@@ -72,118 +72,119 @@ Five DESIGN-wave open questions are resolved together here:
 
 ## Decision
 
-### 1. Shared allocator primitive — pure core + persistence shim
+### 1. VIP-pool allocator + persistence shim — two concrete allocators, no shared trait
 
-The shared primitive is a **two-layer factoring**: a pure in-memory
-core (`PoolAllocator<T>`) parameterised over a token trait, and a
-thin persistence shim (`IntentBackedAllocator<T>`) that wraps the
-core and writes through to `IntentStore` on every mutation.
-`BackendIdAllocator` uses the core directly (no persistence — it
-re-hydrates via ADR-0042); `ServiceVipAllocator` uses the shim
-(persistence — required by AC-02).
+*(Amended 2026-05-14 — was "Shared allocator primitive — pure core +
+persistence shim". See § Considered alternatives for the rejection of
+the generic `PoolAllocator<T: Token>` core.)*
+
+The Phase 1 allocator surface is **two concrete allocators** living
+side-by-side under `crates/overdrive-dataplane/src/allocators/`:
+
+- **`BackendIdAllocator`** (existing, relocated from
+  `src/allocator.rs` → `src/allocators/backend_id.rs` via single-cut
+  migration per `feedback_single_cut_greenfield_migrations.md`).
+  Process-local, no persistence; re-hydrated on restart by
+  `ServiceMapHydrator` per ADR-0042.
+- **`ServiceVipAllocator`** (new). Persists via the
+  `PersistentServiceVipAllocator` shim that wraps it; required by
+  AC-02 (allocations survive control-plane restart).
+
+The two allocators **follow the same memo + monotonic-counter shape**
+(BTreeMap memo keyed by the allocator's input key; a monotonic `next`
+counter; release deletes the memo entry but does NOT recycle the
+counter slot — matches `BackendIdAllocator`'s pre-existing
+"counter is monotonic; released slot is not reused" semantics). They
+**share no trait and no generic type**. The shared logic ("memo hit
+returns existing; memo miss + capacity advances counter; release
+deletes the memo entry") is thinner than the abstraction surface
+required to factor it generically — see § Considered alternatives
+for the full RCA.
 
 **Module location**:
 `crates/overdrive-dataplane/src/allocators/` (plural — the existing
 `allocator.rs` moves into the module as `allocators/backend_id.rs`
 via a single-cut migration per
 `feedback_single_cut_greenfield_migrations.md`; the existing tests
-move with it). Layout:
+move with it). Layout (post 2026-05-14 amendment — no generic
+`pool.rs`, no `Token` trait):
 
 ```
 crates/overdrive-dataplane/src/allocators/
-├── mod.rs                 # re-exports + Token trait + PoolError
-├── pool.rs                # generic PoolAllocator<T: Token>
-├── intent_backed.rs       # IntentBackedAllocator<T> persistence shim
+├── mod.rs                 # re-exports
+├── error.rs               # ServiceVipAllocatorError + VipAllocatorConfigError
+├── vip_range.rs           # VipRange (Ipv4Net + reserved set)
 ├── backend_id.rs          # BackendIdAllocator (moved from allocator.rs)
-└── service_vip.rs         # NEW — ServiceVipAllocator
+└── service_vip.rs         # NEW — ServiceVip newtype + ServiceVipAllocator
+                           #       (concrete, NOT generic)
 ```
 
-**Trait — `Token`**:
+**`ServiceVipAllocator` (concrete, in-memory)**:
 
 ```rust
-/// A type that names a single member of a pool. Implementations are
-/// typically newtype-around-fixed-width-integer (BackendId) or
-/// newtype-around-addr (ServiceVip).
-pub trait Token: Copy + Eq + Ord + std::hash::Hash + Send + Sync + 'static {
-    /// The pool's discriminant key — the input the memo table is
-    /// keyed on. For BackendId, this is `(ip, port, proto)`. For
-    /// ServiceVip, this is the spec digest.
-    type Key: Copy + Eq + Ord + Send + Sync + 'static;
-
-    /// Construct the Nth token from a monotonic counter index.
-    /// Returns None when the pool's range is exhausted.
-    ///
-    /// For BackendId: `Self::nth(n)` is `BackendId::new(n)`.
-    /// For ServiceVip: `Self::nth(n)` maps `n` onto the configured
-    ///   CIDR range, skipping reserved addresses.
-    fn nth(n: u32, range: &Self::Range) -> Option<Self>;
-
-    /// The pool's address space (counter range / CIDR / etc.).
-    /// Carries pool configuration immutably; constructed once at
-    /// allocator boot.
-    type Range: Clone + Send + Sync + 'static;
-}
-```
-
-**Pure core — `PoolAllocator<T: Token>`**:
-
-```rust
-pub struct PoolAllocator<T: Token> {
+pub struct ServiceVipAllocator {
     next: u32,
-    by_key: BTreeMap<T::Key, T>,    // memo (input → output)
-    by_token: BTreeMap<T, T::Key>,  // reverse memo (for release)
-    range: T::Range,
+    by_digest: BTreeMap<ServiceSpecDigest, ServiceVip>,   // memo
+    range: VipRange,
 }
 
-impl<T: Token> PoolAllocator<T> {
-    pub const fn with_range(range: T::Range) -> Self;
-    pub fn allocate(&mut self, key: T::Key) -> Result<T, PoolError>;
-    pub fn release(&mut self, key: &T::Key) -> Option<T>;
-    pub fn get(&self, key: &T::Key) -> Option<T>;
+impl ServiceVipAllocator {
+    pub fn new(range: VipRange) -> Self;
+    pub fn allocate(&mut self, digest: ServiceSpecDigest) -> Result<ServiceVip, ServiceVipAllocatorError>;
+    /// Removes the memo entry. Does NOT return the slot to the pool —
+    /// the monotonic counter never rewinds. Matches BackendIdAllocator's
+    /// pre-existing semantics ("Does NOT recycle the counter value").
+    pub fn release(&mut self, digest: &ServiceSpecDigest);
+    pub fn get(&self, digest: &ServiceSpecDigest) -> Option<ServiceVip>;
     pub fn memo_len(&self) -> usize;
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum PoolError {
-    /// No tokens available — the configured `Range` is fully
+pub enum ServiceVipAllocatorError {
+    /// No tokens available — the configured `VipRange` is fully
     /// allocated. Surfaces AC-04 (#167) at the admission boundary.
-    #[error("pool exhausted: {allocated} of {capacity} tokens in use")]
+    #[error("VIP pool exhausted: {allocated} of {capacity} addresses in use")]
     Exhausted { allocated: u32, capacity: u32 },
 }
 ```
 
-The core is `BTreeMap`-backed per `.claude/rules/development.md`
-§ "Ordered-collection choice" (the memo is iterated during release
-and observed by DST invariants); the counter is monotonic and never
-wraps in practice (the persistence shim's restart story does not
-reuse counter values within a single process lifetime, only across
-process restarts when the persisted state is re-hydrated).
+The memo is `BTreeMap`-backed per `.claude/rules/development.md`
+§ "Ordered-collection choice" (the memo is iterated by DST invariants
+and at bulk-load time); the counter is monotonic and never wraps in
+practice (a /16 CIDR is 65k addresses; the persistence shim's restart
+story does not reuse counter values within a single process lifetime,
+only across process restarts when the persisted state is re-hydrated).
 
-**Persistence shim — `IntentBackedAllocator<T>`**:
+**Non-reuse on release**: `release(&digest)` deletes the memo entry
+but does NOT add the freed counter slot back to a free list — the
+released VIP is not reused by a subsequent `allocate(&different_digest)`
+call within the same process lifetime. The next allocation advances
+the monotonic counter to the next non-reserved address in the
+`VipRange`. This matches `BackendIdAllocator`'s pre-existing
+"counter is monotonic; released slot is not reused" semantics and
+keeps the two allocators shape-equivalent. Counter-recycling is the
+deferred optimisation in Alt-D.
+
+**Persistence shim — `PersistentServiceVipAllocator`**:
 
 ```rust
-pub struct IntentBackedAllocator<T: Token> {
-    inner: parking_lot::Mutex<PoolAllocator<T>>,
+pub struct PersistentServiceVipAllocator {
+    inner: parking_lot::Mutex<ServiceVipAllocator>,
     store: Arc<dyn IntentStore>,
-    namespace: AllocatorNamespace, // newtype; e.g., "service-vip"
 }
 
-impl<T: Token> IntentBackedAllocator<T>
-where
-    T::Key: ArchiveForStore,        // sealed bound; see §1a
-    T:      ArchiveForStore,
-{
+impl PersistentServiceVipAllocator {
     /// Construct empty + bulk-load the persisted state.
     ///
-    /// `bulk_load` performs an Earned Trust gate (probe() — see §6):
-    /// reads every persisted `(key, token)` pair from
-    /// `IntentStore` under `namespace`, validates round-trip via
-    /// the rkyv envelope, and refuses to start (returning
-    /// `AllocatorBootError::Envelope`) if any row fails to decode.
+    /// `bulk_load` performs an Earned Trust gate (probe() — see §8):
+    /// reads every persisted `(spec_digest, vip)` pair from
+    /// `IntentStore` under the `allocator_entries` table, validates
+    /// round-trip via the rkyv envelope, and refuses to start
+    /// (returning `AllocatorBootError::Envelope`) if any row fails
+    /// to decode.
     pub fn bulk_load(
-        range: T::Range,
+        range: VipRange,
         store: Arc<dyn IntentStore>,
-        namespace: AllocatorNamespace,
     ) -> Result<Self, AllocatorBootError>;
 
     /// Allocate-or-memo. Writes through to IntentStore on a fresh
@@ -191,108 +192,109 @@ where
     ///
     /// Ordering is fsync-then-memory (matches ADR-0035 §
     /// "Step ordering 7 → 8 is load-bearing"): the IntentStore write
-    /// commits + fsyncs before the in-memory `PoolAllocator` is
+    /// commits + fsyncs before the in-memory `ServiceVipAllocator` is
     /// updated. On crash between fsync and memory-update, the next
     /// boot's bulk_load rebuilds the memo from the persisted state.
-    pub fn allocate(&self, key: T::Key) -> Result<T, AllocatorError>;
+    pub fn allocate(&self, digest: ServiceSpecDigest) -> Result<ServiceVip, AllocatorError>;
 
     /// Release-and-delete. Idempotent on already-released keys.
-    pub fn release(&self, key: &T::Key) -> Result<(), AllocatorError>;
+    pub fn release(&self, digest: &ServiceSpecDigest) -> Result<(), AllocatorError>;
 
     /// Borrow the read-only view of the pool (for diagnostics /
     /// alloc status echo).
-    pub fn get(&self, key: &T::Key) -> Option<T>;
+    pub fn get(&self, digest: &ServiceSpecDigest) -> Option<ServiceVip>;
 }
 ```
 
-**Why pure-core + shim (not generic-with-trait, not separate types)**:
-
-| Shape | Pros | Cons | Verdict |
-|---|---|---|---|
-| (a) Generic `Allocator<T: Token>` with persistence as type-parameter slot | Single struct, parametric uniformity | Hides the persistence-vs-non-persistence distinction at the call site; makes "BackendId never persists" a runtime convention, not a compile-time property | **REJECTED** — collapses the load-bearing distinction. |
-| (b) Pure-core + persistence shim (chosen) | Persistence is a boundary; core is testable without IntentStore mocking; BackendId compile-time-cannot-persist | Two types instead of one; slight duplication in surface area | **CHOSEN** — the persistence boundary is the load-bearing distinction; making it structural is the simplest-honest factoring. |
-| (c) Two independent types (`BackendIdAllocator`, `ServiceVipAllocator`) sharing helper fns | Maximal simplicity; no generics | Violates AC-05 ("the underlying allocator logic is shared"); duplicates the memo-table + counter + release semantics; future third consumer copies the duplication | **REJECTED** — fails AC-05 structurally. |
+**BackendId** keeps its existing concrete `BackendIdAllocator`
+unchanged in body — only the file moves. Its shape (BTreeMap memo
+keyed by `(ip, port, proto)`, monotonic counter, no slot reuse) is
+the precedent the `ServiceVipAllocator` matches; the
+shape-equivalence is documentation, not a shared type.
 
 ### 1a. Persistence wire format — rkyv envelope per ADR-0048
 
+*(Amended 2026-05-14 — single concrete envelope for ServiceVip only;
+no per-token-type generality.)*
+
 The persisted state crosses an `IntentStore` redb boundary, so it
 follows ADR-0048's per-type versioned envelope discipline. One
-envelope per allocator namespace (one for BackendId — not used today
-but kept in the trait surface for future Phase 2 persistence; one
-for ServiceVip — used). Wire shape:
+envelope, specific to the `ServiceVipAllocator` — `BackendId` does
+NOT persist (it re-hydrates from observation per ADR-0042). Wire
+shape:
 
 ```rust
-// Persisted row — one per (namespace, key) pair.
+// Persisted row — one per (spec_digest, vip) pair.
 // Lives in overdrive-core::dataplane (next to existing dataplane
 // types) per the precedent of BackendKey / ServiceVip.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
-pub struct AllocatorEntryV1 {
-    pub key:     [u8; 32],  // SHA-256 of T::Key archived bytes
-    pub token:   AllocatorTokenBytes, // sum-typed: BackendId | ServiceVip
-    pub counter: u32,       // the monotonic counter value at allocation
+pub struct ServiceVipAllocatorEntryV1 {
+    pub spec_digest: [u8; 32],   // ServiceSpecDigest
+    pub vip:         u32,        // host-order IPv4 octets
+    pub counter:     u32,        // monotonic counter value at allocation
 }
 
 // Codec-internal envelope (NOT re-exported from lib.rs per UI-01).
-pub enum AllocatorEntryEnvelope {
-    V1(AllocatorEntryV1),
+pub enum ServiceVipAllocatorEntryEnvelope {
+    V1(ServiceVipAllocatorEntryV1),
 }
 
-impl VersionedEnvelope for AllocatorEntryEnvelope { /* ... */ }
+impl VersionedEnvelope for ServiceVipAllocatorEntryEnvelope { /* ... */ }
 
 // Public alias-to-payload (UI-02).
-pub type AllocatorEntry = AllocatorEntryV1;
+pub type ServiceVipAllocatorEntry = ServiceVipAllocatorEntryV1;
 ```
 
-Wrapping discipline lives in a codec module on `AllocatorEntry`
-(`AllocatorEntry::archive_for_store` / `from_store_bytes`) per
-ADR-0048 § "Typed persistence-boundary codec". A schema-evolution
+Wrapping discipline lives in a codec module on
+`ServiceVipAllocatorEntry`
+(`ServiceVipAllocatorEntry::archive_for_store` / `from_store_bytes`)
+per ADR-0048 § "Typed persistence-boundary codec". A schema-evolution
 golden-bytes fixture under
-`crates/overdrive-dataplane/tests/schema_evolution/allocator_entry.rs`
+`crates/overdrive-dataplane/tests/schema_evolution/service_vip_allocator_entry.rs`
 pins V1 archived bytes per `.claude/rules/testing.md` § "Archive
 schema-evolution roundtrip".
 
-**Why a unified `AllocatorEntry` envelope, not one per namespace**: the
-serialised shape is identical (key digest + token bytes + counter);
-the namespace itself is part of the redb key prefix, not the value.
-This collapses two future envelopes into one and means an additional
-allocator namespace ships without a new envelope version.
+The crafter may choose the exact typed name (e.g.
+`ServiceVipAllocatorEntry` vs `AllocatorEntry`); the load-bearing
+property is one envelope, one persisted shape, scoped to the
+ServiceVip allocator. No `AllocatorTokenBytes` sum type — BackendId
+never persists, so a generic envelope buys nothing.
 
-**Why SHA-256 of the key, not the key bytes inline**: `T::Key` for
-ServiceVip is the spec digest (already a 32-byte hash). For
-BackendId it's `(u32, u16, u8)` — fixed-width and small, but
-hashing it for the persisted form keeps the wire layout uniform
-across namespaces and avoids a per-namespace key codec.
-
-### 2. `ServiceVipAllocator` — `Token` instantiation
+### 2. `ServiceVip` and `VipRange` types
 
 ```rust
-// crates/overdrive-dataplane/src/allocators/service_vip.rs
+// crates/overdrive-dataplane/src/allocators/vip_range.rs
 
 /// A range of IPv4 VIPs the platform may allocate to Service workloads.
 /// Built from operator config (§3); immutable after boot.
 #[derive(Clone)]
 pub struct VipRange {
-    cidr: Ipv4Cidr,                 // newtype in overdrive-core
+    cidr: Ipv4Cidr,                 // from existing workspace dep
     reserved: BTreeSet<Ipv4Addr>,   // platform-reserved (e.g., gateway, broadcast)
 }
 
 impl VipRange {
-    pub fn capacity(&self) -> u32 { /* CIDR size - reserved count */ }
+    /// Build + validate. Returns `VipAllocatorConfigError` on
+    /// overlapping ranges, out-of-range reserved, or zero capacity.
+    pub fn new(cidrs: Vec<Ipv4Net>, reserved: BTreeSet<Ipv4Addr>)
+        -> Result<Self, VipAllocatorConfigError>;
+
+    pub fn capacity(&self) -> u32 { /* sum(CIDR sizes) - reserved.len() */ }
+
+    /// Map a monotonic counter index N to the Nth non-reserved
+    /// address in canonical order. Returns None when N >= capacity().
+    /// Used by `ServiceVipAllocator::allocate` internally.
+    pub fn nth(&self, n: u32) -> Option<Ipv4Addr>;
 }
-
-impl Token for ServiceVip {
-    type Key = ServiceSpecDigest;   // newtype around [u8; 32]
-    type Range = VipRange;
-
-    fn nth(n: u32, range: &VipRange) -> Option<Self> {
-        // Walk CIDR addresses in canonical order; skip reserved;
-        // return the Nth non-reserved address. Returns None when
-        // n >= range.capacity().
-    }
-}
-
-pub type ServiceVipAllocator = IntentBackedAllocator<ServiceVip>;
 ```
+
+`ServiceVip` is the canonical newtype at
+`overdrive-core::id::ServiceVip(Ipv4Addr)`. The
+`crates/overdrive-dataplane/src/allocators/service_vip.rs` module
+imports (or re-exports) the canonical newtype rather than declaring
+a local one; the consolidation deletes the duplicate at
+`crates/overdrive-core/src/aggregate/workload_spec.rs:360` in the
+same commit.
 
 The `ServiceVip` newtype is **already declared twice** in the
 codebase: at `crates/overdrive-core/src/aggregate/workload_spec.rs:360`
@@ -304,9 +306,10 @@ are **inconsistent on IPv4 vs IpAddr**. This ADR consolidates to a
 `overdrive-core::id::ServiceVip`; the duplicate in `workload_spec.rs`
 is deleted in the same commit. Per the 2026-05-14 amendment (§ 5),
 `Listener` carries no `vip` field at all; `ServiceVip` continues to
-be used by the allocator (`IntentBackedAllocator<ServiceVip>`), the
-allocator's persisted `AllocatorTokenBytes::ServiceVip` payload, and
-the downstream consumer surface (`ServiceMapHydrator` consults
+be used by the allocator (`ServiceVipAllocator` and its persistence
+shim `PersistentServiceVipAllocator`), the allocator's persisted
+`ServiceVipAllocatorEntry` rkyv payload, and the downstream consumer
+surface (`ServiceMapHydrator` consults
 `ServiceVipAllocator::get(&spec_digest)` per § 5a — the kernel-side
 `Dataplane::update_service(_, vip, _)` parameter remains
 `ServiceVip`-typed).
@@ -566,9 +569,9 @@ pub enum Action {
 **Action-shim wiring**: a new arm in
 `overdrive-control-plane::reconciler_runtime::action_shim` per
 ADR-0023 dispatches `Action::ReleaseServiceVip { spec_digest, .. }`
-to `ServiceVipAllocator::release(&spec_digest)`. The allocator
-release is idempotent and write-through (fsync-then-memory same as
-allocate).
+to `PersistentServiceVipAllocator::release(&spec_digest)`. The
+allocator release is idempotent and write-through (fsync-then-memory
+same as allocate).
 
 **`WorkloadLifecycle` View extension**: the reconciler tracks which
 VIPs it has emitted release actions for, so it does not re-emit on
@@ -592,37 +595,38 @@ within KPI bounds.
 
 Per `feedback_single_cut_greenfield_migrations.md`: no deprecation
 shim, no parallel paths. The single PR that lands this feature also
-moves the existing allocator:
+moves the existing allocator. Per the 2026-05-14 amendment, the
+`BackendIdAllocator` migration is a **structural move only**, not a
+refactor — the file relocates; the struct body is untouched:
 
 ```
-DELETE: crates/overdrive-dataplane/src/allocator.rs        (140 lines)
+DELETE: crates/overdrive-dataplane/src/allocator.rs        (existing file)
 CREATE: crates/overdrive-dataplane/src/allocators/mod.rs
-CREATE: crates/overdrive-dataplane/src/allocators/pool.rs
-CREATE: crates/overdrive-dataplane/src/allocators/intent_backed.rs
-CREATE: crates/overdrive-dataplane/src/allocators/backend_id.rs  (from old allocator.rs)
+CREATE: crates/overdrive-dataplane/src/allocators/error.rs
+CREATE: crates/overdrive-dataplane/src/allocators/vip_range.rs
+CREATE: crates/overdrive-dataplane/src/allocators/backend_id.rs    (relocated, body unchanged)
 CREATE: crates/overdrive-dataplane/src/allocators/service_vip.rs
 UPDATE: crates/overdrive-dataplane/src/lib.rs (mod declaration)
 UPDATE: every call site of BackendIdAllocator (path change only — API stable)
 ```
 
 `BackendIdAllocator`'s public API (`new()`, `allocate(ip, port,
-proto)`, `release(id)`, `memo_len()`) stays signature-stable; only
-its internal representation changes to wrap `PoolAllocator<BackendId>`.
-The existing tests (proptest at `allocator.rs:92-110`,
-collision-witness at `:125-138`) move with the file and continue to
-pass. R1 from DISCUSS § Risks (hot-path coverage) is preserved by
-this stability.
+proto)`, `release(id)`, `memo_len()`) and its internal representation
+are **unchanged**. The existing tests (proptest, collision-witness)
+move with the file. R1 from DISCUSS § Risks (hot-path coverage) is
+preserved by this stability.
 
-The existing typed `Token` impl for `BackendId` lives at
-`allocators/backend_id.rs` and uses `(u32, u16, u8)` as `Key` and a
-`BackendIdRange { start: 1, max: u32::MAX }` as `Range`.
+No generic `PoolAllocator<T>` wrapping step exists; the prior framing
+of "BackendIdAllocator wraps `PoolAllocator<BackendId>`" was removed
+in the 2026-05-14 amendment when the `Token` trait and generic core
+were rejected (see § Considered alternatives).
 
 ### 8. Earned Trust — `probe()` on the allocator at boot
 
 Per the project's load-bearing principle: every dependency must
-demonstrate it can honor its contract. The `IntentBackedAllocator`
-specifies a `probe()` method that runs at composition-root time and
-verifies:
+demonstrate it can honor its contract. The
+`PersistentServiceVipAllocator` specifies a `probe()` method that
+runs at composition-root time and verifies:
 
 1. The `IntentStore` is reachable and supports the
    `allocator_entries` table (a known-good throwaway key
@@ -639,15 +643,54 @@ structured `health.startup.refused` events per ADR-0048's intent-layer
 unknown-handling discipline. The control plane refuses to start.
 
 The probe is enforced by the same three-layer discipline ADR-0048
-already mandates: subtype check (mypy/Protocol-equivalent — the
-`probe()` method is on the trait), structural check (an
-`xtask::dst_lint` AST scanner walks every `IntentBackedAllocator`
-construction site and asserts `probe()` is called before first
-`allocate()` / `release()`), behavioral check (a CI gold-test that
-configures a CIDR-too-small-for-persisted-state fixture and asserts
-the probe refuses to start).
+already mandates: subtype check (the `probe()` method is on the
+allocator type), structural check (an `xtask::dst_lint` AST scanner
+walks every `PersistentServiceVipAllocator` construction site and
+asserts `probe()` is called before first `allocate()` / `release()`),
+behavioral check (a CI gold-test that configures a
+CIDR-too-small-for-persisted-state fixture and asserts the probe
+refuses to start).
 
 ## Considered alternatives (ADR-level — additional to the per-question shapes above)
+
+### Alt-0 — Generic `PoolAllocator<T: Token>` core + `IntentBackedAllocator<T>` shim (rejected during DELIVER step 01-01, 2026-05-14)
+
+The original DESIGN-wave decision (this ADR's pre-amendment §1)
+proposed a two-layer factoring with a pure generic core
+`PoolAllocator<T: Token>` and a generic persistence shim
+`IntentBackedAllocator<T>`. The `Token` trait abstracted "the Nth
+thing in a sequence" with associated types `Key` and `Range`, and
+both `BackendIdAllocator` and `ServiceVipAllocator` would have been
+type aliases over the generic core.
+
+**Rejected during DELIVER step 01-01 (2026-05-14).** When the
+crafter implemented the generic, the resulting design baked
+`VipRange` (a CIDR + reserved set) into the generic core via
+`T::Range`. `BackendIdAllocator` has no concept of CIDR ranges —
+its "range" is a `(start: u32, max: u32)` counter envelope, an
+entirely different shape from a CIDR + reserved set. To satisfy
+both consumers, the generic `T::Range` had to either:
+
+- Become a sum type (`Range::Counter(u32, u32) | Range::Cidr(VipRange)`)
+  — which collapses to "two concrete allocators with a union type
+  in the middle," gaining nothing over two concrete allocators;
+- Or stay specific to one consumer (the implementation picked CIDR),
+  forcing `BackendIdAllocator` into a generic that doesn't fit it.
+
+The actually-shared logic across the two allocators is **thinner
+than the abstraction required to factor it**: memo + monotonic
+counter + memo-hit-returns-existing. That shape can be described
+in a sentence and matched between two concrete types without a
+shared trait. The `Token` trait was overstating the abstraction.
+
+The 2026-05-14 amendment **deletes** the generic core, the `Token`
+trait, the `IntentBackedAllocator<T>` generic shim, and the
+"two-layer allocator primitive" framing's generic implementation.
+The replacement is two concrete allocators that follow the same
+memo + monotonic-counter shape but share no trait or type. AC-05's
+"the underlying allocator logic is shared" is **honest as
+shape-similarity**, not as literal code reuse. See § 1 and the
+Consequences amendment.
 
 ### Alt-A — Allocator in `overdrive-control-plane` instead of `overdrive-dataplane`
 
@@ -709,10 +752,14 @@ rather than a counter; same return shape).
 
 ### Positive
 
-1. **AC-05 structurally satisfied.** `BackendIdAllocator` and
-   `ServiceVipAllocator` share the `PoolAllocator<T>` core; the
-   shared primitive lives in `crates/overdrive-dataplane/` per
-   DISCUSS D3.
+1. **AC-05 satisfied as shape-similarity, not literal code reuse**
+   (amended 2026-05-14). `BackendIdAllocator` and
+   `ServiceVipAllocator` follow the same memo + monotonic-counter
+   shape (no slot reuse on release) and live side-by-side in
+   `crates/overdrive-dataplane/src/allocators/` per DISCUSS D3.
+   They share no trait and no generic type — the previously-proposed
+   `PoolAllocator<T: Token>` core was rejected at DELIVER step 01-01
+   as overstated abstraction (see § Considered alternatives → Alt-0).
 2. **AC-02 structurally satisfied.** The persistence shim's
    write-through guarantees survives-restart by construction; the
    bulk-load probe guarantees consistency on boot.
@@ -817,3 +864,47 @@ the same `Job::spec_digest` codec entry point per ADR-0048 § 4b.
 - `docs/feature/service-vip-allocator/discuss/` — DISCUSS artifacts
 - `docs/feature/service-vip-allocator/design/wave-decisions.md` —
   DESIGN-wave decisions
+
+## Amendments
+
+### 2026-05-14 — Generic `PoolAllocator<T: Token>` rejected; two concrete allocators land
+
+During DELIVER step 01-01, the crafter implemented the originally-
+designed two-layer factoring (generic `PoolAllocator<T: Token>` core
++ `IntentBackedAllocator<T>` persistence shim) and discovered the
+abstraction was overstated: the shared logic between
+`BackendIdAllocator` and `ServiceVipAllocator` is only memo +
+monotonic counter + memo-hit-returns-existing, while the `T::Range`
+slot required to factor the two consumers generically bakes
+`VipRange` (a CIDR-shaped concept) into a core that `BackendIdAllocator`
+has no use for. Trying to factor a thinner shared shape behind a
+heavier trait surface produced the wrong abstraction.
+
+**Resolution (now in code, 6/6 tests passing in Lima as of
+2026-05-14):**
+
+- Deleted: `Token` trait, `PoolAllocator<T, K>` generic core,
+  `IntentBackedAllocator<T>` generic shim, "two-layer allocator
+  primitive" framing's generic implementation.
+- Moved: existing `crates/overdrive-dataplane/src/allocator.rs` →
+  `crates/overdrive-dataplane/src/allocators/backend_id.rs`
+  (untouched internally — same `BackendIdAllocator` struct, just
+  relocated).
+- Added: `crates/overdrive-dataplane/src/allocators/service_vip.rs`
+  — concrete `ServiceVipAllocator` struct (NOT generic), keyed by
+  `ServiceSpecDigest`. Memo + monotonic counter. NO slot reuse on
+  release (matches `BackendIdAllocator`'s pre-existing semantics).
+- Kept: `VipRange` (now consumed only by `ServiceVipAllocator`),
+  `VipAllocatorConfigError` (unchanged).
+- Renamed: `PoolError` → `ServiceVipAllocatorError` (single variant
+  `Exhausted { allocated, capacity }`).
+- Persistence shim: `PersistentServiceVipAllocator` (concrete, not
+  generic) wraps `ServiceVipAllocator` with redb write-through and
+  bulk-load.
+
+Sections rewritten: § 1, § 1a, § 2, § 7, § 8 (allocator-type
+references), § Considered alternatives (new Alt-0), § Consequences
+→ Positive #1. Roadmap step 01-04 ("BackendIdAllocator single-cut
+migration") was absorbed into step 01-01 (the relocation is forced
+by the deletion of `PoolAllocator`); roadmap `total_steps` updated
+from 11 → 10.

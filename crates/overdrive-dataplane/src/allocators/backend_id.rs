@@ -33,6 +33,12 @@ pub struct BackendIdAllocator {
     by_endpoint: BTreeMap<(u32, u16, u8), BackendId>,
 }
 
+impl Default for BackendIdAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BackendIdAllocator {
     /// Create a fresh allocator. Counter starts at 1.
     #[must_use]

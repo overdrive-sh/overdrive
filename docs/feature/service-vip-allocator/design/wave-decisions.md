@@ -21,22 +21,25 @@
 **Style**: Hexagonal (ports and adapters), single-process, single-node (Phase 1).
 Same style as the existing brief.md § 1.
 
-**Approach**: Two-layer allocator primitive in
-`crates/overdrive-dataplane/src/allocators/`:
+**Approach** *(amended 2026-05-14 — two concrete allocators, no
+shared trait; see Changelog)*: Two concrete allocators side-by-side
+in `crates/overdrive-dataplane/src/allocators/`:
 
-- Pure in-memory core `PoolAllocator<T: Token>` — sync, no I/O, BTreeMap
-  memo + monotonic counter.
-- Persistence shim `IntentBackedAllocator<T>` — wraps the core, writes
-  through to `IntentStore` (fsync-then-memory ordering matching
-  ADR-0035 § "Step ordering 7 → 8 is load-bearing").
+- `BackendIdAllocator` (existing, relocated from `src/allocator.rs`
+  → `src/allocators/backend_id.rs`; body untouched; no persistence —
+  re-hydrates via `ServiceMapHydrator` per ADR-0042).
+- `ServiceVipAllocator` (new, concrete — NOT generic). In-memory
+  `BTreeMap` memo keyed by `ServiceSpecDigest`, monotonic counter,
+  no slot reuse on release. Wrapped by `PersistentServiceVipAllocator`
+  for redb write-through + bulk-load (fsync-then-memory ordering
+  matching ADR-0035 § "Step ordering 7 → 8 is load-bearing").
 
-**Two instantiations**:
-
-- `BackendIdAllocator` = `PoolAllocator<BackendId>` directly (no
-  persistence — re-hydrates via `ServiceMapHydrator` per ADR-0042).
-  Replaces the existing `allocator.rs:31-82`; single-cut migration.
-- `ServiceVipAllocator` = `IntentBackedAllocator<ServiceVip>` (persists;
-  required by AC-02).
+The two allocators follow the **same memo + monotonic-counter shape**
+but share **no trait and no generic type**. The original DESIGN
+proposal of a generic `PoolAllocator<T: Token>` core was rejected
+during DELIVER step 01-01 — see ADR-0049 § Considered alternatives →
+Alt-0. AC-05's "shared allocator logic" is honest as
+shape-similarity, not as literal code reuse.
 
 **Admission flow** (resolves Open Q2):
 operator submit → parser (the `Listener` struct has no `vip` field per
@@ -60,19 +63,25 @@ optional `reserved = [...]`. Required — boot fails with a typed error
 if missing.
 
 **Shared trait shape** (resolves Open Q4):
-Option (b) — pure core + persistence shim. Persistence is a structural
-boundary at the type level; `BackendIdAllocator` compile-time-cannot-persist;
-`ServiceVipAllocator` must persist. Rejected: (a) generic-with-trait
-hides the distinction; (c) two independent types fail AC-05.
+*(Amended 2026-05-14.)* The DESIGN-wave decision selected pure-core +
+persistence shim (option b). During DELIVER step 01-01 this was
+rejected as overstated abstraction — see ADR-0049 § Considered
+alternatives → Alt-0. The landing shape is **two concrete allocators
+that share no trait or type**, plus a concrete
+`PersistentServiceVipAllocator` shim wrapping the `ServiceVipAllocator`.
+Persistence is still a structural boundary at the type level
+(`BackendIdAllocator` compile-time-cannot-persist;
+`PersistentServiceVipAllocator` compile-time-must-persist), just not
+mediated by a `Token` trait.
 
 ## Key Decisions
 
 | ID | Decision | Rationale | Open Q resolved |
 |---|---|---|---|
-| K1 | Shared primitive at `crates/overdrive-dataplane/src/allocators/` — pure core + persistence shim | AC-05; persistence is a load-bearing structural distinction | Q4 |
-| K2 | Single-cut migration of existing `allocator.rs` into `allocators/backend_id.rs` | `feedback_single_cut_greenfield_migrations.md` | Q4 |
+| K1 | **Two concrete allocators at `crates/overdrive-dataplane/src/allocators/`: `BackendIdAllocator` (existing, relocated from `src/allocator.rs`) and `ServiceVipAllocator` (new).** No shared trait. Both follow a memo + monotonic-counter shape with no slot reuse on release (matches `BackendIdAllocator`'s pre-existing semantics). The `Token` trait and `PoolAllocator<T>` generic from the original DESIGN are deleted — rejected during DELIVER step 01-01 as overstated abstraction; the shared logic was thinner than the trait surface required. *(amended 2026-05-14)* | AC-05 as shape-similarity, not literal code reuse; persistence is a load-bearing structural distinction enforced via concrete `PersistentServiceVipAllocator` wrapper, not via a generic shim | Q4 |
+| K2 | Single-cut migration of existing `allocator.rs` into `allocators/backend_id.rs` — body untouched, file relocates only. *(folded into DELIVER step 01-01 by the 2026-05-14 amendment; was step 01-04)* | `feedback_single_cut_greenfield_migrations.md`; deleting the generic forces the move into step 01-01 | Q4 |
 | K3 | Persistence in IntentStore (not ViewStore) | The allocator is not a reconciler; allocation IS intent; whitepaper § 4 state-layer discipline | Q4 |
-| K4 | rkyv versioned envelope per ADR-0048 for persisted state | Crosses redb persistence boundary; project rule | Q4 |
+| K4 | rkyv versioned envelope per ADR-0048 for persisted state — concrete `ServiceVipAllocatorEntry` envelope wrapped by `PersistentServiceVipAllocator` (NOT a generic `IntentBackedAllocator<T>`'s `AllocatorEntry`). *(amended 2026-05-14)* | Crosses redb persistence boundary; project rule; envelope scope narrowed to ServiceVip since BackendId never persists | Q4 |
 | K5 | Submit-time admission (before IntentStore admission) | AC-01 echo, AC-02 idempotency, AC-04 synchronous rejection | Q2 |
 | K6 | Pool config in `[dataplane.vip_allocator]` subsection; required `ranges` list; optional `reserved` list | ADR-0019 TOML precedent; #175 `[dataplane]` nesting precedent | Q3 |
 | K7 | Reclamation via `WorkloadLifecycle` reconciler + `Action::ReleaseServiceVip` | Reconcilers converge; idempotent on retry; matches ADR-0013 primitive | Q1 |
@@ -88,7 +97,7 @@ overlap. Zero unjustified CREATE NEW decisions.
 
 | Existing Component | File / Reference | Overlap | Decision | Justification |
 |---|---|---|---|---|
-| `BackendIdAllocator` (monotonic counter + memo, BTreeMap, `allocate(ip,port,proto)`, `release(id)`) | `crates/overdrive-dataplane/src/allocator.rs:31-82` (ADR-0046) | Entire allocator concept overlaps — this IS the primitive being generalised | **EXTEND** (refactor) | AC-05: "the underlying allocator logic is shared between BackendId and ServiceVip allocators." Single-cut migration relocates the existing type into the shared `allocators/` module without API change. |
+| `BackendIdAllocator` (monotonic counter + memo, BTreeMap, `allocate(ip,port,proto)`, `release(id)`) | `crates/overdrive-dataplane/src/allocator.rs:31-82` (ADR-0046) | Entire allocator concept overlaps — this IS the precedent the new ServiceVipAllocator's shape matches | **EXTEND** (relocate only — body untouched per 2026-05-14 amendment) | Single-cut migration relocates the existing type into the shared `allocators/` module as `allocators/backend_id.rs`. The struct body is unchanged; only the file path moves. The new `ServiceVipAllocator` is a separate concrete type that follows the same shape (memo + monotonic counter, no slot reuse on release). AC-05's "shared allocator logic" is honest as shape-similarity, not literal code reuse. |
 | `ServiceVip` newtype (Ipv4Addr-based, ADR-0047 spec layer) | `crates/overdrive-core/src/aggregate/workload_spec.rs:360` | Direct overlap with the allocator's output Token | **EXTEND / CONSOLIDATE** | Discovered during reuse analysis: TWO `ServiceVip` declarations exist (the other at `id.rs:647` wraps `IpAddr`, not `Ipv4Addr`). Consolidating to one canonical `ServiceVip(Ipv4Addr)` at `overdrive-core::id` is required for the allocator's `Token` impl to be unambiguous. Single-cut consolidation per `feedback_single_cut_greenfield_migrations.md`. |
 | `ServiceMapHydrator` reconciler (ADR-0042) | `docs/product/architecture/adr-0042-service-map-hydrator-reconciler.md` | Observes Service state; downstream consumer of allocated VIPs (passes VIP into `Dataplane::update_service`) | **REUSE AS-IS** | No change needed. The hydrator reads the post-allocation VIP from the persisted spec; the allocator boundary is upstream of it. |
 | `WorkloadLifecycle` reconciler (ADR-0013) | `docs/product/architecture/adr-0013-reconciler-primitive-runtime.md` + ADR-0021 / ADR-0035 / ADR-0036 | Terminal-state convergence is its existing job | **EXTEND** (new View field + new Action variant) | Reclamation is convergence-shaped; this reconciler is the natural emitter. Extension: `released_for_terminal: BTreeSet<ServiceSpecDigest>` field on the View (input — records past emissions, not a derived deadline); new `Action::ReleaseServiceVip` variant. No new reconciler created. |
@@ -100,13 +109,14 @@ overlap. Zero unjustified CREATE NEW decisions.
 | `AdmissionError::VipNotOperatorAssignable` | (was new in prior resolution; never landed) | Admission-level rejection of operator-supplied `vip = Some(...)` | **DELETED (amended 2026-05-14)** | No longer needed. With the `vip` field removed, operator-supplied `vip = "..."` fails at TOML deserialise with `unknown field` + named guidance; no runtime check at admission time, no `AdmissionError` variant, no admission-walk loop. Per `.claude/rules/development.md` § "Deletion discipline" the variant and any test that would have defended it are absent from the landing commit. |
 | `CorrelationKey::derive` (`overdrive-core::id`) | `crates/overdrive-core/src/id.rs` (ADR-0042 § 1) | Correlation between Action emission and observation | **REUSE AS-IS** | New `Action::ReleaseServiceVip` carries a `CorrelationKey` per ADR-0042's precedent — same constructor surface. |
 | `VersionedEnvelope` trait + `EnvelopeError` (ADR-0048) | `crates/overdrive-core/src/codec/envelope.rs` | rkyv persistence-boundary envelope discipline | **REUSE AS-IS** | New `AllocatorEntryEnvelope` follows the existing per-type envelope shape; codec-internal, alias-to-payload, golden-bytes fixture per ADR-0048 § "Version-bump procedure". |
-| `PoolAllocator<T: Token>` core | (NEW) | n/a | **CREATE NEW** | Justified: no existing generic allocator type exists. The existing `BackendIdAllocator` is monomorphic; generalising it to accept `Token` is the EXTEND on the existing type. The `PoolAllocator<T>` IS that generalisation. |
-| `IntentBackedAllocator<T>` persistence shim | (NEW) | n/a | **CREATE NEW** | Justified: persistence is a new requirement (AC-02). No existing IntentStore-backed wrapper exists; the shim is the structural boundary that distinguishes persistent allocators from non-persistent. Could not be implemented as an extension of an existing type because no existing type has this concern. |
-| `Token` trait | (NEW) | n/a | **CREATE NEW** | Justified: the trait surface required to factor BackendId + ServiceVip uniformly does not exist. The trait is the load-bearing abstraction enabling AC-05. |
-| `VipRange` (CIDR + reserved set) | (NEW) | n/a | **CREATE NEW** | Justified: no existing CIDR-range-with-reserved-set type in the codebase. `ipnet::Ipv4Net` from the existing workspace dependency surface provides the CIDR primitive; `VipRange` composes it with a `BTreeSet<Ipv4Addr>` for exclusions. Could not be reused. |
+| `ServiceVipAllocator` (concrete, in-memory: BTreeMap memo + monotonic counter + VipRange) | (NEW) | n/a | **CREATE NEW** | Justified: no existing allocator keyed by `ServiceSpecDigest` returning `ServiceVip`. The body shape matches `BackendIdAllocator`'s pre-existing semantics (memo + monotonic counter, no slot reuse on release) but the two types are distinct — they share no trait. AC-02 (persistence) is satisfied by wrapping this concrete type with `PersistentServiceVipAllocator`, not via a generic shim. *(amended 2026-05-14 — was `IntentBackedAllocator<T>` shim before the generic was rejected)* |
+| `VipRange` (CIDR + reserved set) | (NEW) | n/a | **CREATE NEW** | Justified: no existing CIDR-range-with-reserved-set type in the codebase. `ipnet::Ipv4Net` from the existing workspace dependency surface provides the CIDR primitive; `VipRange` composes it with a `BTreeSet<Ipv4Addr>` for exclusions. Consumed only by `ServiceVipAllocator`. Could not be reused. |
+| ~~`PoolAllocator<T: Token>` core~~ | ~~(NEW)~~ | n/a | **DELETED 2026-05-14** | The generic core was proposed during DESIGN but rejected during DELIVER step 01-01 as overstated abstraction — the actually-shared logic is thinner than the `Token` trait surface required, and `T::Range` would have had to bake `VipRange` into a core that `BackendIdAllocator` does not need. Replaced by two concrete allocators. See ADR-0049 § Considered alternatives → Alt-0. |
+| ~~`Token` trait~~ | ~~(NEW)~~ | n/a | **DELETED 2026-05-14** | Deleted with `PoolAllocator<T>` — the trait surface required to factor BackendId + ServiceVip uniformly is overhead the shared logic does not earn. The two allocators are concrete with a documented matching shape. |
+| ~~`IntentBackedAllocator<T>` persistence shim~~ | ~~(NEW)~~ | n/a | **REPLACED 2026-05-14** | Replaced by concrete `PersistentServiceVipAllocator` (no generic). Same persistence boundary, no generic wrapper. AC-02 still structurally satisfied; the type-level "compile-time-must-persist" distinction is preserved. |
 | `ServiceSpecDigest` newtype | (NEW or REUSE) | n/a | **REUSE** (likely `SpecDigest` or `ContentHash` already exists) | The project has `ContentHash` newtype in `overdrive-core::id` for SHA-256 digests. `ServiceSpecDigest` is either an alias to `ContentHash` or its own newtype-around-`[u8;32]`. Discovery deferred to crafter; ADR specifies "spec digest" semantics; the existing type satisfies. |
 
-**Verdict (post 2026-05-14 amendment)**: 7 EXTEND, 4 REUSE AS-IS, 4 CREATE NEW, 2 DELETE (`Listener.vip` field; the previously-proposed `AdmissionError::VipNotOperatorAssignable` variant). Reviewer gate compliance: every CREATE NEW carries explicit "no existing alternative" justification; every DELETE is single-cut per greenfield migration discipline.
+**Verdict (post 2026-05-14 amendment — both Q5 parser-level removal AND the allocator-design course-correction)**: 7 EXTEND, 4 REUSE AS-IS, 2 CREATE NEW (`VipRange`, `ServiceVipAllocator`; with `PersistentServiceVipAllocator` as the concrete persistence shim wrapping the new allocator), 2 DELETE (`Listener.vip` field; the previously-proposed `AdmissionError::VipNotOperatorAssignable` variant). The previously-listed CREATE NEW rows for `PoolAllocator<T: Token>`, `Token` trait, and `IntentBackedAllocator<T>` generic shim are struck — the generic factoring was rejected at DELIVER step 01-01 and replaced by two concrete allocators. Reviewer gate compliance: every CREATE NEW carries explicit "no existing alternative" justification; every DELETE is single-cut per greenfield migration discipline.
 
 ## Technology Stack
 
@@ -135,10 +145,10 @@ No proprietary technology. Open Source First validated.
 | C4 | Phase 1 single-node; no cross-node allocator consensus | DISCUSS D8; `feedback_phase1_single_node_scope.md` | ADR-0049 § 1 (no Raft replication of allocator state — single-node IntentStore is the SSOT) |
 | C5 | Greenfield single-cut migration of `BackendIdAllocator` | `feedback_single_cut_greenfield_migrations.md` | ADR-0049 § 7 |
 | C6 | `Persist inputs, not derived state` in any reconciler View extension | `.claude/rules/development.md` | ADR-0049 § 6 (`released_for_terminal` is an input set of past emissions, not a derived deadline) |
-| C7 | `BTreeMap` not `HashMap` in core memo tables | `.claude/rules/development.md` § Ordered-collection choice | ADR-0049 § 1 (PoolAllocator uses BTreeMap) |
+| C7 | `BTreeMap` not `HashMap` in core memo tables | `.claude/rules/development.md` § Ordered-collection choice | ADR-0049 § 1 (`ServiceVipAllocator` uses BTreeMap; `BackendIdAllocator` already does) |
 | C8 | Newtype completeness on `ServiceVip` (FromStr, Display, Serialize/Deserialize, validating constructor) | `.claude/rules/development.md` § Newtype completeness | ADR-0049 § 2 (consolidates to existing complete newtype) |
 | C9 | Earned Trust probe at composition root | Project core principle 12 | ADR-0049 § 8 |
-| C10 | Port-trait dependencies injected mandatorily in `new()`, not via builders | `.claude/rules/development.md` § Port-trait dependencies | `IntentBackedAllocator::bulk_load` takes `Arc<dyn IntentStore>` as required parameter |
+| C10 | Port-trait dependencies injected mandatorily in `new()`, not via builders | `.claude/rules/development.md` § Port-trait dependencies | `PersistentServiceVipAllocator::bulk_load` takes `Arc<dyn IntentStore>` as required parameter |
 | C11 | No `gh issue create` without user approval | `feedback_no_unilateral_gh_issues.md` | This DESIGN wave creates no GH issues; deferrals (if any) surfaced to user for approval |
 | C12 | xtask MUST NOT depend on `overdrive-*` crates | `.claude/rules/development.md` § xtask | ADR-0049 § 8 enforcement xtask scanner is purely syntactic (AST walk) — no overdrive-* dep |
 
@@ -188,7 +198,7 @@ slice-06's brief for the product owner.
 | Q1 | Reclamation trigger | `WorkloadLifecycle` reconciler emits `Action::ReleaseServiceVip` on terminal-state observation | ADR-0049 § 6 |
 | Q2 | When admission allocates | Submit-time (admission handler, before IntentStore admission write) | ADR-0049 § 4 |
 | Q3 | Pool config shape | `[dataplane.vip_allocator]` subsection; required `ranges` list; optional `reserved` list | ADR-0049 § 3 |
-| Q4 | Shared allocator trait shape | Pure-core + persistence shim (option b); `PoolAllocator<T: Token>` + `IntentBackedAllocator<T>`; module at `crates/overdrive-dataplane/src/allocators/` | ADR-0049 § 1 |
+| Q4 | Shared allocator trait shape | *(amended 2026-05-14)* Two concrete allocators (`BackendIdAllocator` + `ServiceVipAllocator`) at `crates/overdrive-dataplane/src/allocators/`, no shared trait, matching memo + monotonic-counter shape. The DESIGN-wave selection of pure-core + persistence shim (option b) with `PoolAllocator<T: Token>` + `IntentBackedAllocator<T>` was rejected at DELIVER step 01-01 — see ADR-0049 § Considered alternatives → Alt-0. | ADR-0049 § 1 |
 | Q5 | Upstream slice-06 spec shape | **Parser-level removal of the `vip` field on `Listener`** (amended 2026-05-14 from admission-level rejection). Operator-supplied `vip` is structurally unrepresentable. Assigned VIP lives in the allocator's `allocator_entries` memo, not on the spec. | ADR-0049 § 5 + § 5a |
 
 All five resolved. No DESIGN-wave concern punted to DELIVER.
@@ -206,7 +216,7 @@ new containers (the allocator is internal to `overdrive-dataplane`).
 | KPI (from DISCUSS) | Architecture-side support | Source |
 |---|---|---|
 | K1 — successful-allocation rate 100% on non-empty pool | Synchronous allocation at admission; pool size validated at boot; pool-empty case surfaces typed error not silent failure | ADR-0049 § 4, § 8 |
-| K2 — p50 ≤ 5 ms, p99 ≤ 25 ms allocator-induced admission latency | In-memory `PoolAllocator` is O(log N) BTreeMap; single redb write + fsync; no network, no per-tick polling | ADR-0049 § 1 |
+| K2 — p50 ≤ 5 ms, p99 ≤ 25 ms allocator-induced admission latency | In-memory `ServiceVipAllocator` is O(log N) BTreeMap; single redb write + fsync; no network, no per-tick polling | ADR-0049 § 1 |
 | K3 — p50 ≤ 1 s, p99 ≤ 5 s VIP reclamation lag | Reconciler tick cadence is 100 ms (ADR-0023); reclamation is one tick after terminal-state observation + action-shim dispatch + write-through fsync | ADR-0049 § 6 |
 | K4 — 0 pool-exhaustion rejections per 24 h under nominal load | Pool capacity is operator-configured; boot probe validates persisted state fits within range; KPI surfaces as a typed counter the platform-architect instruments | ADR-0049 § 3, § 8 |
 
@@ -236,7 +246,7 @@ Inputs:
 - `docs/feature/service-vip-allocator/discuss/outcome-kpis.md` — KPIs K1–K4 with instrumentation guidance
 - KPI-shaping decisions from this DESIGN:
   - K1: counter on admission entry (Service-kind submissions reaching the allocator), counter on allocator allocation, counter on admission success
-  - K2: span timing isolated to `IntentBackedAllocator::allocate` (in-memory + persistence latency)
+  - K2: span timing isolated to `PersistentServiceVipAllocator::allocate` (in-memory + persistence latency)
   - K3: two timestamps per allocation lifecycle — terminal-state-row write timestamp and `Action::ReleaseServiceVip` dispatch timestamp
   - K4: pool-utilisation gauge sampled per minute; typed `pool_exhausted` rejection counter
 
@@ -270,6 +280,37 @@ follow-up.
   One incidental discovery: two `ServiceVip` newtype declarations
   exist in the codebase; consolidation captured as K10 + reuse
   analysis row.
+- 2026-05-14 (amendment 2 — Q4 / allocator design course-correction)
+  — The DESIGN-wave selection of "pure-core + persistence shim"
+  (option b in §1; `PoolAllocator<T: Token>` core +
+  `IntentBackedAllocator<T>` generic shim) was rejected during
+  DELIVER step 01-01. The crafter discovered that the actually-
+  shared logic between `BackendIdAllocator` and `ServiceVipAllocator`
+  is thinner than the `Token` trait surface required (memo +
+  monotonic counter + memo-hit-returns-existing), while `T::Range`
+  bakes `VipRange` (a CIDR-shaped concept) into a generic core that
+  `BackendIdAllocator` has no use for. The landing shape (now in
+  code, 6/6 tests passing in Lima as of 2026-05-14) is two concrete
+  allocators that share no trait or type. The `BackendIdAllocator`
+  migration is now a relocation only — file moves from
+  `src/allocator.rs` to `src/allocators/backend_id.rs`; struct body
+  untouched. The `ServiceVipAllocator` is a new concrete type
+  matching the same shape (memo + monotonic counter, no slot reuse
+  on release). The persistence shim is concrete
+  `PersistentServiceVipAllocator` (not `IntentBackedAllocator<T>`).
+  K1 rewritten; K4 narrowed to ServiceVip-only envelope; Reuse
+  Analysis: three CREATE NEW rows struck (`PoolAllocator<T>`,
+  `Token` trait, `IntentBackedAllocator<T>`); one CREATE NEW row
+  renamed (`IntentBackedAllocator<ServiceVip>` → `ServiceVipAllocator`
+  + `PersistentServiceVipAllocator`). Verdict totals shift from
+  7 EXTEND / 4 REUSE / 4 CREATE / 2 DELETE to 7 EXTEND / 4 REUSE /
+  2 CREATE / 2 DELETE. Cascade: roadmap step 01-04 is absorbed into
+  01-01 (the relocation is forced by deleting the generic); 01-02
+  collapses to ServiceVip newtype consolidation (no `Token` impl);
+  01-03 renames `IntentBackedAllocator<T>` to
+  `PersistentServiceVipAllocator`. ADR-0049 § Considered alternatives
+  gains Alt-0 documenting the rejection. ADR-0049 § Amendments
+  records the new shape.
 - 2026-05-14 (amendment) — Q5 resolution changed from admission-level
   rejection (preserving the `vip: Option<ServiceVip>` field on
   `Listener`) to parser-level removal of the field entirely. Driver:

@@ -1,0 +1,75 @@
+//! Typed errors for the `allocators` module.
+//!
+//! Two error families, distinct concerns:
+//!
+//! - [`VipAllocatorConfigError`] — surfaces from [`super::VipRange::new`].
+//!   Construction-time validation: overlapping CIDRs, reserved addresses
+//!   outside the configured range, zero effective capacity. Per ADR-0049
+//!   these are operator-config errors that refuse boot.
+//! - [`ServiceVipAllocatorError`] — surfaces from
+//!   [`super::ServiceVipAllocator::allocate`]. Runtime allocation
+//!   errors: pool exhaustion.
+//!
+//! Both follow the project's `thiserror`-typed pattern; binary boundaries
+//! flatten via `eyre`. Per `.claude/rules/development.md` § Errors.
+
+use std::net::Ipv4Addr;
+
+use ipnet::Ipv4Net;
+use thiserror::Error;
+
+/// Construction-time errors from [`super::VipRange::new`].
+///
+/// Each variant carries the offending input(s) so the boot-time
+/// `health.startup.refused` event can name the precise misconfiguration
+/// the operator must fix.
+#[derive(Debug, Error)]
+pub enum VipAllocatorConfigError {
+    /// Two configured CIDR ranges overlap. Refusing prevents the same
+    /// IPv4 address from being allocated twice under two different
+    /// `VipRange` entries.
+    #[error("overlapping VIP ranges: {a} overlaps {b}")]
+    OverlappingRanges {
+        /// First overlapping CIDR.
+        a: Ipv4Net,
+        /// Second overlapping CIDR.
+        b: Ipv4Net,
+    },
+
+    /// A reserved address falls outside every configured range. The
+    /// reserved set must be a subset of the union of `ranges`.
+    #[error("reserved address {addr} is outside every configured range")]
+    ReservedOutsideRange {
+        /// The offending reserved address.
+        addr: Ipv4Addr,
+    },
+
+    /// After exclusions, the range has zero allocatable addresses.
+    /// Either the CIDR is /32 with that address reserved, or every
+    /// address in the union is reserved.
+    #[error("VIP range has zero effective capacity after exclusions")]
+    ZeroCapacity,
+}
+
+/// Result alias for [`VipAllocatorConfigError`]-returning constructors.
+pub type Result<T, E = VipAllocatorConfigError> = std::result::Result<T, E>;
+
+/// Runtime allocation errors from
+/// [`super::ServiceVipAllocator::allocate`].
+///
+/// The allocator is monotonic — released entries are not reclaimed; the
+/// counter advances on every miss until the configured range is
+/// exhausted. `Exhausted` surfaces when the next index has no
+/// allocatable address available.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ServiceVipAllocatorError {
+    /// The pool has no more available addresses. `allocated` is the
+    /// current memo size; `capacity` is the configured maximum.
+    #[error("ServiceVip pool exhausted: allocated {allocated} of {capacity}")]
+    Exhausted {
+        /// Number of VIPs currently allocated.
+        allocated: u64,
+        /// Configured pool capacity (after reserved exclusions).
+        capacity: u64,
+    },
+}

@@ -23,8 +23,8 @@ DISTILL methodology.
 |---|---|---|---|
 | `submit_workload` HTTP handler | Driving (user-facing) | `crates/overdrive-control-plane/src/handlers.rs` | AC-01, AC-02, AC-04, AC-06 |
 | `WorkloadLifecycle` reconciler tick | Driving (internal) | `crates/overdrive-control-plane/src/reconcilers/` | AC-03 |
-| `PoolAllocator<T>` API | Driven (library) | `crates/overdrive-dataplane/src/allocators/pool.rs` | AC-05 |
-| `IntentBackedAllocator<T>` API | Driven (persistence) | `crates/overdrive-dataplane/src/allocators/intent_backed.rs` | AC-01, AC-02, AC-03 |
+| `ServiceVipAllocator` API | Driven (library) | `crates/overdrive-dataplane/src/allocators/service_vip.rs` | AC-05 |
+| `PersistentServiceVipAllocator` API | Driven (persistence) | `crates/overdrive-dataplane/src/allocators/persistent_service_vip.rs` | AC-01, AC-02, AC-03 |
 | TOML parser (serde deserializer) | Driving (user-facing) | `crates/overdrive-core/src/aggregate/` | AC-06 |
 | Operator config boot path | Driving (operator-facing) | `crates/overdrive-control-plane/` | Config validation |
 
@@ -52,7 +52,7 @@ And the VIP is not in the reserved set
 
 **Crafter notes**: Exercise through the `submit_workload` HTTP handler
 with a real `LocalStore` (TempDir-backed) and a real
-`IntentBackedAllocator<ServiceVip>`. The allocator must be wired into
+`PersistentServiceVipAllocator`. The allocator must be wired into
 `AppState` and probed at boot before the handler is exercised.
 
 ### S-VIP-02: alloc status renders the same VIP as submit echo
@@ -117,11 +117,11 @@ verified by property test S-VIP-P03, not here.
 
 ### S-VIP-05: Resubmit after restart returns same VIP (persistence)
 
-**Driving port**: `IntentBackedAllocator<ServiceVip>` (bulk_load)
+**Driving port**: `PersistentServiceVipAllocator` (bulk_load)
 **Tags**: `@happy_path` `@ac-02`
 
 ```gherkin
-Given an IntentBackedAllocator has allocated VIP `V` for spec
+Given a PersistentServiceVipAllocator has allocated VIP `V` for spec
   digest `D` and the allocation is persisted in IntentStore
 When the allocator is reconstructed via `bulk_load` from the same
   IntentStore (simulating restart)
@@ -197,7 +197,7 @@ And the error body names pool exhaustion as the cause
 And the error includes `allocated` and `capacity` counts
 ```
 
-**Crafter notes**: `PoolError::Exhausted { allocated: 1, capacity: 1 }`
+**Crafter notes**: `ServiceVipAllocatorError::Exhausted { allocated: 1, capacity: 1 }`
 surfaces as `AllocatorError::Exhausted` → `ControlPlaneError` →
 HTTP 503 with `ProblemDetails`. Verify the error shape, not just the
 status code.
@@ -222,7 +222,7 @@ table or IntentStore entries.
 
 ### S-VIP-10: No partial state persisted on exhaustion
 
-**Driving port**: `IntentBackedAllocator<ServiceVip>` API
+**Driving port**: `PersistentServiceVipAllocator` API
 **Tags**: `@error_path` `@ac-04`
 
 ```gherkin
@@ -241,47 +241,55 @@ tests.
 
 ---
 
-## AC-05: Shared allocator primitive
+## AC-05: Shared allocator shape (two concrete allocators)
 
-### S-VIP-11: PoolAllocator serves BackendId allocations (API stability)
+*(Amended 2026-05-14 — AC-05 is satisfied as shape-similarity, not
+literal code reuse. The two concrete allocators share no trait or
+generic type; the structurally-identical memo + monotonic-counter
+shape is verified by parallel tests on each.)*
 
-**Driving port**: `PoolAllocator<BackendId>` API
+### S-VIP-11: BackendIdAllocator API stability after relocation
+
+**Driving port**: `BackendIdAllocator` API
 **Tags**: `@happy_path` `@ac-05`
 
 ```gherkin
-Given a PoolAllocator<BackendId> constructed with BackendIdRange
-When `allocate((ip, port, proto))` is called with a unique endpoint
+Given a BackendIdAllocator constructed at its new location
+  (`crates/overdrive-dataplane/src/allocators/backend_id.rs`)
+When `allocate(ip, port, proto)` is called with a unique endpoint
 Then a unique BackendId is returned
 And calling `allocate` again with the same endpoint returns the
   same BackendId (memo-hit)
 And `release(&endpoint)` removes the memo entry
 ```
 
-**Crafter notes**: The refactored `BackendIdAllocator` wraps
-`PoolAllocator<BackendId>`. This scenario validates that the existing
+**Crafter notes**: The relocated `BackendIdAllocator` is a structural
+move from `src/allocator.rs` to `src/allocators/backend_id.rs` —
+struct body untouched. This scenario validates that the existing
 `BackendIdAllocator` API (`allocate(ip, port, proto)`, `release(id)`,
-`memo_len()`) is signature-stable after the single-cut migration to
-`allocators/backend_id.rs`. The existing proptest and collision-witness
-tests move with the file.
+`memo_len()`) is signature-stable after the single-cut migration.
+The existing proptest and collision-witness tests move with the file.
 
-### S-VIP-12: PoolAllocator serves ServiceVip allocations
+### S-VIP-12: ServiceVipAllocator allocates from a CIDR range
 
-**Driving port**: `PoolAllocator<ServiceVip>` API
+**Driving port**: `ServiceVipAllocator` API
 **Tags**: `@happy_path` `@ac-05`
 
 ```gherkin
-Given a PoolAllocator<ServiceVip> with VipRange from
+Given a ServiceVipAllocator constructed with a VipRange from
   `ranges = ["10.96.0.0/24"]`
 When `allocate(spec_digest)` is called with a unique digest
 Then a ServiceVip within 10.96.0.0/24 is returned
 And `allocate` with the same digest returns the same VIP (memo-hit)
-And `release(&digest)` frees the VIP
+And `release(&digest)` deletes the memo entry
 And `get(&digest)` returns None after release
 ```
 
-**Crafter notes**: Exercises the `Token` impl for `ServiceVip` —
-specifically `Token::nth(n, range)` mapping counter index to CIDR
-address, skipping reserved.
+**Crafter notes**: Exercises `VipRange::nth(n)` mapping a monotonic
+counter index to a CIDR address, skipping reserved. No `Token` trait
+involved — `ServiceVipAllocator` is concrete (NOT generic) post the
+2026-05-14 amendment. Released VIP is NOT reused on next allocation
+(matches BackendIdAllocator's monotonic-counter semantics).
 
 ---
 
@@ -467,34 +475,40 @@ For all valid IPv4 addresses `a`:
 **Crafter notes**: Per `.claude/rules/development.md` § "Newtype
 completeness" — `Display`/`FromStr`/serde roundtrip.
 
-### S-VIP-P02: AllocatorEntry rkyv envelope golden-bytes roundtrip
+### S-VIP-P02: ServiceVipAllocatorEntry rkyv envelope golden-bytes roundtrip
 
 **Tags**: `@property` `@mandatory:schema_evolution`
 
 ```
-For AllocatorEntryV1 with hand-pinned fields:
+For ServiceVipAllocatorEntryV1 with hand-pinned fields:
   hex_decode(FIXTURE_V1) → rkyv-deserialise → into_latest() →
   assert_eq(canonical Latest projection)
 ```
 
 **Crafter notes**: Per `.claude/rules/testing.md` § "Archive
 schema-evolution roundtrip" — golden-bytes fixture in
-`crates/overdrive-dataplane/tests/schema_evolution/allocator_entry.rs`.
+`crates/overdrive-dataplane/tests/schema_evolution/service_vip_allocator_entry.rs`.
+Post-amendment the envelope is ServiceVip-specific (BackendId does
+not persist; no `AllocatorTokenBytes` sum type).
 
-### S-VIP-P03: PoolAllocator never assigns duplicate tokens
+### S-VIP-P03: Allocators never assign duplicate tokens (parallel proptests on each concrete allocator)
 
 **Tags**: `@property` `@mandatory:allocator_invariant`
 
 ```
-For all sequences of N allocate() calls with distinct keys (N ≤ capacity):
-  all returned tokens are distinct
-  memo_len() == N
-  releasing key K and reallocating K returns a token (possibly
-    different from the original if counter advanced)
+For each of {BackendIdAllocator, ServiceVipAllocator}:
+  For all sequences of N allocate() calls with distinct keys (N ≤ capacity):
+    all returned tokens are distinct
+    memo_len() == N
+    releasing key K and reallocating a DIFFERENT key returns a NEW
+      token — the released slot is NOT reused (monotonic counter)
 ```
 
-**Crafter notes**: Proptest with `PROPTEST_CASES=1024`. Exercises
-both `BackendId` and `ServiceVip` token types.
+**Crafter notes**: Proptest with `PROPTEST_CASES=1024`. Parallel
+property tests on each concrete allocator (no shared trait post the
+2026-05-14 amendment). The no-slot-reuse-on-release property is
+load-bearing — it matches `BackendIdAllocator`'s pre-existing
+semantics and keeps the two concrete allocators shape-equivalent.
 
 ### S-VIP-P04: VipRange capacity equals CIDR size minus reserved count
 

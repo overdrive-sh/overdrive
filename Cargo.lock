@@ -1874,6 +1874,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "eyre",
+ "ipnet",
  "libc",
  "nix",
  "overdrive-core",

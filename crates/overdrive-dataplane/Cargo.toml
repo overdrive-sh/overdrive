@@ -76,6 +76,10 @@ aya.workspace  = true
 libc.workspace = true
 nix.workspace  = true
 
+# `ipnet` — IPv4 CIDR + reserved-set types for the `allocators::VipRange`
+# allocator surface (ADR-0049 / step 01-01). Pure-Rust, no I/O.
+ipnet.workspace = true
+
 # Integration-test dev-deps. `serial_test` serialises tests that
 # mutate process-global state — here, the on-disk BPF artifact path
 # under `target/bpf/`. See `.claude/rules/testing.md`

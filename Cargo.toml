@@ -135,6 +135,8 @@ libc            = "0.2"
 # resolution) per architecture.md §5 / S-2.2-03. Linux-only consumers
 # in the workspace; no portability shim needed here.
 nix             = { version = "0.29", default-features = false, features = ["net"] }
+# `ipnet` — IPv4/IPv6 CIDR types used by the VIP-pool allocator (ADR-0049).
+ipnet           = "2"
 rustls-pemfile  = "2"
 x509-parser     = "0.18"
 toml            = "0.8"
