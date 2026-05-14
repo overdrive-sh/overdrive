@@ -134,6 +134,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-14T07:33:18Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T07:34:22Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS: read reconciler helpers (lines 1700-1747), Run branch (1230-1365), and existing kind-parametrised test pattern (e/f/g/h, lines 1346-1557 using ALL_WORKLOAD_KINDS const + alloc_with_state/alloc_system_gc_stopped helpers + per-kind for-loop). Will reuse alloc_with_state for per-row mutation (set state=Terminated + reason only / Pending). Skipping pre-test mutation re-verify to save ~2min; will validate via final mutation re-run.",
+      "t": "2026-05-14T11:03:56Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: production correct; test (i) intentional_stop_marker_in_reason_only_filters_row fills mutation-coverage gap (M1: || -> && at reconciler.rs:1713). Mirrored across StoppedBy::SystemGC and StoppedBy::Operator x WorkloadKind {Service, Job, Schedule}.",
+      "t": "2026-05-14T11:05:32Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS: production correct; test (j) pending_row_does_not_trigger_natural_exit_finalize fills mutation-coverage gap (M2: is_natural_exit body -> true at reconciler.rs:1745; M3: && -> || at reconciler.rs:1746). Mirrored across AllocState {Pending, Draining}; Job-kind only since natural-exit branch is gated on WorkloadKind::Job.",
+      "t": "2026-05-14T11:05:32Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: 398/398 overdrive-core tests pass; clippy clean; mutation re-run 100.0% kill rate (19/19 caught, 0 missed) \u2014 all 3 previously-missed mutants on is_intentionally_stopped (line 1713) and is_natural_exit (lines 1745, 1746) now caught.",
+      "t": "2026-05-14T11:09:08Z"
     }
   ]
 }
