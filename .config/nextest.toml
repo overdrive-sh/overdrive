@@ -44,14 +44,14 @@ final-status-level = "fail"
 slow-timeout = { period = "60s", terminate-after = 2 }
 
 # The store-local snapshot proptest opens a real redb file per case
-# at the default `PROPTEST_CASES=1024` budget. Solo wall-clock on Lima
-# is ~55s; under parallel load (workspace integration runs schedule
-# ~30 tests concurrently and the proptest competes for I/O bandwidth
-# against every other tempdir-touching test) it crosses 120s. The
-# default budget is correct for "this test runs alone" (the inner
-# loop) and incorrect for "this test runs alongside the full
-# workspace" (CI / lima full-suite). A 4× budget absorbs the parallel
-# slow-down without weakening the per-test deadline.
+# at the default `PROPTEST_CASES=1024` budget. Each `put` is a
+# separate redb write transaction, so entry count × case count
+# dominates wall-clock. The generator is sized (0..=32 entries,
+# 0..=256 byte values) to keep solo wall-clock well under 60s, but
+# under parallel load (workspace integration runs schedule ~30 tests
+# concurrently) I/O contention can push past 120s. A 4× budget
+# absorbs the parallel slow-down without weakening the per-test
+# deadline.
 [[profile.default.overrides]]
 filter = 'package(overdrive-store-local) & binary(integration) & test(snapshot_roundtrip_is_byte_identical_for_arbitrary_store_contents)'
 slow-timeout = { period = "60s", terminate-after = 4 }

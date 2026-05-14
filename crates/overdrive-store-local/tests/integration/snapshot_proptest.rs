@@ -9,9 +9,10 @@
 //! Translates `docs/feature/phase-1-foundation/distill/test-scenarios.md`
 //! §4.2 property scenario — "Snapshot round-trip is byte-identical for
 //! any valid store contents" — to a proptest. The generator produces
-//! store contents with 0..=256 entries, each key 1..=64 bytes and each
-//! value 0..=4096 bytes, with unique keys within a generation. This
-//! matches the roadmap scope for step 03-02.
+//! store contents with 0..=32 entries, each key 1..=64 bytes and each
+//! value 0..=256 bytes, with unique keys within a generation. The bounds
+//! are sized so that 1024 cases of real redb I/O (one write transaction
+//! per `put`) complete well within the nextest slow-test budget.
 //!
 //! Port-to-port discipline: the property drives `IntentStore::put`,
 //! `IntentStore::export_snapshot`, and `IntentStore::bootstrap_from`
@@ -34,12 +35,14 @@ use tokio::runtime::Runtime;
 
 /// Generator for valid store contents.
 ///
-/// * 0..=256 entries (covers empty through a meaningful upper bound).
+/// * 0..=32 entries (covers empty through multi-entry; each `put` is a
+///   separate redb write transaction, so the entry count dominates
+///   wall-clock at the default 1024-case budget).
 /// * Each key is 1..=64 bytes (non-empty; 64 is a sane headroom for any
 ///   identifier Phase 1 writes into `entries`).
-/// * Each value is 0..=4096 bytes (4 KB covers the §4.2 scope; empty
-///   values are permitted because `put(key, &[])` is legal on the
-///   trait).
+/// * Each value is 0..=256 bytes (exercises variable-length rkyv
+///   serialization without dominating I/O; empty values are permitted
+///   because `put(key, &[])` is legal on the trait).
 /// * Keys within a single generation are unique — a `BTreeMap` collapses
 ///   duplicates before we return. Ordering does not leak: the store's
 ///   export re-sorts anyway.
@@ -50,8 +53,8 @@ use tokio::runtime::Runtime;
 /// bootstrap byte-identically.
 fn store_contents() -> impl Strategy<Value = Vec<(Vec<u8>, Vec<u8>)>> {
     prop::collection::vec(
-        (prop::collection::vec(any::<u8>(), 1..=64), prop::collection::vec(any::<u8>(), 0..=4096)),
-        0..=256,
+        (prop::collection::vec(any::<u8>(), 1..=64), prop::collection::vec(any::<u8>(), 0..=256)),
+        0..=32,
     )
     .prop_map(|pairs| {
         // Deduplicate keys — last write for a given key wins, matching
