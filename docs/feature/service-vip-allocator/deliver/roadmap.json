@@ -2,9 +2,11 @@
   "roadmap": {
     "project_id": "service-vip-allocator",
     "created_at": "2026-05-14T06:53:49Z",
-    "total_steps": 10,
+    "total_steps": 11,
     "phases": 3,
     "changelog": [
+      "2026-05-14 - Step 02-03 split into 02-03a + 02-03b (user-authorised, option A after second structural finding). 02-03a: WorkloadSpec rkyv envelope + codec + spec_digest + migrate all Job::archive_for_store / from_store_bytes reader sites to WorkloadSpec::* (single-cut wire migration; submit handler unchanged; no allocator). 02-03b: widen SubmitWorkloadRequest.spec to WorkloadSpecInput, wire PersistentServiceVipAllocator into AppState, Service arm in submit_workload + alloc_status + streaming, 6 acceptance scenarios + golden-bytes test. The 6 acceptance criteria stay on 02-03b unchanged. total_steps: 10 -> 11; Phase 2 step count: 4 -> 5. Rationale: the original 02-03 expansion (recorded in prior changelog entry) cascaded into every Job-bytes reader (describe_workload, reconciler hydrate, recovery walks, streaming, alloc_status) - too large to land in one single-cut commit. Splitting at the codec/wiring boundary keeps each commit single-cut within its own scope.",
+      "2026-05-14 \u2014 Step 02-03 scope expansion (user-authorised during DELIVER, after crafter blocked on missing Service-submission driving port). Original 02-03 assumed `SubmitWorkloadRequest.spec` already accepted `WorkloadSpecInput` (any kind); structural finding during dispatch confirmed it accepts only `JobSpecInput`. User chose option (a) \u2014 expand 02-03 to also widen the submit driving port from Job-only to all WorkloadKind, add `WorkloadSpec` persistence codec (rkyv envelope per ADR-0048), and add Service listener rendering on alloc_status. The 6 acceptance scenarios remain unchanged. effort_hours estimate (8h) understates the expanded scope (~20\u201324h actual) \u2014 advisory only per CLAUDE.md, no enforcement.",
       "2026-05-14 \u2014 Reviewer-pass amendment: fixed 5 issues (1 critical, 2 high, 2 medium) per observation #41016. Removed duplicate S-VIP-11 from 01-02; disambiguated S-VIP-06 phase boundaries across 03-01/03-02/03-03; corrected property-test file placement per DWD-03; removed unjustified id.rs reference from 01-01; clarified config validation ownership between 01-01 (type-level) and 02-02 (parser surface).",
       "2026-05-14 \u2014 Allocator design course-correction amendment (post DELIVER step 01-01 implementation; ADR-0049 \u00a7 Amendments / \u00a7 Considered alternatives Alt-0). The generic `PoolAllocator<T: Token>` core + `IntentBackedAllocator<T>` generic shim from the original DESIGN are deleted \u2014 rejected during DELIVER step 01-01 as overstated abstraction. The landing shape is two concrete allocators (`BackendIdAllocator`, `ServiceVipAllocator`) sharing no trait or type, plus a concrete `PersistentServiceVipAllocator` shim. Step 01-01 rewritten (drops Token + PoolAllocator; describes the concrete ServiceVipAllocator + VipRange + the absorbed BackendIdAllocator relocation). Step 01-02 collapses to ServiceVip newtype consolidation (no Token impl). Step 01-03 renames `IntentBackedAllocator<T>` to `PersistentServiceVipAllocator`. Step 01-04 (BackendIdAllocator single-cut migration) is DELETED \u2014 absorbed into 01-01 because the relocation is forced by deleting PoolAllocator. total_steps: 11 \u2192 10; Phase 1 step count: 4 \u2192 3. Validation status reset to pending for re-review."
     ]
@@ -149,17 +151,45 @@
           }
         },
         {
-          "id": "02-03",
+          "id": "02-03a",
+          "name": "WorkloadSpec rkyv codec + reader-site migration (Job -> WorkloadSpec)",
+          "description": "Add the WorkloadSpec rkyv versioned envelope + archive_for_store / from_store_bytes / spec_digest codec (mirrors Job::archive_for_store precedent per ADR-0048 sect 4b - codec lives on the typed value, store stays byte-level). Migrate every existing Job::archive_for_store / Job::from_store_bytes reader site to WorkloadSpec::* in a single-cut commit (no parallel paths, no deprecation, per feedback_single_cut_greenfield_migrations.md): submit_workload writer path, describe_workload reader, reconciler runtime hydrate_desired, LocalIntentStore recovery walk, streaming.rs spec-byte loads, alloc_status if it reads stored spec bytes. Submit handler still accepts JobSpecInput at this point (Service-arm widening happens in 02-03b); the wire-shape change is internal-only. Golden-bytes fixture pins WorkloadSpecEnvelopeV1 archived layout. No VIP allocator wiring.",
+          "criteria": "WorkloadSpec::archive_for_store / from_store_bytes round-trip for every variant (Service / Job / Schedule). WorkloadSpec::spec_digest is deterministic (SHA-256 over canonical archived bytes). Golden-bytes fixture for WorkloadSpecEnvelopeV1 hex-decodes + rkyv-deserialises + projects to Latest, asserts equality with a canonical payload. All existing Job-bytes reader sites switched to WorkloadSpec; workspace compile clean. Existing acceptance + integration tests still pass (behaviour preserved across the codec migration - Job submissions still land, describe still returns spec, reconciler still hydrates).",
+          "test_file": "Schema-evolution fixture: tests/schema_evolution/workload_spec.rs in the crate that owns Job's schema_evolution fixtures (likely overdrive-core or overdrive-store-local - crafter to confirm).",
+          "scenario_name": "workload_spec_envelope_v1_golden_bytes_roundtrip",
+          "effort_hours": 8,
+          "dependencies": [
+            "01-03"
+          ],
+          "implementation_notes": "Single-cut migration per feedback_single_cut_greenfield_migrations.md: delete Job::archive_for_store / Job::from_store_bytes (or alias them to WorkloadSpec equivalents and delete the alias in the same commit). No JobEnvelope re-export shim. Phase 1 greenfield: 'delete the on-disk redb file' IS the official upgrade path; no migration code for pre-envelope rows.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/<owner>/tests/schema_evolution/workload_spec.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-core/src/aggregate/workload_spec.rs",
+              "crates/overdrive-core/src/aggregate/mod.rs",
+              "crates/overdrive-control-plane/src/handlers.rs",
+              "crates/overdrive-control-plane/src/streaming.rs",
+              "crates/overdrive-store-local/src/lib.rs",
+              "any reconciler-runtime / recovery-walk site that calls Job::archive_for_store or Job::from_store_bytes"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-03b",
           "name": "ServiceVipAllocator wired into AppState and submit handler",
-          "description": "Construct PersistentServiceVipAllocator at boot using VipRange from config and bulk_load from IntentStore. Wire the allocator into AppState. In submit_workload handler, compute spec_digest over operator spec, call ServiceVipAllocator.allocate(spec_digest) before IntentStore admission write. Submit-echo renders the allocated VIP at Service level. alloc-status consults ServiceVipAllocator::get(&spec_digest) for VIP rendering.",
+          "description": "Widen SubmitWorkloadRequest.spec from JobSpecInput to WorkloadSpecInput (the enum already exists at crates/overdrive-core/src/aggregate/workload_spec.rs with Service / Job / Schedule variants). Plumb the Service arm through submit_workload, streaming, alloc_status, and OpenAPI. Construct PersistentServiceVipAllocator at boot using VipRange from 02-02 config + bulk_load from IntentStore (the persistence wrapper is from step 01-03). Wire the allocator into AppState as Arc<tokio::sync::Mutex<...>>. In submit_workload for the WorkloadSpec::Service(_) arm: compute spec_digest, call allocator.allocate(spec_digest) BEFORE IntentStore admission write; drop guard before any further .await. Submit-echo renders the allocated VIP at Service level. alloc_status consults allocator.get(&spec_digest) for VIP rendering. Streaming.rs emits VIP in streamed Service-row updates. Job / Schedule arms pass through unchanged. Single-cut: no JobSpecInput backward-compat shim. Depends on 02-03a's WorkloadSpec codec migration being already in place.",
           "criteria": "S-VIP-01: Submit Service spec frontend.toml with [[listener]] port=8080 protocol=tcp (no vip field) via submit_workload; response status 200/201; submit echo contains allocated VIP from 10.96.0.0/24 range; VIP is valid IPv4 within range and not reserved. S-VIP-02: After submit, alloc status query returns same VIP as submit echo; per-listener lines render as port/protocol without per-listener VIP. S-VIP-03: Service spec with two listeners (8080/tcp, 8443/tcp) gets exactly one Service-level VIP; both listeners render as port/protocol. S-VIP-04: Resubmit byte-identical spec returns same VIP (idempotent). S-VIP-08: Pool with 1 address fully allocated; second distinct spec returns HTTP 503 with typed pool exhaustion error naming allocated and capacity counts. S-VIP-09: After pool exhaustion rejection, existing allocations still return their VIPs via get and alloc-status.",
           "test_file": "crates/overdrive-control-plane/tests/acceptance.rs",
           "scenario_name": "submit_service_allocates_vip, alloc_status_renders_same_vip, multi_listener_one_vip, idempotent_resubmit_same_vip, pool_exhaustion_typed_rejection, pool_exhaustion_existing_unaffected",
           "effort_hours": 8,
           "dependencies": [
+            "02-03a",
+            "02-02",
             "01-03",
-            "02-01",
-            "02-02"
+            "02-01"
           ],
           "implementation_scope": {
             "files_to_create": [],
@@ -232,7 +262,7 @@
           "effort_hours": 3,
           "dependencies": [
             "03-01",
-            "02-03"
+            "02-03b"
           ],
           "implementation_notes": "Per-layer scope: action-shim dispatch only. Tests build an action-shim context with a real (or sim) ServiceVipAllocator pre-populated with one allocation, hand the dispatcher a hand-constructed Action::ReleaseServiceVip, and assert allocator.get returns None after the dispatch. S-VIP-07 (released VIP reusable on next allocation) belongs to 03-03 because it requires the submit_workload driving port.",
           "implementation_scope": {
@@ -302,9 +332,9 @@
     ]
   },
   "validation": {
-    "status": "approved",
+    "status": "pending",
     "reviewer": "nw-acceptance-designer-reviewer",
     "approved_at": "2026-05-14T19:45:00Z",
-    "notes": "Re-approved after 2026-05-14 allocator design course-correction amendment (deleted PoolAllocator<T>+Token trait; rewrote 01-01, 01-02, 01-03; deleted 01-04). All 21 S-VIP scenarios + 4 properties mapped exactly once across 10 steps. Architecture: two concrete allocators, no shared trait. BackendIdAllocator relocation absorbed into 01-01. Acyclic DAG verified."
+    "notes": "Re-review needed after 2026-05-14 step 02-03 split into 02-03a + 02-03b (user-authorised, option A). Prior approval is superseded by this structural change. See changelog entry."
   }
 }

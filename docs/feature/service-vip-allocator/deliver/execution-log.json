@@ -183,6 +183,76 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-14T14:17:24Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:34:01Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: SubmitWorkloadRequest is JobSpecInput-only; AC requires Service spec submission surface that does not exist. Cannot write failing acceptance tests against a non-existent driving port shape. Surfaced to user with paths (a)/(b)/(c)/(d); awaiting clarification.",
+      "t": "2026-05-14T14:35:21Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: RED_ACCEPTANCE not entered; unit tests are integration-shaped per step description and gated on the same Service-submission driving port that does not exist. Awaiting user clarification on resolution path.",
+      "t": "2026-05-14T14:35:29Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: No RED tests landed; cannot enter GREEN without a failing test to satisfy. Per Crafty rule No code without a requiring test. Awaiting user clarification on resolution path (a)/(b)/(c)/(d).",
+      "t": "2026-05-14T14:35:31Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: No implementation landed; nothing to commit. Awaiting user clarification on scope-expansion path (a) vs narrow-wiring path (b) vs AC reframe (c) vs missed-code pointer (d).",
+      "t": "2026-05-14T14:35:33Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:53:31Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: structural blocker \u2014 WorkloadSpec::Job(JobSpec) shape (parser-side, no replicas/no WorkloadDriver) is incompatible with Job/JobV1 (intent-side, NonZeroU32 replicas + WorkloadDriver enum). Naive WorkloadSpec::Job(JobSpec) projection from Job loses validated replicas field; handlers.rs:714 alloc_status reads job.replicas.get() as replicas_desired. Step framing 'behaviour preserved' cannot hold with lossy projection. Surfaced CLARIFICATION_NEEDED to user with 3 resolution options (A: widen WorkloadSpec::Job to carry JobV1; B: introduce separate intent-side WorkloadIntent enum; C: merge 02-03a+02-03b). Cannot proceed autonomously per boundary rules ('DO NOT autonomously decide and ship'). Awaiting user decision.",
+      "t": "2026-05-14T14:53:40Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE. The envelope shape (WorkloadSpec vs new WorkloadIntent) determines what type the RED_UNIT golden-bytes fixture instantiates. Cannot write the schema-evolution fixture file until the user resolves which type carries the codec.",
+      "t": "2026-05-14T14:53:49Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE.",
+      "t": "2026-05-14T14:53:49Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE. No code written; no commit produced. Working tree unchanged.",
+      "t": "2026-05-14T14:53:49Z"
     }
   ]
 }
