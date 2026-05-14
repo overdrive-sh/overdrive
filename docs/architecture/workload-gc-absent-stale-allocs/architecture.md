@@ -54,8 +54,8 @@ These ADRs constrain the design space. Any option that violates them is rejected
 |---|---|---|
 | **ADR-0021** | `AnyState::WorkloadLifecycle(WorkloadLifecycleState)`; `desired` and `actual` share one struct shape; `job: Option<Job>` makes the absent case representable. | The mechanism IS already in place. `desired.job.is_none()` is exactly the discriminator the GC logic branches on. No new state shape required for Option A. |
 | **ADR-0035 + ADR-0036** | `reconcile` is pure sync over `(desired, actual, view, tick) → (Vec<Action>, View)`. No `.await`, no I/O, no DB handle. Hydration owned by runtime. | The GC arm must be expressible without I/O. The runtime's existing `hydrate_actual` already filters `alloc_status_rows()` to rows matching the target's `workload_id` (`reconciler_runtime.rs:1078`); when `desired.job` is `None`, `actual.allocations` correctly carries only the orphan rows for that target. **No new hydration logic is needed.** |
-| **ADR-0037** | `Action::StopAllocation` carries `terminal: Option<TerminalCondition>`. The Stop branch stamps `Stopped { by: StoppedBy::Operator }`. `StoppedBy` is `{ Operator, Reconciler, Process }`. | A new `StoppedBy::SystemGC` variant is required to satisfy AC §1.3's "distinct TerminalCondition". This is the SemVer-additive variant addition ADR-0037 §5 describes; it falls inside the existing `TerminalCondition::Stopped { by }` shape (no new top-level variant). |
-| **ADR-0047** | Reconciler is `WorkloadLifecycle`; `WorkloadKind ∈ { Service, Job, Schedule }`. Job-kind has its own natural-exit terminal handling (`Completed`/`Failed`); Service-kind uses restart-budget terminals. | The GC arm must be kind-agnostic. An orphan-row scenario can occur for any workload kind. The emitted terminal claim is `Stopped { by: SystemGC }` regardless of kind — semantically the system is *withdrawing* the workload, not concluding its natural lifecycle. |
+| **ADR-0037** | `Action::StopAllocation` carries `terminal: Option<TerminalCondition>`. The Stop branch stamps `Stopped { by: StoppedBy::Operator }`. `StoppedBy` is `{ Operator, Reconciler, Process }`. | A new `StoppedBy::SystemGc` variant is required to satisfy AC §1.3's "distinct TerminalCondition". This is the SemVer-additive variant addition ADR-0037 §5 describes; it falls inside the existing `TerminalCondition::Stopped { by }` shape (no new top-level variant). |
+| **ADR-0047** | Reconciler is `WorkloadLifecycle`; `WorkloadKind ∈ { Service, Job, Schedule }`. Job-kind has its own natural-exit terminal handling (`Completed`/`Failed`); Service-kind uses restart-budget terminals. | The GC arm must be kind-agnostic. An orphan-row scenario can occur for any workload kind. The emitted terminal claim is `Stopped { by: SystemGc }` regardless of kind — semantically the system is *withdrawing* the workload, not concluding its natural lifecycle. |
 | **`development.md` § "Reconciler I/O"** | `reconcile` returns Actions; the runtime owns persistence. View carries inputs, not derived state. | If the GC arm needs any per-target memory (e.g. "first-observed-as-orphan timestamp" for a soft-stop grace window), the View carries the input timestamp, not a derived deadline. **This design does NOT introduce such memory** — the simplest correct behaviour fires `StopAllocation` immediately on the orphan-observed tick, no grace window. See § 6 Open question 1 for why. |
 | **`development.md` § "Persist inputs, not derived state"** | Persisted fields must be inputs to the live policy, not cached outputs. | If a future grace-window policy lands, the View input is `first_observed_orphan_at: UnixInstant`; the deadline is recomputed every tick against the live policy. Not required for the current cut. |
 
@@ -70,11 +70,11 @@ Default = **EXTEND** existing surface. CREATE NEW must be justified with evidenc
 | `WorkloadLifecycle` reconciler (`overdrive-core/src/reconciler.rs`) | Reconcile loop; runtime registration; broker enqueue path; hydration of `WorkloadLifecycleState`; action emission to `Action::StopAllocation`; View persistence via runtime ViewStore. | **EXTEND.** Replace the `None => (Vec::new(), view.clone())` arm with logic that emits `StopAllocation` per non-terminal row. Every downstream surface (action shim, observation row write, lifecycle event broadcast) is already wired for `Action::StopAllocation`. | The arm IS the documented gap (TODO(#148) in source). Extending it costs one branch body; creating a sibling reconciler costs a new `AnyReconciler` / `AnyState` / `AnyReconcilerView` variant, a new hydrator arm, and a new target-resource registration story — none of which a Phase 1 single-node feature needs. |
 | `WorkloadLifecycleState.allocations: BTreeMap<AllocationId, AllocStatusRow>` | Already populated by `hydrate_actual` filtered to the target's `workload_id`. | **REUSE AS-IS.** When `desired.job` is `None`, this map already contains exactly the orphan rows we need to stop. No hydrator change. | `reconciler_runtime.rs:1078` — `for row in rows.into_iter().filter(|r| r.workload_id == workload_id)`. |
 | `Action::StopAllocation { alloc_id, terminal }` | Action variant that already writes the row's terminal field and broadcasts the lifecycle event with the same value (ADR-0037 §4). | **REUSE AS-IS.** No new action variant. The action shim's write path is unchanged. | `reconciler.rs:519-525` — the variant docstring explicitly says the reconciler stamps `terminal` and the action shim writes both surfaces. |
-| `TerminalCondition::Stopped { by: StoppedBy }` | Closest variant for "this allocation reached Stopped because of withdrawn intent". | **EXTEND `StoppedBy` enum.** Add a new `SystemGC` variant. No new `TerminalCondition` top-level variant. ADR-0037 §5 covers this exact shape ("New variants are additive minor"). | The Stop-by-operator branch is the structural precedent. The mechanism is identical; only the *by-source* differs. |
+| `TerminalCondition::Stopped { by: StoppedBy }` | Closest variant for "this allocation reached Stopped because of withdrawn intent". | **EXTEND `StoppedBy` enum.** Add a new `SystemGc` variant. No new `TerminalCondition` top-level variant. ADR-0037 §5 covers this exact shape ("New variants are additive minor"). | The Stop-by-operator branch is the structural precedent. The mechanism is identical; only the *by-source* differs. |
 | `ObservationStore::alloc_status_rows()` | Source of orphan-row evidence. | **REUSE AS-IS.** | Already returns every row; hydrator already filters per target. |
 | Stop-branch convergence pattern (`reconciler.rs:1180-1205`) | The "iterate Running rows, emit StopAllocation per row, clear `last_failure_seen_at` when complete" shape. | **REUSE PATTERN.** The GC arm's body is structurally identical — different `terminal` value, same convergence shape. | Same idempotency story (next tick: rows are Terminated, filter is empty, no more Actions). Same view-cleanup story. |
 
-**Outcome: zero new types beyond one `StoppedBy::SystemGC` variant. Every other surface extends in-place.** This is the strongest possible signal that Option A (extend the `None` arm) is the right shape.
+**Outcome: zero new types beyond one `StoppedBy::SystemGc` variant. Every other surface extends in-place.** This is the strongest possible signal that Option A (extend the `None` arm) is the right shape.
 
 ---
 
@@ -90,7 +90,7 @@ None => {
     // crash-recovery surgery). Withdraw any non-terminal allocations
     // by stamping a system-GC terminal claim.
     let gc_terminal = Some(TerminalCondition::Stopped {
-        by: StoppedBy::SystemGC,
+        by: StoppedBy::SystemGc,
     });
     let stop_actions: Vec<Action> = actual
         .allocations
@@ -113,7 +113,7 @@ None => {
 
 **Hydration cost.** Zero new I/O. Runtime's `hydrate_desired` reads `Job` from intent (returns `None` for the absent case — already wired). `hydrate_actual` reads alloc rows for the workload id — already wired. No table scan, no orphan-detection observation.
 
-**Concurrency safety vs racing Submit.** ADR-0037 §1 establishes LWW on intent. If a `Submit { id: X }` lands intent immediately after a GC tick stops X's row, the next tick of the same target sees `desired.job = Some(...)` again and follows the Run branch — placing a fresh allocation. The stopped row is durably terminal-stamped with `SystemGC`. This is correct: the operator's resubmit creates a *new* allocation, and the audit log shows the prior allocation was withdrawn by GC. No state corruption; level-triggered convergence resolves the race the way operators expect.
+**Concurrency safety vs racing Submit.** ADR-0037 §1 establishes LWW on intent. If a `Submit { id: X }` lands intent immediately after a GC tick stops X's row, the next tick of the same target sees `desired.job = Some(...)` again and follows the Run branch — placing a fresh allocation. The stopped row is durably terminal-stamped with `SystemGc`. This is correct: the operator's resubmit creates a *new* allocation, and the audit log shows the prior allocation was withdrawn by GC. No state corruption; level-triggered convergence resolves the race the way operators expect.
 
 **Termination model.** The `actual.allocations` map already filters to non-terminal-by-default semantics (terminal rows remain in `alloc_status` until ObservationStore GC, which is out of scope). After all rows reach Terminated, the `filter(state == Running)` collects zero Actions; the View's backoff input is cleared on that tick; the broker stops re-enqueueing per the existing `view_has_backoff_pending` predicate. The arm becomes a no-op once steady state is reached.
 
@@ -122,17 +122,17 @@ None => {
 1. Submit `Job(id=X)` → intent written, observation eventually shows Running alloc.
 2. Operator hard-deletes intent (test harness removes the `jobs/X` key from `IntentStore`).
 3. Tick the WorkloadLifecycle reconciler for target X.
-4. **Invariant** (`assert_eventually!`): every `AllocStatusRow.workload_id == X` reaches a terminal `AllocState` AND carries `terminal == Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`.
+4. **Invariant** (`assert_eventually!`): every `AllocStatusRow.workload_id == X` reaches a terminal `AllocState` AND carries `terminal == Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })`.
 5. **Invariant** (`assert_always!`): no Action other than `StopAllocation` is emitted while `desired.job` is `None`.
 6. **Invariant** (`assert_always!`): no fresh allocation is placed for X while the intent remains absent.
 
-**New `StoppedBy::SystemGC` variant.** Single-line addition to the `StoppedBy` enum at discriminant index `3` (after `Process=2`). ADR-0037 amendment formalises the SemVer claim (additive minor).
+**New `StoppedBy::SystemGc` variant.** Single-line addition to the `StoppedBy` enum at discriminant index `3` (after `Process=2`). ADR-0037 amendment formalises the SemVer claim (additive minor).
 
-> **NOTE — rkyv discriminant stability AND comment update.** The existing `StoppedBy` enum carries an explicit comment at `crates/overdrive-core/src/transition_reason.rs:212-213`: *"MUST remain the last variant to preserve rkyv discriminant compatibility: `Operator=0`, `Reconciler=1`, `Process=2`."* The wording "last variant" is the **mechanism** claim; the **invariant** is discriminant stability for pre-existing variants. Appending `SystemGC` at index `3` preserves the invariant (Operator/Reconciler/Process keep their discriminants) but invalidates the mechanism wording. **The variant addition MUST land alongside a comment update** that switches the wording to the same shape used elsewhere in this file — see `TerminalCondition::Completed` at lines ~395-401 for the canonical phrasing: *"Appended after `<prior_last>` to keep the pre-existing rkyv discriminants stable. This variant takes discriminant `3`. Existing archived rows decode unchanged."* The implementing crafter MUST land both (variant + comment fix) in step 01-01's single commit; landing the variant without the comment fix leaves a stale invariant claim in the SSOT.
+> **NOTE — rkyv discriminant stability AND comment update.** The existing `StoppedBy` enum carries an explicit comment at `crates/overdrive-core/src/transition_reason.rs:212-213`: *"MUST remain the last variant to preserve rkyv discriminant compatibility: `Operator=0`, `Reconciler=1`, `Process=2`."* The wording "last variant" is the **mechanism** claim; the **invariant** is discriminant stability for pre-existing variants. Appending `SystemGc` at index `3` preserves the invariant (Operator/Reconciler/Process keep their discriminants) but invalidates the mechanism wording. **The variant addition MUST land alongside a comment update** that switches the wording to the same shape used elsewhere in this file — see `TerminalCondition::Completed` at lines ~395-401 for the canonical phrasing: *"Appended after `<prior_last>` to keep the pre-existing rkyv discriminants stable. This variant takes discriminant `3`. Existing archived rows decode unchanged."* The implementing crafter MUST land both (variant + comment fix) in step 01-01's single commit; landing the variant without the comment fix leaves a stale invariant claim in the SSOT.
 >
-> **Forward roundtrip coverage (not a new fixture).** Per `.claude/rules/development.md` § "rkyv schema evolution" → "Version-bump procedure", existing `FIXTURE_V1` (already pinned at `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs:59`) is **NEVER touched**. Adding a `StoppedBy` variant does NOT bump the envelope to V2 — the layout is unchanged; only an enum gained an additive variant. Step 01-01 therefore: (a) verifies existing `FIXTURE_V1` continues to hex-decode + project correctly through the new enum (the existing test already does this — no edit needed to assert it); (b) adds a NEW unit-level roundtrip test (not a fixture constant) constructing a fresh `AllocStatusRow` with `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`, archiving via the current envelope, deserialising, and asserting `Eq`. This is forward coverage, not historical pinning. Minting a `FIXTURE_V2` is wrong shape.
+> **Forward roundtrip coverage (not a new fixture).** Per `.claude/rules/development.md` § "rkyv schema evolution" → "Version-bump procedure", existing `FIXTURE_V1` (already pinned at `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs:59`) is **NEVER touched**. Adding a `StoppedBy` variant does NOT bump the envelope to V2 — the layout is unchanged; only an enum gained an additive variant. Step 01-01 therefore: (a) verifies existing `FIXTURE_V1` continues to hex-decode + project correctly through the new enum (the existing test already does this — no edit needed to assert it); (b) adds a NEW unit-level roundtrip test (not a fixture constant) constructing a fresh `AllocStatusRow` with `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })`, archiving via the current envelope, deserialising, and asserting `Eq`. This is forward coverage, not historical pinning. Minting a `FIXTURE_V2` is wrong shape.
 
-**Within-shim ordering (action shim → observation write).** The design assumes the action shim writes `AllocStatusRow.terminal` durably before broadcasting the lifecycle event (i.e., write-through-then-broadcast). This is a property of the existing action shim (per ADR-0023 / ADR-0037 §4) — not introduced by this feature. **Crafter validation gate at step 01-03**: confirm `crates/overdrive-control-plane/src/action_shim.rs` (or wherever the shim lives) sequences `AllocStatusRow.terminal` durability before the lifecycle event broadcast for `Action::StopAllocation`. If the shim broadcasts before durability, a fresh `Submit` between emission and durability could place a fresh alloc before the original's `SystemGC` terminal stamp is observable — a within-shim race outside this design's surface. Surface as a blocker to the user if the shim does not sequence correctly; do NOT silently absorb the race.
+**Within-shim ordering (action shim → observation write).** The design assumes the action shim writes `AllocStatusRow.terminal` durably before broadcasting the lifecycle event (i.e., write-through-then-broadcast). This is a property of the existing action shim (per ADR-0023 / ADR-0037 §4) — not introduced by this feature. **Crafter validation gate at step 01-03**: confirm `crates/overdrive-control-plane/src/action_shim.rs` (or wherever the shim lives) sequences `AllocStatusRow.terminal` durability before the lifecycle event broadcast for `Action::StopAllocation`. If the shim broadcasts before durability, a fresh `Submit` between emission and durability could place a fresh alloc before the original's `SystemGc` terminal stamp is observable — a within-shim race outside this design's surface. Surface as a blocker to the user if the shim does not sequence correctly; do NOT silently absorb the race.
 
 ### Option B — Sibling `WorkloadGC` reconciler
 
@@ -158,18 +158,18 @@ A hybrid would split the responsibility: WorkloadLifecycle's `None` arm emits th
 
 **Option A.** Three load-bearing reasons:
 
-1. **Strongest reuse signal.** Every relevant surface already exists. The only new code is the GC arm body and a `StoppedBy::SystemGC` variant. F-1 default ("EXTEND over CREATE NEW") is honoured by construction.
+1. **Strongest reuse signal.** Every relevant surface already exists. The only new code is the GC arm body and a `StoppedBy::SystemGc` variant. F-1 default ("EXTEND over CREATE NEW") is honoured by construction.
 2. **Cheapest hydration.** Per-target hydration is already in place; the GC arm fires for free as part of the existing tick. No new cross-target observation row, no full-table scan.
 3. **Best concurrency model.** Local LWW resolution per evaluation: each tick of target X sees one consistent snapshot of `(intent[X], obs[X])`. A race between hard-delete and resubmit always resolves to "the most recent intent wins" with no inter-reconciler coordination required.
 
 **Quality-attribute ranking (per #148 implicit priorities):**
 
 - **Correctness/convergence** — both options converge. Option A converges per target every tick; Option B converges per orphan-set every tick. Equal under steady state, simpler under races (A wins on simplicity).
-- **Auditability** — both options emit `TerminalCondition::Stopped { by: StoppedBy::SystemGC }`. Equal.
+- **Auditability** — both options emit `TerminalCondition::Stopped { by: StoppedBy::SystemGc }`. Equal.
 - **Simplicity/reviewability** — Option A is ~20 LOC; Option B is a new reconciler + new dispatch + new hydrator (~200 LOC). **A wins decisively.**
 - **Performance** — cold path; not a perf concern. Effectively equal.
 
-**ADR action.** **Amend ADR-0037** to add `StoppedBy::SystemGC`. No new ADR is required. The reconciler-side mechanism is a body change inside a documented branch (TODO(#148)); the only architecturally-significant decision is the new terminal-condition vocabulary item, which is the ADR-0037 SemVer-additive scope.
+**ADR action.** **Amend ADR-0037** to add `StoppedBy::SystemGc`. No new ADR is required. The reconciler-side mechanism is a body change inside a documented branch (TODO(#148)); the only architecturally-significant decision is the new terminal-condition vocabulary item, which is the ADR-0037 SemVer-additive scope.
 
 ---
 
@@ -179,7 +179,7 @@ This change is intra-reconciler. The component diagram (`./c4-component.md`) sho
 
 **Touched surfaces:**
 
-- `overdrive-core::transition_reason::StoppedBy` — add `SystemGC` variant (last position to preserve rkyv discriminants).
+- `overdrive-core::transition_reason::StoppedBy` — add `SystemGc` variant (last position to preserve rkyv discriminants).
 - `overdrive-core::reconciler::WorkloadLifecycle::reconcile` — replace `None` arm body.
 - `overdrive-core/tests/schema_evolution/alloc_status_row.rs` — verify golden fixtures still decode (new variant is forward-compatible; old archives carrying `Stopped { by: ∈ {Operator, Reconciler, Process} }` continue to decode unchanged).
 - `overdrive-sim/tests/dst/` — new DST scenario for the absent-intent shape.
@@ -188,7 +188,7 @@ This change is intra-reconciler. The component diagram (`./c4-component.md`) sho
 
 - The runtime (`reconciler_runtime.rs`) — `hydrate_desired` and `hydrate_actual` already return the correct shapes; no new I/O.
 - The action shim — `Action::StopAllocation` carries `terminal` already; the shim writes both row and event.
-- `LifecycleEvent` — gains `Stopped { by: SystemGC }` events automatically via the same shim path that already echoes `terminal`.
+- `LifecycleEvent` — gains `Stopped { by: SystemGc }` events automatically via the same shim path that already echoes `terminal`.
 - `Job` intent persistence path — read-only consumer.
 - The evaluation broker — re-enqueues per target on observation deltas and on submit; the absent-intent + non-terminal-rows shape already produces a tick (because the rows themselves are observation events) and the GC arm's view-cleanup quiesces the predicate when work is done.
 
@@ -221,7 +221,7 @@ SCENARIO orphan_workload_converges_to_terminal_gc
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X)
            .all(|r| matches!(r.terminal,
-               Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })))
+               Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })))
     )
     assert_always!("gc.no_fresh_alloc", |obs|
         // No new alloc placed for X while intent absent. `assert_always!` is
@@ -252,7 +252,7 @@ SCENARIO resubmit_after_gc_creates_fresh_alloc
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X && r.alloc_id == original_alloc_id)
            .all(|r| matches!(r.terminal,
-               Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })))
+               Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })))
     )
 ```
 
@@ -282,7 +282,7 @@ Per CLAUDE.md "Deferrals require GitHub issues — AND user approval BEFORE crea
 - **ADR-0021** — `AnyState::WorkloadLifecycle(WorkloadLifecycleState)` shape; `desired.job: Option<Job>` is the discriminator.
 - **ADR-0035** — collapsed reconciler trait; pure sync `reconcile`.
 - **ADR-0036** — amendment removing per-reconciler `hydrate`; runtime owns I/O.
-- **ADR-0037** — `TerminalCondition` + `StoppedBy`; this design proposes the additive `StoppedBy::SystemGC` amendment.
+- **ADR-0037** — `TerminalCondition` + `StoppedBy`; this design proposes the additive `StoppedBy::SystemGc` amendment.
 - **ADR-0047** — `WorkloadKind` taxonomy + reconciler rename to `WorkloadLifecycle`.
 - **`.claude/rules/development.md` § "Reconciler I/O"** — `reconcile` purity contract.
 - **`.claude/rules/development.md` § "Persist inputs, not derived state"** — View-shape rule (not exercised by this cut).

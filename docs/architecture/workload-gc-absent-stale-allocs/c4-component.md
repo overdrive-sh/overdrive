@@ -13,8 +13,8 @@ C4Component
   }
 
   Container_Boundary(core, "overdrive-core (pure library)") {
-    Component(recon, "WorkloadLifecycle::reconcile", "Rust pure fn", "GC arm fires when desired.job is None and non-terminal rows exist — emits StopAllocation with TerminalCondition::Stopped { by: SystemGC }")
-    Component(tc, "TerminalCondition + StoppedBy", "Rust enum", "Adds StoppedBy::SystemGC variant (ADR-0037 amendment)")
+    Component(recon, "WorkloadLifecycle::reconcile", "Rust pure fn", "GC arm fires when desired.job is None and non-terminal rows exist — emits StopAllocation with TerminalCondition::Stopped { by: SystemGc }")
+    Component(tc, "TerminalCondition + StoppedBy", "Rust enum", "Adds StoppedBy::SystemGc variant (ADR-0037 amendment)")
   }
 
   ContainerDb(intent, "IntentStore", "redb", "Holds Job aggregates at jobs/<id>; absence drives the GC arm")
@@ -23,7 +23,7 @@ C4Component
   Rel(runtime, intent, "Reads desired Job via hydrate_desired (returns None for orphan workload)")
   Rel(runtime, obs, "Reads non-terminal AllocStatusRows via hydrate_actual filtered by workload_id")
   Rel(runtime, recon, "Invokes pure reconcile(desired, actual, view, tick) once per tick")
-  Rel(recon, tc, "Stamps Action::StopAllocation { terminal: Some(Stopped { by: SystemGC }) }")
+  Rel(recon, tc, "Stamps Action::StopAllocation { terminal: Some(Stopped { by: SystemGc }) }")
   Rel(runtime, shim, "Dispatches emitted Actions")
   Rel(shim, obs, "Writes AllocStatusRow.terminal field (terminal-claim durability)")
   Rel(shim, broker, "Observation write triggers re-enqueue; next tick converges remaining rows")

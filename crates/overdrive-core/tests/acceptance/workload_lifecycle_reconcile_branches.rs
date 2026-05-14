@@ -163,12 +163,12 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
     // SKIPPED because `&&` requires both clauses true; control falls
     // through to the GC arm (#148, ADR-0037 Amendment 2026-05-14)
     // which emits one StopAllocation per Running orphan stamped with
-    // `Stopped { by: SystemGC }`.
+    // `Stopped { by: SystemGc }`.
     //
     // Mutation discrimination on the original `&&` clause is
     // preserved by the terminal-by-source discriminator:
     //   - Under `&&` (correct): Stop branch skipped → GC arm fires →
-    //     emits StopAllocation { terminal: Some(Stopped { by: SystemGC }) }.
+    //     emits StopAllocation { terminal: Some(Stopped { by: SystemGc }) }.
     //   - Under `||` (mutation): Stop branch fires (`true || false`
     //     evaluates true even with `job: None`) → emits
     //     StopAllocation { terminal: Some(Stopped { by: Operator }) }.
@@ -200,7 +200,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // The GC arm fires (job is None) and emits one StopAllocation
-    // for the orphan Running row. The terminal MUST carry SystemGC,
+    // for the orphan Running row. The terminal MUST carry SystemGc,
     // not Operator — that is what distinguishes `&&` (correct,
     // skipped Stop branch → GC arm) from `||` (mutation, Stop branch
     // fires with Operator terminal).
@@ -214,8 +214,8 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         Action::StopAllocation { terminal, .. } => {
             assert_eq!(
                 terminal,
-                &Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }),
-                "with `&&` the GC arm fires and stamps SystemGC; with `||` the Stop \
+                &Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }),
+                "with `&&` the GC arm fires and stamps SystemGc; with `||` the Stop \
                  branch would fire and stamp Operator. Got terminal = {terminal:?}",
             );
         }
@@ -1008,7 +1008,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
 // -------------------------------------------------------------------
 // GH #148 / ADR-0037 Amendment 2026-05-14 — GC arm: `desired.job ==
 // None` with stale Running allocs emits one
-// `Action::StopAllocation { terminal: Some(Stopped { by: SystemGC }) }`
+// `Action::StopAllocation { terminal: Some(Stopped { by: SystemGc }) }`
 // per orphan Running row.
 // -------------------------------------------------------------------
 //
@@ -1037,7 +1037,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
 //     stops emitted instead of N).
 //   - `is_empty()` → `is_empty().not()` in view-cleanup: tests (b)+(c)
 //     fail (`last_failure_seen_at` not cleared when steady-state).
-//   - `StoppedBy::SystemGC` → `StoppedBy::Operator`: test (a) fails
+//   - `StoppedBy::SystemGc` → `StoppedBy::Operator`: test (a) fails
 //     (terminal mismatch on the stop action).
 
 /// All `WorkloadKind` variants. Used to parametrise the GC-arm tests
@@ -1049,7 +1049,7 @@ const ALL_WORKLOAD_KINDS: &[WorkloadKind] =
 
 /// (a) `desired.job == None` AND `actual.allocations` contains N>=1
 /// `Running` rows produces N `Action::StopAllocation` whose
-/// `terminal == Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`,
+/// `terminal == Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })`,
 /// one per row, indexed by `alloc_id` (asserted on the multiset, not
 /// list order).
 #[test]
@@ -1093,7 +1093,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             3,
             "kind={kind:?}: expected one StopAllocation per Running row; got {actions:?}",
         );
-        let expected_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC });
+        let expected_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc });
         let mut emitted: Vec<(String, Option<TerminalCondition>)> = actions
             .iter()
             .map(|a| match a {
@@ -1109,7 +1109,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
         assert_eq!(
             emitted, expected,
             "kind={kind:?}: emitted (alloc_id, terminal) multiset must match \
-             one StopAllocation per Running row stamped with SystemGC",
+             one StopAllocation per Running row stamped with SystemGc",
         );
     }
 }
@@ -1286,8 +1286,8 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
                 );
                 assert_eq!(
                     terminal,
-                    &Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }),
-                    "kind={kind:?}: GC stop must carry SystemGC terminal",
+                    &Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }),
+                    "kind={kind:?}: GC stop must carry SystemGc terminal",
                 );
             }
             other => panic!("kind={kind:?}: expected StopAllocation, got {other:?}"),
@@ -1300,32 +1300,32 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
 // -------------------------------------------------------------------
 //
 // These four tests parametrise over `WorkloadKind ∈ {Service, Job,
-// Schedule}` and pin the symmetric `Operator OR SystemGC` semantics
+// Schedule}` and pin the symmetric `Operator OR SystemGc` semantics
 // of the Run-branch's intentional-stop class. The asymmetry against
 // `is_operator_stopped` is load-bearing: Operator-stop short-circuits
 // the entire Run branch (operator's intent overrides re-submit);
-// SystemGC-stop is filtered out of `active_allocs_vec` so that
+// SystemGc-stop is filtered out of `active_allocs_vec` so that
 // resubmit lands a fresh placement (the operator's new intent IS the
 // override).
 //
 // Mutation-killability targets:
 //   - A mutant defining `is_intentionally_stopped` as
-//     `is_operator_stopped(row)` (forgets the SystemGC arm) fails (e).
-//   - A mutant flipping the Operator vs SystemGC precedence in (g)
+//     `is_operator_stopped(row)` (forgets the SystemGc arm) fails (e).
+//   - A mutant flipping the Operator vs SystemGc precedence in (g)
 //     fails (g).
 //   - A mutant broadening the filter to all-terminal (allowing Failed
 //     rows to be filtered out of restart candidacy) fails (h).
 //   - The fresh-id derivation in (e) — distinct alloc_id from the
-//     SystemGC-stopped row — guards against `mint_alloc_id`
+//     SystemGc-stopped row — guards against `mint_alloc_id`
 //     regressing to a workload-id-only deterministic form.
 
-/// Build an `AllocStatusRow` already in the SystemGC-Terminated
-/// shape (state=Terminated, terminal=Some(Stopped { by: SystemGC })).
+/// Build an `AllocStatusRow` already in the SystemGc-Terminated
+/// shape (state=Terminated, terminal=Some(Stopped { by: SystemGc })).
 /// Pure helper to keep the four tests below readable.
 fn alloc_system_gc_stopped(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatusRow {
     let mut row = alloc_with_state(alloc_id, workload_id, node_id, AllocState::Terminated);
-    row.terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC });
-    row.reason = Some(TransitionReason::Stopped { by: StoppedBy::SystemGC });
+    row.terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc });
+    row.reason = Some(TransitionReason::Stopped { by: StoppedBy::SystemGc });
     row
 }
 
@@ -1338,9 +1338,9 @@ fn alloc_operator_stopped(alloc_id: &str, workload_id: &str, node_id: &str) -> A
     row
 }
 
-/// (e) Run-branch with intent present + one SystemGC-Terminated row +
+/// (e) Run-branch with intent present + one SystemGc-Terminated row +
 /// zero Running rows → emits exactly one fresh `Action::StartAllocation`
-/// with a NEW alloc_id (distinct from the SystemGC-stopped row's
+/// with a NEW alloc_id (distinct from the SystemGc-stopped row's
 /// alloc_id). This is the architecture.md § 5 promise: a resubmit
 /// lands a fresh allocation.
 #[test]
@@ -1375,7 +1375,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
         assert_eq!(
             actions.len(),
             1,
-            "kind={kind:?}: SystemGC-Terminated row + intent present must emit \
+            "kind={kind:?}: SystemGc-Terminated row + intent present must emit \
              exactly one fresh placement; got {actions:?}",
         );
         match &actions[0] {
@@ -1384,8 +1384,8 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
                     alloc_id.as_str(),
                     "alloc-payments-0",
                     "kind={kind:?}: fresh placement MUST mint a NEW alloc_id distinct \
-                     from the SystemGC-stopped row's alloc_id; reusing the prior id \
-                     would let the action shim's LWW write overwrite the SystemGC \
+                     from the SystemGc-stopped row's alloc_id; reusing the prior id \
+                     would let the action shim's LWW write overwrite the SystemGc \
                      terminal stamp on the obs row, violating \
                      resubmit.preserves_prior_gc_terminal (architecture.md § 7)",
                 );
@@ -1439,10 +1439,10 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
     }
 }
 
-/// (g) Run-branch with intent present + one SystemGC-Terminated row +
+/// (g) Run-branch with intent present + one SystemGc-Terminated row +
 /// one Operator-Terminated row → emits zero actions (operator-stop
 /// short-circuit takes precedence; without the Operator row, the
-/// SystemGC-only case would have placed fresh per test (e)).
+/// SystemGc-only case would have placed fresh per test (e)).
 /// Documents the asymmetry: Operator stop is the more-specific
 /// override.
 #[test]
@@ -1480,18 +1480,18 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
 
         assert!(
             actions.is_empty(),
-            "kind={kind:?}: Operator-Terminated row coexisting with SystemGC-Terminated \
+            "kind={kind:?}: Operator-Terminated row coexisting with SystemGc-Terminated \
              row must short-circuit to zero actions — operator stop overrides re-submit \
-             AND overrides the SystemGC-only fresh-placement path; got {actions:?}",
+             AND overrides the SystemGc-only fresh-placement path; got {actions:?}",
         );
     }
 }
 
-/// (h) Run-branch with intent present + one SystemGC-Terminated row +
+/// (h) Run-branch with intent present + one SystemGc-Terminated row +
 /// one Failed row → emits a `RestartAllocation` for the Failed row
-/// (the SystemGC row is filtered out of restart candidacy; the Failed
+/// (the SystemGc row is filtered out of restart candidacy; the Failed
 /// row drives the restart). Documents the asymmetry between
-/// intentional-stop (Operator/SystemGC) and natural-failure (Failed).
+/// intentional-stop (Operator/SystemGc) and natural-failure (Failed).
 #[test]
 fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
     for kind in ALL_WORKLOAD_KINDS {
@@ -1530,14 +1530,14 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         // the restart branch — for a Job kind, a Failed row is a
         // natural-exit and emits FinalizeFailed. Service/Schedule kinds
         // skip the Job-natural-exit branch and emit RestartAllocation.
-        // Both shapes prove the asymmetry: the SystemGC row is NEVER
+        // Both shapes prove the asymmetry: the SystemGc row is NEVER
         // the action target (no Stop or other action emitted against
         // alloc-payments-0).
         assert_eq!(
             actions.len(),
             1,
-            "kind={kind:?}: SystemGC row + Failed row must emit exactly one action \
-             (against the Failed row, not the SystemGC row); got {actions:?}",
+            "kind={kind:?}: SystemGc row + Failed row must emit exactly one action \
+             (against the Failed row, not the SystemGc row); got {actions:?}",
         );
         let action_alloc_id = match &actions[0] {
             Action::RestartAllocation { alloc_id, .. }
@@ -1550,7 +1550,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         assert_eq!(
             action_alloc_id, "alloc-payments-1",
             "kind={kind:?}: action MUST target the Failed row (`alloc-payments-1`), \
-             NOT the SystemGC-stopped row (`alloc-payments-0`). The SystemGC row is \
+             NOT the SystemGc-stopped row (`alloc-payments-0`). The SystemGc row is \
              filtered out of restart/natural-exit candidacy by the \
              `active_allocs_vec` filter; the Failed row drives the action.",
         );
@@ -1592,17 +1592,17 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
 //       true. Test (j) catches both M2 and M3.
 // -------------------------------------------------------------------
 
-/// (i.SystemGC) Run-branch with intent present + one row whose
-/// intentional-stop marker (`StoppedBy::SystemGC`) lives in `reason`
+/// (i.SystemGc) Run-branch with intent present + one row whose
+/// intentional-stop marker (`StoppedBy::SystemGc`) lives in `reason`
 /// ONLY (`terminal == None`) → row is filtered out of
 /// `active_allocs_vec` and a fresh placement happens. The
-/// SystemGC-via-reason row is NEVER the action target.
+/// SystemGc-via-reason row is NEVER the action target.
 ///
 /// Mutation discrimination on the original `||` clause at line 1713
 /// (between the `terminal` and `reason` arms of `is_intentionally_
 /// stopped`):
 ///   - Under `||` (correct): EITHER arm matching is sufficient — the
-///     `reason: Some(Stopped { by: SystemGC })` arm fires, the row is
+///     `reason: Some(Stopped { by: SystemGc })` arm fires, the row is
 ///     filtered out of `active_allocs_vec`, fresh placement emits
 ///     `StartAllocation` with a NEW alloc_id. Test passes.
 ///   - Under `&&` (mutation): BOTH arms must match — `terminal: None`
@@ -1638,7 +1638,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
         row.kind = *kind;
         row.terminal = None;
-        row.reason = Some(TransitionReason::Stopped { by: StoppedBy::SystemGC });
+        row.reason = Some(TransitionReason::Stopped { by: StoppedBy::SystemGc });
         let allocations = one_alloc_map("alloc-payments-0", row);
 
         let desired = WorkloadLifecycleState {
@@ -1662,7 +1662,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         let r = WorkloadLifecycle::canonical();
         let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-        // Load-bearing assertion: the stale SystemGC-via-reason row
+        // Load-bearing assertion: the stale SystemGc-via-reason row
         // is NEVER the target of any emitted action. Under the `&&`
         // mutation (M1) the row is NOT filtered → enters
         // natural-exit (Job kind) and emits FinalizeFailed against
@@ -1683,8 +1683,8 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             assert_ne!(
                 target_id,
                 Some("alloc-payments-0"),
-                "kind={kind:?}: the stale SystemGC-via-reason row (terminal=None, \
-                 reason=Some(Stopped{{by: SystemGC}})) MUST be filtered out of \
+                "kind={kind:?}: the stale SystemGc-via-reason row (terminal=None, \
+                 reason=Some(Stopped{{by: SystemGc}})) MUST be filtered out of \
                  `active_allocs_vec` by the `||` arm in `is_intentionally_stopped` \
                  (reconciler.rs:1713). Under the `&&` mutation the row is NOT \
                  filtered → enters natural-exit / restart-budget paths and becomes \
@@ -1699,7 +1699,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         assert_eq!(
             actions.len(),
             1,
-            "kind={kind:?}: filtered SystemGC-via-reason row + intent present must \
+            "kind={kind:?}: filtered SystemGc-via-reason row + intent present must \
              emit exactly one fresh placement; got {actions:?}",
         );
         match &actions[0] {
@@ -1708,7 +1708,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
                     alloc_id.as_str(),
                     "alloc-payments-0",
                     "kind={kind:?}: fresh placement MUST mint a NEW alloc_id \
-                     distinct from the filtered SystemGC-via-reason row's id",
+                     distinct from the filtered SystemGc-via-reason row's id",
                 );
             }
             other => {

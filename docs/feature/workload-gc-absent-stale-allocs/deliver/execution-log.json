@@ -153,7 +153,7 @@
       "sid": "01-05",
       "p": "RED_ACCEPTANCE",
       "s": "EXECUTED",
-      "d": "PASS: production correct; test (i) intentional_stop_marker_in_reason_only_filters_row fills mutation-coverage gap (M1: || -> && at reconciler.rs:1713). Mirrored across StoppedBy::SystemGC and StoppedBy::Operator x WorkloadKind {Service, Job, Schedule}.",
+      "d": "PASS: production correct; test (i) intentional_stop_marker_in_reason_only_filters_row fills mutation-coverage gap (M1: || -> && at reconciler.rs:1713). Mirrored across StoppedBy::SystemGc and StoppedBy::Operator x WorkloadKind {Service, Job, Schedule}.",
       "t": "2026-05-14T11:05:32Z"
     },
     {

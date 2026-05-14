@@ -12,7 +12,7 @@ Closed the GC gap in `WorkloadLifecycle::reconcile`'s `None` arm at
 (hard-delete, multi-node drain, crash recovery surgery) while non-terminal
 `AllocStatusRow`s remain, the reconciler now emits one
 `Action::StopAllocation { terminal: Some(TerminalCondition::Stopped { by:
-StoppedBy::SystemGC }) }` per Running orphan row. The new `StoppedBy::SystemGC`
+StoppedBy::SystemGc }) }` per Running orphan row. The new `StoppedBy::SystemGc`
 variant (ADR-0037 Amendment 2026-05-14, appended at rkyv discriminant index 3)
 gives operators a distinct terminal class to audit against.
 
@@ -29,7 +29,7 @@ DST scenario.
 - **D-1: Extend `WorkloadLifecycle::reconcile` in place (Option A).** Sibling
   `WorkloadGC` reconciler rejected — fails F-1 default of EXTEND over CREATE
   NEW; would require new `AnyReconciler`/hydrator/registration story.
-- **D-2: `StoppedBy::SystemGC` as a new variant on the existing enum.** New
+- **D-2: `StoppedBy::SystemGc` as a new variant on the existing enum.** New
   top-level `TerminalCondition::Withdrawn` variant rejected (inflates
   hierarchy for a sub-classification). Reusing `StoppedBy::Reconciler`
   rejected (collapses two distinct semantics).
@@ -50,10 +50,10 @@ DST scenario.
 
 | Step | Title | Outcome |
 |---|---|---|
-| 01-01 | Add `StoppedBy::SystemGC` variant + schema-evolution fixture pin | Variant appended at index 3; existing `FIXTURE_V1` untouched; new forward-roundtrip test added. |
-| 01-02 | Reconcile None-arm emits `StopAllocation { terminal: SystemGC }` per orphan Running row | Mirror of operator-stop branch; kind-parametrised tests (a)-(d). |
+| 01-01 | Add `StoppedBy::SystemGc` variant + schema-evolution fixture pin | Variant appended at index 3; existing `FIXTURE_V1` untouched; new forward-roundtrip test added. |
+| 01-02 | Reconcile None-arm emits `StopAllocation { terminal: SystemGc }` per orphan Running row | Mirror of operator-stop branch; kind-parametrised tests (a)-(d). |
 | 01-03 | DST scenarios for orphan convergence and resubmit race | `orphan_workload_converges_to_terminal_gc` GREEN; `resubmit_after_gc_creates_fresh_alloc` landed RED — surfaced production gap (see scope expansion below). |
-| 01-04 | Close resubmit-after-SystemGC gap; promote `WorkloadGcResubmitCreatesFresh` into `Invariant::ALL` | Symmetric `is_intentionally_stopped` helper introduced; SystemGC-Terminated rows now filtered from Run-branch `active_allocs_vec`; resubmit DST GREEN. |
+| 01-04 | Close resubmit-after-SystemGc gap; promote `WorkloadGcResubmitCreatesFresh` into `Invariant::ALL` | Symmetric `is_intentionally_stopped` helper introduced; SystemGc-Terminated rows now filtered from Run-branch `active_allocs_vec`; resubmit DST GREEN. |
 | 01-05 | Kill 3 missed mutants on `is_intentionally_stopped` + `is_natural_exit` | Mutation kill-rate 100% (was 84.2%, +15.8pp); 19/19 caught. |
 
 ## Scope expansions (user-approved)
@@ -61,12 +61,12 @@ DST scenario.
 Both expansions were surfaced for user approval at the moment of discovery —
 neither was a unilateral widening.
 
-- **Step 01-04 — resubmit-after-SystemGC gap.** Step 01-03's RED scaffold for
+- **Step 01-04 — resubmit-after-SystemGc gap.** Step 01-03's RED scaffold for
   `resubmit_after_gc_creates_fresh_alloc` revealed that the architecture's § 5
   promise ("the next tick of the same target sees `desired.job = Some(...)`
   again and follows the Run branch — placing a fresh allocation") was
   speculative until structurally enforced. The Run branch's `is_natural_exit`
-  helper would mis-classify SystemGC-stopped rows and emit `FinalizeFailed`
+  helper would mis-classify SystemGc-stopped rows and emit `FinalizeFailed`
   every tick instead of placing fresh. User approved option 1 (introduce
   symmetric `is_intentionally_stopped` helper, filter from
   `active_allocs_vec`).
@@ -85,7 +85,7 @@ call sites:
 - **Operator-stop short-circuits the Run branch with `(Vec::new(),
   view.clone())`.** Operator's intent overrides re-submit; if the operator
   stopped the workload, a fresh re-submit does not undo the stop.
-- **SystemGC-stop falls through to fresh placement.** The system stopped the
+- **SystemGc-stop falls through to fresh placement.** The system stopped the
   workload because intent was withdrawn; the re-submit IS the operator's
   intent and re-creates the workload.
 
@@ -97,7 +97,7 @@ two helpers.
 
 ## Architectural promise made structurally true
 
-Architecture.md § 5 stated that resubmit after SystemGC produces a fresh
+Architecture.md § 5 stated that resubmit after SystemGc produces a fresh
 allocation. Until step 01-04 landed the `is_intentionally_stopped` filter on
 `active_allocs_vec`, that statement was a documentation claim with no
 structural enforcement — the Run branch would have hit `is_natural_exit ==
@@ -131,10 +131,10 @@ true` and emitted `FinalizeFailed` instead. Step 01-04 made the promise true.
 
 ## Commits
 
-- `ac02653e` — feat(transition-reason): add StoppedBy::SystemGC for absent-intent GC
-- `3cb064a0` — feat(reconciler): emit SystemGC stops for absent-intent orphan allocs
+- `ac02653e` — feat(transition-reason): add StoppedBy::SystemGc for absent-intent GC
+- `3cb064a0` — feat(reconciler): emit SystemGc stops for absent-intent orphan allocs
 - `c8e47a25` — test(sim): DST scenarios for absent-intent workload GC + resubmit race
-- `a3fc5191` — feat(reconciler): symmetric intentional-stop class for SystemGC + Operator
+- `a3fc5191` — feat(reconciler): symmetric intentional-stop class for SystemGc + Operator
 - `a0f27ba1` — test(reconciler): kill 3 missed mutants on intentional-stop helpers
 
 Plus DESIGN-wave commits `c82d060f` and `69c4bcb5`.

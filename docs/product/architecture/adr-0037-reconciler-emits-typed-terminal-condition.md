@@ -524,7 +524,7 @@ layer remains a forwarder.
 See ADR-0047 §3 for the wire-shape consequence and ADR-0047 §1 for
 the aggregate decomposition.
 
-## Amendment 2026-05-14 — `StoppedBy::SystemGC` variant for absent-intent workload GC
+## Amendment 2026-05-14 — `StoppedBy::SystemGc` variant for absent-intent workload GC
 
 **Decision-maker.** Morgan (DESIGN wave for
 `workload-gc-absent-stale-allocs`, GH issue #148).
@@ -542,25 +542,25 @@ pub enum StoppedBy {
     /// Distinct from `Operator` (explicit stop intent) and `Reconciler`
     /// (the reconciler stopped a still-desired alloc, e.g. for drift
     /// correction). Index `3`.
-    SystemGC,           // index 3 — additive
+    SystemGc,           // index 3 — additive
 }
 ```
 
 **Why appended at index `3` rather than inserted before `Process`.** The
 existing source comment pins the rkyv discriminants: `Operator=0`,
-`Reconciler=1`, `Process=2`. Inserting `SystemGC` before `Process`
+`Reconciler=1`, `Process=2`. Inserting `SystemGc` before `Process`
 would renumber `Process` to `3`, breaking the on-disk archived-byte
 layout for every existing `AllocStatusRow.terminal` value carrying
 `Stopped { by: Process }`. The "Process MUST remain last" comment is a
 discriminant-pin claim, not an aesthetic ordering preference; the
-correct shape is to append `SystemGC` at index `3` while preserving
+correct shape is to append `SystemGc` at index `3` while preserving
 `Process=2`.
 
 **The variant addition MUST land alongside a comment update in the
 same commit.** The existing wording ("MUST remain the last variant to
 preserve rkyv discriminant compatibility") describes the
 **mechanism** (Process being last); the **invariant** is discriminant
-stability for pre-existing variants. Once `SystemGC` is appended, the
+stability for pre-existing variants. Once `SystemGc` is appended, the
 mechanism wording is stale and contradicts the SSOT. The replacement
 phrasing follows the canonical shape used elsewhere in
 `transition_reason.rs` (see `TerminalCondition::Completed` at
@@ -569,7 +569,7 @@ pre-existing rkyv discriminants stable. This variant takes
 discriminant `N`. Existing archived rows decode unchanged."* Future
 additions to `StoppedBy` follow the same pattern (append + update
 the prior tail's docstring with the same shape). Do **not** carry the
-"must remain last" phrasing forward onto `SystemGC` — that wording
+"must remain last" phrasing forward onto `SystemGc` — that wording
 was the source of the contradicted-mechanism defect this amendment
 fixes.
 
@@ -582,7 +582,7 @@ rkyv layout is unchanged; only an inner enum gained an additive
 variant at the tail. Existing fixtures continue to decode through the
 new enum unchanged and serve as the regression guard. The DELIVER
 wave adds a **forward-roundtrip test** (not a new fixture constant)
-constructing a fresh row with `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`,
+constructing a fresh row with `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })`,
 rkyv-archiving through the current envelope, deserialising, and
 asserting `Eq` — proving the new variant encodes/decodes through the
 existing envelope. Minting a `FIXTURE_V2` is the wrong shape per the
@@ -592,7 +592,7 @@ Version-bump procedure (envelope unchanged, no new version warranted).
 gains a non-trivial `None` branch in its `match desired.job.as_ref()`
 arm. When `desired.job` is `None` AND `actual.allocations` carries any
 row in `AllocState::Running`, the reconciler emits
-`Action::StopAllocation { alloc_id, terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }) }`
+`Action::StopAllocation { alloc_id, terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }) }`
 for each such row. The action shim writes both surfaces
 (`AllocStatusRow.terminal` and `LifecycleEvent.terminal`) with the
 same value, preserving the §4 byte-equality guarantee. See
@@ -600,15 +600,15 @@ same value, preserving the §4 byte-equality guarantee. See
 for the full design.
 
 **SemVer claim.** Per §5 above ("New variants are additive minor"),
-appending `SystemGC` is an additive minor change. The
+appending `SystemGc` is an additive minor change. The
 `#[non_exhaustive]` attribute on `TerminalCondition` (and the
 project's exhaustive-match discipline) ensures consumers branching on
 the wildcard arm continue to compile; consumers that want to display
-the new by-source explicitly add a `StoppedBy::SystemGC` arm.
+the new by-source explicitly add a `StoppedBy::SystemGc` arm.
 
 **What this amendment does NOT change.**
 
-- The `TerminalCondition` top-level variants are unchanged. `SystemGC`
+- The `TerminalCondition` top-level variants are unchanged. `SystemGc`
   is a sub-classification of the existing `Stopped` variant, not a
   new top-level claim.
 - The action shim's write path is unchanged — it already writes
@@ -637,7 +637,7 @@ and pins the implementation contract the DELIVER wave executes.
   typed `TerminalCondition` variants. Service kind unchanged.
   Schedule kind ships no firing semantics (deferred to GH #166).
   See `Amendment 2026-05-10` section above and ADR-0047.
-- 2026-05-14 — **Amendment**: `StoppedBy::SystemGC` variant added
+- 2026-05-14 — **Amendment**: `StoppedBy::SystemGc` variant added
   (appended at index `3` to preserve rkyv discriminants for
   `Operator=0, Reconciler=1, Process=2`). Closes GH issue #148 (the
   `WorkloadLifecycle` reconciler's `None` arm for absent-intent

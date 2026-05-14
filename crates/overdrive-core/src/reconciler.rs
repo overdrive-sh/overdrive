@@ -1216,7 +1216,7 @@ impl Reconciler for WorkloadLifecycle {
             // of the operator-Stop branch above (filter Running rows,
             // emit one StopAllocation per row, clear
             // `last_failure_seen_at` when no work remains).
-            // `StoppedBy::SystemGC` is the load-bearing
+            // `StoppedBy::SystemGc` is the load-bearing
             // discriminator: it lets the action shim, lifecycle
             // event consumers, and operator-facing surfaces
             // distinguish "the operator stopped this" from "the
@@ -1234,7 +1234,7 @@ impl Reconciler for WorkloadLifecycle {
             // can occur for any workload kind (architecture.md § 8
             // Open Q2).
             None => {
-                let gc_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC });
+                let gc_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc });
                 let stop_actions: Vec<Action> = actual
                     .allocations
                     .values()
@@ -1268,7 +1268,7 @@ impl Reconciler for WorkloadLifecycle {
 
                 // Per workload-gc-absent-stale-allocs step 01-04: derive
                 // a second view that excludes intentional-stop rows
-                // (Operator OR SystemGC). Used by the running-alloc /
+                // (Operator OR SystemGc). Used by the running-alloc /
                 // natural-exit / failed-alloc checks below so that a
                 // re-submit after GC lands a fresh placement (the
                 // architecture.md § 5 promise) rather than spuriously
@@ -1307,15 +1307,15 @@ impl Reconciler for WorkloadLifecycle {
                 // even when no `for_job_stop` intent exists, e.g.
                 // by direct CLI / API operator action.)
                 //
-                // **Asymmetry vs SystemGC** (workload-gc-absent-stale-
-                // allocs step 01-04). SystemGC-stopped rows are NOT
+                // **Asymmetry vs SystemGc** (workload-gc-absent-stale-
+                // allocs step 01-04). SystemGc-stopped rows are NOT
                 // short-circuited here — they are filtered out of
                 // `active_allocs_vec` above so that the Run branch
                 // falls through to fresh placement on resubmit. The
                 // semantic difference: Operator stop is OVERRIDING
                 // (operator's intent outranks the new submit; a
                 // fresh schedule would undo the operator's stop),
-                // while SystemGC stop is OVERRIDABLE (system stop
+                // while SystemGc stop is OVERRIDABLE (system stop
                 // was system-initiated because intent disappeared;
                 // a fresh submit IS the operator's overriding new
                 // intent and should land a fresh allocation —
@@ -1510,13 +1510,13 @@ impl Reconciler for WorkloadLifecycle {
                         // alloc by the number of pre-existing rows
                         // for this workload. With zero rows the
                         // suffix is `0` (preserves the prior shape);
-                        // with a SystemGC-Terminated row already in
+                        // with a SystemGc-Terminated row already in
                         // `allocs_vec` (resubmit-after-GC), the
                         // suffix is `1` and the new alloc gets a
                         // distinct id. This makes the action shim's
                         // LWW write of the new `Running` row land
                         // on a NEW key rather than overwrite the
-                        // prior SystemGC terminal stamp — making
+                        // prior SystemGc terminal stamp — making
                         // good on architecture.md § 5's
                         // `resubmit.preserves_prior_gc_terminal`
                         // promise.
@@ -1608,12 +1608,12 @@ fn node_free_capacity(
 /// rows for the workload at placement time** (per workload-gc-
 /// absent-stale-allocs step 01-04). With zero pre-existing rows the
 /// suffix is `0` (preserves the pre-Phase-1.4 single-shot shape);
-/// after a SystemGC stop leaves one Terminated row behind, a
+/// after a SystemGc stop leaves one Terminated row behind, a
 /// resubmit's placement passes `attempt = 1` and mints
 /// `alloc-{workload_id}-1` — distinct from the GC'd row's
 /// `alloc-{workload_id}-0`. This is the structural defence against
 /// the resurrection class where the action shim's LWW write of the
-/// new `Running` row would otherwise overwrite the prior SystemGC
+/// new `Running` row would otherwise overwrite the prior SystemGc
 /// terminal stamp.
 fn mint_alloc_id(workload_id: &WorkloadId, attempt: u32) -> AllocationId {
     let raw = format!("alloc-{}-{}", workload_id.as_str(), attempt);
@@ -1655,7 +1655,7 @@ fn mint_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId 
 /// outranks the new submit), so the Run branch returns no actions
 /// even when desired intent is present. Use [`is_intentionally_stopped`]
 /// for restart / natural-exit / placement-candidacy decisions where
-/// `Operator` and `SystemGC` share the "don't restart, don't
+/// `Operator` and `SystemGc` share the "don't restart, don't
 /// finalize" semantics.
 fn is_operator_stopped(row: &AllocStatusRow) -> bool {
     row.state == AllocState::Terminated
@@ -1674,7 +1674,7 @@ fn is_operator_stopped(row: &AllocStatusRow) -> bool {
 
 /// True iff the alloc row carries a terminal *intentional-stop class*
 /// record — `state == Terminated` AND its `terminal` OR `reason`
-/// carries `Stopped { by: ∈ {Operator, SystemGC} }`.
+/// carries `Stopped { by: ∈ {Operator, SystemGc} }`.
 ///
 /// **Asymmetry vs [`is_operator_stopped`] — load-bearing.** This
 /// predicate is the broader query covering both intentional-stop
@@ -1688,7 +1688,7 @@ fn is_operator_stopped(row: &AllocStatusRow) -> bool {
 ///   (`desired.job = Some(...)`). The operator's stop intent outranks
 ///   the new submit; a fresh schedule would undo the operator's stop.
 /// - **`is_intentionally_stopped`** (filter for `active_allocs_vec`):
-///   SystemGC-stopped rows are filtered out of placement-candidacy so
+///   SystemGc-stopped rows are filtered out of placement-candidacy so
 ///   that a re-submit lands a fresh allocation (the operator's new
 ///   intent IS the override of the system's earlier GC withdrawal).
 ///   Operator-stopped rows would also be filtered out, but they
@@ -1698,7 +1698,7 @@ fn is_operator_stopped(row: &AllocStatusRow) -> bool {
 /// Use this predicate for restart / natural-exit / placement-
 /// candidacy decisions where the question is "does this row
 /// represent an intentional stop the reconciler should respect?"
-/// (Operator OR SystemGC). Use [`is_operator_stopped`] for the
+/// (Operator OR SystemGc). Use [`is_operator_stopped`] for the
 /// stricter "is this specifically an operator-driven stop?" check
 /// (audit log gating, the Run-branch short-circuit, lifecycle event
 /// payload classification).
@@ -1708,20 +1708,20 @@ fn is_intentionally_stopped(row: &AllocStatusRow) -> bool {
             row.terminal,
             Some(crate::transition_reason::TerminalCondition::Stopped {
                 by: crate::transition_reason::StoppedBy::Operator
-                    | crate::transition_reason::StoppedBy::SystemGC
+                    | crate::transition_reason::StoppedBy::SystemGc
             })
         ) || matches!(
             row.reason,
             Some(crate::transition_reason::TransitionReason::Stopped {
                 by: crate::transition_reason::StoppedBy::Operator
-                    | crate::transition_reason::StoppedBy::SystemGC
+                    | crate::transition_reason::StoppedBy::SystemGc
             })
         ))
 }
 
 /// True iff the alloc row is a candidate for a `RestartAllocation`
 /// action — i.e. it sits in a restartable terminal state AND is NOT
-/// part of the intentional-stop class (Operator OR SystemGC).
+/// part of the intentional-stop class (Operator OR SystemGc).
 /// Intentional-stop rows are explicitly excluded; see
 /// [`is_intentionally_stopped`].
 fn is_restartable(row: &AllocStatusRow) -> bool {
@@ -1733,11 +1733,11 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 /// True iff the alloc row represents a *natural exit* the Job-kind
 /// reconciler should finalize on — a terminal lifecycle state (Failed
 /// OR Terminated) whose stop attribution (in either `terminal` or
-/// `reason`) is NOT an intentional stop (Operator OR SystemGC). Per
+/// `reason`) is NOT an intentional stop (Operator OR SystemGc). Per
 /// ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: Job kind terminates on
 /// the first observed exit (clean OR crashed). Intentional-stop rows
 /// are excluded — Operator-stopped rows short-circuit the entire Run
-/// branch upstream via [`is_operator_stopped`], and SystemGC-stopped
+/// branch upstream via [`is_operator_stopped`], and SystemGc-stopped
 /// rows are filtered out of `active_allocs_vec` so a re-submit lands
 /// a fresh allocation rather than spuriously firing FinalizeFailed
 /// against the prior GC'd row.

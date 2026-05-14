@@ -97,11 +97,11 @@ fn alloc_status_row_unknown_version_probe_surfaces() {
     );
 }
 
-/// Forward-roundtrip pin for the `StoppedBy::SystemGC` variant
+/// Forward-roundtrip pin for the `StoppedBy::SystemGc` variant
 /// (ADR-0037 Amendment 2026-05-14, step 01-01 of
 /// `workload-gc-absent-stale-allocs`). Constructs a fresh
 /// `AllocStatusRow` carrying
-/// `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`,
+/// `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc })`,
 /// archives through the *current* `AllocStatusRowEnvelope` (V1 — the
 /// rkyv layout is unchanged because the new variant is appended at
 /// the tail of `StoppedBy`'s discriminant space), deserialises, and
@@ -114,7 +114,7 @@ fn alloc_status_row_unknown_version_probe_surfaces() {
 /// layout of pre-existing variants. This test pins that the new
 /// variant encodes/decodes through the same envelope.
 ///
-/// Mutation-killability: a mutant swapping `SystemGC` for `Process`
+/// Mutation-killability: a mutant swapping `SystemGc` for `Process`
 /// in the constructor below fails the equality assertion.
 #[test]
 fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope() {
@@ -129,7 +129,7 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
         },
         reason: None,
         detail: None,
-        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }),
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }),
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
@@ -143,7 +143,7 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
         decoded.into_latest().expect("envelope into_latest projection");
     assert_eq!(
         projected, payload,
-        "AllocStatusRow with StoppedBy::SystemGC must round-trip through the current V1 envelope unchanged"
+        "AllocStatusRow with StoppedBy::SystemGc must round-trip through the current V1 envelope unchanged"
     );
 }
 

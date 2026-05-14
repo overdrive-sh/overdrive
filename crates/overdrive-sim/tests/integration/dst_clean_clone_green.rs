@@ -123,7 +123,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // scenarios covering the absent-intent workload GC arm: after
     // `IntentStore::delete("jobs/X")` removes the desired Job, every
     // alloc row for X reaches a terminal state with
-    // `Some(Stopped { by: SystemGC })` AND no fresh alloc is placed
+    // `Some(Stopped { by: SystemGc })` AND no fresh alloc is placed
     // while intent stays absent. The sibling resubmit invariant
     // (`workload-gc-resubmit-creates-fresh`) was promoted into
     // `Invariant::ALL` by step 01-04 once the resurrection-protection

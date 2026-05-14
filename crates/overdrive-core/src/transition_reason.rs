@@ -219,13 +219,13 @@ pub enum StoppedBy {
     /// `workload-gc-absent-stale-allocs`). Distinct from
     /// [`Self::Reconciler`] (which represents an explicit
     /// reconciler-actioned stop with desired intent still present)
-    /// — `SystemGC` records that the allocation was withdrawn
+    /// — `SystemGc` records that the allocation was withdrawn
     /// because no operator intent referenced it any longer.
     ///
     /// Appended after `Process` to keep the pre-existing rkyv
     /// discriminants stable. This variant takes discriminant `3`.
     /// Existing archived rows decode unchanged.
-    SystemGC,
+    SystemGc,
 }
 
 #[cfg(test)]
@@ -243,6 +243,7 @@ mod tests {
         assert!(!TransitionReason::Stopped { by: StoppedBy::Operator }.is_failure());
         assert!(!TransitionReason::Stopped { by: StoppedBy::Reconciler }.is_failure());
         assert!(!TransitionReason::Stopped { by: StoppedBy::Process }.is_failure());
+        assert!(!TransitionReason::Stopped { by: StoppedBy::SystemGc }.is_failure());
     }
 
     #[test]
@@ -530,7 +531,7 @@ impl TransitionReason {
             Self::Stopped { by: StoppedBy::Operator } => "stopped (by operator)".to_owned(),
             Self::Stopped { by: StoppedBy::Reconciler } => "stopped".to_owned(),
             Self::Stopped { by: StoppedBy::Process } => "stopped (by process)".to_owned(),
-            Self::Stopped { by: StoppedBy::SystemGC } => "stopped (by system gc)".to_owned(),
+            Self::Stopped { by: StoppedBy::SystemGc } => "stopped (by system gc)".to_owned(),
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),

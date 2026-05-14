@@ -23,7 +23,7 @@
 //!    - **gc.converges**: every alloc row for X is terminal
 //!      (`Terminated | Failed`).
 //!    - **gc.terminal_claim**: every alloc row for X carries
-//!      `terminal == Some(Stopped { by: SystemGC })`.
+//!      `terminal == Some(Stopped { by: SystemGc })`.
 //!    - **gc.no_fresh_alloc**: `assert_always!` — no alloc row for
 //!      X with `alloc_id` outside the pre-fault snapshot is
 //!      created during the post-fault tick window.
@@ -41,12 +41,12 @@
 //!      (durable distinctness — the GC'd row is not resurrected).
 //!    - **resubmit.preserves_prior_gc_terminal**: the original
 //!      alloc row's `terminal` field stays
-//!      `Some(Stopped { by: SystemGC })` for every tick after
+//!      `Some(Stopped { by: SystemGc })` for every tick after
 //!      resubmit.
 //!
 //! ## Mutation-killability targets (per step 01-03 AC)
 //!
-//! - A mutant flipping the `SystemGC` stamp to `Operator` fails
+//! - A mutant flipping the `SystemGc` stamp to `Operator` fails
 //!   gc.terminal_claim AND resubmit.preserves_prior_gc_terminal.
 //! - A mutant skipping the `StopAllocation` emission entirely
 //!   (returning `Vec::new()`) fails gc.converges.
@@ -68,7 +68,7 @@
 // Module-level narrative docstrings reference scenario sub-invariant
 // names (gc.converges, gc.terminal_claim, gc.no_fresh_alloc,
 // resubmit.places_fresh, resubmit.preserves_prior_gc_terminal),
-// `StoppedBy` variant words used as concepts (`SystemGC`, `Operator`),
+// `StoppedBy` variant words used as concepts (`SystemGc`, `Operator`),
 // driver method names embedded in narrative prose, and the
 // `IntentStore::put` / `IntentStore::delete` driving-port references.
 // Forcing every occurrence into backticks degrades readability of the
@@ -78,7 +78,7 @@
 // reference tables in COMMIT-phase polish).
 #![expect(
     clippy::doc_markdown,
-    reason = "narrative scenario docstrings reference concept words (gc.converges, SystemGC, Operator, IntentStore::delete) — see module header"
+    reason = "narrative scenario docstrings reference concept words (gc.converges, SystemGc, Operator, IntentStore::delete) — see module header"
 )]
 
 use std::sync::Arc;
@@ -205,7 +205,7 @@ async fn drive_orphan_converges() -> Result<(), String> {
             && rows.iter().all(|r| matches!(r.state, AllocState::Terminated | AllocState::Failed));
         let all_system_gc_stamped = !rows.is_empty()
             && rows.iter().all(|r| {
-                matches!(r.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }))
+                matches!(r.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }))
             });
         if all_terminal && all_system_gc_stamped {
             converged = true;
@@ -220,7 +220,7 @@ async fn drive_orphan_converges() -> Result<(), String> {
         return Err(format!(
             "gc.converges / gc.terminal_claim violated: after {budget} ticks, not every \
              alloc for workload `{wid}` reached a terminal state with \
-             `Some(Stopped {{ by: SystemGC }})`. Rows snapshot: {rows:?}",
+             `Some(Stopped {{ by: SystemGc }})`. Rows snapshot: {rows:?}",
         ));
     }
 
@@ -257,7 +257,7 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
         if !rows.is_empty()
             && rows.iter().all(|r| matches!(r.state, AllocState::Terminated | AllocState::Failed))
             && rows.iter().all(|r| {
-                matches!(r.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }))
+                matches!(r.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }))
             })
         {
             converged = true;
@@ -296,14 +296,14 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
 
         // resubmit.preserves_prior_gc_terminal — assert_always: the
         // original alloc rows MUST stay terminal-stamped with
-        // SystemGC for every tick after resubmit. The SystemGC stamp
+        // SystemGc for every tick after resubmit. The SystemGc stamp
         // is durable through the resubmit cycle.
         for row in rows.iter().filter(|r| pre_fault_alloc_ids.contains(&r.alloc_id)) {
-            if !matches!(row.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }))
+            if !matches!(row.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }))
             {
                 return Err(format!(
                     "resubmit.preserves_prior_gc_terminal violated at tick {tick_n}: \
-                     original alloc `{alloc}` lost its SystemGC terminal stamp. \
+                     original alloc `{alloc}` lost its SystemGc terminal stamp. \
                      Current row: {row:?}",
                     alloc = row.alloc_id,
                 ));
@@ -315,7 +315,7 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
         // The "alloc_id distinctness" half is the durable-distinctness
         // claim from architecture.md § 7 + step 01-03 prompt: the GC'd
         // row is NOT resurrected. A reconciler that reuses the prior
-        // alloc_id and overwrites the SystemGC terminal row with a
+        // alloc_id and overwrites the SystemGc terminal row with a
         // fresh Running row violates BOTH this invariant AND
         // preserves_prior_gc_terminal — the structural defence
         // against the resurrection class.

@@ -79,11 +79,11 @@ pub mod exit_event_observable_outcome;
 // race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
 // Running, IntentStore::delete("jobs/X"), drive ≤3 ticks, assert
 // every alloc reaches a terminal state with `terminal == Some(
-// Stopped { by: SystemGC })` AND no fresh alloc placed; (2)
+// Stopped { by: SystemGc })` AND no fresh alloc placed; (2)
 // `WorkloadGcResubmitCreatesFresh` — continues from quiescent
 // orphan state, resubmits Job(X), drives ≤5 ticks, asserts ≥1
 // fresh alloc reaches Running with `alloc_id != original` AND
-// the original alloc's `SystemGC` terminal stamp is durable.
+// the original alloc's `SystemGc` terminal stamp is durable.
 // Closes #148 AC §1.3.
 pub mod workload_gc_absent_intent;
 
@@ -303,7 +303,7 @@ pub enum Invariant {
     /// the desired Job, every non-terminal `AllocStatusRow` for
     /// `workload_id == X` reaches a terminal state within 3 ticks
     /// AND carries `terminal == Some(TerminalCondition::Stopped {
-    /// by: StoppedBy::SystemGC })` AND no fresh allocation is
+    /// by: StoppedBy::SystemGc })` AND no fresh allocation is
     /// placed for X while intent stays absent. Drives end-to-end
     /// through `SimIntentStore` + `SimObservationStore` +
     /// `WorkloadLifecycle` runtime stack — entry through the
@@ -322,15 +322,15 @@ pub enum Invariant {
     /// from the original GC'd row's `alloc_id` (durable
     /// distinctness — the GC'd row is not resurrected) AND (b)
     /// the original alloc's `terminal` field stays
-    /// `Some(Stopped { by: SystemGC })` for every tick after
-    /// resubmit (the `SystemGC` stamp is durable through the
+    /// `Some(Stopped { by: SystemGc })` for every tick after
+    /// resubmit (the `SystemGc` stamp is durable through the
     /// resubmit cycle). The evaluator body lives in
     /// `crate::invariants::workload_gc_absent_intent`.
     /// Promoted into `ALL` by step 01-04 once the
     /// resurrection-protection helper (`is_intentionally_stopped`)
-    /// was generalized to cover both `Operator` and `SystemGC`
+    /// was generalized to cover both `Operator` and `SystemGc`
     /// stops, the Run-branch's `active_allocs_vec` filter excluded
-    /// SystemGC-stopped rows from placement-candidacy, and
+    /// SystemGc-stopped rows from placement-candidacy, and
     /// `mint_alloc_id` was extended to accept an `attempt` index
     /// so a resubmit mints a distinct `alloc_id` rather than
     /// reusing the GC'd row's id. Closes #148 AC §1.3.
