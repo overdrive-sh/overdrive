@@ -524,6 +524,82 @@ layer remains a forwarder.
 See ADR-0047 §3 for the wire-shape consequence and ADR-0047 §1 for
 the aggregate decomposition.
 
+## Amendment 2026-05-14 — `StoppedBy::SystemGC` variant for absent-intent workload GC
+
+**Decision-maker.** Morgan (DESIGN wave for
+`workload-gc-absent-stale-allocs`, GH issue #148).
+
+**What changed.** The `StoppedBy` enum gains a new variant:
+
+```rust
+pub enum StoppedBy {
+    Operator,           // index 0 — unchanged
+    Reconciler,         // index 1 — unchanged
+    Process,            // index 2 — unchanged (rkyv discriminant pin)
+    /// `WorkloadLifecycle` GC arm: desired Job intent is absent
+    /// (hard-delete, multi-node drain, crash-recovery surgery) and the
+    /// system is withdrawing the workload's non-terminal allocations.
+    /// Distinct from `Operator` (explicit stop intent) and `Reconciler`
+    /// (the reconciler stopped a still-desired alloc, e.g. for drift
+    /// correction). Index `3`.
+    SystemGC,           // index 3 — additive
+}
+```
+
+**Why appended at index `3` rather than inserted before `Process`.** The
+existing source comment pins the rkyv discriminants: `Operator=0`,
+`Reconciler=1`, `Process=2`. Inserting `SystemGC` before `Process`
+would renumber `Process` to `3`, breaking the on-disk archived-byte
+layout for every existing `AllocStatusRow.terminal` value carrying
+`Stopped { by: Process }`. The "Process MUST remain last" comment is a
+discriminant-pin claim, not an aesthetic ordering preference; the
+correct shape is to append `SystemGC` at the new last position
+(index `3`) and update the comment to pin `SystemGC=3` going forward.
+
+The schema-evolution golden-bytes fixture for `AllocStatusRow` (per
+`.claude/rules/testing.md` § "Archive schema-evolution roundtrip")
+must include a `Stopped { by: SystemGC }` archive after this lands.
+Existing `V_N` fixtures (Operator/Reconciler/Process by-source rows)
+remain untouched per the rkyv evolution rules.
+
+**Where the variant fires.** The `WorkloadLifecycle::reconcile` body
+gains a non-trivial `None` branch in its `match desired.job.as_ref()`
+arm. When `desired.job` is `None` AND `actual.allocations` carries any
+row in `AllocState::Running`, the reconciler emits
+`Action::StopAllocation { alloc_id, terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }) }`
+for each such row. The action shim writes both surfaces
+(`AllocStatusRow.terminal` and `LifecycleEvent.terminal`) with the
+same value, preserving the §4 byte-equality guarantee. See
+`docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`
+for the full design.
+
+**SemVer claim.** Per §5 above ("New variants are additive minor"),
+appending `SystemGC` is an additive minor change. The
+`#[non_exhaustive]` attribute on `TerminalCondition` (and the
+project's exhaustive-match discipline) ensures consumers branching on
+the wildcard arm continue to compile; consumers that want to display
+the new by-source explicitly add a `StoppedBy::SystemGC` arm.
+
+**What this amendment does NOT change.**
+
+- The `TerminalCondition` top-level variants are unchanged. `SystemGC`
+  is a sub-classification of the existing `Stopped` variant, not a
+  new top-level claim.
+- The action shim's write path is unchanged — it already writes
+  `terminal` to both `AllocStatusRow` and `LifecycleEvent`.
+- Streaming consumers (`streaming.rs::check_terminal`) and snapshot
+  consumers (HTTP `alloc_status` handler) consume the new by-source
+  via the existing forward-the-row-field path; no projection logic
+  changes.
+- ADR-0037's layering rule ("reconciler decides terminal-or-not from
+  inputs in scope; streaming forwards without re-deriving") is
+  preserved verbatim.
+
+**Cross-reference.** GH issue #148 is the requirements anchor for the
+amendment. The feature's DESIGN-wave architecture document lives at
+`docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`
+and pins the implementation contract the DELIVER wave executes.
+
 ## Changelog
 
 - 2026-05-03 — Initial accepted version. Codifies the recommendation
@@ -535,3 +611,9 @@ the aggregate decomposition.
   typed `TerminalCondition` variants. Service kind unchanged.
   Schedule kind ships no firing semantics (deferred to GH #166).
   See `Amendment 2026-05-10` section above and ADR-0047.
+- 2026-05-14 — **Amendment**: `StoppedBy::SystemGC` variant added
+  (appended at index `3` to preserve rkyv discriminants for
+  `Operator=0, Reconciler=1, Process=2`). Closes GH issue #148 (the
+  `WorkloadLifecycle` reconciler's `None` arm for absent-intent
+  workload GC). See `Amendment 2026-05-14` section above and
+  `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`.
