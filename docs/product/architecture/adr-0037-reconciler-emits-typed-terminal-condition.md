@@ -553,14 +553,40 @@ would renumber `Process` to `3`, breaking the on-disk archived-byte
 layout for every existing `AllocStatusRow.terminal` value carrying
 `Stopped { by: Process }`. The "Process MUST remain last" comment is a
 discriminant-pin claim, not an aesthetic ordering preference; the
-correct shape is to append `SystemGC` at the new last position
-(index `3`) and update the comment to pin `SystemGC=3` going forward.
+correct shape is to append `SystemGC` at index `3` while preserving
+`Process=2`.
 
-The schema-evolution golden-bytes fixture for `AllocStatusRow` (per
-`.claude/rules/testing.md` § "Archive schema-evolution roundtrip")
-must include a `Stopped { by: SystemGC }` archive after this lands.
-Existing `V_N` fixtures (Operator/Reconciler/Process by-source rows)
-remain untouched per the rkyv evolution rules.
+**The variant addition MUST land alongside a comment update in the
+same commit.** The existing wording ("MUST remain the last variant to
+preserve rkyv discriminant compatibility") describes the
+**mechanism** (Process being last); the **invariant** is discriminant
+stability for pre-existing variants. Once `SystemGC` is appended, the
+mechanism wording is stale and contradicts the SSOT. The replacement
+phrasing follows the canonical shape used elsewhere in
+`transition_reason.rs` (see `TerminalCondition::Completed` at
+lines ~395-401): *"Appended after `<prior_last>` to keep the
+pre-existing rkyv discriminants stable. This variant takes
+discriminant `N`. Existing archived rows decode unchanged."* Future
+additions to `StoppedBy` follow the same pattern (append + update
+the prior tail's docstring with the same shape). Do **not** carry the
+"must remain last" phrasing forward onto `SystemGC` — that wording
+was the source of the contradicted-mechanism defect this amendment
+fixes.
+
+**Schema-evolution coverage.** Per `.claude/rules/development.md` §
+"rkyv schema evolution" → "Version-bump procedure", existing
+`FIXTURE_V1` constants for `AllocStatusRow` (and any other rkyv
+envelope whose payload references `StoppedBy`) are **never touched**.
+Adding a `StoppedBy` variant is NOT an envelope version bump — the
+rkyv layout is unchanged; only an inner enum gained an additive
+variant at the tail. Existing fixtures continue to decode through the
+new enum unchanged and serve as the regression guard. The DELIVER
+wave adds a **forward-roundtrip test** (not a new fixture constant)
+constructing a fresh row with `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`,
+rkyv-archiving through the current envelope, deserialising, and
+asserting `Eq` — proving the new variant encodes/decodes through the
+existing envelope. Minting a `FIXTURE_V2` is the wrong shape per the
+Version-bump procedure (envelope unchanged, no new version warranted).
 
 **Where the variant fires.** The `WorkloadLifecycle::reconcile` body
 gains a non-trivial `None` branch in its `match desired.job.as_ref()`

@@ -126,9 +126,13 @@ None => {
 5. **Invariant** (`assert_always!`): no Action other than `StopAllocation` is emitted while `desired.job` is `None`.
 6. **Invariant** (`assert_always!`): no fresh allocation is placed for X while the intent remains absent.
 
-**New `StoppedBy::SystemGC` variant.** Single-line addition to the `StoppedBy` enum. ADR-0037 amendment formalises the SemVer claim (additive minor). The variant ordering rule (`Process` last) per the existing comment is preserved: insert `SystemGC` *before* `Process` to keep `Process=N (last)` and assign `SystemGC` to the now-vacated penultimate slot.
+**New `StoppedBy::SystemGC` variant.** Single-line addition to the `StoppedBy` enum at discriminant index `3` (after `Process=2`). ADR-0037 amendment formalises the SemVer claim (additive minor).
 
-> **NOTE — rkyv discriminant stability.** The existing `StoppedBy` enum carries an explicit comment: *"MUST remain the last variant to preserve rkyv discriminant compatibility: `Operator=0`, `Reconciler=1`, `Process=2`."* Inserting `SystemGC` *before* `Process` would renumber `Process` to `3`, which IS a discriminant change. The correct shape is to **append `SystemGC` as variant index `3` (after `Process`)** and update the docstring comment so `Process=2` remains pinned. This preserves prior on-disk archived bytes per `development.md` § "rkyv schema evolution". The implementing crafter must verify against the schema-evolution golden-bytes fixture for `AllocStatusRow` (per `testing.md` § "Archive schema-evolution roundtrip").
+> **NOTE — rkyv discriminant stability AND comment update.** The existing `StoppedBy` enum carries an explicit comment at `crates/overdrive-core/src/transition_reason.rs:212-213`: *"MUST remain the last variant to preserve rkyv discriminant compatibility: `Operator=0`, `Reconciler=1`, `Process=2`."* The wording "last variant" is the **mechanism** claim; the **invariant** is discriminant stability for pre-existing variants. Appending `SystemGC` at index `3` preserves the invariant (Operator/Reconciler/Process keep their discriminants) but invalidates the mechanism wording. **The variant addition MUST land alongside a comment update** that switches the wording to the same shape used elsewhere in this file — see `TerminalCondition::Completed` at lines ~395-401 for the canonical phrasing: *"Appended after `<prior_last>` to keep the pre-existing rkyv discriminants stable. This variant takes discriminant `3`. Existing archived rows decode unchanged."* The implementing crafter MUST land both (variant + comment fix) in step 01-01's single commit; landing the variant without the comment fix leaves a stale invariant claim in the SSOT.
+>
+> **Forward roundtrip coverage (not a new fixture).** Per `.claude/rules/development.md` § "rkyv schema evolution" → "Version-bump procedure", existing `FIXTURE_V1` (already pinned at `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs:59`) is **NEVER touched**. Adding a `StoppedBy` variant does NOT bump the envelope to V2 — the layout is unchanged; only an enum gained an additive variant. Step 01-01 therefore: (a) verifies existing `FIXTURE_V1` continues to hex-decode + project correctly through the new enum (the existing test already does this — no edit needed to assert it); (b) adds a NEW unit-level roundtrip test (not a fixture constant) constructing a fresh `AllocStatusRow` with `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`, archiving via the current envelope, deserialising, and asserting `Eq`. This is forward coverage, not historical pinning. Minting a `FIXTURE_V2` is wrong shape.
+
+**Within-shim ordering (action shim → observation write).** The design assumes the action shim writes `AllocStatusRow.terminal` durably before broadcasting the lifecycle event (i.e., write-through-then-broadcast). This is a property of the existing action shim (per ADR-0023 / ADR-0037 §4) — not introduced by this feature. **Crafter validation gate at step 01-03**: confirm `crates/overdrive-control-plane/src/action_shim.rs` (or wherever the shim lives) sequences `AllocStatusRow.terminal` durability before the lifecycle event broadcast for `Action::StopAllocation`. If the shim broadcasts before durability, a fresh `Submit` between emission and durability could place a fresh alloc before the original's `SystemGC` terminal stamp is observable — a within-shim race outside this design's surface. Surface as a blocker to the user if the shim does not sequence correctly; do NOT silently absorb the race.
 
 ### Option B — Sibling `WorkloadGC` reconciler
 
@@ -192,7 +196,7 @@ This change is intra-reconciler. The component diagram (`./c4-component.md`) sho
 
 ## 7. DST invariant shape
 
-Three invariants (Tier 1, turmoil):
+Three invariants (Tier 1, turmoil). **Every `assert_eventually!` carries an explicit tick budget** — an unbounded "eventually" is satisfied by a buggy implementation that converges through some unrelated path (a tick storm, a panic-reset, an unrelated GC). The budget is the falsifiability gate.
 
 ```text
 SCENARIO orphan_workload_converges_to_terminal_gc
@@ -201,22 +205,28 @@ SCENARIO orphan_workload_converges_to_terminal_gc
         Submit Job(id=X)
         wait_until: actual.allocations[X].any_state == Running
     fault_inject:
-        IntentStore::remove("jobs/X")   // simulate hard-delete
+        IntentStore::delete("jobs/X")   // simulate hard-delete; method name per
+                                        // crates/overdrive-core/src/traits/intent_store.rs:193
     tick:
-        run WorkloadLifecycle reconciler for target X (≥1 tick)
-    assert_eventually!("gc.converges", |obs|
+        run WorkloadLifecycle reconciler for target X
+    assert_eventually!("gc.converges", max_ticks = 3, |obs|
+        // Bound: at one tick the GC arm emits StopAllocation per Running row;
+        // the action shim writes terminal + state on the next tick boundary;
+        // by the third tick, all rows for X are terminal. Anything slower is a bug.
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X)
            .all(|r| r.state.is_terminal())
     )
-    assert_eventually!("gc.terminal_claim", |obs|
+    assert_eventually!("gc.terminal_claim", max_ticks = 3, |obs|
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X)
            .all(|r| matches!(r.terminal,
                Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })))
     )
     assert_always!("gc.no_fresh_alloc", |obs|
-        // No new alloc placed for X while intent absent.
+        // No new alloc placed for X while intent absent. `assert_always!` is
+        // checked every tick — no budget needed; the invariant must hold at
+        // every observation point post-fault.
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X && r.created_after(fault_inject_time))
            .count() == 0
@@ -230,13 +240,15 @@ SCENARIO resubmit_after_gc_creates_fresh_alloc
     setup: same as above through fault_inject
     after gc has stopped the original alloc:
         Submit Job(id=X)   // operator changes mind
-    assert_eventually!("resubmit.places_fresh", |obs|
+    assert_eventually!("resubmit.places_fresh", max_ticks = 5, |obs|
+        // Bound: resubmit writes intent; one tick to hydrate, one to schedule,
+        // one for the driver to mark Running. Five ticks is a generous ceiling.
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X && r.state == Running)
            .count() >= 1
     )
     assert_always!("resubmit.preserves_prior_gc_terminal", |obs|
-        // The original alloc's terminal claim is durable.
+        // The original alloc's terminal claim is durable across resubmit.
         obs.alloc_status_rows()
            .filter(|r| r.workload_id == X && r.alloc_id == original_alloc_id)
            .all(|r| matches!(r.terminal,
@@ -244,7 +256,7 @@ SCENARIO resubmit_after_gc_creates_fresh_alloc
     )
 ```
 
-The DST suite already drives WorkloadLifecycle convergence; these scenarios extend the existing harness with one fault primitive (`IntentStore::remove`) and the two invariants above.
+The DST suite already drives WorkloadLifecycle convergence; these scenarios extend the existing harness with one fault primitive (`IntentStore::delete` on the harness's intent handle — already present in the trait at `crates/overdrive-core/src/traits/intent_store.rs:193`; no new primitive to wire) and the invariants above. If the harness's `assert_eventually!` macro does not yet support a `max_ticks` parameter, the crafter wires the budget at the harness level (existing scenarios that rely on a default budget continue working; this feature's scenarios opt in to an explicit one).
 
 ---
 
