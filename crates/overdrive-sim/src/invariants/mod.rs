@@ -74,6 +74,18 @@ pub mod service_map_hydrator;
 // named and `docs/evolution/2026-05-02-fix-exit-observer-write-
 // retry.md:64` left open.
 pub mod exit_event_observable_outcome;
+// workload-gc-absent-stale-allocs step 01-03. Two DST scenarios
+// pinning the GC reconciler arm convergence + resubmit-after-GC
+// race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
+// Running, IntentStore::delete("jobs/X"), drive ≤3 ticks, assert
+// every alloc reaches a terminal state with `terminal == Some(
+// Stopped { by: SystemGc })` AND no fresh alloc placed; (2)
+// `WorkloadGcResubmitCreatesFresh` — continues from quiescent
+// orphan state, resubmits Job(X), drives ≤5 ticks, asserts ≥1
+// fresh alloc reaches Running with `alloc_id != original` AND
+// the original alloc's `SystemGc` terminal stamp is durable.
+// Closes #148 AC §1.3.
+pub mod workload_gc_absent_intent;
 
 /// Catalogue of invariants the DST harness evaluates.
 ///
@@ -285,6 +297,44 @@ pub enum Invariant {
     /// the gate. The evaluator body lives in
     /// `crate::invariants::exit_event_observable_outcome`.
     ExitEventObservableOutcome,
+
+    /// workload-gc-absent-stale-allocs step 01-03 — eventually
+    /// invariant. After `IntentStore::delete("jobs/X")` removes
+    /// the desired Job, every non-terminal `AllocStatusRow` for
+    /// `workload_id == X` reaches a terminal state within 3 ticks
+    /// AND carries `terminal == Some(TerminalCondition::Stopped {
+    /// by: StoppedBy::SystemGc })` AND no fresh allocation is
+    /// placed for X while intent stays absent. Drives end-to-end
+    /// through `SimIntentStore` + `SimObservationStore` +
+    /// `WorkloadLifecycle` runtime stack — entry through the
+    /// `submit` / `tick` harness driving ports, assertions on
+    /// `ObservationStore::alloc_status_rows()` (driven port
+    /// boundary). The evaluator body lives in
+    /// `crate::invariants::workload_gc_absent_intent`. Closes
+    /// #148 AC §1.3.
+    WorkloadGcOrphanConverges,
+
+    /// workload-gc-absent-stale-allocs step 01-03 — eventually +
+    /// always invariant. Continues from
+    /// `WorkloadGcOrphanConverges`'s quiescent state: resubmits
+    /// `Job(id=X)` to intent, drives ≤5 ticks, asserts (a) ≥1
+    /// alloc reaches Running with a fresh `alloc_id` distinct
+    /// from the original GC'd row's `alloc_id` (durable
+    /// distinctness — the GC'd row is not resurrected) AND (b)
+    /// the original alloc's `terminal` field stays
+    /// `Some(Stopped { by: SystemGc })` for every tick after
+    /// resubmit (the `SystemGc` stamp is durable through the
+    /// resubmit cycle). The evaluator body lives in
+    /// `crate::invariants::workload_gc_absent_intent`.
+    /// Promoted into `ALL` by step 01-04 once the
+    /// resurrection-protection helper (`is_intentionally_stopped`)
+    /// was generalized to cover both `Operator` and `SystemGc`
+    /// stops, the Run-branch's `active_allocs_vec` filter excluded
+    /// SystemGc-stopped rows from placement-candidacy, and
+    /// `mint_alloc_id` was extended to accept an `attempt` index
+    /// so a resubmit mints a distinct `alloc_id` rather than
+    /// reusing the GC'd row's id. Closes #148 AC §1.3.
+    WorkloadGcResubmitCreatesFresh,
 }
 
 impl Invariant {
@@ -351,6 +401,18 @@ impl Invariant {
         // The evaluator body lives in
         // `crate::invariants::exit_event_observable_outcome`.
         Self::ExitEventObservableOutcome,
+        // workload-gc-absent-stale-allocs steps 01-03 + 01-04.
+        // Evaluator bodies live in
+        // `crate::invariants::workload_gc_absent_intent`. Both
+        // variants are in the default catalogue: step 01-04 closed
+        // the resurrection-protection gap (the
+        // `is_intentionally_stopped` helper, the
+        // `active_allocs_vec` Run-branch filter, and the
+        // `mint_alloc_id(workload_id, attempt)` extension) so
+        // `WorkloadGcResubmitCreatesFresh` now passes against the
+        // production reconciler.
+        Self::WorkloadGcOrphanConverges,
+        Self::WorkloadGcResubmitCreatesFresh,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -388,6 +450,9 @@ impl Invariant {
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
             Self::ExitEventObservableOutcome => "exit-event-observable-outcome",
+            // workload-gc-absent-stale-allocs step 01-03.
+            Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
+            Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",
         }
     }
 }

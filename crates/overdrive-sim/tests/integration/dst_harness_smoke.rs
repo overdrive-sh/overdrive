@@ -115,6 +115,14 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-
     // observer-write-retry.md:64` left open.
     "exit-event-observable-outcome",
+    // workload-gc-absent-stale-allocs steps 01-03 + 01-04 — DST
+    // scenarios covering the absent-intent workload GC arm and the
+    // resubmit-after-GC race. Step 01-04 promoted
+    // `workload-gc-resubmit-creates-fresh` into `Invariant::ALL`
+    // once the resurrection-protection gap closed; see the matching
+    // comment in `dst_clean_clone_green.rs`.
+    "workload-gc-orphan-converges",
+    "workload-gc-resubmit-creates-fresh",
 ];
 
 // -----------------------------------------------------------------------------

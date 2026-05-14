@@ -848,6 +848,7 @@ components:
       - operator
       - reconciler
       - process
+      - system_gc
     SubmitEvent:
       oneOf:
       - type: object

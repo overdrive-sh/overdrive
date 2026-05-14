@@ -119,6 +119,20 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-
     // observer-write-retry.md:64` left open.
     "exit-event-observable-outcome",
+    // workload-gc-absent-stale-allocs steps 01-03 + 01-04 — DST
+    // scenarios covering the absent-intent workload GC arm: after
+    // `IntentStore::delete("jobs/X")` removes the desired Job, every
+    // alloc row for X reaches a terminal state with
+    // `Some(Stopped { by: SystemGc })` AND no fresh alloc is placed
+    // while intent stays absent. The sibling resubmit invariant
+    // (`workload-gc-resubmit-creates-fresh`) was promoted into
+    // `Invariant::ALL` by step 01-04 once the resurrection-protection
+    // gap closed (the `is_intentionally_stopped` helper +
+    // `active_allocs_vec` Run-branch filter +
+    // `mint_alloc_id(workload_id, attempt)` extension). Closes #148
+    // AC §1.3.
+    "workload-gc-orphan-converges",
+    "workload-gc-resubmit-creates-fresh",
 ];
 
 // -----------------------------------------------------------------------------
