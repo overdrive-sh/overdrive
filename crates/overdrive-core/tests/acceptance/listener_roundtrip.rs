@@ -12,9 +12,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
-use std::net::{IpAddr, Ipv4Addr};
-
-use overdrive_core::aggregate::{Listener, ServiceVip, WorkloadSpecInput};
+use overdrive_core::aggregate::{Listener, WorkloadSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
 use proptest::prelude::*;
 
@@ -28,38 +26,28 @@ fn arb_proto() -> impl Strategy<Value = Proto> {
     prop_oneof![Just(Proto::Tcp), Just(Proto::Udp)]
 }
 
-/// Generate a `ServiceVip`. Constrained to the 10.0.0.0/24 RFC1918
-/// space — the absolute octet values do not matter for round-trip
-/// purposes; only that they survive TOML render → parse.
-fn arb_service_vip() -> impl Strategy<Value = ServiceVip> {
-    (1u8..=254u8).prop_map(|d| {
-        ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, d)))
-            .expect("IPv4 is always a valid ServiceVip")
+/// Generate a `Listener`. Per ADR-0049 § 5 / service-vip-allocator
+/// step 02-01 the per-listener `vip` axis was removed — VIPs are
+/// platform-issued service-wide. The generator carries only the
+/// `(port, protocol)` pair.
+fn arb_listener() -> impl Strategy<Value = Listener> {
+    (1u16..=65535u16, arb_proto()).prop_map(|(port, protocol)| Listener {
+        port: std::num::NonZeroU16::new(port).expect("port > 0 by generator constraint"),
+        protocol,
     })
 }
 
-/// Generate a `Listener`. The (vip, port, protocol) triple is the
-/// shape per ADR-0047 §1 — pinned-VIP and pending-VIP listeners are
-/// generated in roughly equal proportion.
-fn arb_listener() -> impl Strategy<Value = Listener> {
-    (1u16..=65535u16, arb_proto(), prop_oneof![Just(None), arb_service_vip().prop_map(Some)])
-        .prop_map(|(port, protocol, vip)| Listener {
-            port: std::num::NonZeroU16::new(port).expect("port > 0 by generator constraint"),
-            protocol,
-            vip,
-        })
-}
-
-/// Generate 1..=8 listeners with distinct `(vip, port, protocol)`
-/// triples per S-08-10. Uniqueness is enforced by post-filtering the
-/// raw vector; a small case-budget rejection is tolerated by proptest.
+/// Generate 1..=8 listeners with distinct `(port, protocol)` pairs.
+/// Per ADR-0049 § 5 the `vip` axis is gone from the uniqueness rule.
+/// Uniqueness is enforced by post-filtering the raw vector; a small
+/// case-budget rejection is tolerated by proptest.
 fn arb_distinct_listeners() -> impl Strategy<Value = Vec<Listener>> {
     prop::collection::vec(arb_listener(), 1..=8).prop_filter(
-        "listeners must be triple-distinct",
+        "listeners must be (port, protocol)-distinct",
         |ls| {
             let mut seen = std::collections::HashSet::with_capacity(ls.len());
             for l in ls {
-                if !seen.insert((l.vip, l.port, l.protocol)) {
+                if !seen.insert((l.port, l.protocol)) {
                     return false;
                 }
             }
@@ -86,9 +74,6 @@ replicas = 1
         s.push_str("[[listener]]\n");
         let _ = writeln!(s, "port = {}", l.port.get());
         let _ = writeln!(s, "protocol = \"{}\"", l.protocol);
-        if let Some(v) = l.vip {
-            let _ = writeln!(s, "vip = \"{v}\"");
-        }
         s.push('\n');
     }
     s.push_str(
@@ -117,8 +102,9 @@ proptest! {
     })]
 
     /// S-08-10 — Listener round-trip byte-equivalence: render to TOML,
-    /// parse back, every (vip, port, protocol) triple equals the
-    /// original in declaration order.
+    /// parse back, every (port, protocol) pair equals the original in
+    /// declaration order. Per ADR-0049 § 5 / service-vip-allocator
+    /// step 02-01 the `vip` axis is gone from the per-listener shape.
     #[test]
     fn s_08_10_listeners_round_trip_byte_equivalent(
         listeners in arb_distinct_listeners(),
@@ -140,7 +126,6 @@ proptest! {
         for (i, (a, b)) in listeners.iter().zip(svc.listeners.iter()).enumerate() {
             prop_assert_eq!(a.port, b.port, "listener[{}] port must round-trip", i);
             prop_assert_eq!(a.protocol, b.protocol, "listener[{}] protocol must round-trip", i);
-            prop_assert_eq!(a.vip, b.vip, "listener[{}] vip must round-trip", i);
         }
     }
 }

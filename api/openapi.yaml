@@ -640,11 +640,18 @@ components:
       description: |-
         A single `[[listener]]` block on a `[service]` body.
 
-        Per ADR-0047 §1 (Service listener fields) the triple is
-        `(port, protocol, vip)` — `port` is non-zero (rejected at parse
-        time per S-08-06), `protocol` is `tcp` / `udp` only via the existing
-        [`Proto`] newtype (case-insensitive parse, lowercase canonical
-        render), and `vip` is optional.
+        Per ADR-0047 §1 (Service listener fields) and ADR-0049 § 5 the
+        listener identity is the `(port, protocol)` pair — `port` is
+        non-zero (rejected at parse time per S-08-06) and `protocol` is
+        `tcp` / `udp` only via the existing [`Proto`] newtype
+        (case-insensitive parse, lowercase canonical render).
+
+        The operator-supplied `vip` field was removed in
+        `service-vip-allocator` step 02-01: VIPs are platform-issued via
+        `ServiceVipAllocator` keyed by `spec_digest` and are structurally
+        unrepresentable in the operator-facing spec. The parser rejects
+        any TOML carrying `vip` on a `[[listener]]` block with a typed
+        [`ParseError::UnknownField`] variant.
 
         Distinct from the dataplane-layer `Backend` per design Reuse
         Analysis — the spec-layer `Listener` is the OPERATOR-DECLARED
@@ -668,13 +675,7 @@ components:
           description: |-
             L4 protocol — `tcp` or `udp` only. Case-insensitive at parse
             time; lowercase on canonical render.
-        vip:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ServiceVip'
-            description: |-
-              Optional pinned VIP. `None` means the runtime VIP allocator is
-              responsible for assigning one (GH #167).
+      additionalProperties: false
     NodeList:
       type: object
       description: |-
@@ -807,15 +808,21 @@ components:
     ServiceVip:
       type: string
       description: |-
-        Pinned service VIP — IPv4 address an operator pinned in their
-        `[[listener]]` block. Wraps [`Ipv4Addr`] with `serde` / `utoipa` /
-        `rkyv` derives so the type-system distinguishes it from a backend or
-        node IP at every call site.
+        Virtual IP a kernel-side XDP program matches incoming packets
+        against. Stored host-order; converted at the kernel boundary
+        per architecture.md § 11.
 
-        Per ADR-0047 §1 (Service listener fields) the VIP is OPTIONAL — when
-        absent, the runtime VIP allocator is responsible for assigning one
-        at convergence time. The runtime allocator behaviour is OUT OF SCOPE
-        for slice 06 and tracked at GH #167.
+        Userspace control-plane newtype only — `service_backends`
+        observation rows continue to carry `vip: Ipv4Addr` as their
+        wire-shape field; the hydrator wraps at the read boundary
+        (architecture.md § 5).
+
+        # Wire form
+
+        `Display` emits the canonical `IpAddr` string form (e.g.
+        `10.0.0.1`, `::1`). `FromStr` parses any [`std::net::IpAddr`]-
+        compatible string. Empty input and non-IP strings surface as
+        structured [`IdParseError`] variants.
       example: 10.0.0.1
     StopOutcome:
       type: string

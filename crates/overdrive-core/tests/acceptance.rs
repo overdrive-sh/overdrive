@@ -119,6 +119,13 @@ mod acceptance {
     mod listener_parser;
     mod listener_roundtrip;
 
+    // service-vip-allocator Slice 02 step 02-01 — parser-level
+    // rejection of operator-supplied `vip` field on `[[listener]]`
+    // blocks (S-VIP-13, S-VIP-14). Per ADR-0049 § 5 the `Listener`
+    // struct has no `vip` field; the parser rejects with a typed
+    // `ParseError::UnknownField` variant naming `vip`.
+    mod listener_rejects_vip_field;
+
     // workload-kind-discriminator Slice 05 — parser-side cron
     // required-field scenario. S-05-04 in distill/test-scenarios.md §5.
     mod schedule_parser;

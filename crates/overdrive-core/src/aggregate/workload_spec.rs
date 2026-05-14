@@ -31,7 +31,6 @@
 //! non-empty after trim. Richer cron syntax validation is tracked under
 //! GH #166 — Slice 05 will land semantic parsing.
 
-use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
 
 use serde::{Deserialize, Serialize};
@@ -129,6 +128,27 @@ pub enum ParseError {
     /// be in 1..=65535.
     #[error("listener port must be in 1..=65535")]
     ListenerPortZero,
+
+    /// A TOML section carried a field the parser does not accept.
+    ///
+    /// Per `service-vip-allocator` step 02-01 / ADR-0049 § 5 — the
+    /// operator-supplied `vip` field on `[[listener]]` was removed
+    /// from the [`Listener`] struct: VIPs are platform-issued via
+    /// `ServiceVipAllocator` keyed by `spec_digest` and are
+    /// structurally unrepresentable in the operator-facing spec. The
+    /// parser rejects any unknown field with this typed variant; the
+    /// `Display` form names the offending field AND tells the
+    /// operator to remove it.
+    #[error(
+        "{section}: unknown field `{field}` — remove the `{field}` field; VIPs are platform-issued and not operator-configurable"
+    )]
+    UnknownField {
+        /// Section name (e.g. `[[listener]]`).
+        section: &'static str,
+        /// The offending field token, verbatim from the operator
+        /// input.
+        field: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -337,11 +357,18 @@ pub use crate::id::ServiceVip;
 
 /// A single `[[listener]]` block on a `[service]` body.
 ///
-/// Per ADR-0047 §1 (Service listener fields) the triple is
-/// `(port, protocol, vip)` — `port` is non-zero (rejected at parse
-/// time per S-08-06), `protocol` is `tcp` / `udp` only via the existing
-/// [`Proto`] newtype (case-insensitive parse, lowercase canonical
-/// render), and `vip` is optional.
+/// Per ADR-0047 §1 (Service listener fields) and ADR-0049 § 5 the
+/// listener identity is the `(port, protocol)` pair — `port` is
+/// non-zero (rejected at parse time per S-08-06) and `protocol` is
+/// `tcp` / `udp` only via the existing [`Proto`] newtype
+/// (case-insensitive parse, lowercase canonical render).
+///
+/// The operator-supplied `vip` field was removed in
+/// `service-vip-allocator` step 02-01: VIPs are platform-issued via
+/// `ServiceVipAllocator` keyed by `spec_digest` and are structurally
+/// unrepresentable in the operator-facing spec. The parser rejects
+/// any TOML carrying `vip` on a `[[listener]]` block with a typed
+/// [`ParseError::UnknownField`] variant.
 ///
 /// Distinct from the dataplane-layer `Backend` per design Reuse
 /// Analysis — the spec-layer `Listener` is the OPERATOR-DECLARED
@@ -361,6 +388,7 @@ pub use crate::id::ServiceVip;
     rkyv::Deserialize,
     utoipa::ToSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct Listener {
     /// Listener port — 1..=65535. `port = 0` is rejected at parse time
     /// per S-08-06 (`ParseError::ListenerPortZero`).
@@ -369,10 +397,6 @@ pub struct Listener {
     /// L4 protocol — `tcp` or `udp` only. Case-insensitive at parse
     /// time; lowercase on canonical render.
     pub protocol: Proto,
-    /// Optional pinned VIP. `None` means the runtime VIP allocator is
-    /// responsible for assigning one (GH #167).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vip: Option<ServiceVip>,
 }
 
 // ---------------------------------------------------------------------------
@@ -754,16 +778,19 @@ fn parse_listeners(table: &toml::value::Table) -> Result<Vec<Listener>, ParseErr
         out.push(listener);
     }
 
-    // Uniqueness check on the (vip, port, protocol) triple. When both
-    // vip values are None the fallback is (port, protocol).
+    // Uniqueness check on the (port, protocol) pair. Per ADR-0049 § 5
+    // / service-vip-allocator step 02-01 the `vip` axis was removed —
+    // VIPs are platform-issued at the service level, so two listeners
+    // sharing the same (port, protocol) on the same Service are
+    // always a duplicate regardless of any (non-existent) per-listener
+    // VIP.
     for i in 0..out.len() {
         for j in (i + 1)..out.len() {
             let a = &out[i];
             let b = &out[j];
-            let same_vip_axis = a.vip == b.vip;
-            if same_vip_axis && a.port == b.port && a.protocol == b.protocol {
-                let triple = format_listener_triple(*a);
-                return Err(ParseError::ListenerDuplicate { triple });
+            if a.port == b.port && a.protocol == b.protocol {
+                let pair = format_listener_pair(*a);
+                return Err(ParseError::ListenerDuplicate { triple: pair });
             }
         }
     }
@@ -810,40 +837,31 @@ fn parse_one_listener(entry: &toml::value::Table) -> Result<Listener, ParseError
         }
     };
 
-    // vip — optional IPv4 string.
-    let vip = match entry.get("vip") {
-        None => None,
-        Some(v) => {
-            let s = v.as_str().ok_or_else(|| ParseError::Field {
-                section: "[[listener]]",
-                message: "field `vip` must be a string".to_string(),
-            })?;
-            let addr = s.parse::<Ipv4Addr>().map_err(|e| ParseError::Field {
-                section: "[[listener]]",
-                message: format!("field `vip` is not a valid IPv4 address: {e}"),
-            })?;
-            // ADR-0049 § 5 — Phase 1 admits IPv4 only; the canonical
-            // `ServiceVip` wraps `IpAddr` for forward-compat with GH #155.
-            // `ServiceVip::new` is total over `IpAddr` today; surface the
-            // result with `map_err` into the structured parse error so a
-            // future range-rejection (multicast / unspecified / etc.)
-            // surfaces as a structured `ParseError::Field` rather than a
-            // panic.
-            let vip =
-                ServiceVip::new(std::net::IpAddr::V4(addr)).map_err(|e| ParseError::Field {
-                    section: "[[listener]]",
-                    message: format!("field `vip` rejected by ServiceVip newtype: {e}"),
-                })?;
-            Some(vip)
+    // Reject unknown fields per ADR-0049 § 5 / service-vip-allocator
+    // step 02-01. The operator-supplied `vip` field was removed from
+    // [`Listener`]; the parser-level rejection makes it structurally
+    // unrepresentable. Any unknown field surfaces with a typed
+    // [`ParseError::UnknownField`] whose `Display` form names the
+    // offending field AND tells the operator to remove it.
+    //
+    // We special-case `vip` for the targeted guidance text; other
+    // unknown fields share the same variant but fall back to the
+    // generic message via the `Display` impl.
+    for key in entry.keys() {
+        if !matches!(key.as_str(), "port" | "protocol") {
+            return Err(ParseError::UnknownField { section: "[[listener]]", field: key.clone() });
         }
-    };
+    }
 
-    Ok(Listener { port, protocol, vip })
+    Ok(Listener { port, protocol })
 }
 
-/// Render a listener triple for diagnostic messages. Used by
-/// [`ParseError::ListenerDuplicate`].
-fn format_listener_triple(l: Listener) -> String {
-    let vip = l.vip.map_or_else(|| "none".to_string(), |v| v.to_string());
-    format!("(vip={vip}, port={}, protocol={})", l.port.get(), l.protocol)
+/// Render a listener `(port, protocol)` pair for diagnostic messages.
+/// Used by [`ParseError::ListenerDuplicate`]. Per ADR-0049 § 5 the
+/// per-listener `vip` axis was removed; the diagnostic surface still
+/// uses the `triple` field name on the variant for source compat with
+/// existing callers, but the rendered form names only the two-axis
+/// pair.
+fn format_listener_pair(l: Listener) -> String {
+    format!("(port={}, protocol={})", l.port.get(), l.protocol)
 }
