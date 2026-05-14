@@ -325,8 +325,15 @@ pub enum Invariant {
     /// `Some(Stopped { by: SystemGC })` for every tick after
     /// resubmit (the `SystemGC` stamp is durable through the
     /// resubmit cycle). The evaluator body lives in
-    /// `crate::invariants::workload_gc_absent_intent`. Closes
-    /// #148 AC §1.3.
+    /// `crate::invariants::workload_gc_absent_intent`.
+    /// Promoted into `ALL` by step 01-04 once the
+    /// resurrection-protection helper (`is_intentionally_stopped`)
+    /// was generalized to cover both `Operator` and `SystemGC`
+    /// stops, the Run-branch's `active_allocs_vec` filter excluded
+    /// SystemGC-stopped rows from placement-candidacy, and
+    /// `mint_alloc_id` was extended to accept an `attempt` index
+    /// so a resubmit mints a distinct `alloc_id` rather than
+    /// reusing the GC'd row's id. Closes #148 AC §1.3.
     WorkloadGcResubmitCreatesFresh,
 }
 
@@ -394,46 +401,19 @@ impl Invariant {
         // The evaluator body lives in
         // `crate::invariants::exit_event_observable_outcome`.
         Self::ExitEventObservableOutcome,
-        // workload-gc-absent-stale-allocs step 01-03. Evaluator
-        // bodies live in `crate::invariants::workload_gc_absent_intent`.
-        // `WorkloadGcOrphanConverges` is registered in the default
-        // catalogue (its evaluator returns Pass against today's
-        // reconciler). `WorkloadGcResubmitCreatesFresh` is
-        // intentionally NOT in `ALL` while the production gap at
-        // `crates/overdrive-core/src/reconciler.rs:1294` (the
-        // resurrection-protection check matches StoppedBy::Operator
-        // only, not StoppedBy::SystemGC) remains open — the
-        // evaluator returns Fail under today's code, which would
-        // break the downstream "default catalogue is green"
-        // contract observed by `dst_clean_clone_green` /
-        // `default_harness_run_passes_all_three_reconciler_invariants`
-        // / `summary_names_every_expected_invariant`. The variant is
-        // still discoverable via `cargo dst --only
-        // workload-gc-resubmit-creates-fresh`; the integration test
-        // at `tests/integration/workload_gc_absent_intent.rs`
-        // captures the failure under a `#[should_panic(expected =
-        // "RED scaffold")]` guard per testing.md. Promote into ALL
-        // once the production gap closes.
+        // workload-gc-absent-stale-allocs steps 01-03 + 01-04.
+        // Evaluator bodies live in
+        // `crate::invariants::workload_gc_absent_intent`. Both
+        // variants are in the default catalogue: step 01-04 closed
+        // the resurrection-protection gap (the
+        // `is_intentionally_stopped` helper, the
+        // `active_allocs_vec` Run-branch filter, and the
+        // `mint_alloc_id(workload_id, attempt)` extension) so
+        // `WorkloadGcResubmitCreatesFresh` now passes against the
+        // production reconciler.
         Self::WorkloadGcOrphanConverges,
+        Self::WorkloadGcResubmitCreatesFresh,
     ];
-
-    /// Variants intentionally excluded from [`Self::ALL`] (the default
-    /// catalogue iterated by `cargo dst` without `--only`) but still
-    /// addressable via `--only <NAME>` because their canonical name
-    /// must round-trip through [`FromStr`]. A variant lives here while
-    /// its evaluator returns `Fail` against today's production code —
-    /// inclusion in `ALL` would break the "default catalogue is green"
-    /// contract observed by `dst_clean_clone_green` and
-    /// `summary_names_every_expected_invariant`. Promote into `ALL`
-    /// once the production gap that gates the variant closes.
-    ///
-    /// Currently gated:
-    /// - `WorkloadGcResubmitCreatesFresh` — gated on the production gap
-    ///   at `crates/overdrive-core/src/reconciler.rs:1294` (resurrection
-    ///   protection covers `StoppedBy::Operator` only, not
-    ///   `StoppedBy::SystemGC`). See workload-gc-absent-stale-allocs
-    ///   step 01-03 and #148 AC §1.3.
-    pub const GATED: &'static [Self] = &[Self::WorkloadGcResubmitCreatesFresh];
 
     /// The canonical kebab-case spelling of this invariant, as a static
     /// string. `Display` renders the same text; having a `&'static str`
@@ -490,7 +470,7 @@ impl FromStr for Invariant {
         // Case-insensitive match against the canonical forms. Hyphens
         // are preserved, only alphabetic characters are folded.
         let lowered = raw.to_ascii_lowercase();
-        for candidate in Self::ALL.iter().chain(Self::GATED.iter()) {
+        for candidate in Self::ALL {
             if candidate.as_canonical() == lowered {
                 return Ok(*candidate);
             }

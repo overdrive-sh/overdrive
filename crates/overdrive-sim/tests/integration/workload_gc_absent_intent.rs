@@ -73,42 +73,13 @@ async fn orphan_workload_converges_to_terminal_gc() {
 /// for every post-resubmit tick. Closes #148 AC §1.3
 /// (resubmit-creates-fresh half).
 ///
-/// **RED scaffold — production gap surfaced to user 2026-05-14**.
-/// Per `.claude/rules/testing.md` § "Test-side scaffolds —
-/// `#[should_panic(expected = "RED scaffold")]`", this is the
-/// sanctioned RED-without-blocking-CI shape. The scenario evaluator
-/// IS exercised against the live action_shim + reconciler runtime
-/// (the failure is the production behavior, not unwired
-/// scaffolding). The architecture-faithful invariants
-/// `resubmit.places_fresh` (alloc_id distinctness half) and
-/// `resubmit.preserves_prior_gc_terminal` (architecture.md § 7) are
-/// catastrophically incompatible with today's reconciler shape:
-///
-///   - `crates/overdrive-core/src/reconciler.rs:1294` —
-///     `is_operator_stopped(r)` resurrection-protection check
-///     matches `StoppedBy::Operator` ONLY, not `StoppedBy::SystemGC`.
-///   - `crates/overdrive-core/src/reconciler.rs:1558` —
-///     `mint_alloc_id` is purely deterministic on workload_id
-///     (`alloc-{workload_id}-0`); a resubmit reuses the same id and
-///     LWW overwrites the prior terminal stamp.
-///
-/// The architecture-faithful fix is one of:
-///   (A) extend the resurrection-protection check at line 1294 to
-///       cover `SystemGC` (one-line guard via a sibling
-///       `is_system_gc_stopped` predicate or a widened
-///       `is_terminal_stopped`), OR
-///   (B) derive `mint_alloc_id` from `(workload_id, attempt_count)`
-///       so resubmit produces a fresh id by construction.
-///
-/// Both touch `reconciler.rs` body which is step 01-02 scope and
-/// excluded from step 01-03 per BOUNDARY_RULES. Surfaced to the
-/// user; awaiting decision on whether to expand step 01-03 scope,
-/// add a follow-up step (e.g. 01-04), or amend architecture.md § 7
-/// to a weaker invariant. Once the production gap closes, promote
-/// this test to GREEN by dropping the `#[should_panic]` attribute
-/// and the trailing `panic!`.
+/// Promoted to GREEN in step 01-04: the `is_intentionally_stopped`
+/// helper (Operator OR SystemGC) generalised the prior
+/// `is_operator_stopped` resurrection-protection check, and the Run
+/// branch's `active_allocs_vec` filter now excludes SystemGC-stopped
+/// rows from placement-candidacy so a resubmit lands a fresh alloc —
+/// making good on architecture.md § 5's promise.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn resubmit_after_gc_creates_fresh_alloc() {
     let result = evaluate_resubmit_after_gc_creates_fresh_alloc().await;
 
@@ -120,28 +91,21 @@ async fn resubmit_after_gc_creates_fresh_alloc() {
          workload-gc-resubmit-creates-fresh` resolves correctly",
     );
 
-    if matches!(result.status, InvariantStatus::Pass) {
-        // Production gap closed — the architecture-faithful
-        // invariant now holds. Promote this test to GREEN by
-        // dropping the `#[should_panic]` attribute and this
-        // entire `if`/panic guard.
-        return;
-    }
-
-    panic!(
-        "Not yet implemented -- RED scaffold (workload-gc-absent-stale-allocs \
-         step 01-03 / scenario 2 / `resubmit.preserves_prior_gc_terminal` + \
-         `resubmit.places_fresh` alloc_id-distinctness half): \
-         architecture.md § 7 requires the original alloc's SystemGC terminal \
-         stamp be durable across resubmit, but today's \
-         WorkloadLifecycle::reconcile Run branch reuses the deterministic \
-         `alloc-{{workload_id}}-0` id and the action shim's LWW write of the \
-         new `Running` row overwrites the prior terminal stamp. Fix lives at \
-         crates/overdrive-core/src/reconciler.rs:1294 (extend resurrection \
-         protection to cover StoppedBy::SystemGC) OR :1558 (fresh-id \
-         derivation in mint_alloc_id). Out of scope for step 01-03 per \
-         BOUNDARY_RULES (step 01-02 owns reconciler.rs body changes). \
-         Evaluator cause = {:?}",
+    assert!(
+        matches!(result.status, InvariantStatus::Pass),
+        "WorkloadGcResubmitCreatesFresh invariant FAILED: cause = {:?}. After \
+         resubmit, the WorkloadLifecycle reconciler's Run branch MUST place a \
+         fresh allocation with a NEW `alloc_id` distinct from the GC'd row's \
+         `alloc_id`, AND the original GC'd row's `terminal == \
+         Some(Stopped {{ by: SystemGC }})` MUST stay durable for every tick \
+         after resubmit. A failure here usually means: (a) the \
+         `is_intentionally_stopped` helper at \
+         `crates/overdrive-core/src/reconciler.rs` was narrowed back to only \
+         match `Operator` (regressing the SystemGC case), (b) the Run-branch \
+         `active_allocs_vec` filter regressed (SystemGC-stopped rows now \
+         participate in `running_alloc` / restart / natural-exit decisions \
+         instead of being filtered out), or (c) `mint_alloc_id` lost its \
+         attempt-suffix derivation and started reusing the prior alloc's id.",
         result.cause,
     );
 }
@@ -149,12 +113,11 @@ async fn resubmit_after_gc_creates_fresh_alloc() {
 /// Catalogue + canonical-name round-trip property for both new
 /// variants. Both variants MUST round-trip through `FromStr ↔
 /// Display` losslessly (per the proptest in
-/// `tests/invariant_roundtrip.rs`'s contract). `WorkloadGcOrphanConverges`
-/// is in `Invariant::ALL`; `WorkloadGcResubmitCreatesFresh` is
-/// intentionally excluded from ALL while the production gap at
-/// `crates/overdrive-core/src/reconciler.rs:1294` remains open
-/// (see this scenario's `#[should_panic]` guard for the full
-/// rationale). Both remain reachable via `cargo dst --only <NAME>`.
+/// `tests/invariant_roundtrip.rs`'s contract). Both
+/// `WorkloadGcOrphanConverges` and `WorkloadGcResubmitCreatesFresh`
+/// live in `Invariant::ALL` since step 01-04 closed the
+/// resurrection-protection gap (the `is_intentionally_stopped`
+/// helper + `active_allocs_vec` Run-branch filter).
 #[tokio::test]
 async fn workload_gc_variants_in_catalogue_and_round_trip() {
     // Both variants — name + round-trip.
@@ -174,23 +137,22 @@ async fn workload_gc_variants_in_catalogue_and_round_trip() {
         assert_eq!(parsed, variant, "FromStr round-trip MUST yield the same variant");
     }
 
-    // Default-catalogue membership.
+    // Default-catalogue membership: both variants MUST appear in
+    // `Invariant::ALL` so the harness's default catalogue iterates
+    // them under `cargo dst` without requiring `--only`. Step 01-04
+    // closed the production gap that previously gated
+    // `WorkloadGcResubmitCreatesFresh` out of ALL.
     assert!(
         Invariant::ALL.contains(&Invariant::WorkloadGcOrphanConverges),
-        "WorkloadGcOrphanConverges MUST appear in `Invariant::ALL` so the \
-         harness's default catalogue iterates it under `cargo dst` without \
-         requiring `--only`",
+        "WorkloadGcOrphanConverges MUST appear in `Invariant::ALL`",
     );
     assert!(
-        !Invariant::ALL.contains(&Invariant::WorkloadGcResubmitCreatesFresh),
-        "WorkloadGcResubmitCreatesFresh MUST NOT appear in `Invariant::ALL` \
-         while the production gap at \
-         `crates/overdrive-core/src/reconciler.rs:1294` (resurrection \
-         protection covers StoppedBy::Operator only, not StoppedBy::SystemGC) \
-         remains open — its evaluator returns Fail under today's code and \
-         would break the default-catalogue green contract observed by \
-         `dst_clean_clone_green` / `summary_names_every_expected_invariant`. \
-         Once the gap closes, promote the variant into ALL and flip this \
-         assertion to `assert!(contains)`.",
+        Invariant::ALL.contains(&Invariant::WorkloadGcResubmitCreatesFresh),
+        "WorkloadGcResubmitCreatesFresh MUST appear in `Invariant::ALL` since \
+         step 01-04 closed the resurrection-protection gap. A regression \
+         here means either the variant was reverted out of ALL or the \
+         production fix at `crates/overdrive-core/src/reconciler.rs` \
+         (`is_intentionally_stopped` helper + `active_allocs_vec` Run-branch \
+         filter) was rolled back.",
     );
 }

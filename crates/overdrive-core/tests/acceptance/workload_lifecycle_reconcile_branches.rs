@@ -1294,3 +1294,265 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
         }
     }
 }
+
+// -------------------------------------------------------------------
+// Step 01-04 — `is_intentionally_stopped` Run-branch filter
+// -------------------------------------------------------------------
+//
+// These four tests parametrise over `WorkloadKind ∈ {Service, Job,
+// Schedule}` and pin the symmetric `Operator OR SystemGC` semantics
+// of the Run-branch's intentional-stop class. The asymmetry against
+// `is_operator_stopped` is load-bearing: Operator-stop short-circuits
+// the entire Run branch (operator's intent overrides re-submit);
+// SystemGC-stop is filtered out of `active_allocs_vec` so that
+// resubmit lands a fresh placement (the operator's new intent IS the
+// override).
+//
+// Mutation-killability targets:
+//   - A mutant defining `is_intentionally_stopped` as
+//     `is_operator_stopped(row)` (forgets the SystemGC arm) fails (e).
+//   - A mutant flipping the Operator vs SystemGC precedence in (g)
+//     fails (g).
+//   - A mutant broadening the filter to all-terminal (allowing Failed
+//     rows to be filtered out of restart candidacy) fails (h).
+//   - The fresh-id derivation in (e) — distinct alloc_id from the
+//     SystemGC-stopped row — guards against `mint_alloc_id`
+//     regressing to a workload-id-only deterministic form.
+
+/// Build an `AllocStatusRow` already in the SystemGC-Terminated
+/// shape (state=Terminated, terminal=Some(Stopped { by: SystemGC })).
+/// Pure helper to keep the four tests below readable.
+fn alloc_system_gc_stopped(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatusRow {
+    let mut row = alloc_with_state(alloc_id, workload_id, node_id, AllocState::Terminated);
+    row.terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC });
+    row.reason = Some(TransitionReason::Stopped { by: StoppedBy::SystemGC });
+    row
+}
+
+/// Build an `AllocStatusRow` already in the Operator-Terminated shape
+/// (state=Terminated, terminal=Some(Stopped { by: Operator })).
+fn alloc_operator_stopped(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatusRow {
+    let mut row = alloc_with_state(alloc_id, workload_id, node_id, AllocState::Terminated);
+    row.terminal = Some(TerminalCondition::Stopped { by: StoppedBy::Operator });
+    row.reason = Some(TransitionReason::Stopped { by: StoppedBy::Operator });
+    row
+}
+
+/// (e) Run-branch with intent present + one SystemGC-Terminated row +
+/// zero Running rows → emits exactly one fresh `Action::StartAllocation`
+/// with a NEW alloc_id (distinct from the SystemGC-stopped row's
+/// alloc_id). This is the architecture.md § 5 promise: a resubmit
+/// lands a fresh allocation.
+#[test]
+fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
+    for kind in ALL_WORKLOAD_KINDS {
+        let nodes = one_node_map("local");
+        let mut row = alloc_system_gc_stopped("alloc-payments-0", "payments", "local");
+        row.kind = *kind;
+        let allocations = one_alloc_map("alloc-payments-0", row);
+
+        let desired = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes: nodes.clone(),
+            allocations: BTreeMap::new(),
+            workload_kind: *kind,
+        };
+        let actual = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes,
+            allocations,
+            workload_kind: *kind,
+        };
+        let view = WorkloadLifecycleView::default();
+        let tick =
+            fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+        let r = WorkloadLifecycle::canonical();
+        let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+        assert_eq!(
+            actions.len(),
+            1,
+            "kind={kind:?}: SystemGC-Terminated row + intent present must emit \
+             exactly one fresh placement; got {actions:?}",
+        );
+        match &actions[0] {
+            Action::StartAllocation { alloc_id, .. } => {
+                assert_ne!(
+                    alloc_id.as_str(),
+                    "alloc-payments-0",
+                    "kind={kind:?}: fresh placement MUST mint a NEW alloc_id distinct \
+                     from the SystemGC-stopped row's alloc_id; reusing the prior id \
+                     would let the action shim's LWW write overwrite the SystemGC \
+                     terminal stamp on the obs row, violating \
+                     resubmit.preserves_prior_gc_terminal (architecture.md § 7)",
+                );
+            }
+            other => {
+                panic!("kind={kind:?}: expected StartAllocation (fresh placement), got {other:?}")
+            }
+        }
+    }
+}
+
+/// (f) Run-branch with intent present + one Operator-Terminated row →
+/// emits zero actions. Preserves the existing operator-stop short-
+/// circuit behaviour — regression guard against the new helper
+/// accidentally widening the Run-branch short-circuit beyond its
+/// narrower `is_operator_stopped` predicate.
+#[test]
+fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
+    for kind in ALL_WORKLOAD_KINDS {
+        let nodes = one_node_map("local");
+        let mut row = alloc_operator_stopped("alloc-payments-0", "payments", "local");
+        row.kind = *kind;
+        let allocations = one_alloc_map("alloc-payments-0", row);
+
+        let desired = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes: nodes.clone(),
+            allocations: BTreeMap::new(),
+            workload_kind: *kind,
+        };
+        let actual = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes,
+            allocations,
+            workload_kind: *kind,
+        };
+        let view = WorkloadLifecycleView::default();
+        let tick =
+            fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+        let r = WorkloadLifecycle::canonical();
+        let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+        assert!(
+            actions.is_empty(),
+            "kind={kind:?}: Operator-Terminated row + intent present must short-circuit \
+             to zero actions (operator stop overrides re-submit); got {actions:?}",
+        );
+    }
+}
+
+/// (g) Run-branch with intent present + one SystemGC-Terminated row +
+/// one Operator-Terminated row → emits zero actions (operator-stop
+/// short-circuit takes precedence; without the Operator row, the
+/// SystemGC-only case would have placed fresh per test (e)).
+/// Documents the asymmetry: Operator stop is the more-specific
+/// override.
+#[test]
+fn run_branch_operator_stop_takes_precedence_over_system_gc() {
+    for kind in ALL_WORKLOAD_KINDS {
+        let nodes = one_node_map("local");
+        let mut allocs = BTreeMap::new();
+        let mut sys_gc = alloc_system_gc_stopped("alloc-payments-0", "payments", "local");
+        sys_gc.kind = *kind;
+        allocs.insert(aid("alloc-payments-0"), sys_gc);
+        let mut op_stop = alloc_operator_stopped("alloc-payments-1", "payments", "local");
+        op_stop.kind = *kind;
+        allocs.insert(aid("alloc-payments-1"), op_stop);
+
+        let desired = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes: nodes.clone(),
+            allocations: BTreeMap::new(),
+            workload_kind: *kind,
+        };
+        let actual = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes,
+            allocations: allocs,
+            workload_kind: *kind,
+        };
+        let view = WorkloadLifecycleView::default();
+        let tick =
+            fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+        let r = WorkloadLifecycle::canonical();
+        let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+        assert!(
+            actions.is_empty(),
+            "kind={kind:?}: Operator-Terminated row coexisting with SystemGC-Terminated \
+             row must short-circuit to zero actions — operator stop overrides re-submit \
+             AND overrides the SystemGC-only fresh-placement path; got {actions:?}",
+        );
+    }
+}
+
+/// (h) Run-branch with intent present + one SystemGC-Terminated row +
+/// one Failed row → emits a `RestartAllocation` for the Failed row
+/// (the SystemGC row is filtered out of restart candidacy; the Failed
+/// row drives the restart). Documents the asymmetry between
+/// intentional-stop (Operator/SystemGC) and natural-failure (Failed).
+#[test]
+fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
+    for kind in ALL_WORKLOAD_KINDS {
+        let nodes = one_node_map("local");
+        let mut allocs = BTreeMap::new();
+        let mut sys_gc = alloc_system_gc_stopped("alloc-payments-0", "payments", "local");
+        sys_gc.kind = *kind;
+        allocs.insert(aid("alloc-payments-0"), sys_gc);
+        let mut failed =
+            alloc_with_state("alloc-payments-1", "payments", "local", AllocState::Failed);
+        failed.kind = *kind;
+        allocs.insert(aid("alloc-payments-1"), failed);
+
+        let desired = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes: nodes.clone(),
+            allocations: BTreeMap::new(),
+            workload_kind: *kind,
+        };
+        let actual = WorkloadLifecycleState {
+            job: Some(make_job("payments")),
+            desired_to_stop: false,
+            nodes,
+            allocations: allocs,
+            workload_kind: *kind,
+        };
+        let view = WorkloadLifecycleView::default();
+        let tick =
+            fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+        let r = WorkloadLifecycle::canonical();
+        let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+        // Job-kind hits the Job-natural-exit handler before reaching
+        // the restart branch — for a Job kind, a Failed row is a
+        // natural-exit and emits FinalizeFailed. Service/Schedule kinds
+        // skip the Job-natural-exit branch and emit RestartAllocation.
+        // Both shapes prove the asymmetry: the SystemGC row is NEVER
+        // the action target (no Stop or other action emitted against
+        // alloc-payments-0).
+        assert_eq!(
+            actions.len(),
+            1,
+            "kind={kind:?}: SystemGC row + Failed row must emit exactly one action \
+             (against the Failed row, not the SystemGC row); got {actions:?}",
+        );
+        let action_alloc_id = match &actions[0] {
+            Action::RestartAllocation { alloc_id, .. }
+            | Action::FinalizeFailed { alloc_id, .. } => alloc_id.as_str(),
+            other => panic!(
+                "kind={kind:?}: expected RestartAllocation or FinalizeFailed against \
+                 Failed row, got {other:?}"
+            ),
+        };
+        assert_eq!(
+            action_alloc_id, "alloc-payments-1",
+            "kind={kind:?}: action MUST target the Failed row (`alloc-payments-1`), \
+             NOT the SystemGC-stopped row (`alloc-payments-0`). The SystemGC row is \
+             filtered out of restart/natural-exit candidacy by the \
+             `active_allocs_vec` filter; the Failed row drives the action.",
+        );
+    }
+}
