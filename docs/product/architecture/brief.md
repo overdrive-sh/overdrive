@@ -2249,6 +2249,301 @@ work.
 
 ---
 
+## Phase 1 service-vip-allocator extension
+
+**Scope**: Generalises the existing `BackendIdAllocator` (ADR-0046)
+into a shared pool primitive that hosts a second consumer — the
+new `ServiceVipAllocator` that issues IPv4 VIPs to admitted Service
+workloads. The shared primitive lives in
+`crates/overdrive-dataplane/src/allocators/`. Closes GH #167; resolves
+all five DESIGN-wave open questions from
+`docs/feature/service-vip-allocator/discuss/wave-decisions.md`.
+
+### 63. Shared allocator primitive — pure core + persistence shim
+
+Two-layer factoring under
+`crates/overdrive-dataplane/src/allocators/`:
+
+```
+allocators/
+├── mod.rs           # re-exports + Token trait + PoolError + AllocatorNamespace
+├── pool.rs          # PoolAllocator<T: Token> — pure sync core
+├── intent_backed.rs # IntentBackedAllocator<T> — persistence shim over IntentStore
+├── backend_id.rs    # BackendIdAllocator (moved from src/allocator.rs)
+└── service_vip.rs   # ServiceVipAllocator (new)
+```
+
+- **`Token` trait** — every allocatable identifier implements it. Defines
+  associated types `Key` (memo input — `(u32,u16,u8)` for BackendId,
+  `ServiceSpecDigest` for ServiceVip) and `Range` (pool address space
+  — counter range for BackendId, CIDR-with-reservations for ServiceVip)
+  plus `fn nth(n: u32, range: &Range) -> Option<Self>`.
+- **`PoolAllocator<T: Token>`** — `BTreeMap`-backed memo + monotonic
+  counter; sync, no I/O. Same shape as ADR-0046's existing allocator,
+  but generic over `Token`. The existing proptest + collision witness
+  move with it.
+- **`IntentBackedAllocator<T>`** — wraps `PoolAllocator<T>` behind
+  `parking_lot::Mutex` and writes through to `IntentStore` on every
+  mutation. Ordering is fsync-then-memory (matches §35 / ADR-0035
+  "Step ordering 7 → 8 is load-bearing"). Bulk-loads persisted state
+  at construction; refuses to start if persisted state fails round-trip
+  through the rkyv envelope (Earned Trust gate, see §65).
+
+Two instantiations:
+
+- `BackendIdAllocator = PoolAllocator<BackendId>` — direct use of the
+  core, no persistence. Re-hydrated on restart by `ServiceMapHydrator`
+  per ADR-0042 (unchanged contract).
+- `ServiceVipAllocator = IntentBackedAllocator<ServiceVip>` — persistent;
+  satisfies AC-02 (survives restart).
+
+The persistence boundary is structural at the type level:
+`BackendIdAllocator` compile-time-cannot-persist (its type doesn't
+carry an `IntentStore`); `ServiceVipAllocator` compile-time-must-persist.
+This makes AC-05 ("the underlying allocator logic is shared") true by
+construction without sacrificing the AC-02 / non-persistent distinction.
+
+### 64. Admission flow — submit-time VIP allocation
+
+Resolves DESIGN Open Q2. The admission handler in
+`overdrive-control-plane` allocates synchronously, **before** the
+IntentStore admission write:
+
+```
+operator submit
+  → parser produces ServiceSpec with every listener.vip == None
+  → admission handler validates every listener.vip.is_none()
+       (rejects with AdmissionError::VipNotOperatorAssignable
+        if Some(_); see §66)
+  → spec digest computed over the vip-free spec
+  → ServiceVipAllocator::allocate(spec_digest):
+       - memo hit → returns existing VIP (AC-02 idempotency)
+       - memo miss + capacity → assigns next; writes through to
+         IntentStore (fsync); returns VIP
+       - memo miss + exhausted → AllocatorError::Exhausted → 503
+  → listener.vip = Some(allocated_vip) projection
+  → IntentStore admission write (the spec, now with Some(vip),
+    is the durable form)
+  → submit echo renders the assigned VIP (AC-01)
+```
+
+**Spec-digest invariance**: the digest is computed over the
+VIP-free spec (operators never type the VIP, so the digest is
+stable across resubmissions). The allocator memo key is the digest;
+resubmitting an unchanged file produces the same digest → same
+memo → same VIP. AC-02 is structural.
+
+Failure surface at admission time is typed:
+
+- `AllocatorError::Exhausted { allocated, capacity }` — AC-04 typed
+  rejection; HTTP 503; no partial state persisted.
+- `AdmissionError::VipNotOperatorAssignable { listener_idx }` — AC-06
+  named-guidance rejection; HTTP 400; no allocator state mutated; no
+  IntentStore write.
+
+### 65. Reclamation flow — `WorkloadLifecycle` + `Action::ReleaseServiceVip`
+
+Resolves DESIGN Open Q1. On terminal-state observation, the
+`WorkloadLifecycle` reconciler (per ADR-0013 / §19 / §34) emits a
+new `Action::ReleaseServiceVip { spec_digest, correlation }`. The
+action-shim arm calls `ServiceVipAllocator::release(&spec_digest)`,
+which idempotently removes the memo + persists the deletion.
+
+The reconciler's View gains one field per ADR-0049 § 6:
+
+```rust
+pub struct WorkloadLifecycleView {
+    // ... existing fields ...
+
+    /// Set of Service spec digests for which a release action has
+    /// already been emitted. Prevents re-emission on every tick
+    /// after the terminal-state observation. Per `development.md`
+    /// § "Persist inputs, not derived state" — this set is the
+    /// INPUT (history of past emissions), not a derived deadline.
+    pub released_for_terminal: BTreeSet<ServiceSpecDigest>,
+}
+```
+
+K3 (p99 ≤ 5 s reclamation lag) is structurally bounded: tick cadence
+100 ms (ADR-0023) + action-shim dispatch + write-through fsync. The
+worst-case path is one tick + a single redb write.
+
+### 66. Admission-level rejection of operator-supplied `vip = Some(...)`
+
+Resolves DESIGN Open Q5. The choice is admission-level, not
+parser-level — preserves ADR-0047 § 4a's `Option<ServiceVip>` field
+shape verbatim. The admission handler does the policy check; the
+parser stays a pure structural validator.
+
+```rust
+// in overdrive-control-plane::admission
+#[derive(thiserror::Error, Debug)]
+pub enum AdmissionError {
+    // ... existing variants ...
+    #[error("listener {listener_idx}: vip is platform-issued; remove the `vip` field from the listener block")]
+    VipNotOperatorAssignable { listener_idx: usize },
+}
+```
+
+Validation runs after parser, before spec-digest compute, before
+allocator consult. Per AC-06: "No allocator state is mutated and no
+admission occurs."
+
+### 67. `ServiceVip` newtype consolidation
+
+The codebase had two `ServiceVip` declarations
+(`crates/overdrive-core/src/aggregate/workload_spec.rs:360` over
+`Ipv4Addr`; `crates/overdrive-core/src/id.rs:647` over `IpAddr`).
+ADR-0049 § 2 consolidates to one canonical declaration at
+`overdrive-core::id::ServiceVip(Ipv4Addr)`. IPv4-only per #167
+§ Out of scope; IPv6 VIPs are GH #61. The duplicate is deleted in
+the same commit (single-cut migration per
+`feedback_single_cut_greenfield_migrations.md`); the `Listener.vip`
+field references the surviving canonical type. Newtype completeness
+preserved (`FromStr`, `Display`, serde + validation).
+
+### 68. Operator config — `[dataplane.vip_allocator]` subsection
+
+Resolves DESIGN Open Q3. New TOML subsection nested under the
+existing/forthcoming `[dataplane]` block per ADR-0019:
+
+```toml
+[dataplane.vip_allocator]
+ranges   = ["10.96.0.0/16"]                     # required, list of CIDRs
+reserved = ["10.96.0.0", "10.96.255.255"]       # optional, IPv4 addresses within ranges
+```
+
+Required — boot fails with a typed `VipAllocatorConfigError::Missing`
+error if absent. Per #167 § Out of scope: "Opinionated default VIP
+ranges. The allocator is pool-agnostic." Validation at boot:
+
+- `ranges` non-empty; CIDRs parse as `Ipv4Net`; no overlapping pairs.
+- Every `reserved` address lies within at least one of `ranges`.
+- Total capacity = sum(CIDR sizes) - `len(reserved)` > 0.
+
+### 69. Persistence wire format — `AllocatorEntryEnvelope` per ADR-0048
+
+Persisted allocator state crosses a redb boundary, so it follows
+ADR-0048 envelope discipline:
+
+```rust
+// codec-internal envelope (NOT re-exported from overdrive-core::lib.rs
+// per ADR-0048 § Layer 1)
+pub enum AllocatorEntryEnvelope { V1(AllocatorEntryV1) }
+
+pub struct AllocatorEntryV1 {
+    pub key:     [u8; 32],          // SHA-256 of T::Key archived bytes
+    pub token:   AllocatorTokenBytes, // sum-typed: BackendId(u32) | ServiceVip(Ipv4Addr bytes)
+    pub counter: u32,
+}
+
+pub type AllocatorEntry = AllocatorEntryV1;     // alias-to-payload per UI-02
+```
+
+Single envelope across allocator namespaces (the namespace is the
+redb key prefix, not the value). Golden-bytes fixture under
+`crates/overdrive-dataplane/tests/schema_evolution/allocator_entry.rs`
+per `.claude/rules/testing.md` § "Archive schema-evolution roundtrip".
+Layer 2 dst-lint clause from ADR-0048 already covers the new envelope
+(generic `<Envelope>::V<N>(` scanner).
+
+### 70. New `Action::ReleaseServiceVip` variant
+
+Append to the `pub enum Action` block in
+`crates/overdrive-core/src/reconciler.rs`:
+
+```rust
+/// Release a previously-allocated Service VIP back to the
+/// allocator pool. Idempotent — releasing an already-released
+/// key is a no-op. Emitted by `WorkloadLifecycle` on observed
+/// terminal-state transition.
+ReleaseServiceVip {
+    spec_digest: ServiceSpecDigest,
+    correlation: CorrelationKey,
+},
+```
+
+`correlation` is required (not optional) — same precedent as
+ADR-0042 § 1's `Action::DataplaneUpdateService`. Derived via the
+existing `CorrelationKey::derive(target, spec_hash, purpose)`
+constructor.
+
+Action-shim arm in `overdrive-control-plane::reconciler_runtime::action_shim`
+dispatches to `ServiceVipAllocator::release`. Exhaustive-match shape
+preserved per ADR-0023.
+
+### 71. Earned Trust — allocator `probe()` at composition root
+
+Per the project's core principle 12. `IntentBackedAllocator::bulk_load`
+runs at composition-root time and verifies:
+
+1. `IntentStore` reachable + supports the `allocator_entries` table
+   (throwaway key round-trips).
+2. `VipRange` non-empty (`range.capacity() > 0`).
+3. Bulk-loaded state internally consistent — every persisted token
+   projects back to an address within `range` (defends against the
+   "operator shrunk CIDR below previously-allocated VIPs" drift).
+
+Failures are typed `AllocatorBootError` variants → structured
+`health.startup.refused` events → control plane refuses to start
+(per ADR-0048 intent-layer unknown-handling discipline).
+
+The probe contract is enforced three ways per principle 12:
+
+- **Subtype check**: the `probe()` method is on the `Allocator` trait
+  the composition root sees; missing impl fails to compile.
+- **Structural check**: `xtask::dst_lint` AST scanner walks every
+  `IntentBackedAllocator::bulk_load` use site and verifies `probe()`
+  is called before first `allocate()` / `release()`. AST-only; xtask
+  remains decoupled from `overdrive-*` crates per §"xtask is build /
+  test / dev orchestration" rule.
+- **Behavioral check**: a CI gold-test configures a
+  CIDR-too-small-for-persisted-state fixture and asserts the probe
+  refuses to start.
+
+### 72. Updated quality-attribute scenarios (extending §22 / §32 / §38 / §50 / §60)
+
+| KPI | Architecture-side support |
+|---|---|
+| K1 — 100% successful allocation on non-empty pool | Synchronous allocation at admission; pool size validated at boot; typed error not silent failure |
+| K2 — p50 ≤ 5 ms, p99 ≤ 25 ms allocator-induced admission latency | In-memory `PoolAllocator` is O(log N) BTreeMap; single redb write + fsync; no network, no per-tick polling |
+| K3 — p50 ≤ 1 s, p99 ≤ 5 s VIP reclamation lag | Reconciler tick cadence 100 ms; reclamation is one tick after terminal observation + action-shim dispatch + write-through fsync |
+| K4 — 0 pool-exhaustion rejections per 24 h under nominal load | Pool capacity operator-configured; boot probe validates persisted state fits within range; typed `pool_exhausted` counter for DEVOPS instrumentation |
+
+### 73. C4 — see `c4-diagrams.md` § Phase 1 Service VIP Allocator
+
+A new component diagram covers the allocator subsystem: the
+admission handler, `ServiceVipAllocator`, the shared `PoolAllocator<T>`
+core, the `WorkloadLifecycle` reconciler reclamation path, the
+action-shim arm, the IntentStore boundary, and the existing
+`ServiceMapHydrator` as the downstream VIP consumer. System Context
+(L1) and Container (L2) inherit from prior phases unchanged.
+
+### 74. Updated handoff annotations — service-vip-allocator
+
+- **`crates/overdrive-dataplane/`** — gains `allocators/` module (5
+  files). `BackendIdAllocator` moves into the module; API
+  signature-stable. `ServiceVipAllocator` is new.
+- **`crates/overdrive-core/`** — `id::ServiceVip` consolidated to
+  IPv4-only canonical form; duplicate at `aggregate/workload_spec.rs`
+  deleted. New `dataplane::AllocatorEntry*` codec types. New
+  `Action::ReleaseServiceVip` variant in `reconciler.rs`. New
+  `ServiceSpecDigest` newtype (or `ContentHash` reused — crafter's
+  call; both shapes satisfy).
+- **`crates/overdrive-control-plane/`** — admission handler gains
+  `vip.is_none()` validation; allocator wired at composition root via
+  `Arc<ServiceVipAllocator>`; action-shim arm for
+  `Action::ReleaseServiceVip`; new TOML config subsection
+  `[dataplane.vip_allocator]` deserialised at boot.
+- **No external integrations introduced**; no contract-test
+  annotations for platform-architect.
+- **DEVOPS instrumentation hooks** (from `outcome-kpis.md`): counters
+  on K1's numerator/denominator; span on allocator entry/exit for K2;
+  twin timestamps for K3; pool-utilisation gauge + typed
+  `pool_exhausted` rejection counter for K4.
+
+---
+
 ## Changelog
 
 | Date | Change |
@@ -2265,4 +2560,5 @@ work.
 | 2026-05-02 | ADR-0028 superseded in part by ADR-0034: the `--allow-no-cgroups` escape hatch is removed. Reasons: (a) structural leak in the `StopAllocation` action path (handle had `pid: None`, cgroup-kill branch gated off, `stop` returned `Ok(())` while the process kept running, producing `state: Terminated`-while-process-alive on the next reconciler tick); (b) redundancy — the canonical dev path is now `cargo xtask lima run --` (documented in `.claude/rules/testing.md`), which absorbs the dev-ergonomics objection ADR-0028 § Alternative A documented. Hard-refusal pre-flight from ADR-0028 stays. §31 rewritten; ADR index entry for 0028 marked Superseded; ADR-0034 added to index; Linux-only requirements bullet replaces flag reference with the Lima wrapper. Single-cut migration per greenfield convention — code/test deletions land in the crafter PR, not in this changelog entry. — Morgan. |
 | 2026-05-05 | Phase 2.2 XDP service map extension (§44–§52). Added ADR-0040 (SERVICE_MAP three-map split — SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP — with HASH_OF_MAPS atomic-swap primitive; Q1=A `bpf_l3_csum_replace`/`bpf_l4_csum_replace` kernel helpers; Q3=C shared `#[inline(always)]` Rust helper for sanity prologue; Q5=A inner-map size 256; Q7=B `DropClass` slots = 6 — `MalformedHeader=0, UnknownVip=1, NoHealthyBackend=2, SanityPrologue=3, ReverseNatMiss=4, OversizePacket=5`). Added ADR-0041 (weighted Maglev consistent hashing M=16_381 default + Eisenbud permutation + multiplicity expansion in deterministic `BTreeMap` order; REVERSE_NAT_MAP shape and host-order storage; Q2=A TC-egress for `tc_reverse_nat`; endianness lockstep contract with conversion site at `crates/overdrive-bpf/src/shared/sanity.rs`). Added ADR-0042 (`ServiceMapHydrator` reconciler closes J-PLAT-004; new `Action::DataplaneUpdateService` typed variant; new `service_hydration_results` ObservationStore table for `actual` projection — Drift 2 fix; failure surface is observation, NOT `TerminalCondition` — preserves ADR-0037 invariant; ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState`). Drift 3: SERVICE_MAP outer key locked at `(ServiceVip, u16 port)` (the kernel sees wire packets and must look up by `(VIP, port)`); MAGLEV_MAP outer key on `ServiceId`; BACKEND_MAP key on `BackendId`. Five new STRICT newtypes in `overdrive-core` — `ServiceVip`, `ServiceId`, `BackendId` (extending `id.rs`); `MaglevTableSize` (u32) + `DropClass` (#[repr(u32)] enum) in NEW `dataplane/` sibling module. `Dataplane::update_service(service_id, vip, backends)` signature locked (Q-Sig=A — three explicit args). One additive ObservationStore table; no edits to existing observation rows. C4 Level 3 component diagram for the Phase 2.2 dataplane subsystem added to `c4-diagrams.md`. ADR index grows from 32 to 35 entries; no entry changes status. — Morgan. |
 | 2026-05-05 | Atlas review remediation pass (review ID `arch-rev-2026-05-05-phase2.2-xdp-service-map`; verdict `NEEDS_REVISION` → `APPROVED after remediation`): B1–B3 + S4–S5 + Q1–Q2 addressed in a single pass — concrete `hydrate_desired` / `hydrate_actual` arm signatures inlined in ADR-0042 § 2 + architecture.md § 8 (B1); full `service_hydration_results` schema replicated inline in ADR-0042 § 4 with LWW resolution semantics (B2); `BackendSetFingerprint` declared as a `pub type … = u64;` alias in `crates/overdrive-core/src/dataplane/mod.rs` with computation site at `dataplane/fingerprint.rs` and rationale in architecture.md § 6 *Type aliases* (B3); `DropClass` and `MaglevTableSize` carry full Rust code blocks in their respective ADRs and architecture.md § 6 (S4); `CorrelationKey::derive` derivation pinned with explicit `(target, spec_hash, purpose)` snippet in architecture.md § 7 + ADR-0042 § 1 (S5); test-file inventory added as architecture.md § 13 advisory subsection (Q1); `service_backends.vip` typing clarified as Case A — row carries `vip: Ipv4Addr` as its existing wire-shape field, `ServiceVip` is a userspace-only newtype wrapped at the hydrate boundary, no schema migration (Q2). `## Review` section appended to architecture.md. No design decisions changed; artifact lockdowns only. Atlas not re-invoked. — Morgan. |
+| 2026-05-14 | Phase 1 service-vip-allocator extension (§63–§74). Added ADR-0049 (platform-issued Service VIP allocator: shared pool primitive under `overdrive-dataplane`; `IntentStore`-persisted; submit-time admission; reconciler-driven reclamation). Closes GH #167. Generalises ADR-0046's `BackendIdAllocator` into a two-layer factoring at `crates/overdrive-dataplane/src/allocators/`: pure core `PoolAllocator<T: Token>` + persistence shim `IntentBackedAllocator<T>`. New `ServiceVipAllocator = IntentBackedAllocator<ServiceVip>`. New `Action::ReleaseServiceVip` variant. New TOML config subsection `[dataplane.vip_allocator]`. New rkyv envelope `AllocatorEntryEnvelope` per ADR-0048. Admission-level rejection of operator-supplied `vip = Some(...)` per AC-06 (preserves ADR-0047 § 4a `Option<ServiceVip>` field shape verbatim). `ServiceVip` newtype consolidated to single IPv4-only canonical declaration at `overdrive-core::id::ServiceVip(Ipv4Addr)`; duplicate at `aggregate/workload_spec.rs:360` deleted in same commit. Earned Trust `probe()` enforced via subtype + structural (xtask AST scanner) + behavioural (CI gold-test) layers. Reuse Analysis: 8 EXTEND, 5 REUSE AS-IS, 4 CREATE NEW (justified). C4 Component diagram added at `c4-diagrams.md` § Phase 1 Service VIP Allocator. — Morgan. |
 | 2026-05-04 | Phase 2.1 eBPF dataplane scaffolding extension (§40–§43). Added ADR-0038 (eBPF crate layout `overdrive-bpf` + `overdrive-dataplane`; `xtask bpf-build` + `build.rs` artifact-check shim build pipeline; `bpf-linker` provisioning via Lima image + xtask dev-setup + which-or-hint; `default-members` exclusion for the kernel-side crate; `EbpfDataplane` mirroring `SimDataplane`'s constructor seam). Two new crates: `overdrive-bpf` (class `binary`, target `bpfel-unknown-none`, `#![no_std]`, `aya-ebpf`-only) and `overdrive-dataplane` (class `adapter-host`, hosts `EbpfDataplane` impl of `Dataplane` port). `cargo xtask bpf-build` is NEW; `cargo xtask bpf-unit` and `cargo xtask integration-test vm` filled in (against the no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter); `verifier-regress` and `xdp-perf` remain stubbed for #29. Workspace `members` grows from 9 to 11 entries; new `default-members` declaration excludes `overdrive-bpf` so `cargo check --workspace` builds on macOS. Lima image `cargo install --locked` line extended with `bpf-linker`. C4 L1 (System Context) + L2 (Container) added at `c4-diagrams.md` § Phase 2.1; L3 deliberately skipped (loader is a single struct with two no-op methods). dst-lint scope unchanged — both new crates are non-`core`. ADR-0029 mirrored as the closest-precedent extraction ADR. — Morgan. |

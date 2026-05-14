@@ -191,3 +191,114 @@ The diagram makes three architectural properties visually explicit:
    else (per ADR-0041). Tier 2 BPF unit roundtrip + userspace
    proptest gate the contract.
 
+---
+
+## Phase 1 — Service VIP Allocator component diagram (Mermaid)
+
+**Source:** `docs/feature/service-vip-allocator/design/wave-decisions.md` + ADR-0049
+**ADR:** ADR-0049 (relates to ADR-0046, ADR-0042, ADR-0047, ADR-0048, ADR-0019, ADR-0013)
+**Date:** 2026-05-14
+
+System Context (L1) and Container (L2) inherit from prior phases
+unchanged — the allocator introduces no new external actors and no
+new containers (the primitive is internal to `overdrive-dataplane`).
+Only L3 is new here.
+
+### C4 Level 3 — Service VIP Allocator subsystem (Phase 1)
+
+```mermaid
+C4Component
+  title Component Diagram — Service VIP Allocator subsystem (Phase 1)
+
+  Person(operator, "Platform Engineer (Maya)", "Submits Service specs via `overdrive job submit`")
+
+  Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
+    Component(admit, "Admission Handler", "axum handler (EXTENDED — §66)", "Validates listener.vip.is_none() per AC-06; rejects operator-supplied VIPs with AdmissionError::VipNotOperatorAssignable. Computes spec digest over VIP-free spec.")
+    Component(wl_recon, "WorkloadLifecycle reconciler", "Reconciler impl (EXTENDED — §65)", "sync `reconcile` (ADR-0035 contract); View gains `released_for_terminal: BTreeSet<ServiceSpecDigest>` (input — past emissions); emits Action::ReleaseServiceVip on terminal-state observation.")
+    Component(vip_shim, "action_shim::release_service_vip::dispatch", "fn (NEW — §70)", "Consumes Action::ReleaseServiceVip; calls ServiceVipAllocator::release(&spec_digest); idempotent.")
+    Component(boot_probe, "Composition root", "fn (EXTENDED — §71)", "Wires Arc<ServiceVipAllocator>; calls bulk_load() → probe() → use. Refuses to start on AllocatorBootError → health.startup.refused.")
+  }
+
+  Container_Boundary(dp, "overdrive-dataplane (adapter-host)") {
+    Boundary(allocs, "allocators/ (NEW module — §63)") {
+      Component(token, "Token trait + AllocatorNamespace", "Rust trait + newtype (NEW)", "Associated types Key + Range; fn nth(n, range) -> Option<Self>. Sealed-ish — impls for BackendId and ServiceVip only.")
+      Component(pool, "PoolAllocator<T: Token>", "Generic struct (NEW)", "Pure sync core: BTreeMap memo + monotonic counter. No I/O. O(log N) allocate/release. Returns PoolError::Exhausted on capacity.")
+      Component(shim, "IntentBackedAllocator<T>", "Generic struct (NEW)", "parking_lot::Mutex<PoolAllocator<T>> + Arc<dyn IntentStore>. Write-through fsync-then-memory (ADR-0035 § Step ordering 7→8). bulk_load() + probe() at boot (§71).")
+      Component(backend_alloc, "BackendIdAllocator", "type alias = PoolAllocator<BackendId> (MOVED from src/allocator.rs)", "ADR-0046 primitive. Process-local, no persistence — re-hydrated by ServiceMapHydrator (ADR-0042). API signature-stable from old location.")
+      Component(vip_alloc, "ServiceVipAllocator", "type alias = IntentBackedAllocator<ServiceVip> (NEW)", "Persists across restart (AC-02). Memo key = ServiceSpecDigest; output = ServiceVip from configured VipRange (CIDR + reserved).")
+      Component(vip_range, "VipRange", "struct (NEW — §68)", "Ipv4Net CIDR list + BTreeSet<Ipv4Addr> reserved. Built from `[dataplane.vip_allocator]` TOML at boot. capacity() validated > 0 by probe.")
+    }
+    Component(hydrator, "ServiceMapHydrator", "Reconciler impl (REUSE AS-IS — ADR-0042)", "Reads allocated VIP from persisted spec listener.vip; passes to Dataplane::update_service. NOT a writer of allocator state — downstream consumer only.")
+  }
+
+  Container_Boundary(corebox, "overdrive-core") {
+    Component(vip_newtype, "id::ServiceVip(Ipv4Addr)", "Newtype (CONSOLIDATED — §67)", "IPv4-only canonical declaration; duplicate at aggregate/workload_spec.rs:360 deleted in same commit. Newtype completeness preserved.")
+    Component(action, "reconciler::Action", "enum (EXTENDED — §70)", "New variant ReleaseServiceVip { spec_digest, correlation }. Exhaustive-match shape preserved (ADR-0023).")
+    Component(envelope, "dataplane::AllocatorEntryEnvelope", "rkyv envelope (NEW — §69)", "Codec-internal per ADR-0048 § Layer 1; V1(AllocatorEntryV1) variant. Codec module on AllocatorEntry: archive_for_store / from_store_bytes.")
+    Component(intent_trait, "traits::IntentStore", "Port trait (REUSE AS-IS)", "Bytes-passthrough surface; new `allocator_entries` redb table prefix used by IntentBackedAllocator.")
+  }
+
+  ContainerDb(intent_db, "IntentStore redb file", "On-disk ACID KV; new `allocator_entries` table — key=(namespace, key_digest), value=AllocatorEntryEnvelope archived bytes")
+  Container(config, "Operator config (TOML)", "~/.overdrive/config + node config", "NEW [dataplane.vip_allocator] subsection: ranges = [CIDR list], reserved = [Ipv4Addr list] (§68). Required — boot fails with typed VipAllocatorConfigError::Missing if absent.")
+
+  Rel(operator, admit, "POST /v1/jobs/{id} (Service spec)", "HTTPS")
+
+  Rel(admit, vip_newtype, "Validates listener.vip is None")
+  Rel(admit, vip_alloc, "Calls allocate(spec_digest) → ServiceVip", "SYNC at submit-time (§64)")
+  Rel(admit, intent_trait, "Writes admitted spec (with allocated VIP) via IntentStore.put")
+
+  Rel(boot_probe, vip_alloc, "Wires Arc<ServiceVipAllocator> at composition root")
+  Rel(boot_probe, config, "Deserialises [dataplane.vip_allocator] block")
+
+  Rel(vip_alloc, shim, "type alias =")
+  Rel(backend_alloc, pool, "type alias =")
+  Rel(shim, pool, "wraps; delegates allocate/release/get")
+  Rel(shim, intent_trait, "Write-through fsync-then-memory (§63)")
+  Rel(shim, envelope, "Encodes/decodes persisted state via AllocatorEntry::archive_for_store / from_store_bytes")
+  Rel(pool, token, "Generic over T: Token")
+  Rel(vip_alloc, vip_range, "Holds VipRange in T::Range")
+  Rel(vip_range, vip_newtype, "Iterates Ipv4Addr → ServiceVip via Token::nth")
+
+  Rel(wl_recon, action, "Emits Action::ReleaseServiceVip on terminal observation")
+  Rel(vip_shim, action, "Consumes Action::ReleaseServiceVip")
+  Rel(vip_shim, vip_alloc, "Calls release(&spec_digest)", "IDEMPOTENT (§65)")
+
+  Rel(hydrator, intent_trait, "Reads spec.listener.vip (already-allocated VIP)")
+
+  Rel(intent_trait, intent_db, "redb ACID transactions")
+  Rel(config, boot_probe, "Parsed at boot")
+```
+
+The diagram makes five architectural properties visually explicit:
+
+1. **Persistence is a structural boundary** — `BackendIdAllocator =
+   PoolAllocator<BackendId>` is the pure core directly (no
+   IntentStore edge); `ServiceVipAllocator = IntentBackedAllocator<
+   ServiceVip>` carries the persistence shim that connects to
+   IntentStore. The "compile-time-must-persist vs
+   compile-time-cannot-persist" distinction is the type-level shape,
+   not a runtime convention.
+2. **Submit-time allocation is the single source of VIP truth** —
+   the admission handler is the only writer of the allocator;
+   `ServiceMapHydrator` (downstream consumer) reads the allocated
+   VIP from the persisted spec, not from the allocator's API. The
+   intent-vs-observation split is preserved (allocation IS intent).
+3. **Reclamation rides the existing reconciler primitive** —
+   `WorkloadLifecycle` emits `Action::ReleaseServiceVip`; the
+   action-shim arm dispatches; no new orchestration surface. The
+   reconciler View carries the *inputs* (`released_for_terminal`
+   set of past emissions), not a derived deadline per
+   `development.md` § "Persist inputs, not derived state".
+4. **Earned Trust at composition root** — `bulk_load()` runs
+   `probe()` before the allocator is exposed to any caller. Three
+   enforcement layers per principle 12: subtype (`probe()` on the
+   trait), structural (xtask AST scanner verifies probe-call
+   ordering), behavioural (CI gold-test with
+   CIDR-too-small-for-persisted-state fixture).
+5. **One canonical `ServiceVip`** — the consolidation to
+   `overdrive-core::id::ServiceVip(Ipv4Addr)` makes the `Token`
+   impl unambiguous. The previously-duplicate declaration at
+   `aggregate/workload_spec.rs:360` is deleted in the same commit;
+   `Listener.vip` references the surviving canonical type.
+
+
