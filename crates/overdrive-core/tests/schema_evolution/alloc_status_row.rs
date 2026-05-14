@@ -17,6 +17,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRowEnvelope, AllocStatusRowLatest, AllocStatusRowV1, LogicalTimestamp,
 };
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
 use super::harness::{
     assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
@@ -93,6 +94,56 @@ fn alloc_status_row_unknown_version_probe_surfaces() {
         canonical_v1_payload(),
         "AllocStatusRowEnvelope",
         0,
+    );
+}
+
+/// Forward-roundtrip pin for the `StoppedBy::SystemGC` variant
+/// (ADR-0037 Amendment 2026-05-14, step 01-01 of
+/// `workload-gc-absent-stale-allocs`). Constructs a fresh
+/// `AllocStatusRow` carrying
+/// `terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC })`,
+/// archives through the *current* `AllocStatusRowEnvelope` (V1 — the
+/// rkyv layout is unchanged because the new variant is appended at
+/// the tail of `StoppedBy`'s discriminant space), deserialises, and
+/// asserts `Eq` against the source.
+///
+/// This is NOT a `FIXTURE_V<N>` constant — appending an enum variant
+/// does not bump the envelope version per
+/// `.claude/rules/development.md` § "rkyv schema evolution"; the
+/// existing `FIXTURE_V1` test continues to defend the discriminant
+/// layout of pre-existing variants. This test pins that the new
+/// variant encodes/decodes through the same envelope.
+///
+/// Mutation-killability: a mutant swapping `SystemGC` for `Process`
+/// in the constructor below fails the equality assertion.
+#[test]
+fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope() {
+    let payload = AllocStatusRowV1 {
+        alloc_id: AllocationId::new("alloc-gc-01").expect("valid alloc id"),
+        workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp {
+            counter: 7,
+            writer: NodeId::new("node-001").expect("valid writer node id"),
+        },
+        reason: None,
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+    };
+    let envelope = AllocStatusRowEnvelope::latest(payload.clone());
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+    let decoded: AllocStatusRowEnvelope =
+        rkyv::from_bytes::<AllocStatusRowEnvelope, rkyv::rancor::Error>(bytes.as_ref())
+            .expect("rkyv deserialize");
+    let projected: AllocStatusRowLatest =
+        decoded.into_latest().expect("envelope into_latest projection");
+    assert_eq!(
+        projected, payload,
+        "AllocStatusRow with StoppedBy::SystemGC must round-trip through the current V1 envelope unchanged"
     );
 }
 

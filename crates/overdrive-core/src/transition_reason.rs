@@ -209,9 +209,23 @@ pub enum StoppedBy {
     /// The workload process exited naturally (clean exit with no stop
     /// intent from the operator or reconciler).
     ///
-    /// MUST remain the last variant to preserve rkyv discriminant
-    /// compatibility: `Operator=0`, `Reconciler=1`, `Process=2`.
+    /// **Additive position**: variants are append-only to preserve
+    /// pre-existing rkyv discriminants (`Operator=0`, `Reconciler=1`,
+    /// `Process=2`). New variants land at the tail of the
+    /// discriminant space; existing archived rows decode unchanged.
     Process,
+    /// The system garbage-collected an allocation whose desired
+    /// intent disappeared (per ADR-0037 Amendment 2026-05-14;
+    /// `workload-gc-absent-stale-allocs`). Distinct from
+    /// [`Self::Reconciler`] (which represents an explicit
+    /// reconciler-actioned stop with desired intent still present)
+    /// — `SystemGC` records that the allocation was withdrawn
+    /// because no operator intent referenced it any longer.
+    ///
+    /// Appended after `Process` to keep the pre-existing rkyv
+    /// discriminants stable. This variant takes discriminant `3`.
+    /// Existing archived rows decode unchanged.
+    SystemGC,
 }
 
 #[cfg(test)]
@@ -516,6 +530,7 @@ impl TransitionReason {
             Self::Stopped { by: StoppedBy::Operator } => "stopped (by operator)".to_owned(),
             Self::Stopped { by: StoppedBy::Reconciler } => "stopped".to_owned(),
             Self::Stopped { by: StoppedBy::Process } => "stopped (by process)".to_owned(),
+            Self::Stopped { by: StoppedBy::SystemGC } => "stopped (by system gc)".to_owned(),
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
