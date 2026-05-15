@@ -288,6 +288,48 @@
       "s": "EXECUTED",
       "d": "PASS commit=5c72564e",
       "t": "2026-05-15T05:08:52Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T05:10:12Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T07:36:14Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: structural finding \u2014 widening SubmitWorkloadRequest.spec from JobSpecInput to WorkloadSpecInput cascades to 86 files (CLI submit paths, http_client, OpenAPI schema, 20+ test files). WorkloadSpecInput::Job has NO replicas field (Job is run-to-completion per ADR-0047 \u00a71) while current JobSpecInput AND intent-side JobV1 do \u2014 wire-shape regression on Job submissions. Roadmap files_to_modify lists 5 control-plane files but the migration must cascade further to compile. Surfaced to user with clarification options A/B/C before proceeding.",
+      "t": "2026-05-15T07:39:20Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE.",
+      "t": "2026-05-15T07:39:22Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE.",
+      "t": "2026-05-15T07:39:23Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE. No code written; no commit produced. Working tree unchanged.",
+      "t": "2026-05-15T07:39:25Z"
     }
   ]
 }
