@@ -202,7 +202,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
             // (`jobs/payments`). Mutation that returned empty string
             // would be caught here.
             assert!(
-                message.contains("jobs/payments"),
+                message.contains("workloads/payments"),
                 "Conflict message must name the intent-key path `jobs/payments`; \
                  got: {message}",
             );
@@ -220,12 +220,14 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // does not call `put`. A back-door read of the intent key returns
     // the canonical (replicas=3) bytes; a mutation that called `put`
     // either way would surface here as drifted bytes.
-    let key = b"jobs/payments";
+    let key = b"workloads/payments";
     let stored = state.store.get(key).await.expect("get must succeed");
     let bytes = stored.expect("intent key must remain populated after a Conflict");
     let canonical_job =
         overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
-    let canonical_bytes = canonical_job.archive_for_store().expect("rkyv archive of canonical job");
+    let canonical_bytes = overdrive_core::aggregate::WorkloadIntent::Job(canonical_job)
+        .archive_for_store()
+        .expect("rkyv archive of canonical job");
     assert_eq!(
         bytes.as_ref(),
         canonical_bytes.as_ref(),
@@ -268,7 +270,7 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
     // The key must be populated (get returns Some) — proves the put
     // actually fired. Per ADR-0020 `IntentStore::get` returns
     // `Option<Bytes>`.
-    let key = b"jobs/payments";
+    let key = b"workloads/payments";
     let stored = state.store.get(key).await.expect("get must succeed");
     let bytes = stored.expect(
         "after successful submit the intent key must be populated — \

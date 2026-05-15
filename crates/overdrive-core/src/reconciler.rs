@@ -389,7 +389,7 @@ pub struct WorkloadLifecycleState {
     /// surviving row to project against.
     pub job: Option<Job>,
     /// Whether a stop intent has been recorded for this job (i.e.
-    /// `IntentKey::for_job_stop(<id>)` is populated). When true and
+    /// `IntentKey::for_workload_stop(<id>)` is populated). When true and
     /// `job` is `Some`, the reconciler's Stop branch fires —
     /// emitting `Action::StopAllocation` for every Running alloc.
     /// Set false on the actual side; only the desired-side hydrator
@@ -508,7 +508,7 @@ pub enum Action {
     },
     /// Stop a Running allocation. Emitted by the `WorkloadLifecycle`
     /// reconciler when desired state is "stopped" (set by
-    /// `IntentKey::for_job_stop`).
+    /// `IntentKey::for_workload_stop`).
     ///
     /// Per ADR-0037 §4 the variant carries a typed
     /// [`TerminalCondition`] flag the action shim writes onto
@@ -517,7 +517,7 @@ pub enum Action {
     /// emission sites outside a reconciler tick (the action-shim
     /// heartbeat, the exit observer) emit `terminal: None`. When a
     /// stop is operator-initiated (`desired.desired_to_stop` set
-    /// by `IntentKey::for_job_stop`), the reconciler stamps
+    /// by `IntentKey::for_workload_stop`), the reconciler stamps
     /// `Some(TerminalCondition::Stopped { by: StoppedBy::Operator })`
     /// here — the by-source is already known from the desired state,
     /// so the action shim never re-derives it.
@@ -1300,7 +1300,7 @@ impl Reconciler for WorkloadLifecycle {
                 // re-submits the job intent.
                 //
                 // (Distinct from `desired.desired_to_stop`, which is
-                // a separate signal carried by `IntentKey::for_job_stop`
+                // a separate signal carried by `IntentKey::for_workload_stop`
                 // and handled at the Stop branch above. The
                 // Operator-stopped row arrives via the watcher's
                 // `intentional_stop` flag — set by `Driver::stop`

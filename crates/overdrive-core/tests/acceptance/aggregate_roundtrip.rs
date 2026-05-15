@@ -71,37 +71,45 @@ fn sample_allocation() -> Allocation {
 
 #[test]
 fn job_rkyv_roundtrip_equals_original() {
-    let original = sample_job();
+    let original = overdrive_core::aggregate::WorkloadIntent::Job(sample_job());
 
     let bytes = original
         .archive_for_store()
-        .expect("rkyv envelope serialization of canonical Job must succeed");
+        .expect("rkyv envelope serialization of canonical WorkloadIntent must succeed");
 
-    let deserialized =
-        Job::from_store_bytes(&bytes, std::path::Path::new("aggregate_roundtrip.redb"), None)
-            .expect("envelope bytes must decode back to Job");
+    let deserialized = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+        &bytes,
+        std::path::Path::new("aggregate_roundtrip.redb"),
+        None,
+    )
+    .expect("envelope bytes must decode back to WorkloadIntent");
 
-    assert_eq!(deserialized, original, "rkyv envelope round-trip must preserve Job equality");
+    assert_eq!(
+        deserialized, original,
+        "rkyv envelope round-trip must preserve WorkloadIntent equality",
+    );
 }
 
-/// `Job::spec_digest()` MUST equal SHA-256 over the raw payload bytes
-/// (`rkyv::to_bytes(&job)`), NOT the envelope-wrapped bytes from
-/// `archive_for_store`. Content-addressed identity depends only on
-/// the logical payload — including the envelope discriminant byte
-/// would make the digest shift on every envelope version bump.
+/// `WorkloadIntent::spec_digest()` MUST equal SHA-256 over the raw
+/// inner-payload bytes (`rkyv::to_bytes(&intent)`), NOT the
+/// envelope-wrapped bytes from `archive_for_store`. Content-addressed
+/// identity depends only on the logical payload — including the
+/// envelope discriminant byte would make the digest shift on every
+/// envelope version bump.
 #[test]
 fn job_spec_digest_matches_raw_payload_hash() {
-    let job = sample_job();
+    let intent = overdrive_core::aggregate::WorkloadIntent::Job(sample_job());
 
-    let raw_bytes =
-        rkyv::to_bytes::<rancor::Error>(&job).expect("rkyv serialization of Job must succeed");
+    let raw_bytes = rkyv::to_bytes::<rancor::Error>(&intent)
+        .expect("rkyv serialization of WorkloadIntent must succeed");
     let hash_over_raw_bytes = ContentHash::of(raw_bytes.as_ref());
 
-    let digest = job.spec_digest().expect("spec_digest of canonical Job must succeed");
+    let digest =
+        intent.spec_digest().expect("spec_digest of canonical WorkloadIntent must succeed");
 
     assert_eq!(
         digest, hash_over_raw_bytes,
-        "spec_digest MUST equal SHA-256 over raw payload bytes — \
+        "spec_digest MUST equal SHA-256 over raw inner-payload bytes — \
          content-addressed identity must be envelope-version-independent",
     );
 }
@@ -113,13 +121,15 @@ fn job_spec_digest_matches_raw_payload_hash() {
 /// hashing.
 #[test]
 fn job_spec_digest_differs_from_envelope_hash() {
-    let job = sample_job();
+    let intent = overdrive_core::aggregate::WorkloadIntent::Job(sample_job());
 
-    let envelope_bytes =
-        job.archive_for_store().expect("archive_for_store of canonical Job must succeed");
+    let envelope_bytes = intent
+        .archive_for_store()
+        .expect("archive_for_store of canonical WorkloadIntent must succeed");
     let hash_over_envelope = ContentHash::of(envelope_bytes.as_ref());
 
-    let digest = job.spec_digest().expect("spec_digest of canonical Job must succeed");
+    let digest =
+        intent.spec_digest().expect("spec_digest of canonical WorkloadIntent must succeed");
 
     assert_ne!(
         digest, hash_over_envelope,

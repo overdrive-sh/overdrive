@@ -2,7 +2,7 @@
 //! `job_stop_drives_running_to_terminated`.
 //!
 //! Submits a 1-replica job and drives convergence until alloc reaches
-//! Running. Then writes the stop intent (`IntentKey::for_job_stop`)
+//! Running. Then writes the stop intent (`IntentKey::for_workload_stop`)
 //! and drives convergence again — alloc must transition Running →
 //! Terminated.
 //!
@@ -82,8 +82,10 @@ async fn job_stop_drives_running_to_terminated() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/stopper").expect("valid target");
@@ -114,7 +116,7 @@ async fn job_stop_drives_running_to_terminated() {
     assert!(converged_running, "convergence loop must produce a Running alloc within 30 ticks");
 
     // Now write the stop intent and drive convergence again.
-    let stop_key = IntentKey::for_job_stop(&job.id);
+    let stop_key = IntentKey::for_workload_stop(&job.id);
     state.store.put(stop_key.as_bytes(), b"").await.expect("put stop intent");
 
     let mut converged_terminated = false;

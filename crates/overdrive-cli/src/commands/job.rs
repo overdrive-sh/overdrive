@@ -229,10 +229,11 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
         client.submit_workload(SubmitWorkloadRequest { spec: spec_input, workload_kind }).await?;
 
     // 5. Compose the typed output. Intent key is derived via the
-    //    shared `IntentKey::for_job` helper (ADR-0011 SSOT) — no
-    //    drift-prone second `jobs/` literal in this crate.
+    //    shared `IntentKey::for_workload` helper (ADR-0050 OQ-5 single-
+    //    cut migration: `jobs/<id>` → `workloads/<id>`) — no drift-
+    //    prone second `workloads/` literal in this crate.
     let workload_id = parse_response_job_id(&resp.workload_id)?;
-    let intent_key = IntentKey::for_job(&workload_id).as_str().to_string();
+    let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
     let next_command = format!("overdrive alloc status --job {}", resp.workload_id);
     Ok(SubmitOutput {
         workload_id: resp.workload_id,

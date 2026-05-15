@@ -57,14 +57,14 @@ fn validation_error_without_field_renders_as_400_with_none_field() {
 
 #[test]
 fn not_found_error_renders_as_404_with_not_found_kind() {
-    let err = ControlPlaneError::NotFound { resource: "jobs/unknown-id".into() };
+    let err = ControlPlaneError::NotFound { resource: "workloads/unknown-id".into() };
 
     let (status, body) = to_response(err);
 
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body.error, "not_found");
     assert!(
-        body.message.contains("jobs/unknown-id"),
+        body.message.contains("workloads/unknown-id"),
         "message must name the missing resource, got {:?}",
         body.message,
     );
@@ -290,9 +290,9 @@ fn error_response_body_does_not_leak_stack_trace() {
 async fn into_response_round_trips_through_to_response() {
     // Confirm `IntoResponse::into_response` is not silently diverging
     // from `to_response` — status and body shape must match bit-for-bit.
-    let err = ControlPlaneError::NotFound { resource: "jobs/abc".into() };
+    let err = ControlPlaneError::NotFound { resource: "workloads/abc".into() };
     let (expected_status, expected_body) =
-        to_response(ControlPlaneError::NotFound { resource: "jobs/abc".into() });
+        to_response(ControlPlaneError::NotFound { resource: "workloads/abc".into() });
 
     let response = err.into_response();
 

@@ -495,8 +495,12 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         }),
     })
     .map_err(|e| format!("valid job spec: {e:?}"))?;
-    let archived = job.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
-    let key = IntentKey::for_job(&job.id);
+    // Per ADR-0050 single-cut migration: wrap into the kind-agnostic
+    // `WorkloadIntent` aggregate before archival; persist at
+    // `workloads/<id>` keying.
+    let intent = overdrive_core::aggregate::WorkloadIntent::Job(job.clone());
+    let archived = intent.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
+    let key = IntentKey::for_workload(&job.id);
     state
         .store
         .put(key.as_bytes(), archived.as_ref())

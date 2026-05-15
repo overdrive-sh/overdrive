@@ -121,7 +121,10 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn local_spec_digest(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse TOML");
     let job = Job::from_spec(parsed).expect("Job::from_spec");
-    job.spec_digest().expect("spec_digest").to_string()
+    overdrive_core::aggregate::WorkloadIntent::Job(job)
+        .spec_digest()
+        .expect("spec_digest")
+        .to_string()
 }
 
 // -------------------------------------------------------------------
@@ -152,7 +155,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     .await
     .expect("job::submit");
     assert_eq!(submit_output.workload_id, "payments");
-    assert_eq!(submit_output.intent_key, "jobs/payments");
+    assert_eq!(submit_output.intent_key, "workloads/payments");
 
     // WS-1 (test-scenarios.md §1.1, ADR-0020 amendment): the submit
     // output names a spec digest byte-identical to what Ana can
@@ -324,7 +327,7 @@ async fn alloc_status_for_unknown_job_returns_typed_http_status_404_with_actiona
             assert_eq!(body.error, "not_found", "error class must be `not_found`");
             // Message must name the offending job id so the operator can act.
             assert!(
-                body.message.contains("mystery") || body.message.contains("jobs/mystery"),
+                body.message.contains("mystery") || body.message.contains("workloads/mystery"),
                 "ErrorBody.message must name `mystery`; got: {}",
                 body.message,
             );

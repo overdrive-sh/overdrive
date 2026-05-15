@@ -230,13 +230,15 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     // key — i.e. the stored bytes are byte-equal to the rkyv archive of
     // the canonical spec, unchanged by the second submission.
     let workload_id = WorkloadId::new("payments").expect("parse payments WorkloadId");
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
-        .expect("jobs/payments must be populated after successful submit");
+        .expect("workloads/payments must be populated after successful submit");
 
     let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
-    let expected_bytes = expected_job.archive_for_store().expect("rkyv archive of expected Job");
+    let expected_bytes = overdrive_core::aggregate::WorkloadIntent::Job(expected_job)
+        .archive_for_store()
+        .expect("rkyv archive of expected Job");
     assert_eq!(
         persisted.as_ref(),
         expected_bytes.as_ref(),
@@ -455,7 +457,7 @@ async fn conflict_message_names_intent_key_path() {
     // needs to be able to tell WHICH key conflicted from the body alone.
     // `jobs/payments` is the canonical form per `IntentKey::for_job`.
     assert!(
-        body.message.contains("jobs/payments"),
+        body.message.contains("workloads/payments"),
         "conflict ErrorBody.message must name the intent-key path \
          (substring 'jobs/payments'); got {:?}",
         body.message,

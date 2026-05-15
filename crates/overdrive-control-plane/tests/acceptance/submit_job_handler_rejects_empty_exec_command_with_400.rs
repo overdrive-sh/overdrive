@@ -107,7 +107,7 @@ async fn submit_job_handler_rejects_empty_exec_command_with_validation_error_nam
     }
 
     // And no IntentStore put occurred — the key remains absent.
-    let key = b"jobs/payments";
+    let key = b"workloads/payments";
     let stored = state.store.get(key).await.expect("get must succeed");
     assert!(
         stored.is_none(),
@@ -142,6 +142,6 @@ async fn submit_job_handler_rejects_whitespace_only_exec_command_with_validation
     }
 
     // Defence-in-depth: no IntentStore put.
-    let stored = state.store.get(b"jobs/payments").await.expect("get must succeed");
+    let stored = state.store.get(b"workloads/payments").await.expect("get must succeed");
     assert!(stored.is_none(), "rejected spec must not reach the store");
 }

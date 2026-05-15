@@ -96,8 +96,10 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
@@ -255,8 +257,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let payments_intent_key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let payments_intent_key = IntentKey::for_workload(&job.id);
     state.store.put(payments_intent_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
@@ -397,7 +401,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///      far enough to elapse the 1-second per-attempt backoff window;
 ///      this is the load-bearing precondition — the alloc is Failed
 ///      AND mid-backoff when the stop arrives.)
-///   4. Submit the stop intent (`IntentKey::for_job_stop(<id>)`) and
+///   4. Submit the stop intent (`IntentKey::for_workload_stop(<id>)`) and
 ///      capture `dispatched` at this moment.
 ///   5. Drive 10 more convergence ticks.
 ///   6. Assert: `queued == 0` (broker drained); `dispatched -
@@ -453,8 +457,10 @@ async fn stop_after_failed_alloc_drains_broker() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let job_key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let job_key = IntentKey::for_workload(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Submit the seed evaluation.
@@ -528,7 +534,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     is the signal — value is opaque (the runtime probes
     //     `state.store.get(stop_key.as_bytes())` and treats `Some(_)`
     //     as "stop intended"). A single zero byte is sufficient.
-    let stop_key = IntentKey::for_job_stop(&workload_id);
+    let stop_key = IntentKey::for_workload_stop(&workload_id);
     state.store.put(stop_key.as_bytes(), &[0u8]).await.expect("put stop intent");
 
     // --- Re-submit the evaluation so the next tick re-evaluates the
@@ -699,8 +705,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let job_key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let job_key = IntentKey::for_workload(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Submit the seed evaluation.
@@ -964,8 +972,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // Seed Failed alloc (observation) so hydrate_actual sees a Failed

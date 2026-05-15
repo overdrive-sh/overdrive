@@ -18,7 +18,9 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
-use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput, WorkloadKind};
+use overdrive_core::aggregate::{
+    AggregateError, IntentKey, Job, JobSpecInput, WorkloadIntent, WorkloadKind,
+};
 use overdrive_core::id::WorkloadId;
 use overdrive_core::reconciler::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
@@ -235,28 +237,40 @@ pub async fn submit_workload(
         other => ControlPlaneError::Aggregate(other),
     })?;
 
-    // 2. Archive canonically via the typed `JobEnvelope` codec
-    //    (ADR-0048 § "Intent persistence boundary"). Two archivals of
-    //    the same logical Job produce byte-identical bytes — this is
-    //    what makes the idempotency check byte-equality instead of
-    //    semantic-equality.
-    let archived = job
+    // 2. Wrap the validated Job in the kind-agnostic `WorkloadIntent`
+    //    aggregate per ADR-0050 and archive canonically via the typed
+    //    `WorkloadIntentEnvelope` codec. Two archivals of the same
+    //    logical intent produce byte-identical bytes — this is what
+    //    makes the idempotency check byte-equality instead of
+    //    semantic-equality. Submit handler today only accepts
+    //    `JobSpecInput` (per step 02-03a scope; Service/Schedule
+    //    landing in 02-03b), so we always wrap as `WorkloadIntent::Job`.
+    let workload_id = job.id.clone();
+    let intent = WorkloadIntent::Job(job);
+    let archived = intent
         .archive_for_store()
-        .map_err(|e| ControlPlaneError::internal("rkyv archive of Job", e))?;
+        .map_err(|e| ControlPlaneError::internal("rkyv archive of WorkloadIntent", e))?;
 
-    // 3. Derive the canonical intent key (`jobs/<WorkloadId>`).
-    let key = IntentKey::for_job(&job.id);
+    // 3. Derive the canonical intent key (`workloads/<WorkloadId>`)
+    //    per ADR-0050 OQ-5 single-cut migration.
+    let key = IntentKey::for_workload(&workload_id);
 
-    // 4. Compute the canonical `spec_digest` over the envelope bytes
-    //    via the typed codec method (ADR-0048 § 5 — operator-observable
-    //    Job ID change absorbed by greenfield single-cut). Used both as
-    //    the response field and (on the `KeyExists` branch) as the
-    //    equality check against the bytes already stored at this key —
-    //    see step 5.
-    let spec_digest = job
+    // 4. Compute the canonical `spec_digest` via the typed codec
+    //    method. Per ADR-0050 the digest is over the rkyv-archived
+    //    inner `WorkloadIntentV1` payload bytes — distinct from
+    //    pre-migration `Job::spec_digest`, but stable across reads
+    //    and used by `ServiceVipAllocator` per ADR-0049.
+    let spec_digest = intent
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?
         .to_string();
+    // Re-borrow the inner `JobV1` for downstream code that still names
+    // the `Job` shape (kind discriminator persistence below, response
+    // body construction). 02-03b widens the submit wire shape to
+    // accept Service/Schedule directly.
+    let WorkloadIntent::Job(ref job) = intent else {
+        unreachable!("submit handler constructed WorkloadIntent::Job directly above");
+    };
 
     // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
     //     persist the workload-kind discriminator at
@@ -356,8 +370,11 @@ pub async fn submit_workload(
                     key.as_str().to_owned(),
                     outcome,
                 );
-                let stream =
-                    crate::streaming::build_workload_stream(state.clone(), job.id, accepted);
+                let stream = crate::streaming::build_workload_stream(
+                    state.clone(),
+                    workload_id.clone(),
+                    accepted,
+                );
                 Body::from_stream(stream)
             }
             WorkloadKind::Service | WorkloadKind::Schedule => {
@@ -366,7 +383,8 @@ pub async fn submit_workload(
                 // flat-`SubmitEvent` path unchanged.
                 let accepted =
                     crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
-                let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
+                let stream =
+                    crate::streaming::build_stream(state.clone(), workload_id.clone(), accepted);
                 Body::from_stream(stream)
             }
         };
@@ -448,30 +466,36 @@ pub async fn describe_workload(
     //    duplicate the job-prefix literal into a second production
     //    file, which the `intent_key_canonical` grep-gate in
     //    `overdrive-core` explicitly forbids.
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
 
-    // 3. Decode the persisted bytes via the typed `JobEnvelope` codec
-    //    (ADR-0048 § "Intent persistence boundary"). Corruption /
-    //    bit-rot in the redb file surfaces here as
-    //    `IntentStoreError::Envelope`; it maps to HTTP 500 via the
-    //    `#[from]` blanket on `ControlPlaneError::Intent`. The
-    //    `health.startup.refused` event names the IntentKey so an
-    //    operator can identify which job's bytes failed to decode.
-    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
+    // 3. Decode the persisted bytes via the typed `WorkloadIntentEnvelope`
+    //    codec (ADR-0050 § 4 + ADR-0048 § "Intent persistence
+    //    boundary"). Corruption / bit-rot in the redb file surfaces
+    //    here as `IntentStoreError::Envelope`; it maps to HTTP 500
+    //    via the `#[from]` blanket on `ControlPlaneError::Intent`.
+    let intent =
+        WorkloadIntent::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
+    let WorkloadIntent::Job(job) = intent else {
+        // Step 02-03a — submit handler today only accepts Job. Service
+        // / Schedule arms land in 02-03b once `SubmitWorkloadRequest`
+        // widens to `WorkloadSpecInput`.
+        unreachable!(
+            "describe_workload reached non-Job WorkloadIntent variant; submit handler currently rejects Service / Schedule"
+        );
+    };
 
-    // 4. Canonical spec_digest — SHA-256 over the envelope bytes
-    //    `archive_for_store` produces. Per ADR-0048 § 5, this digest
-    //    is computed over envelope bytes (envelope tag + payload), not
-    //    over raw V1 payload bytes — the operator-observable Job ID
-    //    change is absorbed by the greenfield single-cut migration.
-    let spec_digest = job
+    // 4. Canonical spec_digest — SHA-256 over the rkyv-archived inner
+    //    `WorkloadIntentV1` payload bytes per ADR-0050. Recompute
+    //    against the wrapping `WorkloadIntent::Job(job)` so the digest
+    //    matches submit-handler output.
+    let spec_digest = WorkloadIntent::Job(job.clone())
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?
         .to_string();
 
     Ok(Json(api::WorkloadDescription { spec: JobSpecInput::from(&job), spec_digest }))
@@ -488,13 +512,13 @@ pub async fn describe_workload(
 /// equivalent, and free of framework conflict. ADR-0027's guidance
 /// stands; only the URL form differs.
 ///
-/// Idempotency: the handler writes `IntentKey::for_job_stop(<id>)`
+/// Idempotency: the handler writes `IntentKey::for_workload_stop(<id>)`
 /// via `IntentStore::put_if_absent` (atomic compare-and-set). A
 /// second call sees `KeyExists` and returns
 /// `outcome = AlreadyStopped` — no second write occurs.
 ///
 /// 404 contract: a stop call against an `<id>` that was never
-/// submitted (no `IntentKey::for_job(<id>)` row) returns HTTP 404.
+/// submitted (no `IntentKey::for_workload(<id>)` row) returns HTTP 404.
 /// The original spec key MUST exist before a stop intent can be
 /// recorded — stopping a non-existent job is operator error, not an
 /// idempotent no-op.
@@ -527,7 +551,7 @@ pub async fn stop_workload(
     //    row is absent we have no stop target, so 404 surfaces with
     //    the same `resource = jobs/<id>` shape as describe_workload's
     //    NotFound path.
-    let job_key = IntentKey::for_job(&workload_id);
+    let job_key = IntentKey::for_workload(&workload_id);
     let job_exists = state.store.get(job_key.as_bytes()).await?.is_some();
     if !job_exists {
         return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
@@ -537,7 +561,7 @@ pub async fn stop_workload(
     //    deliberate — the key's existence IS the signal. A second
     //    stop call lands on the KeyExists branch and reports
     //    AlreadyStopped without a second write.
-    let stop_key = IntentKey::for_job_stop(&workload_id);
+    let stop_key = IntentKey::for_workload_stop(&workload_id);
     let outcome = match state.store.put_if_absent(stop_key.as_bytes(), b"").await? {
         PutOutcome::Inserted => StopOutcome::Stopped,
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
@@ -646,17 +670,23 @@ pub async fn alloc_status(
         field: Some("job".to_owned()),
     })?;
 
-    // Read the Job aggregate — 404 if absent.
-    let key = IntentKey::for_job(&workload_id);
+    // Read the workload aggregate — 404 if absent.
+    let key = IntentKey::for_workload(&workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
-    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
-    let spec_digest = job
+    let intent =
+        WorkloadIntent::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
+    let WorkloadIntent::Job(job) = intent else {
+        unreachable!(
+            "alloc_status reached non-Job WorkloadIntent variant; submit handler currently rejects Service / Schedule (step 02-03b)"
+        );
+    };
+    let spec_digest = WorkloadIntent::Job(job.clone())
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?
         .to_string();
 
     // Filter rows to this job, project them, and stamp the requested

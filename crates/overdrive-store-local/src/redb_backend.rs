@@ -123,52 +123,34 @@ impl LocalIntentStore {
         }
 
         // Intent envelope recovery walk per ADR-0048 § "Intent
-        // persistence boundary — typed codec on Job" + § 3
-        // (refuse-to-start on malformed/unknown envelopes). Iterate
-        // every key with the `jobs/` prefix and attempt to decode via
-        // the typed `Job::from_store_bytes` codec. The first decode
-        // failure surfaces a structured `health.startup.refused` event
-        // (emitted inside `from_store_bytes`) and aborts boot with
-        // `IntentStoreError::Envelope`. The asymmetric intent-fail-fast
-        // policy (intent is load-bearing SSOT) is implemented here.
-        // The `jobs/<id>/stop` suffix-keys are skipped — their value is
-        // an empty byte slice (the existence is the signal); they don't
-        // carry envelope bytes.
+        // persistence boundary" + ADR-0050 (single-cut migration to
+        // `workloads/<id>` keying) + § 3 (refuse-to-start on
+        // malformed/unknown envelopes). Iterate every key with the
+        // `workloads/` prefix and attempt to decode via the typed
+        // `WorkloadIntent::from_store_bytes` codec. The first decode
+        // failure surfaces a structured `health.startup.refused`
+        // event and aborts boot with `IntentStoreError::Envelope`.
+        // Suffix-keys (`workloads/<id>/stop`, `workloads/<id>/kind`)
+        // are skipped — they carry sentinel bytes, not aggregate
+        // envelope bytes.
         {
-            const JOB_PREFIX: &[u8] = b"jobs/";
+            const WORKLOAD_PREFIX: &[u8] = b"workloads/";
             const STOP_SUFFIX: &[u8] = b"/stop";
+            const KIND_SUFFIX: &[u8] = b"/kind";
             let read = db.begin_read().map_err(map_transaction_error)?;
             let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-            let range = table.range::<&[u8]>(JOB_PREFIX..).map_err(map_storage_error)?;
+            let range = table.range::<&[u8]>(WORKLOAD_PREFIX..).map_err(map_storage_error)?;
             for entry in range {
                 let (key, value) = entry.map_err(map_storage_error)?;
                 let key_bytes = key.value();
-                if !key_bytes.starts_with(JOB_PREFIX) {
-                    // Safe to break: redb range scans iterate keys in
-                    // sorted byte order, so once the prefix no longer
-                    // matches, every remaining key in the range also
-                    // won't. Removing the prefix-bounded scan would
-                    // make the boot path scan every row in the table.
+                if !key_bytes.starts_with(WORKLOAD_PREFIX) {
                     break;
                 }
-                if key_bytes.ends_with(STOP_SUFFIX) {
+                if key_bytes.ends_with(STOP_SUFFIX) || key_bytes.ends_with(KIND_SUFFIX) {
                     continue;
                 }
-                // Pass the iterated key into `from_store_bytes` so the
-                // `health.startup.refused` event names which row failed
-                // when an operator has N jobs in the file. We
-                // hex-encode the key bytes unconditionally: today's
-                // keys are ASCII `jobs/<workload-id>` (hex form is
-                // verbose but unambiguous), but a future key prefix
-                // may carry binary bytes — `String::from_utf8_lossy`
-                // would silently substitute U+FFFD and corrupt the
-                // operator's ability to locate the failing row.
-                // The hex form is always correct and round-trips
-                // through `xxd | grep <hex>` / `redb-cli`. The event's
-                // `key` field is the load-bearing diagnostic
-                // identifier; clarity beats brevity here.
                 let key_hex = hex::encode(key_bytes);
-                overdrive_core::aggregate::Job::from_store_bytes(
+                overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
                     value.value(),
                     path,
                     Some(&key_hex),
@@ -515,25 +497,27 @@ impl IntentStore for LocalIntentStore {
                 .map_err(|e| IntentStoreError::SnapshotCorrupt { offset: e.offset() })?;
 
             // Intent envelope validation walk — same discipline as
-            // `LocalIntentStore::open`. Every `jobs/<id>` entry
-            // (excluding `jobs/<id>/stop` sentinel keys) is decoded
-            // through the typed `Job::from_store_bytes` codec BEFORE
-            // any write. A snapshot containing an unknown or malformed
+            // `LocalIntentStore::open`. Every `workloads/<id>`
+            // aggregate-body entry (excluding `/stop` and `/kind`
+            // suffix sentinels) is decoded through the typed
+            // `WorkloadIntent::from_store_bytes` codec BEFORE any
+            // write. A snapshot containing an unknown or malformed
             // envelope surfaces `health.startup.refused` and aborts
             // here — the target store is never touched.
             {
-                const JOB_PREFIX: &[u8] = b"jobs/";
+                const WORKLOAD_PREFIX: &[u8] = b"workloads/";
                 const STOP_SUFFIX: &[u8] = b"/stop";
+                const KIND_SUFFIX: &[u8] = b"/kind";
                 for (k, v) in &entries {
                     let key_bytes = k.as_ref();
-                    if !key_bytes.starts_with(JOB_PREFIX) {
+                    if !key_bytes.starts_with(WORKLOAD_PREFIX) {
                         continue;
                     }
-                    if key_bytes.ends_with(STOP_SUFFIX) {
+                    if key_bytes.ends_with(STOP_SUFFIX) || key_bytes.ends_with(KIND_SUFFIX) {
                         continue;
                     }
                     let key_hex = hex::encode(key_bytes);
-                    overdrive_core::aggregate::Job::from_store_bytes(
+                    overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
                         v.as_ref(),
                         &inner.path,
                         Some(&key_hex),

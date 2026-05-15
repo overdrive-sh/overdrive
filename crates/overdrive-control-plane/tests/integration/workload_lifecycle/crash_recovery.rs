@@ -110,8 +110,10 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/recovery").expect("valid target");

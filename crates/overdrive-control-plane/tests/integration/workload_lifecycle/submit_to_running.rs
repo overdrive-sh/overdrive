@@ -74,8 +74,10 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/payments").expect("valid target");

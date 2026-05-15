@@ -135,8 +135,10 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/backoff-exhaust").expect("valid target");
@@ -228,8 +230,10 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/term-stop").expect("valid target");
@@ -260,7 +264,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     assert!(converged_running, "must reach Running before issuing stop");
 
     // Issue operator stop.
-    let stop_key = IntentKey::for_job_stop(&job.id);
+    let stop_key = IntentKey::for_workload_stop(&job.id);
     state.store.put(stop_key.as_bytes(), b"").await.expect("put stop intent");
 
     // Drain any pre-stop events; we only care about events from this
@@ -342,8 +346,10 @@ async fn non_terminal_transitions_emit_none() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/non-term").expect("valid target");

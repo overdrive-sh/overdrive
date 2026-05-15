@@ -316,7 +316,7 @@ fn converged_failed_carries_nested_cause_class_under_backoff_exhausted() {
 fn accepted_serialises_with_inserted_outcome_lowercase() {
     let event = SubmitEvent::Accepted {
         spec_digest: "sha256:abc".to_string(),
-        intent_key: "jobs/payments".to_string(),
+        intent_key: "workloads/payments".to_string(),
         outcome: IdempotencyOutcome::Inserted,
     };
 
@@ -333,7 +333,7 @@ fn accepted_serialises_with_inserted_outcome_lowercase() {
         "outcome lowercase rendering missing: {serialised}"
     );
     assert!(
-        serialised.contains(r#""intent_key":"jobs/payments""#),
+        serialised.contains(r#""intent_key":"workloads/payments""#),
         "intent_key field missing: {serialised}"
     );
 }

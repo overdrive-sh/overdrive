@@ -1001,26 +1001,44 @@ pub async fn hydrate_desired_for_test(
     hydrate_desired(reconciler, target, state).await
 }
 
-/// Read a `Job` from the `IntentStore` at the canonical `jobs/<id>` key,
-/// rkyv-decoding the archived bytes. Returns `Ok(None)` when the key is
-/// absent. Errors map to `ConvergenceError::IntentRead`.
+/// Read a `Job` from the `IntentStore` at the canonical
+/// `workloads/<id>` key (per ADR-0050 OQ-5 single-cut migration),
+/// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes.
+/// Returns `Ok(None)` when the key is absent. Errors map to
+/// `ConvergenceError::IntentRead`.
+///
+/// Step 02-03a: submit handler today only writes Job-shaped intents
+/// (Service / Schedule arms land in 02-03b). Decoding to anything
+/// other than `WorkloadIntent::Job(_)` is unreachable in this slice;
+/// the match arm panics with a descriptive message rather than
+/// silently coercing.
 async fn read_job(
     state: &AppState,
     workload_id: &WorkloadId,
 ) -> Result<Option<Job>, ConvergenceError> {
-    let key = IntentKey::for_job(workload_id);
+    let key = IntentKey::for_workload(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
     let Some(b) = bytes else { return Ok(None) };
-    // Pass the canonical IntentKey (`jobs/<workload-id>`) so a decode
-    // failure's `health.startup.refused` event names the specific row
-    // an operator would need to inspect.
-    let job = Job::from_store_bytes(b.as_ref(), &state.intent_redb_path, Some(key.as_str()))
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    Ok(Some(job))
+    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+        b.as_ref(),
+        &state.intent_redb_path,
+        Some(key.as_str()),
+    )
+    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    match intent {
+        overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok(Some(job)),
+        overdrive_core::aggregate::WorkloadIntent::Service(_)
+        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
+            unreachable!(
+                "reconciler_runtime::read_job reached non-Job WorkloadIntent variant; \
+                 submit handler currently rejects Service / Schedule (step 02-03b)"
+            )
+        }
+    }
 }
 
 /// Read the persisted workload-kind discriminator at
@@ -1044,12 +1062,13 @@ async fn read_workload_kind(
         .map_or_else(WorkloadKind::default, WorkloadKind::from_discriminator_byte))
 }
 
-/// Probe the canonical `jobs/<id>:stop` key; presence is the signal.
+/// Probe the canonical `workloads/<id>/stop` key; presence is the
+/// signal. Per ADR-0050 OQ-5 single-cut migration.
 async fn stop_intent_present(
     state: &AppState,
     workload_id: &WorkloadId,
 ) -> Result<bool, ConvergenceError> {
-    let stop_key = IntentKey::for_job_stop(workload_id);
+    let stop_key = IntentKey::for_workload_stop(workload_id);
     let stop_bytes = state
         .store
         .get(stop_key.as_bytes())

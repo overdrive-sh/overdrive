@@ -133,8 +133,10 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // Drive the convergence tick loop M+1 times. The current ceiling

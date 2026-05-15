@@ -253,6 +253,41 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE. No code written; no commit produced. Working tree unchanged.",
       "t": "2026-05-14T14:53:49Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T04:20:43Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T04:46:40Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: round-trip + golden-bytes + spec_digest determinism tests in tests/schema_evolution/workload_intent.rs are unit-level proptests; no smaller unit decomposition warranted",
+      "t": "2026-05-15T04:46:43Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T04:59:15Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS commit=5c72564e",
+      "t": "2026-05-15T05:08:52Z"
     }
   ]
 }

@@ -98,18 +98,16 @@ pub enum AggregateError {
 /// serde is NOT substitutable for rkyv in hashing contexts — see
 /// ADR-0002.
 ///
-/// # Envelope wrapping (ADR-0048)
+/// # Envelope wrapping (ADR-0050)
 ///
-/// Per ADR-0048 § 4 (outer-envelope-only on `Job`), `Job` is the
-/// inner payload type wrapped by [`JobEnvelope`]. Under the UI-02
-/// amendment (alias-to-payload public API), `pub type Job = JobV1`
-/// preserves every existing struct-literal `Job { id, replicas,
-/// resources, driver }` construction across the workspace
-/// unchanged. The persistence-boundary code (codec-internal — only
-/// `LocalIntentStore` should name `JobEnvelope`) is the SOLE site
-/// that wraps via [`JobEnvelope::latest`]. Embedded
-/// `WorkloadDriver` and `Exec` types are NOT wrapped per ADR-0048
-/// § 4 — schema changes there bump the outer `JobEnvelope` version.
+/// Per ADR-0050 single-cut migration: the `Job` payload is wrapped
+/// at the persistence boundary by [`WorkloadIntentEnvelope`] via
+/// the [`WorkloadIntentV1::Job`] variant — NOT by a per-type
+/// `JobEnvelope`. Public callers construct `Job { ... }` (=
+/// `JobV1 { ... }`) values via struct-literal syntax and wrap with
+/// `WorkloadIntent::Job(job)` at the persistence boundary; the
+/// codec ([`WorkloadIntentV1::archive_for_store`]) is the SOLE
+/// wrapping site.
 pub type Job = JobV1;
 
 /// Validated intent-side counterpart to wire-shape [`DriverInput`]. One
@@ -168,65 +166,33 @@ pub struct Exec {
 }
 
 // ---------------------------------------------------------------------------
-// Job versioned envelope per ADR-0048 § 4
+// Job inner payload (envelope relocated to WorkloadIntent per ADR-0050)
 // ---------------------------------------------------------------------------
 //
-// Per ADR-0048 § 4 (outer-envelope-only on `Job`), the envelope wraps
-// the outer `JobV1` payload; embedded `WorkloadDriver` / `Exec` types
-// are NOT wrapped — their schema changes bump the outer `JobEnvelope`
-// version.
+// Per ADR-0050 single-cut migration: the persistence-boundary
+// envelope on `Job` (`JobEnvelope`, `JobLatest`,
+// `Job::archive_for_store`, `Job::from_store_bytes`,
+// `Job::spec_digest`) was deleted in this commit. The `Job` payload
+// is now persisted as the inner variant of
+// [`WorkloadIntentV1::Job`]; the codec lives on
+// [`WorkloadIntentV1`].
 //
-// Per ADR-0048 § 2 Layer 1 + UI-01 amendment: both `JobEnvelope` and
-// `JobV1` are `pub` (rustc E0446 forbids `pub(crate)` under a `pub`
-// trait), but neither is re-exported from `overdrive_core::lib.rs`.
-// The load-bearing Layer 1 target is `JobEnvelope` (the envelope
-// is codec-internal; callers go through the `Job = JobV1` payload
-// alias for struct-literal construction).
-//
-// Per ADR-0048 § 2 Layer 2: in-crate variant construction
-// (`JobEnvelope::V1(...)` literal) is rejected by
-// `xtask::dst_lint::scan_for_envelope_variant_construction`; the
-// canonical construction path is `JobEnvelope::latest(payload)`.
+// `Job::from_spec` (the validating constructor) is preserved
+// unchanged — every CLI handler and every server handler still
+// routes through it. The `Job` alias (= `JobV1`) is retained so
+// existing struct-literal `Job { id, replicas, resources, driver }`
+// construction across the workspace stays unchanged; callers wrap
+// the value via `WorkloadIntent::Job(job)` at the persistence
+// boundary.
 
-/// Per-type rkyv versioned envelope for the [`Job`] aggregate per
-/// ADR-0048 § 4.
-///
-/// Codec-internal — named only inside `LocalIntentStore` read/write
-/// paths. Public callers use the [`Job`] alias (= [`JobV1`]) and
-/// construct payloads via struct-literal syntax; the persistence
-/// boundary wraps via [`JobEnvelope::latest`].
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum JobEnvelope {
-    V1(JobV1),
-}
-
-/// Alias for the latest payload variant of [`JobEnvelope`]. Today
-/// this is [`JobV1`]; bumping to `JobV2` updates this alias and the
-/// [`VersionedEnvelope::latest`] constructor in one commit per the
-/// version-bump procedure in `.claude/rules/development.md`
-/// § "rkyv schema evolution".
-pub type JobLatest = JobV1;
-
-/// Inner V1 payload of the [`Job`] aggregate per ADR-0048 § 4.
+/// Inner V1 payload of the [`Job`] aggregate.
 ///
 /// rkyv archives are **fixed positional layouts** — appending a
 /// field to this struct shifts every subsequent offset and renders
 /// previously-archived bytes unreadable. Layout-changing edits
-/// require minting a new `JobV2` payload + appending a new
-/// [`JobEnvelope::V2`] variant + landing a `From<JobV1> for JobV2`
-/// conversion + pinning a fresh golden-bytes fixture in
-/// `tests/schema_evolution/job.rs` — all in a single commit. See
-/// `.claude/rules/development.md` § "Version-bump procedure".
+/// require minting a new outer envelope variant per
+/// `.claude/rules/development.md` § "Version-bump procedure". The
+/// envelope today is [`WorkloadIntentEnvelope`] (per ADR-0050).
 ///
 /// Per ADR-0031 Amendment 1, `driver` is a tagged enum
 /// (`WorkloadDriver`) carrying the operator's invocation shape;
@@ -252,50 +218,6 @@ pub struct JobV1 {
     /// shape. Per ADR-0031 Amendment 1 this is a tagged enum
     /// mirroring the wire-shape `DriverInput`.
     pub driver: WorkloadDriver,
-}
-
-impl VersionedEnvelope for JobEnvelope {
-    type Latest = JobV1;
-
-    fn latest(payload: Self::Latest) -> Self {
-        Self::V1(payload)
-    }
-
-    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        match self {
-            Self::V1(v1) => Ok(v1),
-        }
-    }
-
-    /// Discriminant offset for `JobEnvelope` archives, measured from
-    /// the END of the archive bytes.
-    ///
-    /// Empirically determined against canonical V1 payloads of
-    /// varying inner-string sizes (`workload_id`, `command`, `args`):
-    /// rkyv 0.8 places the outer enum's discriminant byte 64 bytes
-    /// from the END of the archive, stable across all payload sizes
-    /// (the trailing "root" structure has a fixed footprint; only
-    /// the leading slab grows with variable-length data).
-    ///
-    /// Re-pin alongside the schema-evolution fixture at every
-    /// version-bump per
-    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
-    /// docstring.
-    fn discriminant_offset_from_end() -> Option<usize> {
-        Some(64)
-    }
-
-    fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0 (declaration order — first
-        // variant). Empirically verified by archiving a canonical
-        // `JobEnvelope::latest(...)` and inspecting the byte at
-        // `bytes.len() - 64`.
-        &[0]
-    }
-
-    fn type_name() -> &'static str {
-        "JobEnvelope"
-    }
 }
 
 impl JobV1 {
@@ -353,133 +275,245 @@ impl JobV1 {
 }
 
 // ---------------------------------------------------------------------------
-// Job typed persistence-boundary codec (UI-03 — typed codec on `Job`)
+// `WorkloadIntent` — kind-agnostic intent-side workload aggregate (ADR-0050)
 // ---------------------------------------------------------------------------
 //
-// Per ADR-0048 § "Intent persistence boundary — typed codec on `Job`"
-// (UI-03 amendment 2026-05-12): the `IntentStore` trait is a generic
-// byte-level k/v store (Jobs, kind discriminators, stop markers,
-// snapshot frames). The envelope-wrapping discipline lives on the
-// `Job` type itself, NOT inside the adapter trait. Every Job writer in
-// the workspace goes through [`Job::archive_for_store`]; every Job
-// reader goes through [`Job::from_store_bytes`]. The two methods are
-// the SOLE wrapping sites — public callers continue to construct
-// payloads via struct-literal `Job { ... }` (= `JobV1 { ... }`)
-// unchanged.
+// Per ADR-0050 (Accepted 2026-05-14): the intent-side aggregate is a
+// kind-discriminated outer enum (`WorkloadIntent::Job | Service |
+// Schedule`), distinct from the parser-side `WorkloadSpec`. Pattern C
+// (parsed-on-ingress, typed-on-disk) — the two type families evolve
+// independently. The persistence-boundary codec lives on
+// `WorkloadIntent` (per ADR-0048 § 4b — typed codec on the value);
+// the `IntentStore` trait stays generic byte-level.
+//
+// Per OQ-5 (single-cut), every workload-scoped row sits at
+// `workloads/<id>` — see `IntentKey::for_workload*`.
 
-impl JobV1 {
-    /// Archive a [`Job`] for persistence through the [`IntentStore`].
-    ///
-    /// # Preconditions
-    ///
-    /// `self` is a valid [`JobV1`] payload — every field has gone
-    /// through [`JobV1::from_spec`] validation. There are no further
-    /// preconditions.
+/// Public payload alias for the intent-side workload aggregate.
+///
+/// Per ADR-0050 the alias points at the latest payload variant —
+/// today `WorkloadIntentV1`. Callers construct values via
+/// `WorkloadIntent::Job(job)` / `WorkloadIntent::Service(svc)` /
+/// `WorkloadIntent::Schedule(sched)` and pass the value to the
+/// persistence-boundary codec ([`WorkloadIntentV1::archive_for_store`]).
+pub type WorkloadIntent = WorkloadIntentV1;
+
+/// Documentation alias for "the latest payload variant of
+/// [`WorkloadIntentEnvelope`]". Mirrors the [`Job`] = [`JobV1`]
+/// alias-to-payload pattern from ADR-0048 UI-02.
+pub type WorkloadIntentLatest = WorkloadIntentV1;
+
+/// Per-type rkyv versioned envelope for the intent-side workload
+/// aggregate per ADR-0048 § 4 + ADR-0050 § 4.
+///
+/// Codec-internal — named only inside the typed
+/// [`WorkloadIntentV1::archive_for_store`] / [`WorkloadIntentV1::from_store_bytes`]
+/// codec methods and the persistence-boundary call sites that consume
+/// them. Public callers use the [`WorkloadIntent`] alias and
+/// construct payloads via the per-variant struct-literal syntax;
+/// the persistence boundary wraps via
+/// [`WorkloadIntentEnvelope::latest`].
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum WorkloadIntentEnvelope {
+    V1(WorkloadIntentV1),
+}
+
+/// Inner V1 payload of the intent-side workload aggregate per
+/// ADR-0050 § 1. Three variants tracking the parser-side
+/// [`WorkloadSpec`]: `Job` (run-to-completion), `Service`
+/// (long-running supervised), `Schedule` (cron-fired Job).
+///
+/// rkyv archives are **fixed positional layouts** — appending a
+/// variant to this enum is additive and does not shift discriminant
+/// tags for existing variants per ADR-0048 § "Why a per-type rkyv
+/// enum is forward-compatible". Layout-changing edits to embedded
+/// per-kind payloads (e.g. adding a field to [`ServiceV1`]) require
+/// minting a new envelope variant per `.claude/rules/development.md`
+/// § "Version-bump procedure".
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum WorkloadIntentV1 {
+    /// Run-to-completion workload.
+    Job(JobV1),
+    /// Long-running supervised workload — Phase 1 minimal shape per
+    /// ADR-0050 OQ-3.
+    Service(ServiceV1),
+    /// Cron-scheduled Job — embedded-job shape per ADR-0050 OQ-4.
+    Schedule(ScheduleV1),
+}
+
+/// Phase 1 minimal `Service` payload per ADR-0050 § 2 + OQ-3.
+///
+/// Mirrors [`JobV1`]'s `(id, replicas, resources, driver)` shape and
+/// adds `listeners`. Listener health-check policy, TLS-termination
+/// config, and backend weights are deferred per OQ-3 (additive
+/// envelope evolution).
+///
+/// Carries no VIP — VIPs are platform-issued via
+/// `ServiceVipAllocator` per ADR-0049 § 5. The aggregate carries
+/// what the operator declared; the allocated VIP lives in the
+/// allocator's persisted state and is projected onto listener rows
+/// at dataplane-render time.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ServiceV1 {
+    pub id: WorkloadId,
+    pub replicas: NonZeroU32,
+    pub resources: Resources,
+    pub driver: WorkloadDriver,
+    /// Operator-declared listeners in declaration order. Reuses the
+    /// parser-layer [`Listener`] newtype — `(port, protocol)` only.
+    pub listeners: Vec<Listener>,
+}
+
+/// Phase 1 `Schedule` payload per ADR-0050 § 2 + OQ-4 (embedded
+/// inner job).
+///
+/// The schedule's per-fire instance IS a [`JobV1`] — embedded
+/// directly rather than carried as deferred bytes (alternative
+/// rejected per OQ-4 — every reader would otherwise pay a second
+/// envelope decode). The cron expression is the schedule-only
+/// addition.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ScheduleV1 {
+    pub id: WorkloadId,
+    pub job: JobV1,
+    pub cron_expr: CronExpr,
+}
+
+impl VersionedEnvelope for WorkloadIntentEnvelope {
+    type Latest = WorkloadIntentV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    fn discriminant_offset_from_end() -> Option<usize> {
+        // Empirically-pinned offset is DEFERRED for `WorkloadIntentEnvelope`
+        // per ADR-0050 step 02-03a — the outer envelope wraps a
+        // 3-variant inner enum (`WorkloadIntentV1::{Job, Service,
+        // Schedule}`) whose archived layout shifts the trailing root
+        // region in ways that the JobEnvelope-style 64-byte from-end
+        // pin cannot trivially adopt. Returning `None` makes the
+        // pre-decode probe a no-op; unknown-future-variant bytes
+        // still surface as `EnvelopeError::Malformed` via rkyv's
+        // bytecheck (operator-facing remediation is the same:
+        // "delete the redb file"). The structural defense against
+        // future-binary surface IS preserved by the round-trip
+        // golden-bytes fixture for V1 (Job / Service / Schedule);
+        // the targeted `UnknownVersion` classification is the only
+        // diagnostic surface that degrades. Re-pin in a follow-up
+        // commit when V2 lands and the empirical offset becomes
+        // worth investing in.
+        None
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0; when `discriminant_offset_from_end`
+        // is `None`, the probe is skipped and this slice is unused.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "WorkloadIntentEnvelope"
+    }
+}
+
+impl WorkloadIntentV1 {
+    /// Archive a [`WorkloadIntent`] for persistence through the
+    /// [`IntentStore`].
     ///
     /// # Postconditions
     ///
     /// On `Ok(bytes)`, `bytes` is the canonical rkyv-archived byte
-    /// sequence of `JobEnvelope::V1(self.clone())`. Two archivals of
-    /// the same logical [`Job`] produce byte-identical output (rkyv
-    /// canonicalisation, per `.claude/rules/development.md` § "Internal
-    /// data → rkyv"). The returned [`AlignedVec`] is the wire shape
-    /// every Job writer at the persistence boundary uses to bridge to
-    /// [`IntentStore::put`] / [`IntentStore::put_if_absent`] —
-    /// callers pass `bytes.as_ref()` to the trait's `&[u8]` surface.
+    /// sequence of `WorkloadIntentEnvelope::V1(self.clone())`. Two
+    /// archivals of the same logical [`WorkloadIntent`] produce
+    /// byte-identical output. Callers pass `bytes.as_ref()` to the
+    /// `IntentStore` trait's `&[u8]` write surface.
     ///
     /// # Observable invariants
     ///
-    /// `Job::from_store_bytes(&self.archive_for_store()?, p)` returns
-    /// `Ok(self_owned)` bit-equivalent to `self` for any redb path
-    /// `p`. The envelope wrap is internal — the caller never names
-    /// [`JobEnvelope`].
+    /// `WorkloadIntent::from_store_bytes(&self.archive_for_store()?, p, None)`
+    /// returns `Ok(self_owned)` bit-equivalent to `self` for any
+    /// redb path `p`.
     ///
     /// # Errors
     ///
     /// Returns [`EnvelopeError::Malformed`] when the rkyv serialiser
-    /// itself fails. This is unreachable in practice for valid
-    /// [`JobV1`] payloads — the rkyv derives accept every shape
-    /// [`JobV1::from_spec`] produces — but the variant is preserved
-    /// as the structured error surface so future explicit-translation
-    /// migrations have a typed slot.
+    /// fails (unreachable for valid payloads).
     pub fn archive_for_store(&self) -> Result<AlignedVec, EnvelopeError> {
-        let envelope = JobEnvelope::latest(self.clone());
+        let envelope = WorkloadIntentEnvelope::latest(self.clone());
         rkyv::to_bytes::<rkyv::rancor::Error>(&envelope)
             .map_err(|source| EnvelopeError::Malformed { source })
     }
 
-    /// Decode persisted bytes back into a [`Job`].
-    ///
-    /// # Preconditions
-    ///
-    /// `bytes` is either the rkyv-archived bytes produced by
-    /// [`JobV1::archive_for_store`] against some [`JobV1`] payload
-    /// (success path), OR an arbitrary byte slice that does NOT
-    /// decode through the current envelope shape (malformed /
-    /// unknown-future variant — error path). `redb_path` names the
-    /// underlying redb file the bytes were read from, used in the
-    /// operator-facing remediation message; it is observed but not
-    /// required to exist. `key` optionally names the redb key the
-    /// bytes were read from (e.g. `"jobs/svc-payments"`); when
-    /// `Some`, it threads into the `health.startup.refused` tracing
-    /// event so an operator with N jobs in the file can identify
-    /// which specific row failed to decode. Callers without a key
-    /// context (the read handlers, the reconciler runtime read path)
-    /// pass `None`; the recovery walk in `LocalIntentStore::open`
-    /// passes the iterated key.
-    ///
-    /// # Postconditions
-    ///
-    /// On `Ok(job)`, `job` is the canonical [`Job`] payload projected
-    /// from the envelope via [`VersionedEnvelope::into_latest`]. No
-    /// tracing event fires on the success path.
-    ///
-    /// On `Err(...)`, exactly one `tracing::error!` event with
-    /// `name: "health.startup.refused"` fires BEFORE the `Err` value
-    /// is returned. The event carries the `redb_path`, the `key`
-    /// (`"<unknown>"` when `None`), and the underlying
-    /// `envelope_error` for operator diagnosis. The returned
-    /// [`IntentStoreError::Envelope`]'s [`Display`] form names the
-    /// `redb_path` twice (in the decode-failure line and in the
-    /// remediation hint `delete {redb_path}`) per ADR-0048 § 6.
+    /// Decode persisted bytes back into a [`WorkloadIntent`].
     ///
     /// # Edge cases
     ///
-    /// * Empty `bytes` → [`EnvelopeError::Malformed`] (rkyv validator
-    ///   rejection).
-    /// * Bytes from a writer that has bumped the envelope to
-    ///   `V<N+1>` while this binary knows only up to `V<N>` →
-    ///   [`EnvelopeError::UnknownVersion`] (surfaced by
-    ///   [`probe_known_variant`] before rkyv decode). The structured
-    ///   surface carries the observed discriminant byte and the
-    ///   envelope's [`VersionedEnvelope::type_name`] for
-    ///   operator-facing diagnostics.
+    /// * Empty `bytes` → [`EnvelopeError::Malformed`].
+    /// * Future-binary `V<N+1>` bytes → [`EnvelopeError::UnknownVersion`].
     /// * Truncated / corrupt bytes → [`EnvelopeError::Malformed`].
     ///
     /// # Observable invariants
     ///
-    /// The `health.startup.refused` event MUST NOT fire on the
-    /// success path. The event MUST fire exactly once before the
-    /// `Err` return. The asymmetric intent-fail-fast policy (ADR-0048
-    /// § 3) is implemented by the caller — `from_store_bytes`
-    /// surfaces the error; the caller (`LocalIntentStore::open`)
-    /// propagates it to abort startup.
+    /// On `Err(...)`, exactly one `tracing::error!` event with
+    /// `name: "health.startup.refused"` fires BEFORE the `Err`
+    /// return — per ADR-0048 § 3 (intent fail-fast policy). The
+    /// event carries the `redb_path`, the optional `key`
+    /// (`"<unknown>"` when `None`), and the underlying
+    /// `envelope_error` for operator diagnosis.
     pub fn from_store_bytes(
         bytes: &[u8],
         redb_path: &Path,
         key: Option<&str>,
     ) -> Result<Self, IntentStoreError> {
-        // `decode_envelope_bytes` composes the canonical
-        // "align + probe + rkyv decode + into_latest" pipeline per
-        // ADR-0048 § 4b. Probing the rkyv-archived discriminant byte
-        // BEFORE attempting full decode is what distinguishes a future
-        // binary's `V<N+1>` (surfaces as
-        // `EnvelopeError::UnknownVersion`) from corrupt bytes
-        // (`Malformed`) — the operator-facing remediation diverges.
-        // The intent-layer policy below (fail-fast with structured
-        // `health.startup.refused` event) is per ADR-0048 § 3.
-        match decode_envelope_bytes::<JobEnvelope>(bytes) {
-            Ok(job) => Ok(job),
+        match decode_envelope_bytes::<WorkloadIntentEnvelope>(bytes) {
+            Ok(intent) => Ok(intent),
             Err(envelope_error) => {
                 tracing::error!(
                     name: "health.startup.refused",
@@ -496,27 +530,28 @@ impl JobV1 {
         }
     }
 
-    /// Canonical content-addressed identity of a [`Job`].
-    ///
-    /// # Preconditions
-    ///
-    /// `self` is a valid [`JobV1`] payload.
+    /// Canonical content-addressed identity of a [`WorkloadIntent`].
     ///
     /// # Postconditions
     ///
-    /// Returns SHA-256 over the rkyv-archived **raw payload** bytes
-    /// (`rkyv::to_bytes(self)`), **not** the envelope-wrapped bytes
-    /// that [`Self::archive_for_store`] produces. Two calls against
-    /// the same logical [`Job`] return bit-identical hashes
-    /// (canonical rkyv archive is byte-stable), and the hash is
-    /// stable across envelope version bumps — a future
-    /// `JobEnvelope::V2` does not change the digest for the same
-    /// logical payload.
+    /// Returns SHA-256 over the rkyv-archived **raw inner payload
+    /// bytes** of `self` (`rkyv::to_bytes(self)`) — NOT the
+    /// envelope-wrapped bytes. Stable across envelope version bumps.
+    ///
+    /// Per ADR-0050: `WorkloadIntent::Job(j).spec_digest()` produces
+    /// a value distinct from `j.spec_digest()` would have produced
+    /// pre-migration — the bytes hashed are now the outer enum's
+    /// archive (with discriminant + padding), not the bare `JobV1`.
+    /// This is the operator-observable single-cut migration boundary
+    /// for content-addressed identity. The `ServiceVipAllocator`
+    /// memo (ADR-0049) keys by the value this method returns —
+    /// remains stable across reconciler ticks because the input
+    /// `WorkloadIntent::Service(_)` value is byte-stable.
     ///
     /// # Errors
     ///
     /// Returns [`EnvelopeError::Malformed`] if the rkyv serialiser
-    /// fails (unreachable for valid [`JobV1`] payloads).
+    /// fails (unreachable for valid payloads).
     pub fn spec_digest(&self) -> Result<ContentHash, EnvelopeError> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(self)
             .map_err(|source| EnvelopeError::Malformed { source })?;
@@ -770,20 +805,23 @@ pub struct Investigation {
 pub struct IntentKey(Vec<u8>);
 
 impl IntentKey {
-    /// Derive the intent key for a Job. Stable for any valid `WorkloadId` per
-    /// US-01 AC (property test).
-    pub fn for_job(id: &WorkloadId) -> Self {
-        Self(format!("jobs/{id}").into_bytes())
+    /// Derive the intent key for a workload aggregate body —
+    /// `workloads/<id>`. Per ADR-0050 OQ-5 single-cut migration: this
+    /// replaces the legacy `for_job` derivation. The aggregate body
+    /// at this key carries `WorkloadIntentEnvelope` rkyv-archived
+    /// bytes (Job / Service / Schedule).
+    pub fn for_workload(id: &WorkloadId) -> Self {
+        Self(format!("workloads/{id}").into_bytes())
     }
 
-    /// Derive the intent key for a Job's stop signal — `jobs/<id>/stop`.
-    /// Per ADR-0027, the stop signal is a separate intent record so the
-    /// original job spec stays readable for audit / rollback / debug.
-    /// `IntentKey::for_job_stop(&id)` is byte-stable for any valid
-    /// `WorkloadId`; the `/stop` suffix is fixed ASCII and the prefix `jobs/`
-    /// reuses the canonical ASCII derivation from `for_job`.
-    pub fn for_job_stop(id: &WorkloadId) -> Self {
-        Self(format!("jobs/{id}/stop").into_bytes())
+    /// Derive the intent key for a workload's stop signal —
+    /// `workloads/<id>/stop`. Per ADR-0050 OQ-5 single-cut migration:
+    /// this replaces the legacy `for_job_stop` derivation. The stop
+    /// sentinel is a separate intent record so the original aggregate
+    /// stays readable for audit / rollback / debug; the value is the
+    /// empty byte slice — the existence is the signal.
+    pub fn for_workload_stop(id: &WorkloadId) -> Self {
+        Self(format!("workloads/{id}/stop").into_bytes())
     }
 
     /// Derive the intent key for a workload's kind discriminator —

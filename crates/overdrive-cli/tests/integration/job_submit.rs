@@ -12,7 +12,7 @@
 //!
 //! Acceptance coverage:
 //!   (a) valid TOML against in-process server returns `SubmitOutput`
-//!       with `workload_id = "payments"`, `intent_key = "jobs/payments"`,
+//!       with `workload_id = "payments"`, `intent_key = "workloads/payments"`,
 //!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
 //!       `spec_digest`, and `next_command` naming
 //!       `overdrive alloc status --job payments`.
@@ -131,7 +131,7 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
 
     assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
     assert_eq!(
-        output.intent_key, "jobs/payments",
+        output.intent_key, "workloads/payments",
         "SubmitOutput.intent_key must be 'jobs/payments'",
     );
     assert_eq!(
@@ -486,7 +486,7 @@ memory_bytes = 67108864
         .expect("submit must accept [job]-section TOML");
 
     assert_eq!(output.workload_id, "regression-kind");
-    assert_eq!(output.intent_key, "jobs/regression-kind");
+    assert_eq!(output.intent_key, "workloads/regression-kind");
     assert_eq!(output.outcome, IdempotencyOutcome::Inserted);
 
     handle.shutdown().await.expect("clean shutdown");

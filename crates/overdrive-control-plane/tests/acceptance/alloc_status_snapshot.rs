@@ -99,8 +99,10 @@ fn sample_spec() -> JobSpecInput {
 /// precondition for a 200 response (S-AS-09 vacuum-base for non-404 paths).
 async fn install_job(state: &AppState, spec: JobSpecInput) -> Job {
     let job = Job::from_spec(spec).expect("Job::from_spec must succeed for fixture");
-    let key = IntentKey::for_job(&job.id);
-    let archived = job.archive_for_store().expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("IntentStore put");
     job
 }
@@ -410,7 +412,7 @@ async fn s_as_09_unknown_job_returns_not_found_naming_resource() {
                 "NotFound resource string must name the missing job; got {resource:?}",
             );
             assert!(
-                resource.starts_with("jobs/"),
+                resource.starts_with("workloads/"),
                 "NotFound resource string must use the canonical IntentKey rendering \
                  jobs/<id>; got {resource:?}",
             );

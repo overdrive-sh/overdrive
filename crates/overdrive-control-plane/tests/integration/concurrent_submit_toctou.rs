@@ -230,7 +230,7 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
     for (_spec, body) in &conflict_outcomes {
         assert_eq!(body.error, "conflict", "409 ErrorBody.error must be 'conflict'; got {body:?}");
         assert!(
-            body.message.contains("jobs/payments"),
+            body.message.contains("workloads/payments"),
             "409 ErrorBody.message must name the intent-key path; got {body:?}",
         );
     }
@@ -244,13 +244,15 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
     handle.shutdown(Duration::from_secs(2)).await;
 
     let workload_id = WorkloadId::new("payments").expect("parse WorkloadId");
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
-        .expect("jobs/payments must be populated after a successful concurrent submit");
+        .expect("workloads/payments must be populated after a successful concurrent submit");
 
     let expected_job = Job::from_spec(winning_spec.clone()).expect("winning spec constructs a Job");
-    let expected_bytes = expected_job.archive_for_store().expect("rkyv archive of winning Job");
+    let expected_bytes = overdrive_core::aggregate::WorkloadIntent::Job(expected_job)
+        .archive_for_store()
+        .expect("rkyv archive of winning Job");
     assert_eq!(
         persisted.as_ref(),
         expected_bytes.as_ref(),
@@ -404,13 +406,15 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
     handle.shutdown(Duration::from_secs(2)).await;
 
     let workload_id = WorkloadId::new("payments").expect("parse WorkloadId");
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
-        .expect("jobs/payments must be populated after concurrent identical submits");
+        .expect("workloads/payments must be populated after concurrent identical submits");
 
     let expected_job = Job::from_spec(spec).expect("spec constructs a Job");
-    let expected_bytes = expected_job.archive_for_store().expect("rkyv archive of Job");
+    let expected_bytes = overdrive_core::aggregate::WorkloadIntent::Job(expected_job)
+        .archive_for_store()
+        .expect("rkyv archive of Job");
     assert_eq!(
         persisted.as_ref(),
         expected_bytes.as_ref(),
