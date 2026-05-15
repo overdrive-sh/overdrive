@@ -2,9 +2,10 @@
   "roadmap": {
     "project_id": "service-vip-allocator",
     "created_at": "2026-05-14T06:53:49Z",
-    "total_steps": 11,
+    "total_steps": 12,
     "phases": 3,
     "changelog": [
+      "2026-05-15 - Step 02-03b split into 02-03b + 02-03c (user-authorised, after 4th structural finding at PREPARE of original 02-03b). Cascade from ADR-0051 wire-shape migration was materially larger than ADR's ~10-file estimate (actual ~30-40 source files: 14 SubmitWorkloadRequest construction sites, JobV1::from_spec -> from_submit rename per OQ-6 (~15-20 source files), AppState constructor signature change cascading to ~10 test fixtures, 6 brand-new acceptance scenarios with new test infrastructure, streaming.rs >900-line Service-row work, 2 unreachable!() paths in handlers.rs becoming real code, OpenAPI regen). 02-03b narrows to wire-shape migration only (SubmitSpecInput lands, SubmitWorkloadRequest .spec widens, JobSpecInput sites wrap, workload_kind deletes, from_spec rename cascades, OpenAPI regen, NO allocator wiring, NO Service-arm code, NO new acceptance tests). 02-03c lands PersistentServiceVipAllocator boot wiring + AppState field + submit_workload Service arm + alloc_status Service-arm VIP rendering + streaming.rs Service-row VIP + error.rs 503 mapping + 6 S-VIP acceptance scenarios (01/02/03/04/08/09). total_steps: 11 -> 12; Phase 2: 5 -> 6. ADR-0051 stays Accepted; no design changes.",
       "2026-05-14 - Step 02-03 split into 02-03a + 02-03b (user-authorised, option A after second structural finding). 02-03a: WorkloadSpec rkyv envelope + codec + spec_digest + migrate all Job::archive_for_store / from_store_bytes reader sites to WorkloadSpec::* (single-cut wire migration; submit handler unchanged; no allocator). 02-03b: widen SubmitWorkloadRequest.spec to WorkloadSpecInput, wire PersistentServiceVipAllocator into AppState, Service arm in submit_workload + alloc_status + streaming, 6 acceptance scenarios + golden-bytes test. The 6 acceptance criteria stay on 02-03b unchanged. total_steps: 10 -> 11; Phase 2 step count: 4 -> 5. Rationale: the original 02-03 expansion (recorded in prior changelog entry) cascaded into every Job-bytes reader (describe_workload, reconciler hydrate, recovery walks, streaming, alloc_status) - too large to land in one single-cut commit. Splitting at the codec/wiring boundary keeps each commit single-cut within its own scope.",
       "2026-05-14 \u2014 Step 02-03 scope expansion (user-authorised during DELIVER, after crafter blocked on missing Service-submission driving port). Original 02-03 assumed `SubmitWorkloadRequest.spec` already accepted `WorkloadSpecInput` (any kind); structural finding during dispatch confirmed it accepts only `JobSpecInput`. User chose option (a) \u2014 expand 02-03 to also widen the submit driving port from Job-only to all WorkloadKind, add `WorkloadSpec` persistence codec (rkyv envelope per ADR-0048), and add Service listener rendering on alloc_status. The 6 acceptance scenarios remain unchanged. effort_hours estimate (8h) understates the expanded scope (~20\u201324h actual) \u2014 advisory only per CLAUDE.md, no enforcement.",
       "2026-05-14 \u2014 Reviewer-pass amendment: fixed 5 issues (1 critical, 2 high, 2 medium) per observation #41016. Removed duplicate S-VIP-11 from 01-02; disambiguated S-VIP-06 phase boundaries across 03-01/03-02/03-03; corrected property-test file placement per DWD-03; removed unjustified id.rs reference from 01-01; clarified config validation ownership between 01-01 (type-level) and 02-02 (parser surface).",
@@ -179,26 +180,60 @@
         },
         {
           "id": "02-03b",
-          "name": "ServiceVipAllocator wired into AppState and submit handler",
-          "description": "Widen SubmitWorkloadRequest.spec from JobSpecInput to WorkloadSpecInput (the enum already exists at crates/overdrive-core/src/aggregate/workload_spec.rs with Service / Job / Schedule variants). Plumb the Service arm through submit_workload, streaming, alloc_status, and OpenAPI. Construct PersistentServiceVipAllocator at boot using VipRange from 02-02 config + bulk_load from IntentStore (the persistence wrapper is from step 01-03). Wire the allocator into AppState as Arc<tokio::sync::Mutex<...>>. In submit_workload for the WorkloadSpec::Service(_) arm: compute spec_digest, call allocator.allocate(spec_digest) BEFORE IntentStore admission write; drop guard before any further .await. Submit-echo renders the allocated VIP at Service level. alloc_status consults allocator.get(&spec_digest) for VIP rendering. Streaming.rs emits VIP in streamed Service-row updates. Job / Schedule arms pass through unchanged. Single-cut: no JobSpecInput backward-compat shim. Depends on 02-03a's WorkloadSpec codec migration being already in place.",
-          "criteria": "S-VIP-01: Submit Service spec frontend.toml with [[listener]] port=8080 protocol=tcp (no vip field) via submit_workload; response status 200/201; submit echo contains allocated VIP from 10.96.0.0/24 range; VIP is valid IPv4 within range and not reserved. S-VIP-02: After submit, alloc status query returns same VIP as submit echo; per-listener lines render as port/protocol without per-listener VIP. S-VIP-03: Service spec with two listeners (8080/tcp, 8443/tcp) gets exactly one Service-level VIP; both listeners render as port/protocol. S-VIP-04: Resubmit byte-identical spec returns same VIP (idempotent). S-VIP-08: Pool with 1 address fully allocated; second distinct spec returns HTTP 503 with typed pool exhaustion error naming allocated and capacity counts. S-VIP-09: After pool exhaustion rejection, existing allocations still return their VIPs via get and alloc-status.",
-          "test_file": "crates/overdrive-control-plane/tests/acceptance.rs",
+          "name": "SubmitSpecInput wire layer + JobSpecInput call-site cascade",
+          "description": "Per ADR-0051 (Accepted 2026-05-15): introduce SubmitSpecInput at crates/overdrive-core/src/api/submit.rs (new module) with variants Job(JobSpecInput) / Service(ServiceSpecInput) / Schedule(ScheduleSpecInput). JobSpecInput stays verbatim as the Job arm's inner type (OQ-3 - additive, zero changes to today's Job wire shape). ServiceSpecInput per OQ-4: {id, replicas, resources, driver, listeners: Vec<ListenerInput>} where ListenerInput {port, protocol} - NO vip (S-VIP-13/14 parser rejection is upstream). ScheduleSpecInput per OQ-5 with embedded JobSpecInput. Add per-kind validating constructors on intent-side aggregates (OQ-6, mirrors Job::from_spec / ADR-0050 \u00a7 4): JobV1::from_submit (rename of existing JobV1::from_spec - cascades across ~15-20 source files); ServiceV1::from_submit (new); ScheduleV1::from_submit (todo!(\"RED scaffold\") stub per testing.md production-side scaffold convention; gate clippy::todo via #[expect(...)] on the carrying module). Widen SubmitWorkloadRequest.spec: JobSpecInput -> SubmitSpecInput; delete the redundant workload_kind: Option<String> field (kind discriminator lives inside SubmitSpecInput per OQ-8). Every existing JobSpecInput construction site wrapped as SubmitSpecInput::Job(_) (~14 SubmitWorkloadRequest sites + propagation through CLI commands/job.rs three submit paths). OpenAPI regen: SubmitSpecInput renders as oneOf with kind: \"job\"|\"service\"|\"schedule\" discriminator (OQ-7, utoipa default). Single-cut per feedback_single_cut_greenfield_migrations.md: no JobSpecInput-typed SubmitWorkloadRequest.spec shim survives. NO allocator wiring (lands in 02-03c). NO Service-arm code in submit_workload handler beyond a 501-shaped rejection placeholder (Service-arm submission lands in 02-03c). NO new acceptance scenarios in this step (S-VIP-01/02/03/04/08/09 all live in 02-03c). Existing Job-only acceptance tests must continue to pass after the wire-shape widening - that IS the behavior-preservation AC. Depends on 02-03a's WorkloadIntent codec migration being in place (commit 3cd7d1d5).",
+          "criteria": "SubmitSpecInput compiles with three variants at crates/overdrive-core/src/api/submit.rs. SubmitWorkloadRequest.spec field is typed SubmitSpecInput and workload_kind field is deleted. Every existing JobSpecInput construction site (14 SubmitWorkloadRequest writers + 3 CLI paths) wraps via SubmitSpecInput::Job(_). JobV1::from_submit replaces the JobV1::from_spec entry point at every source call site; rustdoc and in-prose references in CLAUDE.md / .claude/rules/ updated to match. ServiceV1::from_submit and ScheduleV1::from_submit exist; ScheduleV1 is a todo! RED scaffold. OpenAPI gate passes (cargo run -p overdrive-control-plane --bin openapi -- check); api/openapi.yaml carries the regenerated oneOf shape and is committed. Workspace cargo check --workspace --features integration-tests via Lima clean. cargo nextest run --workspace --features integration-tests via Lima: every previously-passing test still passes (NO new test scenarios in this step; behavior preservation is the AC). Clippy -D warnings clean. Submit handler Service arm returns a structured rejection (TBD: HTTP 501 Not Implemented or a typed ParseError surface) until 02-03c lands the real allocator-wired path; the Service arm match arm exists but does NOT silently fall through. ScheduleV1::from_submit todo!() is unreachable from any test.",
+          "test_file": "No new test file. Existing acceptance + integration tests across crates/overdrive-control-plane, crates/overdrive-cli, crates/overdrive-core must continue to pass. Specific litmus: crates/overdrive-control-plane/tests/integration/{submit_round_trip,idempotent_resubmit}.rs and crates/overdrive-cli/tests/integration/{job_submit,exec_spec_walking_skeleton}.rs all green after the JobSpecInput -> SubmitSpecInput::Job(_) wrap.",
+          "scenario_name": "existing_tests_preserved_under_submit_spec_input_migration",
+          "effort_hours": 6,
+          "dependencies": [
+            "02-03a"
+          ],
+          "implementation_notes": "Single-cut per feedback_single_cut_greenfield_migrations.md: no JobSpecInput-typed SubmitWorkloadRequest.spec shim. Delete workload_kind field on SubmitWorkloadRequest in the same commit. The Service-arm match in submit_workload returns a structured rejection placeholder (crafter judgement on HTTP shape; surface as a blocker if unclear) - real Service-arm logic lands in 02-03c. Schedule-arm match returns the same placeholder shape; the ScheduleV1::from_submit todo!() is only reachable if Schedule submission is actually exercised, which 02-03c will explicitly defer.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-core/src/api/mod.rs",
+              "crates/overdrive-core/src/api/submit.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-core/src/lib.rs",
+              "crates/overdrive-core/src/aggregate/mod.rs",
+              "crates/overdrive-control-plane/src/api.rs",
+              "crates/overdrive-control-plane/src/handlers.rs",
+              "crates/overdrive-cli/src/commands/job.rs",
+              "crates/overdrive-cli/src/http_client.rs",
+              "api/openapi.yaml",
+              "any other JobV1::from_spec / SubmitWorkloadRequest construction site enumerated via grep"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-03c",
+          "name": "ServiceVipAllocator wired into AppState + Service-arm submit + 6 acceptance scenarios",
+          "description": "Construct PersistentServiceVipAllocator at boot using VipRange from 02-02 config + bulk_load from IntentStore (persistence wrapper from step 01-03). Wire the allocator into AppState as Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>. AppState::new (or equivalent constructor) signature change cascades to ~10 test fixtures - migrate all in this commit. In submit_workload for the SubmitSpecInput::Service(_) arm (the match arm landed in 02-03b as a placeholder): construct ServiceV1::from_submit(...), compute WorkloadIntent::Service(svc).spec_digest(), lock allocator, allocate(spec_digest) BEFORE IntentStore admission write (this is the PERSISTING allocate from 01-03 - .await is inside the critical section because that IS the serialization point); drop guard before any further .await per .claude/rules/development.md Concurrency & async. Submit-echo renders the allocated VIP at Service level. alloc_status consults allocator.get(&spec_digest) for VIP rendering; per-listener lines render as (port, protocol) only - NO per-listener VIP. streaming.rs Service-row emits VIP in streamed Service updates. Resolve the two unreachable!() panics in handlers.rs (describe_workload and alloc_status) - both become real Service-arm code paths. Pool exhaustion error path: PersistentAllocatorError::Allocator(ServiceVipAllocatorError::Exhausted{allocated, capacity}) maps to HTTP 503 with structured JSON body. Existing allocations remain readable via allocator.get after rejection (true by construction). Job-arm and Schedule-arm pass through unchanged (Job continues to compile via the wire-shape migration from 02-03b; Schedule keeps the placeholder rejection from 02-03b - Schedule submission is not wired in this slice). Depends on 02-03b (wire-shape migration) and the prerequisite chain 02-02, 01-03, 02-01.",
+          "criteria": "S-VIP-01: Submit Service spec frontend.toml with [[listener]] port=8080 protocol=tcp (no vip field) via submit_workload; response status 200/201; submit echo contains allocated VIP from 10.96.0.0/24 range; VIP is valid IPv4 within range and not reserved. S-VIP-02: After submit, alloc status query returns same VIP as submit echo; per-listener lines render as port/protocol without per-listener VIP. S-VIP-03: Service spec with two listeners (8080/tcp, 8443/tcp) gets exactly one Service-level VIP; both listeners render as port/protocol. S-VIP-04: Resubmit byte-identical spec returns same VIP (idempotent). S-VIP-08: Pool with 1 address fully allocated; second distinct spec returns HTTP 503 with typed pool exhaustion error naming allocated and capacity counts. S-VIP-09: After pool exhaustion rejection, existing allocations still return their VIPs via get and alloc-status. Workspace cargo check / nextest via Lima clean; clippy -D warnings clean; OpenAPI gate passes (no schema changes expected in this step beyond Service submit-echo body shape - regen if drift).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance.rs - 6 new scenarios in a new test module (e.g. service_vip_submit_acceptance.rs) wired through the existing tests/acceptance.rs entrypoint.",
           "scenario_name": "submit_service_allocates_vip, alloc_status_renders_same_vip, multi_listener_one_vip, idempotent_resubmit_same_vip, pool_exhaustion_typed_rejection, pool_exhaustion_existing_unaffected",
           "effort_hours": 8,
           "dependencies": [
-            "02-03a",
+            "02-03b",
             "02-02",
             "01-03",
             "02-01"
           ],
+          "implementation_notes": "Concurrency discipline (development.md Concurrency & async): tokio::sync::Mutex (not parking_lot::Mutex) because allocate().await is the serialization point. NEVER hold the lock across .await OUTSIDE the allocate critical section - drop guard explicitly before any further .await. AppState constructor signature gets a new mandatory allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>> parameter - DO NOT default it in the constructor body (per development.md Port-trait dependencies). Test fixtures pass an explicit allocator (production tests with a real VipRange config; DST sim tests can use a tiny range). The two unreachable!() panics in handlers.rs (describe_workload ~line 487, alloc_status ~line 683) become real Service-arm code paths in this commit. Pool exhaustion JSON shape: {error: \"pool_exhausted\", allocated: N, capacity: M} or whatever fits the existing error envelope precedent - crafter to confirm against src/error.rs precedent.",
           "implementation_scope": {
-            "files_to_create": [],
+            "files_to_create": [
+              "crates/overdrive-control-plane/tests/acceptance/service_vip_submit_acceptance.rs"
+            ],
             "files_to_modify": [
               "crates/overdrive-control-plane/src/handlers.rs",
-              "crates/overdrive-control-plane/src/api.rs",
+              "crates/overdrive-control-plane/src/streaming.rs",
               "crates/overdrive-control-plane/src/error.rs",
               "crates/overdrive-control-plane/src/lib.rs",
-              "crates/overdrive-control-plane/src/streaming.rs"
+              "crates/overdrive-core/src/aggregate/mod.rs (ServiceV1::from_submit body lands real here if it didn't in 02-03b)",
+              "any test fixture calling AppState::new(...) - enumerate via grep"
             ],
             "files_to_delete": []
           }
@@ -262,7 +297,7 @@
           "effort_hours": 3,
           "dependencies": [
             "03-01",
-            "02-03b"
+            "02-03c"
           ],
           "implementation_notes": "Per-layer scope: action-shim dispatch only. Tests build an action-shim context with a real (or sim) ServiceVipAllocator pre-populated with one allocation, hand the dispatcher a hand-constructed Action::ReleaseServiceVip, and assert allocator.get returns None after the dispatch. S-VIP-07 (released VIP reusable on next allocation) belongs to 03-03 because it requires the submit_workload driving port.",
           "implementation_scope": {
@@ -335,6 +370,6 @@
     "status": "pending",
     "reviewer": "nw-acceptance-designer-reviewer",
     "approved_at": "2026-05-14T19:45:00Z",
-    "notes": "Re-review needed after 2026-05-14 step 02-03 split into 02-03a + 02-03b (user-authorised, option A). Prior approval is superseded by this structural change. See changelog entry."
+    "notes": "Re-review needed after 2026-05-15 step 02-03b split into 02-03b + 02-03c (user-authorised after 4th structural finding - capacity not design; ADR-0051 stays Accepted). Prior approval superseded by this structural change. See changelog entry."
   }
 }

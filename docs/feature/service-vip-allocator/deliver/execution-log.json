@@ -330,6 +330,48 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE. No code written; no commit produced. Working tree unchanged.",
       "t": "2026-05-15T07:39:25Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T08:03:30Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: PREPARE pass surfaced concrete scope mismatch with available context budget \u2014 surfaced to user for orchestrator decision (see return message)",
+      "t": "2026-05-15T08:03:57Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T08:25:26Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: behavior-preservation step; no new test scenarios",
+      "t": "2026-05-15T08:25:28Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: behavior-preservation step; no new behavioral tests",
+      "t": "2026-05-15T08:25:29Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: structural finding \u2014 ADR-0051 single-cut migration breaks 3 legacy submit_streaming tests that depend on pre-migration WorkloadKind::Service default for None workload_kind. Tests assert Service-shape stream events (running, attempt_failed) and Service vocabulary rendering. Single-cut wraps all JobSpecInput in SubmitSpecInput::Job(_), forcing Job-arm streaming dispatch. Needs user direction: migrate the 3 tests to Job-arm assertions, or restore a Service-arm wire path",
+      "t": "2026-05-15T08:41:08Z"
     }
   ]
 }
