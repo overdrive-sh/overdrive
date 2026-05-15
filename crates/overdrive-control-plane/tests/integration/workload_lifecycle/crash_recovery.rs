@@ -100,7 +100,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // (`alloc-recovery-0.scope`) does not collide with the scope used by
     // submit_to_running (`alloc-payments-0.scope`) when both tests run in
     // parallel under nextest.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "recovery".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

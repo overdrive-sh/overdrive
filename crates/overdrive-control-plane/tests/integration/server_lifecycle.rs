@@ -274,8 +274,13 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     // coverage lives in `integration::submit_round_trip` — this
     // assertion only pins that the route remains mounted and reachable.
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    // ADR-0051: `SubmitSpecInput` is `#[serde(tag = "kind")]` with
+    // `deny_unknown_fields` — the per-kind discriminator MUST appear
+    // inside `spec`. Without it the request fails JSON deserialisation
+    // and returns 400, not 200.
     let body = serde_json::json!({
         "spec": {
+            "kind": "job",
             "id": "routing-check",
             "replicas": 1,
             "resources": {

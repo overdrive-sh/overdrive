@@ -45,6 +45,7 @@ use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -177,7 +178,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     // First submit — outcome = Inserted, captures the spec_digest.
     let first: SubmitWorkloadResponse = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
         .expect("first submit")
@@ -196,7 +197,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     // Unchanged and the SAME spec_digest.
     let second: SubmitWorkloadResponse = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
         .expect("second submit")
@@ -235,7 +236,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
         .await
         .expect("workloads/payments must be populated after successful submit");
 
-    let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
+    let expected_job = Job::from_submit(spec).expect("canonical spec constructs a Job");
     let expected_bytes = overdrive_core::aggregate::WorkloadIntent::Job(expected_job)
         .archive_for_store()
         .expect("rkyv archive of expected Job");
@@ -261,7 +262,7 @@ async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
     // Prime the store with the canonical payments spec.
     let primed = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("prime submit");
@@ -270,7 +271,7 @@ async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
     // Second submit: same id, different replicas. Must be 409.
     let conflict = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec_alt_replicas()) })
         .send()
         .await
         .expect("conflicting submit");
@@ -308,7 +309,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     // Prime with replicas = 3 (canonical).
     let primed = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("prime submit");
@@ -324,7 +325,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     // Reject with replicas = 7 — must be 409.
     let conflict = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec_alt_replicas()) })
         .send()
         .await
         .expect("conflicting submit");
@@ -374,7 +375,7 @@ async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_ou
     for attempt in 0..3 {
         let resp: SubmitWorkloadResponse = client
             .post(&url)
-            .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+            .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
             .send()
             .await
             .expect(&format!("submit attempt {attempt}"))
@@ -437,7 +438,7 @@ async fn conflict_message_names_intent_key_path() {
     // Prime, then conflict.
     let primed = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("prime submit");
@@ -445,7 +446,7 @@ async fn conflict_message_names_intent_key_path() {
 
     let conflict = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec_alt_replicas()) })
         .send()
         .await
         .expect("conflicting submit");

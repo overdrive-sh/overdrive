@@ -13,7 +13,7 @@
 //!     │ toml::from_str
 //!     ▼
 //! JobSpecInput                       (client-side parse — new shape)
-//!     │ Job::from_spec
+//!     │ Job::from_submit
 //!     ▼
 //! Job aggregate                      (carries command + args)
 //!     │ POST /v1/jobs (real reqwest + rustls)
@@ -101,7 +101,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 /// any drift indicates the rkyv canonicalisation lane diverged.
 fn local_spec_digest_new_shape(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse new-shape TOML");
-    let job = Job::from_spec(parsed).expect("Job::from_spec on canonical new-shape spec");
+    let job = Job::from_submit(parsed).expect("Job::from_submit on canonical new-shape spec");
     overdrive_core::aggregate::WorkloadIntent::Job(job)
         .spec_digest()
         .expect("spec_digest")
@@ -143,7 +143,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     assert_eq!(
         submit_output.spec_digest, expected_digest,
         "spec_digest must be byte-identical to a locally-computed \
-         ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed))); a divergence means \
+         ContentHash::of(rkyv::to_bytes(&Job::from_submit(parsed))); a divergence means \
          the new `command` + `args` fields are not contributing to the canonical \
          archive consistently across client and server lanes",
     );
@@ -206,7 +206,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
         "stored Job.driver.exec.command must equal the operator's TOML \
          input verbatim — a divergence here means the wire shape was \
          lossy along the persistence lane (TOML → JobSpecInput → \
-         Job::from_spec → rkyv::to_bytes → redb → rkyv::access → Job)",
+         Job::from_submit → rkyv::to_bytes → redb → rkyv::access → Job)",
     );
     assert_eq!(
         exec.args,

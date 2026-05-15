@@ -361,7 +361,7 @@ async fn bootstrap_from_rejects_snapshot_with_unknown_job_envelope_variant() {
 
     // Build a valid Job envelope, then corrupt the discriminant byte to
     // simulate a future V<N+1> variant this binary doesn't know about.
-    let job = Job::from_spec(sample_job_spec("job-future-99")).expect("valid job");
+    let job = Job::from_submit(sample_job_spec("job-future-99")).expect("valid job");
     let valid_archive: rkyv::util::AlignedVec = rkyv::to_bytes::<rkyv::rancor::Error>(
         &WorkloadIntentEnvelope::latest(overdrive_core::aggregate::WorkloadIntent::Job(job)),
     )
@@ -421,7 +421,7 @@ async fn bootstrap_from_rejects_snapshot_with_unknown_job_envelope_variant() {
 async fn bootstrap_from_accepts_snapshot_with_valid_job_envelope() {
     // Build a snapshot containing a properly-encoded Job envelope
     // alongside a stop sentinel and a non-job key.
-    let job = Job::from_spec(sample_job_spec("job-valid-01")).expect("valid job");
+    let job = Job::from_submit(sample_job_spec("job-valid-01")).expect("valid job");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
         .archive_for_store()
         .expect("typed codec archive");

@@ -64,7 +64,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     };
 
     // Submit a 1-replica job that runs `/bin/sleep` for a long time.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

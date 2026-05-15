@@ -43,7 +43,7 @@ mod acceptance {
 
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // explicit `[exec]` block (command + args) and the projection
-    // flows end-to-end through Job::from_spec → Action::Start/Restart.
+    // flows end-to-end through Job::from_submit → Action::Start/Restart.
     // Per ADR-0031.
     mod exec_constructors;
     mod exec_reconciler_purity;

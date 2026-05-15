@@ -585,7 +585,7 @@ components:
           type: string
           description: |-
             Host filesystem path to the binary. Validated non-empty (after
-            trim) at `Job::from_spec` per ADR-0031 §4.
+            trim) at `JobV1::from_submit` per ADR-0031 §4.
       additionalProperties: false
     IdempotencyOutcome:
       type: string
@@ -620,7 +620,7 @@ components:
           resources:
             $ref: '#/components/schemas/ResourcesInput'
       description: |-
-        Input shape for `Job::from_spec`. The CLI deserialises TOML into this
+        Input shape for `JobV1::from_submit`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
 
@@ -675,6 +675,36 @@ components:
           description: |-
             L4 protocol — `tcp` or `udp` only. Case-insensitive at parse
             time; lowercase on canonical render.
+      additionalProperties: false
+    ListenerInput:
+      type: object
+      description: |-
+        HTTP/JSON wire-shape for a single listener entry.
+
+        Distinct from the parser-side
+        [`crate::aggregate::workload_spec::Listener`] newtype in encoding
+        only: the parser side carries `port: NonZeroU16` and
+        `protocol: Proto` after TOML decoding; the wire side carries
+        `port: u16` and `protocol: String` for JSON deserialise tolerance,
+        with validation deferred to
+        [`crate::aggregate::ServiceV1::from_submit`].
+      required:
+      - port
+      - protocol
+      properties:
+        port:
+          type: integer
+          format: int32
+          description: |-
+            Listener port — 1..=65535. `port == 0` is rejected at admission
+            inside `ServiceV1::from_submit`.
+          maximum: 65535
+          minimum: 1
+        protocol:
+          type: string
+          description: |-
+            L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
+            admission inside `ServiceV1::from_submit`.
       additionalProperties: false
     NodeList:
       type: object
@@ -762,7 +792,7 @@ components:
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
-        `Job::from_spec` (no `From` impl: the ≥3-call-sites rule isn't met,
+        `JobV1::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
         and the validation rules — `memory_bytes != 0` — must fire on the
         way through anyway).
       required:
@@ -805,6 +835,72 @@ components:
           type: integer
           format: int32
           minimum: 0
+    ScheduleSpecInput:
+      type: object
+      description: |-
+        HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
+
+        The per-fire instance is a [`crate::aggregate::JobV1`] per ADR-0047
+        § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
+        inner job body uses the same wire shape standalone Jobs use —
+        operators write the schedule body and the inner job body in the
+        same JSON document.
+      required:
+      - id
+      - job
+      - cron_expr
+      properties:
+        cron_expr:
+          type: string
+          description: |-
+            Cron expression. String-shaped on the wire; validated and
+            projected onto `CronExpr` inside `ScheduleV1::from_submit`.
+        id:
+          type: string
+        job:
+          $ref: '#/components/schemas/JobSpecInput'
+          description: |-
+            Inner job specification fired on each cron tick. Same wire
+            shape standalone Jobs use.
+      additionalProperties: false
+    ServiceSpecInput:
+      allOf:
+      - $ref: '#/components/schemas/DriverInput'
+      - type: object
+        required:
+        - id
+        - replicas
+        - resources
+        - listeners
+        properties:
+          id:
+            type: string
+          listeners:
+            type: array
+            items:
+              $ref: '#/components/schemas/ListenerInput'
+            description: |-
+              Operator-declared listeners in declaration order. Validated at
+              admission inside [`crate::aggregate::ServiceV1::from_submit`]:
+              at least one element; no two share `(port, protocol)`; protocol
+              is `tcp` / `udp` only.
+          replicas:
+            type: integer
+            format: int32
+            minimum: 0
+          resources:
+            $ref: '#/components/schemas/ResourcesInput'
+      description: |-
+        HTTP/JSON wire-shape for a Service submission per ADR-0051 § 3.
+
+        Mirrors [`crate::aggregate::JobSpecInput`]'s `(id, replicas,
+        resources, driver)` shape plus operator-declared listeners.
+
+        Per ADR-0049 § 5 and ADR-0051 § 2 listeners carry `(port, protocol)`
+        only — NO operator-supplied VIP. The platform issues VIPs via
+        `ServiceVipAllocator` keyed by
+        `WorkloadIntent::Service(_).spec_digest()` after admission; the
+        operator never names a VIP on the wire or in TOML.
     ServiceVip:
       type: string
       description: |-
@@ -1089,39 +1185,90 @@ components:
         `TransitionReason` enum as the snapshot's
         `AllocStatusRowBody.reason` and `TransitionRecord.reason` — byte-
         equality across surfaces is structural, not discipline ([C6]).
+    SubmitSpecInput:
+      oneOf:
+      - allOf:
+        - $ref: '#/components/schemas/JobSpecInput'
+          description: |-
+            Run-to-completion workload — see
+            [`crate::aggregate::JobSpecInput`] for the per-kind shape.
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - job
+        description: |-
+          Run-to-completion workload — see
+          [`crate::aggregate::JobSpecInput`] for the per-kind shape.
+      - allOf:
+        - $ref: '#/components/schemas/ServiceSpecInput'
+          description: |-
+            Long-running supervised workload with operator-declared
+            listeners — see [`ServiceSpecInput`].
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - service
+        description: |-
+          Long-running supervised workload with operator-declared
+          listeners — see [`ServiceSpecInput`].
+      - allOf:
+        - $ref: '#/components/schemas/ScheduleSpecInput'
+          description: Cron-scheduled `Job` — see [`ScheduleSpecInput`].
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - schedule
+        description: Cron-scheduled `Job` — see [`ScheduleSpecInput`].
+      description: |-
+        HTTP/JSON wire-shape for `POST /v1/workloads` (and the streaming
+        sibling). Per ADR-0051 this is the wire-side member of the three-
+        layer Rust universe — distinct from the parser-side
+        [`crate::aggregate::workload_spec::WorkloadSpec`] (TOML) and the
+        persisted [`crate::aggregate::WorkloadIntent`] (rkyv).
+
+        Tagged JSON via `#[serde(tag = "kind", rename_all = "snake_case")]`
+        — the `kind` field discriminates `job` / `service` / `schedule` and
+        the per-variant fields populate the rest of the body.
+
+        `utoipa::ToSchema` renders this as a `oneOf`-discriminated schema in
+        the generated OpenAPI document per ADR-0051 OQ-7.
+
+        Listener `vip` is structurally unrepresentable per ADR-0049 § 5;
+        `deny_unknown_fields` rejects any incoming JSON carrying it.
     SubmitWorkloadRequest:
       type: object
       description: |-
-        Body of `POST /v1/jobs`. Carries the operator-submitted job spec
-        verbatim; the server routes it through `Job::from_spec` to validate
-        and derive the intent key / digest.
+        Body of `POST /v1/jobs`. Carries the operator-submitted workload
+        spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
+        dispatches on the [`SubmitSpecInput`] variant and routes each
+        arm through the per-kind validating constructor
+        (`JobV1::from_submit` / `ServiceV1::from_submit` /
+        `ScheduleV1::from_submit`) to derive the intent key / digest.
 
-        Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
-        optional `workload_kind` field is the wire-side carrier for the
-        kind discriminator (`"service"` / `"job"` / `"schedule"`). Absent
-        on legacy clients (defaults to `"service"` per
-        `WorkloadKind::default`); set to `"job"` by the CLI's
-        `submit_streaming_job` path so the server can dispatch on the
-        per-kind streaming-event sibling enums (ADR-0047 §3 [D7]) and
-        persist the discriminator at `IntentKey::for_workload_kind` so the
-        reconciler runtime's `hydrate_desired` populates
-        `WorkloadLifecycleState.workload_kind` for the natural-exit emission
-        path (ADR-0037 Amendment 2026-05-10).
+        Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
+        is the SOLE workload-kind discriminator carrier — the previous
+        optional top-level `workload_kind: Option<String>` field was
+        deleted in step 02-03b. Legacy clients that sent
+        `workload_kind = "job"` migrate to `spec = { kind: "job", ... }`;
+        `kind` is required (not optional) and the JSON shape is
+        `oneOf`-discriminated.
       required:
       - spec
       properties:
         spec:
-          $ref: '#/components/schemas/JobSpecInput'
-        workload_kind:
-          type:
-          - string
-          - 'null'
-          description: |-
-            Optional workload-kind discriminator. `"service"` (default),
-            `"job"`, or `"schedule"`. Unknown values fall back to `"service"`
-            per ADR-0047 §1 forward-compat — preserves kind-agnostic
-            behavior for clients sending a value the server does not
-            recognise.
+          $ref: '#/components/schemas/SubmitSpecInput'
     SubmitWorkloadResponse:
       type: object
       description: |-

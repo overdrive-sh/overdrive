@@ -51,6 +51,7 @@ async fn submit_json(
 }
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -114,7 +115,7 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // First submit — Ok, outcome = Inserted.
     let first: SubmitWorkloadResponse = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await
     .expect("first submit must be Ok");
@@ -137,7 +138,7 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // takes the conflict branch and returns ControlPlaneError::Conflict.
     let second = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await;
 
@@ -179,7 +180,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // Prime with canonical spec.
     let primed: SubmitWorkloadResponse = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) },
     )
     .await
     .expect("prime submit");
@@ -191,7 +192,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // Ok.
     let outcome = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec_alt_replicas()) },
     )
     .await;
 
@@ -224,7 +225,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     let stored = state.store.get(key).await.expect("get must succeed");
     let bytes = stored.expect("intent key must remain populated after a Conflict");
     let canonical_job =
-        overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
+        overdrive_core::aggregate::Job::from_submit(payments_spec()).expect("Job::from_submit");
     let canonical_bytes = overdrive_core::aggregate::WorkloadIntent::Job(canonical_job)
         .archive_for_store()
         .expect("rkyv archive of canonical job");
@@ -250,7 +251,7 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
 
     let resp: SubmitWorkloadResponse = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) },
     )
     .await
     .expect("submit");
@@ -294,7 +295,7 @@ async fn unchanged_path_with_empty_kind_bytes_does_not_panic() {
     // First submit — plants the spec at the canonical key.
     let first = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await
     .expect("first submit");
@@ -310,7 +311,7 @@ async fn unchanged_path_with_empty_kind_bytes_does_not_panic() {
     // "index out of bounds: the len is 0 but the index is 0".
     let second = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await
     .expect("re-submit with empty kind bytes must not panic");

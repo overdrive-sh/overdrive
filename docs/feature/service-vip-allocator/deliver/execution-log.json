@@ -372,6 +372,27 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: structural finding \u2014 ADR-0051 single-cut migration breaks 3 legacy submit_streaming tests that depend on pre-migration WorkloadKind::Service default for None workload_kind. Tests assert Service-shape stream events (running, attempt_failed) and Service vocabulary rendering. Single-cut wraps all JobSpecInput in SubmitSpecInput::Job(_), forcing Job-arm streaming dispatch. Needs user direction: migrate the 3 tests to Job-arm assertions, or restore a Service-arm wire path",
       "t": "2026-05-15T08:41:08Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: structural finding committed at 636cfc15. Migration code (compile + clippy clean via Lima) remains in working tree. User must pick (A) test migration in-scope, (B) restore Service-arm wire path, or (C) #[ignore] the 3 failing tests",
+      "t": "2026-05-15T08:47:10Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 6th structural finding \u2014 18 workspace test failures across overdrive-control-plane acceptance/streaming_submit (s_cp_01/03/06/06b/07/11/12 + streaming_channel_closed), openapi_gate, server_lifecycle stub_router, xtask dst_lint + acceptance/dst_lint_banned_apis + dst_lint_catches_reconciler_violation + mutants::every_workspace_member_declares_integration_tests_feature. Root cause is the same OQ-8 coercion-deletion: pre-migration these tests submitted JobSpecInput payloads with workload_kind=None, server coerced to Service, server-side streaming path emitted SubmitEvent (Service-arm vocabulary). Post-migration with workload_kind field deleted, server routes them through Job-arm JobSubmitEvent vocabulary. 3 target tests (streaming_submit_broken_binary/happy_path/converged_stopped) PASS after Job-vocab rewrite. Surfacing per dispatch instruction 'If a SIXTH structural finding emerges, STOP and surface \u2014 do not paper over.'",
+      "t": "2026-05-15T10:49:50Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T11:11:03Z"
     }
   ]
 }

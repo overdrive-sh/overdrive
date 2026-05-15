@@ -106,7 +106,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         sim_clock.clone(),
     );
 
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "obswrite".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

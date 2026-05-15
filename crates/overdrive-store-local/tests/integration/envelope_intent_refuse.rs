@@ -102,7 +102,7 @@ fn malformed_intent_bytes_cause_refuse_to_start() {
     // the "unknown future variant" branch (which lives in
     // `unknown_future_variant_tag_causes_refuse_to_start`).
     let job_id = "job-malformed-01";
-    let job = Job::from_spec(sample_job_spec(job_id)).expect("valid job");
+    let job = Job::from_submit(sample_job_spec(job_id)).expect("valid job");
     let key = IntentKey::for_workload(&job.id);
     let garbage: &[u8] = b"\xff\xfe\xfd\xfc not rkyv";
     assert!(
@@ -182,7 +182,7 @@ fn unknown_future_variant_tag_causes_refuse_to_start() {
     // § 3 calls for, distinguishing "future binary's V<N+1>" from
     // "bytes don't decode at all".
     let job_id = "job-unknown-future-99";
-    let job = Job::from_spec(sample_job_spec(job_id)).expect("valid job");
+    let job = Job::from_submit(sample_job_spec(job_id)).expect("valid job");
     let key = IntentKey::for_workload(&job.id);
     let valid_archive: rkyv::util::AlignedVec = rkyv::to_bytes::<rkyv::rancor::Error>(
         &WorkloadIntentEnvelope::latest(overdrive_core::aggregate::WorkloadIntent::Job(job)),
@@ -247,7 +247,7 @@ fn well_formed_intent_bytes_do_not_emit_refused_event() {
     // Write a valid envelope through the typed codec — the recovery
     // walk must observe it on re-open without emitting any
     // `health.startup.refused` event.
-    let job = Job::from_spec(sample_job_spec("job-ok-01")).expect("valid job");
+    let job = Job::from_submit(sample_job_spec("job-ok-01")).expect("valid job");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
         .archive_for_store()
         .expect("typed codec archive");

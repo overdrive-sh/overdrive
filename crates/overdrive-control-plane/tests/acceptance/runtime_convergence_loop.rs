@@ -89,7 +89,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
     //     desired state for `WorkloadLifecycle` against `job/payments`).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -250,7 +250,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     );
 
     // --- Preload IntentStore with one converged Job (replicas=1).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -447,7 +447,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     start, the action shim writes `AllocState::Failed`, the
     //     reconciler emits one `RestartAllocation` then sits on the
     //     1-second backoff (`RESTART_BACKOFF_DURATION`).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -695,7 +695,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     // --- Preload a Job that the SimDriver will reject — this drives
     //     the alloc into Failed and exercises the restart-with-backoff
     //     branch where `WorkloadLifecycleView` accumulates state.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -965,7 +965,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     );
 
     // Seed Job (intent) so hydrate_desired returns Some(job).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

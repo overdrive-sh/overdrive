@@ -1610,6 +1610,53 @@ will read. If the commit you are landing is otherwise unrelated, add
 `.nwave/des-config.json` to it anyway — it is the one file exempt from
 the "focused subset" discipline above.
 
+## Commit message hygiene
+
+**A commit message describes the change, not the session that produced
+it.** Do NOT paste transient command output, gate results, or
+workspace-state snapshots into commit messages. These are useless to
+every future reader: the commit IS the gate result (CI re-runs the
+gates on every PR), and the workspace state at the moment of the
+commit is recoverable from the commit itself.
+
+The shapes to keep out:
+
+- **Gate / check output.** Lines like `cargo check --workspace ...:
+  clean`, `cargo clippy ...: clean`, `cargo nextest run ...: 148
+  passed, 3 failed, 12 skipped`. CI runs the same gates on every PR
+  and the answer is reproducible from the commit; pasting one
+  transient run's output adds noise and rots the moment anything
+  shifts.
+- **"Workspace state at this checkpoint" sections** enumerating which
+  commands were run and what they returned. The commit IS the
+  checkpoint.
+- **Test-run summaries** ("N passed, M failed, K skipped before
+  `--no-fail-fast` cancel"). If specific failures are load-bearing to
+  the change, name them by test path and explain *why* in prose —
+  don't dump the runner's tally.
+- **Tool invocation traces** (the literal command lines the agent
+  ran, in order, with their exit codes). These belong in the agent's
+  session log, not in `git log`.
+
+What DOES belong:
+
+- The *why* of the change — the problem, constraint, or decision
+  that motivated it. Future readers reach for `git log` to answer
+  "why does this code look like this?" not "what gates passed when
+  this landed?"
+- *Specific* findings that shape the change — e.g. "S-2.2-17 still
+  fails after this fix because the kernel-side bounds check fires
+  before the helper runs; tracked separately" — named, scoped, and
+  load-bearing. Not a gate summary.
+- Cross-references to issues, ADRs, or prior commits when the change
+  is part of a larger arc.
+
+If the commit needs a "checkpoint" framing because the work is
+genuinely incomplete (e.g. a `chore(deliver): checkpoint step NN-NN`
+commit during a multi-step DELIVER wave), the body still describes
+*what is left and why* in prose — not which commands the agent
+happened to run before stopping.
+
 ## Deletion discipline
 
 When production code becomes unused — typically after a refactor that

@@ -1,6 +1,6 @@
 //! `overdrive job submit`.
 //!
-//! Reads a TOML job spec from disk, runs `Job::from_spec` locally for
+//! Reads a TOML job spec from disk, runs `Job::from_submit` locally for
 //! fast-fail validation, POSTs the typed `SubmitWorkloadRequest` to the
 //! control plane, and returns a typed [`SubmitOutput`] carrying the
 //! `workload_id`, derived `intent_key`, canonical `spec_digest`, idempotency
@@ -12,7 +12,7 @@
 //! rkyv-archived `Job` bytes (ADR-0002), 64 characters; `outcome` is
 //! `IdempotencyOutcome::{Inserted, Unchanged}`.
 //!
-//! Per ADR-0011, `Job::from_spec` is THE validating constructor. The
+//! Per ADR-0011, `Job::from_submit` is THE validating constructor. The
 //! CLI runs it client-side for an immediate, operator-facing error
 //! that names the offending field without a server round-trip; the
 //! server runs it again on ingress for defence-in-depth (ADR-0015).
@@ -34,6 +34,7 @@ use overdrive_core::aggregate::{
     AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
     JobSpecInput, ResourcesInput as LegacyResourcesInput, WorkloadSpecInput,
 };
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use url::Url;
 
@@ -171,7 +172,7 @@ pub struct SubmitOutput {
 /// # Errors
 ///
 /// * [`CliError::InvalidSpec`] — the TOML file is unreadable,
-///   malformed, or fails `Job::from_spec` (zero replicas, zero memory,
+///   malformed, or fails `Job::from_submit` (zero replicas, zero memory,
 ///   unparseable ID). Fires BEFORE any HTTP call.
 /// * [`CliError::ConfigLoad`] — the trust triple cannot be loaded.
 /// * [`CliError::Transport`] — the control plane is unreachable.
@@ -187,46 +188,45 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
 
     // 2. Try the kind-discriminated parser first (same detection as
     //    `submit_streaming`). If the TOML carries a `[job]` section,
-    //    translate to the legacy wire shape and tag with
-    //    `workload_kind = "job"` so the server persists the correct
-    //    discriminator byte. Flat TOMLs fall through to the legacy
-    //    `JobSpecInput` parser with `workload_kind: None`.
-    let (spec_input, workload_kind) = if let Ok(WorkloadSpecInput::Job(job_spec)) =
-        WorkloadSpecInput::from_toml_str(&toml_str)
-    {
-        let spec = JobSpecInput {
-            id: job_spec.id,
-            replicas: 1,
-            driver: DriverInput::Exec(LegacyExecInput {
-                command: job_spec.exec.command,
-                args: job_spec.exec.args,
-            }),
-            resources: LegacyResourcesInput {
-                cpu_milli: job_spec.resources.cpu_milli,
-                memory_bytes: job_spec.resources.memory_bytes,
-            },
+    //    translate to the wire shape via `JobSpecInput`. Flat TOMLs
+    //    fall through to the legacy `JobSpecInput` parser. Per
+    //    ADR-0051 the wire-side discriminator now lives inside
+    //    `SubmitSpecInput`'s `kind` tag; the outer
+    //    `SubmitWorkloadRequest.workload_kind` field has been deleted.
+    let spec_input: JobSpecInput =
+        if let Ok(WorkloadSpecInput::Job(job_spec)) = WorkloadSpecInput::from_toml_str(&toml_str) {
+            JobSpecInput {
+                id: job_spec.id,
+                replicas: 1,
+                driver: DriverInput::Exec(LegacyExecInput {
+                    command: job_spec.exec.command,
+                    args: job_spec.exec.args,
+                }),
+                resources: LegacyResourcesInput {
+                    cpu_milli: job_spec.resources.cpu_milli,
+                    memory_bytes: job_spec.resources.memory_bytes,
+                },
+            }
+        } else {
+            toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+                field: "toml".to_string(),
+                message: format!("failed to parse TOML: {e}"),
+            })?
         };
-        (spec, Some("job".to_string()))
-    } else {
-        let spec: JobSpecInput = toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
-            field: "toml".to_string(),
-            message: format!("failed to parse TOML: {e}"),
-        })?;
-        (spec, None)
-    };
 
     // 3. Client-side validation via the shared ADR-0011 constructor.
     //    Fast-fail BEFORE any HTTP call — operators see the offending
     //    field without a round-trip.
-    let _validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let _validated: Job = Job::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
 
     // 4. Build the typed API client and POST. The endpoint is the one
     //    recorded in the trust triple — the operator config is the
     //    sole source.
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
-    let resp =
-        client.submit_workload(SubmitWorkloadRequest { spec: spec_input, workload_kind }).await?;
+    let resp = client
+        .submit_workload(SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_input) })
+        .await?;
 
     // 5. Compose the typed output. Intent key is derived via the
     //    shared `IntentKey::for_workload` helper (ADR-0050 OQ-5 single-
@@ -381,7 +381,7 @@ pub struct SubmitStreamingOutput {
 /// Per slice 02 step 02-04 acceptance criteria, this handler:
 ///
 /// 1. Reads + validates the spec client-side via
-///    [`Job::from_spec`] (ADR-0011) — fast-fail BEFORE any HTTP call.
+///    [`Job::from_submit`] (ADR-0011) — fast-fail BEFORE any HTTP call.
 /// 2. POSTs `application/x-ndjson` via
 ///    [`crate::http_client::ApiClient::submit_workload_streaming`].
 /// 3. Consumes the response body line-by-line via
@@ -446,15 +446,16 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
     // 4. Client-side validation (ADR-0011 SSOT). Capture the validated
     //    `WorkloadId` so the streaming consumer can carry the canonical
     //    workload_id without re-parsing the server's `intent_key`.
-    let validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated: Job = Job::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
     let validated_job_id = validated.id.to_string();
 
     // 5. Build the typed API client and POST with `Accept: application/x-ndjson`.
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
-    // Legacy / Service-shape lane — workload_kind: None defaults to
-    // Service on the server side per ADR-0047 §1 forward-compat.
-    let request = SubmitWorkloadRequest { spec: spec_input, workload_kind: None };
+    // Legacy lane — wrapped in `SubmitSpecInput::Job(_)` per ADR-0051.
+    // The wire-side discriminator now lives inside `SubmitSpecInput`'s
+    // `kind` tag; the outer `workload_kind` field has been deleted.
+    let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_input) };
     let response = client.submit_workload_streaming(request).await?;
 
     // 6. Consume the stream line-by-line.
@@ -494,7 +495,7 @@ async fn submit_streaming_job(
     };
 
     // Client-side validation via the shared ADR-0011 constructor.
-    let validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated: Job = Job::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
     let validated_job_id = validated.id.to_string();
 
     // Submit echo (per S-02-06) — printed via stdout BEFORE any
@@ -507,13 +508,13 @@ async fn submit_streaming_job(
 
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
-    // Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
-    // tag the wire request with `workload_kind = "job"` so the server
-    // dispatches to `build_workload_stream` (typed `JobSubmitEvent` lane)
-    // and persists the kind discriminator at `IntentKey::for_workload_kind`
-    // for the reconciler runtime's `hydrate_desired` to read.
-    let request =
-        SubmitWorkloadRequest { spec: spec_input, workload_kind: Some("job".to_string()) };
+    // Per ADR-0051 the wire-side workload kind is the `kind` tag
+    // inside `SubmitSpecInput::Job(_)`. The outer
+    // `workload_kind: Option<String>` field has been deleted; the
+    // server dispatches to `build_workload_stream` (typed
+    // `JobSubmitEvent` lane) based on the discriminator persisted at
+    // `IntentKey::for_workload_kind` after admission.
+    let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_input) };
     let response = client.submit_workload_streaming(request).await?;
 
     consume_stream_job(response, endpoint, validated_job_id, submit_echo).await

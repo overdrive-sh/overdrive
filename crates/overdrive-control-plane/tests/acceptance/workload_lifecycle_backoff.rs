@@ -126,7 +126,7 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
 
     // Submit a 1-replica job. The submit goes through the IntentStore
     // directly (the test does not need the HTTP boundary here).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

@@ -109,7 +109,7 @@ fn body_decode_failure_maps_to_exit_code_2() {
 
 #[test]
 fn invalid_spec_maps_to_exit_code_2_no_http_call_made() {
-    // InvalidSpec fires BEFORE any HTTP call (client-side `Job::from_spec`
+    // InvalidSpec fires BEFORE any HTTP call (client-side `Job::from_submit`
     // validation). The criteria pin every pre-Accepted failure to exit 2
     // — InvalidSpec is the earliest pre-Accepted failure shape.
     let err =

@@ -34,7 +34,7 @@ use rkyv::rancor;
 // ---------------------------------------------------------------------------
 
 fn sample_job() -> Job {
-    Job::from_spec(JobSpecInput {
+    Job::from_submit(JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 1500, memory_bytes: 512 * 1024 * 1024 },
@@ -313,7 +313,7 @@ fn valid_region() -> impl Strategy<Value = String> {
 fn arb_job() -> impl Strategy<Value = Job> {
     (valid_label(), 1u32..=1024, 0u32..=64_000, 1u64..=(128 * 1024 * 1024 * 1024)).prop_map(
         |(id, replicas, cpu_milli, memory_bytes)| {
-            Job::from_spec(JobSpecInput {
+            Job::from_submit(JobSpecInput {
                 id,
                 replicas,
                 resources: ResourcesInput { cpu_milli, memory_bytes },

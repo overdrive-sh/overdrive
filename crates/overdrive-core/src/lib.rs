@@ -39,6 +39,11 @@
 )]
 
 pub mod aggregate;
+// `api::submit` — wire-shape `SubmitSpecInput` enum + per-kind payloads
+// per ADR-0051 (Accepted 2026-05-15). The wire-side member of the
+// three-layer Rust type universe (parser-side `WorkloadSpec` / wire-side
+// `SubmitSpecInput` / persisted `WorkloadIntent`).
+pub mod api;
 // `codec::envelope::{VersionedEnvelope, EnvelopeError}` — shared
 // envelope contract for every rkyv-persisted type that crosses a
 // durable-storage boundary. Per-type envelopes (e.g.

@@ -131,7 +131,7 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     // Preload IntentStore with a Job so WorkloadLifecycle's hydrate_desired
     // succeeds (otherwise hydrate fails before TickContext construction
     // — this test asserts the happy-path tick construction).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

@@ -1,7 +1,7 @@
 //! Acceptance — `wire-exec-spec-end-to-end` server-side defence-in-depth.
 //!
 //! Per ADR-0011 / ADR-0015 / ADR-0031 §7: even when the CLI
-//! pre-validates client-side, the server runs `Job::from_spec` again
+//! pre-validates client-side, the server runs `Job::from_submit` again
 //! on ingress. The new `exec.command` non-empty rule (ADR-0031 §4)
 //! must fire on the server lane and surface as
 //! `ControlPlaneError::Validation { field: Some("exec.command"), .. }`,
@@ -30,6 +30,7 @@ use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -81,7 +82,7 @@ async fn submit_job_handler_rejects_empty_exec_command_with_validation_error_nam
     let result = submit_workload(
         State(state.clone()),
         HeaderMap::new(),
-        Json(SubmitWorkloadRequest { spec: spec_with_command(""), workload_kind: None }),
+        Json(SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_with_command("")) }),
     )
     .await;
 
@@ -126,7 +127,7 @@ async fn submit_job_handler_rejects_whitespace_only_exec_command_with_validation
     let result = submit_workload(
         State(state.clone()),
         HeaderMap::new(),
-        Json(SubmitWorkloadRequest { spec: spec_with_command("   "), workload_kind: None }),
+        Json(SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_with_command("   ")) }),
     )
     .await;
 

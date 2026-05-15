@@ -21,6 +21,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, IntentKey, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -96,7 +97,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     // Submit a job first.
     let resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -105,11 +106,12 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     assert_eq!(submit_body.outcome, IdempotencyOutcome::Inserted);
 
     // Capture the expected spec bytes by re-archiving from the same
-    // input — the original handler stores rkyv archive of `Job::from_spec`,
+    // input — the original handler stores rkyv archive of `Job::from_submit`,
     // which is byte-deterministic.
     let workload_id = WorkloadId::new("payments").expect("parse job id");
     let job_key = IntentKey::for_workload(&workload_id);
-    let job = overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
+    let job =
+        overdrive_core::aggregate::Job::from_submit(payments_spec()).expect("Job::from_submit");
     let expected_spec_bytes = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
         .archive_for_store()
         .expect("rkyv archive expected Job");

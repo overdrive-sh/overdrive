@@ -60,7 +60,7 @@ fn make_node(id: &str, capacity: Resources) -> Node {
     Node { id: nid(id), region: local_region(), capacity }
 }
 
-/// Construct a `Job` aggregate directly (NOT through `Job::from_spec`)
+/// Construct a `Job` aggregate directly (NOT through `Job::from_submit`)
 /// so the test fixture wires explicit `command` / `args` values without
 /// depending on the new wire-shape input twin. This keeps the focused
 /// scenario isolated from the input shape — a regression in the input

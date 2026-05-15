@@ -53,7 +53,7 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
     };
 
     // When Ana calls the validating constructor.
-    let err = Job::from_spec(spec).expect_err("zero replicas must be rejected");
+    let err = Job::from_submit(spec).expect_err("zero replicas must be rejected");
 
     // Then the error is the Validation variant naming the replicas field.
     match err {
@@ -88,7 +88,7 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
     };
 
     // When Ana calls the validating constructor.
-    let result = Job::from_spec(spec);
+    let result = Job::from_submit(spec);
 
     // Then the result is Err — and the type system guarantees no Job
     // is constructed on this branch. `Result<Job, _>::Err` does not
@@ -135,7 +135,7 @@ fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes
     };
 
     // When Ana calls the validating constructor.
-    let err = Job::from_spec(spec).expect_err("zero memory must be rejected");
+    let err = Job::from_submit(spec).expect_err("zero memory must be rejected");
 
     // Then the error names the memory_bytes field.
     match err {
@@ -280,7 +280,7 @@ fn allocation_new_rejects_forbidden_char_in_node_id() {
 }
 
 // ---------------------------------------------------------------------------
-// Structural rkyv-sentinel check — `Job::from_spec` signature returns
+// Structural rkyv-sentinel check — `Job::from_submit` signature returns
 // `Result<Job, AggregateError>`. On the Err branch no `Job` exists by
 // construction, so no downstream archival call is reachable. This test
 // documents the structural guarantee; no runtime wrapper is needed
@@ -298,7 +298,7 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
     };
 
     // When Ana calls from_spec.
-    let result: Result<Job, AggregateError> = Job::from_spec(spec);
+    let result: Result<Job, AggregateError> = Job::from_submit(spec);
 
     // Then the return type is Result<Job, _>. On Err, the value
     // discriminant carries no Job. This is the structural sentinel —
@@ -346,7 +346,7 @@ mod property {
                     args: vec![],
                 }),
             };
-            match Job::from_spec(spec) {
+            match Job::from_submit(spec) {
                 Err(AggregateError::Validation { field, .. }) => {
                     prop_assert_eq!(field, "replicas");
                 }
@@ -375,7 +375,7 @@ mod property {
                     args: vec![],
                 }),
             };
-            match Job::from_spec(spec) {
+            match Job::from_submit(spec) {
                 Err(AggregateError::Validation { field, .. }) => {
                     prop_assert_eq!(field, "memory_bytes");
                 }

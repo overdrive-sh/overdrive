@@ -72,7 +72,7 @@ async fn job_stop_drives_running_to_terminated() {
     // Use a distinct workload_id so the derived cgroup scope
     // (`alloc-stopper-0.scope`) does not collide with submit_to_running
     // (`alloc-payments-0.scope`) when both tests run in parallel under nextest.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "stopper".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

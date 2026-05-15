@@ -18,6 +18,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use serde::Deserialize;
 use tempfile::TempDir;
 
@@ -100,7 +101,7 @@ async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
     // Submit the job first.
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("POST /v1/jobs");

@@ -95,10 +95,10 @@ fn sample_spec() -> JobSpecInput {
     }
 }
 
-/// Persist `Job::from_spec(spec)` into the `IntentStore` — the required
+/// Persist `Job::from_submit(spec)` into the `IntentStore` — the required
 /// precondition for a 200 response (S-AS-09 vacuum-base for non-404 paths).
 async fn install_job(state: &AppState, spec: JobSpecInput) -> Job {
-    let job = Job::from_spec(spec).expect("Job::from_spec must succeed for fixture");
+    let job = Job::from_submit(spec).expect("Job::from_submit must succeed for fixture");
     let key = IntentKey::for_workload(&job.id);
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
         .archive_for_store()

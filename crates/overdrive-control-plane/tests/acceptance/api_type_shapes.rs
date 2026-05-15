@@ -27,6 +27,7 @@ use overdrive_control_plane::api::{
     WorkloadDescription,
 };
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use utoipa::ToSchema;
 
 fn sample_job_spec() -> JobSpecInput {
@@ -40,7 +41,7 @@ fn sample_job_spec() -> JobSpecInput {
 
 #[test]
 fn submit_job_request_round_trips_through_serde_json() {
-    let original = SubmitWorkloadRequest { spec: sample_job_spec(), workload_kind: None };
+    let original = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(sample_job_spec()) };
     let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadRequest");
     let round_tripped: SubmitWorkloadRequest =
         serde_json::from_str(&wire).expect("deserialise SubmitWorkloadRequest");

@@ -81,7 +81,7 @@ pub enum AggregateError {
 /// additively. The driver passes the inner `Exec.command` / `Exec.args`
 /// to `tokio::process::Command::new(impl AsRef<OsStr>).args(...)` — no
 /// newtype is warranted (per `.claude/rules/development.md` § Newtypes),
-/// and validation lives in `Job::from_spec`.
+/// and validation lives in `JobV1::from_submit`.
 ///
 /// # Canonicalisation (rkyv)
 ///
@@ -158,7 +158,7 @@ pub enum WorkloadDriver {
 pub struct Exec {
     /// Host filesystem path to the binary the driver execs. Per ADR-0031
     /// this is mandatory and validated non-empty (after trim) at
-    /// `Job::from_spec`.
+    /// `JobV1::from_submit`.
     pub command: String,
     /// Argv passed verbatim to the binary. No per-element validation —
     /// argv is opaque to the platform per ADR-0031 §4.
@@ -177,7 +177,7 @@ pub struct Exec {
 // [`WorkloadIntentV1::Job`]; the codec lives on
 // [`WorkloadIntentV1`].
 //
-// `Job::from_spec` (the validating constructor) is preserved
+// `JobV1::from_submit` (the validating constructor) is preserved
 // unchanged — every CLI handler and every server handler still
 // routes through it. The `Job` alias (= `JobV1`) is retained so
 // existing struct-literal `Job { id, replicas, resources, driver }`
@@ -198,7 +198,7 @@ pub struct Exec {
 /// (`WorkloadDriver`) carrying the operator's invocation shape;
 /// the projection from wire-shape `DriverInput::Exec` →
 /// `WorkloadDriver::Exec` happens inside
-/// [`Job::from_spec`](JobV1::from_spec).
+/// [`JobV1::from_submit`](JobV1::from_submit).
 #[derive(
     Debug,
     Clone,
@@ -221,15 +221,19 @@ pub struct JobV1 {
 }
 
 impl JobV1 {
-    /// Validating constructor. Per US-01 AC, this is the single path into
-    /// the intent-side `Job` aggregate. Every CLI handler and every
-    /// server handler routes through here.
+    /// Validating constructor for the wire-side
+    /// [`crate::api::submit::SubmitSpecInput::Job`] payload per
+    /// ADR-0051 § 4 / OQ-6. Renames the legacy `from_spec` entry point
+    /// (which dated from the era when the wire and parser shapes were
+    /// conflated). Per US-01 AC, this is the single path into the
+    /// intent-side `Job` aggregate; every CLI handler and every server
+    /// handler routes through here.
     ///
     /// Rejects zero replicas, zero-byte memory capacity, and (per
     /// ADR-0031 §4) empty / whitespace-only `exec.command`. Wraps
     /// [`WorkloadId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
-    pub fn from_spec(spec: JobSpecInput) -> Result<Self, AggregateError> {
+    pub fn from_submit(spec: JobSpecInput) -> Result<Self, AggregateError> {
         let JobSpecInput { id, replicas, resources, driver } = spec;
         let id = WorkloadId::new(&id)?;
         let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
@@ -419,6 +423,137 @@ pub struct ScheduleV1 {
     pub cron_expr: CronExpr,
 }
 
+impl ServiceV1 {
+    /// Validating constructor for the wire-side
+    /// [`crate::api::submit::SubmitSpecInput::Service`] payload per
+    /// ADR-0051 § 4. Mirrors [`JobV1::from_submit`]'s validation
+    /// surface plus Service-specific listener rules:
+    ///
+    /// * `id` non-empty after trim → [`WorkloadId::new`].
+    /// * `replicas > 0` → [`NonZeroU32`].
+    /// * `resources.memory_bytes != 0`.
+    /// * Driver validation (currently `exec.command` non-empty after
+    ///   trim, per ADR-0031 § 4).
+    /// * `listeners.len() >= 1`
+    ///   ([`crate::aggregate::ParseError::ListenerMissing`] projected
+    ///   onto [`AggregateError::Validation`]).
+    /// * No two listeners share `(port, protocol)`.
+    /// * `port != 0` per listener.
+    /// * `protocol` parses to `Proto` (case-insensitive `tcp` / `udp`).
+    pub fn from_submit(
+        input: crate::api::submit::ServiceSpecInput,
+    ) -> Result<Self, AggregateError> {
+        use std::collections::BTreeSet;
+        use std::num::NonZeroU16;
+
+        use crate::dataplane::backend_key::Proto;
+
+        let crate::api::submit::ServiceSpecInput { id, replicas, resources, driver, listeners } =
+            input;
+
+        // Identity + scalar field validation — mirrors `JobV1::from_submit`.
+        let id = WorkloadId::new(&id)?;
+        let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
+            field: "replicas",
+            message: format!("replica count must be non-zero; got {replicas}"),
+        })?;
+        if resources.memory_bytes == 0 {
+            return Err(AggregateError::Validation {
+                field: "memory_bytes",
+                message: "memory capacity must be non-zero".to_string(),
+            });
+        }
+
+        // Driver projection — same shape as `JobV1::from_submit`.
+        let DriverInput::Exec(exec_input) = driver;
+        if exec_input.command.trim().is_empty() {
+            return Err(AggregateError::Validation {
+                field: "exec.command",
+                message: "command must be non-empty".to_string(),
+            });
+        }
+
+        // Listener validation.
+        if listeners.is_empty() {
+            return Err(AggregateError::Validation {
+                field: "listeners",
+                message: "a service requires at least one listener".to_string(),
+            });
+        }
+        let mut seen: BTreeSet<(u16, &'static str)> = BTreeSet::new();
+        let mut validated: Vec<Listener> = Vec::with_capacity(listeners.len());
+        for listener in listeners {
+            let port =
+                NonZeroU16::new(listener.port).ok_or_else(|| AggregateError::Validation {
+                    field: "listeners[].port",
+                    message: "listener port must be in 1..=65535".to_string(),
+                })?;
+            let protocol = match listener.protocol.to_ascii_lowercase().as_str() {
+                "tcp" => Proto::Tcp,
+                "udp" => Proto::Udp,
+                other => {
+                    return Err(AggregateError::Validation {
+                        field: "listeners[].protocol",
+                        message: format!(
+                            "unsupported listener protocol {other:?} (supported protocols: tcp, udp)"
+                        ),
+                    });
+                }
+            };
+            let key = (port.get(), protocol.as_str());
+            if !seen.insert(key) {
+                return Err(AggregateError::Validation {
+                    field: "listeners",
+                    message: format!(
+                        "duplicate listener (port={}, protocol={})",
+                        port.get(),
+                        protocol.as_str()
+                    ),
+                });
+            }
+            validated.push(Listener { port, protocol });
+        }
+
+        Ok(Self {
+            id,
+            replicas,
+            resources: Resources {
+                cpu_milli: resources.cpu_milli,
+                memory_bytes: resources.memory_bytes,
+            },
+            driver: WorkloadDriver::Exec(Exec {
+                command: exec_input.command,
+                args: exec_input.args,
+            }),
+            listeners: validated,
+        })
+    }
+}
+
+impl ScheduleV1 {
+    /// Validating constructor for the wire-side
+    /// [`crate::api::submit::SubmitSpecInput::Schedule`] payload per
+    /// ADR-0051 § 4 / OQ-5.
+    ///
+    /// RED scaffold per `.claude/rules/testing.md` § "Production-side
+    /// scaffolds": Schedule wire-arm submission is intentionally
+    /// deferred. The submit handler returns a structured rejection on
+    /// `SubmitSpecInput::Schedule(_)` so this body is unreachable from
+    /// any existing test. Lands GREEN in a future slice when the
+    /// Schedule streaming endpoint ships.
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold for ScheduleV1::from_submit — lands in a future slice per ADR-0051 OQ-5"
+    )]
+    pub fn from_submit(
+        _input: crate::api::submit::ScheduleSpecInput,
+    ) -> Result<Self, AggregateError> {
+        todo!(
+            "RED scaffold: ScheduleV1::from_submit lands in a future slice — Schedule wire-arm wiring is intentionally deferred per ADR-0051 OQ-5"
+        )
+    }
+}
+
 impl VersionedEnvelope for WorkloadIntentEnvelope {
     type Latest = WorkloadIntentV1;
 
@@ -559,7 +694,7 @@ impl WorkloadIntentV1 {
     }
 }
 
-/// Input shape for `Job::from_spec`. The CLI deserialises TOML into this
+/// Input shape for `JobV1::from_submit`. The CLI deserialises TOML into this
 /// type; the server deserialises JSON into the same type; both route
 /// through the same constructor.
 ///
@@ -590,7 +725,7 @@ pub struct JobSpecInput {
 /// hygiene: the rkyv-archived intent-side `Resources` is kept clean of
 /// serde-only / utoipa-only concerns; this twin carries the wire-side
 /// derives. The projection onto `Resources` is field-by-field inside
-/// `Job::from_spec` (no `From` impl: the ≥3-call-sites rule isn't met,
+/// `JobV1::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
 /// and the validation rules — `memory_bytes != 0` — must fire on the
 /// way through anyway).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -622,7 +757,7 @@ pub enum DriverInput {
 #[serde(deny_unknown_fields)]
 pub struct ExecInput {
     /// Host filesystem path to the binary. Validated non-empty (after
-    /// trim) at `Job::from_spec` per ADR-0031 §4.
+    /// trim) at `JobV1::from_submit` per ADR-0031 §4.
     pub command: String,
     /// Argv passed verbatim. Required field — an absent `args` is a
     /// parse error, not "default to no args" (per ADR-0031 §8). Empty
@@ -636,7 +771,7 @@ pub struct ExecInput {
 /// rkyv access + deserialize.
 ///
 /// Non-fallible by construction: every field in `JobSpecInput` is a
-/// projection of a field already validated by `Job::from_spec`. Cloning
+/// projection of a field already validated by `JobV1::from_submit`. Cloning
 /// the `id` is cheap — `WorkloadId::to_string()` is an owned ASCII string.
 impl From<&Job> for JobSpecInput {
     fn from(job: &Job) -> Self {

@@ -205,37 +205,65 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
     ),
     tag = "jobs",
 )]
+// The handler body grew past the 100-line clippy default with the
+// ADR-0051 `SubmitSpecInput` dispatch added at the top — splitting
+// per-arm helpers would obscure the linear "validate → wrap →
+// idempotency → branch on Accept" shape that makes the function
+// comprehensible. Same precedent: `streaming.rs` (file-level allow)
+// and `action_shim/mod.rs::reconciler_action_to_shim` (fn-level allow).
+#[allow(clippy::too_many_lines)]
 pub async fn submit_workload(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<api::SubmitWorkloadRequest>,
 ) -> Result<Response, ControlPlaneError> {
     let want_streaming = wants_ndjson(&headers);
-    // 1. Validate via the single aggregate constructor (ADR-0011 —
-    //    THE-single-validating-constructor). The `Job::from_spec` call
-    //    is the server-side defence-in-depth complement to the CLI's
-    //    fast-fail (ADR-0014); both lanes route through the same
-    //    constructor, so the new ADR-0031 §4 `exec.command` non-empty
-    //    rule fires on both by construction.
+    // 1. Dispatch on the wire-side `SubmitSpecInput` discriminator per
+    //    ADR-0051 § 4 / OQ-6 and route each arm through its per-kind
+    //    validating constructor (`JobV1::from_submit` /
+    //    `ServiceV1::from_submit` / `ScheduleV1::from_submit`). This
+    //    is the wire → intent boundary; the constructors are the
+    //    single validation surface. Field-name preservation per
+    //    ADR-0015: scalar-field validation failures
+    //    (`AggregateError::Validation { field, message }`) flatten
+    //    into the top-level `ControlPlaneError::Validation` variant
+    //    with `field: Some(field.to_string())`. Non-validation
+    //    `AggregateError` shapes fall through the `#[from]` blanket
+    //    conversion to `ControlPlaneError::Aggregate(_)` — `to_response`
+    //    still maps them to HTTP 400 with `error: "validation"`.
     //
-    //    Field-name preservation per ADR-0015: scalar-field validation
-    //    failures (`AggregateError::Validation { field, message }`)
-    //    flatten into the top-level `ControlPlaneError::Validation`
-    //    variant with `field: Some(field.to_string())`. This keeps the
-    //    typed Rust contract aligned with the wire shape — clients
-    //    matching on the typed error see the same `field` token the
-    //    HTTP layer renders into the RFC 7807 body.
-    //
-    //    Non-validation `AggregateError` shapes (`Id`, `Resources`)
-    //    fall through the `#[from]` blanket conversion to
-    //    `ControlPlaneError::Aggregate(_)` — `to_response` still maps
-    //    them to HTTP 400 with `error: "validation"`.
-    let job = Job::from_spec(request.spec).map_err(|e| match e {
-        AggregateError::Validation { field, message } => {
-            ControlPlaneError::Validation { field: Some(field.to_owned()), message }
+    //    Step 02-03b NOTE: Service / Schedule arms return a structured
+    //    rejection placeholder. The full Service-arm wiring
+    //    (allocator integration, `alloc_status` widening, streaming)
+    //    lands in step 02-03c per the roadmap split; the Schedule
+    //    arm's `from_submit` is a `todo!()` RED scaffold that the
+    //    rejection placeholder makes structurally unreachable.
+    let job = match request.spec {
+        overdrive_core::api::submit::SubmitSpecInput::Job(jsi) => {
+            Job::from_submit(jsi).map_err(|e| match e {
+                AggregateError::Validation { field, message } => {
+                    ControlPlaneError::Validation { field: Some(field.to_owned()), message }
+                }
+                other => ControlPlaneError::Aggregate(other),
+            })?
         }
-        other => ControlPlaneError::Aggregate(other),
-    })?;
+        overdrive_core::api::submit::SubmitSpecInput::Service(_) => {
+            return Err(ControlPlaneError::Validation {
+                field: Some("spec.kind".to_owned()),
+                message:
+                    "service submission is gated; lands in step 02-03c per the roadmap (ADR-0051)"
+                        .to_owned(),
+            });
+        }
+        overdrive_core::api::submit::SubmitSpecInput::Schedule(_) => {
+            return Err(ControlPlaneError::Validation {
+                field: Some("spec.kind".to_owned()),
+                message:
+                    "schedule submission is not yet implemented (ADR-0051 OQ-5 — RED scaffold)"
+                        .to_owned(),
+            });
+        }
+    };
 
     // 2. Wrap the validated Job in the kind-agnostic `WorkloadIntent`
     //    aggregate per ADR-0050 and archive canonically via the typed
@@ -243,8 +271,8 @@ pub async fn submit_workload(
     //    logical intent produce byte-identical bytes — this is what
     //    makes the idempotency check byte-equality instead of
     //    semantic-equality. Submit handler today only accepts
-    //    `JobSpecInput` (per step 02-03a scope; Service/Schedule
-    //    landing in 02-03b), so we always wrap as `WorkloadIntent::Job`.
+    //    `SubmitSpecInput::Job` (step 02-03b — Service / Schedule are
+    //    gated above; Service arm lands in 02-03c).
     let workload_id = job.id.clone();
     let intent = WorkloadIntent::Job(job);
     let archived = intent
@@ -278,13 +306,17 @@ pub async fn submit_workload(
     //     dispatch on per-kind sibling-event enums (ADR-0047 §3 [D7])
     //     and the reconciler runtime's `hydrate_desired` can populate
     //     `WorkloadLifecycleState.workload_kind` for the natural-exit
-    //     emission path (ADR-0037 Amendment 2026-05-10). The wire
-    //     field is optional — absent or unknown values default to
-    //     Service per `WorkloadKind::from_wire_str` forward-compat.
-    let mut workload_kind = request
-        .workload_kind
-        .as_deref()
-        .map_or_else(WorkloadKind::default, WorkloadKind::from_wire_str);
+    //     emission path (ADR-0037 Amendment 2026-05-10).
+    //
+    //     Step 02-03b: every submission reaching this point is a Job
+    //     (Service / Schedule arms return a structured rejection
+    //     above). The Service-arm wiring lands in 02-03c; until then
+    //     the discriminator written here is unconditionally `Job`.
+    //     The `mut` binding is preserved because the `KeyExists`
+    //     idempotency path below may re-read a previously-persisted
+    //     discriminator to keep streaming dispatch stable across
+    //     resubmits.
+    let mut workload_kind = WorkloadKind::Job;
     let kind_key = IntentKey::for_workload_kind(&job.id);
 
     // 5. Atomic idempotency / conflict detection via `put_if_absent`.
@@ -330,8 +362,11 @@ pub async fn submit_workload(
                 // Read the stored kind discriminator so streaming
                 // dispatch matches the reconciler's view. The first
                 // submit wrote the authoritative kind; a re-submit
-                // with a different (or absent) workload_kind must not
-                // override the streaming dispatch to a different path.
+                // re-reads the persisted byte rather than re-deriving
+                // from the wire (Step 02-03b: wire always carries Job
+                // until 02-03c lands the Service arm, but the read-
+                // back keeps the path identical to its pre-02-03b
+                // semantics).
                 if let Some(stored_kind_bytes) =
                     state.store.get(kind_key.as_bytes()).await.map_err(|e| {
                         ControlPlaneError::internal("read workload kind (unchanged path)", e)
@@ -481,11 +516,15 @@ pub async fn describe_workload(
     let intent =
         WorkloadIntent::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
     let WorkloadIntent::Job(job) = intent else {
-        // Step 02-03a — submit handler today only accepts Job. Service
-        // / Schedule arms land in 02-03b once `SubmitWorkloadRequest`
-        // widens to `WorkloadSpecInput`.
+        // Step 02-03b — submit handler accepts a wire-side
+        // `SubmitSpecInput`, but the Service / Schedule arms return a
+        // structured rejection (the allocator wiring lands in 02-03c).
+        // The persisted intent layer therefore carries only
+        // `WorkloadIntent::Job(_)` values today; this arm exists for
+        // enum exhaustiveness and lands real Service-arm handling in
+        // 02-03c per the roadmap split.
         unreachable!(
-            "describe_workload reached non-Job WorkloadIntent variant; submit handler currently rejects Service / Schedule"
+            "describe_workload reached non-Job WorkloadIntent variant; submit handler currently rejects Service / Schedule per ADR-0051"
         );
     };
 

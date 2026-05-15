@@ -47,7 +47,7 @@ fn job_from_spec_accepts_canonical_input() {
     };
 
     // When Ana calls the validating constructor.
-    let job = Job::from_spec(spec).expect("canonical input must construct");
+    let job = Job::from_submit(spec).expect("canonical input must construct");
 
     // Then the resulting Job carries the expected typed fields.
     assert_eq!(
@@ -126,7 +126,7 @@ fn count_resources_decls(body: &str) -> usize {
 #[test]
 fn job_resources_and_node_capacity_resolve_to_the_same_resources_type() {
     // Given a Job and a Node constructed through the public constructors.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
@@ -248,7 +248,7 @@ fn allocation_public_fields_are_typed_newtypes_not_raw_primitives() {
 
 #[test]
 fn job_public_fields_are_typed_newtypes_not_raw_primitives() {
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },

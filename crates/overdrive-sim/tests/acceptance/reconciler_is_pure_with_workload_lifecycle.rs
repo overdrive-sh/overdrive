@@ -37,7 +37,7 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 }
 
 fn payments_job() -> Job {
-    Job::from_spec(JobSpecInput {
+    Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },

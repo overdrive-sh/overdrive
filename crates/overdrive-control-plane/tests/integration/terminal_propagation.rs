@@ -125,7 +125,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     // `restart_counts`, and after `RESTART_BACKOFF_CEILING (5)` the
     // WorkloadLifecycle emits `Action::FinalizeFailed { terminal:
     // BackoffExhausted { attempts: 5 } }`.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "backoff-exhaust".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 50, memory_bytes: 64 * 1024 * 1024 },
@@ -220,7 +220,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 
     // Distinct workload_id so cgroup scope name does not collide with
     // sibling tests under nextest.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "term-stop".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -336,7 +336,7 @@ async fn non_terminal_transitions_emit_none() {
     // Distinct workload_id; long-running /bin/sleep so we observe the
     // Pending → Running transition and stop early before any restart
     // budget would be consumed.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "non-term".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },

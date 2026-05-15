@@ -25,6 +25,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, Job, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -102,13 +103,13 @@ fn payments_spec() -> JobSpecInput {
 }
 
 /// Compute the canonical `spec_digest` a correct handler must return:
-/// `ContentHash::of(rkyv::to_bytes(Job::from_spec(spec))).to_string()`.
+/// `ContentHash::of(rkyv::to_bytes(Job::from_submit(spec))).to_string()`.
 ///
 /// This mirrors the handler's expected behaviour exactly — if the handler
 /// instead hashes `serde_json::to_string(&job)` or re-canonicalises via
 /// JCS, the assertions in this module will fail, as they should.
 fn expected_spec_digest(spec: &JobSpecInput) -> String {
-    let job = Job::from_spec(spec.clone()).expect("canonical spec constructs a Job");
+    let job = Job::from_submit(spec.clone()).expect("canonical spec constructs a Job");
     overdrive_core::aggregate::WorkloadIntent::Job(job)
         .spec_digest()
         .expect("spec_digest")
@@ -128,7 +129,7 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -149,7 +150,7 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
         describe_resp.json().await.expect("decode WorkloadDescription");
 
     // 3. spec must round-trip byte-identical (via rkyv) to the submitted
-    //    spec — `Job::from_spec(spec)` applied to both sides must produce
+    //    spec — `Job::from_submit(spec)` applied to both sides must produce
     //    byte-identical archives.
     assert_eq!(
         description.spec,
@@ -266,7 +267,7 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -283,7 +284,7 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
     let expected = expected_spec_digest(&spec);
     assert_eq!(
         description.spec_digest, expected,
-        "spec_digest must equal ContentHash::of(rkyv::to_bytes(Job::from_spec(spec))) — \
+        "spec_digest must equal ContentHash::of(rkyv::to_bytes(Job::from_submit(spec))) — \
          ADR-0002 canonical hashing. Got {:?}; expected {:?}",
         description.spec_digest, expected,
     );
@@ -319,7 +320,7 @@ async fn describe_returns_spec_digest_matching_submit_response() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -372,13 +373,13 @@ proptest! {
     /// Submit-then-describe round-trip: for any valid `JobSpecInput`,
     /// describing the returned workload_id yields a `WorkloadDescription` whose
     /// `spec` equals the submitted spec AND whose `spec_digest` equals
-    /// the canonical `ContentHash::of(rkyv::to_bytes(Job::from_spec(spec)))`.
+    /// the canonical `ContentHash::of(rkyv::to_bytes(Job::from_submit(spec)))`.
     ///
     /// Why this shape: the mandatory "rkyv roundtrip" property per
     /// testing.md requires asserting that a rkyv-archived value, when
     /// read back through `access` + `deserialize`, yields the original.
     /// Here the round trip is: operator's `JobSpecInput` → server
-    /// `Job::from_spec` → `rkyv::to_bytes` → `IntentStore::put` →
+    /// `Job::from_submit` → `rkyv::to_bytes` → `IntentStore::put` →
     /// (new request) `IntentStore::get` → `rkyv::access` → `rkyv::deserialize`
     /// → `JobSpecInput::from(&Job)` → wire. Every step is exercised.
     #[test]
@@ -399,7 +400,7 @@ proptest! {
             let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
             let submit_resp = client
                 .post(&submit_url)
-                .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+                .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
                 .send()
                 .await
                 .expect("POST /v1/jobs");
