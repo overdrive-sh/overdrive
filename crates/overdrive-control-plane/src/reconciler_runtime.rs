@@ -1011,6 +1011,12 @@ pub async fn hydrate_desired_for_test(
 /// Returns `Ok((None, None))` when the key is absent. Errors map to
 /// `ConvergenceError::IntentRead`.
 ///
+/// Step 02-03a+: the submit handler now accepts Job, Service, and Schedule
+/// intents (02-03b). For Service and Schedule kinds, `read_job` returns
+/// `Ok(None)` — the reconciler's `desired.job` field is `None` for those
+/// variants, which is the correct "no Job allocation target" shape for
+/// Phase 1's Service-arm (allocations are not yet spawned for Services).
+///
 /// The second element is the `WorkloadIntent`'s content-addressed
 /// `spec_digest` (SHA-256 over the rkyv-archived payload). Returned
 /// only for `Service` intents — Job and Schedule workloads do not
