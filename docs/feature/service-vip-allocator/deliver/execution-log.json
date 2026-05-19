@@ -435,6 +435,118 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: cascaded from RED_ACCEPTANCE \u2014 no code changes to commit. Working tree carries only the pre-existing execution-log.json edit from prior session; no production or test files modified by this dispatch.",
       "t": "2026-05-15T12:18:42Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T13:19:08Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:09:56Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: 02-03c is infra cascade only; no new user-facing scenarios. All 6 S-VIP acceptance scenarios land in 02-03d per 2026-05-15 split.",
+      "t": "2026-05-19T07:10:03Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:12:12Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:38:44Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:40:43Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T08:32:11Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T08:36:32Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: All new logic exercised port-to-port through submit_workload/alloc_status HTTP handlers in 6 acceptance tests; no new pure functions introduced that need decomposition",
+      "t": "2026-05-19T08:36:34Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T09:23:34Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T09:25:23Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:21:53Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:23:21Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: 3 acceptance scenarios cover all 3 distinct behaviors at the driving port (bulk_load); probe is ~5 LOC and additional unit tests would be tautological",
+      "t": "2026-05-19T10:23:51Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:30:00Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:31:01Z"
     }
   ]
 }
