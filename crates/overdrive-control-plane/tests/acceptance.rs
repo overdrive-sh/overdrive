@@ -122,4 +122,12 @@ mod acceptance {
     // reconciler emission in 03-01; end-to-end S-VIP-06 + S-VIP-07 in
     // 03-03).
     mod release_service_vip_dispatch;
+
+    // Regression: Service workload convergence must not panic via stale
+    // `unreachable!()` in `read_job`. Gated behind `integration-tests`
+    // for the same reason as `runtime_convergence_loop` — the
+    // `run_convergence_tick` accessor is `#[cfg(any(test, feature =
+    // "integration-tests"))]`.
+    #[cfg(feature = "integration-tests")]
+    mod service_workload_convergence_no_panic;
 }

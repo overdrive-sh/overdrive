@@ -1043,12 +1043,7 @@ async fn read_job(
     match intent {
         overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok(Some(job)),
         overdrive_core::aggregate::WorkloadIntent::Service(_)
-        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
-            unreachable!(
-                "reconciler_runtime::read_job reached non-Job WorkloadIntent variant; \
-                 submit handler currently rejects Service / Schedule (step 02-03b)"
-            )
-        }
+        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok(None),
     }
 }
 
