@@ -478,6 +478,15 @@ jobs:
     # 10 min ceiling — K1 targets <60s; anything close to the ceiling
     # means the guardrail is broken and the build should fail loudly.
     timeout-minutes: 10
+    # `cargo dst` resolves to `cargo run -p overdrive-sim --bin dst`.
+    # `overdrive-sim` depends on `overdrive-control-plane`, which depends
+    # on `overdrive-dataplane` — whose build.rs requires
+    # `target/bpf/overdrive_bpf.o` on Linux per ADR-0038 §3.2. Pull the
+    # artifact from bpf-build rather than rebuilding it here.
+    # Tracked architecturally as #185 — the long-term fix is breaking the
+    # `overdrive-sim → overdrive-control-plane → overdrive-dataplane`
+    # edge so this job no longer needs the BPF artifact at all.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -491,6 +500,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "phase-1-dst"
+
+      # MUST run AFTER Swatinem/rust-cache@v2: the cached tarball is the
+      # entire workspace `target/` directory and its restore step
+      # extracts over `target/bpf/`, clobbering anything written there
+      # by an earlier `download-artifact` invocation. Downloading after
+      # the cache restore guarantees the BPF object is the file present
+      # when build.rs runs.
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/bpf/
+          if-no-files-found: error
 
       # See fmt-clippy job above for rationale.
       - id: sccache-setup
