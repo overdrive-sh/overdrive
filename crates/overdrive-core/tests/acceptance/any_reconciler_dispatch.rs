@@ -101,9 +101,9 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         capacity: Resources { cpu_milli: 1_000, memory_bytes: 1024 * 1024 * 1024 },
     };
     nodes.insert(local.id.clone(), local);
-    let _ = WorkloadId::new("payments").expect("valid WorkloadId");
 
     let desired = WorkloadLifecycleState {
+        workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -112,6 +112,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,
         nodes,

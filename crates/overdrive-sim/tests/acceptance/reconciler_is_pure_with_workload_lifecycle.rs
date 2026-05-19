@@ -22,6 +22,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
+use overdrive_core::id::WorkloadId;
 use overdrive_core::reconciler::{
     AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
     WorkloadLifecycleState, WorkloadLifecycleView,
@@ -61,6 +62,7 @@ fn happy_path_state() -> WorkloadLifecycleState {
     let n = node_alpha();
     nodes.insert(n.id.clone(), n);
     WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(payments_job()),
         desired_to_stop: false,
         nodes,
@@ -85,6 +87,7 @@ fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
     let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();
     let actual_inner = WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: desired_inner.job.clone(),
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
@@ -125,6 +128,7 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();
     let actual_inner = WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: desired_inner.job.clone(),
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),

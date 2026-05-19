@@ -953,6 +953,7 @@ async fn hydrate_desired(
             let service_spec_digest =
                 if workload_kind == WorkloadKind::Service { intent_digest } else { None };
             let s = WorkloadLifecycleState {
+                workload_id: workload_id.clone(),
                 job,
                 desired_to_stop,
                 nodes,
@@ -1123,6 +1124,7 @@ async fn hydrate_actual(
             let service_spec_digest =
                 if workload_kind == WorkloadKind::Service { intent_digest } else { None };
             let s = WorkloadLifecycleState {
+                workload_id,
                 job: None,
                 desired_to_stop: false,
                 nodes,

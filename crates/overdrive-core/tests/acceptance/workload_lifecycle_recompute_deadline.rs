@@ -141,6 +141,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         alloc_with_state("alloc-payments-0", "payments", "local", state),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -149,6 +150,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,

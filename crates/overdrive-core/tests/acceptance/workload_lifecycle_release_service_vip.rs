@@ -125,6 +125,7 @@ fn service_state_with_terminal_alloc(
     );
 
     let desired = WorkloadLifecycleState {
+        workload_id: jid(workload_id),
         job: Some(make_job(workload_id)),
         desired_to_stop: true,
         nodes: nodes.clone(),
@@ -133,6 +134,7 @@ fn service_state_with_terminal_alloc(
         service_spec_digest: spec_digest,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid(workload_id),
         job: Some(make_job(workload_id)),
         desired_to_stop: false,
         nodes,
@@ -212,4 +214,69 @@ fn terminal_state_release_action_idempotent_on_reemit() {
         next_view.released_for_terminal.contains(&digest),
         "next_view.released_for_terminal must still contain the digest after idempotent tick",
     );
+}
+
+/// Regression: Service workloads have `job: None` (read_job returns
+/// `(None, Some(digest))` for `WorkloadIntent::Service`). The
+/// correlation key must embed the real workload ID from
+/// `desired.workload_id`, not fall back to `"unknown"`.
+#[test]
+fn service_release_correlation_uses_workload_id_not_unknown() {
+    use overdrive_core::id::CorrelationKey;
+
+    let digest = fake_spec_digest();
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        aid("alloc-web-api-0"),
+        alloc_terminal_operator_stopped("alloc-web-api-0", "web-api", "local"),
+    );
+
+    let desired = WorkloadLifecycleState {
+        workload_id: jid("web-api"),
+        job: None,
+        desired_to_stop: true,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: Some(digest),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: jid("web-api"),
+        job: None,
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: Some(digest),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _) = r.reconcile(&desired, &actual, &view, &tick);
+
+    let release = actions
+        .iter()
+        .find(|a| matches!(a, Action::ReleaseServiceVip { .. }))
+        .expect("Service with terminal alloc must emit ReleaseServiceVip");
+
+    let expected_correlation =
+        CorrelationKey::derive("job-lifecycle/web-api", &digest, "release-service-vip");
+    let wrong_correlation =
+        CorrelationKey::derive("job-lifecycle/unknown", &digest, "release-service-vip");
+
+    match release {
+        Action::ReleaseServiceVip { correlation, .. } => {
+            assert_eq!(
+                *correlation, expected_correlation,
+                "correlation must embed the real workload ID 'web-api'"
+            );
+            assert_ne!(
+                *correlation, wrong_correlation,
+                "correlation must NOT embed 'unknown' for Service workloads"
+            );
+        }
+        _ => unreachable!(),
+    }
 }

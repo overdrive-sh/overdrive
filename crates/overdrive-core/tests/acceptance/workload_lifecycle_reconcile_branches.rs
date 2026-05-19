@@ -180,6 +180,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("absent"),
         job: None,
         desired_to_stop: true,
         nodes: nodes.clone(),
@@ -188,6 +189,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("absent"),
         job: None,
         desired_to_stop: false,
         nodes,
@@ -238,6 +240,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -246,6 +249,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -291,6 +295,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         alloc_with_state("alloc-payments-1", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: true,
         nodes: nodes.clone(),
@@ -299,6 +304,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -350,6 +356,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -358,6 +365,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -385,6 +393,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
     // StartAllocation against a Running alloc).
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -393,6 +402,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -498,6 +508,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -506,6 +517,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -612,6 +624,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -620,6 +633,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -676,6 +690,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -684,6 +699,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -742,6 +758,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -750,6 +767,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -815,6 +833,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -823,6 +842,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -927,6 +947,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Failed),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: true,
         nodes: nodes.clone(),
@@ -935,6 +956,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -1013,6 +1035,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
     let allocations = one_alloc_map("alloc-payments-0", row);
 
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -1021,6 +1044,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -1102,6 +1126,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
         }
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1110,6 +1135,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes,
@@ -1162,6 +1188,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
     for kind in ALL_WORKLOAD_KINDS {
         let nodes = one_node_map("local");
         let desired = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1170,6 +1197,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes,
@@ -1234,6 +1262,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
         allocs.insert(aid("alloc-payments-1"), failed);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1242,6 +1271,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes,
@@ -1299,6 +1329,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
         }
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1307,6 +1338,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("absent"),
             job: None,
             desired_to_stop: false,
             nodes,
@@ -1404,6 +1436,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
         let allocations = one_alloc_map("alloc-payments-0", row);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1412,6 +1445,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -1465,6 +1499,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
         let allocations = one_alloc_map("alloc-payments-0", row);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1473,6 +1508,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -1514,6 +1550,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
         allocs.insert(aid("alloc-payments-1"), op_stop);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1522,6 +1559,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -1564,6 +1602,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         allocs.insert(aid("alloc-payments-1"), failed);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1572,6 +1611,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -1702,6 +1742,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         let allocations = one_alloc_map("alloc-payments-0", row);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1710,6 +1751,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -1806,6 +1848,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
         let allocations = one_alloc_map("alloc-payments-0", row);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1814,6 +1857,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -1887,6 +1931,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
         let allocations = one_alloc_map("alloc-payments-0", row);
 
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes: nodes.clone(),
@@ -1895,6 +1940,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,

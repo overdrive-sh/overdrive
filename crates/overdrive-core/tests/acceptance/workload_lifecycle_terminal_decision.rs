@@ -144,6 +144,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
     );
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -152,6 +153,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -199,6 +201,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: true,
         nodes: nodes.clone(),
@@ -207,6 +210,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -240,6 +244,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
 fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -248,6 +253,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -287,6 +293,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     );
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -295,6 +302,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -376,6 +384,7 @@ proptest! {
             alloc_with_state("alloc-payments-0", "payments", "local", alloc_state),
         );
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop,
             nodes: nodes.clone(),
@@ -384,6 +393,7 @@ proptest! {
                     service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,

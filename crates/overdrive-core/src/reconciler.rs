@@ -384,6 +384,9 @@ pub enum AnyState {
 /// are pinned by ADR-0021 §1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkloadLifecycleState {
+    /// Kind-agnostic workload identity, always available from the
+    /// `TargetResource` at hydration time.
+    pub workload_id: WorkloadId,
     /// The target job. `None` when the desired-state read returned
     /// no row (job was deleted) or the actual-state read found no
     /// surviving row to project against.
@@ -1777,9 +1780,7 @@ fn service_vip_release_emission(
     if !terminal_observed {
         return None;
     }
-    let workload_id_str =
-        desired.job.as_ref().map_or_else(|| "unknown".to_string(), |j| j.id.as_str().to_string());
-    let target = format!("job-lifecycle/{workload_id_str}");
+    let target = format!("job-lifecycle/{}", desired.workload_id.as_str());
     let correlation = CorrelationKey::derive(&target, &digest, "release-service-vip");
     Some((Action::ReleaseServiceVip { spec_digest: digest, correlation }, digest))
 }

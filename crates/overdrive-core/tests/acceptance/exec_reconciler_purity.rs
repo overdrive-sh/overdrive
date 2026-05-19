@@ -151,6 +151,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     // branch and emits StartAllocation.
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -159,6 +160,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job),
         desired_to_stop: false,
         nodes,
@@ -217,6 +219,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -225,6 +228,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job),
         desired_to_stop: false,
         nodes,
@@ -283,6 +287,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
 
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -291,6 +296,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job),
         desired_to_stop: false,
         nodes,

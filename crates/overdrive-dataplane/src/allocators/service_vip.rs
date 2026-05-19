@@ -12,8 +12,10 @@
 //! Released VIPs return to the pool. On allocate, the implementation
 //! scans the configured [`VipRange`] in order and returns the first
 //! address not currently bound by another memo entry. The trade-off is
-//! O(capacity + k log k) per allocation on the miss path (where k is
-//! the current memo size); in exchange the pool
+//! O(capacity × log k) per allocation on the miss path (where k is
+//! the current memo size and the log k factor comes from the
+//! `BTreeSet::contains` lookup at each candidate address); in exchange
+//! the pool
 //! does not exhaust after `capacity` total submissions regardless of
 //! liveness — a /16 default pool can serve effectively-unbounded
 //! lifetimes of distinct workloads as long as the **simultaneously-held
@@ -116,9 +118,11 @@ impl ServiceVipAllocator {
     /// currently bound in the memo. Shared by [`Self::allocate`] and
     /// [`Self::peek_next_allocation`].
     ///
-    /// O(capacity) worst case — single pass over the range's
+    /// O(capacity × log k) worst case — single pass over the range's
     /// allocatable addresses with O(log k) `BTreeSet::contains` per
-    /// address, where k is the current memo size.
+    /// address, where k is the current memo size. Building the
+    /// `BTreeSet` itself is O(k log k), subsumed by the scan term
+    /// since capacity ≥ k whenever the function returns `Ok`.
     fn scan_for_available(&self) -> Result<ServiceVip, ServiceVipAllocatorError> {
         let held: BTreeSet<ServiceVip> = self.by_digest.values().copied().collect();
         for addr in self.range.allocatable_addrs() {

@@ -30,7 +30,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::eval_broker::Evaluation;
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -832,6 +832,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     nodes.insert(local_node.id.clone(), local_node);
 
     let desired = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
@@ -840,6 +841,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         service_spec_digest: None,
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,
         nodes,
