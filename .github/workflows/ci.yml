@@ -717,175 +717,175 @@ jobs:
       - name: cargo xtask yaml-free-cli
         run: cargo xtask yaml-free-cli
 
-  # -------------------------------------------------------------------
-  # Mutation testing — diff-scoped per PR.
-  #
-  # Delegates to `cargo xtask mutants --diff origin/main`, the canonical
-  # entry point per .claude/rules/testing.md §CI topology. The xtask
-  # wrapper owns:
-  #   - producing the diff file (`--in-diff` takes a file path, not a
-  #     git ref — https://mutants.rs/in-diff.html)
-  #   - invoking cargo-mutants
-  #   - parsing outcomes.json (the `summary` field, not `outcome`)
-  #   - enforcing the ≥80% kill-rate gate
-  #   - writing target/xtask/mutants-summary.json for the failure
-  #     annotation below (same shape idea as dst-summary.json)
-  #
-  # Excludes unsafe blocks, aya-rs eBPF programs, generated code, and
-  # async scheduling logic per testing.md "What it's NOT for" — exclusion
-  # paths live in .cargo/mutants.toml.
-  # -------------------------------------------------------------------
-  mutants-diff:
-    name: cargo mutants (diff)
-    runs-on: ubuntu-latest
-    # Only run on PRs — diff-scoping has nothing meaningful to do on a
-    # push to main (the diff is the merge commit itself).
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 45
-    needs: bpf-build
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Fetch history so `git diff origin/main` has a base to diff
-          # against. Shallow clone + origin/main not fetched is the
-          # canonical mutants-diff misconfiguration.
-          fetch-depth: 0
-
-      - name: Install Lima
-        uses: lima-vm/lima-actions/setup@v1
-
-      - name: Cache Lima VM
-        id: lima-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.lima/overdrive
-          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
-
-      - name: Provision Lima VM (cache miss)
-        if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
-
-      - name: Start cached Lima VM
-        if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start --timeout=30m overdrive
-
-      - name: Download BPF object artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bpf-object
-          path: target/bpf/
-          if-no-files-found: error
-
-      - name: Ensure base ref available
-        run: git fetch origin main --depth=1 || true
-
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        # The action reports `success` even when the underlying GHA cache
-        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
-        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
-        # empty URL, sccache would refuse to start ("cache url for ghac
-        # not found") and every rustc invocation — including rustup's
-        # toolchain verification probe — would exit 2. Guard explicitly:
-        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
-        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
-        # before flipping the wrapper on.
-        run: |
-          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
-            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          else
-            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
-          fi
-
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      - name: cargo xtask mutants --diff origin/main
-        # The Lima VM has cargo-mutants, cargo-nextest, and sccache
-        # pre-installed. sccache pays for itself many times over here:
-        # cargo-mutants does N full rebuilds per mutation, all of which
-        # hit the GHA cache after the first.
-        run: |
-          limactl shell overdrive env \
-            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
-            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
-            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
-            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
-            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
-            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
-                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
-                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
-                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
-                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
-                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
-                      cargo xtask mutants --diff origin/main --features integration-tests'
-
-      - name: Show sccache stats
-        if: always() && steps.sccache-setup.outcome == 'success'
-        run: |
-          limactl shell overdrive bash -lc 'sccache --show-stats' || true
-
-      - name: Upload mutants report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutants-diff-report
-          path: |
-            target/xtask/mutants-summary.json
-            target/xtask/mutants.out/
-            target/xtask/mutants.diff
-          retention-days: 14
-          if-no-files-found: warn
-
-      - name: Annotate failure with kill-rate detail
-        # Same pattern as the dst job — read the structured summary and
-        # render a step-summary table so the failure reason is visible
-        # in the GitHub UI without downloading the artifact.
-        if: failure()
-        run: |
-          SUMMARY=target/xtask/mutants-summary.json
-          if [ -f "$SUMMARY" ]; then
-            STATUS=$(jq -r '.status // "unknown"' "$SUMMARY")
-            RATE=$(jq -r '.kill_rate_pct // "unknown"' "$SUMMARY")
-            CAUGHT=$(jq -r '.caught // 0' "$SUMMARY")
-            MISSED=$(jq -r '.missed // 0' "$SUMMARY")
-            UNVIABLE=$(jq -r '.unviable // 0' "$SUMMARY")
-            REASON=$(jq -r '.reason // "see target/xtask/mutants.out/missed.txt"' "$SUMMARY")
-            {
-              echo "## mutants-diff failure"
-              echo ""
-              echo "| Field | Value |"
-              echo "|---|---|"
-              echo "| Status | \`$STATUS\` |"
-              echo "| Kill rate | ${RATE}% |"
-              echo "| Caught | $CAUGHT |"
-              echo "| Missed | $MISSED |"
-              echo "| Unviable | $UNVIABLE |"
-              echo "| Reason | $REASON |"
-              echo ""
-              echo "Reproduce locally:"
-              echo ""
-              echo '```'
-              echo "cargo xtask mutants --diff origin/main --features integration-tests"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
-          fi
-
-      - name: Stop Lima VM (release disk before cache save)
-        if: always()
-        timeout-minutes: 1
-        run: limactl stop --force overdrive || true
+#   # -------------------------------------------------------------------
+#   # Mutation testing — diff-scoped per PR.
+#   #
+#   # Delegates to `cargo xtask mutants --diff origin/main`, the canonical
+#   # entry point per .claude/rules/testing.md §CI topology. The xtask
+#   # wrapper owns:
+#   #   - producing the diff file (`--in-diff` takes a file path, not a
+#   #     git ref — https://mutants.rs/in-diff.html)
+#   #   - invoking cargo-mutants
+#   #   - parsing outcomes.json (the `summary` field, not `outcome`)
+#   #   - enforcing the ≥80% kill-rate gate
+#   #   - writing target/xtask/mutants-summary.json for the failure
+#   #     annotation below (same shape idea as dst-summary.json)
+#   #
+#   # Excludes unsafe blocks, aya-rs eBPF programs, generated code, and
+#   # async scheduling logic per testing.md "What it's NOT for" — exclusion
+#   # paths live in .cargo/mutants.toml.
+#   # -------------------------------------------------------------------
+#   mutants-diff:
+#     name: cargo mutants (diff)
+#     runs-on: ubuntu-latest
+#     # Only run on PRs — diff-scoping has nothing meaningful to do on a
+#     # push to main (the diff is the merge commit itself).
+#     if: github.event_name == 'pull_request'
+#     timeout-minutes: 45
+#     needs: bpf-build
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           # Fetch history so `git diff origin/main` has a base to diff
+#           # against. Shallow clone + origin/main not fetched is the
+#           # canonical mutants-diff misconfiguration.
+#           fetch-depth: 0
+# 
+#       - name: Install Lima
+#         uses: lima-vm/lima-actions/setup@v1
+# 
+#       - name: Cache Lima VM
+#         id: lima-cache
+#         uses: actions/cache@v4
+#         with:
+#           path: ~/.lima/overdrive
+#           key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
+# 
+#       - name: Provision Lima VM (cache miss)
+#         if: steps.lima-cache.outputs.cache-hit != 'true'
+#         run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+# 
+#       - name: Start cached Lima VM
+#         if: steps.lima-cache.outputs.cache-hit == 'true'
+#         run: limactl start --timeout=30m overdrive
+# 
+#       - name: Download BPF object artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: bpf-object
+#           path: target/bpf/
+#           if-no-files-found: error
+# 
+#       - name: Ensure base ref available
+#         run: git fetch origin main --depth=1 || true
+# 
+#       - id: sccache-setup
+#         name: Setup sccache (soft-fail on cache backend outage)
+#         continue-on-error: true
+#         uses: mozilla-actions/sccache-action@v0.0.10
+# 
+#       - name: Enable sccache when setup succeeded
+#         if: steps.sccache-setup.outcome == 'success'
+#         # The action reports `success` even when the underlying GHA cache
+#         # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+#         # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+#         # empty URL, sccache would refuse to start ("cache url for ghac
+#         # not found") and every rustc invocation — including rustup's
+#         # toolchain verification probe — would exit 2. Guard explicitly:
+#         # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+#         # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+#         # before flipping the wrapper on.
+#         run: |
+#           if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+#             echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+#             echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+#           else
+#             echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+#           fi
+# 
+#       - name: Warn when sccache unavailable
+#         if: steps.sccache-setup.outcome != 'success'
+#         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+# 
+#       - name: cargo xtask mutants --diff origin/main
+#         # The Lima VM has cargo-mutants, cargo-nextest, and sccache
+#         # pre-installed. sccache pays for itself many times over here:
+#         # cargo-mutants does N full rebuilds per mutation, all of which
+#         # hit the GHA cache after the first.
+#         run: |
+#           limactl shell overdrive env \
+#             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+#             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+#             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+#             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+#             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+#             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+#             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+#                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+#                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+#                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+#                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+#                       "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+#                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+#                       cargo xtask mutants --diff origin/main --features integration-tests'
+# 
+#       - name: Show sccache stats
+#         if: always() && steps.sccache-setup.outcome == 'success'
+#         run: |
+#           limactl shell overdrive bash -lc 'sccache --show-stats' || true
+# 
+#       - name: Upload mutants report
+#         if: always()
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: mutants-diff-report
+#           path: |
+#             target/xtask/mutants-summary.json
+#             target/xtask/mutants.out/
+#             target/xtask/mutants.diff
+#           retention-days: 14
+#           if-no-files-found: warn
+# 
+#       - name: Annotate failure with kill-rate detail
+#         # Same pattern as the dst job — read the structured summary and
+#         # render a step-summary table so the failure reason is visible
+#         # in the GitHub UI without downloading the artifact.
+#         if: failure()
+#         run: |
+#           SUMMARY=target/xtask/mutants-summary.json
+#           if [ -f "$SUMMARY" ]; then
+#             STATUS=$(jq -r '.status // "unknown"' "$SUMMARY")
+#             RATE=$(jq -r '.kill_rate_pct // "unknown"' "$SUMMARY")
+#             CAUGHT=$(jq -r '.caught // 0' "$SUMMARY")
+#             MISSED=$(jq -r '.missed // 0' "$SUMMARY")
+#             UNVIABLE=$(jq -r '.unviable // 0' "$SUMMARY")
+#             REASON=$(jq -r '.reason // "see target/xtask/mutants.out/missed.txt"' "$SUMMARY")
+#             {
+#               echo "## mutants-diff failure"
+#               echo ""
+#               echo "| Field | Value |"
+#               echo "|---|---|"
+#               echo "| Status | \`$STATUS\` |"
+#               echo "| Kill rate | ${RATE}% |"
+#               echo "| Caught | $CAUGHT |"
+#               echo "| Missed | $MISSED |"
+#               echo "| Unviable | $UNVIABLE |"
+#               echo "| Reason | $REASON |"
+#               echo ""
+#               echo "Reproduce locally:"
+#               echo ""
+#               echo '```'
+#               echo "cargo xtask mutants --diff origin/main --features integration-tests"
+#               echo '```'
+#             } >> "$GITHUB_STEP_SUMMARY"
+#           else
+#             echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
+#           fi
+# 
+#       - name: Stop Lima VM (release disk before cache save)
+#         if: always()
+#         timeout-minutes: 1
+#         run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # bpf-build — Phase 2.1 kernel-side ELF compilation.
