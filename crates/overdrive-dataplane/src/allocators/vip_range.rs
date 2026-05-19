@@ -103,8 +103,12 @@ impl VipRange {
     /// Effective capacity — total addresses in `ranges` minus the
     /// number of reserved addresses.
     ///
-    /// Equivalent to: how many distinct tokens the underlying
-    /// [`super::PoolAllocator`] can hand out before exhaustion.
+    /// Equivalent to: how many distinct simultaneously-held tokens the
+    /// [`super::ServiceVipAllocator`] can hand out before
+    /// [`super::ServiceVipAllocatorError::Exhausted`] surfaces. Under
+    /// the reuse-on-release shape (ADR-0049 § Amendments → 2026-05-19),
+    /// total submissions over a session are unbounded as long as the
+    /// simultaneously-held count stays below this capacity.
     #[must_use]
     pub fn capacity(&self) -> u64 {
         self.total - self.reserved.len() as u64

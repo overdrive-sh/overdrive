@@ -142,9 +142,10 @@ impl PersistentServiceVipAllocator {
     /// Iterates every row in the store under
     /// [`ALLOCATOR_ENTRIES_PREFIX`], decodes each through the typed
     /// codec, and replays it into a fresh in-memory
-    /// [`ServiceVipAllocator`]. The counter is set to
-    /// `max(persisted.counter_idx) + 1` (or 0 if no entries persist),
-    /// so the next allocation issues an unused index.
+    /// [`ServiceVipAllocator`]. The scan-based allocator (ADR-0049 §
+    /// Amendments → 2026-05-19) requires no counter — the next
+    /// allocation rescans the configured [`VipRange`] against the
+    /// replayed held set to find the first allocatable address.
     ///
     /// # Earned Trust boot probe
     ///
@@ -192,24 +193,25 @@ impl PersistentServiceVipAllocator {
     }
 
     /// Allocate a [`ServiceVip`] for `digest` and persist the
-    /// resulting `(digest, vip, counter_idx)` entry to the store.
+    /// resulting `(digest, vip)` entry to the store.
     ///
     /// # Ordering
     ///
     /// fsync-then-memory:
-    /// 1. Compute the candidate `(vip, counter_idx)` from the
-    ///    in-memory allocator. On memo-hit, return immediately without
-    ///    a store write (the entry was already persisted on the
-    ///    original allocation).
+    /// 1. Compute the candidate `vip` from the in-memory allocator via
+    ///    [`ServiceVipAllocator::peek_next_allocation`]. On memo-hit,
+    ///    return immediately without a store write (the entry was
+    ///    already persisted on the original allocation).
     /// 2. Archive the entry and `put` it through the byte-level store
     ///    (redb fsync on commit).
     /// 3. After the store write returns `Ok`, commit the in-memory
-    ///    state (memo insert + counter advance).
+    ///    state (memo insert via [`ServiceVipAllocator::restore_entry`]).
     ///
     /// On a store write failure between steps 2 and 3 the in-memory
-    /// state stays unchanged — the next `allocate(digest)` call retries
-    /// the same `(vip, counter_idx)` (because the in-memory counter
-    /// did not advance), which is idempotent at the store layer.
+    /// state stays unchanged — the next `allocate(digest)` call
+    /// rescans the configured [`VipRange`] against the same held set
+    /// and retries with the same candidate VIP, which is idempotent
+    /// at the store layer (same key, same archived bytes).
     ///
     /// # Errors
     ///
