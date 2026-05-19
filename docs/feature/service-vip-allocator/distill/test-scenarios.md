@@ -270,7 +270,13 @@ struct body untouched. This scenario validates that the existing
 `memo_len()`) is signature-stable after the single-cut migration.
 The existing proptest and collision-witness tests move with the file.
 
-### S-VIP-12: ServiceVipAllocator allocates from a CIDR range
+### S-VIP-12: ServiceVipAllocator allocates from a CIDR range; released VIPs return to the pool
+
+*(Revised 2026-05-19 — inverts the prior "released VIP NOT reused"
+assertion per ADR-0049 § Amendments → 2026-05-19. The pre-revision
+scenario asserted monotonic-counter no-reuse semantics; the post-
+revision scenario asserts the inverse — released VIPs become
+available for re-allocation.)*
 
 **Driving port**: `ServiceVipAllocator` API
 **Tags**: `@happy_path` `@ac-05`
@@ -278,18 +284,27 @@ The existing proptest and collision-witness tests move with the file.
 ```gherkin
 Given a ServiceVipAllocator constructed with a VipRange from
   `ranges = ["10.96.0.0/24"]`
-When `allocate(spec_digest)` is called with a unique digest
-Then a ServiceVip within 10.96.0.0/24 is returned
-And `allocate` with the same digest returns the same VIP (memo-hit)
-And `release(&digest)` deletes the memo entry
-And `get(&digest)` returns None after release
+When `allocate(spec_digest_A)` is called with a unique digest A
+Then a ServiceVip V_A within 10.96.0.0/24 is returned
+And `allocate(spec_digest_A)` again returns V_A (memo-hit)
+And `release(&spec_digest_A)` deletes the memo entry
+And `get(&spec_digest_A)` returns None after release
+And `allocate(spec_digest_B)` with a byte-different digest B
+  returns a ServiceVip V_B within 10.96.0.0/24
+And V_B MAY equal V_A — released VIPs return to the available pool
+  per ADR-0049 § Amendments → 2026-05-19
 ```
 
-**Crafter notes**: Exercises `VipRange::nth(n)` mapping a monotonic
-counter index to a CIDR address, skipping reserved. No `Token` trait
-involved — `ServiceVipAllocator` is concrete (NOT generic) post the
-2026-05-14 amendment. Released VIP is NOT reused on next allocation
-(matches BackendIdAllocator's monotonic-counter semantics).
+**Crafter notes**: Exercises `VipRange::nth(n)` as the per-index
+scan primitive — `ServiceVipAllocator::allocate` iterates
+`range.nth(0)..range.nth(capacity-1)` on memo-miss and returns the
+first non-reserved address not currently held in `by_digest.values()`.
+No `Token` trait involved — `ServiceVipAllocator` is concrete (NOT
+generic) per the 2026-05-14 amendment. **Released VIPs are reusable
+on next allocation** per the 2026-05-19 amendment — the no-reuse
+property from the prior scenario shape is withdrawn. The
+no-duplicate-among-simultaneously-held invariant is asserted
+separately by S-VIP-P03.
 
 ---
 
@@ -475,40 +490,90 @@ For all valid IPv4 addresses `a`:
 **Crafter notes**: Per `.claude/rules/development.md` § "Newtype
 completeness" — `Display`/`FromStr`/serde roundtrip.
 
-### S-VIP-P02: ServiceVipAllocatorEntry rkyv envelope golden-bytes roundtrip
+### S-VIP-P02: ServiceVipAllocatorEntry rkyv envelope golden-bytes roundtrip (V1 + V2)
+
+*(Revised 2026-05-19 — envelope bumps to V2 per ADR-0049 §
+Amendments → 2026-05-19; V1 fixture retained per ADR-0048's
+"existing fixtures are NEVER touched" rule.)*
 
 **Tags**: `@property` `@mandatory:schema_evolution`
 
 ```
-For ServiceVipAllocatorEntryV1 with hand-pinned fields:
-  hex_decode(FIXTURE_V1) → rkyv-deserialise → into_latest() →
-  assert_eq(canonical Latest projection)
+For ServiceVipAllocatorEntryV1 with hand-pinned fields
+  (spec_digest, vip, counter):
+  hex_decode(FIXTURE_V1) → rkyv-deserialise into envelope →
+  into_latest() → assert_eq(V2 projection with counter dropped)
+
+For ServiceVipAllocatorEntryV2 with hand-pinned fields
+  (spec_digest, vip):
+  hex_decode(FIXTURE_V2) → rkyv-deserialise into envelope →
+  into_latest() → assert_eq(canonical V2 payload)
 ```
 
 **Crafter notes**: Per `.claude/rules/testing.md` § "Archive
-schema-evolution roundtrip" — golden-bytes fixture in
+schema-evolution roundtrip" — golden-bytes fixtures in
 `crates/overdrive-dataplane/tests/schema_evolution/service_vip_allocator_entry.rs`.
-Post-amendment the envelope is ServiceVip-specific (BackendId does
-not persist; no `AllocatorTokenBytes` sum type).
+The envelope is ServiceVip-specific (BackendId does not persist; no
+`AllocatorTokenBytes` sum type). Post the 2026-05-19 amendment two
+variants exist: `V1 { spec_digest, vip, counter }` (preserved for
+forward-readability of pre-amendment persisted bytes) and `V2 { spec_digest,
+vip }` (latest — drops the now-unused counter field). V1 → V2
+conversion is `From<V1> for V2` and structurally drops `counter`.
+Both fixtures land in the same commit as the envelope bump per
+ADR-0048 § "Version-bump procedure".
 
-### S-VIP-P03: Allocators never assign duplicate tokens (parallel proptests on each concrete allocator)
+### S-VIP-P03: Allocators never assign duplicate tokens to simultaneously-held memo entries (parallel proptests; per-allocator reuse-policy assertion)
+
+*(Revised 2026-05-19 — was "released slot is NOT reused (monotonic
+counter)" universally; now per-allocator: `BackendIdAllocator`
+remains monotonic-no-reuse, `ServiceVipAllocator` reuses on release
+per ADR-0049 § Amendments → 2026-05-19.)*
 
 **Tags**: `@property` `@mandatory:allocator_invariant`
 
 ```
-For each of {BackendIdAllocator, ServiceVipAllocator}:
-  For all sequences of N allocate() calls with distinct keys (N ≤ capacity):
-    all returned tokens are distinct
-    memo_len() == N
-    releasing key K and reallocating a DIFFERENT key returns a NEW
-      token — the released slot is NOT reused (monotonic counter)
+Universal invariant (BOTH allocators):
+  For all sequences of allocate() / release() calls with arbitrary
+  distinct keys, at every point in the sequence:
+    no two simultaneously-held memo entries share a token
+    (i.e., the set of currently-held tokens is unique).
+
+Per-allocator reuse-policy invariant:
+
+  BackendIdAllocator (monotonic counter, no slot reuse):
+    For all sequences of N allocate() calls with distinct keys (N ≤
+      effectively-unbounded capacity):
+      all returned tokens are distinct
+      memo_len() == N
+      releasing key K and reallocating a DIFFERENT key returns a NEW
+        token — the released slot is NOT reused (monotonic counter).
+
+  ServiceVipAllocator (finite IPv4 pool, reuse on release):
+    For all sequences of N allocate() calls (N ≤ capacity), then K
+      releases of arbitrary held keys, then K' allocate() calls with
+      byte-different digests (K' ≤ K):
+      every returned token is within `range` and not in `reserved`
+      no two simultaneously-held tokens are equal
+      the set of tokens returned by the K' post-release allocations
+        is a subset of (released_tokens ∪ unallocated_tokens_in_range)
+      specifically, if capacity == 1 and the only held VIP is
+        released, the next allocate() returns that same VIP.
 ```
 
 **Crafter notes**: Proptest with `PROPTEST_CASES=1024`. Parallel
 property tests on each concrete allocator (no shared trait post the
-2026-05-14 amendment). The no-slot-reuse-on-release property is
-load-bearing — it matches `BackendIdAllocator`'s pre-existing
-semantics and keeps the two concrete allocators shape-equivalent.
+2026-05-14 amendment). The two allocators diverge on release policy
+per the 2026-05-19 amendment — `BackendIdAllocator` keeps monotonic
+no-reuse semantics (correct for its unbounded internal identifier
+space); `ServiceVipAllocator` reuses on release (correct for its
+finite IPv4 address space, where monotonic-only would exhaust the
+pool after `capacity` total submissions regardless of liveness).
+The no-duplicate-among-simultaneously-held invariant is the universal
+property both allocators MUST satisfy; it's the structural guard
+against the kind of bug the property exists to prevent. The "released
+slot is NOT reused" branch applies only to `BackendIdAllocator`; the
+`ServiceVipAllocator` branch asserts the inverse plus the
+no-duplicate invariant.
 
 ### S-VIP-P04: VipRange capacity equals CIDR size minus reserved count
 

@@ -40,7 +40,7 @@ use overdrive_core::codec::EnvelopeError;
 use overdrive_core::traits::intent_store::{IntentStore, IntentStoreError};
 use thiserror::Error;
 
-use super::entry::{ServiceVipAllocatorEntry, ServiceVipAllocatorEntryV1};
+use super::entry::{ServiceVipAllocatorEntry, ServiceVipAllocatorEntryV2};
 use super::error::ServiceVipAllocatorError;
 use super::service_vip::{ServiceSpecDigest, ServiceVip, ServiceVipAllocator};
 use super::vip_range::VipRange;
@@ -186,7 +186,7 @@ impl PersistentServiceVipAllocator {
                     vip: entry.vip,
                 });
             }
-            inner.restore_entry(entry.spec_digest, entry.vip, entry.counter_idx);
+            inner.restore_entry(entry.spec_digest, entry.vip);
         }
         Ok(Self { inner, store })
     }
@@ -225,12 +225,12 @@ impl PersistentServiceVipAllocator {
         }
 
         // Probe the next allocation from the in-memory allocator
-        // WITHOUT committing. If this returns Ok, we know what
-        // `(vip, counter_idx)` to persist; we only commit to the
-        // in-memory state after the store write succeeds.
-        let (vip, counter_idx) = self.inner.peek_next_allocation(&digest)?;
+        // WITHOUT committing. If this returns Ok, we know what `vip`
+        // to persist; we only commit to the in-memory state after the
+        // store write succeeds.
+        let vip = self.inner.peek_next_allocation(&digest)?;
 
-        let entry = ServiceVipAllocatorEntryV1 { spec_digest: digest, vip, counter_idx };
+        let entry = ServiceVipAllocatorEntryV2 { spec_digest: digest, vip };
         let archived = entry.archive_for_store()?;
         let key = entry_key(&digest);
 
@@ -239,7 +239,7 @@ impl PersistentServiceVipAllocator {
         self.store.put(&key, archived.as_ref()).await?;
 
         // Step 3: after fsync OK, commit in-memory state.
-        self.inner.restore_entry(digest, vip, counter_idx);
+        self.inner.restore_entry(digest, vip);
 
         Ok(vip)
     }

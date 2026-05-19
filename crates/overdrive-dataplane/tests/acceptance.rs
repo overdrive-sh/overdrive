@@ -102,8 +102,8 @@ async fn persistence_across_restart() {
     );
 
     // Assertion 2: allocate(same digest) is a memo-hit returning the
-    // same VIP — counter was correctly reconstructed at
-    // max(counter_idx) + 1 so this short-circuits without advancing.
+    // same VIP — the bulk_load replay reconstructed the memo, so the
+    // re-allocate short-circuits without rescanning.
     let vip_again = reloaded.allocate(d).await.expect("memo-hit allocate succeeds");
     assert_eq!(vip_again, vip, "memo-hit allocate returns the same VIP");
 }
@@ -217,7 +217,7 @@ const _: fn() = || {
 // Step 02-04 — Earned Trust boot probe scenarios.
 //
 // The probe runs inside `PersistentServiceVipAllocator::bulk_load`. For
-// each persisted `(digest, vip, counter_idx)` entry, the probe asserts
+// each persisted `(digest, vip)` entry, the probe asserts
 // `vip` projects back within the configured `VipRange` (i.e. is contained
 // in some configured CIDR AND not in the reserved set). Inconsistency
 // (typically caused by an operator narrowing the configured range AFTER

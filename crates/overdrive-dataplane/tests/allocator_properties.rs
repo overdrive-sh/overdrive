@@ -6,7 +6,10 @@
 //! Scope:
 //!
 //! - **S-VIP-P03** — `ServiceVipAllocator` never assigns duplicate
-//!   tokens; memo size matches the distinct-key call count.
+//!   tokens to simultaneously-held memo entries; memo size matches
+//!   the distinct-key call count. Released VIPs return to the
+//!   available pool per ADR-0049 § Amendments → 2026-05-19 — a
+//!   subsequent allocate MAY reuse the released address.
 //! - **S-VIP-P04** — `VipRange::capacity()` == CIDR size − reserved
 //!   count for all valid `(cidr, reserved)` inputs.
 //! - **S-VIP-21** — Reserved addresses skipped during allocation; pool
@@ -78,9 +81,15 @@ proptest! {
             prop_assert!(tokens.contains(&token_again));
         }
 
-        // Release clears the memo entry; counter does NOT rewind, so a
-        // re-allocate of the same digest yields a fresh VIP (different
-        // from the released one), proving monotonic semantics.
+        // Release clears the memo entry; per ADR-0049 § Amendments
+        // → 2026-05-19, released VIPs return to the available pool.
+        // Re-allocate of the same digest hits the scan path and (for
+        // a /24 pool with the scan starting at index 0) returns the
+        // FIRST available address — which is the lowest unallocated
+        // address in the held set's complement. The released VIP IS
+        // available; whether the scan returns it depends on whether
+        // it sits earlier in the range than the other unallocated
+        // addresses.
         if let Some(first) = keys.first().copied() {
             let d = digest_from_u64(first);
             let pre_release = alloc.get(&d).expect("memoised");
@@ -88,7 +97,8 @@ proptest! {
             prop_assert_eq!(alloc.get(&d), None);
 
             // If the pool still has capacity, re-allocate must succeed
-            // and yield a distinct VIP (counter moved on).
+            // and stay within the /24 range. The reuse property is the
+            // inverse of the prior monotonic shape.
             if alloc.memo_len() < usize::try_from(alloc.capacity()).unwrap_or(usize::MAX) {
                 let realloc = alloc.allocate(d).expect("re-allocate after release");
                 let realloc_v4 = realloc
@@ -96,13 +106,58 @@ proptest! {
                     .expect("allocator always produces IPv4 tokens (ADR-0049 § 5)");
                 prop_assert!(realloc_v4 >= Ipv4Addr::new(10, 96, 0, 0));
                 prop_assert!(realloc_v4 <= Ipv4Addr::new(10, 96, 0, 255));
-                prop_assert_ne!(
-                    realloc, pre_release,
-                    "monotonic counter must NOT reuse the released VIP"
-                );
+                // No assert_ne — the scan-based allocator MAY return the
+                // released VIP. The simultaneously-held no-duplicate
+                // invariant is asserted globally above (`tokens.insert`).
+                let _ = pre_release;
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// S-VIP-P03 (additional) — capacity=1 release-then-realloc returns same VIP
+// ---------------------------------------------------------------------------
+
+/// Mechanical reuse property: with `capacity = 1` and the sole VIP
+/// held, releasing and then allocating a byte-different digest MUST
+/// return the original VIP (there is no other address available). This
+/// is the property the integration test `vip_allocator_lifecycle`
+/// pins end-to-end; this unit-level test pins the allocator-level
+/// contract in isolation per `.claude/rules/development.md` §
+/// "Trait definitions specify behavior, not just signature".
+#[test]
+fn release_then_reallocate_reuses_address_under_capacity_one() {
+    use std::net::Ipv4Addr;
+
+    let cidr = Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 1), 32).expect("/32 valid");
+    let range = VipRange::new(vec![cidr], BTreeSet::new()).expect("single-address pool");
+    assert_eq!(range.capacity(), 1);
+    let mut alloc = ServiceVipAllocator::new(range);
+
+    let digest_a = digest_from_u64(0x1111_1111_1111_1111);
+    let digest_b = digest_from_u64(0x2222_2222_2222_2222);
+
+    let vip_a = alloc.allocate(digest_a).expect("first allocation");
+    assert_eq!(
+        vip_a.try_as_ipv4().expect("v4"),
+        Ipv4Addr::new(10, 96, 0, 1),
+        "capacity=1 pool must issue the sole address",
+    );
+
+    // Without release, a different digest exhausts.
+    assert!(matches!(alloc.allocate(digest_b), Err(ServiceVipAllocatorError::Exhausted { .. }),));
+
+    // Release A; the VIP is now available again.
+    alloc.release(&digest_a);
+
+    // Allocate B — MUST return the same VIP since the pool has exactly
+    // one address.
+    let vip_b = alloc.allocate(digest_b).expect("post-release alloc");
+    assert_eq!(
+        vip_b, vip_a,
+        "capacity=1 reuse: released VIP MUST be reissued on the next allocation",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +302,108 @@ fn vip_range_rejects_zero_capacity() {
 // type at compile time, which is the structural defense that exactly
 // one declaration exists post-commit.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Mutation-coverage tests — `capacity()` accessors + envelope diagnostics
+// ---------------------------------------------------------------------------
+
+/// `ServiceVipAllocator::capacity()` MUST reflect the underlying
+/// `VipRange::capacity()` — not a hardcoded 0, 1, or any other constant.
+/// Three distinct ranges with three distinct capacities pin the mapping.
+#[test]
+fn service_vip_allocator_capacity_reflects_range() {
+    use std::net::Ipv4Addr;
+
+    // /30 with one reserved → capacity 3.
+    let r30 = VipRange::new(
+        vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 30).unwrap()],
+        std::iter::once(Ipv4Addr::new(10, 96, 0, 0)).collect(),
+    )
+    .expect("/30 with 1 reserved");
+    assert_eq!(ServiceVipAllocator::new(r30).capacity(), 3);
+
+    // /30 no reserved → capacity 4.
+    let r30_full = VipRange::new(
+        vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 30).unwrap()],
+        BTreeSet::new(),
+    )
+    .expect("/30 no reserved");
+    assert_eq!(ServiceVipAllocator::new(r30_full).capacity(), 4);
+
+    // /24 no reserved → capacity 256.
+    let r24 = VipRange::new(
+        vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 24).unwrap()],
+        BTreeSet::new(),
+    )
+    .expect("/24 no reserved");
+    assert_eq!(ServiceVipAllocator::new(r24).capacity(), 256);
+}
+
+/// `PersistentServiceVipAllocator::capacity()` MUST delegate to the
+/// underlying allocator's capacity. Pin via a wrapper construction
+/// against a tempdir-backed store and a non-default range — a hardcoded
+/// 0 or 1 in the pass-through would diverge from the inner capacity.
+#[tokio::test]
+async fn persistent_service_vip_allocator_capacity_reflects_range() {
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+
+    use overdrive_core::traits::intent_store::IntentStore;
+    use overdrive_dataplane::allocators::PersistentServiceVipAllocator;
+    use overdrive_store_local::LocalIntentStore;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store_path = tmp.path().join("intent.redb");
+    let store: Arc<dyn IntentStore> =
+        Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+
+    // /28 with 0 reserved → capacity 16; distinct from the inner
+    // allocator's defaults and from 0 / 1 mutations.
+    let range = VipRange::new(
+        vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 28).unwrap()],
+        BTreeSet::new(),
+    )
+    .expect("/28 range");
+
+    let persistent = PersistentServiceVipAllocator::new(range, store);
+    assert_eq!(
+        persistent.capacity(),
+        16,
+        "PersistentServiceVipAllocator::capacity must delegate to the underlying VipRange",
+    );
+}
+
+/// `ServiceVipAllocatorEntryEnvelope::known_discriminants()` and
+/// `type_name()` are the diagnostic surface the
+/// `VersionedEnvelope::probe_unknown_discriminant` decoder consults
+/// when emitting `EnvelopeError::UnknownVersion`. The exact values
+/// matter — a `&[]` or `&[1]` discriminant set would silently classify
+/// every persisted V1 / V2 byte as "unknown version" and the
+/// `bulk_load` decoder would refuse every Earned Trust probe under
+/// production load.
+#[test]
+fn service_vip_allocator_entry_envelope_diagnostics() {
+    use overdrive_core::codec::VersionedEnvelope;
+    use overdrive_dataplane::allocators::entry::ServiceVipAllocatorEntryEnvelope;
+
+    // V1 + V2 currently shipped — discriminant set must name exactly
+    // these two rkyv tags (declaration order: V1 = 0, V2 = 1).
+    assert_eq!(
+        ServiceVipAllocatorEntryEnvelope::known_discriminants(),
+        &[0u8, 1u8],
+        "known_discriminants must enumerate the V1 + V2 rkyv discriminant tags exactly",
+    );
+
+    // The type name is structured-diagnostic — it surfaces in
+    // `health.startup.refused` events and operator-facing errors. The
+    // canonical name is the envelope's Rust type ident.
+    assert_eq!(
+        ServiceVipAllocatorEntryEnvelope::type_name(),
+        "ServiceVipAllocatorEntryEnvelope",
+        "type_name must match the envelope's Rust type identifier for operator diagnostics",
+    );
+}
 
 #[test]
 fn service_vip_allocator_serves_canonical_newtype() {

@@ -1,29 +1,29 @@
-//! `ServiceVip` newtype and `ServiceVipAllocator` — concrete monotonic
+//! `ServiceVip` newtype and `ServiceVipAllocator` — concrete scan-based
 //! allocator for IPv4 service VIPs.
 //!
-//! Per ADR-0049 § 1: the allocator is purely in-memory, synchronous, no
+//! Per ADR-0049 § 1 the allocator is purely in-memory, synchronous, no
 //! I/O, no DB handle. State at construction: a validated [`VipRange`]
-//! plus a `u64` monotonic counter at zero. The persistence wrapper
-//! `IntentBackedAllocator` (step 01-03) wraps this with redb-backed
-//! write-through and bulk-load reconstruction.
+//! plus an empty memo. The persistence wrapper
+//! [`super::PersistentServiceVipAllocator`] (step 01-03) wraps this with
+//! redb-backed write-through and bulk-load reconstruction.
 //!
-//! **Shape mirrors [`super::BackendIdAllocator`] deliberately**: memo +
-//! monotonic counter, memo-hit-returns-existing, no slot reclamation on
-//! release. Released entries clear the memo but the counter does not
-//! rewind — a released VIP is permanently lost to the pool. This keeps
-//! the allocator trivially DST-replayable and removes a class of "did
-//! we reuse the right slot?" reasoning. The trade-off is operator-
-//! visible: a pool sized for `N` distinct workload lifetimes; once N
-//! allocations have happened (across the boot lifetime, regardless of
-//! intervening releases) the pool is exhausted and refuses. Phase 1 is
-//! single-node, single boot; this is a deliberate Phase 1 simplification
-//! and an operator note in the boot-time `health.startup.ready` event.
+//! # Reuse-on-release (ADR-0049 § Amendments → 2026-05-19)
 //!
-//! `BackendIdAllocator` made the same choice (commit `allocator.rs:69`:
-//! "Does NOT recycle the counter value — the counter is monotonic and
-//! never wraps in practice"). Same shape; different token domain.
+//! Released VIPs return to the pool. On allocate, the implementation
+//! scans the configured [`VipRange`] in order and returns the first
+//! address not currently bound by another memo entry. The trade-off is
+//! O(capacity) per allocation on the miss path; in exchange the pool
+//! does not exhaust after `capacity` total submissions regardless of
+//! liveness — a /16 default pool can serve effectively-unbounded
+//! lifetimes of distinct workloads as long as the **simultaneously-held
+//! count** stays below capacity. This is the inverse of the original
+//! monotonic-counter shape (rejected 2026-05-19 as operability-broken).
+//!
+//! [`BackendIdAllocator`] retains the monotonic-counter-no-reuse shape
+//! (correct for its effectively-unbounded `u32` identifier space). The
+//! two allocators no longer share a release policy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use super::error::ServiceVipAllocatorError;
@@ -44,56 +44,54 @@ pub use overdrive_core::id::ServiceVip;
 /// step 02-03) by SHA-256 over the canonicalised service spec.
 pub type ServiceSpecDigest = [u8; 32];
 
-/// Monotonic VIP-pool allocator with memo-table deduplication.
+/// Scan-based VIP-pool allocator with memo-table deduplication and
+/// VIP reuse on release (ADR-0049 § Amendments → 2026-05-19).
 ///
 /// Concrete (not generic) — there is no shared abstraction with
-/// [`super::BackendIdAllocator`]. The two allocators happen to follow
-/// the same memo-plus-counter shape but operate over different token
-/// domains with different exhaustion semantics: BackendId has a `u32`
-/// counter and effectively unbounded supply; ServiceVip is bounded by
-/// the operator-configured `VipRange`.
+/// [`super::BackendIdAllocator`]. The two allocators operate over
+/// different token domains with different reuse policies:
+/// `BackendIdAllocator` is monotonic-no-reuse over a `u32` space;
+/// `ServiceVipAllocator` is scan-based-with-reuse over a finite IPv4
+/// pool bounded by an operator-configured `VipRange`.
 ///
-/// # Invariants (S-VIP-P03 / S-VIP-P04 / S-VIP-21)
+/// # Invariants (S-VIP-P03 / S-VIP-P04 / S-VIP-21 / S-VIP-12)
 ///
-/// - **No duplicate tokens**: two distinct keys never receive the same
-///   `ServiceVip` while both are present in the memo.
+/// - **No duplicate tokens among simultaneously-held entries**: two
+///   distinct keys never receive the same `ServiceVip` while both are
+///   present in the memo.
 /// - **Memo-hit idempotency**: `allocate(K)` returning a memoised token
-///   leaves the counter unchanged.
+///   makes no further mutation.
 /// - **Reserved-skipping**: the underlying [`VipRange`] excludes
 ///   reserved addresses; the allocator never observes them.
-/// - **Monotonic counter**: `release` removes the memo entry but does
-///   not rewind the counter; a released VIP is not reused.
-/// - **Exhaustion**: when the counter exceeds the range's effective
-///   capacity (or wraps `u64`), [`Self::allocate`] returns
-///   [`ServiceVipAllocatorError::Exhausted`].
+/// - **Reuse on release**: `release(K)` removes the memo entry. A
+///   subsequent `allocate(K')` with a different key MAY receive the
+///   released VIP if the scan reaches it first.
+/// - **Exhaustion**: [`Self::allocate`] returns
+///   [`ServiceVipAllocatorError::Exhausted`] iff every slot in the
+///   range is currently held in the memo.
 pub struct ServiceVipAllocator {
     range: VipRange,
-    /// Monotonic counter into the allocatable sequence. Advances on
-    /// every memo miss; never rewinds on release.
-    next_idx: u64,
-    /// Memo table: spec-digest → assigned VIP.
-    memo: BTreeMap<ServiceSpecDigest, ServiceVip>,
+    /// Memo table: spec-digest → assigned VIP. Iterated only via
+    /// `values()` on the allocate-miss scan path (deterministic order
+    /// per `BTreeMap`); never relied on for issuance ordering.
+    by_digest: BTreeMap<ServiceSpecDigest, ServiceVip>,
 }
 
 impl ServiceVipAllocator {
-    /// Construct an empty allocator bound to `range`. Counter starts
-    /// at zero (first allocation returns the 0th allocatable address
-    /// in the range, skipping reserved entries).
+    /// Construct an empty allocator bound to `range`.
     #[must_use]
     pub const fn new(range: VipRange) -> Self {
-        Self { range, next_idx: 0, memo: BTreeMap::new() }
+        Self { range, by_digest: BTreeMap::new() }
     }
 
     /// Allocate a [`ServiceVip`] for `digest`.
     ///
-    /// - **Memo hit**: returns the previously-assigned VIP; counter is
-    ///   unchanged.
-    /// - **Memo miss**: materializes the next address via
-    ///   [`VipRange::nth_allocatable`], advances the counter, inserts
-    ///   into the memo, returns the VIP.
-    /// - **Exhaustion**: [`VipRange::nth_allocatable`] returns `None`
-    ///   for the current counter, or the counter wraps `u64::MAX`.
-    ///   Returns [`ServiceVipAllocatorError::Exhausted`].
+    /// - **Memo hit**: returns the previously-assigned VIP unchanged.
+    /// - **Memo miss**: scans the configured [`VipRange`] in order and
+    ///   returns the first allocatable address not currently held.
+    ///   Inserts into the memo.
+    /// - **Exhaustion**: every slot in the range is currently held in
+    ///   the memo. Returns [`ServiceVipAllocatorError::Exhausted`].
     ///
     /// # Errors
     ///
@@ -105,51 +103,60 @@ impl ServiceVipAllocator {
         &mut self,
         digest: ServiceSpecDigest,
     ) -> Result<ServiceVip, ServiceVipAllocatorError> {
-        if let Some(&existing) = self.memo.get(&digest) {
+        if let Some(&existing) = self.by_digest.get(&digest) {
             return Ok(existing);
         }
-        let addr = self.range.nth_allocatable(self.next_idx).ok_or_else(|| {
-            ServiceVipAllocatorError::Exhausted {
-                allocated: self.memo.len() as u64,
-                capacity: self.range.capacity(),
-            }
-        })?;
-        // `ServiceVip::new` is total over `IpAddr` today; the IPv4 wrap
-        // is always valid. The `?` propagates as
-        // `ServiceVipAllocatorError::NewtypeRejected` so a future range-
-        // rejection on the canonical newtype surfaces as a typed error
-        // rather than a panic — distinct failure modes get distinct
-        // variants per `.claude/rules/development.md` § Errors.
-        let vip = ServiceVip::new(IpAddr::V4(addr))?;
-        // Saturating add on the off-chance of u64 overflow — at that
-        // point the range is also long-exhausted, so the next call hits
-        // the `nth_allocatable` exhaustion branch above.
-        self.next_idx = self.next_idx.saturating_add(1);
-        self.memo.insert(digest, vip);
+        let vip = self.scan_for_available()?;
+        self.by_digest.insert(digest, vip);
         Ok(vip)
+    }
+
+    /// Scan the configured range for the first allocatable address not
+    /// currently bound in the memo. Shared by [`Self::allocate`] and
+    /// [`Self::peek_next_allocation`].
+    ///
+    /// O(capacity) worst case. The held-set is materialised once per
+    /// call into a `BTreeSet<ServiceVip>` so the per-index contains
+    /// check is O(log N) rather than O(N).
+    fn scan_for_available(&self) -> Result<ServiceVip, ServiceVipAllocatorError> {
+        let held: BTreeSet<ServiceVip> = self.by_digest.values().copied().collect();
+        let capacity = self.range.capacity();
+        for i in 0..capacity {
+            if let Some(addr) = self.range.nth_allocatable(i) {
+                let vip = ServiceVip::new(IpAddr::V4(addr))?;
+                if !held.contains(&vip) {
+                    return Ok(vip);
+                }
+            }
+        }
+        Err(ServiceVipAllocatorError::Exhausted {
+            allocated: self.by_digest.len() as u64,
+            capacity,
+        })
     }
 
     /// Return the VIP currently assigned to `digest`, if any.
     #[must_use]
     pub fn get(&self, digest: &ServiceSpecDigest) -> Option<ServiceVip> {
-        self.memo.get(digest).copied()
+        self.by_digest.get(digest).copied()
     }
 
     /// Release the VIP bound to `digest`. Idempotent: a no-op if
     /// `digest` has no current allocation.
     ///
     /// After release, [`Self::get`] returns `None` for `digest`. The
-    /// VIP is NOT returned to the pool — the counter is monotonic.
+    /// VIP is returned to the available pool per ADR-0049 § Amendments
+    /// → 2026-05-19 — a subsequent [`Self::allocate`] with a different
+    /// digest MAY receive the released address.
     pub fn release(&mut self, digest: &ServiceSpecDigest) {
-        self.memo.remove(digest);
+        self.by_digest.remove(digest);
     }
 
     /// Number of entries in the memo table — i.e., the number of VIPs
-    /// currently assigned (NOT the number of VIPs ever issued; the
-    /// counter tracks that separately and is not exposed).
+    /// currently assigned.
     #[must_use]
     pub fn memo_len(&self) -> usize {
-        self.memo.len()
+        self.by_digest.len()
     }
 
     /// The configured capacity of the underlying range.
@@ -172,46 +179,36 @@ impl ServiceVipAllocator {
         self.range.contains(addr)
     }
 
-    /// Peek the `(vip, counter_idx)` that would be issued for `digest`
-    /// on the next [`Self::allocate`] call, WITHOUT mutating any
-    /// in-memory state.
+    /// Peek the VIP that would be issued for `digest` on the next
+    /// [`Self::allocate`] call, WITHOUT mutating any in-memory state.
     ///
     /// Used by [`super::PersistentServiceVipAllocator::allocate`] to
     /// compute the candidate allocation BEFORE the fsync — the
-    /// in-memory commit (memo insert + counter advance) happens only
-    /// after the persistence-layer write succeeds, per the
-    /// fsync-then-memory ordering rule.
+    /// in-memory commit (memo insert) happens only after the
+    /// persistence-layer write succeeds, per the fsync-then-memory
+    /// ordering rule.
     ///
     /// # Preconditions
     ///
     /// `digest` MUST NOT already be in the memo. Callers must check
-    /// [`Self::get`] first and short-circuit on hit; passing a
-    /// memo-hit digest here would advance the counter prediction
-    /// past a slot that has already been issued.
+    /// [`Self::get`] first and short-circuit on hit.
     ///
     /// # Errors
     ///
-    /// [`ServiceVipAllocatorError::Exhausted`] when the range has no
-    /// available address at the current counter position, or
+    /// [`ServiceVipAllocatorError::Exhausted`] when every slot in the
+    /// range is currently held, or
     /// [`ServiceVipAllocatorError::NewtypeRejected`] if the canonical
     /// [`ServiceVip`] constructor rejects the materialised address.
     pub fn peek_next_allocation(
         &self,
         digest: &ServiceSpecDigest,
-    ) -> Result<(ServiceVip, u64), ServiceVipAllocatorError> {
+    ) -> Result<ServiceVip, ServiceVipAllocatorError> {
         debug_assert!(
-            !self.memo.contains_key(digest),
+            !self.by_digest.contains_key(digest),
             "peek_next_allocation must not be called on a memo-hit digest"
         );
         let _ = digest; // suppress unused warning in non-debug builds
-        let addr = self.range.nth_allocatable(self.next_idx).ok_or_else(|| {
-            ServiceVipAllocatorError::Exhausted {
-                allocated: self.memo.len() as u64,
-                capacity: self.range.capacity(),
-            }
-        })?;
-        let vip = ServiceVip::new(IpAddr::V4(addr))?;
-        Ok((vip, self.next_idx))
+        self.scan_for_available()
     }
 
     /// Replay a persisted entry into the allocator. Used by
@@ -220,16 +217,8 @@ impl ServiceVipAllocator {
     /// [`super::PersistentServiceVipAllocator::allocate`] to commit
     /// the in-memory state AFTER the fsync.
     ///
-    /// Inserts the `(digest, vip)` pair into the memo and advances
-    /// `next_idx` to `max(next_idx, counter_idx + 1)` so subsequent
-    /// allocations skip every persisted slot.
-    pub fn restore_entry(&mut self, digest: ServiceSpecDigest, vip: ServiceVip, counter_idx: u64) {
-        self.memo.insert(digest, vip);
-        // Advance the counter to one past the highest persisted index
-        // — the next miss issues a fresh slot.
-        let next = counter_idx.saturating_add(1);
-        if next > self.next_idx {
-            self.next_idx = next;
-        }
+    /// Inserts the `(digest, vip)` pair into the memo.
+    pub fn restore_entry(&mut self, digest: ServiceSpecDigest, vip: ServiceVip) {
+        self.by_digest.insert(digest, vip);
     }
 }

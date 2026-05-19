@@ -78,10 +78,10 @@ mediated by a `Token` trait.
 
 | ID | Decision | Rationale | Open Q resolved |
 |---|---|---|---|
-| K1 | **Two concrete allocators at `crates/overdrive-dataplane/src/allocators/`: `BackendIdAllocator` (existing, relocated from `src/allocator.rs`) and `ServiceVipAllocator` (new).** No shared trait. Both follow a memo + monotonic-counter shape with no slot reuse on release (matches `BackendIdAllocator`'s pre-existing semantics). The `Token` trait and `PoolAllocator<T>` generic from the original DESIGN are deleted — rejected during DELIVER step 01-01 as overstated abstraction; the shared logic was thinner than the trait surface required. *(amended 2026-05-14)* | AC-05 as shape-similarity, not literal code reuse; persistence is a load-bearing structural distinction enforced via concrete `PersistentServiceVipAllocator` wrapper, not via a generic shim | Q4 |
+| K1 | **Two concrete allocators at `crates/overdrive-dataplane/src/allocators/`: `BackendIdAllocator` (existing, relocated from `src/allocator.rs`) and `ServiceVipAllocator` (new).** No shared trait. Both share the memo + memo-hit-returns-existing shape; they diverge on release policy. The `Token` trait and `PoolAllocator<T>` generic from the original DESIGN are deleted — rejected during DELIVER step 01-01 as overstated abstraction; the shared logic was thinner than the trait surface required. *(amended 2026-05-14; release-policy divergence amended 2026-05-19 — see ADR-0049 § Amendments → 2026-05-19. `BackendIdAllocator` keeps monotonic-counter no-reuse semantics correct for its unbounded internal identifier space; `ServiceVipAllocator` reuses VIPs on release — correct for its finite IPv4 address space — with the `next` counter removed and address selection via scan over `range`.)* | AC-05 as shape-similarity, not literal code reuse; persistence is a load-bearing structural distinction enforced via concrete `PersistentServiceVipAllocator` wrapper, not via a generic shim; release-policy divergence per 2026-05-19 amendment recognises the cardinality difference between the two allocators (unbounded internal IDs vs finite IPv4 pool) | Q4 |
 | K2 | Single-cut migration of existing `allocator.rs` into `allocators/backend_id.rs` — body untouched, file relocates only. *(folded into DELIVER step 01-01 by the 2026-05-14 amendment; was step 01-04)* | `feedback_single_cut_greenfield_migrations.md`; deleting the generic forces the move into step 01-01 | Q4 |
 | K3 | Persistence in IntentStore (not ViewStore) | The allocator is not a reconciler; allocation IS intent; whitepaper § 4 state-layer discipline | Q4 |
-| K4 | rkyv versioned envelope per ADR-0048 for persisted state — concrete `ServiceVipAllocatorEntry` envelope wrapped by `PersistentServiceVipAllocator` (NOT a generic `IntentBackedAllocator<T>`'s `AllocatorEntry`). *(amended 2026-05-14)* | Crosses redb persistence boundary; project rule; envelope scope narrowed to ServiceVip since BackendId never persists | Q4 |
+| K4 | rkyv versioned envelope per ADR-0048 for persisted state — concrete `ServiceVipAllocatorEntry` envelope wrapped by `PersistentServiceVipAllocator` (NOT a generic `IntentBackedAllocator<T>`'s `AllocatorEntry`). *(amended 2026-05-14; envelope bumped to V2 by the 2026-05-19 amendment — `counter` field dropped from the payload since `ServiceVipAllocator` no longer carries a monotonic counter. V1 fixture preserved per ADR-0048's "existing fixtures are NEVER touched" rule; V2 fixture lands in the same commit as the V2 variant. See ADR-0049 § 1a + § Amendments → 2026-05-19.)* | Crosses redb persistence boundary; project rule; envelope scope narrowed to ServiceVip since BackendId never persists; V2 bump preserves forward-readability of V1 bytes while shrinking the payload | Q4 |
 | K5 | Submit-time admission (before IntentStore admission) | AC-01 echo, AC-02 idempotency, AC-04 synchronous rejection | Q2 |
 | K6 | Pool config in `[dataplane.vip_allocator]` subsection; required `ranges` list; optional `reserved` list. *(Amended 2026-05-15: `ranges` is no longer hard-required at the missing-section level — when `[dataplane.vip_allocator]` is absent, the allocator boots with `ranges = ["10.96.0.0/16"]` + reserved `["10.96.0.0", "10.96.0.1", "10.96.255.255"]` and emits `health.startup.warn` every startup under HA mode; CLI renders the effective default. Malformed / out-of-range operator-supplied config still refuses to start with a typed `VipAllocatorConfigError`. See ADR-0049 § Amendments → 2026-05-15 and § Considered alternatives → Alt-E; research evidence in `docs/research/orchestration/service-vip-range-config-patterns.md`.)* | ADR-0019 TOML precedent; #175 `[dataplane]` nesting precedent; 2026-05-15 amendment matches ecosystem operator expectation (Kubernetes / Cilium / MetalLB / KubeVirt / kube-vip / Calico-CNI) | Q3 |
 | K7 | Reclamation via `WorkloadLifecycle` reconciler + `Action::ReleaseServiceVip` | Reconcilers converge; idempotent on retry; matches ADR-0013 primitive | Q1 |
@@ -330,6 +330,46 @@ follow-up.
   slice-06's already-shipped tests delete in the same commit as the
   field removal per single-cut migration. ADR-0049 § 5 rewritten;
   § 5a added for the placement decision.
+- 2026-05-19 (amendment — `ServiceVipAllocator` VIP reuse on release;
+  counter removed; envelope V2) — DELIVER step 03-03's S-VIP-07
+  acceptance test ("released VIP reusable on next allocation, pool
+  of 1") failed RED against the 2026-05-14 "Non-reuse on release"
+  rule with `Exhausted { allocated: 0, capacity: 1 }`. RCA: the
+  "Non-reuse on release" rule was copy-pasted from
+  `BackendIdAllocator` without distinguishing the cardinality
+  difference between the two allocators (unbounded internal
+  identifier space vs finite IPv4 pool). Monotonic-only is correct
+  for `BackendIdAllocator`; it exhausts `ServiceVipAllocator`'s pool
+  after `capacity` total submissions regardless of liveness. Every
+  comparable Service-VIP allocator in the ecosystem (Kubernetes
+  ClusterIP, Cilium IPAM, MetalLB, kube-vip) reuses released
+  addresses. Resolution: released VIPs return to the available pool;
+  address selection on memo-miss is recompute-on-allocate (scan
+  `range.nth(0)..range.nth(capacity-1)` ascending for the first
+  non-held address); the `next: u32` field on `ServiceVipAllocator`
+  is removed entirely; the `counter: u32` field on the persisted
+  envelope is dropped by bumping `ServiceVipAllocatorEntryV1` →
+  `ServiceVipAllocatorEntryV2` per ADR-0048 § "Version-bump
+  procedure" (V1 fixture preserved; V2 fixture lands in the same
+  commit; V1 → V2 conversion structurally drops `counter`). No free
+  list — would be derived state, persisting it would force a second
+  persistence shape for no operability benefit; in-memory free-list
+  cache MAY be added as additive optimization if future deployments
+  surface scan-cost pressure. `BackendIdAllocator` is unchanged
+  (monotonic shape is correct for its unbounded space). The
+  no-duplicate-among-simultaneously-held invariant is preserved by
+  construction. K1 row revised (per-allocator release-policy
+  divergence); K4 row revised (V2 envelope bump). DISTILL S-VIP-12
+  inverted (was "released VIP NOT reused" — now "released VIP MAY
+  be reused"); DISTILL S-VIP-P03 split into per-allocator branches
+  with a universal no-duplicate invariant. ADR-0049: § 1 + § 1a +
+  § 2 + Alt-D rewritten in place; new "### 2026-05-19" Amendment
+  section + new "Considered alternative: keep monotonic counter"
+  Considered-alternative entry land. Q4 resolution: per architect's
+  unilateral judgment grounded in the cardinality RCA, ecosystem
+  precedent, and the project's "Persist inputs, not derived state"
+  rule. No production code touched under this amendment; landing
+  belongs to the resumed DELIVER step 03-03 crafter dispatch.
 - 2026-05-15 (amendment — K6 default-range walk-back) — DESIGN's
   original § 3 "no defaults" stance investigated during DELIVER
   step 02-03c and found out of step with the surrounding orchestrator

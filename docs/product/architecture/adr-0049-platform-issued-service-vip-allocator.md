@@ -78,6 +78,13 @@ Five DESIGN-wave open questions are resolved together here:
 persistence shim". See § Considered alternatives for the rejection of
 the generic `PoolAllocator<T: Token>` core.)*
 
+*(Amended 2026-05-19 — slot-reuse policy on release diverges from
+`BackendIdAllocator`. Released VIPs return to the available pool and
+may be re-allocated by subsequent `allocate(&different_digest)` calls.
+The monotonic `next` counter is removed; address selection on
+allocate is "first non-reserved address in `range` not currently held
+in `memo.values()`". See § Amendments → 2026-05-19.)*
+
 The Phase 1 allocator surface is **two concrete allocators** living
 side-by-side under `crates/overdrive-dataplane/src/allocators/`:
 
@@ -90,16 +97,33 @@ side-by-side under `crates/overdrive-dataplane/src/allocators/`:
   `PersistentServiceVipAllocator` shim that wraps it; required by
   AC-02 (allocations survive control-plane restart).
 
-The two allocators **follow the same memo + monotonic-counter shape**
-(BTreeMap memo keyed by the allocator's input key; a monotonic `next`
-counter; release deletes the memo entry but does NOT recycle the
-counter slot — matches `BackendIdAllocator`'s pre-existing
-"counter is monotonic; released slot is not reused" semantics). They
-**share no trait and no generic type**. The shared logic ("memo hit
-returns existing; memo miss + capacity advances counter; release
-deletes the memo entry") is thinner than the abstraction surface
-required to factor it generically — see § Considered alternatives
-for the full RCA.
+The two allocators **share the memo + memo-hit-returns-existing
+shape** but diverge on slot-reuse policy on `release`. They **share
+no trait and no generic type**. The shared logic ("memo hit returns
+existing; memo miss advances allocation; release deletes the memo
+entry") is thinner than the abstraction surface required to factor
+it generically — see § Considered alternatives for the full RCA.
+
+**Per-allocator shapes** *(amended 2026-05-19):*
+
+- `BackendIdAllocator` keeps its monotonic counter and no-slot-reuse-on-release
+  policy. Its address space is internally-allocated and effectively
+  unbounded; monotonicity matches the Snowflake / event-source ID
+  precedent and the in-tree shape since ADR-0046.
+- `ServiceVipAllocator` reuses VIPs on release (no `next` counter at
+  all). Its address space is a finite IPv4 CIDR — `/16` is 65 K
+  addresses; `/24` is 254; `/32` is 1. A monotonic-only allocator
+  would exhaust the pool after `capacity` total submissions over
+  process lifetime regardless of current liveness, and "restart to
+  recover" is not an operability story. Every comparable
+  Service-VIP allocator in the ecosystem (Kubernetes ClusterIP,
+  Cilium IPAM, MetalLB, kube-vip) reuses released addresses.
+
+The 2026-05-14 amendment's "shape-equivalence with `BackendIdAllocator`"
+framing was load-bearing when AC-05 still required literal code reuse;
+with AC-05 already restated as shape-similarity (not code reuse) and
+no shared trait between the two types, divergence on release policy
+costs nothing structural.
 
 **Module location**:
 `crates/overdrive-dataplane/src/allocators/` (plural — the existing
@@ -119,22 +143,33 @@ crates/overdrive-dataplane/src/allocators/
                            #       (concrete, NOT generic)
 ```
 
-**`ServiceVipAllocator` (concrete, in-memory)**:
+**`ServiceVipAllocator` (concrete, in-memory)** *(amended 2026-05-19 —
+no `next` counter; address selection by scan over `range`)*:
 
 ```rust
 pub struct ServiceVipAllocator {
-    next: u32,
-    by_digest: BTreeMap<ServiceSpecDigest, ServiceVip>,   // memo
+    by_digest: BTreeMap<ServiceSpecDigest, ServiceVip>,   // memo (SSOT)
     range: VipRange,
 }
 
 impl ServiceVipAllocator {
     pub fn new(range: VipRange) -> Self;
+
+    /// Memo-hit returns the existing VIP. On memo-miss, scans
+    /// `range.nth(0)..range.nth(capacity-1)` in canonical order and
+    /// returns the first non-reserved address NOT currently held in
+    /// `by_digest.values()`. Returns `Exhausted` when no such address
+    /// exists. The scan order is deterministic — same `range` + same
+    /// `memo` always selects the same next VIP, so DST/proptest
+    /// reproducibility (K3 of testing.md § DST) is preserved without
+    /// any tie-breaker logic.
     pub fn allocate(&mut self, digest: ServiceSpecDigest) -> Result<ServiceVip, ServiceVipAllocatorError>;
-    /// Removes the memo entry. Does NOT return the slot to the pool —
-    /// the monotonic counter never rewinds. Matches BackendIdAllocator's
-    /// pre-existing semantics ("Does NOT recycle the counter value").
+
+    /// Removes the memo entry. The freed VIP becomes available for
+    /// re-allocation to a subsequent `allocate(&different_digest)` call.
+    /// Idempotent on already-released keys.
     pub fn release(&mut self, digest: &ServiceSpecDigest);
+
     pub fn get(&self, digest: &ServiceSpecDigest) -> Option<ServiceVip>;
     pub fn memo_len(&self) -> usize;
 }
@@ -149,21 +184,39 @@ pub enum ServiceVipAllocatorError {
 ```
 
 The memo is `BTreeMap`-backed per `.claude/rules/development.md`
-§ "Ordered-collection choice" (the memo is iterated by DST invariants
-and at bulk-load time); the counter is monotonic and never wraps in
-practice (a /16 CIDR is 65k addresses; the persistence shim's restart
-story does not reuse counter values within a single process lifetime,
-only across process restarts when the persisted state is re-hydrated).
+§ "Ordered-collection choice" — the memo is iterated by DST
+invariants, at bulk-load time, AND on every `allocate` to find the
+next non-held address (the scan is `range.nth(i)` for ascending `i`,
+short-circuiting on the first `Ipv4Addr` whose `ServiceVip` is
+absent from `by_digest.values()`).
 
-**Non-reuse on release**: `release(&digest)` deletes the memo entry
-but does NOT add the freed counter slot back to a free list — the
-released VIP is not reused by a subsequent `allocate(&different_digest)`
-call within the same process lifetime. The next allocation advances
-the monotonic counter to the next non-reserved address in the
-`VipRange`. This matches `BackendIdAllocator`'s pre-existing
-"counter is monotonic; released slot is not reused" semantics and
-keeps the two allocators shape-equivalent. Counter-recycling is the
-deferred optimisation in Alt-D.
+**Reuse on release** *(amended 2026-05-19)*: `release(&digest)`
+deletes the memo entry, returning the VIP to the available pool.
+A subsequent `allocate(&different_digest)` MAY receive the freed
+VIP — specifically, it WILL receive the freed VIP if the freed VIP
+is the lowest-indexed non-held address in `range`. The structural
+invariant "no two simultaneously-held memo entries share a VIP" is
+preserved by construction (the scan refuses any address present in
+`by_digest.values()`). The 2026-05-14 amendment's "shape-equivalent
+with `BackendIdAllocator`'s non-reuse semantics" framing is
+withdrawn; see § Amendments → 2026-05-19 for the RCA. Alt-D
+("Counter recycling") is partially accepted by this amendment —
+basic free-on-release lands now; LRU / age-based policies remain
+deferred.
+
+**Why "scan the memo" instead of a free list**: the free list would
+be derived state (recomputable at any moment from `(range, memo)`),
+which under `.claude/rules/development.md` § "Persist inputs, not
+derived state" should not be persisted. Recomputing on every
+allocate is `O(capacity)` worst-case scan over a `BTreeMap` membership
+test — at Phase 1 `/16` (65 K addresses) it is microsecond-class and
+dominated by the redb fsync that follows on the persistence shim;
+KPI K2 (p50 ≤ 5 ms / p99 ≤ 25 ms) is preserved by a wide margin.
+If future Phase 3+ deployments with larger pools and higher churn
+show scan-cost pressure, a `free: VecDeque<ServiceVip>` cache may
+be added as an in-memory optimization (recomputed from memo on
+`bulk_load`, never persisted); that's additive and out of scope
+here.
 
 **Persistence shim — `PersistentServiceVipAllocator`**:
 
@@ -232,27 +285,67 @@ pub struct ServiceVipAllocatorEntryV1 {
     pub spec_digest: [u8; 32],   // ServiceSpecDigest
     pub vip:         u32,        // host-order IPv4 octets
     pub counter:     u32,        // monotonic counter value at allocation
+                                 // (deprecated by V2; see 2026-05-19 amendment)
+}
+
+// 2026-05-19 amendment: counter field removed; address selection no
+// longer monotonic. V1 → V2 conversion drops `counter` (it carried
+// no behavior the V2 allocator needs).
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
+pub struct ServiceVipAllocatorEntryV2 {
+    pub spec_digest: [u8; 32],
+    pub vip:         u32,
+}
+
+impl From<ServiceVipAllocatorEntryV1> for ServiceVipAllocatorEntryV2 {
+    fn from(v1: ServiceVipAllocatorEntryV1) -> Self {
+        Self { spec_digest: v1.spec_digest, vip: v1.vip }
+        // v1.counter intentionally dropped — V2 allocator has no
+        // monotonic counter; address selection is scan-over-range.
+    }
 }
 
 // Codec-internal envelope (NOT re-exported from lib.rs per UI-01).
+// V1 variant retained per ADR-0048 § "Version-bump procedure" —
+// "existing fixtures are NEVER touched"; V1 stays in the envelope
+// so the per-type golden-bytes fixture continues to assert that
+// V1 bytes decode and round-trip through into_latest() → V2.
 pub enum ServiceVipAllocatorEntryEnvelope {
     V1(ServiceVipAllocatorEntryV1),
+    V2(ServiceVipAllocatorEntryV2),
 }
 
-impl VersionedEnvelope for ServiceVipAllocatorEntryEnvelope { /* ... */ }
+impl VersionedEnvelope for ServiceVipAllocatorEntryEnvelope {
+    type Latest = ServiceVipAllocatorEntryV2;
+    fn latest(p: Self::Latest) -> Self { Self::V2(p) }
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1.into()),  // drop counter
+            Self::V2(v2) => Ok(v2),
+        }
+    }
+}
 
-// Public alias-to-payload (UI-02).
-pub type ServiceVipAllocatorEntry = ServiceVipAllocatorEntryV1;
+// Public alias-to-payload (UI-02) — points at V2 latest.
+pub type ServiceVipAllocatorEntry = ServiceVipAllocatorEntryV2;
+pub type ServiceVipAllocatorEntryLatest = ServiceVipAllocatorEntryV2;
 ```
 
 Wrapping discipline lives in a codec module on
 `ServiceVipAllocatorEntry`
 (`ServiceVipAllocatorEntry::archive_for_store` / `from_store_bytes`)
-per ADR-0048 § "Typed persistence-boundary codec". A schema-evolution
-golden-bytes fixture under
+per ADR-0048 § "Typed persistence-boundary codec". Schema-evolution
+golden-bytes fixtures under
 `crates/overdrive-dataplane/tests/schema_evolution/service_vip_allocator_entry.rs`
-pins V1 archived bytes per `.claude/rules/testing.md` § "Archive
-schema-evolution roundtrip".
+pin BOTH V1 archived bytes (per `.claude/rules/testing.md` §
+"Archive schema-evolution roundtrip" — existing fixtures are NEVER
+touched per ADR-0048 § "Version-bump procedure") AND V2 archived
+bytes. The V1 fixture asserts decode → `into_latest()` → V2 projection
+equality; the V2 fixture asserts decode → V2-typed payload equality.
+The V1 → V2 conversion drops `counter`, which previously carried the
+allocator's monotonic-counter value at allocation time — V2's
+allocator has no monotonic counter, so the field is structurally
+unused under the 2026-05-19 amendment.
 
 The crafter may choose the exact typed name (e.g.
 `ServiceVipAllocatorEntry` vs `AllocatorEntry`); the load-bearing
@@ -281,9 +374,14 @@ impl VipRange {
 
     pub fn capacity(&self) -> u32 { /* sum(CIDR sizes) - reserved.len() */ }
 
-    /// Map a monotonic counter index N to the Nth non-reserved
-    /// address in canonical order. Returns None when N >= capacity().
-    /// Used by `ServiceVipAllocator::allocate` internally.
+    /// Map an index N to the Nth non-reserved address in canonical
+    /// order. Returns None when N >= capacity(). Used by
+    /// `ServiceVipAllocator::allocate` internally as the scan
+    /// primitive — the allocator iterates `nth(0)..nth(capacity-1)`
+    /// and returns the first address NOT currently held in its memo
+    /// (per 2026-05-19 amendment; pre-amendment this was driven by a
+    /// monotonic counter — same `nth` semantics, different caller
+    /// behavior).
     pub fn nth(&self, n: u32) -> Option<Ipv4Addr>;
 }
 ```
@@ -802,27 +900,62 @@ Action round-trip for no gain.
 When a VIP is released, recycle its counter slot so the next
 allocation reuses the address.
 
-**Deferred (not rejected).** Phase 1 single-node deployments draw
-from a configurable CIDR; even a /16 (65k addresses) supports
-years of churn without exhaustion. The monotonic-counter shape
-matches ADR-0046's BackendId precedent. If KPI K4 (pool exhaustion)
-fires in practice, an LRU recycling strategy lands as an additive
-amendment to `PoolAllocator` — the `Token::nth` trait surface is
-forward-compatible (a recycling impl computes `n` from a free-list
-rather than a counter; same return shape).
+**Partially accepted 2026-05-19.** The basic form — "released VIPs
+return to the available pool and may be re-allocated on subsequent
+`allocate(&different_digest)` calls" — lands under the 2026-05-19
+amendment. The implementation is "scan `range.nth(i)` ascending for
+the first non-held address," not a free list (free list would be
+derived state per `.claude/rules/development.md` § "Persist inputs,
+not derived state" and would force a new envelope shape). The
+`next` monotonic counter is removed entirely.
+
+The originally-deferred form — **LRU / age-based recycling policy** —
+remains deferred. A future Phase 3+ multi-tenant deployment with
+high VIP churn AND latency-sensitive operators MAY benefit from
+preferring oldest-released addresses (so a flapping workload doesn't
+see its old VIP reassigned to a different workload within seconds
+of release); the basic form above does not provide that guarantee
+(it returns the lowest-indexed non-held address, which IS the most-
+recently-released address if churn is at the high end of the range
+and re-allocation rate matches release rate). LRU lands as an
+additive amendment if it surfaces as an operability concern; for
+Phase 1 single-node, basic reuse is sufficient.
+
+**RCA for the change** *(why the 2026-05-14 "no reuse" call was
+wrong)*: the original "Non-reuse on release" rule was copy-pasted
+from `BackendIdAllocator`'s pre-existing semantics without
+distinguishing the cardinality difference between the two
+allocators. `BackendId` has an effectively-unbounded internal
+identifier space (u64 / `i64`-shaped); monotonicity is correct.
+`ServiceVip` is bounded by IPv4 CIDR — `/16` is 65 K addresses,
+`/24` is 254, `/32` is 1 — and a monotonic-only allocator exhausts
+the pool after `capacity` total ever-allocated regardless of
+current liveness. The failure mode surfaced at DELIVER step 03-03
+when the S-VIP-07 acceptance test (released VIP reusable on next
+allocation, pool of 1) failed RED with
+`Exhausted { allocated: 0, capacity: 1 }`. Every comparable
+Service-VIP allocator in the ecosystem (Kubernetes ClusterIP
+allocator, Cilium IPAM, MetalLB, kube-vip) reuses released
+addresses; the "no reuse" stance was the outlier.
 
 ## Consequences
 
 ### Positive
 
 1. **AC-05 satisfied as shape-similarity, not literal code reuse**
-   (amended 2026-05-14). `BackendIdAllocator` and
-   `ServiceVipAllocator` follow the same memo + monotonic-counter
-   shape (no slot reuse on release) and live side-by-side in
-   `crates/overdrive-dataplane/src/allocators/` per DISCUSS D3.
-   They share no trait and no generic type — the previously-proposed
-   `PoolAllocator<T: Token>` core was rejected at DELIVER step 01-01
-   as overstated abstraction (see § Considered alternatives → Alt-0).
+   (amended 2026-05-14; release-policy divergence amended
+   2026-05-19). `BackendIdAllocator` and `ServiceVipAllocator`
+   share the memo + memo-hit-returns-existing shape and live
+   side-by-side in `crates/overdrive-dataplane/src/allocators/` per
+   DISCUSS D3. They share no trait and no generic type — the
+   previously-proposed `PoolAllocator<T: Token>` core was rejected at
+   DELIVER step 01-01 as overstated abstraction (see § Considered
+   alternatives → Alt-0). They diverge on release policy:
+   `BackendIdAllocator` keeps monotonic-counter no-reuse semantics
+   (correct for its unbounded internal identifier space);
+   `ServiceVipAllocator` reuses VIPs on release with the `next`
+   counter removed (correct for its finite IPv4 address space; see
+   § Amendments → 2026-05-19).
 2. **AC-02 structurally satisfied.** The persistence shim's
    write-through guarantees survives-restart by construction; the
    bulk-load probe guarantees consistency on boot.
@@ -1048,3 +1181,132 @@ is one TOML line away, not deleted.
 
 Cross-reference:
 `docs/research/orchestration/service-vip-range-config-patterns.md`.
+
+### 2026-05-19 — `ServiceVipAllocator` VIP reuse on release (counter removed)
+
+During DELIVER step 03-03 (end-to-end S-VIP-06 + S-VIP-07
+acceptance tests on the `submit_workload` handler) the test for
+S-VIP-07 ("released VIP reusable on next allocation, pool of 1")
+failed RED with `Exhausted { allocated: 0, capacity: 1 }`. The
+implementation followed ADR-0049's "Non-reuse on release" rule from
+the 2026-05-14 amendment; the test expected the inverse.
+
+The contradiction was real: DISTILL S-VIP-07 specifies VIP reuse
+and the DELIVER step 03-03 roadmap acceptance criterion specifies
+VIP reuse, but ADR-0049 § 1 + DISTILL S-VIP-12 specified non-reuse.
+
+**RCA.** The 2026-05-14 "Non-reuse on release" rule was copied from
+`BackendIdAllocator`'s shape without distinguishing the cardinality
+difference between the two allocators:
+
+- `BackendId` is an internally-allocated identifier in an
+  effectively-unbounded namespace (u64 / `i64`-shaped). Monotonic
+  counter is correct — matches Snowflake / event-source ID
+  precedent; no exhaustion concern.
+- `ServiceVip` is a finite IPv4 address within a configured CIDR.
+  `VipRange::default() = 10.96.0.0/16` is 65 K addresses; a `/24`
+  test fixture is 254; the S-VIP-07 fixture is `/32` (1). A
+  monotonic-only allocator exhausts the pool after `capacity` total
+  ever-allocated regardless of how many are currently held, and
+  "restart to recover" is not an operability story.
+
+Every comparable Service-VIP allocator in the ecosystem
+(Kubernetes ClusterIP, Cilium IPAM, MetalLB, kube-vip) reuses
+released addresses. The "shape-equivalence with `BackendIdAllocator`"
+framing from the 2026-05-14 amendment was load-bearing only when
+AC-05 still implied literal code reuse; with AC-05 already restated
+as shape-similarity (not code reuse) and no shared trait between
+the two types, divergence on release policy costs nothing
+structural.
+
+**Resolution.** Released VIPs return to the available pool and
+become eligible for re-allocation by subsequent
+`allocate(&different_digest)` calls within the same process
+lifetime. Concretely:
+
+1. **`ServiceVipAllocator::release(&digest)` semantics inverted.**
+   Was: "Removes the memo entry. Does NOT return the slot to the
+   pool — the monotonic counter never rewinds."
+   Now: "Removes the memo entry. The freed VIP becomes available
+   for re-allocation to a subsequent `allocate(&different_digest)`
+   call. Idempotent on already-released keys."
+
+2. **Address-selection mechanism = recompute-on-allocate (scan over
+   `range`).** On memo-miss, `allocate` scans
+   `range.nth(0)..range.nth(capacity-1)` ascending and returns the
+   first non-reserved address NOT currently held in
+   `by_digest.values()`. Returns `Exhausted { allocated, capacity }`
+   when no such address exists. The scan order is deterministic —
+   same `range` + same `memo` always selects the same next VIP, so
+   DST/proptest reproducibility (K3 of `testing.md` § DST) is
+   preserved without any tie-breaker logic.
+
+3. **Free list NOT introduced.** A free list would be derived
+   state recomputable at any moment from `(range, memo)`. Per
+   `.claude/rules/development.md` § "Persist inputs, not derived
+   state", deriving on every `allocate` is the right shape;
+   persisting a free list would force a second persistence shape
+   and a second `bulk_load` invariant for no operability benefit.
+   If a future Phase 3+ deployment surfaces scan-cost pressure (a
+   `/12` pool or larger with high churn), an in-memory `free:
+   VecDeque<ServiceVip>` cache MAY be added — recomputed from memo
+   on `bulk_load`, never persisted; that's an additive optimization,
+   not a structural change.
+
+4. **Counter field removed entirely.** The `next: u32` field on
+   `ServiceVipAllocator` is removed (it carried no behavior under
+   the scan shape). The `counter: u32` field on
+   `ServiceVipAllocatorEntryV1` is removed by minting
+   `ServiceVipAllocatorEntryV2 { spec_digest, vip }` per ADR-0048
+   § "Version-bump procedure". The V1 envelope variant is retained
+   (per the rule "existing fixtures are NEVER touched"); the V1 →
+   V2 conversion drops `counter` structurally; V1 golden-bytes
+   fixture stays, V2 golden-bytes fixture lands in the same commit.
+
+5. **No-duplicate-tokens invariant unchanged.** "No two
+   simultaneously-held memo entries share a VIP" is preserved by
+   construction — the scan refuses any address already in
+   `by_digest.values()`. S-VIP-P03 (DISTILL property test) inverts
+   from "released slot is NOT reused (monotonic counter)" to "the
+   no-duplicate-among-simultaneously-held invariant holds under any
+   sequence of allocate/release calls (including release-then-
+   reallocate-to-different-digest)".
+
+6. **`BackendIdAllocator` unchanged.** Its monotonic-counter shape
+   is correct for its unbounded internal identifier space and
+   matches ADR-0046's precedent.
+
+**Sections rewritten:** § 1 (allocator shape, `release` semantics
+paragraph), § 1a (envelope V1 → V2 schema bump), § 2 (`VipRange::nth`
+rustdoc), § Considered alternatives → Alt-D (basic reuse accepted;
+LRU still deferred), this amendment section.
+
+**No production code touched under this amendment** — landing
+belongs to the resumed DELIVER step 03-03 crafter dispatch.
+
+### 2026-05-19 — Considered alternative: keep monotonic counter, no reuse
+
+The 2026-05-14 amendment's "Non-reuse on release" rule was
+proposed and stood for five days before being amended out. The
+rejection rationale is captured here as the counter-balance to
+Alt-E's 2026-05-15 acceptance of ecosystem-default behavior.
+
+**Rejected 2026-05-19.** Monotonic counter with no slot reuse on
+release is the correct shape for `BackendIdAllocator` (unbounded
+internal identifier space, matches Snowflake/UUID/event-source
+precedent) but the wrong shape for `ServiceVipAllocator` (finite
+IPv4 address space, exhausts after `capacity` total submissions
+regardless of current liveness, no restart-to-recover story).
+
+The 2026-05-14 framing rested on "shape-equivalence with
+`BackendIdAllocator`" preserving AC-05's "shared allocator logic"
+story, but AC-05 was concurrently restated as shape-similarity (not
+literal code reuse) — making shape-equivalence on release-policy a
+non-load-bearing aesthetic preference. Every comparable
+Service-VIP allocator in the ecosystem reuses released addresses;
+the "no reuse" stance was the outlier with no operability win to
+trade for it.
+
+Cross-reference: § Amendments → 2026-05-19; DELIVER step 03-03
+DISTILL S-VIP-07; `docs/feature/service-vip-allocator/distill/test-scenarios.md`
+S-VIP-P03 (revised).
