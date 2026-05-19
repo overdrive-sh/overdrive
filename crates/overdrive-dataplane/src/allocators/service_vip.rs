@@ -12,7 +12,8 @@
 //! Released VIPs return to the pool. On allocate, the implementation
 //! scans the configured [`VipRange`] in order and returns the first
 //! address not currently bound by another memo entry. The trade-off is
-//! O(capacity) per allocation on the miss path; in exchange the pool
+//! O(capacity + k log k) per allocation on the miss path (where k is
+//! the current memo size); in exchange the pool
 //! does not exhaust after `capacity` total submissions regardless of
 //! liveness — a /16 default pool can serve effectively-unbounded
 //! lifetimes of distinct workloads as long as the **simultaneously-held
@@ -115,23 +116,20 @@ impl ServiceVipAllocator {
     /// currently bound in the memo. Shared by [`Self::allocate`] and
     /// [`Self::peek_next_allocation`].
     ///
-    /// O(capacity) worst case. The held-set is materialised once per
-    /// call into a `BTreeSet<ServiceVip>` so the per-index contains
-    /// check is O(log N) rather than O(N).
+    /// O(capacity) worst case — single pass over the range's
+    /// allocatable addresses with O(log k) `BTreeSet::contains` per
+    /// address, where k is the current memo size.
     fn scan_for_available(&self) -> Result<ServiceVip, ServiceVipAllocatorError> {
         let held: BTreeSet<ServiceVip> = self.by_digest.values().copied().collect();
-        let capacity = self.range.capacity();
-        for i in 0..capacity {
-            if let Some(addr) = self.range.nth_allocatable(i) {
-                let vip = ServiceVip::new(IpAddr::V4(addr))?;
-                if !held.contains(&vip) {
-                    return Ok(vip);
-                }
+        for addr in self.range.allocatable_addrs() {
+            let vip = ServiceVip::new(IpAddr::V4(addr))?;
+            if !held.contains(&vip) {
+                return Ok(vip);
             }
         }
         Err(ServiceVipAllocatorError::Exhausted {
             allocated: self.by_digest.len() as u64,
-            capacity,
+            capacity: self.range.capacity(),
         })
     }
 

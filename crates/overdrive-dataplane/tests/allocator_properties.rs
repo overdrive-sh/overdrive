@@ -440,3 +440,68 @@ fn service_vip_allocator_serves_canonical_newtype() {
     alloc.release(&digest_a);
     assert_eq!(alloc.get(&digest_a), None, "post-release lookup must be None");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: scan_for_available must be O(capacity), not O(k²)
+//
+// Before the fix, scan_for_available called nth_allocatable(i) in a loop,
+// and each call re-iterated from address 0, producing O(k²) total work.
+// This test fills the first k-1 slots of a /24 (capacity 256) and
+// allocates one more, asserting correctness — the behavioral contract
+// that the single-pass rewrite must preserve.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scan_for_available_correctness_near_full_pool() {
+    let range = VipRange::new(
+        vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 24).unwrap()],
+        BTreeSet::new(),
+    )
+    .expect("valid /24 range");
+    assert_eq!(range.capacity(), 256);
+    let mut alloc = ServiceVipAllocator::new(range);
+
+    // Fill 255 of 256 slots.
+    for i in 0u64..255 {
+        alloc.allocate(digest_from_u64(i)).unwrap_or_else(|e| panic!("allocation {i} failed: {e}"));
+    }
+    assert_eq!(alloc.memo_len(), 255);
+
+    // The 256th allocation must succeed and return the one remaining
+    // address — not exhaust or panic.
+    let last = alloc
+        .allocate(digest_from_u64(999))
+        .expect("256th allocation must succeed (one slot remaining)");
+    let last_v4 = last.try_as_ipv4().expect("allocator always produces IPv4");
+    assert!(
+        last_v4 >= Ipv4Addr::new(10, 96, 0, 0) && last_v4 <= Ipv4Addr::new(10, 96, 0, 255),
+        "last VIP {last_v4} must be within the /24 range",
+    );
+
+    // Pool is now full — 257th must exhaust.
+    assert!(
+        matches!(
+            alloc.allocate(digest_from_u64(1000)),
+            Err(ServiceVipAllocatorError::Exhausted { allocated: 256, capacity: 256 })
+        ),
+        "pool must be exhausted after 256 allocations on a /24",
+    );
+}
+
+/// `VipRange::allocatable_addrs` yields exactly `capacity()` addresses,
+/// matching the `nth_allocatable` enumeration.
+#[test]
+fn allocatable_addrs_matches_nth_allocatable() {
+    let reserved: BTreeSet<Ipv4Addr> =
+        [Ipv4Addr::new(10, 96, 0, 0), Ipv4Addr::new(10, 96, 0, 3)].into_iter().collect();
+    let range =
+        VipRange::new(vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 30).unwrap()], reserved)
+            .expect("valid /30 range");
+
+    let from_iter: Vec<Ipv4Addr> = range.allocatable_addrs().collect();
+    let from_nth: Vec<Ipv4Addr> =
+        (0..range.capacity()).map(|i| range.nth_allocatable(i).unwrap()).collect();
+
+    assert_eq!(from_iter, from_nth, "allocatable_addrs and nth_allocatable must agree");
+    assert_eq!(from_iter.len() as u64, range.capacity());
+}

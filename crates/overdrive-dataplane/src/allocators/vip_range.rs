@@ -149,6 +149,25 @@ impl VipRange {
         None
     }
 
+    /// Iterates every allocatable IPv4 address in the pool, skipping
+    /// reserved entries.
+    ///
+    /// Iteration order: `ranges` in the operator-supplied order; each
+    /// range walked from `network()` to `broadcast()` inclusive,
+    /// skipping any address in the reserved set. Single-pass — O(total
+    /// addresses across all ranges).
+    pub fn allocatable_addrs(&self) -> impl Iterator<Item = Ipv4Addr> + '_ {
+        self.ranges.iter().flat_map(move |net| {
+            let net_u32 = u32::from(net.network());
+            let span: u64 = 1u64 << (32 - u32::from(net.prefix_len()));
+            (0..span).filter_map(move |offset| {
+                #[allow(clippy::cast_possible_truncation)]
+                let addr = Ipv4Addr::from(net_u32.wrapping_add(offset as u32));
+                if self.reserved.contains(&addr) { None } else { Some(addr) }
+            })
+        })
+    }
+
     /// Returns `true` if `addr` is contained in any configured range
     /// AND not reserved. Used by Earned Trust probes (step 01-03) to
     /// verify persisted entries still project into the live range.
