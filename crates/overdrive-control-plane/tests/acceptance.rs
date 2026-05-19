@@ -111,4 +111,9 @@ mod acceptance {
     // `VipRange::new` for the three type-level invariants + structured
     // `health.startup.refused` event on every refusal.
     mod vip_allocator_config_parsing;
+
+    // service-vip-allocator step 02-03d — Service-arm submit_workload /
+    // alloc_status code paths. Six S-VIP scenarios per ADR-0049
+    // (amended 2026-05-15) + ADR-0050 + ADR-0051.
+    mod service_vip_submit_acceptance;
 }

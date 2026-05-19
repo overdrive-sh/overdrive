@@ -579,7 +579,7 @@ async fn consume_stream(
                 })?;
 
             match event {
-                SubmitEvent::Accepted { spec_digest, intent_key, outcome } => {
+                SubmitEvent::Accepted { spec_digest, intent_key, outcome, vip: _ } => {
                     // The server-derived `intent_key` carries the
                     // canonical `IntentKey` shape; the CLI uses the
                     // already-validated client-side `WorkloadId` (captured

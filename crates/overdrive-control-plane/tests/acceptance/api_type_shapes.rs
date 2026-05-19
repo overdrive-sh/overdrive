@@ -62,6 +62,7 @@ fn submit_response_carries_spec_digest_and_outcome_inserted() {
         workload_id: "payments".to_string(),
         spec_digest: digest.clone(),
         outcome: IdempotencyOutcome::Inserted,
+        vip: None,
     };
     let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadResponse");
     let round_tripped: SubmitWorkloadResponse =
@@ -83,6 +84,7 @@ fn submit_response_carries_outcome_unchanged_on_idempotent_resubmit() {
         workload_id: "payments".to_string(),
         spec_digest: digest.clone(),
         outcome: IdempotencyOutcome::Unchanged,
+        vip: None,
     };
     let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadResponse");
     // The lowercase JSON form is the wire contract — pinned via
@@ -215,6 +217,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
             exhausted: false,
         }),
         kind: None,
+        vip: None,
     };
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =

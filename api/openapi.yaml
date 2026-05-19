@@ -363,6 +363,20 @@ components:
           description: |-
             SHA-256 (hex, 64 chars) of the canonical rkyv-archived `Job`
             bytes — see `WorkloadDescription::spec_digest`. Pinned per ADR-0002.
+        vip:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Service-issued VIP — populated for `WorkloadKind::Service`
+            reads per ADR-0049 (amended 2026-05-15). `None` for
+            `Job` / `Schedule` reads. Resolved from the persistent
+            allocator's content-addressed memo keyed by the workload's
+            `WorkloadIntent::Service(_).spec_digest()`.
+
+            Per the Q1.A resolution 2026-05-15: per-listener lines do
+            NOT carry a per-listener VIP — listeners are `(port, protocol)`
+            only; the Service-level VIP lives at this top-level field.
         workload_id:
           type:
           - string
@@ -959,6 +973,10 @@ components:
           First line of every streaming response — confirms the
           `IntentStore` commit. `outcome` carries the idempotency verdict
           (Inserted / Unchanged) per ADR-0020.
+
+          `vip` is populated only for `WorkloadKind::Service` streams per
+          service-vip-allocator step 02-03d / ADR-0049 (amended 2026-05-15);
+          Job / Schedule streams emit `vip: None` (skipped on the wire).
         required:
         - data
         - kind
@@ -969,6 +987,10 @@ components:
               First line of every streaming response — confirms the
               `IntentStore` commit. `outcome` carries the idempotency verdict
               (Inserted / Unchanged) per ADR-0020.
+
+              `vip` is populated only for `WorkloadKind::Service` streams per
+              service-vip-allocator step 02-03d / ADR-0049 (amended 2026-05-15);
+              Job / Schedule streams emit `vip: None` (skipped on the wire).
             required:
             - spec_digest
             - intent_key
@@ -980,6 +1002,10 @@ components:
                 $ref: '#/components/schemas/IdempotencyOutcome'
               spec_digest:
                 type: string
+              vip:
+                type:
+                - string
+                - 'null'
           kind:
             type: string
             enum:
@@ -1300,6 +1326,22 @@ components:
           $ref: '#/components/schemas/IdempotencyOutcome'
         spec_digest:
           type: string
+        vip:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Service-issued VIP — populated for `WorkloadKind::Service`
+            submissions per ADR-0049 (amended 2026-05-15). `None` for
+            `Job` / `Schedule` submissions (those kinds carry no service-
+            level VIP). Rendered as the canonical dotted-decimal IPv4
+            form (e.g. `"10.96.0.2"`).
+
+            Per the Q1.A resolution 2026-05-15: this is a top-level
+            `Option<String>` rather than a per-kind discriminated oneOf
+            response shape. The symmetric oneOf shape is deferred (would
+            pull in Job / Schedule response migration not in this
+            feature's scope).
         workload_id:
           type: string
     TerminalReason:

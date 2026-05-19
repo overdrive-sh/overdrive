@@ -81,6 +81,19 @@ pub struct SubmitWorkloadResponse {
     pub workload_id: String,
     pub spec_digest: String,
     pub outcome: IdempotencyOutcome,
+    /// Service-issued VIP — populated for `WorkloadKind::Service`
+    /// submissions per ADR-0049 (amended 2026-05-15). `None` for
+    /// `Job` / `Schedule` submissions (those kinds carry no service-
+    /// level VIP). Rendered as the canonical dotted-decimal IPv4
+    /// form (e.g. `"10.96.0.2"`).
+    ///
+    /// Per the Q1.A resolution 2026-05-15: this is a top-level
+    /// `Option<String>` rather than a per-kind discriminated oneOf
+    /// response shape. The symmetric oneOf shape is deferred (would
+    /// pull in Job / Schedule response migration not in this
+    /// feature's scope).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip: Option<String>,
 }
 
 /// Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
@@ -212,6 +225,17 @@ pub struct AllocStatusResponse {
     /// The CLI render layer branches on this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<overdrive_core::aggregate::WorkloadKind>,
+    /// Service-issued VIP — populated for `WorkloadKind::Service`
+    /// reads per ADR-0049 (amended 2026-05-15). `None` for
+    /// `Job` / `Schedule` reads. Resolved from the persistent
+    /// allocator's content-addressed memo keyed by the workload's
+    /// `WorkloadIntent::Service(_).spec_digest()`.
+    ///
+    /// Per the Q1.A resolution 2026-05-15: per-listener lines do
+    /// NOT carry a per-listener VIP — listeners are `(port, protocol)`
+    /// only; the Service-level VIP lives at this top-level field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip: Option<String>,
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01
@@ -613,7 +637,17 @@ pub enum SubmitEvent {
     /// First line of every streaming response — confirms the
     /// `IntentStore` commit. `outcome` carries the idempotency verdict
     /// (Inserted / Unchanged) per ADR-0020.
-    Accepted { spec_digest: String, intent_key: String, outcome: IdempotencyOutcome },
+    ///
+    /// `vip` is populated only for `WorkloadKind::Service` streams per
+    /// service-vip-allocator step 02-03d / ADR-0049 (amended 2026-05-15);
+    /// Job / Schedule streams emit `vip: None` (skipped on the wire).
+    Accepted {
+        spec_digest: String,
+        intent_key: String,
+        outcome: IdempotencyOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vip: Option<String>,
+    },
     /// Lifecycle transition observed on the broadcast channel.
     /// Mirrors the snapshot's `TransitionRecord` shape with the alloc
     /// id added so a stream consumer can disambiguate concurrent

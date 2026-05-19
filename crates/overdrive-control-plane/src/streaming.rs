@@ -489,13 +489,20 @@ async fn lagged_recover(
 
 /// Build the synchronous `Accepted` event the handler emits before
 /// entering the streaming loop.
+///
+/// `vip` is the allocator-issued Service VIP per ADR-0049 (amended
+/// 2026-05-15); the legacy Service streaming lane carries it on
+/// `SubmitEvent::Accepted` so a consumer of the NDJSON Service stream
+/// observes the same VIP the JSON `SubmitWorkloadResponse` echoes.
+/// Pass `None` for Schedule / non-Service streams.
 #[must_use]
 pub fn build_accepted(
     spec_digest: String,
     intent_key: String,
     outcome: IdempotencyOutcome,
+    vip: Option<String>,
 ) -> SubmitEvent {
-    SubmitEvent::Accepted { spec_digest, intent_key, outcome }
+    SubmitEvent::Accepted { spec_digest, intent_key, outcome, vip }
 }
 
 /// Build the synchronous `JobSubmitEvent::Accepted` event the handler

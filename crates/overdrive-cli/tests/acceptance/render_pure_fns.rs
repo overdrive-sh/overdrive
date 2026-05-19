@@ -131,6 +131,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusResponse 
         rows: vec![minimal_row(AllocStateWire::Pending, None)],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
         kind: Some(kind),
+        vip: None,
     }
 }
 

@@ -72,6 +72,7 @@ fn fixture_response(
         rows,
         restart_budget: None,
         kind: Some(kind),
+        vip: None,
     }
 }
 
