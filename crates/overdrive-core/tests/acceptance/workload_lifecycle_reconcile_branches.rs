@@ -41,7 +41,7 @@
 // backticking every occurrence costs more readability than it buys.
 #![allow(clippy::doc_markdown)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
@@ -1107,6 +1107,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: None,
@@ -1114,6 +1115,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             nodes,
             allocations: allocs,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1165,6 +1167,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: None,
@@ -1172,6 +1175,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             nodes,
             allocations: empty_alloc_map(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
 
         // Seed the view: a stale `last_failure_seen_at` carried over
@@ -1185,7 +1189,11 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
         restart_counts.insert(aid("alloc-payments-0"), 1);
         let mut last_failure_seen_at = BTreeMap::new();
         last_failure_seen_at.insert(aid("alloc-payments-0"), now_unix);
-        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+        let view = WorkloadLifecycleView {
+            restart_counts,
+            last_failure_seen_at,
+            released_for_terminal: BTreeSet::new(),
+        };
         let tick = tick_at_unix(now, now_unix, 0);
 
         let r = WorkloadLifecycle::canonical();
@@ -1231,6 +1239,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: None,
@@ -1238,13 +1247,18 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             nodes,
             allocations: allocs,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
 
         let now = Instant::now();
         let now_unix = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
         let mut last_failure_seen_at = BTreeMap::new();
         last_failure_seen_at.insert(aid("alloc-payments-1"), now_unix);
-        let view = WorkloadLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at };
+        let view = WorkloadLifecycleView {
+            restart_counts: BTreeMap::new(),
+            last_failure_seen_at,
+            released_for_terminal: BTreeSet::new(),
+        };
         let tick = tick_at_unix(now, now_unix, 0);
 
         let r = WorkloadLifecycle::canonical();
@@ -1290,6 +1304,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: None,
@@ -1297,6 +1312,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             nodes,
             allocations: allocs,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1393,6 +1409,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1400,6 +1417,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             nodes,
             allocations,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1452,6 +1470,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1459,6 +1478,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             nodes,
             allocations,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1499,6 +1519,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1506,6 +1527,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             nodes,
             allocations: allocs,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1547,6 +1569,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1554,6 +1577,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             nodes,
             allocations: allocs,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1683,6 +1707,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1690,6 +1715,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             nodes,
             allocations,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1785,6 +1811,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1792,6 +1819,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             nodes,
             allocations,
             workload_kind: *kind,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1864,6 +1892,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
             workload_kind: WorkloadKind::Job,
+            service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
@@ -1871,6 +1900,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             nodes,
             allocations,
             workload_kind: WorkloadKind::Job,
+            service_spec_digest: None,
         };
         let view = WorkloadLifecycleView::default();
         let tick =
