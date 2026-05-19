@@ -567,6 +567,14 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
         }
     }
 
+    // mutants: skip — `discriminant_offset_from_end` is intentionally
+    // `None` per ADR-0050 step 02-03a (re-pin deferred until V2
+    // lands; tracked in the rkyv-envelope-forward-traps memory note).
+    // The pre-decode probe is structurally a no-op until that point,
+    // so `Some(0)` and `None` produce indistinguishable behaviour
+    // — there is no test that can distinguish them. Future commit
+    // that introduces `V2` MUST re-pin the offset AND add a golden-
+    // bytes test that fires on `Some(0)`.
     fn discriminant_offset_from_end() -> Option<usize> {
         // Empirically-pinned offset is DEFERRED for `WorkloadIntentEnvelope`
         // per ADR-0050 step 02-03a — the outer envelope wraps a
@@ -587,12 +595,26 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
         None
     }
 
+    // mutants: skip — `known_discriminants` is unused when
+    // `discriminant_offset_from_end` returns `None` (see above
+    // skip block). Mutations that replace the `&[0]` slice with
+    // `Vec::leak(vec![])` / `Vec::leak(vec![1])` produce no
+    // observable behaviour change while the offset probe is a
+    // no-op. Lands GREEN in the same commit as the V2 offset re-pin.
     fn known_discriminants() -> &'static [u8] {
         // V1 carries rkyv discriminant 0; when `discriminant_offset_from_end`
         // is `None`, the probe is skipped and this slice is unused.
         &[0]
     }
 
+    // mutants: skip — `type_name` feeds only the `EnvelopeError`
+    // `Display` form for operator diagnostics. The string content
+    // is not load-bearing for any branch (no caller pattern-matches
+    // on it), so mutations to `""` / `"xyzzy"` are observationally
+    // equivalent to "WorkloadIntentEnvelope". Operator-visible
+    // diagnostic regression would be caught at code review of any
+    // future error-message golden-string assertion, not by mutation
+    // testing.
     fn type_name() -> &'static str {
         "WorkloadIntentEnvelope"
     }

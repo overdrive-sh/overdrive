@@ -685,6 +685,12 @@ impl ServiceVip {
     /// onto the newtype.
     #[must_use]
     pub const fn try_as_ipv4(&self) -> Option<std::net::Ipv4Addr> {
+        // mutants: skip — the `None` arm is structurally unreachable in
+        // Phase 1: `ServiceVip` is exclusively constructed as IPv4 via the
+        // allocator (`VipRange` is IPv4-only per ADR-0049 § 5) and the
+        // parser layer does not yet admit IPv6 literals. IPv6
+        // forward-compat is tracked in GH #155; the corresponding kill
+        // test lands the same commit that admits an IPv6 path.
         match self.0 {
             std::net::IpAddr::V4(v4) => Some(v4),
             std::net::IpAddr::V6(_) => None,
