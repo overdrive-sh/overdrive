@@ -212,3 +212,135 @@ const _: fn() = || {
     assert_copy::<ServiceVip>();
     let _ = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // silence unused-import lint
 };
+
+// ---------------------------------------------------------------------------
+// Step 02-04 — Earned Trust boot probe scenarios.
+//
+// The probe runs inside `PersistentServiceVipAllocator::bulk_load`. For
+// each persisted `(digest, vip, counter_idx)` entry, the probe asserts
+// `vip` projects back within the configured `VipRange` (i.e. is contained
+// in some configured CIDR AND not in the reserved set). Inconsistency
+// (typically caused by an operator narrowing the configured range AFTER
+// allocations were persisted under a wider range) surfaces as
+// `PersistentAllocatorError::PersistedStateInconsistent`, naming the
+// offending VIP.
+//
+// Driving port: `PersistentServiceVipAllocator::bulk_load(range, store)`.
+// Inconsistency is seeded by allocating against a wide range, then
+// re-opening the same on-disk store with a narrower range that excludes
+// some persisted VIPs.
+// ---------------------------------------------------------------------------
+
+/// Range covering `10.96.0.0/24` (256 addresses, none reserved). Wide
+/// enough to allocate VIPs that fall OUTSIDE the narrower 02-04 range.
+fn wide_24_range() -> VipRange {
+    use std::collections::BTreeSet;
+    let cidr: ipnet::Ipv4Net = "10.96.0.0/24".parse().expect("valid cidr");
+    VipRange::new(vec![cidr], BTreeSet::new()).expect("valid VipRange")
+}
+
+/// Narrow range — `10.96.0.0/29` covers `10.96.0.0`..`10.96.0.7` only.
+/// Used to project the wide-range allocations after restart; VIPs at
+/// `10.96.0.8`+ will be outside this range and trip the probe.
+fn narrow_29_range() -> VipRange {
+    use std::collections::BTreeSet;
+    let cidr: ipnet::Ipv4Net = "10.96.0.0/29".parse().expect("valid cidr");
+    VipRange::new(vec![cidr], BTreeSet::new()).expect("valid VipRange")
+}
+
+// ---------------------------------------------------------------------------
+// S-VIP-19 — boot_probe_refuses_inconsistent_state
+// ---------------------------------------------------------------------------
+
+/// Allocate enough VIPs against a wide range that some land outside a
+/// narrower range, restart against the narrow range, and assert that
+/// `bulk_load` refuses with `PersistedStateInconsistent` naming the
+/// first VIP that fails to project back into the active range.
+#[tokio::test]
+async fn boot_probe_refuses_inconsistent_state() {
+    let (store, dir) = fresh_store();
+
+    // First boot — allocate against the wide /24 range; counter
+    // walks from .0 upward, so the 10th allocation lands at .9 (well
+    // outside the narrower /29).
+    let mut allocator = PersistentServiceVipAllocator::new(wide_24_range(), Arc::clone(&store));
+    for seed in 0..10 {
+        let _ = allocator.allocate(digest(seed)).await.expect("allocate succeeds");
+    }
+    drop(allocator);
+    drop(store);
+
+    // Operator-misconfiguration scenario: restart with a narrower
+    // range that excludes the persisted VIPs at .8 and beyond.
+    let store_reopened = reopen_store(&dir);
+    let result = PersistentServiceVipAllocator::bulk_load(narrow_29_range(), store_reopened).await;
+    let Err(err) = result else {
+        panic!("bulk_load must refuse when persisted VIPs project outside the active range");
+    };
+
+    match err {
+        PersistentAllocatorError::PersistedStateInconsistent { vip } => {
+            // VIP must be a real IPv4 that is OUTSIDE the narrow range.
+            let v4 = vip.try_as_ipv4().expect("ServiceVip is IPv4 in Phase 1");
+            assert!(
+                !narrow_29_range().contains(v4),
+                "PersistedStateInconsistent must name a VIP outside the active range; got {v4}",
+            );
+        }
+        other => {
+            panic!("expected PersistedStateInconsistent on narrowed-range restart; got {other:?}")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S-VIP-passes-consistent — boot_probe_passes_consistent_state
+// ---------------------------------------------------------------------------
+
+/// Allocate VIPs against a wide range, restart against the same wide
+/// range, and assert that `bulk_load` succeeds (every persisted VIP
+/// projects back within the active range).
+#[tokio::test]
+async fn boot_probe_passes_consistent_state() {
+    let (store, dir) = fresh_store();
+
+    let mut allocator = PersistentServiceVipAllocator::new(wide_24_range(), Arc::clone(&store));
+    let d_first = digest(0xA0);
+    let d_second = digest(0xA1);
+    let vip_first = allocator.allocate(d_first).await.expect("first allocate succeeds");
+    let _ = allocator.allocate(d_second).await.expect("second allocate succeeds");
+    drop(allocator);
+    drop(store);
+
+    // Reopen with the SAME wide range — every persisted VIP still
+    // projects back within the active range.
+    let store_reopened = reopen_store(&dir);
+    let reloaded = PersistentServiceVipAllocator::bulk_load(wide_24_range(), store_reopened)
+        .await
+        .expect("bulk_load succeeds when persisted VIPs project back within active range");
+
+    assert_eq!(
+        reloaded.get(&d_first),
+        Some(vip_first),
+        "consistent-state bulk_load reconstructs the memo",
+    );
+    assert_eq!(reloaded.memo_len(), 2, "memo carries both persisted allocations");
+}
+
+// ---------------------------------------------------------------------------
+// S-VIP-empty — boot_probe_passes_empty_store
+// ---------------------------------------------------------------------------
+
+/// First-boot scenario: empty `IntentStore`, narrow `VipRange`,
+/// `bulk_load` returns Ok with empty memo (the per-VIP projection
+/// check is vacuously true with zero persisted entries).
+#[tokio::test]
+async fn boot_probe_passes_empty_store() {
+    let (store, _dir) = fresh_store();
+
+    let allocator = PersistentServiceVipAllocator::bulk_load(narrow_29_range(), store)
+        .await
+        .expect("bulk_load succeeds on empty store (first boot)");
+
+    assert_eq!(allocator.memo_len(), 0, "first-boot memo is empty");
+}

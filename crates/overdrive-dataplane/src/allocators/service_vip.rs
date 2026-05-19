@@ -158,6 +158,20 @@ impl ServiceVipAllocator {
         self.range.capacity()
     }
 
+    /// Returns `true` if `addr` projects within the bound
+    /// [`VipRange`] (contained in some configured CIDR AND not in the
+    /// reserved set).
+    ///
+    /// Used by [`super::PersistentServiceVipAllocator::bulk_load`]'s
+    /// Earned Trust probe (ADR-0049 § Amendments) to assert every
+    /// persisted VIP still falls inside the operator's currently-
+    /// configured range. Boot-only — not used on the hot allocate
+    /// path.
+    #[must_use]
+    pub fn range_contains(&self, addr: std::net::Ipv4Addr) -> bool {
+        self.range.contains(addr)
+    }
+
     /// Peek the `(vip, counter_idx)` that would be issued for `digest`
     /// on the next [`Self::allocate`] call, WITHOUT mutating any
     /// in-memory state.

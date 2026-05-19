@@ -487,6 +487,18 @@ impl ServerHandle {
 /// from the post-crash counter rather than colliding with prior
 /// allocations.
 ///
+/// Per step 02-04 the `bulk_load` round-trip ALSO runs the Earned
+/// Trust boot probe — every persisted VIP must project back within
+/// the active [`VipRange`]. On probe failure (typically an operator
+/// who narrowed the configured range after allocations were persisted
+/// under a wider range), this fn emits a structured
+/// `health.startup.refused` event naming the offending VIP and
+/// propagates the typed [`overdrive_dataplane::allocators::PersistentAllocatorError`]
+/// via the `#[from]` variant on `ControlPlaneError::VipAllocator` —
+/// never flattened to `Internal(String)` per
+/// `.claude/rules/development.md` § "Never flatten a typed error to
+/// `Internal(String)` at a composition boundary".
+///
 /// Extracted from `run_server_with_obs_and_driver` to keep that fn
 /// under the clippy `too_many_lines` ceiling — the construction is
 /// otherwise a single logical step.
@@ -495,10 +507,17 @@ async fn bulk_load_service_vip_allocator(
     store: &Arc<LocalIntentStore>,
 ) -> Result<Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>, error::ControlPlaneError> {
     let intent_store: Arc<dyn IntentStore> = Arc::clone(store) as Arc<dyn IntentStore>;
-    let allocator =
-        PersistentServiceVipAllocator::bulk_load(vip_range.clone(), intent_store).await.map_err(
-            |e| error::ControlPlaneError::internal("PersistentServiceVipAllocator::bulk_load", e),
-        )?;
+    let allocator = PersistentServiceVipAllocator::bulk_load(vip_range.clone(), intent_store)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: "overdrive::health",
+                event = "health.startup.refused",
+                cause = %err,
+                "ServiceVipAllocator bulk_load refused; control-plane will not start"
+            );
+            error::ControlPlaneError::from(err)
+        })?;
     Ok(Arc::new(tokio::sync::Mutex::new(allocator)))
 }
 

@@ -83,6 +83,32 @@ pub enum PersistentAllocatorError {
     /// (decoding a persisted entry).
     #[error(transparent)]
     Envelope(#[from] EnvelopeError),
+
+    /// Earned-Trust boot probe (per ADR-0049 § Amendments) detected a
+    /// persisted VIP that does not project back within the active
+    /// [`VipRange`]. Typically caused by an operator narrowing the
+    /// configured `[dataplane.vip_allocator]` range AFTER allocations
+    /// were persisted under a wider range — the surviving persisted
+    /// entries would now allocate addresses outside the operator's
+    /// stated pool.
+    ///
+    /// Surfaces only from [`Self::bulk_load`]; never from `allocate`
+    /// (a fresh allocation cannot produce a VIP outside the range
+    /// supplied to the allocator). The control-plane boot path emits
+    /// `health.startup.refused` and exits non-zero on this variant;
+    /// operator remediation is either (a) restore the wider range or
+    /// (b) wipe the on-disk allocator state for a clean re-allocation.
+    #[error(
+        "Earned Trust probe failed: persisted VIP {vip} is outside the active VipRange — \
+         operator likely narrowed [dataplane.vip_allocator].ranges after allocations were persisted"
+    )]
+    PersistedStateInconsistent {
+        /// The first persisted VIP encountered that fails the
+        /// projection check. Named verbatim so the operator-facing
+        /// `health.startup.refused` event identifies the offending
+        /// row without further diagnostics.
+        vip: ServiceVip,
+    },
 }
 
 /// Result alias for [`PersistentAllocatorError`].
@@ -120,17 +146,46 @@ impl PersistentServiceVipAllocator {
     /// `max(persisted.counter_idx) + 1` (or 0 if no entries persist),
     /// so the next allocation issues an unused index.
     ///
+    /// # Earned Trust boot probe
+    ///
+    /// Per ADR-0049 § Amendments, every persisted VIP is checked for
+    /// projection back within the active [`VipRange`] BEFORE being
+    /// admitted into the in-memory memo. On the first persisted VIP
+    /// that fails projection (typically because the operator narrowed
+    /// `[dataplane.vip_allocator].ranges` after allocations were
+    /// persisted under a wider range), `bulk_load` returns
+    /// [`PersistentAllocatorError::PersistedStateInconsistent`]
+    /// naming the offending VIP — the control-plane boot path emits
+    /// `health.startup.refused` and refuses to start. The probe is
+    /// boot-only; the hot `allocate` path never re-checks (a fresh
+    /// allocation cannot produce a VIP outside the range supplied to
+    /// the allocator). Empty stores pass vacuously.
+    ///
     /// # Errors
     ///
     /// * [`PersistentAllocatorError::Storage`] — store read failed.
     /// * [`PersistentAllocatorError::Envelope`] — a persisted row
     ///   failed to decode through the current envelope shape (intent
     ///   layer policy: fail-fast per ADR-0048 § 3).
+    /// * [`PersistentAllocatorError::PersistedStateInconsistent`] —
+    ///   a persisted VIP does not project back within `range`.
     pub async fn bulk_load(range: VipRange, store: Arc<dyn IntentStore>) -> Result<Self> {
         let rows = store.scan_prefix(ALLOCATOR_ENTRIES_PREFIX).await?;
         let mut inner = ServiceVipAllocator::new(range);
         for (_key, value) in rows {
             let entry = ServiceVipAllocatorEntry::from_store_bytes(&value)?;
+            // Earned Trust probe — refuse to admit a persisted VIP
+            // that the active range no longer covers. IPv6 entries
+            // are also refused at this boundary (Phase 1 allocator
+            // is IPv4-only per ADR-0049 § 5); the projection failure
+            // surfaces as the same typed error so the operator-
+            // facing event is uniform.
+            let in_range = entry.vip.try_as_ipv4().is_some_and(|v4| inner.range_contains(v4));
+            if !in_range {
+                return Err(PersistentAllocatorError::PersistedStateInconsistent {
+                    vip: entry.vip,
+                });
+            }
             inner.restore_entry(entry.spec_digest, entry.vip, entry.counter_idx);
         }
         Ok(Self { inner, store })
