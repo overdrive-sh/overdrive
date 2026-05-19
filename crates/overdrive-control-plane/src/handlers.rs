@@ -569,14 +569,14 @@ pub async fn describe_workload(
 
     // Per step 02-03d — Service describe is a structural rejection at
     // this surface in Phase 1 because `WorkloadDescription.spec` is
-    // typed `JobSpecInput`. A Service-specific describe response shape
-    // is GH #182 (CLI range-visibility surface), deferred per Q2.B
-    // resolution 2026-05-15. Schedule is similarly out of scope here.
+    // typed `JobSpecInput`. Widening to a kind-discriminated oneOf
+    // response shape (parallel to ADR-0051's SubmitSpecInput) is
+    // tracked in GH #183. Schedule is similarly out of scope here.
     let WorkloadIntent::Job(job) = intent else {
         return Err(ControlPlaneError::Validation {
             field: Some("id".to_owned()),
             message:
-                "describe is only available for Job workloads in Phase 1 (Service describe is GH #182)"
+                "describe is only available for Job workloads in Phase 1 (Service/Schedule describe wire shape is GH #183)"
                     .to_owned(),
         });
     };
