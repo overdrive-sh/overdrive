@@ -458,3 +458,148 @@ async fn vip_allocator_pool_exhaustion_and_recovery() {
          recovered, not just memo-cleared)",
     );
 }
+
+/// Like [`build_state_with_range`] but also registers the
+/// `workload-lifecycle` reconciler so `run_convergence_tick` can
+/// dispatch against it.
+async fn build_state_with_range_and_reconciler(
+    tmp: &TempDir,
+    vip_range: VipRange,
+) -> (AppState, Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>) {
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime
+        .register(overdrive_control_plane::noop_heartbeat())
+        .await
+        .expect("register noop-heartbeat");
+    runtime
+        .register(overdrive_control_plane::workload_lifecycle())
+        .await
+        .expect("register job-lifecycle");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        vip_range,
+        Arc::clone(&store) as Arc<dyn IntentStore>,
+    )));
+    let state = AppState::new(
+        store,
+        store_path,
+        obs,
+        Arc::new(runtime),
+        driver,
+        Arc::new(SimClock::new()),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        NodeId::new("writer-1").expect("NodeId"),
+        Arc::clone(&allocator),
+    );
+    (state, allocator)
+}
+
+/// Regression: `hydrate_desired` must populate `service_spec_digest`
+/// from the persisted `WorkloadIntent` so the reconciler's
+/// `service_vip_release_emission` gate fires on the production
+/// `run_convergence_tick` path — not only in unit tests that construct
+/// `WorkloadLifecycleState` directly.
+///
+/// Before the fix, `hydrate_desired` hardcoded `service_spec_digest =
+/// None`, which short-circuited the release gate (condition 2 in
+/// `service_vip_release_emission`: `desired.service_spec_digest?`).
+/// Every VIP allocated at submit time was permanently held in the
+/// allocator memo regardless of terminal-state observations.
+#[tokio::test]
+async fn convergence_tick_releases_vip_on_terminal_service() {
+    use overdrive_control_plane::reconciler_runtime::run_convergence_tick;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let (state, allocator) = build_state_with_range_and_reconciler(&tmp, VipRange::default()).await;
+
+    // ---- (1) Submit a Service workload through the production handler.
+    let spec = service_spec("svc-release", 8080);
+    let resp = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec.clone()) },
+    )
+    .await
+    .expect("Service submit must succeed");
+    assert_eq!(resp.outcome, IdempotencyOutcome::Inserted);
+
+    // ---- (2) Pre-condition: the allocator carries the digest.
+    let digest_bytes = digest_for_spec(spec);
+    {
+        let guard = allocator.lock().await;
+        assert!(
+            guard.get(&digest_bytes).is_some(),
+            "pre-condition: allocator must carry the digest after submit"
+        );
+        drop(guard);
+    }
+
+    // ---- (3) Write a terminal alloc-status observation row.
+    let workload_id = overdrive_core::id::WorkloadId::new("svc-release").expect("WorkloadId");
+    let writer = NodeId::new("local").expect("NodeId");
+    let terminal_row = overdrive_core::traits::observation_store::AllocStatusRow {
+        alloc_id: overdrive_core::id::AllocationId::new("alloc-svc-release-0")
+            .expect("AllocationId"),
+        workload_id: workload_id.clone(),
+        node_id: writer.clone(),
+        state: overdrive_core::traits::observation_store::AllocState::Terminated,
+        updated_at: overdrive_core::traits::observation_store::LogicalTimestamp {
+            counter: 1,
+            writer,
+        },
+        reason: Some(overdrive_core::transition_reason::TransitionReason::Stopped {
+            by: overdrive_core::transition_reason::StoppedBy::Operator,
+        }),
+        detail: None,
+        terminal: Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+            by: overdrive_core::transition_reason::StoppedBy::Operator,
+        }),
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: vec![],
+    };
+    state
+        .obs
+        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(terminal_row))
+        .await
+        .expect("write terminal observation row");
+
+    // ---- (4) Write a stop intent so desired_to_stop fires.
+    let stop_key = overdrive_core::aggregate::IntentKey::for_workload_stop(&workload_id);
+    state.store.put(stop_key.as_bytes(), &[1u8]).await.expect("put stop intent");
+
+    // ---- (5) Drive convergence ticks — should emit ReleaseServiceVip.
+    let reconciler_name =
+        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("reconciler name");
+    let target_resource =
+        overdrive_core::reconciler::TargetResource::new(&format!("job/{workload_id}"))
+            .expect("valid target");
+    let now = Instant::now();
+    let deadline = now + Duration::from_secs(60);
+    for tick_n in 0..10_u64 {
+        run_convergence_tick(
+            &state,
+            &reconciler_name,
+            &target_resource,
+            now + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("convergence tick");
+    }
+
+    // ---- (6) Post-condition: the allocator MUST have released the digest.
+    {
+        let guard = allocator.lock().await;
+        assert!(
+            guard.get(&digest_bytes).is_none(),
+            "regression: convergence tick must release the VIP on a terminal Service workload"
+        );
+        drop(guard);
+    }
+}

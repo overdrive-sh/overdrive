@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconciler::ServiceMapHydrator;
 use overdrive_core::reconciler::{
@@ -931,7 +931,7 @@ async fn hydrate_desired(
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            let job = read_job(state, &workload_id).await?;
+            let (job, intent_digest) = read_job(state, &workload_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
@@ -950,15 +950,8 @@ async fn hydrate_desired(
             // the kind-agnostic Service shape for legacy submits that
             // predate the discriminator persistence.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
-            // service-vip-allocator step 03-01 — the
-            // `WorkloadLifecycle::reconcile` release-emission branch
-            // gates on `desired.service_spec_digest`. The reconciler-
-            // emission layer ships with `None` here as a safe default
-            // (release branch is short-circuited); end-to-end
-            // population from the persisted `WorkloadIntent` for
-            // Service kinds lands with the end-to-end S-VIP-06 flow
-            // in step 03-03 / future Service-arm runtime wiring.
-            let service_spec_digest = None;
+            let service_spec_digest =
+                if workload_kind == WorkloadKind::Service { intent_digest } else { None };
             let s = WorkloadLifecycleState {
                 job,
                 desired_to_stop,
@@ -1015,35 +1008,38 @@ pub async fn hydrate_desired_for_test(
 /// Read a `Job` from the `IntentStore` at the canonical
 /// `workloads/<id>` key (per ADR-0050 OQ-5 single-cut migration),
 /// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes.
-/// Returns `Ok(None)` when the key is absent. Errors map to
+/// Returns `Ok((None, None))` when the key is absent. Errors map to
 /// `ConvergenceError::IntentRead`.
 ///
-/// Step 02-03a: submit handler today only writes Job-shaped intents
-/// (Service / Schedule arms land in 02-03b). Decoding to anything
-/// other than `WorkloadIntent::Job(_)` is unreachable in this slice;
-/// the match arm panics with a descriptive message rather than
-/// silently coercing.
+/// The second element is the `WorkloadIntent`'s content-addressed
+/// `spec_digest` (SHA-256 over the rkyv-archived payload). Returned
+/// only for `Service` intents — Job and Schedule workloads do not
+/// allocate VIPs (ADR-0049), so their digest is not surfaced.
 async fn read_job(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<Option<Job>, ConvergenceError> {
+) -> Result<(Option<Job>, Option<ContentHash>), ConvergenceError> {
     let key = IntentKey::for_workload(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let Some(b) = bytes else { return Ok(None) };
+    let Some(b) = bytes else { return Ok((None, None)) };
     let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
         b.as_ref(),
         &state.intent_redb_path,
         Some(key.as_str()),
     )
     .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    match intent {
-        overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok(Some(job)),
-        overdrive_core::aggregate::WorkloadIntent::Service(_)
-        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok(None),
+    match &intent {
+        overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok((Some(job.clone()), None)),
+        overdrive_core::aggregate::WorkloadIntent::Service(_) => {
+            let digest =
+                intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+            Ok((None, Some(digest)))
+        }
+        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok((None, None)),
     }
 }
 
@@ -1117,11 +1113,9 @@ async fn hydrate_actual(
             // `actual`-side branching has a non-default value to work
             // with.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
-            // service-vip-allocator step 03-01 — actual-side mirrors
-            // the desired-side default of `None`; see hydrate_desired
-            // for the rationale. End-to-end Service-arm population
-            // lands with step 03-03.
-            let service_spec_digest = None;
+            let (_, intent_digest) = read_job(state, &workload_id).await?;
+            let service_spec_digest =
+                if workload_kind == WorkloadKind::Service { intent_digest } else { None };
             let s = WorkloadLifecycleState {
                 job: None,
                 desired_to_stop: false,
