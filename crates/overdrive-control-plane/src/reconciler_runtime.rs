@@ -837,6 +837,7 @@ pub async fn run_convergence_tick(
         state.lifecycle_events.as_ref(),
         &tick,
         &state.node_id,
+        std::sync::Arc::clone(&state.allocator),
     )
     .await
     .map_err(ConvergenceError::Shim)?;

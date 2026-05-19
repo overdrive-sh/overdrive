@@ -116,4 +116,10 @@ mod acceptance {
     // alloc_status code paths. Six S-VIP scenarios per ADR-0049
     // (amended 2026-05-15) + ADR-0050 + ADR-0051.
     mod service_vip_submit_acceptance;
+
+    // service-vip-allocator step 03-02 — action-shim dispatch arm for
+    // Action::ReleaseServiceVip. S-VIP-06 PARTIAL (dispatch layer only;
+    // reconciler emission in 03-01; end-to-end S-VIP-06 + S-VIP-07 in
+    // 03-03).
+    mod release_service_vip_dispatch;
 }

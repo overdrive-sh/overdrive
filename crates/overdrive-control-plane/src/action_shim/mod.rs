@@ -18,6 +18,8 @@
 //! lives at the crate root as `action_shim` and is re-exported under
 //! the canonical path via `pub mod` in lib.rs.
 
+use std::sync::Arc;
+
 use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
@@ -28,6 +30,7 @@ use overdrive_core::traits::observation_store::{
     ObservationStoreError,
 };
 use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServiceVipAllocator};
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
@@ -36,6 +39,12 @@ use crate::api::{AllocStateWire, TransitionSource};
 /// module docstring of [`dataplane_update_service`] for the
 /// failure-surface contract per architecture.md § 7.
 pub mod dataplane_update_service;
+
+/// Per-arm dispatch for `Action::ReleaseServiceVip` per ADR-0049
+/// (amended 2026-05-15). See module docstring of
+/// [`release_service_vip`] for the lock discipline + idempotency
+/// contract (service-vip-allocator step 03-02).
+pub mod release_service_vip;
 
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
@@ -322,6 +331,10 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 /// representable as an [`AllocStatusRow`]. Returns
 /// [`ShimError::Observation`] when the observation store rejects the
 /// write itself.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Action-shim ports (Driver, ObservationStore, Dataplane, LifecycleEvent bus, ServiceVipAllocator) are required at dispatch per .claude/rules/development.md § Port-trait dependencies; bundling into a struct would make individual deps optional and defeat the explicit-injection invariant."
+)]
 pub async fn dispatch(
     actions: Vec<Action>,
     driver: &dyn Driver,
@@ -330,11 +343,14 @@ pub async fn dispatch(
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
+    allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
-        let result = dispatch_single(action, driver, obs, dataplane, bus, tick, writer_node).await;
+        let result =
+            dispatch_single(action, driver, obs, dataplane, bus, tick, writer_node, &allocator)
+                .await;
         if let Err(err) = result {
             // Per-variant error isolation: record only the first error
             // and continue draining the rest of the actions.
@@ -350,6 +366,10 @@ pub async fn dispatch(
 /// Dispatch a single action. Each variant is independent; the caller
 /// loops over a `Vec<Action>` and aggregates errors.
 #[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "See dispatch() docstring — port-trait dependencies are required at call site, not optional via a builder."
+)]
 async fn dispatch_single(
     action: Action,
     driver: &dyn Driver,
@@ -358,6 +378,7 @@ async fn dispatch_single(
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
+    allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
@@ -717,24 +738,21 @@ async fn dispatch_single(
                 })?;
             Ok(())
         }
-        // service-vip-allocator step 03-01 — the reconciler emits this
-        // variant when a Service-kind workload reaches a terminal-state
-        // observation row. Real dispatch (calling
-        // `ServiceVipAllocator::release`) lands in step 03-02; here we
-        // log the intent and ack so the shim remains exhaustive and the
-        // reconciler can land its emission gate ahead of the dispatch
-        // arm. The structured event lets operators trace pre-dispatch
-        // ReleaseServiceVip activity in step 03-01 land-before-dispatch
-        // builds.
+        // service-vip-allocator step 03-02 — real dispatch arm per
+        // ADR-0049 (amended 2026-05-15). Threads the digest +
+        // correlation into the per-arm `release_service_vip::dispatch`
+        // which owns the `tokio::sync::Mutex` guard + the
+        // `PersistentServiceVipAllocator::release` call (memo +
+        // IntentStore allocator_entries row removal in
+        // fsync-then-memory order). On Ok, the released VIP returns to
+        // the pool for reallocation on the next `allocate(&fresh)`. On
+        // Err, the typed `PersistentAllocatorError` surfaces via
+        // `ShimError::AllocatorRelease { #[from] source }` so callers
+        // can `matches!` on the structured cause without re-parsing
+        // `Display` (per `.claude/rules/development.md` § "Never
+        // flatten a typed error to `Internal(String)`").
         Action::ReleaseServiceVip { spec_digest, correlation } => {
-            tracing::info!(
-                target: "overdrive_control_plane::action_shim",
-                event = "release_service_vip.pending_dispatch",
-                spec_digest = %spec_digest,
-                correlation = %correlation,
-                "ReleaseServiceVip received; dispatch lands in step 03-02"
-            );
-            Ok(())
+            release_service_vip::dispatch(&spec_digest, &correlation, allocator).await
         }
     }
 }
@@ -776,5 +794,17 @@ pub enum ShimError {
     HandleMissing {
         /// The allocation whose handle is missing.
         alloc_id: overdrive_core::id::AllocationId,
+    },
+    /// The [`PersistentServiceVipAllocator::release`] call failed —
+    /// typically a byte-level `IntentStore::delete` rejection (disk
+    /// full, file corruption, redb internal error). Pass-through
+    /// `#[from]` per `.claude/rules/development.md` § Errors so the
+    /// typed cause is preserved end-to-end. Service-vip-allocator
+    /// step 03-02 / ADR-0049.
+    #[error("release_service_vip failed: {source}")]
+    AllocatorRelease {
+        /// The underlying typed error from the allocator.
+        #[from]
+        source: PersistentAllocatorError,
     },
 }

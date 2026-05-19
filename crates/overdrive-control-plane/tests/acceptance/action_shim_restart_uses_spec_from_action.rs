@@ -151,6 +151,17 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
+    // service-vip-allocator step 03-02 — the action shim's dispatch
+    // signature carries the allocator for the ReleaseServiceVip arm.
+    // This test does NOT dispatch ReleaseServiceVip; an ephemeral
+    // tempdir-backed allocator is sufficient.
+    let tmp_alloc = tempfile::TempDir::new().expect("tempdir");
+    let alloc_store: std::sync::Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        std::sync::Arc::new(
+            overdrive_store_local::LocalIntentStore::open(tmp_alloc.path().join("intent.redb"))
+                .expect("open store for allocator"),
+        );
+    let allocator = overdrive_control_plane::test_default_allocator(alloc_store);
     dispatch(
         vec![action],
         driver_dyn.as_ref(),
@@ -159,6 +170,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         &lifecycle_tx,
         &tick,
         &writer_node,
+        allocator,
     )
     .await
     .expect("dispatch must succeed");

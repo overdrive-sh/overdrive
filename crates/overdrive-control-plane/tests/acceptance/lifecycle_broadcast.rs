@@ -63,6 +63,24 @@ use overdrive_core::traits::observation_store::{AllocState, ObservationRow, Obse
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio::sync::broadcast;
 
+/// service-vip-allocator step 03-02 — the action shim's dispatch
+/// signature carries the allocator for the `ReleaseServiceVip` arm.
+/// These lifecycle-broadcast tests do not dispatch `ReleaseServiceVip`,
+/// so an ephemeral tempdir-backed allocator is sufficient. The
+/// returned tuple keeps the tempdir alive for the test's lifetime.
+fn fresh_test_allocator() -> (
+    tempfile::TempDir,
+    Arc<tokio::sync::Mutex<overdrive_dataplane::allocators::PersistentServiceVipAllocator>>,
+) {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> = Arc::new(
+        overdrive_store_local::LocalIntentStore::open(tmp.path().join("intent.redb"))
+            .expect("open store for allocator"),
+    );
+    let allocator = overdrive_control_plane::test_default_allocator(store);
+    (tmp, allocator)
+}
+
 // ---------------------------------------------------------------------------
 // Test doubles
 // ---------------------------------------------------------------------------
@@ -243,7 +261,8 @@ proptest! {
             // Dispatch — the shim writes N rows AND broadcasts N events.
             let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> = std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
             let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
-            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node)
+            let (_alloc_tmp, allocator) = fresh_test_allocator();
+            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node, allocator)
                 .await
                 .expect("dispatch must succeed");
 
@@ -302,6 +321,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
 
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
 
+    let (_alloc_tmp, allocator) = fresh_test_allocator();
     dispatch(
         vec![action],
         driver.as_ref(),
@@ -310,6 +330,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         &tx,
         &tick,
         &writer_node,
+        allocator,
     )
     .await
     .expect("dispatch must succeed even on driver failure (failure is recorded)");
@@ -440,6 +461,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
+    let (_alloc_tmp, allocator) = fresh_test_allocator();
     dispatch(
         vec![action],
         driver.as_ref(),
@@ -448,6 +470,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         &tx,
         &tick,
         &writer_node,
+        allocator,
     )
     .await
     .expect("dispatch must succeed");
