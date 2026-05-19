@@ -1557,6 +1557,49 @@ a reconciler.
 > rationale governs `cargo nextest run` and `cargo clippy` on macOS;
 > see § "Running tests — Lima VM" in `.claude/rules/testing.md`.
 
+## Stale Lima xtask test artifacts across workspaces
+
+Conductor lets a single developer run many workspaces in parallel
+(`hamburg-v1`, `tyler-v2`, …) against the same Lima VM. The VM
+virtiofs-mounts each workspace at its host absolute path, so the
+guest-side `CARGO_MANIFEST_DIR` baked into a compiled test binary is
+the host's workspace path. When the same Lima VM's `target/` directory
+caches a previously-built xtask test binary from a *different*
+workspace, nextest happily reuses it — and the test panics at runtime
+reading paths under the wrong workspace.
+
+The canonical symptom is a pre-push hook failure with shape:
+
+```
+thread 'dst_lint::tests::<some_test>' panicked at xtask/src/dst_lint.rs:NNNN:NN:
+  read /Users/marcus/conductor/workspaces/helios/<OTHER_WORKSPACE>/crates/<crate>/src/<file>: No such file or directory
+```
+
+The path embedded in the panic names a workspace that is NOT the one
+you are pushing from. That is the smoking gun: cached artifact reuse,
+not a bug in the branch under test.
+
+**Fix:** clean the xtask test artifacts inside Lima and retry:
+
+```bash
+cargo xtask lima run -- cargo clean -p xtask
+git push origin <branch>
+```
+
+`cargo clean -p xtask` drops the per-package build cache; the next
+nextest invocation recompiles with the current workspace's manifest
+dir. Do NOT reach for `--no-verify` to bypass the hook — the failure
+is a real cache-coherence signal that masks any genuine xtask test
+regression underneath.
+
+This applies to any xtask test that reads a workspace-relative path
+computed from `env!("CARGO_MANIFEST_DIR")` (e.g.
+`real_core_reconciler_source_path` and siblings in
+`xtask/src/dst_lint.rs`). The structural defense — a workspace-aware
+test harness that resolves paths at runtime rather than compile time
+— is a separate concern; the operational rule above is the answer
+when the panic fires.
+
 ## Committing a focused subset
 
 The lefthook pre-commit pipeline auto-stages modified files into the
