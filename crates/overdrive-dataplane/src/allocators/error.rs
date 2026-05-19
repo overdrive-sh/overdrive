@@ -58,14 +58,17 @@ pub type Result<T, E = VipAllocatorConfigError> = std::result::Result<T, E>;
 /// Runtime allocation errors from
 /// [`super::ServiceVipAllocator::allocate`].
 ///
-/// The allocator is monotonic — released entries are not reclaimed; the
-/// counter advances on every miss until the configured range is
-/// exhausted. `Exhausted` surfaces when the next index has no
-/// allocatable address available.
+/// The allocator is scan-based with reuse-on-release (ADR-0049 §
+/// Amendments → 2026-05-19); released entries return to the pool.
+/// `Exhausted` surfaces only when every slot in the configured range
+/// is currently held in the memo — a finite-but-large pool can serve
+/// effectively-unbounded lifetimes as long as the
+/// simultaneously-held count stays below capacity.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ServiceVipAllocatorError {
-    /// The pool has no more available addresses. `allocated` is the
-    /// current memo size; `capacity` is the configured maximum.
+    /// The pool has no more available addresses — every slot in the
+    /// configured range is currently held. `allocated` is the current
+    /// memo size; `capacity` is the configured maximum.
     #[error("ServiceVip pool exhausted: allocated {allocated} of {capacity}")]
     Exhausted {
         /// Number of VIPs currently allocated.

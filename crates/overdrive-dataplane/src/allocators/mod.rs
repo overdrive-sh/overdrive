@@ -1,22 +1,27 @@
 //! `allocators` — userspace allocator primitives.
 //!
-//! Two concrete allocators, no shared abstraction:
+//! Two concrete allocators with deliberately divergent reuse policies
+//! (ADR-0049 § Amendments → 2026-05-19); no shared abstraction:
 //!
 //! - [`BackendIdAllocator`] (ADR-0046) — monotonic-counter `BackendId`
-//!   allocator keyed by `(ip, port, proto)`. Userspace-only; re-hydrated
-//!   from observation on restart (no persistence).
-//! - [`ServiceVipAllocator`] (ADR-0049 / step 01-01) — monotonic VIP
+//!   allocator keyed by `(ip, port, proto)`. Userspace-only;
+//!   re-hydrated from observation on restart (no persistence). Counter
+//!   advances on every miss; released slots are NOT reclaimed (correct
+//!   for the effectively-unbounded `u32` identifier space).
+//! - [`ServiceVipAllocator`] (ADR-0049 / step 01-01) — scan-based VIP
 //!   pool allocator keyed by service-spec digest. Bounded by an
-//!   operator-configured [`VipRange`]. Persistence wrapper lives in
-//!   `IntentBackedAllocator` (step 01-03; not in this module).
+//!   operator-configured [`VipRange`]; released VIPs return to the
+//!   pool (so a finite /16 default can serve effectively-unbounded
+//!   lifetimes provided the simultaneously-held count stays below
+//!   capacity). The redb-backed persistence wrapper is
+//!   [`PersistentServiceVipAllocator`] (step 01-03).
 //!
-//! Both allocators are sync, no I/O, no DB handle. Both follow the
-//! memo + monotonic-counter shape; neither reclaims slots on release.
-//! Beyond that surface similarity there is no shared trait — VIP
-//! allocation carries range/capacity/exhaustion concerns that BackendId
-//! does not, and trying to factor them produced unjustified complexity
-//! (the previous attempt baked `VipRange` into a generic `PoolAllocator`,
-//! which BackendId could not use).
+//! Both allocators are sync, no I/O, no DB handle, and share the
+//! memo-table-deduplication shape — but the release policy diverges
+//! per the bullets above. There is no shared trait: VIP allocation
+//! carries range/capacity/exhaustion concerns that BackendId does not,
+//! and a prior attempt to factor them baked `VipRange` into a generic
+//! `PoolAllocator` that BackendId could not use.
 
 mod backend_id;
 pub mod entry;
