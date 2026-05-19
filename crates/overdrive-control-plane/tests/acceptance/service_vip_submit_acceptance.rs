@@ -403,3 +403,63 @@ async fn pool_exhaustion_existing_unaffected() {
         "post-exhaustion read of an existing Service must still resolve to its original VIP",
     );
 }
+
+/// S-VIP-10 `conflict_releases_vip` — when a different Service spec is
+/// submitted at an already-occupied `workload_id`, the handler returns
+/// 409 Conflict. The VIP allocated for the rejected spec MUST be
+/// released back to the pool — otherwise it leaks permanently (no
+/// downstream `Action::ReleaseServiceVip` will ever fire because the
+/// rejected spec never gets a persisted `WorkloadIntent`).
+///
+/// Regression test for: VIP allocation precedes idempotency check —
+/// leak on 409 Conflict path.
+#[tokio::test]
+async fn conflict_releases_vip() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state_default(&tmp);
+
+    // 1. First submit — allocates a VIP from the default pool.
+    let first = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest {
+            spec: SubmitSpecInput::Service(service_spec("clash", vec![(8080, "tcp")])),
+        },
+    )
+    .await
+    .expect("first submit");
+    assert_eq!(first.outcome, IdempotencyOutcome::Inserted);
+    assert!(first.vip.is_some(), "first submit must carry a VIP");
+
+    // Confirm exactly one allocation in the memo.
+    {
+        let guard = state.allocator.lock().await;
+        assert_eq!(guard.memo_len(), 1, "one allocation after first submit");
+        drop(guard);
+    }
+
+    // 2. Submit a DIFFERENT spec at the same workload_id ("clash") —
+    //    different listeners ⇒ different spec_digest ⇒ allocator
+    //    issues a second VIP before put_if_absent detects the conflict.
+    let conflict = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest {
+            spec: SubmitSpecInput::Service(service_spec("clash", vec![(9090, "tcp")])),
+        },
+    )
+    .await;
+    assert!(
+        matches!(&conflict, Err(ControlPlaneError::Conflict { .. })),
+        "different spec at occupied key must return Conflict; got {conflict:?}",
+    );
+
+    // 3. The allocator memo must hold exactly ONE entry — the
+    //    original. If the rejected spec's VIP leaked, memo_len == 2.
+    let guard = state.allocator.lock().await;
+    assert_eq!(
+        guard.memo_len(),
+        1,
+        "rejected 409 Conflict must NOT leak a VIP — allocator memo \
+         must hold only the original allocation, not the rejected one",
+    );
+    drop(guard);
+}

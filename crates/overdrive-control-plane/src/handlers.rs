@@ -413,6 +413,22 @@ pub async fn submit_workload(
                 // Conflict is HTTP-status, never a wire `outcome`
                 // value (ADR-0015 §4 amended by ADR-0020). No
                 // evaluation enqueued — the intent did not change.
+                //
+                // Release any VIP that was allocated for the rejected
+                // spec before returning the error. The allocation at
+                // step 4a runs before `put_if_absent`; without this
+                // cleanup the VIP leaks permanently — no downstream
+                // `Action::ReleaseServiceVip` will fire because the
+                // rejected spec never gets a persisted WorkloadIntent.
+                if service_vip.is_some() {
+                    let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+                    let mut guard = state.allocator.lock().await;
+                    guard
+                        .release(&digest_bytes)
+                        .await
+                        .map_err(|e| ControlPlaneError::internal("release VIP on conflict", e))?;
+                    drop(guard);
+                }
                 return Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 });

@@ -48,7 +48,7 @@ use super::vip_range::VipRange;
 /// redb-key prefix for [`PersistentServiceVipAllocator`] entries.
 ///
 /// Persisted keys take the form `ALLOCATOR_ENTRIES_PREFIX || digest`
-/// (39 bytes total: 7-byte prefix `+` 32-byte SHA-256 digest). The
+/// (40 bytes total: 8-byte prefix `+` 32-byte SHA-256 digest). The
 /// prefix scopes the namespace so concurrent intent payloads (jobs,
 /// stop sentinels, snapshots) cannot collide with allocator rows in
 /// the byte-level `entries` table.
