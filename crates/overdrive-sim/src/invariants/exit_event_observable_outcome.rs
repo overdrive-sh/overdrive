@@ -467,6 +467,9 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         tmp.path().join("intent.redb"),
@@ -476,6 +479,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         sim_clock.clone(),
         Arc::new(SimDataplane::new()),
         NodeId::new("writer-1").map_err(|e| format!("writer node id: {e:?}"))?,
+        allocator,
     );
 
     exit_observer::spawn(

@@ -88,6 +88,9 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -97,6 +100,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     exit_observer::spawn(

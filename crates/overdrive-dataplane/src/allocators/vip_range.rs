@@ -156,3 +156,94 @@ impl VipRange {
         self.ranges.iter().any(|net| net.contains(&addr))
     }
 }
+
+impl Default for VipRange {
+    /// Phase 1 single-node default per ADR-0049 § Amendments → 2026-05-15
+    /// (Alt-E accepted).
+    ///
+    /// Returns a `VipRange` covering `10.96.0.0/16` with reserved set
+    /// `[10.96.0.0, 10.96.0.1, 10.96.255.255]` — matching the pinned
+    /// defaults Kubernetes (`--service-cluster-ip-range`), MetalLB
+    /// (`addresses`), and kube-vip / Calico-CNI ship. Operators may
+    /// override via the `[dataplane.vip_allocator]` TOML section.
+    ///
+    /// # Panics
+    ///
+    /// Never. The default inputs are statically known to satisfy every
+    /// invariant `VipRange::new` enforces (single non-overlapping CIDR,
+    /// reserved addresses all inside the CIDR, capacity = 65536 - 3 > 0).
+    /// The `expect` is therefore a static-guarantee assertion, not a
+    /// runtime failure path. If you change the constants below, re-prove
+    /// the invariants hold. The `expect` lint is scoped here because the
+    /// inputs are infallible by construction; the surrounding lib does
+    /// not relax this lint generally.
+    #[allow(
+        clippy::expect_used,
+        reason = "static-guarantee assertion on hard-coded ADR-0049 default inputs; \
+                  the prefix is constant (/16 ≤ /32) and the reserved addresses are \
+                  inside the network, so the constructor cannot return Err. See the \
+                  `vip_range_default_value` unit test for the invariant pin."
+    )]
+    fn default() -> Self {
+        let network = Ipv4Addr::new(10, 96, 0, 0);
+        let range = Ipv4Net::new(network, 16)
+            .expect("/16 prefix is a valid prefix length (≤32) per Ipv4Net::new contract");
+        let reserved: BTreeSet<Ipv4Addr> = [
+            Ipv4Addr::new(10, 96, 0, 0),
+            Ipv4Addr::new(10, 96, 0, 1),
+            Ipv4Addr::new(10, 96, 255, 255),
+        ]
+        .into_iter()
+        .collect();
+        Self::new(vec![range], reserved).expect(
+            "ADR-0049 default VipRange inputs statically satisfy every VipRange::new invariant",
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ADR-0049 amendment 2026-05-15 (Alt-E): the Phase 1 default
+    /// `VipRange` covers `10.96.0.0/16` with reserved set
+    /// `[10.96.0.0, 10.96.0.1, 10.96.255.255]`. The boot-time refusal
+    /// for "missing `[dataplane.vip_allocator]` section" is walked back
+    /// to "default and emit `health.startup.warn` under HA". This unit
+    /// test pins the default's effective shape so a future
+    /// behaviour-changing edit to `Default::default()` fails loud at
+    /// PR time rather than silently shipping a different default to
+    /// every single-node operator.
+    #[test]
+    fn vip_range_default_value() {
+        let range = VipRange::default();
+
+        // /16 has 65_536 addresses; 3 reserved → 65_533 allocatable.
+        assert_eq!(
+            range.capacity(),
+            65_536 - 3,
+            "default /16 minus 3 reserved should be 65533 allocatable",
+        );
+
+        // Reserved addresses are NOT contained.
+        assert!(!range.contains(Ipv4Addr::new(10, 96, 0, 0)));
+        assert!(!range.contains(Ipv4Addr::new(10, 96, 0, 1)));
+        assert!(!range.contains(Ipv4Addr::new(10, 96, 255, 255)));
+
+        // First allocatable address is 10.96.0.2 (after skipping
+        // .0 and .1).
+        assert_eq!(
+            range.nth_allocatable(0),
+            Some(Ipv4Addr::new(10, 96, 0, 2)),
+            "first allocatable after reserved skip is 10.96.0.2",
+        );
+
+        // Addresses inside the /16 but outside the reserved set ARE
+        // contained.
+        assert!(range.contains(Ipv4Addr::new(10, 96, 0, 2)));
+        assert!(range.contains(Ipv4Addr::new(10, 96, 128, 0)));
+
+        // Addresses outside the /16 are NOT contained.
+        assert!(!range.contains(Ipv4Addr::new(10, 97, 0, 0)));
+    }
+}

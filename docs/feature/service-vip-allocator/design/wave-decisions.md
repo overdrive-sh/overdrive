@@ -83,7 +83,7 @@ mediated by a `Token` trait.
 | K3 | Persistence in IntentStore (not ViewStore) | The allocator is not a reconciler; allocation IS intent; whitepaper § 4 state-layer discipline | Q4 |
 | K4 | rkyv versioned envelope per ADR-0048 for persisted state — concrete `ServiceVipAllocatorEntry` envelope wrapped by `PersistentServiceVipAllocator` (NOT a generic `IntentBackedAllocator<T>`'s `AllocatorEntry`). *(amended 2026-05-14)* | Crosses redb persistence boundary; project rule; envelope scope narrowed to ServiceVip since BackendId never persists | Q4 |
 | K5 | Submit-time admission (before IntentStore admission) | AC-01 echo, AC-02 idempotency, AC-04 synchronous rejection | Q2 |
-| K6 | Pool config in `[dataplane.vip_allocator]` subsection; required `ranges` list; optional `reserved` list | ADR-0019 TOML precedent; #175 `[dataplane]` nesting precedent | Q3 |
+| K6 | Pool config in `[dataplane.vip_allocator]` subsection; required `ranges` list; optional `reserved` list. *(Amended 2026-05-15: `ranges` is no longer hard-required at the missing-section level — when `[dataplane.vip_allocator]` is absent, the allocator boots with `ranges = ["10.96.0.0/16"]` + reserved `["10.96.0.0", "10.96.0.1", "10.96.255.255"]` and emits `health.startup.warn` every startup under HA mode; CLI renders the effective default. Malformed / out-of-range operator-supplied config still refuses to start with a typed `VipAllocatorConfigError`. See ADR-0049 § Amendments → 2026-05-15 and § Considered alternatives → Alt-E; research evidence in `docs/research/orchestration/service-vip-range-config-patterns.md`.)* | ADR-0019 TOML precedent; #175 `[dataplane]` nesting precedent; 2026-05-15 amendment matches ecosystem operator expectation (Kubernetes / Cilium / MetalLB / KubeVirt / kube-vip / Calico-CNI) | Q3 |
 | K7 | Reclamation via `WorkloadLifecycle` reconciler + `Action::ReleaseServiceVip` | Reconcilers converge; idempotent on retry; matches ADR-0013 primitive | Q1 |
 | K8 | **Parser-level removal of the `vip` field from `Listener`** (amended 2026-05-14) | `.claude/rules/development.md` § "Type-driven design" → "make invalid states unrepresentable"; the prior admission-level rejection defended a state the type system can exclude structurally. Operator-pinned VIPs are a feature explicitly decided against, so the "Option-shaped field is forward-compatible" framing is preserving a defense for a non-feature (the deferral-without-issue shape CLAUDE.md forbids). Greenfield single-cut: field, validator, error variant, and slice-06's defending tests delete in one commit. | Q5 |
 | K8a | **Assigned VIP lives in the allocator's own persisted memo, not on the spec aggregate** (amended 2026-05-14 — placement decision for the assigned VIP after removing it from `Listener`) | Option C of three considered (A: aggregate field — rejected because it puts an operator-shape field that's not operator-set on the aggregate; B: observation-only — rejected because it creates a second source of truth and requires synchronous observation-write at admission). The `IntentBackedAllocator<ServiceVip>` already persists `(spec_digest → ServiceVip)` via `allocator_entries`; submit-echo and `alloc status` consult `ServiceVipAllocator::get(&spec_digest)` at render time. The `Job`/`ServiceSpec` aggregate stays operator-spec-only — operator-spec data structurally cannot represent the assigned VIP. | Q5 cascade |
@@ -104,7 +104,7 @@ overlap. Zero unjustified CREATE NEW decisions.
 | `IntentStore` trait (whitepaper § 4; ADR-0011 / ADR-0035) | `crates/overdrive-core/src/traits/intent_store.rs` + `crates/overdrive-store-local` | Persistence boundary for allocator state | **REUSE AS-IS** | The persistence shim layers atop the existing IntentStore trait without modifying it. New table `allocator_entries` is added under the existing `LocalStore` impl per the project's standard table-per-namespace pattern. |
 | `Action` enum (`overdrive-core::reconciler`) | `crates/overdrive-core/src/reconciler.rs` (ADR-0023, ADR-0042) | Action dispatch surface | **EXTEND** (new variant) | Adding `Action::ReleaseServiceVip { spec_digest, correlation }` — the same pattern ADR-0042 used for `Action::DataplaneUpdateService`. Action-shim arm added; no shape change. |
 | Action-shim dispatcher | `crates/overdrive-control-plane/src/reconciler_runtime/action_shim/` (ADR-0023) | Dispatches Actions to side-effecting components | **EXTEND** (new arm) | One additional match arm for `Action::ReleaseServiceVip` calling `ServiceVipAllocator::release`. Existing exhaustive-match shape preserved. |
-| `[dataplane]` config block (forthcoming, GH #175) | `crates/overdrive-control-plane/src/config.rs` (or equivalent) | TOML config surface | **EXTEND** (new subsection) | Adding `[dataplane.vip_allocator]` under the existing `[dataplane]` block — preserves the "dataplane sub-component" mental model. |
+| `[dataplane]` config block (forthcoming, GH #175) | `crates/overdrive-control-plane/src/config.rs` (or equivalent) | TOML config surface | **EXTEND** (new subsection; *2026-05-15 amendment*: subsection is no longer mandatory at the missing-section level — see K6 above and ADR-0049 § Amendments → 2026-05-15) | Adding `[dataplane.vip_allocator]` under the existing `[dataplane]` block — preserves the "dataplane sub-component" mental model. *(Amended 2026-05-15.)* When the subsection is absent, the allocator boots with `ranges = ["10.96.0.0/16"]` + reserved `["10.96.0.0", "10.96.0.1", "10.96.255.255"]` and emits `health.startup.warn` (every startup under HA mode); CLI renders the effective default. Malformed or out-of-range operator-supplied config still refuses to start with a typed error. Ecosystem precedent: Kubernetes / Cilium / MetalLB / KubeVirt / kube-vip / Calico-CNI all ship pinned defaults — see `docs/research/orchestration/service-vip-range-config-patterns.md`. |
 | `Listener.vip: Option<ServiceVip>` (ADR-0047 § 4a / slice-06 brief) | `crates/overdrive-core/src/aggregate/workload_spec.rs` (Slice 06 of `workload-kind-discriminator`) | Field shape on the operator-input spec | **DELETE (amended 2026-05-14)** | Per ADR-0049 § 5 amendment: the field is removed at the parser/spec layer to make invalid states unrepresentable. The `Listener` struct becomes `(port, protocol)`-only. The "Option-shaped field is forward-compatible" framing from slice-06 R6.1 is moot — its mitigation no longer applies because the field is gone. Cascade: uniqueness rule simplifies to `(port, protocol)`; render shape drops the per-listener VIP slot; slice-06's mixed-pinned-and-pending parser test + integration test delete; property test re-targets `(port, protocol)` pairs. |
 | `AdmissionError::VipNotOperatorAssignable` | (was new in prior resolution; never landed) | Admission-level rejection of operator-supplied `vip = Some(...)` | **DELETED (amended 2026-05-14)** | No longer needed. With the `vip` field removed, operator-supplied `vip = "..."` fails at TOML deserialise with `unknown field` + named guidance; no runtime check at admission time, no `AdmissionError` variant, no admission-walk loop. Per `.claude/rules/development.md` § "Deletion discipline" the variant and any test that would have defended it are absent from the landing commit. |
 | `CorrelationKey::derive` (`overdrive-core::id`) | `crates/overdrive-core/src/id.rs` (ADR-0042 § 1) | Correlation between Action emission and observation | **REUSE AS-IS** | New `Action::ReleaseServiceVip` carries a `CorrelationKey` per ADR-0042's precedent — same constructor surface. |
@@ -330,3 +330,32 @@ follow-up.
   slice-06's already-shipped tests delete in the same commit as the
   field removal per single-cut migration. ADR-0049 § 5 rewritten;
   § 5a added for the placement decision.
+- 2026-05-15 (amendment — K6 default-range walk-back) — DESIGN's
+  original § 3 "no defaults" stance investigated during DELIVER
+  step 02-03c and found out of step with the surrounding orchestrator
+  ecosystem's operator expectation (Kubernetes
+  `--service-cluster-ip-range` default `10.96.0.0/12`; Cilium
+  `clusterPoolIPv4PodCIDRList` default `10.0.0.0/8`; MetalLB,
+  KubeVirt, kube-vip, Calico-CNI all ship pinned defaults — see
+  `docs/research/orchestration/service-vip-range-config-patterns.md`).
+  Resolution: missing `[dataplane.vip_allocator]` section now boots
+  with `ranges = ["10.96.0.0/16"]` + reserved
+  `["10.96.0.0", "10.96.0.1", "10.96.255.255"]` and emits
+  `health.startup.warn` every startup under HA mode; CLI renders
+  the effective default ahead of first admission. Malformed /
+  out-of-range operator-supplied config still refuses to start
+  with a typed `VipAllocatorConfigError`.
+  `VipAllocatorConfigError::Missing` is removed from the typed
+  error surface; `AllocatorError::Exhausted` is unchanged (synchronous
+  503 + `ProblemDetails` per § 4). K6 row annotated; Reuse Analysis
+  `[dataplane]` config row annotated. ADR-0049: § 3 walked back
+  in place; § Consequences → Negative #5 superseded inline; new
+  Alt-E entry under § Considered alternatives; new
+  `### 2026-05-15` section under § Amendments documents the three
+  acknowledgments (§ 3 walk-back / Negative #5 supersession /
+  AllocatorError::Exhausted unchanged) and the visibility rebuttal
+  (`health.startup.warn` + CLI rendering preserves Earned Trust
+  visibility without boot refusal). No new ADR; in-place amendment
+  per user-confirmed Q3 resolution. No production code touched
+  under this DESIGN-wave amendment; landing belongs to DELIVER
+  step 02-03c.

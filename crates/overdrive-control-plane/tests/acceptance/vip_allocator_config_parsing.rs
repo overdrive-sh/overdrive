@@ -1,14 +1,26 @@
 //! Step 02-02 — VIP allocator config parsing acceptance scenarios.
 //!
-//! Five scenarios exercise the boot-time TOML parser surface for
-//! `[dataplane.vip_allocator]` (`S-VIP-15` through `S-VIP-18`). The
-//! parser surface owns: (a) section presence (`Missing` → boot
-//! refusal), (b) delegation to `VipRange::new` for the three
-//! type-level invariants (`Overlapping` / `ReservedOutsideRange` /
-//! `ZeroCapacity`), and (c) the structured `health.startup.refused`
-//! event emitted on every refusal.
+//! Amended by step 02-03c (ADR-0049 amendment 2026-05-15, Alt-E
+//! accepted): the parser now treats a missing
+//! `[dataplane.vip_allocator]` section as `Ok(None)` rather than a
+//! boot-refusing `Missing` variant. The scenario previously named
+//! "missing section refuses boot" is replaced by
+//! `missing_vip_allocator_config_returns_none_for_default_substitution`
+//! below — verifying the surface contract that lets the caller
+//! substitute `VipRange::default()` instead.
 //!
-//! Per ADR-0049 § 5b. Type-level invariant coverage lives at
+//! The remaining scenarios exercise the boot-time TOML parser surface
+//! for `[dataplane.vip_allocator]` (`S-VIP-15` happy + `S-VIP-16` /
+//! `S-VIP-17` / `S-VIP-18` malformed-present). The parser surface owns:
+//! (a) section presence detection (`Ok(None)` on absent), (b)
+//! delegation to `VipRange::new` for the three type-level invariants
+//! (`Overlapping` / `ReservedOutsideRange` / `ZeroCapacity`), and (c)
+//! the structured `health.startup.refused` event emitted on every
+//! refusal — only the malformed-present paths emit, the absent path
+//! does not.
+//!
+//! Per ADR-0049 § 5b as amended 2026-05-15. Type-level invariant
+//! coverage lives at
 //! `crates/overdrive-dataplane/tests/allocator_properties.rs`
 //! (step 01-01); this file is the parser-surface counterpart.
 
@@ -102,11 +114,13 @@ fn assert_startup_refused(events: &[CapturedEvent], cause_substring: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// S-VIP-15 — missing [dataplane.vip_allocator] subsection refuses boot.
+// S-VIP-15 — missing [dataplane.vip_allocator] returns Ok(None) so the
+// caller can substitute VipRange::default(). Replaces the pre-amendment
+// "missing refuses boot" scenario per ADR-0049 amendment 2026-05-15.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn missing_vip_allocator_config_boot_refuses() {
+fn missing_vip_allocator_config_returns_none_for_default_substitution() {
     // [dataplane] present but [dataplane.vip_allocator] absent.
     let toml_str = r"
 [dataplane]
@@ -114,19 +128,22 @@ fn missing_vip_allocator_config_boot_refuses() {
     let (events, _guard) = install_capture();
     let result = parse_vip_allocator_section(toml_str);
 
-    let err = result.expect_err("expected refusal when [dataplane.vip_allocator] is absent");
-    match &err {
-        VipAllocatorBootError::Config(VipAllocatorConfigError::Missing { section }) => {
-            assert_eq!(
-                *section, "dataplane.vip_allocator",
-                "Missing variant should name the missing section verbatim",
-            );
-        }
-        other => panic!("expected Config(Missing), got {other:?}"),
+    match result {
+        Ok(None) => {}
+        other => panic!("expected Ok(None) on missing section, got {other:?}"),
     }
 
+    // Absent section does NOT emit health.startup.refused — that
+    // event is reserved for malformed-present configs.
     let events_snapshot = events.lock().expect("events mutex").clone();
-    assert_startup_refused(&events_snapshot, "dataplane.vip_allocator");
+    let refused = events_snapshot.iter().any(|e| {
+        e.target == "overdrive::health"
+            && e.event_field.as_deref() == Some("health.startup.refused")
+    });
+    assert!(
+        !refused,
+        "absent [dataplane.vip_allocator] section must NOT emit health.startup.refused; got events: {events_snapshot:#?}",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +157,9 @@ fn valid_vip_allocator_config_parses() {
 [dataplane.vip_allocator]
 ranges = ["10.96.0.0/24"]
 "#;
-    let range = parse_vip_allocator_section(toml_str).expect("valid config should parse");
+    let range = parse_vip_allocator_section(toml_str)
+        .expect("valid config should parse")
+        .expect("present section should yield Some(range)");
     assert_eq!(
         range.capacity(),
         256,

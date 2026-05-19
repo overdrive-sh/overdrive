@@ -71,6 +71,9 @@ async fn bootstrap_async(
     // never reaches CEILING. SimClock advances when the background
     // ticker calls `clock.tick(...)` so the backoff window crosses
     // and the reconciler emits FinalizeFailed within the test budget.
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -80,6 +83,7 @@ async fn bootstrap_async(
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
     let receiver = state.lifecycle_events.subscribe();
     (state, receiver, sim_clock)

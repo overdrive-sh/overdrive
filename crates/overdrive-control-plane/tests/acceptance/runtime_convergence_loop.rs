@@ -58,6 +58,9 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -67,6 +70,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     )
 }
 
@@ -238,6 +242,9 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -247,6 +254,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // --- Preload IntentStore with one converged Job (replicas=1).
@@ -432,6 +440,9 @@ async fn stop_after_failed_alloc_drains_broker() {
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -441,6 +452,7 @@ async fn stop_after_failed_alloc_drains_broker() {
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // --- Preload IntentStore: one Job. The driver will reject its
@@ -681,6 +693,9 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -690,6 +705,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // --- Preload a Job that the SimDriver will reject — this drives
@@ -953,6 +969,9 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // dispatched in this test (we seed Failed directly + restart_counts
     // via the cached view to keep the reconcile output empty).
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -962,6 +981,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Seed Job (intent) so hydrate_desired returns Some(job).

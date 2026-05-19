@@ -360,12 +360,36 @@ CIDRs. The list shape is forward-compatible with no schema change.
 Validation: ranges must be non-overlapping; total capacity =
 sum(CIDR sizes) - `len(reserved)`.
 
-**No defaults**: operators MUST supply `ranges`. Per #167 § "Out of
-scope": "Opinionated default VIP ranges. The allocator is
-pool-agnostic." A missing `[dataplane.vip_allocator]` section
-surfaces as `VipAllocatorConfigError::Missing` at boot — refuse to
-start, structured `health.startup.refused` event per ADR-0048
-intent-layer discipline.
+**Defaults (amended 2026-05-15 — supersedes the prior "no defaults"
+stance below).** When `[dataplane.vip_allocator]` is absent the
+allocator now boots with `ranges = ["10.96.0.0/16"]` and
+`reserved = ["10.96.0.0", "10.96.0.1", "10.96.255.255"]`. Boot
+emits a single structured `health.startup.warn` event recording
+that the default is in use; when the node is configured for HA
+mode (Phase 2+) the warn is emitted on every startup. The CLI
+renders the default's effective shape ahead of admission so the
+operator is not surprised by the first allocation. See
+`docs/research/orchestration/service-vip-range-config-patterns.md`
+for the comparative analysis (Kubernetes / Cilium / MetalLB / KubeVirt
+/ kube-vip / Calico-CNI all ship pinned defaults; Phase 1 single-node
+Overdrive matches the same operator expectation, with the HA-mode
+warn-every-startup discipline preserving Earned Trust visibility once
+multi-node arrives). The supersession trades one bit of strict
+"refuse-to-start honesty" for parity with the operator's baseline
+expectation across the ecosystem; the warn event + CLI rendering
+keep the choice observable.
+
+*(Walked back 2026-05-15.)* The original "no defaults" framing
+read: "operators MUST supply `ranges`. Per #167 § 'Out of scope':
+'Opinionated default VIP ranges. The allocator is pool-agnostic.'
+A missing `[dataplane.vip_allocator]` section surfaces as
+`VipAllocatorConfigError::Missing` at boot — refuse to start,
+structured `health.startup.refused` event per ADR-0048 intent-layer
+discipline." That framing is superseded: the missing-section path
+now yields the warn + default-shape boot above, not refuse-to-start.
+`VipAllocatorConfigError::Missing` is removed from the typed error
+surface; malformed or out-of-range config still produces typed
+errors and refuses to start. See § Amendments → 2026-05-15.
 
 ### 4. When admission allocates — submit-time, before IntentStore admission
 
@@ -692,6 +716,45 @@ memo + monotonic-counter shape but share no trait or type. AC-05's
 shape-similarity**, not as literal code reuse. See § 1 and the
 Consequences amendment.
 
+### Alt-E — Ship a pinned default `ranges` instead of refusing to boot (accepted 2026-05-15)
+
+The original § 3 stance treated a missing `[dataplane.vip_allocator]`
+section as `VipAllocatorConfigError::Missing` and refused to boot.
+The ecosystem precedent points the other way: Kubernetes
+(`--service-cluster-ip-range` defaults to `10.96.0.0/12`), Cilium
+(`clusterPoolIPv4PodCIDRList` defaults to `10.0.0.0/8`), MetalLB
+(documentation-pinned reserved-block guidance), KubeVirt / kube-vip
+/ Calico-CNI all ship a pinned default and emit operator-visible
+guidance when it is in use. See
+`docs/research/orchestration/service-vip-range-config-patterns.md`
+for the full comparative.
+
+**Accepted 2026-05-15.** A Phase 1 single-node Overdrive boot with
+no operator-supplied VIP config now defaults to
+`ranges = ["10.96.0.0/16"]` and
+`reserved = ["10.96.0.0", "10.96.0.1", "10.96.255.255"]`. The boot
+path emits a structured `health.startup.warn` event recording that
+the default is in use; under HA mode (Phase 2+) the warn is emitted
+on every startup so the operator never "loses sight" of the implicit
+choice. The CLI renders the default's effective shape ahead of the
+first admission so the first VIP allocation is not a surprise.
+
+The trade-off is explicit: the strict "refuse-to-start until
+operator commits" stance maximises one bit of Earned Trust
+honesty — the operator must consciously enumerate the pool — at
+the cost of every single-node bring-up failing the first boot with
+no allocator config. The accepted shape preserves the visibility
+property through `health.startup.warn` + CLI rendering rather than
+through boot refusal; the operator who wants the strict stance can
+still pin `ranges` explicitly, which suppresses the warn. Malformed
+or out-of-range config still refuses to start with a typed error;
+only the missing-section path softens.
+
+`VipAllocatorConfigError::Missing` is removed from the typed error
+surface (was never a returnable variant under the new shape).
+`AllocatorError::Exhausted` is unchanged — pool exhaustion still
+surfaces as a synchronous typed admission rejection per § 4.
+
 ### Alt-A — Allocator in `overdrive-control-plane` instead of `overdrive-dataplane`
 
 The allocator is consumed by the admission handler (control-plane)
@@ -807,6 +870,12 @@ rather than a counter; same return shape).
    typed error if `[dataplane.vip_allocator]` is missing — there
    is no default. Boot-time signal is honest; no silent
    "allocator works without config" failure mode.
+   *(Superseded 2026-05-15 — see § Amendments → 2026-05-15. The
+   missing-section path now defaults to `10.96.0.0/16` with the
+   `[10.96.0.0, 10.96.0.1, 10.96.255.255]` reserved set and emits
+   `health.startup.warn` (every startup under HA mode). Malformed
+   or out-of-range config still refuses to start with a typed
+   error; only the missing-section path softens.)*
 
 ### Quality attribute trade-offs (ISO 25010)
 
@@ -908,3 +977,74 @@ references), § Considered alternatives (new Alt-0), § Consequences
 migration") was absorbed into step 01-01 (the relocation is forced
 by the deletion of `PoolAllocator`); roadmap `total_steps` updated
 from 11 → 10.
+
+### 2026-05-15 — `[dataplane.vip_allocator]` defaults walked back
+
+The DESIGN-wave § 3 "no defaults" stance was investigated during
+DELIVER step 02-03c and found to be out of step with the operator
+expectation set by the surrounding orchestrator ecosystem. Comparative
+analysis in `docs/research/orchestration/service-vip-range-config-patterns.md`
+(Kubernetes, Cilium, MetalLB, KubeVirt, kube-vip, Calico-CNI) shows
+every neighbour ships a pinned default VIP range and surfaces
+operator-visible guidance when it is in use; Phase 1 single-node
+Overdrive declining to boot at all is the outlier. The "refuse-to-start
+until operator commits" framing preserved one bit of Earned Trust
+honesty (the operator must consciously enumerate the pool) at the
+cost of every single-node bring-up failing the first boot with no
+allocator config.
+
+**Resolution (DESIGN-wave amendment, no production code touched
+under this amendment — landing belongs to DELIVER step 02-03c):**
+
+- Default `ranges = ["10.96.0.0/16"]` with reserved set
+  `["10.96.0.0", "10.96.0.1", "10.96.255.255"]` activates when
+  `[dataplane.vip_allocator]` is absent.
+- Boot emits a single structured `health.startup.warn` event
+  recording that the default is in use. Under HA mode (Phase 2+)
+  the warn is emitted on every startup so the operator never loses
+  sight of the implicit choice.
+- CLI renders the default's effective shape ahead of the first
+  admission so the first VIP allocation is not a surprise.
+- Malformed or out-of-range operator-supplied config still refuses
+  to start with a typed `VipAllocatorConfigError` variant. Only the
+  missing-section path softens.
+
+Three explicit acknowledgments:
+
+1. **§ 3 walk-back.** The "No defaults: operators MUST supply
+   `ranges`" stance is superseded. The missing-section path no
+   longer maps to `VipAllocatorConfigError::Missing` /
+   `health.startup.refused`; it maps to the warn-plus-default boot
+   shape above.
+2. **§ Consequences → Negative #5 supersession.** The negative
+   consequence "Operator config gains a required section. Boot
+   fails with a typed error if `[dataplane.vip_allocator]` is
+   missing — there is no default." is superseded by the
+   warn-plus-default path. The supersession is marked inline under
+   § Consequences → Negative; the original line stays as historical
+   context.
+3. **`AllocatorError::Exhausted` unchanged.** Pool exhaustion
+   continues to surface as a synchronous typed admission rejection
+   (HTTP 503 + `ProblemDetails`) per § 4. The default-range
+   softening does not change the exhaustion contract: a /16 with
+   three reserved addresses yields 65 533 allocatable VIPs, well
+   above any plausible Phase 1 single-node service count, but the
+   typed rejection still fires on overflow.
+
+Sections rewritten: § 3 (inline annotation + walk-back paragraph),
+§ Consequences → Negative #5 (supersession marker),
+§ Considered alternatives (new Alt-E entry documenting the
+ecosystem precedent and the accepted shape). § 4 admission
+failure-mode table unchanged (`AllocatorError::Exhausted` stays as
+documented).
+
+Rebuttal to the "operator must consciously choose to avoid
+surprises" framing: the visibility property is preserved through
+`health.startup.warn` (every startup under HA) plus CLI rendering of
+the effective default range ahead of first admission, not through
+boot refusal. The operator who wants the strict stance pins
+`ranges` explicitly, which suppresses the warn — the strict path
+is one TOML line away, not deleted.
+
+Cross-reference:
+`docs/research/orchestration/service-vip-range-config-patterns.md`.

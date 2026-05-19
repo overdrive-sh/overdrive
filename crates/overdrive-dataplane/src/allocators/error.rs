@@ -50,22 +50,6 @@ pub enum VipAllocatorConfigError {
     /// address in the union is reserved.
     #[error("VIP range has zero effective capacity after exclusions")]
     ZeroCapacity,
-
-    /// The TOML config does not declare the named `[dataplane.vip_allocator]`
-    /// subsection. Surfaces from the boot-time parser (step 02-02)
-    /// when the operator-supplied config is missing the required
-    /// section entirely. The `section` field names the missing path
-    /// verbatim so the operator-facing message is unambiguous.
-    ///
-    /// Type-level callers (`VipRange::new` direct invocations) never
-    /// construct this variant — it is reserved for the config-parser
-    /// surface in `overdrive-control-plane::vip_allocator_config`.
-    #[error("required config section [{section}] is missing")]
-    Missing {
-        /// Dotted path of the missing TOML section
-        /// (e.g. `"dataplane.vip_allocator"`).
-        section: &'static str,
-    },
 }
 
 /// Result alias for [`VipAllocatorConfigError`]-returning constructors.

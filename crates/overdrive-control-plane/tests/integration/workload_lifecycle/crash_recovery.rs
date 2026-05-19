@@ -61,6 +61,9 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
     ));
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -70,6 +73,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(overdrive_host::SystemClock),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Spawn the exit-observer subsystem. In production this is wired

@@ -46,6 +46,9 @@ async fn job_stop_drives_running_to_terminated() {
     let driver: Arc<dyn Driver> =
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -55,6 +58,7 @@ async fn job_stop_drives_running_to_terminated() {
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Background ticker: advances logical time continuously so any
