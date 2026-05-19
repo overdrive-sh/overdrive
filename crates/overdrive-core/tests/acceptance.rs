@@ -145,4 +145,13 @@ mod acceptance {
     // restart-budget semantics. Per ADR-0037 Amendment 2026-05-10 +
     // ADR-0047 §1.
     mod workload_lifecycle_natural_exit;
+
+    // service-vip-allocator step 03-01 — `WorkloadLifecycle::reconcile`
+    // emits `Action::ReleaseServiceVip` exactly once when a Service-kind
+    // workload's allocation reaches a terminal-state observation row.
+    // Per-layer scope: reconciler emission only (action-shim dispatch is
+    // step 03-02; end-to-end lifecycle is step 03-03). Per ADR-0049
+    // (amended 2026-05-15) + persist-inputs discipline on
+    // `released_for_terminal: BTreeSet<ContentHash>`.
+    mod workload_lifecycle_release_service_vip;
 }

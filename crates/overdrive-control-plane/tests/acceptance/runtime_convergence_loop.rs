@@ -837,6 +837,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         job: None,
@@ -844,6 +845,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     });
 
     // Single TickContext shared across both reconcile calls — same
@@ -868,6 +870,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let view_post = WorkloadLifecycleView {
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view_post.clone());
 
@@ -1043,7 +1046,11 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     restart_counts.insert(alloc_id.clone(), restart_counts_value);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
-    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at,
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view);
 
     // Submit and drain the seed eval — without re-submitting, the
@@ -1148,8 +1155,11 @@ async fn drop_job_lifecycle_view_removes_seeded_view() {
     // Seed a non-default view (restart_counts non-empty).
     let mut counts = BTreeMap::new();
     counts.insert(alloc_id.clone(), 2u32);
-    let seeded =
-        WorkloadLifecycleView { restart_counts: counts, last_failure_seen_at: BTreeMap::new() };
+    let seeded = WorkloadLifecycleView {
+        restart_counts: counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, seeded);
 
     // Verify the seed is visible before drop.

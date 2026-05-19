@@ -156,6 +156,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
         job: Some(job),
@@ -163,6 +164,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -220,6 +222,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
         job: Some(job),
@@ -227,6 +230,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     // attempts=0, no deadline → restart fires immediately.
     let view = WorkloadLifecycleView::default();
@@ -284,6 +288,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
         job: Some(job),
@@ -291,6 +296,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
 

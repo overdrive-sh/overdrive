@@ -66,11 +66,16 @@ fn happy_path_state() -> WorkloadLifecycleState {
         nodes,
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     }
 }
 
 const fn empty_view() -> WorkloadLifecycleView {
-    WorkloadLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at: BTreeMap::new() }
+    WorkloadLifecycleView {
+        restart_counts: BTreeMap::new(),
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    }
 }
 
 #[test]
@@ -85,6 +90,7 @@ fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let desired = AnyState::WorkloadLifecycle(desired_inner);
     let actual = AnyState::WorkloadLifecycle(actual_inner);
@@ -124,6 +130,7 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let desired = AnyState::WorkloadLifecycle(desired_inner);
     let actual = AnyState::WorkloadLifecycle(actual_inner);

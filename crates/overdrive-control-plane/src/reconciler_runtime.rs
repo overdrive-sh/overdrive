@@ -949,12 +949,22 @@ async fn hydrate_desired(
             // the kind-agnostic Service shape for legacy submits that
             // predate the discriminator persistence.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
+            // service-vip-allocator step 03-01 — the
+            // `WorkloadLifecycle::reconcile` release-emission branch
+            // gates on `desired.service_spec_digest`. The reconciler-
+            // emission layer ships with `None` here as a safe default
+            // (release branch is short-circuited); end-to-end
+            // population from the persisted `WorkloadIntent` for
+            // Service kinds lands with the end-to-end S-VIP-06 flow
+            // in step 03-03 / future Service-arm runtime wiring.
+            let service_spec_digest = None;
             let s = WorkloadLifecycleState {
                 job,
                 desired_to_stop,
                 nodes,
                 allocations: BTreeMap::new(),
                 workload_kind,
+                service_spec_digest,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }
@@ -1111,12 +1121,18 @@ async fn hydrate_actual(
             // `actual`-side branching has a non-default value to work
             // with.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
+            // service-vip-allocator step 03-01 — actual-side mirrors
+            // the desired-side default of `None`; see hydrate_desired
+            // for the rationale. End-to-end Service-arm population
+            // lands with step 03-03.
+            let service_spec_digest = None;
             let s = WorkloadLifecycleState {
                 job: None,
                 desired_to_stop: false,
                 nodes,
                 allocations,
                 workload_kind,
+                service_spec_digest,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }

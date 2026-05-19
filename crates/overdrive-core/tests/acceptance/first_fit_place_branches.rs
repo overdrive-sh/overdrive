@@ -122,6 +122,7 @@ fn placement_actions(
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
         job: Some(job),
@@ -129,6 +130,7 @@ fn placement_actions(
         nodes,
         allocations: current_allocs,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

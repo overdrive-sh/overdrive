@@ -717,6 +717,25 @@ async fn dispatch_single(
                 })?;
             Ok(())
         }
+        // service-vip-allocator step 03-01 — the reconciler emits this
+        // variant when a Service-kind workload reaches a terminal-state
+        // observation row. Real dispatch (calling
+        // `ServiceVipAllocator::release`) lands in step 03-02; here we
+        // log the intent and ack so the shim remains exhaustive and the
+        // reconciler can land its emission gate ahead of the dispatch
+        // arm. The structured event lets operators trace pre-dispatch
+        // ReleaseServiceVip activity in step 03-01 land-before-dispatch
+        // builds.
+        Action::ReleaseServiceVip { spec_digest, correlation } => {
+            tracing::info!(
+                target: "overdrive_control_plane::action_shim",
+                event = "release_service_vip.pending_dispatch",
+                spec_digest = %spec_digest,
+                correlation = %correlation,
+                "ReleaseServiceVip received; dispatch lands in step 03-02"
+            );
+            Ok(())
+        }
     }
 }
 

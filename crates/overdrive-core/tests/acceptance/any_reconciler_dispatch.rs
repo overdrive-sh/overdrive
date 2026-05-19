@@ -109,6 +109,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
         job: None,
@@ -116,6 +117,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         nodes,
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = AnyReconcilerView::WorkloadLifecycle(
         overdrive_core::reconciler::WorkloadLifecycleView::default(),
