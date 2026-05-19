@@ -2176,6 +2176,287 @@ To DEVOPS — required CI checks gain:
 External integrations in this feature: **none**. No contract tests
 recommended. The kind discriminator is purely internal type-shape
 work.
+## Phase 2.2 backend-discovery-bridge-service-reachability extension
+
+**Source:** `docs/feature/backend-discovery-bridge-service-reachability/design/`
+**ADR:** ADR-0052 (backend discovery bridge reconciler + `EbpfDataplane`
+production single-mode boot). _Renumbered 2026-05-20 from ADR-0049 after
+ADR-0049 was reassigned to the platform-issued Service VIP allocator
+(delivered 2026-05-19; see `docs/evolution/2026-05-19-service-vip-allocator.md`)._
+**Tracks:** GH #174 (backend discovery bridge) + GH #175 (wire
+`EbpfDataplane` into production single-mode boot).
+**Date:** 2026-05-13 (revised 2026-05-20 for ADR-0049 / 0050 / 0051 landing).
+
+This section extends §§ 1–62 with the application-architecture
+decisions landed by feature `backend-discovery-bridge-service-reachability`. Nothing in
+§§ 1–62 is rewritten. The feature closes the *no production code
+path writes `ServiceBackendRow`* gap surfaced as a Phase 2 XDP
+blocker (and wires the production single-mode boot for the kernel-side
+`EbpfDataplane` for the first time), jointly closing J-PLAT-004
+end-to-end.
+
+The bridge consumes three companion ADRs landed in PR #184 (Phase 1
+service-vip-allocator feature):
+
+- **ADR-0049** — platform-issued `ServiceVipAllocator`; bridge reads
+  `ServiceVipAllocator::get(&spec_digest)` for each Service's VIP.
+- **ADR-0050** — intent-side `WorkloadIntent` aggregate; bridge reads
+  `WorkloadIntent::Service(ServiceV1)` via `from_store_bytes`.
+- **ADR-0051** — wire-side `SubmitSpecInput`; transitively consumed
+  (admission projects onto `WorkloadIntent` before the bridge runs).
+
+### 63. `BackendDiscoveryBridge` reconciler — placement
+
+A new reconciler kind, `backend-discovery-bridge`, lands at:
+
+```
+crates/overdrive-control-plane/src/reconcilers/backend_discovery_bridge/
+├── mod.rs                       # re-exports + ReconcilerName const
+├── state.rs                     # re-exports of BackendDiscoveryBridge*
+│                                # types from overdrive_core::reconciler
+└── view.rs                      # re-exports of BackendDiscoveryBridgeView
+```
+
+
+The canonical types (`BackendDiscoveryBridge` struct,
+`BackendDiscoveryBridgeState`, `BackendDiscoveryBridgeView`,
+`ServiceListenerSet`, `ProjectedListener`, `RunningAllocSet`) live in
+`overdrive-core::reconciler` because `AnyReconciler` holds the
+concrete type — same layering as `WorkloadLifecycle` and
+`ServiceMapHydrator` (per § 49).
+
+Per-target keying = `WorkloadId`. The bridge:
+
+| Projection | Source | Hydrator surface |
+|---|---|---|
+| `desired.listeners` (intent listeners) | `WorkloadIntent::Service(ServiceV1).listeners` per ADR-0050 — read via `IntentKey::for_workload(&workload_id)` + `WorkloadIntent::from_store_bytes`. `Listener` is `(port, protocol)` only per ADR-0049 § 5 (parser-level removal of `vip`). | New match arm in `hydrate_desired` |
+| `desired.assigned_vip` | `ServiceVipAllocator::get(&spec_digest)` per ADR-0049 § 5a, where `spec_digest = WorkloadIntent::spec_digest(&intent)?`. Sync in-memory lookup against `state.allocator: Arc<Mutex<PersistentServiceVipAllocator>>` (added by ADR-0049). | Same `hydrate_desired` arm |
+| `actual.running` | `ObservationStore::alloc_status_rows_for_workload(workload_id)` filtered to `state == Running` | New match arm in `hydrate_actual` |
+| `view.last_written_fingerprint` | `BTreeMap<ServiceId, BackendSetFingerprint>` — runtime-owned ViewStore | `RedbViewStore::bulk_load` at register; `write_through` after each tick |
+
+The View carries **inputs only** per `.claude/rules/development.md`
+§ "Persist inputs, not derived state" — the persisted fingerprint
+is the content-hash of inputs (covering both `assigned_vip` and
+`backends`), and the dedup decision is recomputed every tick from the
+fresh fingerprint vs the persisted value.
+
+
+New action variant `Action::WriteServiceBackendRow { row, correlation }`
+in `crates/overdrive-core/src/reconciler.rs`. Action-shim wrapper at
+`crates/overdrive-control-plane/src/action_shim/write_service_backend_row.rs`
+mirrors the `dataplane_update_service.rs` shape; dispatch is
+`observation.write(ObservationRow::ServiceBackend(row))`.
+
+`LogicalTimestamp` for the bridge's writes uses
+`counter = tick.tick.saturating_add(1)` and
+`writer = AppState.node_id` — identical to the action shim's
+service-hydration write at line 121-122 of
+`dataplane_update_service.rs`. Multi-node Phase 2+ compat: per-node
+monotonic counter + writer tiebreak IS the CR-SQLite LWW shape; the
+bridge does NOT preclude a future owner-writer convention.
+
+VIP handling (revised 2026-05-20 for ADR-0049): VIPs are
+**platform-issued**. The operator cannot supply a VIP — the field
+is structurally absent from `Listener` at the parser layer (ADR-0049
+§ 5), from `ServiceV1` at the intent layer (ADR-0050 § 2), and from
+`ListenerInput` at the wire layer (ADR-0051 § 2 — `deny_unknown_fields`
+rejects a smuggled one). The bridge consumes the allocator-issued
+VIP via `ServiceVipAllocator::get(&spec_digest)` at hydrate time
+(ADR-0049 § 5a placement decision C — the allocator's own persisted
+memo IS the source of truth). One VIP per Service, shared across the
+Service's listeners — the standard Cilium/k8s LB shape.
+
+Phase 1 invariant: admission allocates the VIP synchronously before
+the IntentStore write (ADR-0049 § 4), so by the time the bridge ever
+runs against a persisted Service intent, the allocator memo is
+populated. A `None` response at hydrate time is structurally
+impossible in Phase 1; if it occurs (regression, corruption), the
+bridge emits a structured `bridge.allocator_memo_absent` debug event
+and defers the convergence to a subsequent tick.
+
+ESR pair (locked names):
+
+- **`BridgeEventuallyWritesBackendRow`** — for every Service workload
+  with `≥ 1` listener AND an allocator-issued VIP for its
+  `spec_digest` AND `≥ 1` Running alloc, a `ServiceBackendRow` is
+  written whose `backends` field reflects exactly the Running
+  endpoints, within a bounded number of ticks. The DST harness seeds
+  the `ServiceVipAllocator` memo as a precondition (mirrors the
+  production submit-time admission path per ADR-0049 § 4).
+- **`BridgeIdempotentSteadyState`** — once converged, no further
+  `Action::WriteServiceBackendRow` actions emitted on subsequent
+  ticks.
+
+Both invariants live in `crates/overdrive-sim/src/invariants/` and
+run on every PR per `.claude/rules/testing.md` § Tier 1.
+
+### 64. Production `EbpfDataplane` single-mode boot composition
+
+Production single-mode boot replaces `NoopDataplane` with
+`EbpfDataplane` at `crates/overdrive-control-plane/src/lib.rs:560-566`.
+`NoopDataplane` is **deleted** (single-cut migration per
+`feedback_single_cut_greenfield_migrations.md`) from both
+`overdrive-host::dataplane` and the `lib.rs` re-export. Tests bind
+`Arc<SimDataplane>` via test-harness construction — no
+`NoopDataplane` consumers remain.
+
+**New `[dataplane]` operator config keys** in `overdrive.toml`:
+
+```toml
+[dataplane]
+client_iface = "lb_veth_a"
+backend_iface = "lb_veth_b"
+
+# (existing) ADR-0049 § 3 subsection — independent of this feature's keys.
+[dataplane.vip_allocator]
+ranges   = ["10.96.0.0/16"]
+reserved = ["10.96.0.0", "10.96.0.1", "10.96.255.255"]
+```
+
+The `client_iface` + `backend_iface` keys are this feature's
+addition; both nest under the existing `[dataplane]` parent already
+in use by `[dataplane.vip_allocator]` from ADR-0049 § 3. Required
+for production boot — missing → typed `ConfigError` (same shape as
+missing `[tls]` per ADR-0010). The configured `client_iface` also
+resolves the bridge's `host_ipv4` via `getifaddrs` at boot.
+
+**New `DataplaneBootError` variant** on `ControlPlaneError` via
+`#[from]`, following the `ViewStoreBoot` / `Cgroup` /
+`CgroupBootstrap` / `WorkloadsBootstrap` precedents in
+`crates/overdrive-control-plane/src/error.rs`:
+
+```rust
+pub enum DataplaneBootError {
+    Construct { client_iface, backend_iface, #[source] source: DataplaneError },
+    Probe     { #[source] source: DataplaneError },
+    IfaceAddrResolution { iface, #[source] source: io::Error },
+}
+```
+
+Per `.claude/rules/development.md` § Errors / "Never flatten a typed
+error to `Internal(String)`" — boot-time `EbpfDataplane::new`
+failures MUST flow through this dedicated `#[from]` variant.
+
+
+**Earned-Trust probe** (`EbpfDataplane::probe()`) per principle 12:
+the composition root invariant is wire-then-probe-then-use. After
+`EbpfDataplane::new` succeeds, `probe()` writes + reads back a
+sentinel BACKEND_MAP entry at `BackendId::PROBE = u32::MAX`,
+asserts byte-equal, deletes it. Failure refuses startup with a
+structured `health.startup.refused` event — same pattern as
+`ViewStoreBootError::Probe` (per ADR-0035 § 5).
+
+**Attach-mode fallback emit** — the structured `tracing::warn!(name:
+"xdp.attach.fallback_generic", iface, errno)` event fires inside
+`EbpfDataplane::new` at the moment the `EOPNOTSUPP`/`ENOTSUP`
+fallback decision is taken, per-iface. The classifier
+`should_fallback_to_generic` stays a pure decision fn; the emit +
+retry is the imperative dispatch and lives at the same level.
+
+**Shutdown** — RAII via `Drop on EbpfDataplane`. XDP detach is
+already RAII through `aya::programs::XdpLinkId::Drop`; the new
+project-owned cleanup is `std::fs::remove_file(pin_dir/SERVICE_MAP_NAME)`.
+SIGKILL leaks are the operator-side recovery scenario per
+`.claude/rules/debugging.md` § "Leftover XDP attachments across
+runs" — not a code bug to fix.
+
+
+**BPF object path** — `include_bytes!`-embedded at build time via
+the existing `crates/overdrive-dataplane/build.rs` precedent, with
+`OVERDRIVE_BPF_OBJECT` env override for dev/test (per
+`.claude/rules/testing.md` § "BPF-object-dependent crates work via
+env override"). No operator config field needed.
+
+### 65. Joint walking-skeleton acceptance gate (Tier 3)
+
+One Tier 3 integration test at
+`crates/overdrive-control-plane/tests/integration/backend_discovery_bridge/walking_skeleton.rs`
+gates both #174 and #175. Gated by the existing `integration-tests`
+feature; runs via `cargo xtask lima run --` per
+`.claude/rules/testing.md` § "Running tests — Lima VM".
+
+Scenario shape (revised 2026-05-20 for ADR-0049 platform-issued VIPs):
+
+```
+GIVEN a control-plane configured with EbpfDataplane on Lima
+       (client_iface=lb_veth_a, backend_iface=lb_veth_b)
+  AND  BackendDiscoveryBridge + ServiceMapHydrator both registered
+  AND  ServiceVipAllocator bulk-loaded + probe-passed (allocator state
+       empty at boot for the fresh test fixture)
+WHEN  a Service spec is submitted with one listener
+       (port=8080, protocol=tcp)
+       — NO vip field; the parser rejects an unknown field per
+         ADR-0049 § 5 / ADR-0051 § 2
+  AND  admission allocates VIP V via ServiceVipAllocator (synchronous,
+       before IntentStore write per ADR-0049 § 4)
+  AND  the test reads V from the submit-echo response and verifies
+       the allocator memo is populated for the workload's spec_digest
+  AND  the alloc reaches Running
+THEN  within ≤ 5 reconciler ticks (≤ 500ms plus slack):
+       - BACKEND_MAP contains an entry whose ipv4 matches the host's
+         lb_veth_a IPv4 and whose port = 8080
+       - SERVICE_MAP for (vip=V, port=8080) resolves to a
+         non-empty inner map containing that BackendId
+```
+
+Per `.claude/rules/testing.md` § "Tier 3 → Assertion rules", the
+test asserts on **observable kernel side effects** (BPF map state
+via typed handles), NOT on program internal reachability. A "real
+TCP connection succeeds" extension is deferred — the existing
+S-2.2-17 already covers end-to-end TCP through the VIP at the
+dataplane level; the walking-skeleton's responsibility is the
+bridge + boot wiring.
+
+### 66. Updated quality-attribute scenarios
+
+| ASR | Quality attribute | Scenario | Pass criterion |
+|---|---|---|---|
+| ASR-BDB-01 | Correctness — bridge ESR closure | DST harness; arbitrary alloc transitions for Service workloads with multiple listeners. | `BridgeEventuallyWritesBackendRow` + `BridgeIdempotentSteadyState` hold across the seeded fault catalogue. |
+| ASR-BDB-02 | Reliability — production boot under valid `[dataplane]` config | Production boot on Lima with `lb_veth_a` / `lb_veth_b`. | `EbpfDataplane` constructs, both XDP programs attach, probe round-trip succeeds. No `health.startup.refused` event. |
+| ASR-BDB-03 | Reliability — production boot under invalid `[dataplane]` config | Production boot with `[dataplane]` pointing at a non-existent iface. | `ControlPlaneError::DataplaneBoot(Construct { source: IfaceNotFound { iface }, .. })`; binary exits non-zero; operator-facing message suggests `ip link show`. |
+| ASR-BDB-04 | End-to-end — walking-skeleton | Tier 3 per § 65. | BACKEND_MAP + SERVICE_MAP populated within ≤ 5 reconciler ticks of alloc Running. |
+
+### 67. C4 — see `docs/feature/backend-discovery-bridge-service-reachability/design/architecture.md`
+
+- **L1 (System Context)** — unchanged from Phase 2.2 base.
+- **L2 (Container)** — same as Phase 2.2; the
+  `overdrive-control-plane` → `overdrive-dataplane` arrow now carries
+  traffic in production (was no-op via `NoopDataplane`).
+- **L3 (Component)** — new diagram in `architecture.md` showing
+  `BackendDiscoveryBridge` slotting between intent-side
+  `ServiceSpec.listeners` / observation-side `AllocStatusRow` and
+  the downstream `ServiceMapHydrator` consumer; new
+  `action_shim::write_service_backend_row` peer to the existing
+  `action_shim::dataplane_update_service`.
+
+### 68. Updated handoff annotations — backend-discovery-bridge-service-reachability
+
+To DEVOPS — required CI checks gain:
+
+- The two new ESR invariants (`BridgeEventuallyWritesBackendRow`,
+  `BridgeIdempotentSteadyState`) under `cargo dst`.
+- The walking-skeleton Tier 3 test (`cargo xtask lima run -- cargo
+  nextest run -p overdrive-control-plane -E 'test(walking_skeleton)'
+  --features integration-tests`).
+- Mutation-testing kill-rate gate ≥ 80% on the bridge's `reconcile`
+  body and the `should_write_row` pure decision fn (the dedup
+  fingerprint check).
+
+External integrations: **none**. The eBPF subsystem is kernel-bound,
+not external. No contract tests recommended.
+
+Operator-facing deferrals (each carries an existing GH issue
+reference):
+
+- **GH #170** — Health-check probing: bridge writes
+  `Backend.healthy = true` for every Running alloc until #170 lands.
+
+(The prior GH #167 deferral — "VIP allocator skip" — is **closed**:
+ADR-0049 / feature `service-vip-allocator` delivered 2026-05-19.
+VIPs are platform-issued and the bridge consumes the allocator's
+output; there is no skip-on-VIP-absent case.)
+
+---
 
 ---
 
