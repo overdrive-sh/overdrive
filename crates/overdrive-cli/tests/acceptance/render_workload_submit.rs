@@ -28,7 +28,7 @@ const FIXTURE_DIGEST: &str = "deadbeefcafebabe0123456789abcdefdeadbeefcafebabe01
 fn fixture_submit_output() -> SubmitOutput {
     SubmitOutput {
         workload_id: "payments".to_string(),
-        intent_key: "jobs/payments".to_string(),
+        intent_key: "workloads/payments".to_string(),
         spec_digest: FIXTURE_DIGEST.to_string(),
         outcome: IdempotencyOutcome::Inserted,
         endpoint: Url::parse("https://127.0.0.1:7001").expect("parse endpoint"),
@@ -64,7 +64,7 @@ fn render_job_submit_accepted_contains_required_labels() {
         "rendered block must contain workload_id value `payments`; got:\n{rendered}",
     );
     assert!(
-        rendered.contains("jobs/payments"),
+        rendered.contains("workloads/payments"),
         "rendered block must contain intent_key `jobs/payments`; got:\n{rendered}",
     );
     assert!(

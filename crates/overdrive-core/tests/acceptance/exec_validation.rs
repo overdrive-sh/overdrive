@@ -1,5 +1,5 @@
 //! Acceptance scenarios for `wire-exec-spec-end-to-end` — the new
-//! `Job::from_spec` validation rule on `exec.command` (per ADR-0031 §4)
+//! `Job::from_submit` validation rule on `exec.command` (per ADR-0031 §4)
 //! and the schema-level rejections driven by serde
 //! (`deny_unknown_fields` + tagged-enum dispatch on `DriverInput`).
 //!
@@ -54,7 +54,7 @@ fn spec_with_command(raw: &str) -> JobSpecInput {
 }
 
 // ---------------------------------------------------------------------------
-// §2 — Validation rules at `Job::from_spec`
+// §2 — Validation rules at `Job::from_submit`
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -63,7 +63,7 @@ fn job_from_spec_rejects_empty_exec_command_with_structured_field_name() {
     let spec = spec_with_command("");
 
     // When Ana calls the validating constructor.
-    let err = Job::from_spec(spec).expect_err("empty exec.command must be rejected");
+    let err = Job::from_submit(spec).expect_err("empty exec.command must be rejected");
 
     // Then the error is the Validation variant naming the exec.command field.
     match err {
@@ -87,7 +87,7 @@ fn job_from_spec_rejects_whitespace_only_exec_command_via_trim_rule() {
     // a bare `is_empty()` would not — pinning the trim rule.
     let spec = spec_with_command("   ");
 
-    let err = Job::from_spec(spec).expect_err("whitespace-only command must be rejected");
+    let err = Job::from_submit(spec).expect_err("whitespace-only command must be rejected");
 
     match err {
         AggregateError::Validation { field, .. } => {
@@ -104,7 +104,7 @@ fn job_from_spec_rejects_mixed_whitespace_exec_command() {
     // whitespace, not only ASCII space.
     let spec = spec_with_command("\t\n ");
 
-    let err = Job::from_spec(spec).expect_err("mixed-whitespace command must be rejected");
+    let err = Job::from_submit(spec).expect_err("mixed-whitespace command must be rejected");
 
     match err {
         AggregateError::Validation { field, .. } => {
@@ -265,7 +265,7 @@ mod property {
                     args: vec![],
                 }),
             };
-            match Job::from_spec(spec) {
+            match Job::from_submit(spec) {
                 Err(AggregateError::Validation { field, .. }) => {
                     prop_assert_eq!(field, "exec.command");
                 }

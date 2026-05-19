@@ -48,6 +48,9 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -57,6 +60,7 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
         Arc::new(SimClock::new()),
         Arc::new(SimDataplane::new()),
         node_id("writer-1"),
+        allocator,
     )
 }
 

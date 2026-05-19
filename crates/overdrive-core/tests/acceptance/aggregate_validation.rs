@@ -33,8 +33,9 @@
 
 use overdrive_core::aggregate::{
     AggregateError, Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput,
-    Node, NodeSpecInput, ResourcesInput,
+    Node, NodeSpecInput, ResourcesInput, ServiceV1,
 };
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::IdParseError;
 
 // ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
     };
 
     // When Ana calls the validating constructor.
-    let err = Job::from_spec(spec).expect_err("zero replicas must be rejected");
+    let err = Job::from_submit(spec).expect_err("zero replicas must be rejected");
 
     // Then the error is the Validation variant naming the replicas field.
     match err {
@@ -88,7 +89,7 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
     };
 
     // When Ana calls the validating constructor.
-    let result = Job::from_spec(spec);
+    let result = Job::from_submit(spec);
 
     // Then the result is Err — and the type system guarantees no Job
     // is constructed on this branch. `Result<Job, _>::Err` does not
@@ -135,7 +136,7 @@ fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes
     };
 
     // When Ana calls the validating constructor.
-    let err = Job::from_spec(spec).expect_err("zero memory must be rejected");
+    let err = Job::from_submit(spec).expect_err("zero memory must be rejected");
 
     // Then the error names the memory_bytes field.
     match err {
@@ -280,7 +281,7 @@ fn allocation_new_rejects_forbidden_char_in_node_id() {
 }
 
 // ---------------------------------------------------------------------------
-// Structural rkyv-sentinel check — `Job::from_spec` signature returns
+// Structural rkyv-sentinel check — `Job::from_submit` signature returns
 // `Result<Job, AggregateError>`. On the Err branch no `Job` exists by
 // construction, so no downstream archival call is reachable. This test
 // documents the structural guarantee; no runtime wrapper is needed
@@ -298,7 +299,7 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
     };
 
     // When Ana calls from_spec.
-    let result: Result<Job, AggregateError> = Job::from_spec(spec);
+    let result: Result<Job, AggregateError> = Job::from_submit(spec);
 
     // Then the return type is Result<Job, _>. On Err, the value
     // discriminant carries no Job. This is the structural sentinel —
@@ -346,7 +347,7 @@ mod property {
                     args: vec![],
                 }),
             };
-            match Job::from_spec(spec) {
+            match Job::from_submit(spec) {
                 Err(AggregateError::Validation { field, .. }) => {
                     prop_assert_eq!(field, "replicas");
                 }
@@ -375,7 +376,7 @@ mod property {
                     args: vec![],
                 }),
             };
-            match Job::from_spec(spec) {
+            match Job::from_submit(spec) {
                 Err(AggregateError::Validation { field, .. }) => {
                     prop_assert_eq!(field, "memory_bytes");
                 }
@@ -411,4 +412,97 @@ mod property {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Service: zero memory → Validation { field: "memory_bytes", .. }
+// Closes the mutation gap on the `resources.memory_bytes == 0` guard in
+// `ServiceV1::from_submit` (Phase 5 aggregate gate, May 2026). Symmetric
+// to the equivalent JobV1 / Node tests above.
+// ---------------------------------------------------------------------------
+
+fn canonical_service_spec() -> ServiceSpecInput {
+    ServiceSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_zero_memory_with_validation_variant_naming_memory_bytes_field() {
+    // Given a Service spec with zero memory_bytes and every other field valid.
+    let mut spec = canonical_service_spec();
+    spec.resources.memory_bytes = 0;
+
+    // When Ana calls the validating constructor.
+    let err = ServiceV1::from_submit(spec).expect_err("zero memory must be rejected");
+
+    // Then the error names the memory_bytes field — same shape as Job /
+    // Node so the HTTP layer per ADR-0015 maps it uniformly to 400.
+    match err {
+        AggregateError::Validation { field, message: _ } => {
+            assert_eq!(field, "memory_bytes", "field must name `memory_bytes`; got {field:?}");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Service: duplicate (port, protocol) → Validation { field: "listeners", .. }
+// Closes the mutation gap on the `!seen.insert(key)` duplicate-detection
+// guard in `ServiceV1::from_submit`. Two listeners sharing (8080, tcp)
+// MUST be rejected; the existing positive path is covered by
+// `service_vip_submit_acceptance.rs` but the negative path on the
+// duplicate-detection branch had no kill before this commit.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn service_from_submit_rejects_duplicate_listener_port_protocol_with_validation_naming_listeners_field()
+ {
+    // Given a Service spec with two identical listeners on the same
+    // (port, protocol) pair.
+    let mut spec = canonical_service_spec();
+    spec.listeners = vec![
+        ListenerInput { port: 8080, protocol: "tcp".to_string() },
+        ListenerInput { port: 8080, protocol: "tcp".to_string() },
+    ];
+
+    // When Ana calls the validating constructor.
+    let err =
+        ServiceV1::from_submit(spec).expect_err("duplicate (port, protocol) must be rejected");
+
+    // Then the error names the listeners field and the Display form
+    // includes both port and protocol so the operator-facing error
+    // message names the offending pair.
+    match err {
+        AggregateError::Validation { field, ref message } => {
+            assert_eq!(field, "listeners", "field must name `listeners`; got {field:?}");
+            assert!(
+                message.contains("8080") && message.contains("tcp"),
+                "message must echo offending (port, protocol); got {message:?}"
+            );
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+// Sanity counter-check — two listeners with the SAME port but DIFFERENT
+// protocols (tcp + udp) are accepted (the dedup key is (port, protocol),
+// not port alone). Without this, a future mutation that flips the key
+// to `port` alone would pass the duplicate-rejection test above but
+// silently reject legitimate dual-protocol listeners.
+#[test]
+fn service_from_submit_accepts_same_port_with_different_protocols() {
+    let mut spec = canonical_service_spec();
+    spec.listeners = vec![
+        ListenerInput { port: 8080, protocol: "tcp".to_string() },
+        ListenerInput { port: 8080, protocol: "udp".to_string() },
+    ];
+
+    let service = ServiceV1::from_submit(spec)
+        .expect("(8080, tcp) and (8080, udp) are distinct listener pairs");
+    assert_eq!(service.listeners.len(), 2, "both listeners must round-trip into the aggregate");
 }

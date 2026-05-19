@@ -1400,6 +1400,9 @@ name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "iri-string"
@@ -1805,9 +1808,11 @@ dependencies = [
  "hostname",
  "http-body-util",
  "hyper",
+ "ipnet",
  "libc",
  "libsql",
  "overdrive-core",
+ "overdrive-dataplane",
  "overdrive-host",
  "overdrive-sim",
  "overdrive-store-local",
@@ -1874,13 +1879,18 @@ dependencies = [
  "clap",
  "color-eyre",
  "eyre",
+ "hex",
+ "ipnet",
  "libc",
  "nix",
  "overdrive-core",
+ "overdrive-store-local",
  "parking_lot",
  "proptest",
+ "rkyv",
  "serde_json",
  "serial_test",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

@@ -23,11 +23,16 @@ use overdrive_core::TransitionReason;
 // + slice 05 spec.
 pub mod schedule;
 
-// workload-kind-discriminator slice 06 — Service `[[listener]]`
-// render functions and the SERVICE_VIP_ALLOCATOR_TRACKING_URL SSOT
-// constant (KPI K6 byte-equality across surfaces). Per ADR-0047 §1
-// + slice 06 spec.
-pub mod listener;
+// `render::listener` was deleted in service-vip-allocator step 02-01.
+// Per ADR-0049 § 5 / `.claude/rules/development.md` § "Deletion
+// discipline": the per-listener VIP rendering (and the
+// SERVICE_VIP_ALLOCATOR_TRACKING_URL SSOT constant that fronted the
+// pending-allocation form) was structurally obsolete once `Listener`
+// lost its `vip` field — VIPs are now platform-issued service-wide
+// via `ServiceVipAllocator`, rendered at the service-level surface
+// (not per-listener). The module had no callers outside its own
+// `#[cfg(test)] mod tests`, so production code AND its tests were
+// deleted together in the same commit.
 
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;

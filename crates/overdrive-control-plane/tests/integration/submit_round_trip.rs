@@ -2,7 +2,7 @@
 //!
 //! Proves the Phase 1 `submit_workload` handler round-trip:
 //!
-//! 1. Validates the spec via `Job::from_spec` (errors map to HTTP 400).
+//! 1. Validates the spec via `Job::from_submit` (errors map to HTTP 400).
 //! 2. Archives via `rkyv::to_bytes::<rancor::Error>`.
 //! 3. Commits through `IntentStore::put_if_absent` at `jobs/<WorkloadId>`.
 //! 4. Returns `{workload_id, spec_digest, outcome}` with
@@ -29,6 +29,7 @@ use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -176,7 +177,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
 
     let resp = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -196,8 +197,11 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
     // rkyv-archived Job bytes (ADR-0002 + ADR-0020). Mismatch means
     // a server-side re-archival or a serde-driven recomputation
     // somewhere in the pipeline.
-    let local_job = Job::from_spec(spec).expect("Job::from_spec for digest reference");
-    let local_digest = local_job.spec_digest().expect("spec_digest").to_string();
+    let local_job = Job::from_submit(spec).expect("Job::from_submit for digest reference");
+    let local_digest = overdrive_core::aggregate::WorkloadIntent::Job(local_job)
+        .spec_digest()
+        .expect("spec_digest")
+        .to_string();
     assert_eq!(
         body.spec_digest, local_digest,
         "spec_digest must equal the locally-computable canonical \
@@ -221,7 +225,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     let spec = payments_spec();
     let resp = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -233,21 +237,23 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     handle.shutdown(Duration::from_secs(2)).await;
 
     let workload_id = WorkloadId::new("payments").expect("parse payments WorkloadId");
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
-        .expect("jobs/payments must be populated after successful submit");
+        .expect("workloads/payments must be populated after successful submit");
 
     assert!(!persisted.is_empty(), "archived Job bytes must be non-empty");
 
     // Rebuild the expected archive from the same spec and compare bytes.
-    let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
-    let expected_bytes = expected_job.archive_for_store().expect("rkyv archive of expected Job");
+    let expected_job = Job::from_submit(spec).expect("canonical spec constructs a Job");
+    let expected_bytes = overdrive_core::aggregate::WorkloadIntent::Job(expected_job)
+        .archive_for_store()
+        .expect("rkyv archive of expected Job");
 
     assert_eq!(
         persisted.as_ref(),
         expected_bytes.as_ref(),
-        "persisted bytes must equal rkyv archive of Job::from_spec(...) \
+        "persisted bytes must equal rkyv archive of Job::from_submit(...) \
          — handler must archive via rkyv, not via serde_json or another format"
     );
 }
@@ -262,7 +268,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
     let client = client_trusting(&ca_pem);
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
 
-    // `replicas = 0` fails `Job::from_spec` at the `NonZeroU32` gate with
+    // `replicas = 0` fails `Job::from_submit` at the `NonZeroU32` gate with
     // `AggregateError::Validation { field: "replicas", .. }`.
     let bad = JobSpecInput {
         id: "payments".to_owned(),
@@ -273,7 +279,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
 
     let resp = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: bad, workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(bad) })
         .send()
         .await
         .expect("POST /v1/jobs with bad spec");
@@ -305,7 +311,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 
     let first: SubmitWorkloadResponse = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
         .expect("first submit")
@@ -315,7 +321,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 
     let second_resp = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec, workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec) })
         .send()
         .await
         .expect("second submit");
@@ -363,7 +369,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     // First submit: canonical spec.
     let first = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("first submit");
@@ -374,7 +380,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     // spec".
     let conflict = client
         .post(&url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec_alt(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec_alt()) })
         .send()
         .await
         .expect("second submit");

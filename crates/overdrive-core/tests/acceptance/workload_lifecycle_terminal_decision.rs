@@ -144,22 +144,30 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
     );
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), RESTART_BACKOFF_CEILING);
-    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = WorkloadLifecycle::canonical();
@@ -193,18 +201,22 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: true,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -232,18 +244,22 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
 fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -277,23 +293,31 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     );
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let mut restart_counts = BTreeMap::new();
     // Budget remaining: attempts < ceiling.
     restart_counts.insert(aid("alloc-payments-0"), 0);
-    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = WorkloadLifecycle::canonical();
@@ -360,18 +384,22 @@ proptest! {
             alloc_with_state("alloc-payments-0", "payments", "local", alloc_state),
         );
         let desired = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop,
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
                     workload_kind: WorkloadKind::default(),
+                    service_spec_digest: None,
         };
         let actual = WorkloadLifecycleState {
+            workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
             allocations,
             workload_kind: WorkloadKind::default(),
+            service_spec_digest: None,
         };
         let mut restart_counts = BTreeMap::new();
         restart_counts.insert(aid("alloc-payments-0"), attempts);
@@ -380,7 +408,7 @@ proptest! {
             aid("alloc-payments-0"),
             UnixInstant::from_unix_duration(Duration::from_secs(seen_at_secs)),
         );
-        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_terminal: ::std::collections::BTreeSet::new() };
 
         // Use a tick well past any seen_at + backoff so the deadline
         // gate never blocks the restart branch — ensures the
@@ -489,6 +517,13 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // in the `service_hydration_results` observation row, not on
         // `TerminalCondition`, preserving ADR-0037's "every terminal
         // claim has a single typed source" invariant.
-        | Action::DataplaneUpdateService { .. } => None,
+        | Action::DataplaneUpdateService { .. }
+        // service-vip-allocator step 03-01: ReleaseServiceVip carries
+        // no terminal claim — Service VIP release is a follow-on
+        // dispatch triggered BY an already-terminal observation row,
+        // not a new terminal claim. The reconciler that emits Release
+        // is also the writer of the terminal claim via StopAllocation /
+        // FinalizeFailed above.
+        | Action::ReleaseServiceVip { .. } => None,
     }
 }

@@ -325,7 +325,17 @@ pub struct ListenerRow {
 
 impl From<&Listener> for ListenerRow {
     fn from(l: &Listener) -> Self {
-        Self { port: l.port, protocol: l.protocol, vip: l.vip }
+        // Per ADR-0049 § 5 / service-vip-allocator step 02-01 the
+        // intent-side [`Listener`] no longer carries a `vip` field;
+        // VIPs are platform-issued at the service level via
+        // `ServiceVipAllocator`. Observation-side `ListenerRow.vip`
+        // is populated downstream by the allocator / action-shim
+        // path, not by mirroring the intent-side spec. Today's
+        // observation-row writers all construct
+        // `listeners: Vec::new()`, so this `From` impl is a forward-
+        // compat shim — the `vip: None` projection is the right
+        // default when the call site has no allocator context.
+        Self { port: l.port, protocol: l.protocol, vip: None }
     }
 }
 

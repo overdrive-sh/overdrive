@@ -61,6 +61,9 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
     ));
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -70,6 +73,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(overdrive_host::SystemClock),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Spawn the exit-observer subsystem. In production this is wired
@@ -100,7 +104,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // (`alloc-recovery-0.scope`) does not collide with the scope used by
     // submit_to_running (`alloc-payments-0.scope`) when both tests run in
     // parallel under nextest.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "recovery".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -110,8 +114,10 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/recovery").expect("valid target");

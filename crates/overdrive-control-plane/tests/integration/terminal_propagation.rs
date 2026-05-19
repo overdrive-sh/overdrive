@@ -71,6 +71,9 @@ async fn bootstrap_async(
     // never reaches CEILING. SimClock advances when the background
     // ticker calls `clock.tick(...)` so the backoff window crosses
     // and the reconciler emits FinalizeFailed within the test budget.
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -80,6 +83,7 @@ async fn bootstrap_async(
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
     let receiver = state.lifecycle_events.subscribe();
     (state, receiver, sim_clock)
@@ -125,7 +129,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     // `restart_counts`, and after `RESTART_BACKOFF_CEILING (5)` the
     // WorkloadLifecycle emits `Action::FinalizeFailed { terminal:
     // BackoffExhausted { attempts: 5 } }`.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "backoff-exhaust".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 50, memory_bytes: 64 * 1024 * 1024 },
@@ -135,8 +139,10 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/backoff-exhaust").expect("valid target");
@@ -218,7 +224,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 
     // Distinct workload_id so cgroup scope name does not collide with
     // sibling tests under nextest.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "term-stop".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -228,8 +234,10 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/term-stop").expect("valid target");
@@ -260,7 +268,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     assert!(converged_running, "must reach Running before issuing stop");
 
     // Issue operator stop.
-    let stop_key = IntentKey::for_job_stop(&job.id);
+    let stop_key = IntentKey::for_workload_stop(&job.id);
     state.store.put(stop_key.as_bytes(), b"").await.expect("put stop intent");
 
     // Drain any pre-stop events; we only care about events from this
@@ -332,7 +340,7 @@ async fn non_terminal_transitions_emit_none() {
     // Distinct workload_id; long-running /bin/sleep so we observe the
     // Pending → Running transition and stop early before any restart
     // budget would be consumed.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "non-term".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -342,8 +350,10 @@ async fn non_terminal_transitions_emit_none() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/non-term").expect("valid target");

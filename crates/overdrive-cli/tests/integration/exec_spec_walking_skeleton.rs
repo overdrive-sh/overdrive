@@ -13,7 +13,7 @@
 //!     │ toml::from_str
 //!     ▼
 //! JobSpecInput                       (client-side parse — new shape)
-//!     │ Job::from_spec
+//!     │ Job::from_submit
 //!     ▼
 //! Job aggregate                      (carries command + args)
 //!     │ POST /v1/jobs (real reqwest + rustls)
@@ -101,8 +101,11 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 /// any drift indicates the rkyv canonicalisation lane diverged.
 fn local_spec_digest_new_shape(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse new-shape TOML");
-    let job = Job::from_spec(parsed).expect("Job::from_spec on canonical new-shape spec");
-    job.spec_digest().expect("spec_digest").to_string()
+    let job = Job::from_submit(parsed).expect("Job::from_submit on canonical new-shape spec");
+    overdrive_core::aggregate::WorkloadIntent::Job(job)
+        .spec_digest()
+        .expect("spec_digest")
+        .to_string()
 }
 
 #[tokio::test]
@@ -122,8 +125,8 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     // Phase 2 — assert the client-visible outcome.
     assert_eq!(submit_output.workload_id, "payments", "echoed workload_id must equal the spec id");
     assert_eq!(
-        submit_output.intent_key, "jobs/payments",
-        "intent_key must derive via IntentKey::for_job; SSOT is overdrive_core",
+        submit_output.intent_key, "workloads/payments",
+        "intent_key must derive via IntentKey::for_workload (ADR-0050 OQ-5 single-cut); SSOT is overdrive_core",
     );
     assert_eq!(
         submit_output.outcome,
@@ -140,7 +143,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     assert_eq!(
         submit_output.spec_digest, expected_digest,
         "spec_digest must be byte-identical to a locally-computed \
-         ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed))); a divergence means \
+         ContentHash::of(rkyv::to_bytes(&Job::from_submit(parsed))); a divergence means \
          the new `command` + `args` fields are not contributing to the canonical \
          archive consistently across client and server lanes",
     );
@@ -171,7 +174,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     let store = LocalIntentStore::open(intent_redb_path(server_tmp.path()))
         .expect("re-open intent.redb for back-door read");
     let workload_id = WorkloadId::from_str("payments").expect("WorkloadId::from_str(\"payments\")");
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let stored = store.get(key.as_bytes()).await.expect("back-door IntentStore::get must succeed");
     let bytes = stored.expect(
         "after a successful submit the intent key `jobs/payments` MUST be \
@@ -181,12 +184,16 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
 
     // Typed codec read — same lane the server uses on read (see
     // `handlers::describe_workload` for the canonical pattern). Per
-    // ADR-0048 § 4b (UI-03) the envelope-wrapping discipline lives on
-    // the `Job` codec module, not on the `IntentStore` trait surface;
-    // `Job::from_store_bytes` is the sole reader site.
+    // ADR-0050 single-cut migration: bytes carry
+    // `WorkloadIntentEnvelope`; project to the inner `Job` variant
+    // for the existing test assertions.
     let intent_path = intent_redb_path(server_tmp.path());
-    let job: Job = Job::from_store_bytes(&bytes, &intent_path, None)
-        .expect("typed codec decode of Job from back-door read bytes");
+    let intent =
+        overdrive_core::aggregate::WorkloadIntent::from_store_bytes(&bytes, &intent_path, None)
+            .expect("typed codec decode of WorkloadIntent from back-door read bytes");
+    let overdrive_core::aggregate::WorkloadIntent::Job(job) = intent else {
+        panic!("test precondition: submit handler today only writes WorkloadIntent::Job");
+    };
 
     // Destructure WorkloadDriver::Exec — irrefutable for Phase 1 (single
     // variant). Future Phase 2+ variants (`MicroVm`, `Wasm`) make this
@@ -199,7 +206,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
         "stored Job.driver.exec.command must equal the operator's TOML \
          input verbatim — a divergence here means the wire shape was \
          lossy along the persistence lane (TOML → JobSpecInput → \
-         Job::from_spec → rkyv::to_bytes → redb → rkyv::access → Job)",
+         Job::from_submit → rkyv::to_bytes → redb → rkyv::access → Job)",
     );
     assert_eq!(
         exec.args,

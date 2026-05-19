@@ -300,12 +300,13 @@ struct IntentStoreProbeKeys {
     long: overdrive_core::aggregate::IntentKey,
 }
 
-/// Derive the three probe keys via `IntentKey::for_job` so the literal
-/// `jobs/` prefix is sourced from `aggregate/mod.rs` (the SSOT).
+/// Derive the three probe keys via `IntentKey::for_workload` so the
+/// literal `workloads/` prefix is sourced from `aggregate/mod.rs`
+/// (the SSOT) per ADR-0050 OQ-5 single-cut migration.
 fn derive_intent_store_probe_keys() -> Result<IntentStoreProbeKeys, String> {
     let mk = |raw: &str| -> Result<overdrive_core::aggregate::IntentKey, String> {
         overdrive_core::id::WorkloadId::new(raw)
-            .map(|id| overdrive_core::aggregate::IntentKey::for_job(&id))
+            .map(|id| overdrive_core::aggregate::IntentKey::for_workload(&id))
             .map_err(|e| format!("derive IntentKey for {raw}: {e}"))
     };
     Ok(IntentStoreProbeKeys {

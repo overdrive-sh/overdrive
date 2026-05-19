@@ -1,5 +1,5 @@
 //! Positive-path acceptance scenarios for `wire-exec-spec-end-to-end` —
-//! `Job::from_spec` accepts the new `[exec]` block and preserves the
+//! `Job::from_submit` accepts the new `[exec]` block and preserves the
 //! operator's command + args field-for-field.
 //!
 //! Covers `docs/feature/wire-exec-spec-end-to-end/distill/test-scenarios.md`
@@ -30,7 +30,7 @@ fn job_from_spec_accepts_non_empty_command_with_empty_args_vec() {
     // Per ADR-0031 §4: empty `args` is the legitimate zero-args case
     // for binaries that take no arguments (`/bin/true`, `/bin/date`).
     let spec = spec_with("/bin/true", vec![]);
-    let job = Job::from_spec(spec).expect("non-empty command + empty args is valid");
+    let job = Job::from_submit(spec).expect("non-empty command + empty args is valid");
     // Per ADR-0031 Amendment 1 the command + args live one level
     // deeper through the tagged-enum `WorkloadDriver` field.
     let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
@@ -45,7 +45,7 @@ fn job_from_spec_preserves_operator_command_casing_verbatim() {
     // driver as-typed. Mixed casing in a path is uncommon but legal
     // (e.g. ext4 case-sensitive).
     let spec = spec_with("/Opt/Payments/Server", vec![]);
-    let job = Job::from_spec(spec).expect("mixed-case command is valid");
+    let job = Job::from_submit(spec).expect("mixed-case command is valid");
     let WorkloadDriver::Exec(Exec { command, .. }) = &job.driver;
     assert_eq!(command, "/Opt/Payments/Server", "command must preserve operator casing verbatim");
 }
@@ -58,7 +58,7 @@ fn job_from_spec_accepts_empty_string_and_whitespace_in_args_vec() {
     // posture for no safety benefit.
     let argv = vec![String::new(), "  ".to_string(), "non-empty".to_string()];
     let spec = spec_with("/bin/echo", argv.clone());
-    let job = Job::from_spec(spec).expect("empty / whitespace args elements are valid");
+    let job = Job::from_submit(spec).expect("empty / whitespace args elements are valid");
     let WorkloadDriver::Exec(Exec { args, .. }) = &job.driver;
     assert_eq!(
         args, &argv,
@@ -74,7 +74,7 @@ fn job_from_spec_carries_command_and_args_through_to_aggregate() {
     // intent surface.
     let argv = vec!["--port".to_string(), "8080".to_string(), "--mode=fast".to_string()];
     let spec = spec_with("/opt/payments/bin/payments-server", argv.clone());
-    let job = Job::from_spec(spec).expect("canonical exec spec is valid");
+    let job = Job::from_submit(spec).expect("canonical exec spec is valid");
     let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
     assert_eq!(command, "/opt/payments/bin/payments-server");
     assert_eq!(args, &argv);

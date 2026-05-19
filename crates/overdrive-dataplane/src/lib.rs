@@ -24,10 +24,14 @@ pub mod loader;
 pub mod maps;
 pub mod swap;
 
-// Collision-free BackendId allocator per ADR-0046. Replaces the
-// multiplicative-hash derivation with a monotonic-counter allocator +
-// memo table, matching Cilium's IDAllocator pattern. Userspace-only.
-mod allocator;
+// Allocator primitives — `BackendIdAllocator` (ADR-0046) lives here
+// alongside `ServiceVipAllocator` + `VipRange` (ADR-0049 / step 01-01).
+// `BackendIdAllocator` is the existing collision-free monotonic-counter
+// allocator; `ServiceVipAllocator` is the concrete VIP-pool allocator
+// keyed by service-spec digest. Both monotonic, both userspace-only;
+// no shared abstraction by design — VIP allocation has its own
+// (range, capacity, exhaustion) concerns that BackendId does not.
+pub mod allocators;
 
 // Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's
 // 5-step swap orchestration).
@@ -161,7 +165,7 @@ pub struct EbpfDataplane {
     /// the multiplicative-hash derivation with a monotonic counter +
     /// memo table. Lock held briefly during `update_service` —
     /// dropped before any `.await`.
-    backend_id_alloc: parking_lot::Mutex<crate::allocator::BackendIdAllocator>,
+    backend_id_alloc: parking_lot::Mutex<crate::allocators::BackendIdAllocator>,
 
     /// Per-service `BackendId` set tracker. Used by step 4 of the
     /// 5-step atomic swap (orphan GC) to compute the union of every
@@ -488,7 +492,7 @@ impl EbpfDataplane {
             service_map,
             backend_map: parking_lot::Mutex::new(backend_map),
             reverse_nat_map: parking_lot::Mutex::new(reverse_nat_map),
-            backend_id_alloc: parking_lot::Mutex::new(crate::allocator::BackendIdAllocator::new()),
+            backend_id_alloc: parking_lot::Mutex::new(crate::allocators::BackendIdAllocator::new()),
             service_backends: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             service_reverse_nat_keys: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             pin_dir: pin_dir.to_path_buf(),

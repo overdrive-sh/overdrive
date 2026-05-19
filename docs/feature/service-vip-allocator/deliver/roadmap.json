@@ -1,0 +1,404 @@
+{
+  "roadmap": {
+    "project_id": "service-vip-allocator",
+    "created_at": "2026-05-14T06:53:49Z",
+    "total_steps": 13,
+    "phases": 3,
+    "changelog": [
+      "2026-05-15 \u2014 Step 02-03c split into 02-03c (infra cascade) + 02-03d (Service-arm + 6 acceptance). User-authorised after fresh-dispatch crafter PREPARE analysis estimated 60-100 turns of focused work vs 30-turn budget. Cascade scope confirmed: 20 AppState::new fixture call sites (not the original ~10 estimate); 6 acceptance tests boot real axum + rcgen + LocalIntentStore (heavy); Lima nextest workspace runs are minutes each. 02-03c narrows to infra cascade: VipRange::default() = 10.96.0.0/16 per ADR-0049 amendment, parse_vip_allocator_section returns Option<VipRange>, ServerConfig.vip_range field, AppState allocator field + AppState::new signature, boot-time PersistentServiceVipAllocator construction, VipAllocatorConfigError::Missing deletion, 20-fixture migration. Job-arm continues to work. NO Service-arm code, NO new acceptance scenarios, two unreachable!() paths stay. 02-03d lands Service-arm code: SubmitWorkloadResponse.vip Option<String> field (Q1.A 2026-05-15), submit_workload Service arm, alloc_status Service arm, streaming Service-row VIP, error 503 mapping for pool exhaustion, resolve 2 unreachable!() paths, 6 S-VIP acceptance scenarios (01/02/03/04/08/09), OpenAPI regen. CLI range-visibility surface DEFERRED to GH issue #182 (Q2.B 2026-05-15) \u2014 Phase 1 visibility satisfied by submit-echo VIP. total_steps: 12 -> 13; Phase 2: 6 -> 7. ADR-0049 (amended) / 0050 / 0051 stay Accepted; no further design changes. Validation status reset to pending for re-review.",
+      "2026-05-15 - Step 02-03b split into 02-03b + 02-03c (user-authorised, after 4th structural finding at PREPARE of original 02-03b). Cascade from ADR-0051 wire-shape migration was materially larger than ADR's ~10-file estimate (actual ~30-40 source files: 14 SubmitWorkloadRequest construction sites, JobV1::from_spec -> from_submit rename per OQ-6 (~15-20 source files), AppState constructor signature change cascading to ~10 test fixtures, 6 brand-new acceptance scenarios with new test infrastructure, streaming.rs >900-line Service-row work, 2 unreachable!() paths in handlers.rs becoming real code, OpenAPI regen). 02-03b narrows to wire-shape migration only (SubmitSpecInput lands, SubmitWorkloadRequest .spec widens, JobSpecInput sites wrap, workload_kind deletes, from_spec rename cascades, OpenAPI regen, NO allocator wiring, NO Service-arm code, NO new acceptance tests). 02-03c lands PersistentServiceVipAllocator boot wiring + AppState field + submit_workload Service arm + alloc_status Service-arm VIP rendering + streaming.rs Service-row VIP + error.rs 503 mapping + 6 S-VIP acceptance scenarios (01/02/03/04/08/09). total_steps: 11 -> 12; Phase 2: 5 -> 6. ADR-0051 stays Accepted; no design changes.",
+      "2026-05-14 - Step 02-03 split into 02-03a + 02-03b (user-authorised, option A after second structural finding). 02-03a: WorkloadSpec rkyv envelope + codec + spec_digest + migrate all Job::archive_for_store / from_store_bytes reader sites to WorkloadSpec::* (single-cut wire migration; submit handler unchanged; no allocator). 02-03b: widen SubmitWorkloadRequest.spec to WorkloadSpecInput, wire PersistentServiceVipAllocator into AppState, Service arm in submit_workload + alloc_status + streaming, 6 acceptance scenarios + golden-bytes test. The 6 acceptance criteria stay on 02-03b unchanged. total_steps: 10 -> 11; Phase 2 step count: 4 -> 5. Rationale: the original 02-03 expansion (recorded in prior changelog entry) cascaded into every Job-bytes reader (describe_workload, reconciler hydrate, recovery walks, streaming, alloc_status) - too large to land in one single-cut commit. Splitting at the codec/wiring boundary keeps each commit single-cut within its own scope.",
+      "2026-05-14 \u2014 Step 02-03 scope expansion (user-authorised during DELIVER, after crafter blocked on missing Service-submission driving port). Original 02-03 assumed `SubmitWorkloadRequest.spec` already accepted `WorkloadSpecInput` (any kind); structural finding during dispatch confirmed it accepts only `JobSpecInput`. User chose option (a) \u2014 expand 02-03 to also widen the submit driving port from Job-only to all WorkloadKind, add `WorkloadSpec` persistence codec (rkyv envelope per ADR-0048), and add Service listener rendering on alloc_status. The 6 acceptance scenarios remain unchanged. effort_hours estimate (8h) understates the expanded scope (~20\u201324h actual) \u2014 advisory only per CLAUDE.md, no enforcement.",
+      "2026-05-14 \u2014 Reviewer-pass amendment: fixed 5 issues (1 critical, 2 high, 2 medium) per observation #41016. Removed duplicate S-VIP-11 from 01-02; disambiguated S-VIP-06 phase boundaries across 03-01/03-02/03-03; corrected property-test file placement per DWD-03; removed unjustified id.rs reference from 01-01; clarified config validation ownership between 01-01 (type-level) and 02-02 (parser surface).",
+      "2026-05-14 \u2014 Allocator design course-correction amendment (post DELIVER step 01-01 implementation; ADR-0049 \u00a7 Amendments / \u00a7 Considered alternatives Alt-0). The generic `PoolAllocator<T: Token>` core + `IntentBackedAllocator<T>` generic shim from the original DESIGN are deleted \u2014 rejected during DELIVER step 01-01 as overstated abstraction. The landing shape is two concrete allocators (`BackendIdAllocator`, `ServiceVipAllocator`) sharing no trait or type, plus a concrete `PersistentServiceVipAllocator` shim. Step 01-01 rewritten (drops Token + PoolAllocator; describes the concrete ServiceVipAllocator + VipRange + the absorbed BackendIdAllocator relocation). Step 01-02 collapses to ServiceVip newtype consolidation (no Token impl). Step 01-03 renames `IntentBackedAllocator<T>` to `PersistentServiceVipAllocator`. Step 01-04 (BackendIdAllocator single-cut migration) is DELETED \u2014 absorbed into 01-01 because the relocation is forced by deleting PoolAllocator. total_steps: 11 \u2192 10; Phase 1 step count: 4 \u2192 3. Validation status reset to pending for re-review."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Core primitives and shared allocator",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "VipRange, ServiceVipAllocator, and BackendIdAllocator relocation",
+          "description": "Land the two-allocator surface in `crates/overdrive-dataplane/src/allocators/` (amended 2026-05-14 \u2014 drops the generic `Token` trait and `PoolAllocator<T>` core; the actually-shared logic across BackendIdAllocator and ServiceVipAllocator is thinner than the generic abstraction required \u2014 see ADR-0049 \u00a7 Considered alternatives \u2192 Alt-0). Three concrete pieces: (1) `VipRange` (Ipv4Net + BTreeSet<Ipv4Addr> reserved exclusions) with TYPE-LEVEL config validation (overlapping CIDRs, out-of-range reserved, zero-capacity \u2014 all via `VipRange::new` constructor returning `VipAllocatorConfigError` variants). (2) `ServiceVipAllocator` (concrete, NOT generic) with `BTreeMap<ServiceSpecDigest, ServiceVip>` memo, monotonic counter, `allocate/release/get/memo_len` API. Release deletes the memo entry but does NOT recycle the counter slot \u2014 matches BackendIdAllocator's pre-existing 'counter is monotonic; released slot is not reused' semantics. (3) Single-cut relocation of existing `BackendIdAllocator` from `crates/overdrive-dataplane/src/allocator.rs` to `crates/overdrive-dataplane/src/allocators/backend_id.rs` \u2014 struct body untouched, file moves only. Update all workspace imports (path change only \u2014 API stable). Delete the old `allocator.rs`. This step absorbs the work that was step 01-04 (the BackendIdAllocator relocation is forced by the deletion of `PoolAllocator<T>`; the relocation cannot land in a later step without breaking the build). Property tests for VipRange capacity invariant (S-VIP-P04), reserved-address skipping (S-VIP-21), and ServiceVipAllocator no-duplicate-token invariant (S-VIP-P03). NOTE: TOML parse-surface validation (same invalid shapes surfacing through operator-facing messages at boot) is OWNED BY step 02-02, not here.",
+          "criteria": "S-VIP-P04: VipRange::capacity() == cidr_size - reserved_count for all valid (cidr, reserved) inputs via proptest. S-VIP-21: ServiceVipAllocator with ranges=[10.96.0.0/30] and reserved=[10.96.0.0, 10.96.0.3] allocates only from {.1, .2} and returns ServiceVipAllocatorError::Exhausted{allocated:2, capacity:2} on third call. S-VIP-P03: For all sequences of N allocate() calls on ServiceVipAllocator with distinct spec_digest keys (N <= capacity), all returned ServiceVips are distinct, memo_len() == N, and after release of digest D, a subsequent allocate(&D) returns a valid (possibly different \u2014 monotonic counter advanced) ServiceVip; releasing digest D MUST NOT cause a subsequent allocate(&E) for E != D to receive D's released VIP within the same process lifetime (monotonic-counter, no-slot-reuse property). S-VIP-16 (TYPE-LEVEL \u2014 pure-Rust unit tests, no TOML): VipRange::new with overlapping CIDR inputs returns VipAllocatorConfigError::OverlappingRanges. S-VIP-17 (TYPE-LEVEL): VipRange::new with a reserved address outside the configured range returns VipAllocatorConfigError::ReservedOutsideRange. S-VIP-18 (TYPE-LEVEL): VipRange::new with zero effective capacity returns VipAllocatorConfigError::ZeroCapacity. S-VIP-11 (absorbed from former step 01-04): BackendIdAllocator API (allocate, release, memo_len) has identical signatures post-relocation; all existing BackendIdAllocator tests pass at their new location; no import of the deleted `crates/overdrive-dataplane/src/allocator.rs` remains in the workspace; cargo check --workspace succeeds.",
+          "test_file": "crates/overdrive-dataplane/tests/allocator_properties.rs",
+          "scenario_name": "service_vip_allocator_no_duplicate_tokens, service_vip_allocator_no_slot_reuse_on_release, vip_range_capacity_invariant, vip_range_rejects_overlapping_cidrs, vip_range_rejects_reserved_outside_range, vip_range_rejects_zero_capacity, reserved_addresses_skipped_during_allocation, backend_id_allocator_api_stability",
+          "effort_hours": 8,
+          "dependencies": [],
+          "implementation_notes": "Property tests (S-VIP-P03, S-VIP-P04) and reserved-skipping (S-VIP-21) live in tests/allocator_properties.rs per DWD-03 (unit-level default lane). Type-level config-error scenarios (S-VIP-16/17/18) are pure-Rust #[test] functions co-located in the same file or a sibling unit-test file at the crafter's discretion; they do NOT belong in a `tests/acceptance/` harness because there is no acceptance surface \u2014 VipRange::new is a pure constructor. The parser surface variant of these same errors (TOML boot path) is owned by step 02-02. The S-VIP-11 BackendIdAllocator API-stability assertion was absorbed from the deleted step 01-04 on 2026-05-14 along with the relocation it defends; existing BackendIdAllocator proptest and collision-witness tests move with the file. No `token.rs` and no `pool.rs` exist in the landing shape \u2014 the generic core was rejected at this step's implementation pass (see ADR-0049 \u00a7 Considered alternatives \u2192 Alt-0).",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-dataplane/src/allocators/mod.rs",
+              "crates/overdrive-dataplane/src/allocators/vip_range.rs",
+              "crates/overdrive-dataplane/src/allocators/service_vip.rs",
+              "crates/overdrive-dataplane/src/allocators/backend_id.rs",
+              "crates/overdrive-dataplane/src/allocators/error.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-dataplane/src/lib.rs",
+              "crates/overdrive-dataplane/Cargo.toml",
+              "crates/overdrive-dataplane/src/swap.rs",
+              "crates/overdrive-control-plane/src/reconcilers/service_map_hydrator/mod.rs",
+              "crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs"
+            ],
+            "files_to_delete": [
+              "crates/overdrive-dataplane/src/allocator.rs"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "ServiceVip newtype consolidation",
+          "description": "Consolidate the two ServiceVip declarations into a single canonical `overdrive-core::id::ServiceVip(Ipv4Addr)` and delete the duplicate at `crates/overdrive-core/src/aggregate/workload_spec.rs:360`. Update `crates/overdrive-dataplane/src/allocators/service_vip.rs` (landed in step 01-01 with a local ServiceVip declaration to keep that step self-contained) to import/re-export the canonical newtype, deleting the local declaration. Property test for ServiceVip newtype roundtrip (S-VIP-P01). NOTE: amended 2026-05-14 \u2014 was 'ServiceVip newtype consolidation AND Token impl'; the Token trait was deleted in step 01-01 along with PoolAllocator<T>, so no Token impl is needed. The step now collapses to the newtype consolidation alone.",
+          "criteria": "S-VIP-P01: ServiceVip::from_str(&ServiceVip::new(a).to_string()) == Ok(ServiceVip(a)) for all valid IPv4 via proptest; ServiceVip serde roundtrip (JSON serialize/deserialize). S-VIP-12: ServiceVipAllocator constructed with VipRange from ranges=[10.96.0.0/24] allocates a ServiceVip within range, returns the same VIP on memo-hit for the same spec_digest, get returns None after release. Canonicalisation: only one ServiceVip declaration exists in the codebase after this step \u2014 the duplicate at `aggregate/workload_spec.rs:360` is removed in this same commit, and the dataplane allocator's local ServiceVip declaration is replaced by an import/re-export of the canonical newtype.",
+          "test_file": "crates/overdrive-core/tests/service_vip_properties.rs",
+          "scenario_name": "service_vip_newtype_roundtrip, service_vip_allocator_serves_canonical_newtype",
+          "effort_hours": 3,
+          "dependencies": [
+            "01-01"
+          ],
+          "implementation_notes": "Per DWD-03: property tests live at the unit-level default lane, NOT in tests/acceptance/. S-VIP-P01 (proptest) goes in crates/overdrive-core/tests/service_vip_properties.rs (dedicated proptest file). The S-VIP-12 ServiceVipAllocator end-to-end scenario can co-locate in the same proptest file as a non-proptest #[test], or move to a sibling unit-test file at the crafter's discretion \u2014 it is NOT acceptance-shaped (no driving-port harness). Listed `test_file` is the primary unit-test destination. No `token.rs` exists post-2026-05-14 amendment; the dataplane `service_vip.rs` is the only file that referenced the local ServiceVip and is the surface that switches to the canonical import in this step.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-core/tests/service_vip_properties.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-core/src/id.rs",
+              "crates/overdrive-core/src/aggregate/workload_spec.rs",
+              "crates/overdrive-dataplane/src/allocators/service_vip.rs"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "01-03",
+          "name": "ServiceVipAllocatorEntry rkyv envelope and PersistentServiceVipAllocator",
+          "description": "Define ServiceVipAllocatorEntryV1 (spec_digest key, ServiceVip value, monotonic counter) with rkyv versioned envelope per ADR-0048 \u2014 concrete to ServiceVip; no generic across token types. Implement `PersistentServiceVipAllocator` (concrete, NOT generic \u2014 amended 2026-05-14: was `PersistentServiceVipAllocator<T>`) wrapping the in-memory `ServiceVipAllocator` from step 01-01 with write-through to IntentStore (fsync-then-memory ordering). Implement bulk_load for restart reconstruction. Add `allocator_entries` redb table to LocalStore (scoped to ServiceVip; no namespace prefix needed since BackendId never persists). Golden-bytes schema evolution test (S-VIP-P02). Persistence roundtrip test (S-VIP-05). No-partial-state-on-exhaustion test (S-VIP-10).",
+          "criteria": "S-VIP-P02: ServiceVipAllocatorEntryV1 golden-bytes fixture hex-decodes, rkyv-deserialises into envelope, into_latest() returns canonical Latest projection. S-VIP-05: PersistentServiceVipAllocator allocates VIP V for digest D, persists to IntentStore; after bulk_load from same store, get(&D) returns Some(V) and allocate(D) returns same V. S-VIP-10: Pool with 1 address fully allocated; allocate(new_digest) returns Err(Exhausted); get(&new_digest) returns None; get(&existing_digest) returns prior VIP. S-VIP-20: release of already-released key is idempotent (no error, get returns None).",
+          "test_file": "crates/overdrive-dataplane/tests/acceptance.rs",
+          "scenario_name": "service_vip_allocator_entry_golden_bytes_roundtrip, persistence_across_restart, no_partial_state_on_exhaustion, release_idempotent",
+          "effort_hours": 6,
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_notes": "S-VIP-P02 (rkyv golden-bytes schema-evolution fixture) lives at tests/schema_evolution/service_vip_allocator_entry.rs per ADR-0048 and DWD-03; the entrypoint at tests/schema_evolution.rs is created in this step. Non-property scenarios (S-VIP-05, S-VIP-10, S-VIP-20) exercise real LocalStore + bulk_load and are acceptance-shaped \u2014 they belong in tests/acceptance.rs. The crafter may choose the exact file name (`persistent_service_vip.rs` vs `persistent.rs`) within the `allocators/` module; the listed file is the suggested name.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-dataplane/src/allocators/persistent_service_vip.rs",
+              "crates/overdrive-dataplane/src/allocators/entry.rs",
+              "crates/overdrive-dataplane/tests/schema_evolution.rs",
+              "crates/overdrive-dataplane/tests/schema_evolution/service_vip_allocator_entry.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-dataplane/src/allocators/mod.rs",
+              "crates/overdrive-dataplane/Cargo.toml",
+              "crates/overdrive-store-local/src/lib.rs",
+              "crates/overdrive-store-local/src/redb_backend.rs",
+              "crates/overdrive-core/src/traits/intent_store.rs"
+            ],
+            "files_to_delete": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Upstream cleanup and admission wiring",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Remove Listener.vip field and simplify uniqueness",
+          "description": "Remove vip: Option<ServiceVip> from the Listener struct in workload_spec.rs. Simplify the listener uniqueness rule from (vip, port, protocol) to (port, protocol). Delete the duplicate ServiceVip declaration at workload_spec.rs:360 if not already done. Delete slice-06 tests that exercise mixed-pinned-and-pending VIP scenarios. Update property tests to round-trip (port, protocol) pairs. Ensure serde deny_unknown_fields rejects operator-supplied vip field with named guidance.",
+          "criteria": "S-VIP-13: Parsing a Service spec TOML with [[listener]] containing vip = '10.96.42.17' fails with a typed error naming the unknown field and guiding removal. S-VIP-14: Submitting such a spec via submit_workload returns HTTP 400/422; alloc status shows no allocation; allocator get returns None. Listener struct has no vip field. Uniqueness check uses (port, protocol) only. All existing slice-06 tests for mixed-pinned-and-pending VIP delete in this commit. cargo check --workspace succeeds.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance.rs",
+          "scenario_name": "parser_rejects_vip_field, parser_rejection_no_state_mutation",
+          "effort_hours": 4,
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_scope": {
+            "files_to_create": [],
+            "files_to_modify": [
+              "crates/overdrive-core/src/aggregate/workload_spec.rs",
+              "crates/overdrive-core/src/id.rs",
+              "crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-02",
+          "name": "VIP allocator config parsing",
+          "description": "Add [dataplane.vip_allocator] TOML subsection with required ranges (Vec<Ipv4Net>) and optional reserved (Vec<Ipv4Addr>). Wire config parsing into control-plane boot path. Boot fails with typed VipAllocatorConfigError::Missing if the section is absent. Config validation delegates to VipRange constructor from step 01-01 (which already owns the type-level checks for OverlappingRanges, ReservedOutsideRange, ZeroCapacity). This step owns the PARSER SURFACE \u2014 the same three invalid shapes, expressed in a TOML [dataplane.vip_allocator] block at boot, surface as operator-facing typed errors via the boot health.startup.refused event.",
+          "criteria": "S-VIP-15 (config-section presence): Control-plane boot with [dataplane] section but no [dataplane.vip_allocator] subsection fails with VipAllocatorConfigError::Missing; error names the missing section; structured health.startup.refused event emitted. Valid config: ranges = ['10.96.0.0/24'] parses successfully and produces a VipRange with capacity 254 (network and broadcast auto-excluded or explicit). S-VIP-16 (PARSER-SURFACE \u2014 operator-facing TOML): TOML [dataplane.vip_allocator] with overlapping ranges (e.g. ranges = ['10.96.0.0/24', '10.96.0.128/25']) surfaces VipAllocatorConfigError::OverlappingRanges with an operator-facing message at boot via health.startup.refused. S-VIP-17 (PARSER-SURFACE): TOML with reserved address outside any configured range surfaces VipAllocatorConfigError::ReservedOutsideRange at boot. S-VIP-18 (PARSER-SURFACE): TOML with zero effective capacity surfaces VipAllocatorConfigError::ZeroCapacity at boot. cargo check --workspace succeeds.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance.rs",
+          "scenario_name": "missing_vip_allocator_config_boot_refuses, valid_vip_allocator_config_parses, vip_allocator_config_overlapping_ranges_surfaces_typed_error, vip_allocator_config_reserved_outside_range_surfaces_typed_error, vip_allocator_config_zero_capacity_surfaces_typed_error",
+          "effort_hours": 4,
+          "dependencies": [
+            "01-01"
+          ],
+          "implementation_notes": "S-VIP-16/17/18 appear in two steps with different scopes: step 01-01 owns the type-level invariant (VipRange::new returns the typed error from a pure-Rust call), and this step owns the parser surface (the same error surfaces at TOML boot with operator-facing messages). The two scopes are not duplicates \u2014 they exercise different boundaries (constructor vs config parser + boot path).",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-control-plane/src/vip_allocator_config.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-control-plane/src/api.rs",
+              "crates/overdrive-control-plane/Cargo.toml"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-03a",
+          "name": "WorkloadSpec rkyv codec + reader-site migration (Job -> WorkloadSpec)",
+          "description": "Add the WorkloadSpec rkyv versioned envelope + archive_for_store / from_store_bytes / spec_digest codec (mirrors Job::archive_for_store precedent per ADR-0048 sect 4b - codec lives on the typed value, store stays byte-level). Migrate every existing Job::archive_for_store / Job::from_store_bytes reader site to WorkloadSpec::* in a single-cut commit (no parallel paths, no deprecation, per feedback_single_cut_greenfield_migrations.md): submit_workload writer path, describe_workload reader, reconciler runtime hydrate_desired, LocalIntentStore recovery walk, streaming.rs spec-byte loads, alloc_status if it reads stored spec bytes. Submit handler still accepts JobSpecInput at this point (Service-arm widening happens in 02-03b); the wire-shape change is internal-only. Golden-bytes fixture pins WorkloadSpecEnvelopeV1 archived layout. No VIP allocator wiring.",
+          "criteria": "WorkloadSpec::archive_for_store / from_store_bytes round-trip for every variant (Service / Job / Schedule). WorkloadSpec::spec_digest is deterministic (SHA-256 over canonical archived bytes). Golden-bytes fixture for WorkloadSpecEnvelopeV1 hex-decodes + rkyv-deserialises + projects to Latest, asserts equality with a canonical payload. All existing Job-bytes reader sites switched to WorkloadSpec; workspace compile clean. Existing acceptance + integration tests still pass (behaviour preserved across the codec migration - Job submissions still land, describe still returns spec, reconciler still hydrates).",
+          "test_file": "Schema-evolution fixture: tests/schema_evolution/workload_spec.rs in the crate that owns Job's schema_evolution fixtures (likely overdrive-core or overdrive-store-local - crafter to confirm).",
+          "scenario_name": "workload_spec_envelope_v1_golden_bytes_roundtrip",
+          "effort_hours": 8,
+          "dependencies": [
+            "01-03"
+          ],
+          "implementation_notes": "Single-cut migration per feedback_single_cut_greenfield_migrations.md: delete Job::archive_for_store / Job::from_store_bytes (or alias them to WorkloadSpec equivalents and delete the alias in the same commit). No JobEnvelope re-export shim. Phase 1 greenfield: 'delete the on-disk redb file' IS the official upgrade path; no migration code for pre-envelope rows.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/<owner>/tests/schema_evolution/workload_spec.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-core/src/aggregate/workload_spec.rs",
+              "crates/overdrive-core/src/aggregate/mod.rs",
+              "crates/overdrive-control-plane/src/handlers.rs",
+              "crates/overdrive-control-plane/src/streaming.rs",
+              "crates/overdrive-store-local/src/lib.rs",
+              "any reconciler-runtime / recovery-walk site that calls Job::archive_for_store or Job::from_store_bytes"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-03b",
+          "name": "SubmitSpecInput wire layer + JobSpecInput call-site cascade",
+          "description": "Per ADR-0051 (Accepted 2026-05-15): introduce SubmitSpecInput at crates/overdrive-core/src/api/submit.rs (new module) with variants Job(JobSpecInput) / Service(ServiceSpecInput) / Schedule(ScheduleSpecInput). JobSpecInput stays verbatim as the Job arm's inner type (OQ-3 - additive, zero changes to today's Job wire shape). ServiceSpecInput per OQ-4: {id, replicas, resources, driver, listeners: Vec<ListenerInput>} where ListenerInput {port, protocol} - NO vip (S-VIP-13/14 parser rejection is upstream). ScheduleSpecInput per OQ-5 with embedded JobSpecInput. Add per-kind validating constructors on intent-side aggregates (OQ-6, mirrors Job::from_spec / ADR-0050 \u00a7 4): JobV1::from_submit (rename of existing JobV1::from_spec - cascades across ~15-20 source files); ServiceV1::from_submit (new); ScheduleV1::from_submit (todo!(\"RED scaffold\") stub per testing.md production-side scaffold convention; gate clippy::todo via #[expect(...)] on the carrying module). Widen SubmitWorkloadRequest.spec: JobSpecInput -> SubmitSpecInput; delete the redundant workload_kind: Option<String> field (kind discriminator lives inside SubmitSpecInput per OQ-8). Every existing JobSpecInput construction site wrapped as SubmitSpecInput::Job(_) (~14 SubmitWorkloadRequest sites + propagation through CLI commands/job.rs three submit paths). OpenAPI regen: SubmitSpecInput renders as oneOf with kind: \"job\"|\"service\"|\"schedule\" discriminator (OQ-7, utoipa default). Single-cut per feedback_single_cut_greenfield_migrations.md: no JobSpecInput-typed SubmitWorkloadRequest.spec shim survives. NO allocator wiring (lands in 02-03c). NO Service-arm code in submit_workload handler beyond a 501-shaped rejection placeholder (Service-arm submission lands in 02-03c). NO new acceptance scenarios in this step (S-VIP-01/02/03/04/08/09 all live in 02-03c). Existing Job-only acceptance tests must continue to pass after the wire-shape widening - that IS the behavior-preservation AC. Depends on 02-03a's WorkloadIntent codec migration being in place (commit 3cd7d1d5).",
+          "criteria": "SubmitSpecInput compiles with three variants at crates/overdrive-core/src/api/submit.rs. SubmitWorkloadRequest.spec field is typed SubmitSpecInput and workload_kind field is deleted. Every existing JobSpecInput construction site (14 SubmitWorkloadRequest writers + 3 CLI paths) wraps via SubmitSpecInput::Job(_). JobV1::from_submit replaces the JobV1::from_spec entry point at every source call site; rustdoc and in-prose references in CLAUDE.md / .claude/rules/ updated to match. ServiceV1::from_submit and ScheduleV1::from_submit exist; ScheduleV1 is a todo! RED scaffold. OpenAPI gate passes (cargo run -p overdrive-control-plane --bin openapi -- check); api/openapi.yaml carries the regenerated oneOf shape and is committed. Workspace cargo check --workspace --features integration-tests via Lima clean. cargo nextest run --workspace --features integration-tests via Lima: every previously-passing test still passes (NO new test scenarios in this step; behavior preservation is the AC). Clippy -D warnings clean. Submit handler Service arm returns a structured rejection (TBD: HTTP 501 Not Implemented or a typed ParseError surface) until 02-03c lands the real allocator-wired path; the Service arm match arm exists but does NOT silently fall through. ScheduleV1::from_submit todo!() is unreachable from any test.",
+          "test_file": "No new test file. Existing acceptance + integration tests across crates/overdrive-control-plane, crates/overdrive-cli, crates/overdrive-core must continue to pass. Specific litmus: crates/overdrive-control-plane/tests/integration/{submit_round_trip,idempotent_resubmit}.rs and crates/overdrive-cli/tests/integration/{job_submit,exec_spec_walking_skeleton}.rs all green after the JobSpecInput -> SubmitSpecInput::Job(_) wrap.",
+          "scenario_name": "existing_tests_preserved_under_submit_spec_input_migration",
+          "effort_hours": 6,
+          "dependencies": [
+            "02-03a"
+          ],
+          "implementation_notes": "Single-cut per feedback_single_cut_greenfield_migrations.md: no JobSpecInput-typed SubmitWorkloadRequest.spec shim. Delete workload_kind field on SubmitWorkloadRequest in the same commit. The Service-arm match in submit_workload returns a structured rejection placeholder (crafter judgement on HTTP shape; surface as a blocker if unclear) - real Service-arm logic lands in 02-03c. Schedule-arm match returns the same placeholder shape; the ScheduleV1::from_submit todo!() is only reachable if Schedule submission is actually exercised, which 02-03c will explicitly defer.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-core/src/api/mod.rs",
+              "crates/overdrive-core/src/api/submit.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-core/src/lib.rs",
+              "crates/overdrive-core/src/aggregate/mod.rs",
+              "crates/overdrive-control-plane/src/api.rs",
+              "crates/overdrive-control-plane/src/handlers.rs",
+              "crates/overdrive-cli/src/commands/job.rs",
+              "crates/overdrive-cli/src/http_client.rs",
+              "api/openapi.yaml",
+              "any other JobV1::from_spec / SubmitWorkloadRequest construction site enumerated via grep"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-03c",
+          "name": "VipRange default + ServiceVipAllocator boot wiring into AppState (infra cascade)",
+          "description": "Infra cascade landing the default-with-override VipRange posture (ADR-0049 amended 2026-05-15) and wiring PersistentServiceVipAllocator into AppState. Scope is intentionally narrow: NO Service-arm code paths, NO new acceptance scenarios, NO wire-shape changes beyond what the cascade requires. Job-arm and Schedule-arm continue to compile via existing 02-03b shape. Specifically: (1) `VipRange::default()` returns `10.96.0.0/16` with reserved `[10.96.0.0, 10.96.0.1, 10.96.255.255]`. (2) `parse_vip_allocator_section` returns `Option<VipRange>` (None on missing section, Some on present-and-valid, error on malformed-present). (3) Delete `VipAllocatorConfigError::Missing` variant + every emission site + every test asserting on it (single-cut greenfield migration per feedback_single_cut_greenfield_migrations.md). (4) Delete `health.startup.refused` emission for the missing-section path (keep emission for malformed-present). (5) `ServerConfig` gains a `vip_range: VipRange` field with `#[serde(default)]` (or equivalent fallback). (6) Boot path (run_server / run_server_with_obs_and_driver) constructs `PersistentServiceVipAllocator` via bulk_load against the IntentStore + VipRange. (7) `AppState` gains `allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>` field; `AppState::new` signature gains a mandatory `allocator` parameter (NOT defaulted in constructor body per development.md Port-trait dependencies). (8) All ~20 AppState::new(...) call sites enumerated via grep and migrated in this commit (production-adjacent + tests/ fixtures). (9) Two `unreachable!()` paths in handlers.rs (describe_workload + alloc_status Service arms) STAY unreachable in 02-03c \u2014 they resolve in 02-03d when Service-arm code lands. Job-arm continues to work end-to-end via the 02-03b wire shape. NO new acceptance scenarios in this step \u2014 quality gate is 'all existing tests pass, AppState plumbing in place, Missing variant deleted, boot uses allocator.'",
+          "criteria": "All existing workspace tests pass via `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests` (excepting the 8 pre-existing xtask parallel-run failures noted in 02-03b commit body). `VipRange::default()` returns `10.96.0.0/16` with reserved `[10.96.0.0, 10.96.0.1, 10.96.255.255]` (unit test). `parse_vip_allocator_section` returns `Ok(None)` on missing `[dataplane.vip_allocator]` section (unit test). `VipAllocatorConfigError::Missing` variant + every reference removed from the workspace (grep returns zero). `ServerConfig.vip_range` field exists with default fallback; AppState carries `Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>`; all AppState::new fixture call sites migrated. Job-arm submit / alloc-status / streaming end-to-end tests continue to pass (no regression). Workspace `cargo check`, `cargo clippy -- -D warnings`, OpenAPI gate all clean.",
+          "test_file": "No new acceptance scenarios. Unit tests for VipRange::default and parse_vip_allocator_section's None return live co-located with their source modules.",
+          "scenario_name": "vip_range_default_value, parse_vip_allocator_section_returns_none_on_missing",
+          "effort_hours": 5,
+          "dependencies": [
+            "02-03b",
+            "02-02",
+            "01-03",
+            "02-01"
+          ],
+          "implementation_notes": "Concurrency discipline (development.md): tokio::sync::Mutex (not parking_lot::Mutex). AppState::new takes allocator as mandatory parameter \u2014 do NOT default in constructor body (per Port-trait dependencies rule). Fixture cascade is ~20 call sites; default-with-override posture means most fixtures pass VipRange::default() with no allocation pre-state. Two unreachable!() paths in handlers.rs stay until 02-03d \u2014 do NOT preemptively wire Service-arm code; that's the deliberate seam between this step and 02-03d. Acceptance criteria are gate-only ('existing tests pass + plumbing in place') because all 6 user-facing S-VIP scenarios land in 02-03d once the Service-arm wires real code.",
+          "implementation_scope": {
+            "files_to_create": [],
+            "files_to_modify": [
+              "crates/overdrive-dataplane/src/allocators/vip_range.rs (VipRange::default impl)",
+              "crates/overdrive-control-plane/src/vip_allocator_config.rs (parse returns Option; delete Missing variant)",
+              "crates/overdrive-control-plane/src/error.rs (delete Missing references; keep other VipAllocatorConfigError variants)",
+              "crates/overdrive-control-plane/src/lib.rs (ServerConfig.vip_range field; AppState allocator field; AppState::new signature; boot construction)",
+              "every AppState::new(...) fixture call site \u2014 enumerated via grep at PREPARE (~20 files)"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-03d",
+          "name": "Service-arm submit + alloc_status + streaming + error 503 + 6 S-VIP acceptance scenarios",
+          "description": "Land the Service-arm code paths on top of the 02-03c infra cascade. Six acceptance scenarios for the Service submission flow. Wire-shape extension: `SubmitWorkloadResponse` gains a top-level `vip: Option<String>` field (null for Job/Schedule, populated for Service \u2014 per Q1.A resolution 2026-05-15). Specifically: (1) submit_workload Service arm: ServiceV1::from_submit(...) \u2192 WorkloadIntent::Service(svc).spec_digest() \u2192 lock allocator \u2192 allocate(&spec_digest).await INSIDE guard (that IS the serialization point) \u2192 drop guard explicitly BEFORE any further .await per development.md Concurrency rules \u2192 IntentStore admission write \u2192 SubmitWorkloadResponse with vip populated. (2) alloc_status Service arm: consult allocator.get(&spec_digest) for VIP rendering; per-listener lines render as (port, protocol) only \u2014 NO per-listener VIP. (3) Resolve both `unreachable!()` paths in handlers.rs (describe_workload + alloc_status Service arms) \u2014 they become real code in this commit. (4) streaming.rs Service-row emits VIP in streamed Service updates (extend SubmitEvent or its accepted variant with optional vip field; locate the correct envelope shape during PREPARE). (5) error.rs 503 mapping for PersistentAllocatorError::Allocator(ServiceVipAllocatorError::Exhausted{allocated, capacity}) with structured JSON body (follow existing error envelope precedent). (6) OpenAPI regen for SubmitWorkloadResponse + streaming event surface changes. (7) ServiceV1::from_submit body if not landed in 02-03b (verify at PREPARE). CLI range-visibility surface is DEFERRED to GH issue #182 (Q2.B resolution 2026-05-15) \u2014 Phase 1 visibility is satisfied by submit-echo carrying the allocated VIP.",
+          "criteria": "S-VIP-01 (submit_service_allocates_vip): Submit Service spec with [[listener]] port=8080 protocol=tcp (no vip field) via submit_workload; response 200/201; SubmitWorkloadResponse.vip is Some(\"10.96.x.y\") within active range and not reserved. S-VIP-02 (alloc_status_renders_same_vip): After submit, alloc-status query returns same VIP as submit echo; per-listener lines render as port/protocol only. S-VIP-03 (multi_listener_one_vip): Service spec with two listeners (8080/tcp, 8443/tcp) gets exactly one Service-level VIP; both listeners render as port/protocol. S-VIP-04 (idempotent_resubmit_same_vip): Resubmit byte-identical spec returns same VIP (works via content-addressed spec_digest). S-VIP-08 (pool_exhaustion_typed_rejection): Test overrides allocator with VipRange of 1 usable address; fully allocated; second distinct spec returns HTTP 503 with typed pool exhaustion error naming allocated and capacity counts. S-VIP-09 (pool_exhaustion_existing_unaffected): After exhaustion rejection, existing allocations still return their VIPs via get and alloc-status. Workspace gates pass; OpenAPI regen reflects SubmitWorkloadResponse.vip field; no new unreachable!()/todo!()/panic!() paths; both prior unreachable!() paths resolved.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_vip_submit_acceptance.rs (NEW, wired through tests/acceptance.rs inline mod block)",
+          "scenario_name": "submit_service_allocates_vip, alloc_status_renders_same_vip, multi_listener_one_vip, idempotent_resubmit_same_vip, pool_exhaustion_typed_rejection, pool_exhaustion_existing_unaffected",
+          "effort_hours": 8,
+          "dependencies": [
+            "02-03c",
+            "02-02",
+            "01-03",
+            "02-01"
+          ],
+          "implementation_notes": "Wire-shape decision (Q1.A 2026-05-15): SubmitWorkloadResponse gains top-level `vip: Option<String>` \u2014 null for Job/Schedule, Some for Service. Pragmatic for Phase 1; the symmetric kind-discriminated oneOf response shape is deferred (cleaner long-term but pulls in JobV1/ScheduleV1 response migration not in this feature's scope). Visibility deferral (Q2.B 2026-05-15): cluster-status / dedicated dataplane surface is GH issue #182. Phase 1 visibility is satisfied by submit-echo SubmitWorkloadResponse.vip. Concurrency: allocator.lock + allocate inside guard (allocate IS the serialization point); drop guard explicitly before any further .await. Pool exhaustion error envelope: match existing error.rs precedent, don't invent new shape. streaming.rs work: extend SubmitEvent (or its accepted variant) with optional vip field \u2014 same trade-offs as SubmitWorkloadResponse, land both in this single commit. Port-to-port discipline: drive all 6 scenarios through submit_workload / alloc_status HTTP entry points; litmus test = deleting allocator.allocate in Service arm must turn tests RED.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-control-plane/tests/acceptance/service_vip_submit_acceptance.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/handlers.rs (Service arm in submit_workload; resolve unreachable!() in describe_workload + alloc_status)",
+              "crates/overdrive-control-plane/src/api.rs (SubmitWorkloadResponse.vip field)",
+              "crates/overdrive-control-plane/src/streaming.rs (Service-row VIP emission; SubmitEvent extension)",
+              "crates/overdrive-control-plane/src/error.rs (PersistentAllocatorError::Allocator(Exhausted) \u2192 HTTP 503)",
+              "crates/overdrive-core/src/aggregate/mod.rs (ServiceV1::from_submit body if still todo from 02-03b)",
+              "crates/overdrive-control-plane/tests/acceptance.rs (wire new module via inline mod block)",
+              "api/openapi.yaml (regen via cargo openapi-gen)"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "02-04",
+          "name": "Earned Trust boot probe for VIP allocator",
+          "description": "Implement boot-time probe for PersistentServiceVipAllocator: IntentStore reachable, range non-empty, persisted state consistent with current range (every persisted VIP projects back within range). Probe runs during bulk_load. Failure surfaces as AllocatorBootError with health.startup.refused structured event. Control plane refuses to start on probe failure.",
+          "criteria": "S-VIP-19: IntentStore contains persisted allocator entry with VIP 10.96.1.100; current config has ranges=[10.96.0.0/24] (persisted VIP outside range); bulk_load returns Err(AllocatorBootError) naming the inconsistency; control plane refuses to start. Probe passes when persisted state is consistent with configured range. Probe passes on empty IntentStore (first boot).",
+          "test_file": "crates/overdrive-dataplane/tests/acceptance.rs",
+          "scenario_name": "boot_probe_refuses_inconsistent_state, boot_probe_passes_consistent_state, boot_probe_passes_empty_store",
+          "effort_hours": 3,
+          "dependencies": [
+            "01-03"
+          ],
+          "implementation_scope": {
+            "files_to_create": [],
+            "files_to_modify": [
+              "crates/overdrive-dataplane/src/allocators/intent_backed.rs",
+              "crates/overdrive-dataplane/src/allocators/error.rs",
+              "crates/overdrive-control-plane/src/api.rs"
+            ],
+            "files_to_delete": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Reclamation and integration",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "WorkloadLifecycle reconciler View extension and ReleaseServiceVip action emission",
+          "description": "Add Action::ReleaseServiceVip { spec_digest, correlation } variant to the Action enum. Extend WorkloadLifecycle reconciler View with released_for_terminal: BTreeSet<SpecDigest> (input field recording past emissions per persist-inputs-not-derived-state rule). On terminal-state observation, reconciler emits Action::ReleaseServiceVip exactly once if spec_digest not already in released_for_terminal, then adds it to next_view. Scope of this step: reconciler emission layer ONLY \u2014 does NOT exercise the action-shim and does NOT touch the allocator. Per-layer scenarios here aggregate into the end-to-end S-VIP-06 owned by step 03-03.",
+          "criteria": "S-VIP-06 PARTIAL (reconciler-emission layer ONLY \u2014 action-shim dispatch is in 03-02, end-to-end lifecycle is in 03-03): Given a WorkloadLifecycle reconciler tick after a terminal-state observation row, the reconciler emits Action::ReleaseServiceVip { spec_digest, correlation } exactly once and updates next_view so that released_for_terminal contains spec_digest. Re-tick with the same terminal-state observation does NOT re-emit (released_for_terminal gate is honoured). Action::ReleaseServiceVip variant exists in the Action enum with spec_digest and correlation fields. All existing WorkloadLifecycle tests pass (no regression).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance.rs",
+          "scenario_name": "terminal_state_emits_release_action_once, terminal_state_release_action_idempotent_on_reemit",
+          "effort_hours": 4,
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_notes": "Per-layer scope: reconciler emission only. Tests construct a WorkloadLifecycle reconciler with a SimObservationStore prepared with a terminal-state row, drive a single tick, and assert on the (actions, next_view) tuple \u2014 they do NOT instantiate an action-shim or an allocator. The end-to-end S-VIP-06 flow (submit -> terminal -> tick -> release -> reallocate) is owned by 03-03.",
+          "implementation_scope": {
+            "files_to_create": [],
+            "files_to_modify": [
+              "crates/overdrive-core/src/reconciler.rs",
+              "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "03-02",
+          "name": "Action-shim dispatch arm for ReleaseServiceVip",
+          "description": "Add match arm in action-shim dispatcher for Action::ReleaseServiceVip. The arm calls ServiceVipAllocator::release(&spec_digest), removing the entry from the in-memory memo and the IntentStore allocator_entries table. Released VIP returns to pool for reallocation. Wire the allocator reference into the action-shim context. Scope of this step: action-shim dispatch layer ONLY \u2014 does NOT exercise the reconciler emission path (covered by 03-01) and does NOT chain a full submit -> terminal -> reallocate lifecycle (covered by 03-03).",
+          "criteria": "S-VIP-06 PARTIAL (action-shim dispatch layer ONLY \u2014 reconciler emission in 03-01, end-to-end in 03-03): Given a pre-constructed Action::ReleaseServiceVip { spec_digest, correlation } (no reconciler involved), the action-shim dispatcher invokes ServiceVipAllocator::release(&spec_digest); after dispatch, allocator.get(&spec_digest) returns None. Action-shim exhaustive match compiles (no unhandled variant) and all existing action-shim tests pass.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance.rs",
+          "scenario_name": "release_action_dispatch_invokes_allocator_release",
+          "effort_hours": 3,
+          "dependencies": [
+            "03-01",
+            "02-03d"
+          ],
+          "implementation_notes": "Per-layer scope: action-shim dispatch only. Tests build an action-shim context with a real (or sim) ServiceVipAllocator pre-populated with one allocation, hand the dispatcher a hand-constructed Action::ReleaseServiceVip, and assert allocator.get returns None after the dispatch. S-VIP-07 (released VIP reusable on next allocation) belongs to 03-03 because it requires the submit_workload driving port.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-control-plane/src/action_shim/release_service_vip.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/action_shim/mod.rs",
+              "crates/overdrive-control-plane/src/api.rs",
+              "crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "files_to_delete": []
+          }
+        },
+        {
+          "id": "03-03",
+          "name": "End-to-end acceptance tests and final quality gate",
+          "description": "Write end-to-end integration tests exercising the full lifecycle: submit Service spec, VIP allocation echo, alloc-status rendering, terminal-state transition, reconciler tick, action-shim dispatch, release, VIP reuse on next submit. This step OWNS the S-VIP-06 end-to-end scenario (chained across the reconciler emission of 03-01 and the action-shim dispatch of 03-02) and S-VIP-07 (released VIP reusable on next allocation). Verify all 21 DISTILL scenarios pass. Run mutation testing (cargo xtask mutants --diff origin/main) on touched files. Verify all quality gates pass.",
+          "criteria": "S-VIP-06 END-TO-END (this step owns the full flow): submit Service A spec -> allocator returns VIP V -> submit echo contains V -> observation transitions to terminal -> WorkloadLifecycle reconciler tick emits Action::ReleaseServiceVip -> action-shim dispatch calls allocator.release -> allocator.get(&digest_A) returns None. S-VIP-07: With a pool of exactly 1 address (ranges=[10.96.0.1/32]), after the above end-to-end release completes, submit a byte-different Service B; submit echo for B contains the previously-allocated VIP 10.96.0.1 (released VIP reusable on next allocation). S-VIP-01 through S-VIP-21 and S-VIP-P01 through S-VIP-P04 all pass in the workspace-wide run. Mutation testing kill rate >= 80% on all files touched in this feature. cargo check --workspace succeeds. cargo xtask lima run -- cargo nextest run --workspace --features integration-tests passes. No regressions in existing test suite.",
+          "test_file": "crates/overdrive-control-plane/tests/integration.rs",
+          "scenario_name": "terminal_state_releases_vip_end_to_end, released_vip_reusable_on_next_allocation, vip_allocator_pool_exhaustion_and_recovery",
+          "effort_hours": 6,
+          "dependencies": [
+            "03-02",
+            "02-04"
+          ],
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-control-plane/tests/integration/vip_allocator_lifecycle.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/tests/integration.rs"
+            ],
+            "files_to_delete": []
+          }
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-dataplane/src/allocators/",
+      "crates/overdrive-core/src/id.rs",
+      "crates/overdrive-core/src/aggregate/workload_spec.rs",
+      "crates/overdrive-core/src/reconciler.rs",
+      "crates/overdrive-core/src/codec/envelope.rs",
+      "crates/overdrive-core/src/traits/intent_store.rs",
+      "crates/overdrive-store-local/src/",
+      "crates/overdrive-control-plane/src/handlers.rs",
+      "crates/overdrive-control-plane/src/api.rs",
+      "crates/overdrive-control-plane/src/error.rs",
+      "crates/overdrive-control-plane/src/action_shim/",
+      "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+      "crates/overdrive-control-plane/src/reconcilers/",
+      "crates/overdrive-control-plane/src/streaming.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-dataplane/tests/",
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-control-plane/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/integration/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "crates/overdrive-bpf/**",
+      "crates/overdrive-sim/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-05-14T19:45:00Z",
+    "notes": "Re-review needed after 2026-05-15 step 02-03c split into 02-03c (infra cascade) + 02-03d (Service-arm + 6 acceptance scenarios). User-authorised after PREPARE-time crafter feasibility analysis identified 60-100 turn scope vs 30-turn budget; ADR-0049 amendment (default-with-override) resolved blocker but surface scope unchanged. ADR-0049 / 0050 / 0051 unchanged. See changelog."
+  }
+}

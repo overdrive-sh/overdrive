@@ -1,5 +1,5 @@
 //! Round-trip acceptance scenarios for `wire-exec-spec-end-to-end` —
-//! `JobSpecInput` ↔ `Job::from_spec` ↔ `From<&Job>` is identity for
+//! `JobSpecInput` ↔ `Job::from_submit` ↔ `From<&Job>` is identity for
 //! every valid input carrying the new exec block.
 //!
 //! Covers `docs/feature/wire-exec-spec-end-to-end/distill/test-scenarios.md`
@@ -35,7 +35,7 @@ fn jobspec_input_roundtrips_through_aggregate_with_exec_block() {
         }),
     };
 
-    let job = Job::from_spec(original.clone()).expect("canonical spec is valid");
+    let job = Job::from_submit(original.clone()).expect("canonical spec is valid");
     let back = JobSpecInput::from(&job);
 
     assert_eq!(back, original, "JobSpecInput → Job → JobSpecInput must be identity");
@@ -53,7 +53,7 @@ fn jobspec_input_roundtrips_with_empty_args_vec() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
-    let job = Job::from_spec(original.clone()).expect("zero-args spec is valid");
+    let job = Job::from_submit(original.clone()).expect("zero-args spec is valid");
     let back = JobSpecInput::from(&job);
 
     assert_eq!(back, original);
@@ -146,7 +146,7 @@ proptest! {
     fn jobspec_input_roundtrip_property_with_exec_block(
         original in arb_jobspec_input(),
     ) {
-        let job = Job::from_spec(original.clone())
+        let job = Job::from_submit(original.clone())
             .expect("generator yields valid JobSpecInput");
         let back = JobSpecInput::from(&job);
         prop_assert_eq!(back, original);

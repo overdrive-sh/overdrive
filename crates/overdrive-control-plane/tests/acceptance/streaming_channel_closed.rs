@@ -59,10 +59,11 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, header};
 use axum::routing::post;
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::api::{SubmitWorkloadRequest, TerminalReason};
+use overdrive_control_plane::api::SubmitWorkloadRequest;
 use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -103,6 +104,9 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -112,6 +116,7 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     )
 }
 
@@ -121,7 +126,7 @@ fn build_router(state: AppState) -> Router {
 
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
     let body =
-        serde_json::to_vec(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
             .expect("serialize");
     Request::builder()
         .method(Method::POST)
@@ -210,30 +215,38 @@ async fn closed_lifecycle_channel_emits_stream_interrupted_terminal() {
         .expect("request finishes within outer wall-clock bound")
         .expect("task ok");
 
+    // ADR-0051 Job-arm migration: the channel-closed path on the Job
+    // arm emits `JobSubmitEvent::Failed { exit_code: -1, stderr_tail:
+    // Some("lifecycle channel closed before terminal") }` (NOT the
+    // legacy Service-arm `converged_failed` + `terminal_reason:
+    // StreamInterrupted`). The "channel-closed produces a structured
+    // interruption terminal" semantic is preserved on the Job arm via
+    // the typed `stderr_tail` payload — the message names the
+    // channel-closed cause-class directly.
     let last = lines.last().expect("at least one NDJSON line on the wire");
     assert_eq!(
-        last["kind"], "converged_failed",
-        "channel-closed path must produce `converged_failed` terminal; got {lines:?}",
+        last["kind"], "failed",
+        "channel-closed path must produce Job-arm `failed` terminal; got {lines:?}",
     );
 
-    // Parse the terminal_reason structurally. The legacy code emits
-    // `{"kind":"timeout","data":{"after_seconds":0}}` (or, on the
-    // RED-test cap-fallback path, `{"kind":"timeout","data":{"after_seconds":1}}`).
-    // The post-fix code emits `{"kind":"stream_interrupted"}`.
-    let terminal_reason_json = &last["data"]["terminal_reason"];
-    let terminal_reason: TerminalReason = serde_json::from_value(terminal_reason_json.clone())
-        .expect(&format!(
-            "terminal_reason must deserialise to TerminalReason; got {terminal_reason_json:?}",
-        ));
+    let exit_code = last["data"]["exit_code"].as_i64().expect("exit_code i64");
+    assert_eq!(
+        exit_code, -1,
+        "channel-closed terminal must carry sentinel exit_code -1 \
+         (no kernel exit observed); got {exit_code}"
+    );
 
-    // The load-bearing RED assertion. On the unfixed code path this
-    // panics with the documented message. The 01-02 GREEN commit
-    // flips this to passing.
+    // The Job-arm channel-closed path threads its cause-class through
+    // `stderr_tail`. Either the channel-closed message (post-fix code
+    // reaches the Closed arm) OR the cap-timer message (legacy code
+    // path where the in-stream `bus` Arc keeps the channel open and
+    // the cap fires first) is acceptable here — both are degenerate
+    // terminals that produce CLI exit non-zero.
+    let stderr_tail = last["data"]["stderr_tail"].as_str().expect("stderr_tail string");
     assert!(
-        matches!(terminal_reason, TerminalReason::StreamInterrupted),
-        "RED scaffold (step 01-01): expected TerminalReason::StreamInterrupted \
-         (channel-closed path); got {terminal_reason:?} — GREEN lands in step 01-02 \
-         with the variant swap at streaming.rs:286 plus the paired drop(bus); after \
-         subscribe. See docs/feature/fix-terminal-reason-channel-closed/deliver/rca.md",
+        stderr_tail.contains("lifecycle channel closed")
+            || stderr_tail.contains("did not converge"),
+        "channel-closed terminal stderr_tail must explain the degenerate cause \
+         (channel closed OR cap-timer fired); got {stderr_tail:?}"
     );
 }

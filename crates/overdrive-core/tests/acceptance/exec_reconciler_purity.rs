@@ -60,7 +60,7 @@ fn make_node(id: &str, capacity: Resources) -> Node {
     Node { id: nid(id), region: local_region(), capacity }
 }
 
-/// Construct a `Job` aggregate directly (NOT through `Job::from_spec`)
+/// Construct a `Job` aggregate directly (NOT through `Job::from_submit`)
 /// so the test fixture wires explicit `command` / `args` values without
 /// depending on the new wire-shape input twin. This keeps the focused
 /// scenario isolated from the input shape — a regression in the input
@@ -151,18 +151,22 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     // branch and emits StartAllocation.
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -215,18 +219,22 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     // attempts=0, no deadline → restart fires immediately.
     let view = WorkloadLifecycleView::default();
@@ -279,18 +287,22 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
 
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
 

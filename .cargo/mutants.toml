@@ -221,6 +221,38 @@ exclude_re = [
     # masks the equivalent-mutant case while V1 is the only variant.
     "::known_discriminants -> &'static\\[u8\\] with Vec::leak\\(vec!\\[0\\]\\)",
 
+    # `<impl VersionedEnvelope for WorkloadIntentEnvelope>::{discriminant_offset_from_end,
+    # known_discriminants, type_name}` — outer-envelope variant whose
+    # body is a DEFERRED-BY-DESIGN no-op per ADR-0050 step 02-03a, NOT
+    # an empirical pin like JobEnvelope/AllocStatusRowEnvelope/etc.
+    # `discriminant_offset_from_end()` returns `None` while V1 is the
+    # only variant (the outer envelope wraps a 3-variant inner enum
+    # whose archived layout shifts the trailing root region in ways
+    # the JobEnvelope-style from-end pin cannot trivially adopt).
+    # `known_discriminants()` is consequently unused (the probe
+    # short-circuits on `None`), and `type_name()` feeds only the
+    # `EnvelopeError` Display form — no caller pattern-matches on the
+    # string. Re-pin in the same commit that introduces V2; that
+    # commit will replace these exclusions with the kill tests.
+    # Tracked in feedback_rkyv_envelope_forward_traps.md.
+    "<impl VersionedEnvelope for WorkloadIntentEnvelope>::discriminant_offset_from_end",
+    "<impl VersionedEnvelope for WorkloadIntentEnvelope>::known_discriminants",
+    "<impl VersionedEnvelope for WorkloadIntentEnvelope>::type_name",
+
+    # `ServiceVip::try_as_ipv4 -> Option<std::net::Ipv4Addr> with None` —
+    # equivalent-mutant under the Phase 1 forward-compat policy. The
+    # `IpAddr::V6` arm is structurally unreachable because
+    # `ServiceVipAllocator` (the only constructor of `ServiceVip` in
+    # production) issues IPv4 addresses exclusively per ADR-0049 § 5,
+    # and the parser layer does not yet admit IPv6 literals (the
+    # `serde(try_from = "String")` path could in principle decode a
+    # textual `::1` but no production wire payload carries one).
+    # When IPv6 lands (GH #155) the corresponding kill test will
+    # construct a `ServiceVip` from an IPv6 literal and assert
+    # `try_as_ipv4().is_none()`, at which point this exclusion is
+    # removed in the same commit.
+    "ServiceVip::try_as_ipv4 -> Option<std::net::Ipv4Addr> with None",
+
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement
     # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,

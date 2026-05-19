@@ -12,7 +12,7 @@
 //!     disk; `job::submit` POSTs `payments.toml`; the server returns
 //!     `outcome = Inserted` and a `spec_digest` BYTE-IDENTICAL to a
 //!     locally-computed
-//!     `ContentHash::of(rkyv::to_bytes(&Job::from_spec(...)))`.
+//!     `ContentHash::of(rkyv::to_bytes(&Job::from_submit(...)))`.
 //!     `alloc::status` GETs the same digest back.
 //!   WS-2 (§1.2) — `cluster::status` returns four fields
 //!     (`{mode, region, reconcilers, broker}`); `broker.dispatched > 0`
@@ -116,12 +116,15 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 
 /// Locally compute the canonical `spec_digest` using the same primitives
 /// the server uses in `handlers::describe_workload`:
-///   SHA-256 of `rkyv::to_bytes::<rancor::Error>(&Job::from_spec(spec))`.
+///   SHA-256 of `rkyv::to_bytes::<rancor::Error>(&Job::from_submit(spec))`.
 /// Any drift between this and the server-side computation is a bug.
 fn local_spec_digest(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse TOML");
-    let job = Job::from_spec(parsed).expect("Job::from_spec");
-    job.spec_digest().expect("spec_digest").to_string()
+    let job = Job::from_submit(parsed).expect("Job::from_submit");
+    overdrive_core::aggregate::WorkloadIntent::Job(job)
+        .spec_digest()
+        .expect("spec_digest")
+        .to_string()
 }
 
 // -------------------------------------------------------------------
@@ -152,7 +155,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     .await
     .expect("job::submit");
     assert_eq!(submit_output.workload_id, "payments");
-    assert_eq!(submit_output.intent_key, "jobs/payments");
+    assert_eq!(submit_output.intent_key, "workloads/payments");
 
     // WS-1 (test-scenarios.md §1.1, ADR-0020 amendment): the submit
     // output names a spec digest byte-identical to what Ana can
@@ -163,7 +166,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     assert_eq!(
         submit_output.spec_digest, expected_digest,
         "WS-1: submit response spec_digest MUST be byte-identical to \
-         ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed))); \
+         ContentHash::of(rkyv::to_bytes(&Job::from_submit(parsed))); \
          post-ADR-0020 the digest is the per-write witness — no \
          commit_index counter exists.",
     );
@@ -198,7 +201,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     assert_eq!(
         status_output.spec_digest, expected_digest,
         "WS-1: spec_digest returned via alloc::status MUST be byte-identical to \
-         ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed))); this proves \
+         ContentHash::of(rkyv::to_bytes(&Job::from_submit(parsed))); this proves \
          the whole serve → submit → describe round-trip preserves \
          canonical rkyv bytes (ADR-0002 + ADR-0011). Post-ADR-0020 the digest \
          is the per-write witness — no commit_index counter exists.",
@@ -324,7 +327,7 @@ async fn alloc_status_for_unknown_job_returns_typed_http_status_404_with_actiona
             assert_eq!(body.error, "not_found", "error class must be `not_found`");
             // Message must name the offending job id so the operator can act.
             assert!(
-                body.message.contains("mystery") || body.message.contains("jobs/mystery"),
+                body.message.contains("mystery") || body.message.contains("workloads/mystery"),
                 "ErrorBody.message must name `mystery`; got: {}",
                 body.message,
             );

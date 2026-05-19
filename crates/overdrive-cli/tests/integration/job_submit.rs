@@ -4,7 +4,7 @@
 //! Per `crates/overdrive-cli/CLAUDE.md` these call the handler directly
 //! (NO subprocess). A real in-process control-plane server stands up via
 //! `commands::serve::run(...)` (step 05-02), then the handler reads a
-//! TOML file from disk, validates locally through `Job::from_spec`
+//! TOML file from disk, validates locally through `Job::from_submit`
 //! (ADR-0011 constructor), POSTs `SubmitWorkloadRequest` via the `ApiClient`
 //! from step 05-01, and returns a typed `SubmitOutput` with `workload_id`,
 //! `intent_key`, `spec_digest`, `outcome`, `endpoint`, and
@@ -12,13 +12,13 @@
 //!
 //! Acceptance coverage:
 //!   (a) valid TOML against in-process server returns `SubmitOutput`
-//!       with `workload_id = "payments"`, `intent_key = "jobs/payments"`,
+//!       with `workload_id = "payments"`, `intent_key = "workloads/payments"`,
 //!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
 //!       `spec_digest`, and `next_command` naming
 //!       `overdrive alloc status --job payments`.
 //!   (b) `replicas = 0` returns `CliError::InvalidSpec { field:
 //!       "replicas", message }` WITHOUT issuing any HTTP — the handler
-//!       runs `Job::from_spec` locally and fails fast.
+//!       runs `Job::from_submit` locally and fails fast.
 //!   (c) malformed TOML syntax returns `CliError::InvalidSpec` with a
 //!       parse-error message naming the TOML problem.
 //!   (d) connection-refused endpoint returns `CliError::Transport`
@@ -131,7 +131,7 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
 
     assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
     assert_eq!(
-        output.intent_key, "jobs/payments",
+        output.intent_key, "workloads/payments",
         "SubmitOutput.intent_key must be 'jobs/payments'",
     );
     assert_eq!(
@@ -368,7 +368,7 @@ memory_bytes = 134217728
 
 #[tokio::test]
 async fn cli_submit_rejects_empty_exec_command_before_any_http_call() {
-    // The handler must run `Job::from_spec` client-side and fail with
+    // The handler must run `Job::from_submit` client-side and fail with
     // `CliError::InvalidSpec { field: "exec.command", .. }` BEFORE
     // contacting the server. We verify the "no HTTP call" property by
     // pointing the trust-triple at an unreachable endpoint — if the
@@ -417,7 +417,7 @@ async fn cli_submit_rejects_empty_exec_command_before_any_http_call() {
 #[tokio::test]
 async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
     // A TOML missing the `[exec]` table fails at `toml::from_str` —
-    // before `Job::from_spec` runs. The CLI's existing mapping wraps
+    // before `Job::from_submit` runs. The CLI's existing mapping wraps
     // this as `CliError::InvalidSpec { field: "toml", .. }` (per
     // `commands/job.rs:104-108`). Pin that the new tagged-enum
     // dispatch participates correctly: the absence of the driver
@@ -486,7 +486,7 @@ memory_bytes = 67108864
         .expect("submit must accept [job]-section TOML");
 
     assert_eq!(output.workload_id, "regression-kind");
-    assert_eq!(output.intent_key, "jobs/regression-kind");
+    assert_eq!(output.intent_key, "workloads/regression-kind");
     assert_eq!(output.outcome, IdempotencyOutcome::Inserted);
 
     handle.shutdown().await.expect("clean shutdown");

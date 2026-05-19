@@ -214,13 +214,13 @@ paths:
         equivalent, and free of framework conflict. ADR-0027's guidance
         stands; only the URL form differs.
 
-        Idempotency: the handler writes `IntentKey::for_job_stop(<id>)`
+        Idempotency: the handler writes `IntentKey::for_workload_stop(<id>)`
         via `IntentStore::put_if_absent` (atomic compare-and-set). A
         second call sees `KeyExists` and returns
         `outcome = AlreadyStopped` — no second write occurs.
 
         404 contract: a stop call against an `<id>` that was never
-        submitted (no `IntentKey::for_job(<id>)` row) returns HTTP 404.
+        submitted (no `IntentKey::for_workload(<id>)` row) returns HTTP 404.
         The original spec key MUST exist before a stop intent can be
         recorded — stopping a non-existent job is operator error, not an
         idempotent no-op.
@@ -363,6 +363,20 @@ components:
           description: |-
             SHA-256 (hex, 64 chars) of the canonical rkyv-archived `Job`
             bytes — see `WorkloadDescription::spec_digest`. Pinned per ADR-0002.
+        vip:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Service-issued VIP — populated for `WorkloadKind::Service`
+            reads per ADR-0049 (amended 2026-05-15). `None` for
+            `Job` / `Schedule` reads. Resolved from the persistent
+            allocator's content-addressed memo keyed by the workload's
+            `WorkloadIntent::Service(_).spec_digest()`.
+
+            Per the Q1.A resolution 2026-05-15: per-listener lines do
+            NOT carry a per-listener VIP — listeners are `(port, protocol)`
+            only; the Service-level VIP lives at this top-level field.
         workload_id:
           type:
           - string
@@ -585,7 +599,7 @@ components:
           type: string
           description: |-
             Host filesystem path to the binary. Validated non-empty (after
-            trim) at `Job::from_spec` per ADR-0031 §4.
+            trim) at `JobV1::from_submit` per ADR-0031 §4.
       additionalProperties: false
     IdempotencyOutcome:
       type: string
@@ -620,7 +634,7 @@ components:
           resources:
             $ref: '#/components/schemas/ResourcesInput'
       description: |-
-        Input shape for `Job::from_spec`. The CLI deserialises TOML into this
+        Input shape for `JobV1::from_submit`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
 
@@ -640,11 +654,18 @@ components:
       description: |-
         A single `[[listener]]` block on a `[service]` body.
 
-        Per ADR-0047 §1 (Service listener fields) the triple is
-        `(port, protocol, vip)` — `port` is non-zero (rejected at parse
-        time per S-08-06), `protocol` is `tcp` / `udp` only via the existing
-        [`Proto`] newtype (case-insensitive parse, lowercase canonical
-        render), and `vip` is optional.
+        Per ADR-0047 §1 (Service listener fields) and ADR-0049 § 5 the
+        listener identity is the `(port, protocol)` pair — `port` is
+        non-zero (rejected at parse time per S-08-06) and `protocol` is
+        `tcp` / `udp` only via the existing [`Proto`] newtype
+        (case-insensitive parse, lowercase canonical render).
+
+        The operator-supplied `vip` field was removed in
+        `service-vip-allocator` step 02-01: VIPs are platform-issued via
+        `ServiceVipAllocator` keyed by `spec_digest` and are structurally
+        unrepresentable in the operator-facing spec. The parser rejects
+        any TOML carrying `vip` on a `[[listener]]` block with a typed
+        [`ParseError::UnknownField`] variant.
 
         Distinct from the dataplane-layer `Backend` per design Reuse
         Analysis — the spec-layer `Listener` is the OPERATOR-DECLARED
@@ -668,13 +689,37 @@ components:
           description: |-
             L4 protocol — `tcp` or `udp` only. Case-insensitive at parse
             time; lowercase on canonical render.
-        vip:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ServiceVip'
-            description: |-
-              Optional pinned VIP. `None` means the runtime VIP allocator is
-              responsible for assigning one (GH #167).
+      additionalProperties: false
+    ListenerInput:
+      type: object
+      description: |-
+        HTTP/JSON wire-shape for a single listener entry.
+
+        Distinct from the parser-side
+        [`crate::aggregate::workload_spec::Listener`] newtype in encoding
+        only: the parser side carries `port: NonZeroU16` and
+        `protocol: Proto` after TOML decoding; the wire side carries
+        `port: u16` and `protocol: String` for JSON deserialise tolerance,
+        with validation deferred to
+        [`crate::aggregate::ServiceV1::from_submit`].
+      required:
+      - port
+      - protocol
+      properties:
+        port:
+          type: integer
+          format: int32
+          description: |-
+            Listener port — 1..=65535. `port == 0` is rejected at admission
+            inside `ServiceV1::from_submit`.
+          maximum: 65535
+          minimum: 1
+        protocol:
+          type: string
+          description: |-
+            L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
+            admission inside `ServiceV1::from_submit`.
+      additionalProperties: false
     NodeList:
       type: object
       description: |-
@@ -761,7 +806,7 @@ components:
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
-        `Job::from_spec` (no `From` impl: the ≥3-call-sites rule isn't met,
+        `JobV1::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
         and the validation rules — `memory_bytes != 0` — must fire on the
         way through anyway).
       required:
@@ -804,18 +849,90 @@ components:
           type: integer
           format: int32
           minimum: 0
+    ScheduleSpecInput:
+      type: object
+      description: |-
+        HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
+
+        The per-fire instance is a [`crate::aggregate::JobV1`] per ADR-0047
+        § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
+        inner job body uses the same wire shape standalone Jobs use —
+        operators write the schedule body and the inner job body in the
+        same JSON document.
+      required:
+      - id
+      - job
+      - cron_expr
+      properties:
+        cron_expr:
+          type: string
+          description: |-
+            Cron expression. String-shaped on the wire; validated and
+            projected onto `CronExpr` inside `ScheduleV1::from_submit`.
+        id:
+          type: string
+        job:
+          $ref: '#/components/schemas/JobSpecInput'
+          description: |-
+            Inner job specification fired on each cron tick. Same wire
+            shape standalone Jobs use.
+      additionalProperties: false
+    ServiceSpecInput:
+      allOf:
+      - $ref: '#/components/schemas/DriverInput'
+      - type: object
+        required:
+        - id
+        - replicas
+        - resources
+        - listeners
+        properties:
+          id:
+            type: string
+          listeners:
+            type: array
+            items:
+              $ref: '#/components/schemas/ListenerInput'
+            description: |-
+              Operator-declared listeners in declaration order. Validated at
+              admission inside [`crate::aggregate::ServiceV1::from_submit`]:
+              at least one element; no two share `(port, protocol)`; protocol
+              is `tcp` / `udp` only.
+          replicas:
+            type: integer
+            format: int32
+            minimum: 0
+          resources:
+            $ref: '#/components/schemas/ResourcesInput'
+      description: |-
+        HTTP/JSON wire-shape for a Service submission per ADR-0051 § 3.
+
+        Mirrors [`crate::aggregate::JobSpecInput`]'s `(id, replicas,
+        resources, driver)` shape plus operator-declared listeners.
+
+        Per ADR-0049 § 5 and ADR-0051 § 2 listeners carry `(port, protocol)`
+        only — NO operator-supplied VIP. The platform issues VIPs via
+        `ServiceVipAllocator` keyed by
+        `WorkloadIntent::Service(_).spec_digest()` after admission; the
+        operator never names a VIP on the wire or in TOML.
     ServiceVip:
       type: string
       description: |-
-        Pinned service VIP — IPv4 address an operator pinned in their
-        `[[listener]]` block. Wraps [`Ipv4Addr`] with `serde` / `utoipa` /
-        `rkyv` derives so the type-system distinguishes it from a backend or
-        node IP at every call site.
+        Virtual IP a kernel-side XDP program matches incoming packets
+        against. Stored host-order; converted at the kernel boundary
+        per architecture.md § 11.
 
-        Per ADR-0047 §1 (Service listener fields) the VIP is OPTIONAL — when
-        absent, the runtime VIP allocator is responsible for assigning one
-        at convergence time. The runtime allocator behaviour is OUT OF SCOPE
-        for slice 06 and tracked at GH #167.
+        Userspace control-plane newtype only — `service_backends`
+        observation rows continue to carry `vip: Ipv4Addr` as their
+        wire-shape field; the hydrator wraps at the read boundary
+        (architecture.md § 5).
+
+        # Wire form
+
+        `Display` emits the canonical `IpAddr` string form (e.g.
+        `10.0.0.1`, `::1`). `FromStr` parses any [`std::net::IpAddr`]-
+        compatible string. Empty input and non-IP strings surface as
+        structured [`IdParseError`] variants.
       example: 10.0.0.1
     StopOutcome:
       type: string
@@ -856,6 +973,10 @@ components:
           First line of every streaming response — confirms the
           `IntentStore` commit. `outcome` carries the idempotency verdict
           (Inserted / Unchanged) per ADR-0020.
+
+          `vip` is populated only for `WorkloadKind::Service` streams per
+          service-vip-allocator step 02-03d / ADR-0049 (amended 2026-05-15);
+          Job / Schedule streams emit `vip: None` (skipped on the wire).
         required:
         - data
         - kind
@@ -866,6 +987,10 @@ components:
               First line of every streaming response — confirms the
               `IntentStore` commit. `outcome` carries the idempotency verdict
               (Inserted / Unchanged) per ADR-0020.
+
+              `vip` is populated only for `WorkloadKind::Service` streams per
+              service-vip-allocator step 02-03d / ADR-0049 (amended 2026-05-15);
+              Job / Schedule streams emit `vip: None` (skipped on the wire).
             required:
             - spec_digest
             - intent_key
@@ -877,6 +1002,10 @@ components:
                 $ref: '#/components/schemas/IdempotencyOutcome'
               spec_digest:
                 type: string
+              vip:
+                type:
+                - string
+                - 'null'
           kind:
             type: string
             enum:
@@ -1082,39 +1211,90 @@ components:
         `TransitionReason` enum as the snapshot's
         `AllocStatusRowBody.reason` and `TransitionRecord.reason` — byte-
         equality across surfaces is structural, not discipline ([C6]).
+    SubmitSpecInput:
+      oneOf:
+      - allOf:
+        - $ref: '#/components/schemas/JobSpecInput'
+          description: |-
+            Run-to-completion workload — see
+            [`crate::aggregate::JobSpecInput`] for the per-kind shape.
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - job
+        description: |-
+          Run-to-completion workload — see
+          [`crate::aggregate::JobSpecInput`] for the per-kind shape.
+      - allOf:
+        - $ref: '#/components/schemas/ServiceSpecInput'
+          description: |-
+            Long-running supervised workload with operator-declared
+            listeners — see [`ServiceSpecInput`].
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - service
+        description: |-
+          Long-running supervised workload with operator-declared
+          listeners — see [`ServiceSpecInput`].
+      - allOf:
+        - $ref: '#/components/schemas/ScheduleSpecInput'
+          description: Cron-scheduled `Job` — see [`ScheduleSpecInput`].
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - schedule
+        description: Cron-scheduled `Job` — see [`ScheduleSpecInput`].
+      description: |-
+        HTTP/JSON wire-shape for `POST /v1/workloads` (and the streaming
+        sibling). Per ADR-0051 this is the wire-side member of the three-
+        layer Rust universe — distinct from the parser-side
+        [`crate::aggregate::workload_spec::WorkloadSpec`] (TOML) and the
+        persisted [`crate::aggregate::WorkloadIntent`] (rkyv).
+
+        Tagged JSON via `#[serde(tag = "kind", rename_all = "snake_case")]`
+        — the `kind` field discriminates `job` / `service` / `schedule` and
+        the per-variant fields populate the rest of the body.
+
+        `utoipa::ToSchema` renders this as a `oneOf`-discriminated schema in
+        the generated OpenAPI document per ADR-0051 OQ-7.
+
+        Listener `vip` is structurally unrepresentable per ADR-0049 § 5;
+        `deny_unknown_fields` rejects any incoming JSON carrying it.
     SubmitWorkloadRequest:
       type: object
       description: |-
-        Body of `POST /v1/jobs`. Carries the operator-submitted job spec
-        verbatim; the server routes it through `Job::from_spec` to validate
-        and derive the intent key / digest.
+        Body of `POST /v1/jobs`. Carries the operator-submitted workload
+        spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
+        dispatches on the [`SubmitSpecInput`] variant and routes each
+        arm through the per-kind validating constructor
+        (`JobV1::from_submit` / `ServiceV1::from_submit` /
+        `ScheduleV1::from_submit`) to derive the intent key / digest.
 
-        Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
-        optional `workload_kind` field is the wire-side carrier for the
-        kind discriminator (`"service"` / `"job"` / `"schedule"`). Absent
-        on legacy clients (defaults to `"service"` per
-        `WorkloadKind::default`); set to `"job"` by the CLI's
-        `submit_streaming_job` path so the server can dispatch on the
-        per-kind streaming-event sibling enums (ADR-0047 §3 [D7]) and
-        persist the discriminator at `IntentKey::for_workload_kind` so the
-        reconciler runtime's `hydrate_desired` populates
-        `WorkloadLifecycleState.workload_kind` for the natural-exit emission
-        path (ADR-0037 Amendment 2026-05-10).
+        Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
+        is the SOLE workload-kind discriminator carrier — the previous
+        optional top-level `workload_kind: Option<String>` field was
+        deleted in step 02-03b. Legacy clients that sent
+        `workload_kind = "job"` migrate to `spec = { kind: "job", ... }`;
+        `kind` is required (not optional) and the JSON shape is
+        `oneOf`-discriminated.
       required:
       - spec
       properties:
         spec:
-          $ref: '#/components/schemas/JobSpecInput'
-        workload_kind:
-          type:
-          - string
-          - 'null'
-          description: |-
-            Optional workload-kind discriminator. `"service"` (default),
-            `"job"`, or `"schedule"`. Unknown values fall back to `"service"`
-            per ADR-0047 §1 forward-compat — preserves kind-agnostic
-            behavior for clients sending a value the server does not
-            recognise.
+          $ref: '#/components/schemas/SubmitSpecInput'
     SubmitWorkloadResponse:
       type: object
       description: |-
@@ -1146,6 +1326,22 @@ components:
           $ref: '#/components/schemas/IdempotencyOutcome'
         spec_digest:
           type: string
+        vip:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Service-issued VIP — populated for `WorkloadKind::Service`
+            submissions per ADR-0049 (amended 2026-05-15). `None` for
+            `Job` / `Schedule` submissions (those kinds carry no service-
+            level VIP). Rendered as the canonical dotted-decimal IPv4
+            form (e.g. `"10.96.0.2"`).
+
+            Per the Q1.A resolution 2026-05-15: this is a top-level
+            `Option<String>` rather than a per-kind discriminated oneOf
+            response shape. The symmetric oneOf shape is deferred (would
+            pull in Job / Schedule response migration not in this
+            feature's scope).
         workload_id:
           type: string
     TerminalReason:

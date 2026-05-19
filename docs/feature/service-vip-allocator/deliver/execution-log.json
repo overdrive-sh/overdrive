@@ -1,0 +1,678 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "service-vip-allocator",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T07:25:55Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T07:27:17Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Step 01-01 acceptance tests ARE the unit tests per DWD-03 (property tests in default lane)",
+      "t": "2026-05-14T07:27:17Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: stash pop pulled in 47 unrelated files from stash@{0}. My work compiles and 6/6 tests pass in Lima pre-corruption (S-VIP-P03/P04/21/16/17/18 all green). Cleanup blocked by destructive-ops hook. Need user approval to discard unrelated worktree changes.",
+      "t": "2026-05-14T07:34:09Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T07:35:44Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: Commit blocked by worktree corruption from misdirected stash pop. 47 unrelated files (with merge markers in overdrive-core/src/reconciler.rs) prevent lefthook pre-commit from passing. Files staged correctly (only my 13 files). User approval needed for either no-verify commit OR worktree cleanup. My code verified in Lima pre-corruption: 6/6 tests pass, clippy clean.",
+      "t": "2026-05-14T07:35:47Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:35Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: unit-shaped step, no driving-port surface (newtype consolidation + allocator memo-hit test)",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:21:20Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:27:22Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance tests + golden-bytes fixture cover all named scenarios; no additional pure-function unit surface emerges (helpers peek_next_allocation/restore_entry on ServiceVipAllocator are exercised through the acceptance tests)",
+      "t": "2026-05-14T13:27:22Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:30:23Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:31:47Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:39:50Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:40:53Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: parser-level rejection is end-to-end-shaped; no pure-function helper emerges that warrants separate unit coverage",
+      "t": "2026-05-14T13:40:54Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:02:18Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:04:28Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:08:20Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:09:16Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: parser surface is boot-shaped; type-level VipRange::new checks already covered by step 01-01 unit tests",
+      "t": "2026-05-14T14:09:16Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:17:09Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:17:24Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:34:01Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: SubmitWorkloadRequest is JobSpecInput-only; AC requires Service spec submission surface that does not exist. Cannot write failing acceptance tests against a non-existent driving port shape. Surfaced to user with paths (a)/(b)/(c)/(d); awaiting clarification.",
+      "t": "2026-05-14T14:35:21Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: RED_ACCEPTANCE not entered; unit tests are integration-shaped per step description and gated on the same Service-submission driving port that does not exist. Awaiting user clarification on resolution path.",
+      "t": "2026-05-14T14:35:29Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: No RED tests landed; cannot enter GREEN without a failing test to satisfy. Per Crafty rule No code without a requiring test. Awaiting user clarification on resolution path (a)/(b)/(c)/(d).",
+      "t": "2026-05-14T14:35:31Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: No implementation landed; nothing to commit. Awaiting user clarification on scope-expansion path (a) vs narrow-wiring path (b) vs AC reframe (c) vs missed-code pointer (d).",
+      "t": "2026-05-14T14:35:33Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T14:53:31Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: structural blocker \u2014 WorkloadSpec::Job(JobSpec) shape (parser-side, no replicas/no WorkloadDriver) is incompatible with Job/JobV1 (intent-side, NonZeroU32 replicas + WorkloadDriver enum). Naive WorkloadSpec::Job(JobSpec) projection from Job loses validated replicas field; handlers.rs:714 alloc_status reads job.replicas.get() as replicas_desired. Step framing 'behaviour preserved' cannot hold with lossy projection. Surfaced CLARIFICATION_NEEDED to user with 3 resolution options (A: widen WorkloadSpec::Job to carry JobV1; B: introduce separate intent-side WorkloadIntent enum; C: merge 02-03a+02-03b). Cannot proceed autonomously per boundary rules ('DO NOT autonomously decide and ship'). Awaiting user decision.",
+      "t": "2026-05-14T14:53:40Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE. The envelope shape (WorkloadSpec vs new WorkloadIntent) determines what type the RED_UNIT golden-bytes fixture instantiates. Cannot write the schema-evolution fixture file until the user resolves which type carries the codec.",
+      "t": "2026-05-14T14:53:49Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE.",
+      "t": "2026-05-14T14:53:49Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CLARIFICATION_NEEDED from RED_ACCEPTANCE. No code written; no commit produced. Working tree unchanged.",
+      "t": "2026-05-14T14:53:49Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T04:20:43Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T04:46:40Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: round-trip + golden-bytes + spec_digest determinism tests in tests/schema_evolution/workload_intent.rs are unit-level proptests; no smaller unit decomposition warranted",
+      "t": "2026-05-15T04:46:43Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T04:59:15Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS commit=5c72564e",
+      "t": "2026-05-15T05:08:52Z"
+    },
+    {
+      "sid": "02-03a",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T05:10:12Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T07:36:14Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: structural finding \u2014 widening SubmitWorkloadRequest.spec from JobSpecInput to WorkloadSpecInput cascades to 86 files (CLI submit paths, http_client, OpenAPI schema, 20+ test files). WorkloadSpecInput::Job has NO replicas field (Job is run-to-completion per ADR-0047 \u00a71) while current JobSpecInput AND intent-side JobV1 do \u2014 wire-shape regression on Job submissions. Roadmap files_to_modify lists 5 control-plane files but the migration must cascade further to compile. Surfaced to user with clarification options A/B/C before proceeding.",
+      "t": "2026-05-15T07:39:20Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE.",
+      "t": "2026-05-15T07:39:22Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE.",
+      "t": "2026-05-15T07:39:23Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked on CHECKPOINT_PENDING from RED_ACCEPTANCE. No code written; no commit produced. Working tree unchanged.",
+      "t": "2026-05-15T07:39:25Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T08:03:30Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: PREPARE pass surfaced concrete scope mismatch with available context budget \u2014 surfaced to user for orchestrator decision (see return message)",
+      "t": "2026-05-15T08:03:57Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T08:25:26Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: behavior-preservation step; no new test scenarios",
+      "t": "2026-05-15T08:25:28Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: behavior-preservation step; no new behavioral tests",
+      "t": "2026-05-15T08:25:29Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: structural finding \u2014 ADR-0051 single-cut migration breaks 3 legacy submit_streaming tests that depend on pre-migration WorkloadKind::Service default for None workload_kind. Tests assert Service-shape stream events (running, attempt_failed) and Service vocabulary rendering. Single-cut wraps all JobSpecInput in SubmitSpecInput::Job(_), forcing Job-arm streaming dispatch. Needs user direction: migrate the 3 tests to Job-arm assertions, or restore a Service-arm wire path",
+      "t": "2026-05-15T08:41:08Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: structural finding committed at 636cfc15. Migration code (compile + clippy clean via Lima) remains in working tree. User must pick (A) test migration in-scope, (B) restore Service-arm wire path, or (C) #[ignore] the 3 failing tests",
+      "t": "2026-05-15T08:47:10Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 6th structural finding \u2014 18 workspace test failures across overdrive-control-plane acceptance/streaming_submit (s_cp_01/03/06/06b/07/11/12 + streaming_channel_closed), openapi_gate, server_lifecycle stub_router, xtask dst_lint + acceptance/dst_lint_banned_apis + dst_lint_catches_reconciler_violation + mutants::every_workspace_member_declares_integration_tests_feature. Root cause is the same OQ-8 coercion-deletion: pre-migration these tests submitted JobSpecInput payloads with workload_kind=None, server coerced to Service, server-side streaming path emitted SubmitEvent (Service-arm vocabulary). Post-migration with workload_kind field deleted, server routes them through Job-arm JobSubmitEvent vocabulary. 3 target tests (streaming_submit_broken_binary/happy_path/converged_stopped) PASS after Job-vocab rewrite. Surfacing per dispatch instruction 'If a SIXTH structural finding emerges, STOP and surface \u2014 do not paper over.'",
+      "t": "2026-05-15T10:49:50Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T11:11:03Z"
+    },
+    {
+      "sid": "02-03b",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T11:12:13Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T12:16:35Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: VipRange boot-path wiring not in scope of 02-02 (parser landed, but no caller threads parsed VipRange into ServerConfig/run_server). Surfaced to user as structural blocker.",
+      "t": "2026-05-15T12:17:46Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cascaded from RED_ACCEPTANCE \u2014 boot-path VipRange wiring not landed in 02-02 (parser exists, no caller). Step needs user decision on how AppState/ServerConfig obtains a VipRange before TDD can proceed.",
+      "t": "2026-05-15T12:18:38Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cascaded from RED_ACCEPTANCE \u2014 no failing tests authored; no production code to make green. Awaiting user decision on boot-path VipRange source (3 options surfaced).",
+      "t": "2026-05-15T12:18:40Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cascaded from RED_ACCEPTANCE \u2014 no code changes to commit. Working tree carries only the pre-existing execution-log.json edit from prior session; no production or test files modified by this dispatch.",
+      "t": "2026-05-15T12:18:42Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-15T13:19:08Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:09:56Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: 02-03c is infra cascade only; no new user-facing scenarios. All 6 S-VIP acceptance scenarios land in 02-03d per 2026-05-15 split.",
+      "t": "2026-05-19T07:10:03Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:12:12Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:38:44Z"
+    },
+    {
+      "sid": "02-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T07:40:43Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T08:32:11Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T08:36:32Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: All new logic exercised port-to-port through submit_workload/alloc_status HTTP handlers in 6 acceptance tests; no new pure functions introduced that need decomposition",
+      "t": "2026-05-19T08:36:34Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T09:23:34Z"
+    },
+    {
+      "sid": "02-03d",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T09:25:23Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:21:53Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:23:21Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: 3 acceptance scenarios cover all 3 distinct behaviors at the driving port (bulk_load); probe is ~5 LOC and additional unit tests would be tautological",
+      "t": "2026-05-19T10:23:51Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:30:00Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:31:01Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:37:22Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:38:59Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: behaviors fully covered by 2 acceptance scenarios (emission + idempotence) on pure reconcile() function",
+      "t": "2026-05-19T10:39:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:55:14Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T10:56:26Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T11:01:42Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T11:04:15Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test fully covers single behavior at action-shim driving port; arm is ~15 lines",
+      "t": "2026-05-19T11:04:32Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T11:17:05Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T11:18:25Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T11:25:41Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T11:30:31Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure integration-tier step per step description; no domain-port unit tests in scope",
+      "t": "2026-05-19T11:31:17Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: S-VIP-07 acceptance criterion contradicts ADR-0049 \u00a7 'Non-reuse on release' + S-VIP-12 monotonic-counter semantics; 2 of 3 integration tests RED for design conflict; surfaced to user for resolution (Option A=ADR amendment, B=revise S-VIP-07, C=defer via GH issue)",
+      "t": "2026-05-19T11:31:24Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN blocked by S-VIP-07 vs ADR-0049 contradiction; nothing to commit until user disposes blocker",
+      "t": "2026-05-19T11:31:26Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-tier; behaviors covered by 3 acceptance scenarios at submit_workload + reconciler-tick + action-shim driving ports per architect 2026-05-19",
+      "t": "2026-05-19T12:08:37Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T12:21:48Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-19T12:31:05Z"
+    }
+  ]
+}

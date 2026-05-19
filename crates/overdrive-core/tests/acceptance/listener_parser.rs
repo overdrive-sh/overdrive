@@ -15,12 +15,21 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::single_char_pattern)]
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use overdrive_core::aggregate::{
     Listener, ParseError, ServiceSpec, ServiceVip, WorkloadKind, WorkloadSpecInput,
 };
 use overdrive_core::dataplane::backend_key::Proto;
+
+// Per service-vip-allocator step 02-01 / ADR-0049 § 5 the
+// operator-supplied `vip` field on `[[listener]]` was removed; the
+// previous slice-06 mixed-pinned-and-pending VIP scenarios (
+// `s_08_04_pinned_vip_collision_also_rejected`,
+// `s_08_04_distinct_vips_at_same_port_are_allowed`) were deleted in
+// the same commit per `.claude/rules/development.md` § "Deletion
+// discipline". The parser-rejection scenarios for `vip` live at
+// `listener_rejects_vip_field` (S-VIP-13 / S-VIP-14).
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,12 +72,15 @@ fn unwrap_service(input: WorkloadSpecInput) -> ServiceSpec {
 
 #[test]
 fn s_08_01_two_listeners_parse_in_declaration_order() {
+    // Per ADR-0049 § 5 the `vip` field is no longer admissible on a
+    // listener block — the two-listener declaration carries only
+    // `(port, protocol)`. VIPs are platform-issued at the service
+    // level via `ServiceVipAllocator`.
     let toml = service_toml_with_listeners(
         r#"
 [[listener]]
 port = 8080
 protocol = "tcp"
-vip = "10.0.0.1"
 
 [[listener]]
 port = 8081
@@ -80,16 +92,14 @@ protocol = "udp"
         .expect("service with two valid listeners must parse");
     assert_eq!(parsed.kind(), WorkloadKind::Service);
 
-    // S-08-01 asserts the `(vip, port, protocol)` triples match in
+    // S-08-01 asserts the `(port, protocol)` pairs match in
     // declaration order on the Service body.
     let svc = unwrap_service(parsed);
     assert_eq!(svc.listeners.len(), 2, "two declared listeners must reach the spec");
     assert_eq!(svc.listeners[0].port.get(), 8080);
     assert_eq!(svc.listeners[0].protocol, Proto::Tcp);
-    assert_eq!(svc.listeners[0].vip, Some(ServiceVip(Ipv4Addr::new(10, 0, 0, 1))));
     assert_eq!(svc.listeners[1].port.get(), 8081);
     assert_eq!(svc.listeners[1].protocol, Proto::Udp);
-    assert_eq!(svc.listeners[1].vip, None);
 }
 
 // ---------------------------------------------------------------------------
@@ -143,13 +153,23 @@ fn s_08_03_zero_listeners_rejected() {
 }
 
 // ---------------------------------------------------------------------------
-// S-08-04 — A duplicate `(vip, port, protocol)` triple is rejected
-// with named guidance
+// S-08-04 — A duplicate `(port, protocol)` pair is rejected with
+// named guidance
 // ---------------------------------------------------------------------------
+//
+// Per ADR-0049 § 5 / service-vip-allocator step 02-01 the previous
+// `(vip, port, protocol)` triple collapses to a `(port, protocol)`
+// pair: VIPs are platform-issued service-wide, not per-listener, so
+// two listeners sharing `(port, protocol)` on the same Service are
+// always a duplicate. The two prior mixed-pinned-and-pending scenarios
+// (`s_08_04_pinned_vip_collision_also_rejected`,
+// `s_08_04_distinct_vips_at_same_port_are_allowed`) were deleted in
+// the same commit per `.claude/rules/development.md` § "Deletion
+// discipline".
 
 #[test]
-fn s_08_04_duplicate_triple_rejected() {
-    // Two listeners with the same (vip=None, 8080, tcp) triple.
+fn s_08_04_duplicate_pair_rejected() {
+    // Two listeners with the same (8080, tcp) pair.
     let toml = service_toml_with_listeners(
         r#"
 [[listener]]
@@ -162,57 +182,13 @@ protocol = "tcp"
 "#,
     );
     let err = WorkloadSpecInput::from_toml_str(&toml)
-        .expect_err("duplicate (vip, port, protocol) triple must be rejected");
-    let triple = match &err {
+        .expect_err("duplicate (port, protocol) pair must be rejected");
+    let pair = match &err {
         ParseError::ListenerDuplicate { triple } => triple.clone(),
         other => panic!("expected ListenerDuplicate, got {other:?}"),
     };
-    assert!(triple.contains("8080"), "diagnostic must name the offending port: {triple}");
-    assert!(triple.contains("tcp"), "diagnostic must name the offending protocol: {triple}");
-    assert!(triple.contains("none"), "vip=none must be named verbatim: {triple}");
-}
-
-#[test]
-fn s_08_04_pinned_vip_collision_also_rejected() {
-    let toml = service_toml_with_listeners(
-        r#"
-[[listener]]
-port = 8080
-protocol = "tcp"
-vip = "10.0.0.1"
-
-[[listener]]
-port = 8080
-protocol = "tcp"
-vip = "10.0.0.1"
-"#,
-    );
-    let err = WorkloadSpecInput::from_toml_str(&toml)
-        .expect_err("collision on pinned-VIP triple must be rejected");
-    assert!(matches!(err, ParseError::ListenerDuplicate { .. }), "got {err:?}");
-}
-
-#[test]
-fn s_08_04_distinct_vips_at_same_port_are_allowed() {
-    // Two listeners, both port 8080/tcp but DIFFERENT pinned VIPs —
-    // valid; they form distinct (vip, port, protocol) triples.
-    let toml = service_toml_with_listeners(
-        r#"
-[[listener]]
-port = 8080
-protocol = "tcp"
-vip = "10.0.0.1"
-
-[[listener]]
-port = 8080
-protocol = "tcp"
-vip = "10.0.0.2"
-"#,
-    );
-    let parsed = WorkloadSpecInput::from_toml_str(&toml)
-        .expect("distinct VIPs at the same port/proto must be allowed");
-    let svc = unwrap_service(parsed);
-    assert_eq!(svc.listeners.len(), 2);
+    assert!(pair.contains("8080"), "diagnostic must name the offending port: {pair}");
+    assert!(pair.contains("tcp"), "diagnostic must name the offending protocol: {pair}");
 }
 
 // ---------------------------------------------------------------------------
@@ -294,26 +270,22 @@ protocol = "tcp"
 }
 
 // ---------------------------------------------------------------------------
-// Sanity — Listener struct surfaces the chosen (port, protocol, vip)
-// shape; ServiceVip wraps Ipv4Addr with type-system distinctness.
+// Sanity — Listener struct surfaces the chosen (port, protocol) pair;
+// ServiceVip survives as a service-level newtype but is structurally
+// absent from the per-listener shape per ADR-0049 § 5.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn listener_struct_carries_port_protocol_vip_triple() {
+fn listener_struct_carries_port_protocol_pair() {
     use std::num::NonZeroU16;
-    let l = Listener {
-        port: NonZeroU16::new(8080).expect("non-zero"),
-        protocol: Proto::Tcp,
-        vip: Some(ServiceVip(Ipv4Addr::new(10, 0, 0, 1))),
-    };
+    let l = Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Tcp };
     assert_eq!(l.port.get(), 8080);
     assert_eq!(l.protocol, Proto::Tcp);
-    assert_eq!(l.vip.expect("vip set above").as_ipv4(), Ipv4Addr::new(10, 0, 0, 1));
 }
 
 #[test]
 fn service_vip_displays_as_ipv4() {
-    let v = ServiceVip(Ipv4Addr::new(192, 168, 1, 100));
+    let v = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))).expect("IPv4 valid");
     assert_eq!(v.to_string(), "192.168.1.100");
 }
 

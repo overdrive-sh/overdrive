@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconciler::ServiceMapHydrator;
 use overdrive_core::reconciler::{
@@ -837,6 +837,7 @@ pub async fn run_convergence_tick(
         state.lifecycle_events.as_ref(),
         &tick,
         &state.node_id,
+        std::sync::Arc::clone(&state.allocator),
     )
     .await
     .map_err(ConvergenceError::Shim)?;
@@ -930,7 +931,7 @@ async fn hydrate_desired(
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            let job = read_job(state, &workload_id).await?;
+            let (job, intent_digest) = read_job(state, &workload_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
@@ -949,12 +950,16 @@ async fn hydrate_desired(
             // the kind-agnostic Service shape for legacy submits that
             // predate the discriminator persistence.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
+            let service_spec_digest =
+                if workload_kind == WorkloadKind::Service { intent_digest } else { None };
             let s = WorkloadLifecycleState {
+                workload_id: workload_id.clone(),
                 job,
                 desired_to_stop,
                 nodes,
                 allocations: BTreeMap::new(),
                 workload_kind,
+                service_spec_digest,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }
@@ -1001,26 +1006,48 @@ pub async fn hydrate_desired_for_test(
     hydrate_desired(reconciler, target, state).await
 }
 
-/// Read a `Job` from the `IntentStore` at the canonical `jobs/<id>` key,
-/// rkyv-decoding the archived bytes. Returns `Ok(None)` when the key is
-/// absent. Errors map to `ConvergenceError::IntentRead`.
+/// Read a `Job` from the `IntentStore` at the canonical
+/// `workloads/<id>` key (per ADR-0050 OQ-5 single-cut migration),
+/// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes.
+/// Returns `Ok((None, None))` when the key is absent. Errors map to
+/// `ConvergenceError::IntentRead`.
+///
+/// Step 02-03a+: the submit handler now accepts Job, Service, and Schedule
+/// intents (02-03b). For Service and Schedule kinds, `read_job` returns
+/// `Ok(None)` — the reconciler's `desired.job` field is `None` for those
+/// variants, which is the correct "no Job allocation target" shape for
+/// Phase 1's Service-arm (allocations are not yet spawned for Services).
+///
+/// The second element is the `WorkloadIntent`'s content-addressed
+/// `spec_digest` (SHA-256 over the rkyv-archived payload). Returned
+/// only for `Service` intents — Job and Schedule workloads do not
+/// allocate VIPs (ADR-0049), so their digest is not surfaced.
 async fn read_job(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<Option<Job>, ConvergenceError> {
-    let key = IntentKey::for_job(workload_id);
+) -> Result<(Option<Job>, Option<ContentHash>), ConvergenceError> {
+    let key = IntentKey::for_workload(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let Some(b) = bytes else { return Ok(None) };
-    // Pass the canonical IntentKey (`jobs/<workload-id>`) so a decode
-    // failure's `health.startup.refused` event names the specific row
-    // an operator would need to inspect.
-    let job = Job::from_store_bytes(b.as_ref(), &state.intent_redb_path, Some(key.as_str()))
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    Ok(Some(job))
+    let Some(b) = bytes else { return Ok((None, None)) };
+    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+        b.as_ref(),
+        &state.intent_redb_path,
+        Some(key.as_str()),
+    )
+    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    match &intent {
+        overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok((Some(job.clone()), None)),
+        overdrive_core::aggregate::WorkloadIntent::Service(_) => {
+            let digest =
+                intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+            Ok((None, Some(digest)))
+        }
+        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok((None, None)),
+    }
 }
 
 /// Read the persisted workload-kind discriminator at
@@ -1044,12 +1071,13 @@ async fn read_workload_kind(
         .map_or_else(WorkloadKind::default, WorkloadKind::from_discriminator_byte))
 }
 
-/// Probe the canonical `jobs/<id>:stop` key; presence is the signal.
+/// Probe the canonical `workloads/<id>/stop` key; presence is the
+/// signal. Per ADR-0050 OQ-5 single-cut migration.
 async fn stop_intent_present(
     state: &AppState,
     workload_id: &WorkloadId,
 ) -> Result<bool, ConvergenceError> {
-    let stop_key = IntentKey::for_job_stop(workload_id);
+    let stop_key = IntentKey::for_workload_stop(workload_id);
     let stop_bytes = state
         .store
         .get(stop_key.as_bytes())
@@ -1092,12 +1120,17 @@ async fn hydrate_actual(
             // `actual`-side branching has a non-default value to work
             // with.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
+            let (_, intent_digest) = read_job(state, &workload_id).await?;
+            let service_spec_digest =
+                if workload_kind == WorkloadKind::Service { intent_digest } else { None };
             let s = WorkloadLifecycleState {
+                workload_id,
                 job: None,
                 desired_to_stop: false,
                 nodes,
                 allocations,
                 workload_kind,
+                service_spec_digest,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }

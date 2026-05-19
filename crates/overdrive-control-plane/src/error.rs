@@ -287,6 +287,28 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     ViewStoreBoot(#[from] ViewStoreBootError),
 
+    /// `[dataplane.vip_allocator]` TOML parser refusal per
+    /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
+    /// embedding so the CLI / composition root can branch on
+    /// `matches!(e, ControlPlaneError::VipAllocatorConfig(_))` for
+    /// structured boot diagnostics. Boot-path-only: like the other
+    /// pre-listener variants, this never reaches an HTTP response in
+    /// practice; the arm in `to_response` exists for enum
+    /// exhaustiveness.
+    #[error(transparent)]
+    VipAllocatorConfig(#[from] crate::vip_allocator_config::VipAllocatorBootError),
+
+    /// Persistent VIP allocator runtime failure surfaced from the
+    /// Service-arm `submit_workload` handler per service-vip-allocator
+    /// step 02-03d. Pass-through embedding so the typed inner cause
+    /// (pool exhaustion, store I/O failure, envelope corruption) is
+    /// preserved through to `to_response`, which branches the typed
+    /// inner on HTTP status mapping: `Allocator(Exhausted)` →
+    /// HTTP 503 with `error = "pool_exhausted"`; other variants fall
+    /// through to HTTP 500.
+    #[error(transparent)]
+    VipAllocator(#[from] overdrive_dataplane::allocators::PersistentAllocatorError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -391,6 +413,46 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
+        ControlPlaneError::VipAllocatorConfig(e) => (
+            // Same shape as `ViewStoreBoot` above: VIP-allocator
+            // config refusals happen BEFORE the listener binds. The
+            // parser at `vip_allocator_config::parse_vip_allocator_section`
+            // emits `health.startup.refused` itself; this arm exists
+            // only for enum exhaustiveness.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::VipAllocator(e) => {
+            // Branch on the typed inner cause per service-vip-allocator
+            // step 02-03d. Pool exhaustion is operator-actionable (provision
+            // a larger range or release stale allocations) — HTTP 503 with a
+            // discrete `error = "pool_exhausted"` discriminator the CLI can
+            // branch on without `Display`-grepping. Other inner causes
+            // (Storage I/O, Envelope corruption) are infra failures and
+            // fall through to HTTP 500.
+            use overdrive_dataplane::allocators::{
+                PersistentAllocatorError, ServiceVipAllocatorError,
+            };
+            match e {
+                PersistentAllocatorError::Allocator(ServiceVipAllocatorError::Exhausted {
+                    allocated,
+                    capacity,
+                }) => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    ErrorBody {
+                        error: "pool_exhausted".into(),
+                        message: format!(
+                            "service VIP pool exhausted: allocated {allocated} of {capacity}",
+                        ),
+                        field: None,
+                    },
+                ),
+                other => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ErrorBody { error: "internal".into(), message: other.to_string(), field: None },
+                ),
+            }
+        }
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: msg, field: None },

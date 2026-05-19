@@ -148,18 +148,22 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         .insert(aid("alloc-payments-0"), alloc_clean_exit("alloc-payments-0", "payments", "local"));
 
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -198,18 +202,22 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
     );
 
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -251,23 +259,31 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         .insert(aid("alloc-svc-0"), alloc_crashed_with_exit("alloc-svc-0", "svc", "local", 1));
 
     let desired = WorkloadLifecycleState {
+        workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
     };
     // Budget remaining: attempts == 0 < ceiling.
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-svc-0"), 0);
-    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = WorkloadLifecycle::canonical();

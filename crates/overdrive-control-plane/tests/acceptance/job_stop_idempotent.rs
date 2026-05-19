@@ -6,7 +6,7 @@
 //! "already_stopped"` rather than failing or re-stopping.
 //!
 //! Default-lane (in-memory). Per ADR-0027 the `put_if_absent` on the
-//! `IntentKey::for_job_stop` key gives idempotent semantics for free.
+//! `IntentKey::for_workload_stop` key gives idempotent semantics for free.
 
 #![allow(clippy::expect_used, clippy::expect_fun_call, clippy::unwrap_used)]
 
@@ -18,6 +18,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use serde::Deserialize;
 use tempfile::TempDir;
 
@@ -100,7 +101,7 @@ async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
     // Submit the job first.
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
         .expect("POST /v1/jobs");

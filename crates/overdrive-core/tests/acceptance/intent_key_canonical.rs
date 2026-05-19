@@ -34,21 +34,21 @@ use proptest::prelude::*;
 #[test]
 fn for_job_returns_jobs_slash_id_as_byte_sequence() {
     let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
-    let key = IntentKey::for_job(&id);
+    let key = IntentKey::for_workload(&id);
 
     assert_eq!(
         key.as_bytes(),
-        b"jobs/payments",
-        "canonical WorkloadId intent key must be `jobs/<id>` byte-for-byte"
+        b"workloads/payments",
+        "canonical WorkloadId intent key must be `workloads/<id>` byte-for-byte"
     );
 }
 
 #[test]
 fn for_job_returns_jobs_slash_id_as_str() {
     let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
-    let key = IntentKey::for_job(&id);
+    let key = IntentKey::for_workload(&id);
 
-    assert_eq!(key.as_str(), "jobs/payments");
+    assert_eq!(key.as_str(), "workloads/payments");
 }
 
 #[test]
@@ -77,8 +77,8 @@ fn for_allocation_returns_allocations_slash_id() {
 #[test]
 fn two_calls_produce_byte_identical_output_for_job() {
     let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
-    let first = IntentKey::for_job(&id);
-    let second = IntentKey::for_job(&id);
+    let first = IntentKey::for_workload(&id);
+    let second = IntentKey::for_workload(&id);
 
     assert_eq!(
         first.as_bytes(),
@@ -159,16 +159,16 @@ fn valid_label() -> impl Strategy<Value = String> {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    /// For any valid WorkloadId, `IntentKey::for_job(&id).as_bytes()` equals
-    /// `format!("jobs/{}", id).as_bytes()` AND is stable across two
+    /// For any valid WorkloadId, `IntentKey::for_workload(&id).as_bytes()` equals
+    /// `format!("workloads/{}", id).as_bytes()` AND is stable across two
     /// invocations.
     #[test]
     fn for_job_is_stable_and_matches_format(raw in valid_label()) {
         let id = WorkloadId::new(&raw).expect("generator yields valid WorkloadId");
-        let expected = format!("jobs/{id}");
+        let expected = format!("workloads/{id}");
 
-        let first = IntentKey::for_job(&id);
-        let second = IntentKey::for_job(&id);
+        let first = IntentKey::for_workload(&id);
+        let second = IntentKey::for_workload(&id);
 
         prop_assert_eq!(first.as_bytes(), expected.as_bytes());
         prop_assert_eq!(first.as_bytes(), second.as_bytes());
@@ -207,17 +207,17 @@ proptest! {
 // ---------------------------------------------------------------------------
 // Grep gate (AC bullet 4).
 //
-// The three collection prefixes (`"jobs/`, `"nodes/`, `"allocations/`)
+// The three collection prefixes (`"workloads/`, `"nodes/`, `"allocations/`)
 // MUST appear as string-literal openers in exactly ONE production source
 // file each — the `IntentKey::for_*` method body in `aggregate/mod.rs`.
 // Any drift-prone second copy in production code violates US-01's
 // shared-artifacts-registry entry for `intent_key`.
 //
-// We search for the open-quote + prefix (e.g. `"jobs/`) rather than the
-// fully-closed `"jobs/"` because the production derivation uses
-// `format!("jobs/{id}")` — the prefix opens a string literal but does
+// We search for the open-quote + prefix (e.g. `"workloads/`) rather than the
+// fully-closed `"workloads/"` because the production derivation uses
+// `format!("workloads/{id}")` — the prefix opens a string literal but does
 // not immediately close it. The open-quote pattern is also what keeps
-// doc comments out of the match set: a `// GET /v1/jobs/{id}` comment
+// doc comments out of the match set: a `// GET /v1/workloads/{id}` comment
 // has no leading `"`, and a rustdoc code-block `` ` `` fence also
 // doesn't match.
 //
@@ -225,7 +225,7 @@ proptest! {
 //   * Scanned: `crates/*/src/**/*.rs` (production sources only).
 //   * NOT scanned: `tests/`, `benches/`, `examples/`, `docs/` — tests and
 //     fixtures legitimately use the prefix strings as consumer inputs
-//     (e.g. `store.watch(b"jobs/")`); that is not drift.
+//     (e.g. `store.watch(b"workloads/")`); that is not drift.
 //
 // The test shells out to `rg` and degrades gracefully when it isn't on
 // PATH — CI runners have it; bare dev shells occasionally don't.
@@ -309,7 +309,7 @@ fn assert_literal_in_exactly_one_production_file(literal: &str, expected_suffix:
 #[test]
 fn jobs_prefix_appears_in_exactly_one_production_file() {
     assert_literal_in_exactly_one_production_file(
-        "\"jobs/",
+        "\"workloads/",
         "crates/overdrive-core/src/aggregate/mod.rs",
     );
 }

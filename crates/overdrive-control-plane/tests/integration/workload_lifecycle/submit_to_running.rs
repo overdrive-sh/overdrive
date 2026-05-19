@@ -42,6 +42,9 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let driver: Arc<dyn Driver> =
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -51,6 +54,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
         sim_clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Cleanup guard — fires on test exit (panic or success) and
@@ -64,7 +68,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     };
 
     // Submit a 1-replica job that runs `/bin/sleep` for a long time.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -74,8 +78,10 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/payments").expect("valid target");

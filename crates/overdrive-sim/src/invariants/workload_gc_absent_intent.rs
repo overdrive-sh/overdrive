@@ -87,7 +87,7 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
 };
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
@@ -394,7 +394,7 @@ async fn read_rows_for_workload(h: &Harness) -> Result<Vec<AllocStatusRow>, Stri
 /// `IntentStore::delete`.
 async fn fault_inject_delete_intent(h: &Harness) -> Result<(), String> {
     let workload_id = WorkloadId::new(WORKLOAD_NAME).map_err(|e| format!("workload id: {e:?}"))?;
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     h.state.store.delete(key.as_bytes()).await.map_err(|e| format!("intent delete: {e:?}"))?;
     Ok(())
 }
@@ -402,9 +402,10 @@ async fn fault_inject_delete_intent(h: &Harness) -> Result<(), String> {
 /// Resubmit `Job(X)` to intent — same shape as initial submit.
 async fn resubmit_intent(h: &Harness) -> Result<(), String> {
     let job = build_job_spec()?;
+    let intent = WorkloadIntent::Job(job.clone());
     let archived =
-        job.archive_for_store().map_err(|e| format!("rkyv archive (resubmit): {e:?}"))?;
-    let key = IntentKey::for_job(&job.id);
+        intent.archive_for_store().map_err(|e| format!("rkyv archive (resubmit): {e:?}"))?;
+    let key = IntentKey::for_workload(&job.id);
     h.state
         .store
         .put(key.as_bytes(), archived.as_ref())
@@ -456,7 +457,7 @@ impl Drop for Harness {
 }
 
 fn build_job_spec() -> Result<Job, String> {
-    Job::from_spec(JobSpecInput {
+    Job::from_submit(JobSpecInput {
         id: WORKLOAD_NAME.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -488,6 +489,8 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver;
 
+    let allocator =
+        overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     let state = AppState::new(
         store,
         tmp.path().join("intent.redb"),
@@ -497,6 +500,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         sim_clock.clone(),
         Arc::new(SimDataplane::new()),
         NodeId::new("writer-1").map_err(|e| format!("writer node id: {e:?}"))?,
+        allocator,
     );
 
     // Initial submit — Job(X). The kind discriminator key is omitted;
@@ -505,8 +509,9 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     // as the kind-agnostic shape (the GC arm is kind-agnostic per
     // architecture.md § 6).
     let job = build_job_spec()?;
-    let archived = job.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
-    let key = IntentKey::for_job(&job.id);
+    let intent = WorkloadIntent::Job(job.clone());
+    let archived = intent.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
+    let key = IntentKey::for_workload(&job.id);
     state
         .store
         .put(key.as_bytes(), archived.as_ref())

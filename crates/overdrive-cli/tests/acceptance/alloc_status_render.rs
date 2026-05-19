@@ -48,6 +48,7 @@ fn running_fixture() -> AllocStatusResponse {
         }],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
         kind: None,
+        vip: None,
     }
 }
 
@@ -79,6 +80,7 @@ fn failed_fixture() -> AllocStatusResponse {
         }],
         restart_budget: Some(RestartBudget { used: 5, max: 5, exhausted: true }),
         kind: None,
+        vip: None,
     }
 }
 
@@ -111,6 +113,7 @@ fn pending_no_capacity_fixture() -> AllocStatusResponse {
         }],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
         kind: None,
+        vip: None,
     }
 }
 

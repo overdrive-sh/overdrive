@@ -30,6 +30,7 @@ use overdrive_control_plane::api::{
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use tempfile::TempDir;
 
 /// Spawn a server on an ephemeral port and return (handle, bound addr,
@@ -138,7 +139,7 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
     };
 
     let submit_resp = client
-        .submit_workload(SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .submit_workload(SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .await
         .expect("submit_workload");
     assert!(!submit_resp.workload_id.is_empty(), "workload_id must not be empty");
@@ -226,7 +227,7 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
     let (handle, _bound, _tmp, config_path) = spawn_server().await;
     let client = build_client_for(&config_path);
 
-    // `replicas = 0` fails `Job::from_spec` at the NonZeroU32 gate;
+    // `replicas = 0` fails `Job::from_submit` at the NonZeroU32 gate;
     // server returns 400 with ErrorBody { error: "validation",
     // field: Some("replicas"), .. } per ADR-0015.
     let bad = JobSpecInput {
@@ -237,7 +238,7 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
     };
 
     let err = client
-        .submit_workload(SubmitWorkloadRequest { spec: bad, workload_kind: None })
+        .submit_workload(SubmitWorkloadRequest { spec: SubmitSpecInput::Job(bad) })
         .await
         .expect_err("bad spec");
 

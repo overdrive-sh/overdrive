@@ -71,6 +71,9 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -80,6 +83,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
         Arc::new(SimClock::new()),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     )
 }
 
@@ -95,12 +99,14 @@ fn sample_spec() -> JobSpecInput {
     }
 }
 
-/// Persist `Job::from_spec(spec)` into the `IntentStore` — the required
+/// Persist `Job::from_submit(spec)` into the `IntentStore` — the required
 /// precondition for a 200 response (S-AS-09 vacuum-base for non-404 paths).
 async fn install_job(state: &AppState, spec: JobSpecInput) -> Job {
-    let job = Job::from_spec(spec).expect("Job::from_spec must succeed for fixture");
-    let key = IntentKey::for_job(&job.id);
-    let archived = job.archive_for_store().expect("rkyv archive");
+    let job = Job::from_submit(spec).expect("Job::from_submit must succeed for fixture");
+    let key = IntentKey::for_workload(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("IntentStore put");
     job
 }
@@ -410,7 +416,7 @@ async fn s_as_09_unknown_job_returns_not_found_naming_resource() {
                 "NotFound resource string must name the missing job; got {resource:?}",
             );
             assert!(
-                resource.starts_with("jobs/"),
+                resource.starts_with("workloads/"),
                 "NotFound resource string must use the canonical IntentKey rendering \
                  jobs/<id>; got {resource:?}",
             );

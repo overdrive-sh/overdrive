@@ -159,7 +159,7 @@ use bytes::Bytes;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::SpiffeId;
 use crate::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
@@ -384,12 +384,15 @@ pub enum AnyState {
 /// are pinned by ADR-0021 §1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkloadLifecycleState {
+    /// Kind-agnostic workload identity, always available from the
+    /// `TargetResource` at hydration time.
+    pub workload_id: WorkloadId,
     /// The target job. `None` when the desired-state read returned
     /// no row (job was deleted) or the actual-state read found no
     /// surviving row to project against.
     pub job: Option<Job>,
     /// Whether a stop intent has been recorded for this job (i.e.
-    /// `IntentKey::for_job_stop(<id>)` is populated). When true and
+    /// `IntentKey::for_workload_stop(<id>)` is populated). When true and
     /// `job` is `Some`, the reconciler's Stop branch fires —
     /// emitting `Action::StopAllocation` for every Running alloc.
     /// Set false on the actual side; only the desired-side hydrator
@@ -425,6 +428,25 @@ pub struct WorkloadLifecycleState {
     /// callers is `WorkloadKind::Service` (the kind-agnostic shape
     /// today's reconciler emulates).
     pub workload_kind: WorkloadKind,
+    /// Content-addressed `spec_digest` for the workload (SHA-256 over
+    /// the rkyv-archived `WorkloadIntent` payload per ADR-0050). Set
+    /// to `Some(...)` by `reconciler_runtime::hydrate_desired` when
+    /// the workload is a Service (`workload_kind == Service`); `None`
+    /// for Job / Schedule kinds and for absent jobs.
+    ///
+    /// The reconciler reads this on the Service-arm release path:
+    /// when an allocation has reached a terminal-state observation
+    /// row and `service_spec_digest` is `Some(digest)`, the reconciler
+    /// emits `Action::ReleaseServiceVip { spec_digest: digest, .. }`
+    /// — gated by `view.released_for_terminal` so the emission is
+    /// exactly-once per digest (per ADR-0049 amended 2026-05-15 +
+    /// service-vip-allocator step 03-01).
+    ///
+    /// Set on BOTH the desired and actual sides by the runtime
+    /// hydrator (the desired-side hydrator reads `WorkloadIntent`
+    /// from `IntentStore`; the actual-side projection mirrors the
+    /// desired-side value so the reconciler can read either).
+    pub service_spec_digest: Option<crate::id::ContentHash>,
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +530,7 @@ pub enum Action {
     },
     /// Stop a Running allocation. Emitted by the `WorkloadLifecycle`
     /// reconciler when desired state is "stopped" (set by
-    /// `IntentKey::for_job_stop`).
+    /// `IntentKey::for_workload_stop`).
     ///
     /// Per ADR-0037 §4 the variant carries a typed
     /// [`TerminalCondition`] flag the action shim writes onto
@@ -517,7 +539,7 @@ pub enum Action {
     /// emission sites outside a reconciler tick (the action-shim
     /// heartbeat, the exit observer) emit `terminal: None`. When a
     /// stop is operator-initiated (`desired.desired_to_stop` set
-    /// by `IntentKey::for_job_stop`), the reconciler stamps
+    /// by `IntentKey::for_workload_stop`), the reconciler stamps
     /// `Some(TerminalCondition::Stopped { by: StoppedBy::Operator })`
     /// here — the by-source is already known from the desired state,
     /// so the action shim never re-derives it.
@@ -628,6 +650,45 @@ pub enum Action {
         ///   spec_hash = ContentHash::of(rkyv-archive of fingerprint),
         ///   purpose = "update-service")` so the next tick can locate
         /// the `service_hydration_results` row deterministically.
+        correlation: CorrelationKey,
+    },
+
+    // -----------------------------------------------------------------
+    // service-vip-allocator step 03-01 — ReleaseServiceVip per
+    // ADR-0049 (amended 2026-05-15).
+    //
+    // Emitted by the `WorkloadLifecycle` reconciler when a Service-kind
+    // workload's allocation reaches a terminal-state observation row
+    // (i.e. `row.terminal.is_some()`) AND the workload's `spec_digest`
+    // has not yet been recorded in `view.released_for_terminal`. The
+    // gate is recomputed every tick from the persisted input ("we
+    // already emitted release for this digest") — never cached as a
+    // derived "needs release now" boolean, per
+    // `.claude/rules/development.md` § "Persist inputs, not derived
+    // state".
+    //
+    // The action shim's per-arm dispatch lands in step 03-02; the
+    // end-to-end submit → terminal → release → reallocate flow lands
+    // in step 03-03. This variant exists in step 03-01 so the
+    // reconciler can emit it before the dispatch arm goes GREEN.
+    // -----------------------------------------------------------------
+    /// Release a VIP from the `ServiceVipAllocator` memo. Carries the
+    /// content-addressed `spec_digest` the allocator uses as its memo
+    /// key (per ADR-0049 amended 2026-05-15). The action shim invokes
+    /// `ServiceVipAllocator::release(spec_digest)` on dispatch (step
+    /// 03-02).
+    ReleaseServiceVip {
+        /// Content-addressed spec digest — SHA-256 over the rkyv-archived
+        /// `WorkloadIntent` payload per ADR-0050. Used as the
+        /// `ServiceVipAllocator` memo key.
+        spec_digest: ContentHash,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "job-lifecycle/<workload_id>",
+        ///   spec_hash = spec_digest,
+        ///   purpose = "release-service-vip")` so the action shim
+        /// (step 03-02) can correlate the dispatch with an observation
+        /// row deterministically.
         correlation: CorrelationKey,
     },
 }
@@ -1155,6 +1216,55 @@ impl Reconciler for WorkloadLifecycle {
         view: &Self::View,
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
+        // service-vip-allocator step 03-01 — Service-arm VIP release
+        // per ADR-0049 (amended 2026-05-15).
+        //
+        // When the workload is a Service AND we have a spec_digest in
+        // scope AND any allocation has reached a terminal-state
+        // observation row (i.e. `row.terminal.is_some()`) AND the
+        // digest has NOT already been recorded in
+        // `view.released_for_terminal`, emit
+        // `Action::ReleaseServiceVip` exactly once and stamp the digest
+        // onto `next_view.released_for_terminal` so the next tick's
+        // gate short-circuits. Per `.claude/rules/development.md`
+        // § "Persist inputs, not derived state": the recorded set is
+        // the input "we already emitted release for this digest" —
+        // never a derived "needs release now" boolean.
+        //
+        // The release decision is independent of (and additive to)
+        // the existing Stop / Absent / Run branches below: a terminal
+        // operator-stopped Service alloc flows through the Run-branch
+        // operator-stopped short-circuit (returns no other actions)
+        // AND ALSO emits the release here. The two-action shape is
+        // intentional — the reconciler is the single source of every
+        // terminal claim, and Service-VIP release is a terminal claim
+        // per ADR-0049.
+        let release_pair = service_vip_release_emission(desired, actual, view);
+
+        let (mut actions, mut next_view) = Self::reconcile_inner(desired, actual, view, tick);
+        if let Some((release_action, released_digest)) = release_pair {
+            actions.push(release_action);
+            next_view.released_for_terminal.insert(released_digest);
+        }
+        (actions, next_view)
+    }
+}
+
+impl WorkloadLifecycle {
+    // The original reconcile body, factored out so the Service-VIP
+    // release branch can wrap it without duplicating every branch's
+    // return tuple. The inner method's contract is unchanged from the
+    // pre-step-03-01 shape; the wrapper above is the only Service-arm
+    // augmentation. Associated function (no `&self`) because the
+    // reconcile logic is purely a function of `(desired, actual, view,
+    // tick)` — the reconciler instance carries only the name newtype.
+    #[allow(clippy::too_many_lines)]
+    fn reconcile_inner(
+        desired: &WorkloadLifecycleState,
+        actual: &WorkloadLifecycleState,
+        view: &WorkloadLifecycleView,
+        tick: &TickContext,
+    ) -> (Vec<Action>, WorkloadLifecycleView) {
         // Per ADR-0021 + US-03 AC: handle Stop / Absent / Run branches.
         //
         // Stop: when a stop intent is recorded (`desired.desired_to_stop`)
@@ -1300,7 +1410,7 @@ impl Reconciler for WorkloadLifecycle {
                 // re-submits the job intent.
                 //
                 // (Distinct from `desired.desired_to_stop`, which is
-                // a separate signal carried by `IntentKey::for_job_stop`
+                // a separate signal carried by `IntentKey::for_workload_stop`
                 // and handled at the Stop branch above. The
                 // Operator-stopped row arrives via the watcher's
                 // `intentional_stop` flag — set by `Driver::stop`
@@ -1632,6 +1742,49 @@ fn mint_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId 
     SpiffeId::new(&raw).expect("derived SpiffeId is valid")
 }
 
+/// service-vip-allocator step 03-01 — pure helper for the Service-arm
+/// release-emission gate.
+///
+/// Returns `Some((action, digest))` when:
+///
+/// 1. `desired.workload_kind == WorkloadKind::Service`, AND
+/// 2. `desired.service_spec_digest` is `Some(digest)`, AND
+/// 3. at least one observed allocation in `actual.allocations` carries
+///    a terminal claim (`row.terminal.is_some()`), AND
+/// 4. `digest` is NOT already present in `view.released_for_terminal`.
+///
+/// Returns `None` otherwise — i.e. for non-Service kinds, when the
+/// digest is absent (the runtime hydrator has not populated it), when
+/// no terminal-state observation row exists yet, or when the digest
+/// is already recorded as released.
+///
+/// The caller (the `WorkloadLifecycle::reconcile` wrapper) appends the
+/// returned action to the inner reconcile's action list and stamps the
+/// returned digest onto `next_view.released_for_terminal` so the next
+/// tick short-circuits. Per ADR-0049 (amended 2026-05-15) +
+/// `.claude/rules/development.md` § "Persist inputs, not derived
+/// state".
+fn service_vip_release_emission(
+    desired: &WorkloadLifecycleState,
+    actual: &WorkloadLifecycleState,
+    view: &WorkloadLifecycleView,
+) -> Option<(Action, crate::id::ContentHash)> {
+    if desired.workload_kind != WorkloadKind::Service {
+        return None;
+    }
+    let digest = desired.service_spec_digest?;
+    if view.released_for_terminal.contains(&digest) {
+        return None;
+    }
+    let terminal_observed = actual.allocations.values().any(|row| row.terminal.is_some());
+    if !terminal_observed {
+        return None;
+    }
+    let target = format!("job-lifecycle/{}", desired.workload_id.as_str());
+    let correlation = CorrelationKey::derive(&target, &digest, "release-service-vip");
+    Some((Action::ReleaseServiceVip { spec_digest: digest, correlation }, digest))
+}
+
 /// True iff the alloc row carries a terminal Operator-stop record.
 ///
 /// Two writers produce operator-stop rows with different field shapes:
@@ -1818,6 +1971,27 @@ pub struct WorkloadLifecycleView {
     /// derived deadline.
     #[serde(default)]
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
+    /// service-vip-allocator step 03-01 — set of `spec_digest`s for
+    /// which `Action::ReleaseServiceVip` has already been emitted by
+    /// this reconciler. The reconcile read site consults this set to
+    /// gate re-emission: a terminal-state observation row whose
+    /// workload `spec_digest` is already present produces NO
+    /// `ReleaseServiceVip` action on this tick.
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this is the *input* "we already emitted release
+    /// for this digest" — NOT a derived "needs release now" boolean.
+    /// The release decision is recomputed every tick from
+    /// `(any terminal alloc observed, released_for_terminal contains
+    /// digest)` against the live workload state.
+    ///
+    /// `BTreeSet`, NOT `HashSet`, per § "Ordered-collection choice":
+    /// the set is serialised via CBOR (the runtime-owned View
+    /// persistence path per ADR-0035/0036) and iterated under DST
+    /// harness assertions — iteration order must be deterministic
+    /// across seeds.
+    #[serde(default)]
+    pub released_for_terminal: BTreeSet<crate::id::ContentHash>,
 }
 
 // ---------------------------------------------------------------------------

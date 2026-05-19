@@ -43,7 +43,7 @@ mod acceptance {
 
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // explicit `[exec]` block (command + args) and the projection
-    // flows end-to-end through Job::from_spec → Action::Start/Restart.
+    // flows end-to-end through Job::from_submit → Action::Start/Restart.
     // Per ADR-0031.
     mod exec_constructors;
     mod exec_reconciler_purity;
@@ -119,6 +119,13 @@ mod acceptance {
     mod listener_parser;
     mod listener_roundtrip;
 
+    // service-vip-allocator Slice 02 step 02-01 — parser-level
+    // rejection of operator-supplied `vip` field on `[[listener]]`
+    // blocks (S-VIP-13, S-VIP-14). Per ADR-0049 § 5 the `Listener`
+    // struct has no `vip` field; the parser rejects with a typed
+    // `ParseError::UnknownField` variant naming `vip`.
+    mod listener_rejects_vip_field;
+
     // workload-kind-discriminator Slice 05 — parser-side cron
     // required-field scenario. S-05-04 in distill/test-scenarios.md §5.
     mod schedule_parser;
@@ -138,4 +145,13 @@ mod acceptance {
     // restart-budget semantics. Per ADR-0037 Amendment 2026-05-10 +
     // ADR-0047 §1.
     mod workload_lifecycle_natural_exit;
+
+    // service-vip-allocator step 03-01 — `WorkloadLifecycle::reconcile`
+    // emits `Action::ReleaseServiceVip` exactly once when a Service-kind
+    // workload's allocation reaches a terminal-state observation row.
+    // Per-layer scope: reconciler emission only (action-shim dispatch is
+    // step 03-02; end-to-end lifecycle is step 03-03). Per ADR-0049
+    // (amended 2026-05-15) + persist-inputs discipline on
+    // `released_for_terminal: BTreeSet<ContentHash>`.
+    mod workload_lifecycle_release_service_vip;
 }

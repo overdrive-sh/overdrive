@@ -18,7 +18,9 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
-use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput, WorkloadKind};
+use overdrive_core::aggregate::{
+    AggregateError, IntentKey, Job, JobSpecInput, ServiceV1, WorkloadIntent, WorkloadKind,
+};
 use overdrive_core::id::WorkloadId;
 use overdrive_core::reconciler::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
@@ -203,60 +205,129 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
     ),
     tag = "jobs",
 )]
+// The handler body grew past the 100-line clippy default with the
+// ADR-0051 `SubmitSpecInput` dispatch added at the top — splitting
+// per-arm helpers would obscure the linear "validate → wrap →
+// idempotency → branch on Accept" shape that makes the function
+// comprehensible. Same precedent: `streaming.rs` (file-level allow)
+// and `action_shim/mod.rs::reconciler_action_to_shim` (fn-level allow).
+#[allow(clippy::too_many_lines)]
 pub async fn submit_workload(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<api::SubmitWorkloadRequest>,
 ) -> Result<Response, ControlPlaneError> {
     let want_streaming = wants_ndjson(&headers);
-    // 1. Validate via the single aggregate constructor (ADR-0011 —
-    //    THE-single-validating-constructor). The `Job::from_spec` call
-    //    is the server-side defence-in-depth complement to the CLI's
-    //    fast-fail (ADR-0014); both lanes route through the same
-    //    constructor, so the new ADR-0031 §4 `exec.command` non-empty
-    //    rule fires on both by construction.
+    // 1. Dispatch on the wire-side `SubmitSpecInput` discriminator per
+    //    ADR-0051 § 4 / OQ-6 and route each arm through its per-kind
+    //    validating constructor (`JobV1::from_submit` /
+    //    `ServiceV1::from_submit` / `ScheduleV1::from_submit`). This
+    //    is the wire → intent boundary; the constructors are the
+    //    single validation surface. Field-name preservation per
+    //    ADR-0015: scalar-field validation failures
+    //    (`AggregateError::Validation { field, message }`) flatten
+    //    into the top-level `ControlPlaneError::Validation` variant
+    //    with `field: Some(field.to_string())`. Non-validation
+    //    `AggregateError` shapes fall through the `#[from]` blanket
+    //    conversion to `ControlPlaneError::Aggregate(_)` — `to_response`
+    //    still maps them to HTTP 400 with `error: "validation"`.
     //
-    //    Field-name preservation per ADR-0015: scalar-field validation
-    //    failures (`AggregateError::Validation { field, message }`)
-    //    flatten into the top-level `ControlPlaneError::Validation`
-    //    variant with `field: Some(field.to_string())`. This keeps the
-    //    typed Rust contract aligned with the wire shape — clients
-    //    matching on the typed error see the same `field` token the
-    //    HTTP layer renders into the RFC 7807 body.
-    //
-    //    Non-validation `AggregateError` shapes (`Id`, `Resources`)
-    //    fall through the `#[from]` blanket conversion to
-    //    `ControlPlaneError::Aggregate(_)` — `to_response` still maps
-    //    them to HTTP 400 with `error: "validation"`.
-    let job = Job::from_spec(request.spec).map_err(|e| match e {
-        AggregateError::Validation { field, message } => {
-            ControlPlaneError::Validation { field: Some(field.to_owned()), message }
+    //    Step 02-03b NOTE: Service / Schedule arms return a structured
+    //    rejection placeholder. The full Service-arm wiring
+    //    (allocator integration, `alloc_status` widening, streaming)
+    //    lands in step 02-03c per the roadmap split; the Schedule
+    //    arm's `from_submit` is a `todo!()` RED scaffold that the
+    //    rejection placeholder makes structurally unreachable.
+    let intent = match request.spec {
+        overdrive_core::api::submit::SubmitSpecInput::Job(jsi) => {
+            WorkloadIntent::Job(Job::from_submit(jsi).map_err(|e| match e {
+                AggregateError::Validation { field, message } => {
+                    ControlPlaneError::Validation { field: Some(field.to_owned()), message }
+                }
+                other => ControlPlaneError::Aggregate(other),
+            })?)
         }
-        other => ControlPlaneError::Aggregate(other),
-    })?;
+        overdrive_core::api::submit::SubmitSpecInput::Service(ssi) => {
+            WorkloadIntent::Service(ServiceV1::from_submit(ssi).map_err(|e| match e {
+                AggregateError::Validation { field, message } => {
+                    ControlPlaneError::Validation { field: Some(field.to_owned()), message }
+                }
+                other => ControlPlaneError::Aggregate(other),
+            })?)
+        }
+        overdrive_core::api::submit::SubmitSpecInput::Schedule(_) => {
+            return Err(ControlPlaneError::Validation {
+                field: Some("spec.kind".to_owned()),
+                message:
+                    "schedule submission is not yet implemented (ADR-0051 OQ-5 — RED scaffold)"
+                        .to_owned(),
+            });
+        }
+    };
 
-    // 2. Archive canonically via the typed `JobEnvelope` codec
-    //    (ADR-0048 § "Intent persistence boundary"). Two archivals of
-    //    the same logical Job produce byte-identical bytes — this is
+    // 2. Wrap the validated workload payload in the kind-agnostic
+    //    `WorkloadIntent` aggregate per ADR-0050 and archive canonically
+    //    via the typed `WorkloadIntentEnvelope` codec. Two archivals of
+    //    the same logical intent produce byte-identical bytes — this is
     //    what makes the idempotency check byte-equality instead of
     //    semantic-equality.
-    let archived = job
+    //
+    //    Per ADR-0050 § 2, `WorkloadIntent::{Job,Service,Schedule}` all
+    //    pass through the same codec. Per step 02-03d, the Schedule arm
+    //    is structurally gated above; the dispatch below routes Job and
+    //    Service to their respective response shapes.
+    let workload_id = match &intent {
+        WorkloadIntent::Job(j) => j.id.clone(),
+        WorkloadIntent::Service(s) => s.id.clone(),
+        WorkloadIntent::Schedule(s) => s.id.clone(),
+    };
+    let archived = intent
         .archive_for_store()
-        .map_err(|e| ControlPlaneError::internal("rkyv archive of Job", e))?;
+        .map_err(|e| ControlPlaneError::internal("rkyv archive of WorkloadIntent", e))?;
 
-    // 3. Derive the canonical intent key (`jobs/<WorkloadId>`).
-    let key = IntentKey::for_job(&job.id);
+    // 3. Derive the canonical intent key (`workloads/<WorkloadId>`)
+    //    per ADR-0050 OQ-5 single-cut migration.
+    let key = IntentKey::for_workload(&workload_id);
 
-    // 4. Compute the canonical `spec_digest` over the envelope bytes
-    //    via the typed codec method (ADR-0048 § 5 — operator-observable
-    //    Job ID change absorbed by greenfield single-cut). Used both as
-    //    the response field and (on the `KeyExists` branch) as the
-    //    equality check against the bytes already stored at this key —
-    //    see step 5.
-    let spec_digest = job
+    // 4. Compute the canonical `spec_digest` via the typed codec
+    //    method. Per ADR-0050 the digest is over the rkyv-archived
+    //    inner `WorkloadIntentV1` payload bytes — distinct from
+    //    pre-migration `Job::spec_digest`, but stable across reads
+    //    and used by `ServiceVipAllocator` per ADR-0049.
+    let spec_digest_hash = intent
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
-        .to_string();
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?;
+    let spec_digest = spec_digest_hash.to_string();
+
+    // 4a. Service-arm VIP allocation per ADR-0049 (amended 2026-05-15)
+    //     / service-vip-allocator step 02-03d.
+    //
+    //     Concurrency contract per `.claude/rules/development.md` §
+    //     "Concurrency & async" → "Never hold a lock across `.await`":
+    //     the allocator lock IS the serialisation point — the
+    //     content-addressed memo lookup + the inner store write happen
+    //     under one guard so that two concurrent submits for the SAME
+    //     spec_digest both see the same VIP (one wins the lock and
+    //     issues; the other hits the memo). The guard is dropped
+    //     EXPLICITLY before any further `.await` (the admission
+    //     `put_if_absent` below); the next `.await` therefore does NOT
+    //     hold the allocator mutex.
+    //
+    //     `PersistentServiceVipAllocator::allocate` itself fsyncs the
+    //     allocator entry through the byte-level `IntentStore` before
+    //     returning Ok, so the durable allocator memo is committed
+    //     before this handler returns the VIP to the client. On
+    //     byte-identical resubmit the memo hit short-circuits without
+    //     a store write — that is the property S-VIP-04 pins.
+    let service_vip = if matches!(intent, WorkloadIntent::Service(_)) {
+        let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+        let mut guard = state.allocator.lock().await;
+        let vip = guard.allocate(digest_bytes).await?;
+        drop(guard);
+        Some(vip)
+    } else {
+        None
+    };
 
     // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
     //     persist the workload-kind discriminator at
@@ -264,14 +335,19 @@ pub async fn submit_workload(
     //     dispatch on per-kind sibling-event enums (ADR-0047 §3 [D7])
     //     and the reconciler runtime's `hydrate_desired` can populate
     //     `WorkloadLifecycleState.workload_kind` for the natural-exit
-    //     emission path (ADR-0037 Amendment 2026-05-10). The wire
-    //     field is optional — absent or unknown values default to
-    //     Service per `WorkloadKind::from_wire_str` forward-compat.
-    let mut workload_kind = request
-        .workload_kind
-        .as_deref()
-        .map_or_else(WorkloadKind::default, WorkloadKind::from_wire_str);
-    let kind_key = IntentKey::for_workload_kind(&job.id);
+    //     emission path (ADR-0037 Amendment 2026-05-10).
+    //
+    //     Step 02-03d: the discriminator is derived from the
+    //     `WorkloadIntent` variant. `mut` is preserved because the
+    //     `KeyExists` idempotency path below may re-read a previously-
+    //     persisted discriminator to keep streaming dispatch stable
+    //     across resubmits.
+    let mut workload_kind = match &intent {
+        WorkloadIntent::Job(_) => WorkloadKind::Job,
+        WorkloadIntent::Service(_) => WorkloadKind::Service,
+        WorkloadIntent::Schedule(_) => WorkloadKind::Schedule,
+    };
+    let kind_key = IntentKey::for_workload_kind(&workload_id);
 
     // 5. Atomic idempotency / conflict detection via `put_if_absent`.
     //    The existence check and the insert happen in a single store
@@ -299,7 +375,7 @@ pub async fn submit_workload(
             // evaluation for the job-lifecycle reconciler so the
             // convergence-loop spawn picks it up on the next tick.
             // Per `fix-convergence-loop-not-spawned` Step 01-02.
-            enqueue_workload_lifecycle_eval(&state, &job.id)?;
+            enqueue_workload_lifecycle_eval(&state, &workload_id)?;
             api::IdempotencyOutcome::Inserted
         }
         PutOutcome::KeyExists { existing } => {
@@ -316,8 +392,11 @@ pub async fn submit_workload(
                 // Read the stored kind discriminator so streaming
                 // dispatch matches the reconciler's view. The first
                 // submit wrote the authoritative kind; a re-submit
-                // with a different (or absent) workload_kind must not
-                // override the streaming dispatch to a different path.
+                // re-reads the persisted byte rather than re-deriving
+                // from the wire (Step 02-03b: wire always carries Job
+                // until 02-03c lands the Service arm, but the read-
+                // back keeps the path identical to its pre-02-03b
+                // semantics).
                 if let Some(stored_kind_bytes) =
                     state.store.get(kind_key.as_bytes()).await.map_err(|e| {
                         ControlPlaneError::internal("read workload kind (unchanged path)", e)
@@ -327,13 +406,29 @@ pub async fn submit_workload(
                         workload_kind = WorkloadKind::from_discriminator_byte(b);
                     }
                 }
-                enqueue_workload_lifecycle_eval(&state, &job.id)?;
+                enqueue_workload_lifecycle_eval(&state, &workload_id)?;
                 api::IdempotencyOutcome::Unchanged
             } else {
                 // Different spec at the same key — 409 Conflict.
                 // Conflict is HTTP-status, never a wire `outcome`
                 // value (ADR-0015 §4 amended by ADR-0020). No
                 // evaluation enqueued — the intent did not change.
+                //
+                // Release any VIP that was allocated for the rejected
+                // spec before returning the error. The allocation at
+                // step 4a runs before `put_if_absent`; without this
+                // cleanup the VIP leaks permanently — no downstream
+                // `Action::ReleaseServiceVip` will fire because the
+                // rejected spec never gets a persisted WorkloadIntent.
+                if service_vip.is_some() {
+                    let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+                    let mut guard = state.allocator.lock().await;
+                    guard
+                        .release(&digest_bytes)
+                        .await
+                        .map_err(|e| ControlPlaneError::internal("release VIP on conflict", e))?;
+                    drop(guard);
+                }
                 return Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 });
@@ -356,17 +451,29 @@ pub async fn submit_workload(
                     key.as_str().to_owned(),
                     outcome,
                 );
-                let stream =
-                    crate::streaming::build_workload_stream(state.clone(), job.id, accepted);
+                let stream = crate::streaming::build_workload_stream(
+                    state.clone(),
+                    workload_id.clone(),
+                    accepted,
+                );
                 Body::from_stream(stream)
             }
             WorkloadKind::Service | WorkloadKind::Schedule => {
                 // Service / Schedule (Schedule is no-op streaming for
                 // Phase 1 per slice 05) flow through the legacy
-                // flat-`SubmitEvent` path unchanged.
-                let accepted =
-                    crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
-                let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
+                // flat-`SubmitEvent` path. For Service the allocator-
+                // issued VIP rides on `SubmitEvent::Accepted` per
+                // ADR-0049 (amended 2026-05-15) / step 02-03d; Schedule
+                // emits `vip: None`.
+                let accepted_vip = service_vip.map(|v| v.get().to_string());
+                let accepted = crate::streaming::build_accepted(
+                    spec_digest,
+                    key.as_str().to_owned(),
+                    outcome,
+                    accepted_vip,
+                );
+                let stream =
+                    crate::streaming::build_stream(state.clone(), workload_id.clone(), accepted);
                 Body::from_stream(stream)
             }
         };
@@ -377,8 +484,12 @@ pub async fn submit_workload(
             .map_err(|e| ControlPlaneError::internal("build streaming response", e))?;
         Ok(response)
     } else {
-        let body =
-            api::SubmitWorkloadResponse { workload_id: job.id.to_string(), spec_digest, outcome };
+        let body = api::SubmitWorkloadResponse {
+            workload_id: workload_id.to_string(),
+            spec_digest,
+            outcome,
+            vip: service_vip.map(|v| v.get().to_string()),
+        };
         Ok(Json(body).into_response())
     }
 }
@@ -448,31 +559,43 @@ pub async fn describe_workload(
     //    duplicate the job-prefix literal into a second production
     //    file, which the `intent_key_canonical` grep-gate in
     //    `overdrive-core` explicitly forbids.
-    let key = IntentKey::for_job(&workload_id);
+    let key = IntentKey::for_workload(&workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
 
-    // 3. Decode the persisted bytes via the typed `JobEnvelope` codec
-    //    (ADR-0048 § "Intent persistence boundary"). Corruption /
-    //    bit-rot in the redb file surfaces here as
-    //    `IntentStoreError::Envelope`; it maps to HTTP 500 via the
-    //    `#[from]` blanket on `ControlPlaneError::Intent`. The
-    //    `health.startup.refused` event names the IntentKey so an
-    //    operator can identify which job's bytes failed to decode.
-    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
+    // 3. Decode the persisted bytes via the typed `WorkloadIntentEnvelope`
+    //    codec (ADR-0050 § 4 + ADR-0048 § "Intent persistence
+    //    boundary"). Corruption / bit-rot in the redb file surfaces
+    //    here as `IntentStoreError::Envelope`; it maps to HTTP 500
+    //    via the `#[from]` blanket on `ControlPlaneError::Intent`.
+    let intent =
+        WorkloadIntent::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
 
-    // 4. Canonical spec_digest — SHA-256 over the envelope bytes
-    //    `archive_for_store` produces. Per ADR-0048 § 5, this digest
-    //    is computed over envelope bytes (envelope tag + payload), not
-    //    over raw V1 payload bytes — the operator-observable Job ID
-    //    change is absorbed by the greenfield single-cut migration.
-    let spec_digest = job
+    // 4. Canonical spec_digest — SHA-256 over the rkyv-archived
+    //    `WorkloadIntentV1` payload bytes per ADR-0050. Computed
+    //    against the typed `WorkloadIntent` so the digest matches
+    //    submit-handler output regardless of variant.
+    let spec_digest = intent
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?
         .to_string();
+
+    // Per step 02-03d — Service describe is a structural rejection at
+    // this surface in Phase 1 because `WorkloadDescription.spec` is
+    // typed `JobSpecInput`. Widening to a kind-discriminated oneOf
+    // response shape (parallel to ADR-0051's SubmitSpecInput) is
+    // tracked in GH #183. Schedule is similarly out of scope here.
+    let WorkloadIntent::Job(job) = intent else {
+        return Err(ControlPlaneError::Validation {
+            field: Some("id".to_owned()),
+            message:
+                "describe is only available for Job workloads in Phase 1 (Service/Schedule describe wire shape is GH #183)"
+                    .to_owned(),
+        });
+    };
 
     Ok(Json(api::WorkloadDescription { spec: JobSpecInput::from(&job), spec_digest }))
 }
@@ -488,13 +611,13 @@ pub async fn describe_workload(
 /// equivalent, and free of framework conflict. ADR-0027's guidance
 /// stands; only the URL form differs.
 ///
-/// Idempotency: the handler writes `IntentKey::for_job_stop(<id>)`
+/// Idempotency: the handler writes `IntentKey::for_workload_stop(<id>)`
 /// via `IntentStore::put_if_absent` (atomic compare-and-set). A
 /// second call sees `KeyExists` and returns
 /// `outcome = AlreadyStopped` — no second write occurs.
 ///
 /// 404 contract: a stop call against an `<id>` that was never
-/// submitted (no `IntentKey::for_job(<id>)` row) returns HTTP 404.
+/// submitted (no `IntentKey::for_workload(<id>)` row) returns HTTP 404.
 /// The original spec key MUST exist before a stop intent can be
 /// recorded — stopping a non-existent job is operator error, not an
 /// idempotent no-op.
@@ -527,7 +650,7 @@ pub async fn stop_workload(
     //    row is absent we have no stop target, so 404 surfaces with
     //    the same `resource = jobs/<id>` shape as describe_workload's
     //    NotFound path.
-    let job_key = IntentKey::for_job(&workload_id);
+    let job_key = IntentKey::for_workload(&workload_id);
     let job_exists = state.store.get(job_key.as_bytes()).await?.is_some();
     if !job_exists {
         return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
@@ -537,7 +660,7 @@ pub async fn stop_workload(
     //    deliberate — the key's existence IS the signal. A second
     //    stop call lands on the KeyExists branch and reports
     //    AlreadyStopped without a second write.
-    let stop_key = IntentKey::for_job_stop(&workload_id);
+    let stop_key = IntentKey::for_workload_stop(&workload_id);
     let outcome = match state.store.put_if_absent(stop_key.as_bytes(), b"").await? {
         PutOutcome::Inserted => StopOutcome::Stopped,
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
@@ -646,44 +769,82 @@ pub async fn alloc_status(
         field: Some("job".to_owned()),
     })?;
 
-    // Read the Job aggregate — 404 if absent.
-    let key = IntentKey::for_job(&workload_id);
+    // Read the workload aggregate — 404 if absent.
+    let key = IntentKey::for_workload(&workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
-    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
-    let spec_digest = job
+    let intent =
+        WorkloadIntent::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
+    let spec_digest_hash = intent
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
-        .to_string();
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?;
+    let spec_digest = spec_digest_hash.to_string();
 
-    // Filter rows to this job, project them, and stamp the requested
-    // resource envelope from the JobSpec onto each row body (the bare
-    // conversion zeroes resources; the handler is the only call site
-    // that knows the spec).
-    let resources_body = api::ResourcesBody {
-        cpu_milli: job.resources.cpu_milli,
-        memory_bytes: job.resources.memory_bytes,
+    // Per ADR-0050 / step 02-03d — project per-variant identity,
+    // resource envelope, replica count, and (Service-only) allocated
+    // VIP from the typed `WorkloadIntent`.
+    let (resources_body, replicas_desired, response_vip) = match &intent {
+        WorkloadIntent::Job(job) => (
+            api::ResourcesBody {
+                cpu_milli: job.resources.cpu_milli,
+                memory_bytes: job.resources.memory_bytes,
+            },
+            job.replicas.get(),
+            None,
+        ),
+        WorkloadIntent::Service(svc) => {
+            // Service-arm VIP resolution per ADR-0049 (amended
+            // 2026-05-15) / step 02-03d. Lookup the allocator memo
+            // keyed by content-addressed `spec_digest`. The
+            // allocator is the single source of truth for the issued
+            // VIP; no per-listener VIP is rendered (per Q1.A — listeners
+            // are `(port, protocol)` only).
+            let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+            let guard = state.allocator.lock().await;
+            let vip = guard.get(&digest_bytes);
+            drop(guard);
+            (
+                api::ResourcesBody {
+                    cpu_milli: svc.resources.cpu_milli,
+                    memory_bytes: svc.resources.memory_bytes,
+                },
+                svc.replicas.get(),
+                vip.map(|v| v.get().to_string()),
+            )
+        }
+        WorkloadIntent::Schedule(sched) => (
+            api::ResourcesBody {
+                cpu_milli: sched.job.resources.cpu_milli,
+                memory_bytes: sched.job.resources.memory_bytes,
+            },
+            sched.job.replicas.get(),
+            None,
+        ),
     };
+
+    // Filter rows to this workload and project, stamping the spec
+    // resource envelope on each row body (the bare conversion zeroes
+    // resources; the handler is the only call site that knows the spec).
     let raw_rows = state
         .obs
         .alloc_status_rows()
         .await
         .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?;
-    let job_rows: Vec<AllocStatusRow> =
+    let workload_rows: Vec<AllocStatusRow> =
         raw_rows.into_iter().filter(|row| row.workload_id == workload_id).collect();
 
     // Per ADR-0037 §4: derive the RestartBudget from the durable
     // `AllocStatusRow.terminal` field rather than from a recomputed
     // projection over `view.restart_counts`. The reconciler is the
     // single writer of terminal claims; the durable row is the
-    // single source of truth for "is this job's replica budget
+    // single source of truth for "is this workload's replica budget
     // exhausted?".
-    let restart_budget = restart_budget_from_rows(&job_rows);
+    let restart_budget = restart_budget_from_rows(&workload_rows);
 
-    let rows: Vec<api::AllocStatusRowBody> = job_rows
+    let rows: Vec<api::AllocStatusRowBody> = workload_rows
         .into_iter()
         .map(|row| {
             let mut body = api::AllocStatusRowBody::from(row);
@@ -709,13 +870,14 @@ pub async fn alloc_status(
         .unwrap_or_default();
 
     Ok(Json(api::AllocStatusResponse {
-        workload_id: Some(job.id.to_string()),
+        workload_id: Some(workload_id.to_string()),
         spec_digest: Some(spec_digest),
-        replicas_desired: job.replicas.get(),
+        replicas_desired,
         replicas_running,
         rows,
         restart_budget: Some(restart_budget),
         kind: Some(kind),
+        vip: response_vip,
     }))
 }
 

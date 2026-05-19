@@ -116,19 +116,24 @@ fn placement_actions(
     job: Job,
     current_allocs: BTreeMap<AllocationId, AllocStatusRow>,
 ) -> Vec<Action> {
+    let wid = job.id.clone();
     let desired = WorkloadLifecycleState {
+        workload_id: wid.clone(),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: wid,
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: current_allocs,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

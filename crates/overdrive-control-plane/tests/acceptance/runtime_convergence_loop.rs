@@ -30,7 +30,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::eval_broker::Evaluation;
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -58,6 +58,9 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -67,6 +70,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     )
 }
 
@@ -89,15 +93,17 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
     //     desired state for `WorkloadLifecycle` against `job/payments`).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
@@ -236,6 +242,9 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -245,18 +254,21 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // --- Preload IntentStore with one converged Job (replicas=1).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let payments_intent_key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let payments_intent_key = IntentKey::for_workload(&job.id);
     state.store.put(payments_intent_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
@@ -397,7 +409,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///      far enough to elapse the 1-second per-attempt backoff window;
 ///      this is the load-bearing precondition — the alloc is Failed
 ///      AND mid-backoff when the stop arrives.)
-///   4. Submit the stop intent (`IntentKey::for_job_stop(<id>)`) and
+///   4. Submit the stop intent (`IntentKey::for_workload_stop(<id>)`) and
 ///      capture `dispatched` at this moment.
 ///   5. Drive 10 more convergence ticks.
 ///   6. Assert: `queued == 0` (broker drained); `dispatched -
@@ -428,6 +440,9 @@ async fn stop_after_failed_alloc_drains_broker() {
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -437,13 +452,14 @@ async fn stop_after_failed_alloc_drains_broker() {
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // --- Preload IntentStore: one Job. The driver will reject its
     //     start, the action shim writes `AllocState::Failed`, the
     //     reconciler emits one `RestartAllocation` then sits on the
     //     1-second backoff (`RESTART_BACKOFF_DURATION`).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -453,8 +469,10 @@ async fn stop_after_failed_alloc_drains_broker() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let job_key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let job_key = IntentKey::for_workload(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Submit the seed evaluation.
@@ -528,7 +546,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     is the signal — value is opaque (the runtime probes
     //     `state.store.get(stop_key.as_bytes())` and treats `Some(_)`
     //     as "stop intended"). A single zero byte is sufficient.
-    let stop_key = IntentKey::for_job_stop(&workload_id);
+    let stop_key = IntentKey::for_workload_stop(&workload_id);
     state.store.put(stop_key.as_bytes(), &[0u8]).await.expect("put stop intent");
 
     // --- Re-submit the evaluation so the next tick re-evaluates the
@@ -675,6 +693,9 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -684,12 +705,13 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // --- Preload a Job that the SimDriver will reject — this drives
     //     the alloc into Failed and exercises the restart-with-backoff
     //     branch where `WorkloadLifecycleView` accumulates state.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -699,8 +721,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let job_key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let job_key = IntentKey::for_workload(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Submit the seed evaluation.
@@ -808,18 +832,22 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     nodes.insert(local_node.id.clone(), local_node);
 
     let desired = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     });
 
     // Single TickContext shared across both reconcile calls — same
@@ -844,6 +872,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let view_post = WorkloadLifecycleView {
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view_post.clone());
 
@@ -945,6 +974,9 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // dispatched in this test (we seed Failed directly + restart_counts
     // via the cached view to keep the reconcile output empty).
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -954,18 +986,21 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Seed Job (intent) so hydrate_desired returns Some(job).
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // Seed Failed alloc (observation) so hydrate_actual sees a Failed
@@ -1013,7 +1048,11 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     restart_counts.insert(alloc_id.clone(), restart_counts_value);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
-    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at,
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view);
 
     // Submit and drain the seed eval — without re-submitting, the
@@ -1118,8 +1157,11 @@ async fn drop_job_lifecycle_view_removes_seeded_view() {
     // Seed a non-default view (restart_counts non-empty).
     let mut counts = BTreeMap::new();
     counts.insert(alloc_id.clone(), 2u32);
-    let seeded =
-        WorkloadLifecycleView { restart_counts: counts, last_failure_seen_at: BTreeMap::new() };
+    let seeded = WorkloadLifecycleView {
+        restart_counts: counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, seeded);
 
     // Verify the seed is visible before drop.

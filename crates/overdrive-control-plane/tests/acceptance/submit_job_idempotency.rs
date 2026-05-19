@@ -51,6 +51,7 @@ async fn submit_json(
 }
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -69,6 +70,9 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -78,6 +82,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
         Arc::new(SimClock::new()),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     )
 }
 
@@ -114,7 +119,7 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // First submit — Ok, outcome = Inserted.
     let first: SubmitWorkloadResponse = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await
     .expect("first submit must be Ok");
@@ -137,7 +142,7 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // takes the conflict branch and returns ControlPlaneError::Conflict.
     let second = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await;
 
@@ -179,7 +184,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // Prime with canonical spec.
     let primed: SubmitWorkloadResponse = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) },
     )
     .await
     .expect("prime submit");
@@ -191,7 +196,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // Ok.
     let outcome = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec_alt_replicas()) },
     )
     .await;
 
@@ -202,7 +207,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
             // (`jobs/payments`). Mutation that returned empty string
             // would be caught here.
             assert!(
-                message.contains("jobs/payments"),
+                message.contains("workloads/payments"),
                 "Conflict message must name the intent-key path `jobs/payments`; \
                  got: {message}",
             );
@@ -220,12 +225,14 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // does not call `put`. A back-door read of the intent key returns
     // the canonical (replicas=3) bytes; a mutation that called `put`
     // either way would surface here as drifted bytes.
-    let key = b"jobs/payments";
+    let key = b"workloads/payments";
     let stored = state.store.get(key).await.expect("get must succeed");
     let bytes = stored.expect("intent key must remain populated after a Conflict");
     let canonical_job =
-        overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
-    let canonical_bytes = canonical_job.archive_for_store().expect("rkyv archive of canonical job");
+        overdrive_core::aggregate::Job::from_submit(payments_spec()).expect("Job::from_submit");
+    let canonical_bytes = overdrive_core::aggregate::WorkloadIntent::Job(canonical_job)
+        .archive_for_store()
+        .expect("rkyv archive of canonical job");
     assert_eq!(
         bytes.as_ref(),
         canonical_bytes.as_ref(),
@@ -248,7 +255,7 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
 
     let resp: SubmitWorkloadResponse = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) },
     )
     .await
     .expect("submit");
@@ -268,7 +275,7 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
     // The key must be populated (get returns Some) — proves the put
     // actually fired. Per ADR-0020 `IntentStore::get` returns
     // `Option<Bytes>`.
-    let key = b"jobs/payments";
+    let key = b"workloads/payments";
     let stored = state.store.get(key).await.expect("get must succeed");
     let bytes = stored.expect(
         "after successful submit the intent key must be populated — \
@@ -292,7 +299,7 @@ async fn unchanged_path_with_empty_kind_bytes_does_not_panic() {
     // First submit — plants the spec at the canonical key.
     let first = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await
     .expect("first submit");
@@ -308,7 +315,7 @@ async fn unchanged_path_with_empty_kind_bytes_does_not_panic() {
     // "index out of bounds: the len is 0 but the index is 0".
     let second = submit_json(
         state.clone(),
-        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) },
     )
     .await
     .expect("re-submit with empty kind bytes must not panic");

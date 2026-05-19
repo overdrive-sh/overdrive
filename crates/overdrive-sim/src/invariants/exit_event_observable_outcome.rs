@@ -467,6 +467,9 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         tmp.path().join("intent.redb"),
@@ -476,6 +479,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         sim_clock.clone(),
         Arc::new(SimDataplane::new()),
         NodeId::new("writer-1").map_err(|e| format!("writer node id: {e:?}"))?,
+        allocator,
     );
 
     exit_observer::spawn(
@@ -485,7 +489,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         sim_clock.clone(),
     );
 
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "exit-event-observable-outcome".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -495,8 +499,12 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         }),
     })
     .map_err(|e| format!("valid job spec: {e:?}"))?;
-    let archived = job.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
-    let key = IntentKey::for_job(&job.id);
+    // Per ADR-0050 single-cut migration: wrap into the kind-agnostic
+    // `WorkloadIntent` aggregate before archival; persist at
+    // `workloads/<id>` keying.
+    let intent = overdrive_core::aggregate::WorkloadIntent::Job(job.clone());
+    let archived = intent.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
+    let key = IntentKey::for_workload(&job.id);
     state
         .store
         .put(key.as_bytes(), archived.as_ref())

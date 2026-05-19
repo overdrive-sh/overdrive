@@ -105,4 +105,29 @@ mod acceptance {
     // GH #160 — `service_backends` ObservationStore table wires
     // through to `hydrate_desired` for `ServiceMapHydrator`.
     mod service_backends_hydrate_desired;
+
+    // service-vip-allocator step 02-02 — TOML `[dataplane.vip_allocator]`
+    // parser surface. S-VIP-15/16/17/18: section presence + delegation to
+    // `VipRange::new` for the three type-level invariants + structured
+    // `health.startup.refused` event on every refusal.
+    mod vip_allocator_config_parsing;
+
+    // service-vip-allocator step 02-03d — Service-arm submit_workload /
+    // alloc_status code paths. Six S-VIP scenarios per ADR-0049
+    // (amended 2026-05-15) + ADR-0050 + ADR-0051.
+    mod service_vip_submit_acceptance;
+
+    // service-vip-allocator step 03-02 — action-shim dispatch arm for
+    // Action::ReleaseServiceVip. S-VIP-06 PARTIAL (dispatch layer only;
+    // reconciler emission in 03-01; end-to-end S-VIP-06 + S-VIP-07 in
+    // 03-03).
+    mod release_service_vip_dispatch;
+
+    // Regression: Service workload convergence must not panic via stale
+    // `unreachable!()` in `read_job`. Gated behind `integration-tests`
+    // for the same reason as `runtime_convergence_loop` — the
+    // `run_convergence_tick` accessor is `#[cfg(any(test, feature =
+    // "integration-tests"))]`.
+    #[cfg(feature = "integration-tests")]
+    mod service_workload_convergence_no_panic;
 }

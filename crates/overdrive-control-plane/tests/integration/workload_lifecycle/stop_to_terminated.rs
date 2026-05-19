@@ -2,7 +2,7 @@
 //! `job_stop_drives_running_to_terminated`.
 //!
 //! Submits a 1-replica job and drives convergence until alloc reaches
-//! Running. Then writes the stop intent (`IntentKey::for_job_stop`)
+//! Running. Then writes the stop intent (`IntentKey::for_workload_stop`)
 //! and drives convergence again — alloc must transition Running →
 //! Terminated.
 //!
@@ -46,6 +46,9 @@ async fn job_stop_drives_running_to_terminated() {
     let driver: Arc<dyn Driver> =
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     let state = AppState::new(
         store,
         store_path,
@@ -55,6 +58,7 @@ async fn job_stop_drives_running_to_terminated() {
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     );
 
     // Background ticker: advances logical time continuously so any
@@ -72,7 +76,7 @@ async fn job_stop_drives_running_to_terminated() {
     // Use a distinct workload_id so the derived cgroup scope
     // (`alloc-stopper-0.scope`) does not collide with submit_to_running
     // (`alloc-payments-0.scope`) when both tests run in parallel under nextest.
-    let job = Job::from_spec(JobSpecInput {
+    let job = Job::from_submit(JobSpecInput {
         id: "stopper".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
@@ -82,8 +86,10 @@ async fn job_stop_drives_running_to_terminated() {
         }),
     })
     .expect("valid job spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    let key = IntentKey::for_job(&job.id);
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/stopper").expect("valid target");
@@ -114,7 +120,7 @@ async fn job_stop_drives_running_to_terminated() {
     assert!(converged_running, "convergence loop must produce a Running alloc within 30 ticks");
 
     // Now write the stop intent and drive convergence again.
-    let stop_key = IntentKey::for_job_stop(&job.id);
+    let stop_key = IntentKey::for_workload_stop(&job.id);
     state.store.put(stop_key.as_bytes(), b"").await.expect("put stop intent");
 
     let mut converged_terminated = false;

@@ -34,7 +34,6 @@ replicas = 1
 [[listener]]
 port = 8080
 protocol = "tcp"
-vip = "10.0.0.1"
 
 [[listener]]
 port = 8081

@@ -11,11 +11,14 @@
 //!   `GET /v1/cluster/info`, `GET /v1/allocs`, `GET /v1/nodes`).
 //! - ADR-0015 — `ErrorBody` shape `{error, message, field}`.
 //!
-//! `JobSpecInput` is re-used from `overdrive_core::aggregate` so there
-//! is exactly one definition of the spec shape on the wire. The CLI
-//! will construct `JobSpecInput` from its TOML input; the server will
-//! deserialise the same type out of JSON; both route through
-//! `Job::from_spec` for validation.
+//! Per ADR-0051 (Accepted 2026-05-15) the wire-side workload spec is
+//! [`SubmitSpecInput`] — a `oneOf`-discriminated enum at
+//! `overdrive_core::api::submit` carrying `Job` / `Service` /
+//! `Schedule` arms. The CLI projects parsed TOML onto a
+//! `SubmitSpecInput` variant; the server deserialises the same type
+//! out of JSON; both route through the per-kind validating
+//! constructors (`JobV1::from_submit` / `ServiceV1::from_submit` /
+//! `ScheduleV1::from_submit`) at the wire → intent boundary.
 
 // The `utoipa::OpenApi` derive on `OverdriveApi` below expands to code
 // using `.for_each(...)` on the collected schemas. The lint fires on
@@ -26,37 +29,32 @@
 
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::{
+    ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput,
+};
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::StoppedBy;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Body of `POST /v1/jobs`. Carries the operator-submitted job spec
-/// verbatim; the server routes it through `Job::from_spec` to validate
-/// and derive the intent key / digest.
+/// Body of `POST /v1/jobs`. Carries the operator-submitted workload
+/// spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
+/// dispatches on the [`SubmitSpecInput`] variant and routes each
+/// arm through the per-kind validating constructor
+/// (`JobV1::from_submit` / `ServiceV1::from_submit` /
+/// `ScheduleV1::from_submit`) to derive the intent key / digest.
 ///
-/// Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
-/// optional `workload_kind` field is the wire-side carrier for the
-/// kind discriminator (`"service"` / `"job"` / `"schedule"`). Absent
-/// on legacy clients (defaults to `"service"` per
-/// `WorkloadKind::default`); set to `"job"` by the CLI's
-/// `submit_streaming_job` path so the server can dispatch on the
-/// per-kind streaming-event sibling enums (ADR-0047 §3 [D7]) and
-/// persist the discriminator at `IntentKey::for_workload_kind` so the
-/// reconciler runtime's `hydrate_desired` populates
-/// `WorkloadLifecycleState.workload_kind` for the natural-exit emission
-/// path (ADR-0037 Amendment 2026-05-10).
+/// Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
+/// is the SOLE workload-kind discriminator carrier — the previous
+/// optional top-level `workload_kind: Option<String>` field was
+/// deleted in step 02-03b. Legacy clients that sent
+/// `workload_kind = "job"` migrate to `spec = { kind: "job", ... }`;
+/// `kind` is required (not optional) and the JSON shape is
+/// `oneOf`-discriminated.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SubmitWorkloadRequest {
-    pub spec: JobSpecInput,
-    /// Optional workload-kind discriminator. `"service"` (default),
-    /// `"job"`, or `"schedule"`. Unknown values fall back to `"service"`
-    /// per ADR-0047 §1 forward-compat — preserves kind-agnostic
-    /// behavior for clients sending a value the server does not
-    /// recognise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workload_kind: Option<String>,
+    pub spec: SubmitSpecInput,
 }
 
 /// Response for `POST /v1/jobs`. Carries `workload_id`, the canonical
@@ -83,6 +81,19 @@ pub struct SubmitWorkloadResponse {
     pub workload_id: String,
     pub spec_digest: String,
     pub outcome: IdempotencyOutcome,
+    /// Service-issued VIP — populated for `WorkloadKind::Service`
+    /// submissions per ADR-0049 (amended 2026-05-15). `None` for
+    /// `Job` / `Schedule` submissions (those kinds carry no service-
+    /// level VIP). Rendered as the canonical dotted-decimal IPv4
+    /// form (e.g. `"10.96.0.2"`).
+    ///
+    /// Per the Q1.A resolution 2026-05-15: this is a top-level
+    /// `Option<String>` rather than a per-kind discriminated oneOf
+    /// response shape. The symmetric oneOf shape is deferred (would
+    /// pull in Job / Schedule response migration not in this
+    /// feature's scope).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip: Option<String>,
 }
 
 /// Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
@@ -214,6 +225,17 @@ pub struct AllocStatusResponse {
     /// The CLI render layer branches on this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<overdrive_core::aggregate::WorkloadKind>,
+    /// Service-issued VIP — populated for `WorkloadKind::Service`
+    /// reads per ADR-0049 (amended 2026-05-15). `None` for
+    /// `Job` / `Schedule` reads. Resolved from the persistent
+    /// allocator's content-addressed memo keyed by the workload's
+    /// `WorkloadIntent::Service(_).spec_digest()`.
+    ///
+    /// Per the Q1.A resolution 2026-05-15: per-listener lines do
+    /// NOT carry a per-listener VIP — listeners are `(port, protocol)`
+    /// only; the Service-level VIP lives at this top-level field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip: Option<String>,
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01
@@ -337,6 +359,16 @@ pub struct ErrorBody {
         ResourcesInput,
         ExecInput,
         DriverInput,
+        // ADR-0051 wire-shape — `SubmitSpecInput` is the discriminated
+        // `oneOf` body now carried by `SubmitWorkloadRequest.spec`.
+        // Per-variant payload schemas (Service / Schedule) plus the
+        // listener leaf are registered explicitly so they appear in the
+        // OpenAPI document's `components.schemas` section regardless of
+        // the renderer's nested-resolution behavior.
+        SubmitSpecInput,
+        ServiceSpecInput,
+        ScheduleSpecInput,
+        ListenerInput,
         // Slice 01 step 01-02 — wire types per DWD-03.
         TerminalReason,
         AllocStateWire,
@@ -605,7 +637,17 @@ pub enum SubmitEvent {
     /// First line of every streaming response — confirms the
     /// `IntentStore` commit. `outcome` carries the idempotency verdict
     /// (Inserted / Unchanged) per ADR-0020.
-    Accepted { spec_digest: String, intent_key: String, outcome: IdempotencyOutcome },
+    ///
+    /// `vip` is populated only for `WorkloadKind::Service` streams per
+    /// service-vip-allocator step 02-03d / ADR-0049 (amended 2026-05-15);
+    /// Job / Schedule streams emit `vip: None` (skipped on the wire).
+    Accepted {
+        spec_digest: String,
+        intent_key: String,
+        outcome: IdempotencyOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vip: Option<String>,
+    },
     /// Lifecycle transition observed on the broadcast channel.
     /// Mirrors the snapshot's `TransitionRecord` shape with the alloc
     /// id added so a stream consumer can disambiguate concurrent

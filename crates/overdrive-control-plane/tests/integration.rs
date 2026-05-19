@@ -138,4 +138,9 @@ mod integration {
     /// `.claude/rules/development.md` for the layering rationale.
     mod openapi_gate;
     mod streaming_attempt_failed;
+    /// service-vip-allocator step 03-03 — end-to-end VIP lifecycle:
+    /// submit → allocate → action-shim release-dispatch → reuse on
+    /// next submit. Owns S-VIP-06 (end-to-end) and S-VIP-07 (released-
+    /// VIP reuse) per the DISTILL test-scenarios contract.
+    mod vip_allocator_lifecycle;
 }

@@ -25,4 +25,14 @@ mod acceptance {
 
     // Phase-1-control-plane-core — step 03-06 `LocalObservationStore`.
     mod local_observation_store;
+
+    // service-vip-allocator Phase 5 (Phase-5 aggregate mutation gate,
+    // May 2026) — `IntentStore::scan_prefix` contract on `LocalIntentStore`,
+    // plus the `open()`-time recovery-walk filter that skips
+    // workload suffix-keys (`/stop`, `/kind`) while pre-decoding
+    // aggregate envelope keys. Kills the three surviving mutants on
+    // `redb_backend.rs:149` (`||` → `&&`), `:397` (`Ok(vec![])`), and
+    // `:409` (`delete !`) — all introduced by this feature's
+    // PersistentServiceVipAllocator + WorkloadIntent migration work.
+    mod scan_prefix_contract;
 }

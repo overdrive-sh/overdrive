@@ -457,7 +457,7 @@ async fn s_02_04_third_attempt_zero_reports_succeeded() {
 }
 
 /// S-02-07 — server validation failure surfaces as a structured error.
-/// A spec with `replicas = 0` (rejected by `Job::from_spec`) must
+/// A spec with `replicas = 0` (rejected by `Job::from_submit`) must
 /// produce `CliError::InvalidSpec` BEFORE any HTTP call — the CLI's
 /// fast-fail validation gate fires per ADR-0014.
 ///

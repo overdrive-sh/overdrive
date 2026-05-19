@@ -155,12 +155,12 @@ pub fn write_raw_bytes_to_entries_table(redb_path: &Path, key: &[u8], raw_bytes:
     write_raw_bytes_to_table(redb_path, ENTRIES_TABLE, key, raw_bytes);
 }
 
-/// Synthesise bytes that look like a `JobEnvelope` archive but carry
+/// Synthesise bytes that look like a `WorkloadIntentEnvelope` archive but carry
 /// an unknown discriminant tag (`99`). Used by S-EV-03.2 to drive the
 /// "unknown future variant" branch of `Job::from_store_bytes` — the
 /// pre-decode probe (`probe_known_variant`) surfaces this as
 /// `EnvelopeError::UnknownVersion { observed: 99, type_name:
-/// "JobEnvelope", supported_max: 0 }`.
+/// "WorkloadIntentEnvelope", supported_max: 0 }`.
 ///
 /// rkyv 0.8 places variable-length payload data (strings, vecs) in
 /// a leading slab and the fixed-size "root" structure — including
@@ -170,9 +170,9 @@ pub fn write_raw_bytes_to_entries_table(redb_path: &Path, key: &[u8], raw_bytes:
 /// envelope shape; the absolute offset from the start shifts with
 /// every workload-id / command / args length change.
 ///
-/// For `JobEnvelope` V1-only archives this distance is 64 bytes,
+/// For `WorkloadIntentEnvelope` V1-only archives this distance is 64 bytes,
 /// mirroring
-/// `JobEnvelope::discriminant_offset_from_end() == Some(64)` in
+/// `WorkloadIntentEnvelope::discriminant_offset_from_end() == Some(64)` in
 /// `crates/overdrive-core/src/aggregate/mod.rs`.
 ///
 /// The helper flips only that one byte (no surrounding padding) so
@@ -180,10 +180,10 @@ pub fn write_raw_bytes_to_entries_table(redb_path: &Path, key: &[u8], raw_bytes:
 /// * pass the pre-decode probe's structural sanity (the slice IS
 ///   long enough),
 /// * fail the probe's known-discriminant check (99 is not in
-///   `JobEnvelope::known_discriminants()`),
+///   `WorkloadIntentEnvelope::known_discriminants()`),
 /// * therefore surface as `UnknownVersion` BEFORE rkyv decode.
 ///
-/// **Version-bump invariant.** When `JobEnvelope::V2` lands, the
+/// **Version-bump invariant.** When `WorkloadIntentEnvelope::V2` lands, the
 /// constant `JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END` below MUST
 /// be re-pinned alongside the schema-evolution fixture per
 /// `VersionedEnvelope::discriminant_offset_from_end`'s docstring —
@@ -192,8 +192,8 @@ pub fn write_raw_bytes_to_entries_table(redb_path: &Path, key: &[u8], raw_bytes:
 /// of the tag, breaking the test.
 pub fn synthesise_unknown_job_envelope_variant_tag(payload_archive: &[u8]) -> Vec<u8> {
     /// Empirically-pinned discriminant distance-from-end for
-    /// `JobEnvelope` V1-only archives. Mirrors
-    /// `JobEnvelope::discriminant_offset_from_end() == Some(64)`.
+    /// `WorkloadIntentEnvelope` V1-only archives. Mirrors
+    /// `WorkloadIntentEnvelope::discriminant_offset_from_end() == Some(64)`.
     const JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END: usize = 64;
 
     let mut bytes = payload_archive.to_vec();

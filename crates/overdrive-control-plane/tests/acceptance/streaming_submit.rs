@@ -34,6 +34,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
@@ -79,6 +80,9 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
     AppState::new(
         store,
         store_path,
@@ -88,6 +92,7 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
+        allocator,
     )
 }
 
@@ -96,22 +101,14 @@ fn build_router(state: AppState) -> Router {
 }
 
 /// Build a `POST /v1/jobs` request with the given Accept header.
+///
+/// Per ADR-0051 the wire-side workload kind is the inner `kind` tag on
+/// `SubmitSpecInput`; the outer `workload_kind` field has been deleted.
+/// Every submission this helper constructs carries `kind: "job"`.
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
-    build_submit_request_with_kind(spec, accept, None)
-}
-
-/// Build a `POST /v1/jobs` request with the given Accept header and
-/// explicit workload kind discriminator.
-fn build_submit_request_with_kind(
-    spec: &JobSpecInput,
-    accept: &str,
-    workload_kind: Option<&str>,
-) -> Request<Body> {
-    let body = serde_json::to_vec(&SubmitWorkloadRequest {
-        spec: spec.clone(),
-        workload_kind: workload_kind.map(str::to_owned),
-    })
-    .expect("serialize");
+    let body =
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
+            .expect("serialize");
     Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")
@@ -119,6 +116,20 @@ fn build_submit_request_with_kind(
         .header(header::ACCEPT, accept)
         .body(Body::from(body))
         .expect("build request")
+}
+
+/// Pre-ADR-0051 helper that varied `workload_kind` per call. Retained as
+/// a thin wrapper over [`build_submit_request`] because the regression
+/// tests at lines 1051 / 1149 / 1181 still call into it; the
+/// `_workload_kind` argument is ignored — the outer field has been
+/// deleted in this step's commit (the kind tag lives inside
+/// `SubmitSpecInput::Job(_)` now).
+fn build_submit_request_with_kind(
+    spec: &JobSpecInput,
+    accept: &str,
+    _workload_kind: Option<&str>,
+) -> Request<Body> {
+    build_submit_request(spec, accept)
 }
 
 /// Read the entire response body and split into NDJSON lines (each
@@ -244,7 +255,7 @@ async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
     // Build request without Accept header — back-compat with reqwest
     // clients that never send Accept.
     let body =
-        serde_json::to_vec(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
             .expect("serialize");
     let request = Request::builder()
         .method(Method::POST)
@@ -317,8 +328,9 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // Emit a LifecycleTransition (Pending → Running) — this should be
-    // forwarded to the consumer.
+    // Emit a LifecycleTransition (Pending → Running) — informational
+    // line on the Job stream (NOT terminal — Jobs are
+    // run-to-completion).
     emit_lifecycle(
         &state,
         make_lifecycle_event(
@@ -330,28 +342,34 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
         ),
     );
 
-    // Write a Running row matching the desired replica count → handler
-    // detects ConvergedRunning. Job has replicas=1, one Running row meets the bar.
-    write_row(
-        state.obs.as_ref(),
-        &alloc_id,
-        &workload_id,
-        AllocState::Running,
-        1,
-        Some(TransitionReason::Started),
-    )
-    .await;
+    // Emit the terminal Completed event — drives the Job stream to
+    // emit `JobSubmitEvent::Succeeded` and close. Pre-migration this
+    // step seeded a Running row + Running lifecycle and the Service
+    // arm emitted `converged_running`; per ADR-0051 the Job arm has no
+    // `converged_running` variant (RCA root causes B+C+D structurally
+    // unreachable) — terminal claim is the close signal.
+    let mut terminal_event = make_lifecycle_event(
+        alloc_id.clone(),
+        workload_id.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    terminal_event.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Completed { exit_code: 0 });
+    emit_lifecycle(&state, terminal_event);
 
     let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
         .await
         .expect("request finishes")
         .expect("task ok");
 
-    // Sequence assertions
+    // Sequence assertions — Job-arm vocabulary (ADR-0051):
+    //   `accepted` → `running` (informational) → `succeeded` (terminal).
     assert!(lines.len() >= 3, "expected at least 3 NDJSON lines; got {lines:?}");
     assert_eq!(lines[0]["kind"], "accepted", "first line must be `accepted`");
     let last = lines.last().expect("at least one line");
-    assert_eq!(last["kind"], "converged_running", "last line must be `converged_running`");
+    assert_eq!(last["kind"], "succeeded", "last line must be `succeeded` (Job-arm terminal)");
     // Every line is valid JSON with a `kind` discriminator.
     for line in &lines {
         assert!(line.get("kind").is_some(), "every line must carry `kind`; got {line}");
@@ -359,9 +377,12 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
     // The Accepted line carries spec_digest and outcome.
     assert!(lines[0]["data"]["spec_digest"].is_string());
     assert_eq!(lines[0]["data"]["outcome"], "inserted");
-    // At least one LifecycleTransition between accepted and converged_running.
-    let has_lt = lines.iter().any(|l| l["kind"] == "lifecycle_transition");
-    assert!(has_lt, "expected at least one lifecycle_transition line; got {lines:?}");
+    // At least one informational `running` between `accepted` and the
+    // terminal `succeeded`. Pre-migration this was a
+    // `lifecycle_transition` line on the Service arm; the Job arm
+    // projects Running directly via `JobSubmitEvent::Running { since }`.
+    let has_running = lines.iter().any(|l| l["kind"] == "running");
+    assert!(has_running, "expected at least one `running` informational line; got {lines:?}");
 }
 
 // ===========================================================================
@@ -425,6 +446,20 @@ async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
         ),
     );
 
+    // Emit a terminal Completed event so the Job-arm stream closes
+    // promptly (no `converged_running` variant on the Job arm per
+    // ADR-0051; terminal claim is the close signal).
+    let mut terminal_event = make_lifecycle_event(
+        alloc_id.clone(),
+        workload_id.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    terminal_event.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Completed { exit_code: 0 });
+    emit_lifecycle(&state, terminal_event);
+
     let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
         .await
         .expect("request finishes")
@@ -434,8 +469,8 @@ async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
     assert_eq!(lines[0]["data"]["outcome"], "unchanged", "byte-identical resubmit → unchanged");
     let last = lines.last().expect("at least one line");
     assert!(
-        last["kind"] == "converged_running" || last["kind"] == "converged_failed",
-        "stream must terminate; got {last}"
+        last["kind"] == "succeeded" || last["kind"] == "failed" || last["kind"] == "stopped",
+        "stream must terminate on a Job-arm terminal variant; got {last}"
     );
 }
 
@@ -484,16 +519,25 @@ async fn s_cp_06_cap_timer_fires_timeout_terminal_when_no_events_arrive() {
         .expect("task ok");
 
     let last = lines.last().expect("at least one line");
-    assert_eq!(last["kind"], "converged_failed", "cap must produce converged_failed terminal");
-    let terminal_reason = &last["data"]["terminal_reason"];
-    assert_eq!(terminal_reason["kind"], "timeout", "cap must produce Timeout variant");
-    assert_eq!(
-        terminal_reason["data"]["after_seconds"], 60,
-        "Timeout must carry the configured cap"
+    // ADR-0051 Job-arm migration: cap-timer emits
+    // `JobSubmitEvent::Failed { exit_code: -1, duration: "60s",
+    // stderr_tail: Some("did not converge in 60s") }` (NOT the legacy
+    // Service-arm `converged_failed` + `terminal_reason: Timeout`).
+    assert_eq!(last["kind"], "failed", "cap must produce Job-arm `failed` terminal");
+    assert_eq!(last["data"]["exit_code"], -1, "cap fires with sentinel exit_code -1");
+    assert_eq!(last["data"]["duration"], "60s", "cap duration must reflect configured cap");
+    let stderr_tail = last["data"]["stderr_tail"].as_str().expect("stderr_tail string");
+    assert!(
+        stderr_tail.contains("did not converge"),
+        "stderr_tail must explain cap-timer non-convergence; got {stderr_tail}"
     );
-    // No lifecycle_transition lines between Accepted and Timeout.
-    let has_lt = lines.iter().any(|l| l["kind"] == "lifecycle_transition");
-    assert!(!has_lt, "no transitions should appear between accepted and timeout; got {lines:?}");
+    // No informational `running` lines between Accepted and the
+    // terminal (bus was silent for the whole stream).
+    let has_running = lines.iter().any(|l| l["kind"] == "running");
+    assert!(
+        !has_running,
+        "no informational running line should appear between accepted and cap-timer terminal; got {lines:?}"
+    );
 }
 
 // ===========================================================================
@@ -588,22 +632,25 @@ async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
         .expect("task ok");
 
     let last = lines.last().expect("at least one line");
+    // ADR-0051 Job-arm migration: cap-timer emits Job-arm `failed`
+    // (NOT Service-arm `converged_failed` + `terminal_reason: Timeout`).
     assert_eq!(
-        last["kind"], "converged_failed",
-        "cap must produce converged_failed terminal at absolute 60s deadline"
+        last["kind"], "failed",
+        "cap must produce Job-arm `failed` terminal at absolute 60s deadline"
     );
-    let terminal_reason = &last["data"]["terminal_reason"];
-    assert_eq!(terminal_reason["kind"], "timeout", "cap must produce Timeout variant");
+    assert_eq!(last["data"]["exit_code"], -1, "cap fires with sentinel exit_code -1");
     assert_eq!(
-        terminal_reason["data"]["after_seconds"], 60,
-        "Timeout must carry the configured cap (60s), not the inactivity interval"
+        last["data"]["duration"], "60s",
+        "duration must reflect configured cap (60s), not the inactivity interval"
     );
-    // The injected event must have been projected before the timeout fired.
-    let has_lt = lines.iter().any(|l| l["kind"] == "lifecycle_transition");
+    // The injected Running lifecycle event must have been projected
+    // before the cap fired — Job-arm renders Running events as
+    // `kind: "running"` (NOT `lifecycle_transition`).
+    let has_running = lines.iter().any(|l| l["kind"] == "running");
     assert!(
-        has_lt,
-        "injected LifecycleEvent at sim_t=30s must appear as a lifecycle_transition \
-         line before the cap-deadline timeout terminal; got {lines:?}"
+        has_running,
+        "injected LifecycleEvent at sim_t=30s must appear as a `running` line \
+         before the cap-deadline terminal; got {lines:?}"
     );
 }
 
@@ -615,23 +662,33 @@ async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
 
 #[tokio::test]
 async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
+    // ADR-0051 migration note (step 02-03b): the Job-arm streaming
+    // surface (`JobSubmitEvent`) does NOT emit a `lifecycle_transition`
+    // line that carries the full `TransitionReason` payload — the
+    // pre-migration Service-arm wire shape is structurally replaced by
+    // per-kind sibling variants (`pending` / `running` / `attempt_failed`
+    // / terminal). The Job-arm path that surfaces reason-derived data
+    // on the wire is `attempt_failed`, which extracts the typed
+    // `exit_code` from `TransitionReason::WorkloadCrashedImmediately`.
+    //
+    // This test is migrated to exercise that path: the typed
+    // `exit_code` on the streaming `attempt_failed` line must match
+    // the typed `exit_code` constructed in the source
+    // `WorkloadCrashedImmediately` reason — the same "single source of
+    // truth carried verbatim through the streaming projection"
+    // invariant the pre-migration test enforced for the Service-arm
+    // `lifecycle_transition.reason` field.
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
+    let sim_clock = Arc::new(SimClock::new());
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    // 60s cap so the test can close the stream via SimClock.tick after
+    // the AttemptFailed line is emitted without racing a terminal.
+    state.streaming_cap = Duration::from_secs(60);
     let router = build_router(state.clone());
 
-    // Project a known TransitionReason variant onto both a row write
-    // and a broadcast event, then assert the JSON shapes byte-equal
-    // each other on the wire.
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
     let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
-    let reason =
-        TransitionReason::ExecBinaryNotFound { path: "/usr/local/bin/payments".to_string() };
-
-    let req_state = state.clone();
-    let req_reason = reason.clone();
-    let req_alloc_id = alloc_id.clone();
-    let req_job_id = workload_id.clone();
     let request_task = tokio::spawn(async move {
         let response = router
             .oneshot(build_submit_request(&payments_spec(), "application/x-ndjson"))
@@ -647,59 +704,54 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // Emit the lifecycle event AFTER the subscriber is live, then write
-    // the Running row that drives terminal classification. Mirrors the
-    // s_cp_01 ordering — required so the post-subscribe snapshot does
-    // not short-circuit the loop before the live event arrives. (The
-    // test asserts on the wire shape of the projected
-    // `LifecycleTransition`; that line only exists when the loop sees
-    // a live event, which requires the subscriber to be live and the
-    // obs row to not yet be terminal at subscribe-time.)
-    emit_lifecycle(
-        &state,
-        make_lifecycle_event(
-            req_alloc_id.clone(),
-            req_job_id.clone(),
-            AllocStateWire::Pending,
-            AllocStateWire::Running,
-            req_reason.clone(),
-        ),
+    // Emit a Failed lifecycle event carrying the typed reason. The
+    // Job-arm projection reads `exit_code` directly from the typed
+    // `WorkloadCrashedImmediately.exit_code` field — the streaming
+    // wire's `exit_code` must byte-equal the constructed value.
+    let mut failed_event = make_lifecycle_event(
+        alloc_id.clone(),
+        workload_id.clone(),
+        AllocStateWire::Pending,
+        AllocStateWire::Failed,
+        TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(42),
+            signal: None,
+            stderr_tail: None,
+        },
     );
+    failed_event.detail = None;
+    failed_event.terminal = None;
+    emit_lifecycle(&state, failed_event);
 
-    // Write a Running row matching the desired replica count → handler
-    // detects ConvergedRunning. Job has replicas=1, one Running row meets the bar.
-    write_row(
-        state.obs.as_ref(),
-        &alloc_id,
-        &workload_id,
-        AllocState::Running,
-        1,
-        Some(TransitionReason::Started),
-    )
-    .await;
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    // Advance past the cap to close the stream.
+    sim_clock.tick(Duration::from_secs(61));
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
 
     let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
         .await
         .expect("request finishes")
         .expect("task ok");
 
-    // Find the streaming `LifecycleTransition` with our reason.
-    let lt_line = lines
+    let attempt_failed_line = lines
         .iter()
-        .find(|l| l["kind"] == "lifecycle_transition")
-        .expect("at least one lifecycle_transition line");
-    let stream_reason = &lt_line["data"]["reason"];
+        .find(|l| l["kind"] == "attempt_failed")
+        .expect("expected an attempt_failed line in the stream");
 
-    // Serialize the same TransitionReason via the snapshot's path
-    // (TransitionReason is the single source of truth used by both
-    // surfaces).
-    let snapshot_reason: Value = serde_json::to_value(&req_reason).expect("serialize reason");
+    // The streaming wire's `exit_code` byte-equals the typed
+    // `WorkloadCrashedImmediately.exit_code` — the migration-time
+    // equivalent of "stream reason byte-equals source reason" on the
+    // Job arm.
     assert_eq!(
-        *stream_reason, snapshot_reason,
-        "streaming reason wire shape must byte-equal snapshot reason"
+        attempt_failed_line["data"]["exit_code"], 42,
+        "streaming attempt_failed.exit_code must byte-equal source \
+         WorkloadCrashedImmediately.exit_code; got {attempt_failed_line}"
     );
-
-    let _ = req_state;
 }
 
 // ===========================================================================
@@ -818,20 +870,28 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
         .expect("stream closes within 5 s after Terminated event, not via cap timer")
         .expect("task ok");
 
-    // AC: final line has kind == "converged_stopped".
+    // ADR-0051 Job-arm migration: terminal Stopped projects to
+    // `JobSubmitEvent::Stopped { stopped_by, duration, attempts }`
+    // (NOT Service-arm `converged_stopped`).
     let last = lines.last().expect("at least one line");
     assert_eq!(
-        last["kind"], "converged_stopped",
-        "last line must be `converged_stopped` after Stopped-by-Reconciler transition; got {lines:?}"
+        last["kind"], "stopped",
+        "last line must be `stopped` (Job-arm terminal) after Stopped-by-Reconciler transition; got {lines:?}"
     );
 
-    // AC: no converged_failed line anywhere in the stream.
-    let has_failed = lines.iter().any(|l| l["kind"] == "converged_failed");
-    assert!(!has_failed, "stream must not contain `converged_failed`; got {lines:?}");
+    // AC: no Job-arm `failed` terminal anywhere in the stream (clean
+    // stop is not a failure).
+    let has_failed = lines.iter().any(|l| l["kind"] == "failed");
+    assert!(!has_failed, "stream must not contain `failed`; got {lines:?}");
 
-    // AC: no timeout terminal_reason anywhere in the stream.
-    let has_timeout = lines.iter().any(|l| l["data"]["terminal_reason"]["kind"] == "timeout");
-    assert!(!has_timeout, "stream must not close via cap timer; got {lines:?}");
+    // AC: stream must close via the Stopped terminal event, not the
+    // cap timer. Cap-timer would produce `failed` (asserted above) and
+    // a stderr_tail containing "did not converge"; assert it does not
+    // appear.
+    let has_cap_terminal = lines
+        .iter()
+        .any(|l| l["data"]["stderr_tail"].as_str().is_some_and(|s| s.contains("did not converge")));
+    assert!(!has_cap_terminal, "stream must not close via cap timer; got {lines:?}");
 }
 
 // ===========================================================================
@@ -891,6 +951,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         &state.lifecycle_events,
         &tick,
         &state.node_id,
+        std::sync::Arc::clone(&state.allocator),
     )
     .await
     .expect("dispatch succeeds");
@@ -957,19 +1018,37 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
     let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
-    // Pre-seed a Running AllocStatusRow BEFORE issuing the streaming
-    // request — simulates the production race outcome where the
-    // convergence loop has already written the obs row by the time
-    // build_stream reaches bus.subscribe().
-    write_row(
-        state.obs.as_ref(),
-        &alloc_id,
-        &workload_id,
-        AllocState::Running,
-        1,
-        Some(TransitionReason::Started),
-    )
-    .await;
+    // Pre-seed a terminal `Completed` AllocStatusRow BEFORE issuing
+    // the streaming request — simulates the production race outcome
+    // where the convergence loop has already written the obs row with
+    // its terminal claim by the time `build_workload_stream` reaches
+    // `bus.subscribe()`. The Job-arm snapshot-recovery path
+    // (`workload_terminal_from_snapshot`) reads `row.terminal` and
+    // projects `TerminalCondition::Completed { exit_code: 0 }` onto
+    // `JobSubmitEvent::Succeeded`.
+    //
+    // ADR-0051 migration note: pre-migration this test seeded a
+    // `terminal: None` Running row and the Service-arm snapshot-
+    // recovery classified Running as `converged_running`. The Job arm
+    // has NO `converged_running` variant — Running is informational,
+    // not terminal — so the seed must carry a real terminal claim to
+    // close the stream synchronously.
+    let row = AllocStatusRow {
+        alloc_id: alloc_id.clone(),
+        workload_id: workload_id.clone(),
+        node_id: sample_node(),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp { counter: 1, writer: sample_node() },
+        reason: Some(TransitionReason::Started),
+        detail: None,
+        terminal: Some(overdrive_core::transition_reason::TerminalCondition::Completed {
+            exit_code: 0,
+        }),
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Job,
+        listeners: Vec::new(),
+    };
+    state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 
     let router = build_router(state.clone());
 
@@ -995,24 +1074,30 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
         .expect("request must complete within 500ms wall-clock — bug: hangs until 60s cap")
         .expect("task ok");
 
-    // Assertions: exactly two lines, accepted then converged_running.
+    // Assertions: exactly two lines, accepted then succeeded.
+    // ADR-0051 Job-arm: `Succeeded` is the terminal that projects from
+    // the pre-seeded `TerminalCondition::Completed { exit_code: 0 }`
+    // row via the snapshot-recovery path.
     assert_eq!(lines.len(), 2, "expected exactly 2 NDJSON lines; got {lines:?}");
     assert_eq!(lines[0]["kind"], "accepted", "first line must be `accepted`");
     assert_eq!(
-        lines[1]["kind"], "converged_running",
-        "second line must be `converged_running` (NOT `converged_failed`); got {lines:?}"
+        lines[1]["kind"], "succeeded",
+        "second line must be Job-arm `succeeded` (NOT `failed`); got {lines:?}"
     );
     assert_ne!(
-        lines[1]["kind"], "converged_failed",
-        "must NOT emit converged_failed — bug symptom is false-positive timeout"
+        lines[1]["kind"], "failed",
+        "must NOT emit `failed` — bug symptom is false-positive cap-fired terminal"
     );
-    assert_ne!(
-        lines[1]["data"]["terminal_reason"]["kind"], "timeout",
-        "must NOT emit timeout terminal_reason — bug symptom is cap-fired Timeout"
+    // Cap-timer fallback produces a stderr_tail containing "did not
+    // converge"; the snapshot-recovery path produces no such tail.
+    let stderr_tail = lines[1]["data"]["stderr_tail"].as_str().unwrap_or("");
+    assert!(
+        !stderr_tail.contains("did not converge"),
+        "must NOT emit cap-fired terminal (no `did not converge` in stderr_tail); got {lines:?}"
     );
     assert_eq!(
-        lines[1]["data"]["alloc_id"], "alloc-payments-0",
-        "converged_running must reference the pre-seeded alloc"
+        lines[1]["data"]["exit_code"], 0,
+        "Job `succeeded` must carry exit_code 0 from the pre-seeded Completed terminal"
     );
 }
 

@@ -141,18 +141,22 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         alloc_with_state("alloc-payments-0", "payments", "local", state),
     );
     let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     (desired, actual)
 }
@@ -184,7 +188,11 @@ fn recomputes_deadline_at_window_boundary() {
     restart_counts.insert(aid("alloc-payments-0"), 2_u32);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), t0);
-    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at,
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
     let r = WorkloadLifecycle::canonical();
@@ -269,7 +277,11 @@ fn restart_survival_idempotence() {
     restart_counts.insert(aid("alloc-payments-0"), 1_u32);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), t0);
-    let view_a = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+    let view_a = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at,
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
     let r = WorkloadLifecycle::canonical();

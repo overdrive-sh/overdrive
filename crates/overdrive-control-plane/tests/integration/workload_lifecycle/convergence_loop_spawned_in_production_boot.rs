@@ -46,6 +46,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -129,6 +130,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         operator_config_dir: operator_config_dir.clone(),
         tick_cadence: Duration::from_millis(100),
         clock: clock.clone(),
+        vip_range: overdrive_dataplane::allocators::VipRange::default(),
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))
@@ -150,7 +152,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     };
     let resp = client
         .post(&submit_url)
-        .json(&SubmitWorkloadRequest { spec, workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec) })
         .send()
         .await
         .expect("POST /v1/jobs");

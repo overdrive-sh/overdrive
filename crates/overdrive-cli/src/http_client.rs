@@ -76,7 +76,7 @@ pub enum CliError {
     BodyDecode { cause: String },
 
     /// Client-side spec validation failed before any HTTP call. Per
-    /// ADR-0011 the CLI runs `Job::from_spec` (the same validating
+    /// ADR-0011 the CLI runs `Job::from_submit` (the same validating
     /// constructor the server uses) locally so operators see the
     /// offending field without a round-trip. `field` names the
     /// offending field in the aggregate's public shape; `message` is

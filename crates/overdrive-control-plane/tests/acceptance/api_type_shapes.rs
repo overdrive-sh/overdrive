@@ -27,6 +27,7 @@ use overdrive_control_plane::api::{
     WorkloadDescription,
 };
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use utoipa::ToSchema;
 
 fn sample_job_spec() -> JobSpecInput {
@@ -40,7 +41,7 @@ fn sample_job_spec() -> JobSpecInput {
 
 #[test]
 fn submit_job_request_round_trips_through_serde_json() {
-    let original = SubmitWorkloadRequest { spec: sample_job_spec(), workload_kind: None };
+    let original = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(sample_job_spec()) };
     let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadRequest");
     let round_tripped: SubmitWorkloadRequest =
         serde_json::from_str(&wire).expect("deserialise SubmitWorkloadRequest");
@@ -61,6 +62,7 @@ fn submit_response_carries_spec_digest_and_outcome_inserted() {
         workload_id: "payments".to_string(),
         spec_digest: digest.clone(),
         outcome: IdempotencyOutcome::Inserted,
+        vip: None,
     };
     let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadResponse");
     let round_tripped: SubmitWorkloadResponse =
@@ -82,6 +84,7 @@ fn submit_response_carries_outcome_unchanged_on_idempotent_resubmit() {
         workload_id: "payments".to_string(),
         spec_digest: digest.clone(),
         outcome: IdempotencyOutcome::Unchanged,
+        vip: None,
     };
     let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadResponse");
     // The lowercase JSON form is the wire contract — pinned via
@@ -214,6 +217,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
             exhausted: false,
         }),
         kind: None,
+        vip: None,
     };
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =

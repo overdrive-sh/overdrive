@@ -22,6 +22,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
+use overdrive_core::id::WorkloadId;
 use overdrive_core::reconciler::{
     AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
     WorkloadLifecycleState, WorkloadLifecycleView,
@@ -37,7 +38,7 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 }
 
 fn payments_job() -> Job {
-    Job::from_spec(JobSpecInput {
+    Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
@@ -61,16 +62,22 @@ fn happy_path_state() -> WorkloadLifecycleState {
     let n = node_alpha();
     nodes.insert(n.id.clone(), n);
     WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(payments_job()),
         desired_to_stop: false,
         nodes,
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     }
 }
 
 const fn empty_view() -> WorkloadLifecycleView {
-    WorkloadLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at: BTreeMap::new() }
+    WorkloadLifecycleView {
+        restart_counts: BTreeMap::new(),
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_terminal: ::std::collections::BTreeSet::new(),
+    }
 }
 
 #[test]
@@ -80,11 +87,13 @@ fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
     let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();
     let actual_inner = WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: desired_inner.job.clone(),
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let desired = AnyState::WorkloadLifecycle(desired_inner);
     let actual = AnyState::WorkloadLifecycle(actual_inner);
@@ -119,11 +128,13 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();
     let actual_inner = WorkloadLifecycleState {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: desired_inner.job.clone(),
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
     };
     let desired = AnyState::WorkloadLifecycle(desired_inner);
     let actual = AnyState::WorkloadLifecycle(actual_inner);

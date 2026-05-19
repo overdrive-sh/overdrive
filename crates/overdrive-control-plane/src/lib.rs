@@ -65,7 +65,12 @@ pub mod streaming;
 pub mod tls_bootstrap;
 // reconciler-memory-redb step 01-03 — `ViewStore` port + error types
 // per ADR-0035 §2. Wired into `ReconcilerRuntime` in step 01-06.
+// service-vip-allocator step 02-02 — `[dataplane.vip_allocator]` TOML
+// parser surface per ADR-0049 § 5b. Owns boot-time section presence,
+// TOML deserialisation, delegation to `VipRange::new`, and the
+// structured `health.startup.refused` event on refusal.
 pub mod view_store;
+pub mod vip_allocator_config;
 pub mod worker;
 
 use std::net::SocketAddr;
@@ -81,7 +86,9 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_store_local::LocalIntentStore;
 use tokio_util::sync::CancellationToken;
 
@@ -160,6 +167,38 @@ pub struct AppState {
     /// LWW resolution across peers is deterministic per
     /// `docs/whitepaper.md` §4.
     pub node_id: NodeId,
+    /// Persistent ServiceVip allocator per ADR-0049 (amended
+    /// 2026-05-15). Bulk-loaded from the byte-level `IntentStore` at
+    /// boot and write-through-persisted on every allocation. Wrapped
+    /// in `Arc<tokio::sync::Mutex<...>>` because `allocate().await`
+    /// (which lands in 02-03d on the Service-arm submit path) crosses
+    /// an `.await` and serialises VIP issuance across concurrent
+    /// submit handlers — `tokio::sync::Mutex` rather than
+    /// `parking_lot` per `.claude/rules/development.md` §
+    /// "Concurrency & async" → "Never hold a lock across `.await`".
+    ///
+    /// 02-03c lands this field and the boot-time construction. The
+    /// Service-arm `submit_workload` / `alloc_status` consumers land in
+    /// 02-03d alongside the six S-VIP acceptance scenarios.
+    pub allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+}
+
+/// Test-only helper: build the default `PersistentServiceVipAllocator`
+/// (per ADR-0049 amendment 2026-05-15) wrapped in
+/// `Arc<tokio::sync::Mutex<...>>` for the AppState shape. Used by the
+/// crate's `tests/acceptance/*` and `tests/integration/*` fixtures so
+/// the per-fixture boilerplate stays small. Production callers go
+/// through `PersistentServiceVipAllocator::bulk_load` in
+/// `run_server_with_obs_and_driver` directly — `new` skips the boot-time
+/// replay and is only safe in fixtures that start against a fresh store.
+#[must_use]
+pub fn test_default_allocator(
+    store: Arc<dyn IntentStore>,
+) -> Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>> {
+    Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        store,
+    )))
 }
 
 /// Default capacity for the lifecycle-event broadcast channel.
@@ -204,6 +243,7 @@ impl AppState {
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
         node_id: NodeId,
+        allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -217,6 +257,7 @@ impl AppState {
             clock,
             dataplane,
             node_id,
+            allocator,
         }
     }
 }
@@ -264,6 +305,15 @@ pub struct ServerConfig {
     /// structure"); DST tests inject `Arc<SimClock>` so the harness
     /// controls time.
     pub clock: Arc<dyn Clock>,
+
+    /// Address-pool definition for [`PersistentServiceVipAllocator`]
+    /// per ADR-0049 (amended 2026-05-15 — default-with-override
+    /// posture). When the operator-supplied TOML carries
+    /// `[dataplane.vip_allocator]`, the parser yields `Some(range)` and
+    /// the binary substitutes it here; when the section is absent,
+    /// [`VipRange::default()`] supplies the Phase 1 pinned default
+    /// (`10.96.0.0/16` reserved `[.0, .1, .255.255]`).
+    pub vip_range: VipRange,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -277,6 +327,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("operator_config_dir", &self.operator_config_dir)
             .field("tick_cadence", &self.tick_cadence)
             .field("clock", &"<dyn Clock>")
+            .field("vip_range", &"<VipRange>")
             .finish()
     }
 }
@@ -305,6 +356,7 @@ impl Default for ServerConfig {
             operator_config_dir: PathBuf::new(),
             tick_cadence: DEFAULT_TICK_CADENCE,
             clock: Arc::new(overdrive_host::SystemClock),
+            vip_range: VipRange::default(),
         }
     }
 }
@@ -429,6 +481,46 @@ impl ServerHandle {
 /// load, trust-triple write, or TCP bind fails. The server task itself
 /// runs in the background; its errors are observable only via
 /// [`ServerHandle::shutdown`] which awaits the task.
+/// Construct the persistent ServiceVip allocator per ADR-0049
+/// (amended 2026-05-15). `bulk_load` replays any persisted allocator
+/// entries from the byte-level `IntentStore` so VIP issuance resumes
+/// from the post-crash counter rather than colliding with prior
+/// allocations.
+///
+/// Per step 02-04 the `bulk_load` round-trip ALSO runs the Earned
+/// Trust boot probe — every persisted VIP must project back within
+/// the active [`VipRange`]. On probe failure (typically an operator
+/// who narrowed the configured range after allocations were persisted
+/// under a wider range), this fn emits a structured
+/// `health.startup.refused` event naming the offending VIP and
+/// propagates the typed [`overdrive_dataplane::allocators::PersistentAllocatorError`]
+/// via the `#[from]` variant on `ControlPlaneError::VipAllocator` —
+/// never flattened to `Internal(String)` per
+/// `.claude/rules/development.md` § "Never flatten a typed error to
+/// `Internal(String)` at a composition boundary".
+///
+/// Extracted from `run_server_with_obs_and_driver` to keep that fn
+/// under the clippy `too_many_lines` ceiling — the construction is
+/// otherwise a single logical step.
+async fn bulk_load_service_vip_allocator(
+    vip_range: &VipRange,
+    store: &Arc<LocalIntentStore>,
+) -> Result<Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>, error::ControlPlaneError> {
+    let intent_store: Arc<dyn IntentStore> = Arc::clone(store) as Arc<dyn IntentStore>;
+    let allocator = PersistentServiceVipAllocator::bulk_load(vip_range.clone(), intent_store)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: "overdrive::health",
+                event = "health.startup.refused",
+                cause = %err,
+                "ServiceVipAllocator bulk_load refused; control-plane will not start"
+            );
+            error::ControlPlaneError::from(err)
+        })?;
+    Ok(Arc::new(tokio::sync::Mutex::new(allocator)))
+}
+
 pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
     // Wire the Phase 1 observation store (`LocalObservationStore`
     // single-node per ADR-0012, revised 2026-04-24) internally and the
@@ -571,6 +663,9 @@ pub async fn run_server_with_obs_and_driver(
     let node_id = overdrive_core::id::NodeId::new("local").map_err(|e| {
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
+
+    let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
+
     let state: AppState = AppState::new(
         store,
         store_path,
@@ -580,6 +675,7 @@ pub async fn run_server_with_obs_and_driver(
         config.clock.clone(),
         dataplane,
         node_id,
+        allocator,
     );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
