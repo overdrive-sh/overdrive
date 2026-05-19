@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed. 2026-05-14. Decision-makers: Morgan (proposing); DESIGN-wave
-output of `docs/feature/service-vip-allocator/`.
+**Accepted (2026-05-14, amended 2026-05-14 / 2026-05-15 / 2026-05-19)**.
+Decision-makers: Morgan (proposing); DESIGN-wave output of
+`docs/feature/service-vip-allocator/`.
 
 Tags: phase-1, dataplane, application-arch, allocator-primitive,
 admission, persistence-boundary.
