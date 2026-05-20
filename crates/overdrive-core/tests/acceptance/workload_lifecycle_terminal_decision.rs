@@ -531,6 +531,13 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // backend membership, orthogonal to the alloc-lifecycle
         // terminal claim that lives on WorkloadLifecycle's
         // StopAllocation / FinalizeFailed.
-        | Action::WriteServiceBackendRow { .. } => None,
+        | Action::WriteServiceBackendRow { .. }
+        // backend-discovery-bridge-service-reachability UI-05:
+        // EnqueueEvaluation is a control-plane re-enqueue (carries
+        // (reconciler, target) for cross-reconciler handoff). It
+        // makes no terminal claim by construction — the emitting
+        // reconciler is the source of terminal claims, not the
+        // broker dispatch surface.
+        | Action::EnqueueEvaluation { .. } => None,
     }
 }

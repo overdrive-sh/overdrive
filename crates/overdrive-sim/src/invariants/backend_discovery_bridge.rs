@@ -389,10 +389,18 @@ pub async fn evaluate_bridge_idempotent_steady_state() -> InvariantResult {
     let mut view = BackendDiscoveryBridgeView::default();
     let tick0 = make_tick(0);
     let (actions0, view_after_seed) = bridge.reconcile(&state, &state, &view, &tick0);
-    if actions0.len() != 1 {
+    // UI-05 dual-emit: bridge emits WriteServiceBackendRow +
+    // EnqueueEvaluation per drifted service. The two actions land
+    // together; either ALL of them apply or NONE (the invariant
+    // tests both at once by checking the pair count).
+    if actions0.len() != 2 {
         return fail(
             NAME,
-            format!("seed tick must emit exactly one action; got {}", actions0.len()),
+            format!(
+                "seed tick must emit exactly two actions \
+                 (WriteServiceBackendRow + EnqueueEvaluation per UI-05); got {}",
+                actions0.len()
+            ),
         );
     }
     if let Err(cause) = apply_actions(&obs, &actions0).await {
@@ -534,8 +542,16 @@ pub async fn evaluate_bridge_recomputes_fingerprint_on_replay() -> InvariantResu
     let seed_tick = make_tick(0);
     let (seed_actions, persisted_view) =
         bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &seed_tick);
-    if seed_actions.len() != 1 {
-        return fail(NAME, format!("seed tick must emit one action; got {}", seed_actions.len()));
+    // UI-05 dual-emit: WriteServiceBackendRow + EnqueueEvaluation.
+    if seed_actions.len() != 2 {
+        return fail(
+            NAME,
+            format!(
+                "seed tick must emit two actions (WriteServiceBackendRow + \
+                 EnqueueEvaluation per UI-05); got {}",
+                seed_actions.len()
+            ),
+        );
     }
     if let Err(cause) = apply_actions(&obs, &seed_actions).await {
         return fail(NAME, cause);
@@ -587,11 +603,13 @@ pub async fn evaluate_bridge_recomputes_fingerprint_on_replay() -> InvariantResu
     let drift_tick = make_tick(2);
     let (drift_actions, drift_view) =
         bridge.reconcile(&state, &state, &persisted_view, &drift_tick);
-    if drift_actions.len() != 1 {
+    // UI-05 dual-emit: WriteServiceBackendRow + EnqueueEvaluation.
+    if drift_actions.len() != 2 {
         return fail(
             NAME,
             format!(
-                "recovery tick (drifted inputs) must emit exactly one action; got {} — \
+                "recovery tick (drifted inputs) must emit exactly two actions \
+                 (WriteServiceBackendRow + EnqueueEvaluation per UI-05); got {} — \
                  silent skip on cached stale fingerprint is the Atlas Q2 failure mode",
                 drift_actions.len()
             ),

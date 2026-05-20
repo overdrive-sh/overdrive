@@ -229,6 +229,7 @@ async fn dispatch_release(
         deadline: now + Duration::from_secs(1),
     };
 
+    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
         driver.as_ref(),
@@ -238,6 +239,7 @@ async fn dispatch_release(
         &tick,
         &writer_node,
         Arc::clone(&allocator),
+        &test_broker,
     )
     .await
     .expect("dispatch must succeed");

@@ -299,6 +299,23 @@ impl ReconcilerRuntime {
         self.broker.lock()
     }
 
+    /// Borrow the broker's mutex directly (rather than the
+    /// `MutexGuard`). Lets callers pass the lock by reference into a
+    /// dispatch path that takes a brief lock-grab-submit-release per
+    /// `Action::EnqueueEvaluation` without holding the guard across
+    /// `.await` per `.claude/rules/development.md` § Concurrency &
+    /// async.
+    ///
+    /// Used by [`action_shim::dispatch`] so the cross-reconciler
+    /// handoff variant can re-enqueue downstream reconcilers
+    /// directly. See UI-05 (the
+    /// `backend-discovery-bridge-service-reachability` step 02-04
+    /// architectural remediation) for the rationale.
+    #[must_use]
+    pub fn broker_mutex(&self) -> &parking_lot::Mutex<EvaluationBroker> {
+        &self.broker
+    }
+
     /// Iterate the registered reconcilers. Used by the ADR-0017
     /// `reconciler_is_pure` invariant to twin-invocation-check every
     /// reconciler in the registry from a single harness entry point.
@@ -923,6 +940,7 @@ pub async fn run_convergence_tick(
         &tick,
         &state.node_id,
         std::sync::Arc::clone(&state.allocator),
+        state.runtime.broker_mutex(),
     )
     .await
     .map_err(ConvergenceError::Shim)?;

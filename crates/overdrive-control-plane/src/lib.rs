@@ -955,6 +955,18 @@ pub async fn run_server_with_obs_and_driver(
     // `feedback_single_cut_greenfield_migrations.md`.
     let host_ipv4 = resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?;
     runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
+    // UI-05 (`backend-discovery-bridge-service-reachability` step
+    // 02-04 architectural remediation) — register the
+    // `service-map-hydrator` at production boot. Prior to UI-05 this
+    // was absent from the production wiring (architecture.md § 4.7
+    // / § 6 carried `// existing` comments that did not reflect any
+    // actual `runtime.register` call site); the bridge → hydrator
+    // handoff failed silently in production. Registration MUST land
+    // AFTER `backend_discovery_bridge` so the bridge's emitted
+    // `Action::EnqueueEvaluation { reconciler: "service-map-hydrator",
+    // .. }` resolves against a registered reconciler when the
+    // broker first drains.
+    runtime.register(service_map_hydrator()).await?;
     let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
@@ -1204,4 +1216,24 @@ pub fn backend_discovery_bridge(
     use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
 
     AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
+}
+
+/// Construct the `service-map-hydrator` reconciler.
+///
+/// Activates J-PLAT-004 per ADR-0042 — converges
+/// `service_hydration_results` rows by dispatching
+/// `Action::DataplaneUpdateService` whenever a service's bridge-written
+/// `(vip, backends)` fingerprint drifts from the last
+/// confirmed-applied fingerprint persisted in the hydrator's `View`.
+///
+/// Registered at production boot AFTER `backend-discovery-bridge`
+/// (the bridge re-enqueues this reconciler per UI-05 cross-reconciler
+/// handoff — see `Action::EnqueueEvaluation`). Order matters only
+/// for `cluster_status`'s deterministic registration listing; the
+/// runtime registers idempotently regardless of order.
+#[must_use]
+pub fn service_map_hydrator() -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::{AnyReconciler, ServiceMapHydrator};
+
+    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical())
 }

@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
+use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::dataplane::Dataplane;
@@ -55,6 +56,14 @@ pub mod release_service_vip;
 /// [`BackendDiscoveryBridgeView`]:
 ///     overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView
 pub mod write_service_backend_row;
+
+/// Per-arm dispatch for `Action::EnqueueEvaluation` per UI-05 (the
+/// `backend-discovery-bridge-service-reachability` step 02-04
+/// architectural remediation). The wrapper submits an
+/// `Evaluation { reconciler, target }` to the runtime's
+/// [`EvaluationBroker`] so the named downstream reconciler ticks
+/// against `target` on the next convergence cycle.
+pub mod enqueue_evaluation;
 
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
@@ -354,13 +363,23 @@ pub async fn dispatch(
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    broker: &parking_lot::Mutex<EvaluationBroker>,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
-        let result =
-            dispatch_single(action, driver, obs, dataplane, bus, tick, writer_node, &allocator)
-                .await;
+        let result = dispatch_single(
+            action,
+            driver,
+            obs,
+            dataplane,
+            bus,
+            tick,
+            writer_node,
+            &allocator,
+            broker,
+        )
+        .await;
         if let Err(err) = result {
             // Per-variant error isolation: record only the first error
             // and continue draining the rest of the actions.
@@ -389,6 +408,7 @@ async fn dispatch_single(
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    broker: &parking_lot::Mutex<EvaluationBroker>,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
@@ -779,6 +799,19 @@ async fn dispatch_single(
         // per `.claude/rules/development.md` § Errors / pass-through.
         action @ Action::WriteServiceBackendRow { .. } => {
             write_service_backend_row::dispatch(&action, obs).await.map_err(ShimError::from)
+        }
+        // backend-discovery-bridge-service-reachability UI-05 —
+        // cross-reconciler handoff at the action boundary. The
+        // wrapper takes a brief lock-grab-submit-release on the
+        // broker mutex; per `.claude/rules/development.md`
+        // § Concurrency & async the guard is dropped before any
+        // subsequent `.await` (the wrapper is a sync function and
+        // the per-action loop awaits between iterations).
+        action @ Action::EnqueueEvaluation { .. } => {
+            let mut guard = broker.lock();
+            enqueue_evaluation::dispatch(&action, &mut guard);
+            drop(guard);
+            Ok(())
         }
     }
 }

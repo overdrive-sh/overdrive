@@ -160,7 +160,7 @@ ADR-0049 / 0050 / 0051):
    - `actual`: `ObservationStore::alloc_status_rows_for_workload(workload_id)` filtered to Running.
 7. **NEW**: `BackendDiscoveryBridge.reconcile` computes the fingerprint of `(assigned_vip, [backend{ipv4=host_ip, port=listener.port}])`. If different from `view.last_written_fingerprint[service_id]`, emits `Action::WriteServiceBackendRow`.
 8. **NEW**: Action shim `write_service_backend_row::dispatch` writes `ObservationRow::ServiceBackend(row)` via `ObservationStore::write`.
-9. Broker re-enqueues `ServiceMapHydrator` (existing behaviour — runs on observation-row change).
+9. **UI-05 (NEW)**: The bridge emits a paired `Action::EnqueueEvaluation { reconciler: "service-map-hydrator", target: "service/<service_id>" }` alongside step 7's `WriteServiceBackendRow`. The action shim's `enqueue_evaluation::dispatch` submits the evaluation to the per-runtime `EvaluationBroker`. Prior to UI-05 this handoff did not exist — the bridge wrote its row but the hydrator never ticked. The "existing behaviour" claim that previously sat here ("broker re-enqueues `ServiceMapHydrator` on observation-row change") was wrong: no such mechanism existed. Making the handoff explicit at the reconciler's action boundary (rather than implicit at the action-shim dispatch surface) keeps the cross-reconciler dependency readable at the bridge's reconcile body.
 10. `ServiceMapHydrator.reconcile` reads `desired.fingerprint == new_fingerprint` ≠ `actual.fingerprint` → emits `Action::DataplaneUpdateService`.
 11. Action shim `dataplane_update_service::dispatch` calls `EbpfDataplane::update_service` → BPF maps populated; writes `ServiceHydrationResultRow::Completed`.
 12. Hydrator on next tick sees `actual.fingerprint == desired.fingerprint` → idempotent steady-state per ADR-0042.
@@ -499,7 +499,14 @@ pub fn backend_discovery_bridge(host_ipv4: Ipv4Addr, node_id: NodeId) -> AnyReco
 runtime.register(noop_heartbeat()).await?;
 runtime.register(workload_lifecycle()).await?;
 runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
-runtime.register(service_map_hydrator()).await?;  // existing
+// UI-05: registered at production boot in step 02-04 architectural
+// remediation. The prior `// existing` annotation was incorrect —
+// no `runtime.register(service_map_hydrator())` call site existed
+// before UI-05 landed, so the bridge → hydrator handoff failed
+// silently in production. Order matters only for
+// `cluster_status`'s deterministic registration listing; the
+// runtime registers idempotently regardless of order.
+runtime.register(service_map_hydrator()).await?;
 ```
 
 The bridge itself does NOT hold an `Arc<Mutex<PersistentServiceVipAllocator>>`

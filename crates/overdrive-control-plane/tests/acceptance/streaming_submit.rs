@@ -941,6 +941,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         deadline: now + Duration::from_secs(5),
     };
 
+    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         // ADR-0037 §4: emission sites outside a reconciler tick (here, a
         // direct test-bench dispatch) emit `terminal: None` — the
@@ -953,6 +954,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         &tick,
         &state.node_id,
         std::sync::Arc::clone(&state.allocator),
+        &test_broker,
     )
     .await
     .expect("dispatch succeeds");

@@ -59,7 +59,7 @@ use crate::id::{
 use crate::traits::dataplane::Backend;
 use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 /// Desired-side projection: the workload's declared listener set,
 /// keyed by `ServiceId`, with each entry's VIP sourced from the
@@ -265,6 +265,17 @@ pub struct BackendDiscoveryBridge {
     writer_node_id: NodeId,
 }
 
+/// Canonical name of the `service-map-hydrator` reconciler — the
+/// downstream sibling the bridge re-enqueues on every
+/// `WriteServiceBackendRow` emission (UI-05 cross-reconciler handoff).
+///
+/// Pinned to the same compile-time string literal as
+/// `<crate::reconciler::ServiceMapHydrator as Reconciler>::NAME` —
+/// kept out-of-scope from the bridge module so this file does not
+/// pull in the hydrator's full type surface (the bridge only needs
+/// the name + target shape to emit `EnqueueEvaluation`).
+const SERVICE_MAP_HYDRATOR_NAME: &str = "service-map-hydrator";
+
 impl BackendDiscoveryBridge {
     /// Canonical kebab-case name; single compile-time anchor per
     /// the project's `Reconciler::NAME` convention.
@@ -367,6 +378,35 @@ impl Reconciler for BackendDiscoveryBridge {
                 },
                 correlation,
             });
+            // UI-05 — cross-reconciler handoff at the action boundary.
+            // The bridge wrote a row the `service-map-hydrator` needs
+            // to re-tick against. Emitting `EnqueueEvaluation` here
+            // (rather than the action-shim auto-enqueueing on
+            // `WriteServiceBackendRow`) keeps the handoff explicit at
+            // the reconciler surface: any reader of the bridge's
+            // reconcile body sees the bridge → hydrator handoff
+            // without having to read the action-shim dispatch source.
+            // The broker is LWW at
+            // `(ReconcilerName, TargetResource)` per ADR-0013 §8 / §18,
+            // so duplicate enqueues collapse to one dispatch per drain
+            // cycle.
+            //
+            // `expect`: both `ReconcilerName::new("service-map-hydrator")`
+            // and `TargetResource::new("service/<u64>")` are
+            // constructor-time validated against compile-time-known
+            // patterns; failure would indicate a constructor regression,
+            // not a runtime concern.
+            #[allow(clippy::expect_used)]
+            {
+                let hydrator_name = ReconcilerName::new(SERVICE_MAP_HYDRATOR_NAME)
+                    .expect("'service-map-hydrator' is a valid ReconcilerName by construction");
+                let hydrator_target = TargetResource::new(&format!("service/{service_id}"))
+                    .expect("'service/<u64>' is a valid TargetResource by construction");
+                actions.push(Action::EnqueueEvaluation {
+                    reconciler: hydrator_name,
+                    target: hydrator_target,
+                });
+            }
             next_view.last_written_fingerprint.insert(*service_id, new_fp);
         }
 
@@ -472,12 +512,16 @@ mod tests {
         assert_eq!(view, next_view, "view must be unchanged when no listeners exist");
     }
 
-    /// S-BDB-02 unit-level proxy — single listener + single Running
-    /// alloc + empty view emits one `WriteServiceBackendRow` action
-    /// carrying one backend, and the next-view records the
-    /// fingerprint.
+    /// S-BDB-02 unit-level proxy + UI-05 dual-emit assertion —
+    /// single listener + single Running alloc + empty view emits
+    /// exactly two actions: one `WriteServiceBackendRow` carrying
+    /// one backend, plus one `EnqueueEvaluation` for the
+    /// `service-map-hydrator` keyed by `service/<sid>`. The next-view
+    /// records the fingerprint. The dual emission is the UI-05
+    /// architectural fix that makes the bridge → hydrator handoff
+    /// explicit at the action boundary.
     #[test]
-    fn reconcile_single_alloc_emits_one_action() {
+    fn reconcile_single_alloc_emits_write_and_enqueue() {
         let bridge = bridge();
         let sid = service_id(1);
         let mut state = empty_state();
@@ -487,10 +531,28 @@ mod tests {
 
         let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick(7));
 
-        assert_eq!(actions.len(), 1, "exactly one WriteServiceBackendRow expected");
+        assert_eq!(
+            actions.len(),
+            2,
+            "exactly two actions expected: WriteServiceBackendRow + EnqueueEvaluation \
+             (UI-05 cross-reconciler handoff)"
+        );
         let Action::WriteServiceBackendRow { row, .. } = &actions[0] else {
-            panic!("expected WriteServiceBackendRow, got {:?}", actions[0]);
+            panic!("expected WriteServiceBackendRow at index 0, got {:?}", actions[0]);
         };
+        let Action::EnqueueEvaluation { reconciler, target } = &actions[1] else {
+            panic!("expected EnqueueEvaluation at index 1, got {:?}", actions[1]);
+        };
+        assert_eq!(
+            reconciler.as_str(),
+            "service-map-hydrator",
+            "enqueue must target the service-map-hydrator per UI-05"
+        );
+        assert_eq!(
+            target.as_str(),
+            &format!("service/{sid}"),
+            "enqueue target must be service/<service_id>"
+        );
         assert_eq!(row.service_id, sid);
         assert_eq!(row.vip, Ipv4Addr::new(10, 1, 0, 1));
         assert_eq!(row.backends.len(), 1, "single Running alloc yields one backend");
@@ -518,9 +580,11 @@ mod tests {
         state.actual.running.insert(alloc_id("alloc-b"));
 
         // First tick — write happens, next_view records fingerprint.
+        // UI-05: dual emit — one WriteServiceBackendRow + one
+        // EnqueueEvaluation per drifted service.
         let (actions_first, view_after_first) =
             bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
-        assert_eq!(actions_first.len(), 1, "first call must emit one action");
+        assert_eq!(actions_first.len(), 2, "first call must emit two actions (UI-05 dual emit)");
 
         // Second tick — feed prior next_view back in; expect zero
         // emissions (dedup).
@@ -572,11 +636,16 @@ mod tests {
 
         let (actions, _) = bridge.reconcile(&state, &state, &view, &tick(1));
 
-        assert_eq!(actions.len(), 1, "one row regardless of backend count");
+        // UI-05 dual emit: WriteServiceBackendRow + EnqueueEvaluation.
+        assert_eq!(actions.len(), 2, "one row + one enqueue regardless of backend count");
         let Action::WriteServiceBackendRow { row, .. } = &actions[0] else {
-            panic!("expected WriteServiceBackendRow");
+            panic!("expected WriteServiceBackendRow at index 0");
         };
         assert_eq!(row.backends.len(), 3, "three Running allocs yield three backends");
+        assert!(
+            matches!(&actions[1], Action::EnqueueEvaluation { .. }),
+            "second action must be EnqueueEvaluation for hydrator handoff"
+        );
     }
 
     /// S-BDB-03 unit-level proxy — terminated alloc. After
@@ -592,21 +661,25 @@ mod tests {
         state.actual.running.insert(alloc_id("alloc-m"));
         state.actual.running.insert(alloc_id("alloc-n"));
 
-        // First tick — write with two backends.
+        // First tick — write with two backends. UI-05 dual emit.
         let (actions_first, view_after_first) =
             bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
-        assert_eq!(actions_first.len(), 1);
+        assert_eq!(actions_first.len(), 2, "first tick emits write + enqueue");
 
         // Second tick — one alloc terminated; expect a fresh row
-        // with one backend.
+        // with one backend plus the paired enqueue.
         state.actual.running.remove(&alloc_id("alloc-n"));
         let (actions_second, _) = bridge.reconcile(&state, &state, &view_after_first, &tick(2));
 
-        assert_eq!(actions_second.len(), 1, "removed alloc must trigger a fresh write");
+        assert_eq!(actions_second.len(), 2, "removed alloc must trigger a fresh write + enqueue");
         let Action::WriteServiceBackendRow { row, .. } = &actions_second[0] else {
-            panic!("expected WriteServiceBackendRow");
+            panic!("expected WriteServiceBackendRow at index 0");
         };
         assert_eq!(row.backends.len(), 1, "after termination, only one backend remains");
+        assert!(
+            matches!(&actions_second[1], Action::EnqueueEvaluation { .. }),
+            "second action must be EnqueueEvaluation for hydrator handoff"
+        );
     }
 
     /// Fingerprint determinism — same inputs across multiple

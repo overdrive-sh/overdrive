@@ -750,6 +750,53 @@ pub enum Action {
         /// the resulting observation row deterministically.
         correlation: CorrelationKey,
     },
+
+    // -----------------------------------------------------------------
+    // backend-discovery-bridge-service-reachability — UI-05
+    // architectural remediation. Cross-reconciler handoff at the
+    // action boundary.
+    //
+    // Emitted by a reconciler to trigger a sibling reconciler on a
+    // specific target after its own observable side effects land.
+    // The alternative — implicit shim-layer triggers based on the
+    // emitting action's shape — would couple the action shim to
+    // reconciler-pair-specific knowledge. The action-shim's per-arm
+    // dispatch wrapper at
+    // `crates/overdrive-control-plane/src/action_shim/
+    // enqueue_evaluation.rs` calls
+    // `EvaluationBroker::submit(Evaluation { reconciler, target })`.
+    //
+    // The broker is LWW at the `(ReconcilerName, TargetResource)`
+    // key per ADR-0013 §8 / whitepaper §18: a second submit at the
+    // same key during the same drain cycle collapses to one
+    // dispatch, so emission is naturally idempotent.
+    // -----------------------------------------------------------------
+    /// Enqueue a reconciliation evaluation for another reconciler.
+    /// Emitted by a reconciler to trigger a downstream sibling on a
+    /// specific target after its own observable side effects land
+    /// (e.g. the `backend-discovery-bridge` emits this alongside
+    /// each `WriteServiceBackendRow` so the `service-map-hydrator`
+    /// ticks against the bridge-written row).
+    ///
+    /// The action-shim wrapper at
+    /// [`crates::overdrive_control_plane::action_shim::enqueue_evaluation`]
+    /// (crate-local) calls
+    /// [`EvaluationBroker::submit`](crate::eval_broker::EvaluationBroker::submit)
+    /// with the carried `(reconciler, target)` pair.
+    EnqueueEvaluation {
+        /// Name of the downstream reconciler to enqueue. The action
+        /// shim looks this up against the runtime's registered set
+        /// when constructing the broker `Evaluation` — an unregistered
+        /// name silently no-ops at drain time (the broker is keyed on
+        /// name but does not validate against the registry; the
+        /// drain-side dispatch is the structural defense).
+        reconciler: ReconcilerName,
+        /// Target the downstream reconciler should reconcile against
+        /// (typically the resource the emitting reconciler's
+        /// observable write concerns — e.g. a `service/<id>` for the
+        /// bridge → hydrator handoff).
+        target: TargetResource,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.

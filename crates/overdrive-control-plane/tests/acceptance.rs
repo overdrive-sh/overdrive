@@ -141,4 +141,18 @@ mod acceptance {
     // visibility reason as `service_workload_convergence_no_panic`.
     #[cfg(feature = "integration-tests")]
     mod service_workload_emits_start_allocation;
+
+    // backend-discovery-bridge-service-reachability — UI-05
+    // architectural remediation (the cross-reconciler handoff RCA
+    // surfaced during step 02-04 walking-skeleton investigation).
+    // Two acceptance properties:
+    //   1. The bridge emits `Action::EnqueueEvaluation` alongside
+    //      every `WriteServiceBackendRow` so the
+    //      `service-map-hydrator` ticks on the bridge-written row.
+    //   2. The production boot registers BOTH the bridge AND the
+    //      hydrator against the runtime (the hydrator was missing
+    //      pre-UI-05; architecture.md § 4.7 / § 6 misclaimed it
+    //      was `// existing` wiring).
+    mod bridge_emits_enqueue_evaluation_for_hydrator;
+    mod service_map_hydrator_registered_at_boot;
 }

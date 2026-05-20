@@ -162,6 +162,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
                 .expect("open store for allocator"),
         );
     let allocator = overdrive_control_plane::test_default_allocator(alloc_store);
+    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
         driver_dyn.as_ref(),
@@ -171,6 +172,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         &tick,
         &writer_node,
         allocator,
+        &test_broker,
     )
     .await
     .expect("dispatch must succeed");
