@@ -65,6 +65,13 @@ pub const BANNED_APIS: &[(&str, &str)] = &[
 ///
 /// `#[cfg(test)]` items (modules and individual fns) are exempt — test
 /// fixture setup may use sync `std::fs` without penalty per the rule.
+/// The same exemption also covers the [`BANNED_APIS`] scanner above —
+/// test helpers that synthesise `TickContext` inputs may call
+/// `Instant::now`, `SystemTime::now`, etc. without flag. The
+/// [`BANNED_TYPES`] (`HashMap` / `HashSet`) clause is **not** exempted:
+/// iteration-order invariants per `.claude/rules/development.md` §
+/// "Ordered-collection choice" still apply to test code that asserts
+/// on DST trajectories.
 ///
 /// # Why prefix instead of leaf
 ///
@@ -207,6 +214,20 @@ fn collect_hashmap_ok_lines(source: &str) -> std::collections::BTreeSet<usize> {
 /// `syn::visit::Visit` implementation that walks every path expression,
 /// path type, and `use` tree, matching segments against [`BANNED_APIS`]
 /// and the LAST segment against [`BANNED_TYPES`].
+///
+/// # `#[cfg(test)]` exemption
+///
+/// [`BannedKind::Api`] violations are suppressed inside any
+/// `#[cfg(test)]`-attributed module, free fn, or impl method. Test
+/// fixtures legitimately call `Instant::now`, `SystemTime::now`, and
+/// other determinism boundaries to build `TickContext` inputs — the
+/// rule in `.claude/rules/development.md` § "Reconciler I/O" bans
+/// wall-clock inside `reconcile` *bodies*, not inside test helpers
+/// that synthesise the inputs `reconcile` receives.
+///
+/// [`BannedKind::OrderedCollection`] is NOT exempted — iteration-order
+/// invariants from `.claude/rules/development.md` § "Ordered-collection
+/// choice" still apply to test code that asserts on DST trajectories.
 struct Collector<'a> {
     file: &'a Path,
     violations: Vec<Violation>,
@@ -214,11 +235,16 @@ struct Collector<'a> {
     /// A [`BannedKind::OrderedCollection`] violation on line N is
     /// suppressed if `N - 1` or `N` is in this set.
     hashmap_ok_lines: std::collections::BTreeSet<usize>,
+    /// Number of `#[cfg(test)]`-attributed items currently open. When
+    /// non-zero, suppress [`BannedKind::Api`] flagging — test fixtures
+    /// may legitimately use wall-clock / RNG APIs to synthesise
+    /// reconciler inputs.
+    cfg_test_depth: usize,
 }
 
 impl<'a> Collector<'a> {
     const fn new(file: &'a Path, hashmap_ok_lines: std::collections::BTreeSet<usize>) -> Self {
-        Self { file, violations: Vec::new(), hashmap_ok_lines }
+        Self { file, violations: Vec::new(), hashmap_ok_lines, cfg_test_depth: 0 }
     }
 
     /// If `segments` — joined by `::` — matches any banned entry (by
@@ -227,6 +253,12 @@ impl<'a> Collector<'a> {
         let joined = segments.join("::");
         for (banned, replacement) in BANNED_APIS {
             if path_matches(&joined, banned) {
+                // `#[cfg(test)]` exemption — suppress BannedKind::Api
+                // violations inside test modules / fns. HashMap rule
+                // is handled separately below and is NOT exempted.
+                if self.cfg_test_depth > 0 {
+                    return;
+                }
                 self.violations.push(Violation {
                     file: self.file.to_path_buf(),
                     line,
@@ -312,6 +344,36 @@ fn path_matches(source: &str, banned: &str) -> bool {
 }
 
 impl<'ast> Visit<'ast> for Collector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_impl_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_mod(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_mod(self, node);
+    }
+
     fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
         let segments = node.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>();
         if let Some(first) = node.path.segments.first() {
@@ -329,6 +391,29 @@ impl<'ast> Visit<'ast> for Collector<'_> {
         }
         visit::visit_type_path(self, node);
     }
+}
+
+/// Free-function form of `AsyncBlockingIoCollector::has_cfg_test_attr`,
+/// shared between the [`Collector`] (banned-API scanner) and the
+/// [`AsyncBlockingIoCollector`] (`std::fs`-in-`async-fn` scanner). See
+/// [`AsyncBlockingIoCollector::has_cfg_test_attr`] for the canonical
+/// rustdoc — recognises only the `#[cfg(test)]` literal form to avoid
+/// silently exempting production code via `#[cfg(any(test, …))]` or
+/// `#[cfg(not(…))]` shapes that evaluate to false at compile time.
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        if !a.path().is_ident("cfg") {
+            return false;
+        }
+        let mut found = false;
+        let _ = a.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                found = true;
+            }
+            Ok(())
+        });
+        found
+    })
 }
 
 // -----------------------------------------------------------------------------
@@ -371,22 +456,11 @@ impl<'a> AsyncBlockingIoCollector<'a> {
     /// (`#[cfg(any(test, …))]`, `#[cfg(not(…))]`) intentionally are not
     /// matched, because they may evaluate to false at compile time and
     /// would silently exempt production code from the rule.
+    ///
+    /// Thin wrapper around the free function [`has_cfg_test_attr`],
+    /// shared between this collector and the banned-API [`Collector`].
     fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-        attrs.iter().any(|a| {
-            if !a.path().is_ident("cfg") {
-                return false;
-            }
-            // `#[cfg(test)]` parses as a path metadata where the parens
-            // contain a single identifier `test`.
-            let mut found = false;
-            let _ = a.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    found = true;
-                }
-                Ok(())
-            });
-            found
-        })
+        has_cfg_test_attr(attrs)
     }
 }
 
@@ -1561,6 +1635,97 @@ mod tests {
         // off-by-one in the length guard would silently flip this
         // into a match.
         assert!(!path_matches("a::b::c::d::e", "std::time::Instant::now"));
+    }
+
+    // -------------------------------------------------------------
+    // #[cfg(test)] exemption — banned-API scanner (UI-03 remediation)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn cfg_test_module_exempts_instant_now_violations() {
+        // The exact shape UI-03 documents: a `tick(counter)` test helper
+        // inside `#[cfg(test)] mod tests {}` calls `Instant::now()`.
+        // Must produce ZERO violations.
+        let source = r"
+            pub fn production() {}
+
+            #[cfg(test)]
+            mod tests {
+                use std::time::{Duration, Instant};
+
+                fn tick(counter: u64) -> u64 {
+                    let _now = Instant::now();
+                    let _deadline = Instant::now() + Duration::from_secs(1);
+                    counter
+                }
+            }
+        ";
+        let violations =
+            scan_source(source, std::path::Path::new("synthetic.rs")).expect("source must parse");
+        assert!(
+            violations.is_empty(),
+            "Instant::now inside #[cfg(test)] mod must be exempt; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn instant_now_outside_cfg_test_is_still_flagged() {
+        // Inverse: same `Instant::now()` call WITHOUT the `#[cfg(test)]`
+        // attribute — the scanner must still flag it.
+        let source = r"
+            use std::time::Instant;
+            pub fn tick() -> Instant {
+                Instant::now()
+            }
+        ";
+        let violations =
+            scan_source(source, std::path::Path::new("synthetic.rs")).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| v.banned_path == "std::time::Instant::now"),
+            "Instant::now outside #[cfg(test)] must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn cfg_test_fn_attr_exempts_instant_now() {
+        // `#[cfg(test)]` directly on a free fn (not on the enclosing
+        // module) also exempts the body.
+        let source = r"
+            use std::time::Instant;
+
+            #[cfg(test)]
+            fn test_tick() -> Instant {
+                Instant::now()
+            }
+        ";
+        let violations =
+            scan_source(source, std::path::Path::new("synthetic.rs")).expect("source must parse");
+        assert!(
+            violations.is_empty(),
+            "Instant::now inside #[cfg(test)] fn must be exempt; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn cfg_test_does_not_exempt_hashmap_violations() {
+        // HashMap is BannedKind::OrderedCollection, NOT exempted from
+        // the cfg(test) carve-out — iteration-order invariants apply
+        // to test code that asserts on DST trajectories.
+        let source = r"
+            #[cfg(test)]
+            mod tests {
+                use std::collections::HashMap;
+                fn build() -> HashMap<u64, u64> {
+                    HashMap::new()
+                }
+            }
+        ";
+        let violations =
+            scan_source(source, std::path::Path::new("synthetic.rs")).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| matches!(v.kind, BannedKind::OrderedCollection)),
+            "HashMap inside #[cfg(test)] must STILL be flagged; got {violations:?}"
+        );
     }
 
     // -------------------------------------------------------------
