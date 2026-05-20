@@ -130,4 +130,15 @@ mod acceptance {
     // "integration-tests"))]`.
     #[cfg(feature = "integration-tests")]
     mod service_workload_convergence_no_panic;
+
+    // backend-discovery-bridge-service-reachability — Service-arm
+    // convergence emission. Service workloads must produce a non-empty
+    // alloc_status row stream with kind == Service. Closes the
+    // coverage gap that let the read_job Service-arm defect slip past
+    // the sibling no_panic test. See:
+    // docs/feature/backend-discovery-bridge-service-reachability/deliver/rca-service-arm-convergence.md
+    // Gated behind `integration-tests` for the same `run_convergence_tick`
+    // visibility reason as `service_workload_convergence_no_panic`.
+    #[cfg(feature = "integration-tests")]
+    mod service_workload_emits_start_allocation;
 }

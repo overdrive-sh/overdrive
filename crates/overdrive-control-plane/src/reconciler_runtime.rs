@@ -1231,17 +1231,29 @@ async fn hydrate_bridge_desired_listeners(
     Ok(listeners)
 }
 
-/// Read a `Job` from the `IntentStore` at the canonical
+/// Read a workload from the `IntentStore` at the canonical
 /// `workloads/<id>` key (per ADR-0050 OQ-5 single-cut migration),
-/// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes.
+/// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes, and
+/// project it onto a kind-agnostic [`Job`] shape consumed by the
+/// downstream reconciler.
+///
 /// Returns `Ok((None, None))` when the key is absent. Errors map to
 /// `ConvergenceError::IntentRead`.
 ///
-/// Step 02-03a+: the submit handler now accepts Job, Service, and Schedule
-/// intents (02-03b). For Service and Schedule kinds, `read_job` returns
-/// `Ok(None)` — the reconciler's `desired.job` field is `None` for those
-/// variants, which is the correct "no Job allocation target" shape for
-/// Phase 1's Service-arm (allocations are not yet spawned for Services).
+/// Returns a kind-agnostic `Job` projection for both `Job` and
+/// `Service` variants — `ServiceV1` carries an identical
+/// `(id, replicas, resources, driver)` envelope (its only extra field
+/// `listeners` is consumed elsewhere via `ServiceV1`-typed reads, not
+/// through this projection), so Service workloads pick up their
+/// driver + resource envelope identically and feed into the existing
+/// `Some(job) => …` allocation-emission arm at
+/// `crates/overdrive-core/src/reconciler.rs::WorkloadLifecycle::reconcile`.
+/// The persisted `WorkloadKind` discriminator continues to flow
+/// separately via `desired.workload_kind` (sourced from
+/// [`read_workload_kind`]) and is threaded onto every emitted
+/// `Action::StartAllocation` / `Action::RestartAllocation` so the
+/// action shim and observation rows correctly record `kind: Service`
+/// for Service-derived allocs.
 ///
 /// The second element is the `WorkloadIntent`'s content-addressed
 /// `spec_digest` (SHA-256 over the rkyv-archived payload). Returned
@@ -1266,10 +1278,26 @@ async fn read_job(
     .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
     match &intent {
         overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok((Some(job.clone()), None)),
-        overdrive_core::aggregate::WorkloadIntent::Service(_) => {
+        overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
+            // Project Service onto a kind-agnostic Job shape. JobV1
+            // and ServiceV1 are field-for-field equivalent over
+            // (id, replicas, resources, driver) — the reconciler's
+            // `Some(job) =>` arm reads only these four fields, so the
+            // projection is lossless from its perspective. Service-
+            // only fields (listeners) are consumed elsewhere via
+            // ServiceV1-typed reads. The `WorkloadKind::Service`
+            // discriminator is threaded separately via
+            // `desired.workload_kind` so emitted actions and rows
+            // correctly record their Service origin.
+            let job = Job {
+                id: svc.id.clone(),
+                replicas: svc.replicas,
+                resources: svc.resources,
+                driver: svc.driver.clone(),
+            };
             let digest =
                 intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            Ok((None, Some(digest)))
+            Ok((Some(job), Some(digest)))
         }
         overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok((None, None)),
     }
