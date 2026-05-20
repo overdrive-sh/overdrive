@@ -47,8 +47,20 @@ pub mod action_shim;
 pub mod api;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
+// backend-discovery-bridge-service-reachability step 02-01 —
+// `[dataplane]` config section parser per architecture.md § 5.1.
+// Section presence + the two required interface bindings; refusal
+// surfaces as `ControlPlaneError::Validation { field:
+// Some("dataplane"), .. }`.
+pub mod dataplane_config;
 pub mod error;
 pub mod handlers;
+// backend-discovery-bridge-service-reachability step 02-01 — host
+// IPv4 resolution via `getifaddrs(3)` for the operator-supplied
+// `[dataplane] client_iface`. Production boot threads the resolved
+// `Ipv4Addr` through `AppState.host_ipv4` to the
+// `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
+pub mod iface;
 pub mod observation_wiring;
 // `cargo openapi-{gen,check}` library — pure deterministic YAML render
 // + drift detection. Paired with the `openapi` binary in `src/bin/`.
@@ -181,6 +193,25 @@ pub struct AppState {
     /// Service-arm `submit_workload` / `alloc_status` consumers land in
     /// 02-03d alongside the six S-VIP acceptance scenarios.
     pub allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    /// Host's IPv4 address for the configured `[dataplane]
+    /// client_iface`. Resolved once at boot by
+    /// [`iface::resolve_iface_ipv4`] and threaded through to the
+    /// `BackendDiscoveryBridge` reconciler — every
+    /// `service_backends` observation row the bridge emits carries
+    /// this address in `endpoint.host` so XDP reverse-NAT translation
+    /// (Phase 2.3) can derive the per-host VIP. Per
+    /// `.claude/rules/development.md` § "Port-trait dependencies" the
+    /// dependency is mandatory at construction so tests cannot
+    /// silently inherit a production loopback by forgetting to
+    /// override.
+    ///
+    /// Step 02-01 of
+    /// `backend-discovery-bridge-service-reachability` lands this
+    /// field; the placeholder `Ipv4Addr::LOCALHOST` previously
+    /// threaded through `run_server_with_obs_and_driver` (introduced
+    /// in 01-04) is removed in the same commit per
+    /// `feedback_single_cut_greenfield_migrations.md`.
+    pub host_ipv4: std::net::Ipv4Addr,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -244,6 +275,7 @@ impl AppState {
         dataplane: Arc<dyn Dataplane>,
         node_id: NodeId,
         allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+        host_ipv4: std::net::Ipv4Addr,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -258,6 +290,7 @@ impl AppState {
             dataplane,
             node_id,
             allocator,
+            host_ipv4,
         }
     }
 }
@@ -314,6 +347,31 @@ pub struct ServerConfig {
     /// [`VipRange::default()`] supplies the Phase 1 pinned default
     /// (`10.96.0.0/16` reserved `[.0, .1, .255.255]`).
     pub vip_range: VipRange,
+
+    /// Required `[dataplane]` section per
+    /// `backend-discovery-bridge-service-reachability` architecture.md
+    /// § 5.1 (step 02-01). Carries the operator-supplied
+    /// `client_iface` + `backend_iface` bindings the production XDP
+    /// programs attach to (Phase 2.3) and from which
+    /// [`iface::resolve_iface_ipv4`] derives `AppState.host_ipv4` at
+    /// boot.
+    ///
+    /// `Option` shape rather than non-optional because production
+    /// reads the value from a TOML file via
+    /// [`dataplane_config::parse_dataplane_section`], whose return
+    /// shape is `Result<DataplaneConfig, ControlPlaneError>`. The
+    /// CLI threads `Some(parsed)` here; test fixtures default to
+    /// `Some(DataplaneConfig::loopback())` via the `Default` impl
+    /// below so existing `..Default::default()` rest-pattern
+    /// construction continues to work without touching every
+    /// fixture's TOML.
+    ///
+    /// `run_server_with_obs_and_driver` refuses to start when this
+    /// field is `None` with
+    /// `ControlPlaneError::Validation { field: Some("dataplane"), .. }`
+    /// — the same shape the parser returns. See architecture.md
+    /// § 5.2.
+    pub dataplane: Option<dataplane_config::DataplaneConfig>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -328,6 +386,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("tick_cadence", &self.tick_cadence)
             .field("clock", &"<dyn Clock>")
             .field("vip_range", &"<VipRange>")
+            .field("dataplane", &self.dataplane)
             .finish()
     }
 }
@@ -357,6 +416,13 @@ impl Default for ServerConfig {
             tick_cadence: DEFAULT_TICK_CADENCE,
             clock: Arc::new(overdrive_host::SystemClock),
             vip_range: VipRange::default(),
+            // Per step 02-01: `Default` populates the loopback
+            // `[dataplane]` shape so existing test fixtures using
+            // `..Default::default()` rest-pattern construction
+            // continue to work. Production callers go through
+            // `parse_dataplane_section` and overwrite this with the
+            // operator-supplied value.
+            dataplane: Some(dataplane_config::DataplaneConfig::loopback()),
         }
     }
 }
@@ -502,6 +568,43 @@ impl ServerHandle {
 /// Extracted from `run_server_with_obs_and_driver` to keep that fn
 /// under the clippy `too_many_lines` ceiling — the construction is
 /// otherwise a single logical step.
+/// Validate the `[dataplane]` config section and resolve the host
+/// IPv4 address for the configured `client_iface` per
+/// `backend-discovery-bridge-service-reachability` architecture.md
+/// § 5.1 / § 5.2 (step 02-01).
+///
+/// Two refusal shapes per
+/// `.claude/rules/development.md` § Errors → "Distinct failure
+/// modes get distinct error variants":
+///
+/// - Missing section → [`error::ControlPlaneError::Validation`] with
+///   `field = Some("dataplane")` so the operator's CLI / log
+///   surface can branch on the field without `Display`-grepping.
+/// - `getifaddrs(3)` refusal → [`error::DataplaneBootError::
+///   IfaceAddrResolution`] embedding the underlying `io::Error`
+///   verbatim (NotFound vs Other) for programmatic inspection.
+///
+/// Extracted from `run_server_with_obs_and_driver` to keep that fn
+/// under the clippy `too_many_lines` ceiling — the validation +
+/// resolve sequence is otherwise a single logical step.
+fn resolve_host_ipv4_from_dataplane_config(
+    dataplane: Option<&dataplane_config::DataplaneConfig>,
+) -> Result<std::net::Ipv4Addr, error::ControlPlaneError> {
+    let dataplane_cfg = dataplane.ok_or_else(|| error::ControlPlaneError::Validation {
+        message: "missing required [dataplane] section in overdrive.toml \
+                  (client_iface + backend_iface)"
+            .to_owned(),
+        field: Some("dataplane".to_owned()),
+    })?;
+    let host_ipv4 = iface::resolve_iface_ipv4(&dataplane_cfg.client_iface).map_err(|source| {
+        error::DataplaneBootError::IfaceAddrResolution {
+            iface: dataplane_cfg.client_iface.clone(),
+            source,
+        }
+    })?;
+    Ok(host_ipv4)
+}
+
 async fn bulk_load_service_vip_allocator(
     vip_range: &VipRange,
     store: &Arc<LocalIntentStore>,
@@ -663,17 +766,13 @@ pub async fn run_server_with_obs_and_driver(
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
 
-    // backend-discovery-bridge-service-reachability step 01-04 —
-    // register the bridge reconciler at boot so the broker enqueues
-    // bridge evaluations on workload-scoped `AllocStatusRow`
-    // transitions (per architecture.md § 3 step 5 + § 4.7).
-    //
-    // Phase 01 wires `host_ipv4 = Ipv4Addr::LOCALHOST` as a
-    // single-commit transitional placeholder per
-    // `feedback_single_cut_greenfield_migrations.md` — step 02-01
-    // replaces this with `resolve_iface_ipv4(&dataplane_cfg.client_iface)?`
-    // in a one-line edit. NO feature flag, NO parallel boot path.
-    let host_ipv4: std::net::Ipv4Addr = std::net::Ipv4Addr::LOCALHOST;
+    // backend-discovery-bridge-service-reachability step 02-01 —
+    // require the `[dataplane]` config section per architecture.md
+    // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
+    // operator-supplied `client_iface`. The `Ipv4Addr::LOCALHOST`
+    // placeholder from 01-04 is removed in the same commit per
+    // `feedback_single_cut_greenfield_migrations.md`.
+    let host_ipv4 = resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?;
     runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
     let runtime = Arc::new(runtime);
 
@@ -689,6 +788,7 @@ pub async fn run_server_with_obs_and_driver(
         dataplane,
         node_id,
         allocator,
+        host_ipv4,
     );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so

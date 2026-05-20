@@ -112,6 +112,7 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     )
 }
 

@@ -63,6 +63,13 @@ overdrive-dataplane.path           = "../overdrive-dataplane"
 # deserialisation. Workspace-pinned per `.claude/rules/development.md`
 # § Dependencies.
 ipnet.workspace                    = true
+# `nix` — safe Rust bindings to *nix syscalls. Used by `iface::
+# resolve_iface_ipv4` (step 02-01 of
+# `backend-discovery-bridge-service-reachability`) to walk
+# `getifaddrs(3)` and find the IPv4 address bound to the operator-
+# supplied `[dataplane] client_iface`. Workspace-pinned with feature
+# `net` per Cargo.toml root.
+nix.workspace                      = true
 
 # Errors / async / serde
 thiserror.workspace   = true

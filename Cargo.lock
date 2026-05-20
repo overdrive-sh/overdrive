@@ -1811,6 +1811,7 @@ dependencies = [
  "ipnet",
  "libc",
  "libsql",
+ "nix",
  "overdrive-core",
  "overdrive-dataplane",
  "overdrive-host",

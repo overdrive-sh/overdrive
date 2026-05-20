@@ -131,6 +131,9 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         tick_cadence: Duration::from_millis(100),
         clock: clock.clone(),
         vip_range: overdrive_dataplane::allocators::VipRange::default(),
+        // Step 02-01 — required `[dataplane]` section. Tests use
+        // the loopback shape so `getifaddrs(3)` resolves locally.
+        dataplane: Some(overdrive_control_plane::dataplane_config::DataplaneConfig::loopback()),
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))

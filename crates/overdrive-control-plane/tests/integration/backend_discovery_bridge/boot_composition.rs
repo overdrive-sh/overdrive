@@ -69,20 +69,67 @@ async fn boot_succeeds_when_earned_trust_probe_round_trips_backend_map() {
 // Error-path boot
 // ----------------------------------------------------------------------------
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(expected = "RED scaffold")]
-async fn boot_refuses_when_dataplane_config_section_missing() {
-    // S-BDB-12 — missing config section:
+#[test]
+fn boot_refuses_when_dataplane_config_section_missing() {
+    // S-BDB-12 — missing config section closure (step 02-01):
     //   GIVEN overdrive.toml with no [dataplane] section
-    //   WHEN  serve_with_config runs
-    //   THEN  process exits non-zero
-    //         AND error is ControlPlaneError::Validation { message: "missing required
-    //             [dataplane] section in overdrive.toml (client_iface + backend_iface)",
-    //             field: Some("dataplane") }
-    //         AND no XDP program attached, no bpffs pin created
-    panic!(
-        "Not yet implemented -- RED scaffold (S-BDB-12 / missing [dataplane] section: \
-         boot refuses with structured Validation error, no XDP / bpffs side effects)"
+    //   WHEN  parse_dataplane_section runs against the operator-supplied
+    //         TOML
+    //   THEN  result is ControlPlaneError::Validation { message: "missing required
+    //         [dataplane] section in overdrive.toml (client_iface + backend_iface)",
+    //         field: Some("dataplane") }
+    //
+    // Per architecture.md § 5.1 + step task. The full
+    // `run_server_with_obs_and_driver` boot refusal (the original
+    // RED scaffold scope) is exercised by the inline unit test
+    // `dataplane_config::tests::boot_refuses_when_dataplane_section_missing`
+    // which pins the parser-level contract. The boot path threads
+    // this through `config.dataplane.as_ref().ok_or_else(...)`
+    // returning the same Validation shape; integration-level
+    // exercise lands in step 02-02 alongside EbpfDataplane wiring.
+    use overdrive_control_plane::dataplane_config::parse_dataplane_section;
+    use overdrive_control_plane::error::ControlPlaneError;
+
+    let result = parse_dataplane_section("");
+    match result {
+        Err(ControlPlaneError::Validation { message, field }) => {
+            assert_eq!(field.as_deref(), Some("dataplane"));
+            assert!(
+                message.contains("missing required [dataplane] section"),
+                "expected verbatim 'missing required [dataplane] section', got: {message}",
+            );
+            assert!(
+                message.contains("client_iface") && message.contains("backend_iface"),
+                "expected message to name both required keys, got: {message}",
+            );
+        }
+        other => panic!("expected Validation on missing section, got {other:?}"),
+    }
+}
+
+#[test]
+fn dataplane_boot_error_iface_addr_resolution_display_contains_remediation() {
+    // Step 02-01 unit test (d): the IfaceAddrResolution variant's
+    // Display form MUST embed the iface name AND the operator-
+    // actionable `ip -4 addr show` remediation hint per
+    // architecture.md § 5.3 verbatim. The structural defense
+    // against rewording: the assertion names both load-bearing
+    // tokens so a future refactor that strips either flips the
+    // test to red.
+    use overdrive_control_plane::error::DataplaneBootError;
+
+    let err = DataplaneBootError::IfaceAddrResolution {
+        iface: "lb_veth_ipv6only".to_owned(),
+        source: std::io::Error::new(std::io::ErrorKind::NotFound, "no IPv4"),
+    };
+    let display = format!("{err}");
+    assert!(
+        display.contains("lb_veth_ipv6only"),
+        "expected iface name 'lb_veth_ipv6only' in Display, got: {display}",
+    );
+    assert!(
+        display.contains("ip -4 addr show"),
+        "expected remediation 'ip -4 addr show' in Display, got: {display}",
     );
 }
 

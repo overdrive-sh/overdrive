@@ -1715,6 +1715,7 @@ mod tests {
                 Arc::new(SimDataplane::new()),
                 writer_node(),
                 allocator,
+                std::net::Ipv4Addr::LOCALHOST,
             )
         }
 

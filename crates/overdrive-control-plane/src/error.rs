@@ -218,6 +218,108 @@ impl CgroupBootstrapError {
     }
 }
 
+/// Boot-time failures from the `EbpfDataplane` composition path per
+/// architecture.md § 5.3 of
+/// `backend-discovery-bridge-service-reachability`.
+///
+/// Three discrete failure modes — `Construct`, `Probe`,
+/// `IfaceAddrResolution` — per `.claude/rules/development.md`
+/// § Errors → "Distinct failure modes get distinct error variants".
+/// Each variant's `#[error("...")]` template embeds the operator-
+/// facing remediation steps from architecture.md § 5.3 verbatim
+/// (`ip link show <iface>`, `mount | grep bpffs`, `dmesg | tail`,
+/// `ip -4 addr show <iface>`, CAP_SYS_ADMIN / CAP_BPF check).
+///
+/// **Step 02-01 NOTE**: only the `IfaceAddrResolution` variant is
+/// reachable from production today — the `Construct` and `Probe`
+/// variants land alongside `EbpfDataplane` boot composition in step
+/// 02-02. They are declared here so the typed contract is in place
+/// and the boot_composition.rs RED scaffolds at S-BDB-13, S-BDB-14
+/// can branch on `matches!(e, DataplaneBootError::Construct { .. })`
+/// when their bodies go GREEN.
+#[derive(Debug, Error)]
+pub enum DataplaneBootError {
+    /// `EbpfDataplane::new` construction failed. Typical causes: the
+    /// configured interface does not exist, /sys/fs/bpf is not
+    /// mounted, the kernel rejected the BPF program at load time, the
+    /// process lacks `CAP_SYS_ADMIN` / `CAP_BPF`. Operator hint
+    /// embeds the canonical inspection commands verbatim.
+    ///
+    /// Reachable from step 02-02 onwards; declared in 02-01 for the
+    /// typed contract surface.
+    #[error(
+        "EbpfDataplane construction failed \
+         (client_iface={client_iface}, backend_iface={backend_iface}): {source}\n\
+         \n\
+         Try:\n\
+           - `ip link show <iface>` to verify the interface exists.\n\
+           - `mount | grep bpffs` to verify /sys/fs/bpf is mounted.\n\
+           - `dmesg | tail` for kernel-side BPF verifier errors.\n\
+           - Confirm CAP_SYS_ADMIN / CAP_BPF for the running process."
+    )]
+    Construct {
+        /// Operator-supplied `[dataplane] client_iface` value.
+        client_iface: String,
+        /// Operator-supplied `[dataplane] backend_iface` value.
+        backend_iface: String,
+        /// Underlying `DataplaneError` from `EbpfDataplane::new`.
+        #[source]
+        source: overdrive_core::traits::dataplane::DataplaneError,
+    },
+
+    /// Earned-Trust probe per architecture.md § 5.4 failed — the
+    /// kernel accepted the BPF programs at load time but the runtime
+    /// BACKEND_MAP write+read sentinel did not round-trip. Typically
+    /// indicates a kernel BPF feature regression or a corrupted
+    /// bpffs pin from a prior unclean shutdown.
+    ///
+    /// Reachable from step 02-02 onwards; declared in 02-01 for the
+    /// typed contract surface.
+    #[error(
+        "EbpfDataplane probe failed — the kernel accepted the BPF \
+         programs at load time but the runtime BACKEND_MAP write+read \
+         did not round-trip. This typically indicates a kernel BPF \
+         feature regression or a corrupted bpffs pin from a prior \
+         unclean shutdown.\n\
+         \n\
+         Try:\n\
+           - `rm /sys/fs/bpf/overdrive/*` and retry.\n\
+           - Inspect `dmesg | tail`.\n\
+         \n\
+         Underlying: {source}"
+    )]
+    Probe {
+        /// Underlying `DataplaneError` from `EbpfDataplane::probe`.
+        #[source]
+        source: overdrive_core::traits::dataplane::DataplaneError,
+    },
+
+    /// `iface::resolve_iface_ipv4` failed for the configured
+    /// `client_iface`. Two sub-cases collapse into one variant
+    /// because the operator remediation (`ip -4 addr show <iface>`)
+    /// is identical: the iface does not exist, OR the iface exists
+    /// but has no IPv4 address bound. The structured `io::ErrorKind`
+    /// (`NotFound` vs `Other`) is preserved on `source` for
+    /// programmatic inspection by the §12 investigation agent.
+    #[error(
+        "EbpfDataplane iface IPv4 resolution failed for {iface}: {source}\n\
+         \n\
+         Try: `ip -4 addr show <iface>` to inspect the interface \
+         configuration. The bridge requires a single IPv4 address on \
+         the configured client_iface for endpoint derivation."
+    )]
+    IfaceAddrResolution {
+        /// The interface name `resolve_iface_ipv4` was asked to
+        /// resolve.
+        iface: String,
+        /// Underlying `io::Error` carrying `ErrorKind::NotFound` (no
+        /// IPv4 binding) or `ErrorKind::Other` (`getifaddrs` system
+        /// failure).
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Top-level control-plane error.
 #[derive(Debug, Error)]
 pub enum ControlPlaneError {
@@ -286,6 +388,18 @@ pub enum ControlPlaneError {
     /// has not bound yet); the arm exists for enum exhaustiveness.
     #[error(transparent)]
     ViewStoreBoot(#[from] ViewStoreBootError),
+
+    /// `EbpfDataplane` boot-time failure per
+    /// `backend-discovery-bridge-service-reachability` architecture.md
+    /// § 5.3 (step 02-01). Pass-through embedding via `#[from]` so
+    /// the composition root can `matches!(e,
+    /// ControlPlaneError::DataplaneBoot(_))` for structured boot
+    /// diagnostics without `Display`-grepping. Same boot-path shape
+    /// as `ViewStoreBoot` / `Cgroup` / `CgroupBootstrap`: happens
+    /// BEFORE the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    DataplaneBoot(#[from] DataplaneBootError),
 
     /// `[dataplane.vip_allocator]` TOML parser refusal per
     /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
@@ -410,6 +524,17 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // exhaustiveness-only. The composition root branches on
             // the typed variant (`matches!(e, ViewStoreBoot(_))`) to
             // emit `health.startup.refused`.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::DataplaneBoot(e) => (
+            // Same shape as `ViewStoreBoot` above: dataplane boot
+            // failures (Construct / Probe / IfaceAddrResolution)
+            // happen BEFORE the listener binds. The composition
+            // root branches on the typed variant
+            // (`matches!(e, DataplaneBoot(_))`) to emit
+            // `health.startup.refused` per architecture.md § 5.3;
+            // this arm exists only for enum exhaustiveness.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
