@@ -376,6 +376,26 @@ pub enum Invariant {
     /// by the bridge's reconcile body. The evaluator body lives in
     /// `crate::invariants::backend_discovery_bridge`. Closes S-BDB-06.
     BridgeRecomputesFingerprintOnReplay,
+    /// `backend-discovery-bridge-service-reachability` step 02-04 —
+    /// always invariant. Drives the in-process bridge → hydrator
+    /// handoff at Tier 1: ticks `BackendDiscoveryBridge::reconcile`
+    /// against a Running alloc + projected listener, applies the
+    /// emitted `Action::WriteServiceBackendRow` to a
+    /// `SimObservationStore`, reads `service_backends_rows` back into
+    /// a `ServiceMapHydratorState.desired` projection (mirrors the
+    /// runtime `hydrate_desired` arm), then ticks
+    /// `ServiceMapHydrator::reconcile` against that state and asserts
+    /// exactly one `Action::DataplaneUpdateService` is emitted
+    /// carrying the bridge-written row's `vip` + `backends`. Pins
+    /// the cross-reconciler fingerprint-identity contract — drift in
+    /// either reconciler's encoding fails the invariant. The Tier 3
+    /// walking-skeleton (`crates/overdrive-control-plane/tests/integration/
+    /// backend_discovery_bridge/walking_skeleton.rs`) exercises the
+    /// same property against the real kernel adapter. The evaluator
+    /// body lives in
+    /// `crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff`.
+    /// Closes S-BDB-19.
+    BridgeToHydratorHandoff,
 }
 
 impl Invariant {
@@ -462,6 +482,11 @@ impl Invariant {
         Self::BridgeEventuallyWritesBackendRow,
         Self::BridgeIdempotentSteadyState,
         Self::BridgeRecomputesFingerprintOnReplay,
+        // backend-discovery-bridge-service-reachability step 02-04 —
+        // bridge → hydrator handoff (S-BDB-19). The evaluator body
+        // lives in
+        // `crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff`.
+        Self::BridgeToHydratorHandoff,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -507,6 +532,8 @@ impl Invariant {
             Self::BridgeEventuallyWritesBackendRow => "bridge-eventually-writes-backend-row",
             Self::BridgeIdempotentSteadyState => "bridge-idempotent-steady-state",
             Self::BridgeRecomputesFingerprintOnReplay => "bridge-recomputes-fingerprint-on-replay",
+            // backend-discovery-bridge-service-reachability step 02-04 (S-BDB-19).
+            Self::BridgeToHydratorHandoff => "bridge-to-hydrator-handoff",
         }
     }
 }

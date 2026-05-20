@@ -618,6 +618,18 @@ impl Harness {
                 crate::invariants::backend_discovery_bridge::evaluate_bridge_recomputes_fingerprint_on_replay()
                     .await
             }
+            // backend-discovery-bridge-service-reachability step 02-04 —
+            // bridge → hydrator handoff (S-BDB-19). Drives
+            // `BackendDiscoveryBridge::reconcile` → applies
+            // `Action::WriteServiceBackendRow` to `SimObservationStore`
+            // → projects `service_backends_rows` back into
+            // `ServiceMapHydratorState.desired` → ticks
+            // `ServiceMapHydrator::reconcile` → asserts the dispatched
+            // `Action::DataplaneUpdateService` carries the bridge-
+            // written VIP + backends.
+            Invariant::BridgeToHydratorHandoff => {
+                crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff().await
+            }
         }
     }
 }

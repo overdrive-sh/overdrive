@@ -139,6 +139,15 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "bridge-eventually-writes-backend-row",
     "bridge-idempotent-steady-state",
     "bridge-recomputes-fingerprint-on-replay",
+    // backend-discovery-bridge-service-reachability Slice 2 step 02-04
+    // — S-BDB-19 Tier 1 DST evidence. Extends the existing
+    // `service_map_hydrator` invariant module to drive the hydrator
+    // against bridge-written `service_backends_rows` under
+    // `SimObservationStore` + `SimDataplane`. The Tier 3 real-kernel
+    // variant against `LocalObservationStore` + `EbpfDataplane` is the
+    // walking-skeleton's `bridge_to_hydrator_handoff_dispatches_*` test
+    // (currently a RED scaffold).
+    "bridge-to-hydrator-handoff",
 ];
 
 // -----------------------------------------------------------------------------

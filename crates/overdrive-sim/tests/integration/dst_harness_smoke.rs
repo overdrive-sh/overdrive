@@ -129,6 +129,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "bridge-eventually-writes-backend-row",
     "bridge-idempotent-steady-state",
     "bridge-recomputes-fingerprint-on-replay",
+    // backend-discovery-bridge-service-reachability Slice 2 step 02-04
+    // — S-BDB-19 Tier 1 DST evidence (extension on
+    // `service_map_hydrator`); drives the hydrator against
+    // bridge-written `service_backends_rows` under Sim adapters.
+    "bridge-to-hydrator-handoff",
 ];
 
 // -----------------------------------------------------------------------------

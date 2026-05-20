@@ -42,6 +42,16 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
     //   - K1 bind-readiness wait: 50ms cadence / 2s budget poll-connect loop
     //   - K2 listener choice: Python one-liner echo (Form A per DWD-03)
     //   - K3 echo payload: literal bytes `walking-skeleton-probe\n`
+    //
+    // BLOCKED on Service-arm convergence loop: investigation in step
+    // 02-04 RESUME found `state.obs.alloc_status_rows()` returns 0 rows
+    // 10s after a Service-arm submit through the real HTTPS driving
+    // port — the Service-arm workload-lifecycle reconciler does not
+    // currently emit `StartAllocation` actions for the test fixture's
+    // Python-echo spec. This is an upstream gap NOT in this feature's
+    // scope; pending user approval for a GitHub-issue-tracked deferral
+    // before the walking-skeleton can drive end-to-end. See the
+    // step 02-04 closing summary for the diagnostic shape and trace.
     panic!(
         "Not yet implemented -- RED scaffold (S-BDB-01 / walking-skeleton e2e: \
          submit Service -> Running -> bridge -> hydrator -> EbpfDataplane -> \
@@ -78,7 +88,9 @@ async fn bridge_to_hydrator_handoff_dispatches_dataplane_update_service() {
     //         AND a service_hydration_results row with Completed status is written
     //
     // Note: the DST equivalent runs every PR via cargo dst against
-    // SimDataplane; this Tier 3 variant proves the same property against
+    // SimDataplane (the `bridge-to-hydrator-handoff` invariant landed in
+    // step 02-04 RESUME of `backend-discovery-bridge-service-reachability/
+    // deliver`); this Tier 3 variant proves the same property against
     // the real kernel adapter.
     panic!(
         "Not yet implemented -- RED scaffold (S-BDB-19 / bridge-to-hydrator handoff: \
