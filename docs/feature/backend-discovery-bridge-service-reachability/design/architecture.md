@@ -1002,3 +1002,22 @@ compiler rejects until the new arm is added. This is the
 | Job workload kind backend rows | ADR-0050 § 2: Job has no listeners. | wave-decisions.md § 1 |
 | Operator-tunable `[dataplane] disabled = true` | DECIDED 2026-05-21 — do not ship. Hosts without XDP cannot run Service workloads; boot refuses without `[dataplane]` `client_iface`/`backend_iface` keys. | wave-decisions.md D1 |
 | ~~Listener-skipped telemetry counter~~ | Withdrawn 2026-05-20 — VIP-less listeners are no longer representable; nothing to skip or count. | wave-decisions.md D5 |
+
+---
+
+## Review
+
+| Field | Value |
+|---|---|
+| Reviewer | Atlas (nw-solution-architect-reviewer) |
+| Date | 2026-05-20 |
+| Verdict | **APPROVED** |
+| Blocking issues | 0 |
+| High issues | 0 |
+
+Full review (focus areas + non-blocking questions) lives in
+`wave-decisions.md` § Review. This file is approved for handoff to
+DISTILL; the C4 L2/L3 diagrams, the walking-skeleton test code
+including the D3 in-gate TCP round-trip block, and the hydration arms
+consuming `WorkloadIntent::Service` + `ServiceVipAllocator::get` are
+all verified coherent with ADR-0049 / ADR-0050 / ADR-0051.

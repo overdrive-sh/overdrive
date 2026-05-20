@@ -897,6 +897,40 @@ All deferrals resolved as of 2026-05-21. None remain open for DELIVER.
 
 ---
 
+## Review
+
+| Field | Value |
+|---|---|
+| Reviewer | Atlas (nw-solution-architect-reviewer) |
+| Date | 2026-05-20 |
+| Verdict | **APPROVED** |
+| Blocking issues | 0 |
+| High issues | 0 |
+| Non-blocking questions | 3 |
+
+**Focus areas verified** (per `/nw-review` skill spec):
+
+1. Internal coherence after delta revision — no surviving operator-pinned-VIP / skip-listener / pre-#167 framing.
+2. D3 reversal coherence — walking-skeleton TCP round-trip uniformly in-gate across all four artifacts; no surviving "deferred" / "optional Phase 2.2 stretch" language.
+3. Reuse Analysis HARD GATE — 9 components inspected with defensible EXTEND vs CREATE NEW verdicts (including post-VIP-allocator `WorkloadLifecycle` shape).
+4. C4 L2/L3 diagrams structural soundness — every arrow labelled, container boundaries intact.
+5. ADR-0052 alternatives A–H rejection rationale specificity — no boilerplate; each rejection cites distinct cost or precedent.
+6. ASR-BDB-01..04 quality-attribute scenarios — measurable, testable, tied to specific gates (Tier 1 DST / Tier 3 integration / boot probe).
+7. Walking-skeleton assertion altitude — observable kernel side effects + real-network signal per `.claude/rules/testing.md` § Tier 3.
+8. Cross-check against landed ADR-0049 / ADR-0050 / ADR-0051 — no contradictions.
+9. Deferral discipline — D1–D5 all in resolved state; no aspirational forward pointers.
+10. Project-rule adherence — ADR-0035/0036 reconciler shape; `#[from]` pass-through errors; no sim-shaped concessions; integration-tests feature gating; single-cut NoopDataplane deletion.
+
+**Non-blocking questions for DISTILL/DELIVER:**
+
+1. `TestServer::serve_with_dataplane_config(...)` test fixture isolation — confirm no test-code leaks into production code.
+2. ViewStore crash semantics — confirm next-tick fingerprint recompute on stale-replay (DESIGN says yes; surface as a DST invariant or fixture).
+3. Mutation-testing scope — confirm the View `insert` / `retain` GC ops are mutation-tested, not just `reconcile` + `should_write_row`.
+
+**Verdict basis:** the design demonstrates strong architectural discipline after the delta-revision pass. Allocator-issued VIP model is coherent across parser/intent/bridge. Earned-Trust probe ordering is sound. D3 reversal is uniformly reflected. APPROVED for handoff to DISTILL.
+
+---
+
 ## 7. Cross-references to brief.md additions
 
 This feature adds to `docs/product/architecture/brief.md`:

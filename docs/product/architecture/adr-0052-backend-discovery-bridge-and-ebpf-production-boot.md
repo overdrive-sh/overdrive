@@ -795,7 +795,7 @@ directly is the simplest correct shape.
 - ADR-0050 (intent-side workload aggregate) — consumed dependency; bridge's intent-read shape.
 - ADR-0051 (wire-side `SubmitSpecInput`) — transitively consumed.
 - `docs/evolution/2026-05-19-service-vip-allocator.md` — feature evolution doc for the landed VIP allocator.
-- `docs/feature/backend-discovery-bridge-service-reachability/design/wave-decisions.md` — option analysis + recommendations + deferrals.
+- `docs/feature/backend-discovery-bridge-service-reachability/design/wave-decisions.md` — option analysis + recommendations + deferrals + **review** (Atlas, 2026-05-20, APPROVED).
 - `docs/feature/backend-discovery-bridge-service-reachability/design/architecture.md` — component-level design with C4 diagrams and code shapes.
 - `.claude/rules/development.md` § Reconciler I/O.
 - `.claude/rules/development.md` § Persist inputs, not derived state.
