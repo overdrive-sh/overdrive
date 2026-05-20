@@ -1,0 +1,34 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "backend-discovery-bridge-service-reachability",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-20T11:01:04Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pre-stages 01-02; no acceptance scenario in this step; unit-level RED tests cover CBOR roundtrip per scenario_name",
+      "t": "2026-05-20T11:26:22Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-20T11:26:29Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-20T11:26:29Z"
+    }
+  ]
+}

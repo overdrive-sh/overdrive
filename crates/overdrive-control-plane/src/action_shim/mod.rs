@@ -754,6 +754,19 @@ async fn dispatch_single(
         Action::ReleaseServiceVip { spec_digest, correlation } => {
             release_service_vip::dispatch(&spec_digest, &correlation, allocator).await
         }
+        // backend-discovery-bridge-service-reachability step 01-01 —
+        // RED scaffold. The real per-arm dispatch lands in step 01-04 at
+        // `crates/overdrive-control-plane/src/action_shim/
+        // write_service_backend_row.rs` and writes the row via
+        // `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+        // Until then this arm exists so the match stays exhaustive over
+        // every `Action` variant — adding the variant in `overdrive-core`
+        // without this arm would be a non-exhaustive-match compile
+        // error, masking the rest of the workspace's wiring.
+        #[expect(clippy::todo, reason = "RED scaffold: lands GREEN in step 01-04")]
+        Action::WriteServiceBackendRow { row: _, correlation: _ } => {
+            todo!("RED scaffold: WriteServiceBackendRow dispatch lands in step 01-04")
+        }
     }
 }
 

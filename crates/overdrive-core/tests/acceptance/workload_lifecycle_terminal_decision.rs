@@ -524,6 +524,13 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // not a new terminal claim. The reconciler that emits Release
         // is also the writer of the terminal claim via StopAllocation /
         // FinalizeFailed above.
-        | Action::ReleaseServiceVip { .. } => None,
+        | Action::ReleaseServiceVip { .. }
+        // backend-discovery-bridge-service-reachability step 01-01:
+        // WriteServiceBackendRow carries no terminal claim — the
+        // bridge writes an observation row tracking workload-side
+        // backend membership, orthogonal to the alloc-lifecycle
+        // terminal claim that lives on WorkloadLifecycle's
+        // StopAllocation / FinalizeFailed.
+        | Action::WriteServiceBackendRow { .. } => None,
     }
 }

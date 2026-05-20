@@ -169,9 +169,24 @@ use crate::id::{
 };
 use crate::traits::dataplane::Backend;
 use crate::traits::driver::{AllocationSpec, Resources};
-use crate::traits::observation_store::{AllocState, AllocStatusRow, ServiceHydrationStatus};
+use crate::traits::observation_store::{
+    AllocState, AllocStatusRow, ServiceBackendRow, ServiceHydrationStatus,
+};
 use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
+
+// `backend-discovery-bridge-service-reachability` step 01-01 — bridge
+// reconciler's pure type surface (State / View / marker struct). The
+// `Reconciler` trait impl + `reconcile` body land in step 01-02; the
+// runtime hydration arms land in step 01-03; the action-shim dispatch
+// arm lands in step 01-04. See `docs/feature/
+// backend-discovery-bridge-service-reachability/design/architecture.md`
+// § 4.
+pub mod backend_discovery_bridge;
+
+use backend_discovery_bridge::{
+    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
+};
 
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
@@ -372,6 +387,11 @@ pub enum AnyState {
     /// `ServiceMapHydrator` reconciler's typed projection — see
     /// [`ServiceMapHydratorState`]. Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(ServiceMapHydratorState),
+    /// `BackendDiscoveryBridge` reconciler's typed projection — see
+    /// [`backend_discovery_bridge::BackendDiscoveryBridgeState`].
+    /// Phase 2.2 (`backend-discovery-bridge-service-reachability`
+    /// step 01-01).
+    BackendDiscoveryBridge(BackendDiscoveryBridgeState),
 }
 
 /// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.
@@ -691,6 +711,45 @@ pub enum Action {
         /// row deterministically.
         correlation: CorrelationKey,
     },
+
+    // -----------------------------------------------------------------
+    // backend-discovery-bridge-service-reachability step 01-01 —
+    // bridge reconciler's `WriteServiceBackendRow` emission per
+    // architecture.md § 4.3.
+    //
+    // Emitted by `BackendDiscoveryBridge::reconcile` (lands in step
+    // 01-02) when the freshly-computed `(vip, [backend])` fingerprint
+    // for a `(workload_id, service_id)` differs from the per-service
+    // entry in `view.last_written_fingerprint`. The action shim's
+    // per-arm dispatch lands in step 01-04 at
+    // `crates/overdrive-control-plane/src/action_shim/
+    // write_service_backend_row.rs` and writes the row via
+    // `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+    // -----------------------------------------------------------------
+    /// Write a `ServiceBackendRow` to the ObservationStore. Emitted
+    /// by `BackendDiscoveryBridge` per architecture.md § 4.3; the
+    /// action shim's wrapper dispatches into
+    /// `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+    /// No correlation-driven follow-up is required at the shim level
+    /// — the bridge's next tick reads `service_backends_rows`
+    /// (transitively through the runtime's hydrate path landing in
+    /// step 01-03) and observes its own write via the dedup
+    /// fingerprint persisted in the bridge's `View`.
+    WriteServiceBackendRow {
+        /// The full `ServiceBackendRow` payload — the persistence
+        /// boundary takes whole rows, not deltas, per
+        /// `crate::traits::observation_store::ObservationStore`'s
+        /// LWW contract.
+        row: ServiceBackendRow,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "backend-discovery-bridge/<workload_id>",
+        ///   spec_hash = ContentHash::of(rkyv-archive of fingerprint),
+        ///   purpose = "write-service-backend-row")` so a future
+        /// audit / replay surface can correlate the dispatch with
+        /// the resulting observation row deterministically.
+        correlation: CorrelationKey,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.
@@ -962,6 +1021,14 @@ pub enum AnyReconciler {
     /// Phase 2 (Slice 08; ASR-2.2-04) — `service-map-hydrator`.
     /// Activates J-PLAT-004 per ADR-0042. See [`ServiceMapHydrator`].
     ServiceMapHydrator(ServiceMapHydrator),
+    /// Phase 2.2 (`backend-discovery-bridge-service-reachability`
+    /// step 01-01) — bridges WorkloadLifecycle's Running alloc set
+    /// to `service_backends` observation rows the
+    /// `ServiceMapHydrator` consumes. See
+    /// [`backend_discovery_bridge::BackendDiscoveryBridge`]. The
+    /// `Reconciler` trait impl lands in step 01-02 alongside the
+    /// reconcile body.
+    BackendDiscoveryBridge(BackendDiscoveryBridge),
 }
 
 impl AnyReconciler {
@@ -972,6 +1039,15 @@ impl AnyReconciler {
             Self::NoopHeartbeat(r) => r.name(),
             Self::WorkloadLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
+            // backend-discovery-bridge-service-reachability step 01-01
+            // — the bridge's marker struct exposes its name through a
+            // shim accessor today; the `Reconciler::name(&self)` trait
+            // method lands in step 01-02 alongside the `impl
+            // Reconciler for BackendDiscoveryBridge` block. Until then
+            // we read the name field directly through a sibling
+            // private accessor scoped to this dispatch — see
+            // `backend_discovery_bridge` module for the struct shape.
+            Self::BackendDiscoveryBridge(r) => r.canonical_name_for_dispatch(),
         }
     }
 
@@ -995,6 +1071,17 @@ impl AnyReconciler {
             Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
             Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
+            // backend-discovery-bridge-service-reachability step 01-01
+            // — `BackendDiscoveryBridge::NAME` is the canonical
+            // `&'static str` anchor. The `Reconciler` trait impl
+            // lands in step 01-02; reading `BackendDiscoveryBridge::NAME`
+            // directly here (rather than via the trait const
+            // dispatch every other arm uses) is the
+            // pre-trait-impl shape that keeps the match exhaustive
+            // without prematurely binding `BackendDiscoveryBridge`
+            // to a `(State, View)` pair the reconcile body has not
+            // settled on yet.
+            Self::BackendDiscoveryBridge(_) => BackendDiscoveryBridge::NAME,
         }
     }
 
@@ -1065,6 +1152,22 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::ServiceMapHydrator(next_view))
             }
+            // backend-discovery-bridge-service-reachability step 01-01
+            // — placeholder dispatch arm. The bridge's `Reconciler`
+            // trait impl lands in step 01-02; until then the dispatch
+            // returns an empty action list and the unchanged view so
+            // the runtime can register the variant in step 01-04's
+            // boot composition without triggering the cross-variant
+            // panic below. The reconcile body lands in 01-02 and the
+            // RED scaffolds in
+            // `crates/overdrive-sim/src/invariants/backend_discovery_bridge.rs`
+            // are the active failure surface until then.
+            (
+                Self::BackendDiscoveryBridge(_),
+                AnyState::BackendDiscoveryBridge(_),
+                AnyState::BackendDiscoveryBridge(_),
+                AnyReconcilerView::BackendDiscoveryBridge(view),
+            ) => (Vec::new(), AnyReconcilerView::BackendDiscoveryBridge(view.clone())),
             // Cross-variant branches — statically impossible once the
             // runtime correctly hydrates matching state and view kinds.
             // The runtime tick loop ships in 02-03; until then these
@@ -1099,6 +1202,11 @@ pub enum AnyReconcilerView {
     /// `ServiceMapHydrator` reconciler's view — see
     /// [`ServiceMapHydratorView`]. Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(ServiceMapHydratorView),
+    /// `BackendDiscoveryBridge` reconciler's view — see
+    /// [`backend_discovery_bridge::BackendDiscoveryBridgeView`].
+    /// Phase 2.2 (`backend-discovery-bridge-service-reachability`
+    /// step 01-01).
+    BackendDiscoveryBridge(BackendDiscoveryBridgeView),
 }
 
 // ---------------------------------------------------------------------------

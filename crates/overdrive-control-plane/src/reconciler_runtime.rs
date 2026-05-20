@@ -44,6 +44,7 @@ use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
 use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconciler::ServiceMapHydrator;
+use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView;
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName,
     ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
@@ -80,6 +81,11 @@ enum AnyViewMap {
     /// the map holds per-target persisted views per ADR-0035 §5.
     /// Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(BTreeMap<TargetResource, ServiceMapHydratorView>),
+    /// `BackendDiscoveryBridge` carries `View =
+    /// BackendDiscoveryBridgeView`; the map holds per-target persisted
+    /// views per ADR-0035 §5. Phase 2.2
+    /// (`backend-discovery-bridge-service-reachability` step 01-01).
+    BackendDiscoveryBridge(BTreeMap<TargetResource, BackendDiscoveryBridgeView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -249,6 +255,20 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::ServiceMapHydrator(loaded)
             }
+            // backend-discovery-bridge-service-reachability step 01-01 —
+            // bulk-load the persisted `BackendDiscoveryBridgeView` map.
+            // Shape mirrors `ServiceMapHydrator` exactly; the production
+            // hydrate / persist paths land in step 01-03.
+            AnyReconciler::BackendDiscoveryBridge(_) => {
+                let loaded: BTreeMap<TargetResource, BackendDiscoveryBridgeView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::BackendDiscoveryBridge(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -311,9 +331,9 @@ impl ReconcilerRuntime {
         };
         match &*entry.views.lock() {
             AnyViewMap::WorkloadLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
-            AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => {
-                WorkloadLifecycleView::default()
-            }
+            AnyViewMap::Unit
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::BackendDiscoveryBridge(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -360,6 +380,13 @@ impl ReconcilerRuntime {
             AnyViewMap::ServiceMapHydrator(map) => {
                 AnyReconcilerView::ServiceMapHydrator(map.get(target).cloned().unwrap_or_default())
             }
+            // backend-discovery-bridge-service-reachability step 01-01 —
+            // shape mirrors the ServiceMapHydrator arm exactly. Returns
+            // the persisted view for `target`, or `default()` when no
+            // row exists (fresh target before the bridge has written).
+            AnyViewMap::BackendDiscoveryBridge(map) => AnyReconcilerView::BackendDiscoveryBridge(
+                map.get(target).cloned().unwrap_or_default(),
+            ),
         })
     }
 
@@ -389,6 +416,14 @@ impl ReconcilerRuntime {
     /// `write_through` fails (e.g. fsync injection in tests, real
     /// fsync error in production). On error the in-memory map is
     /// unchanged — verifiable via the `WriteThroughOrdering` invariant.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "per-variant Eq-diff + fsync-then-memory block is the same \
+                  fixed shape repeated once per reconciler kind; extracting \
+                  would require a higher-rank generic helper without changing \
+                  the per-arm logic. Refactored alongside the bridge's GREEN \
+                  body in step 01-03."
+    )]
     async fn persist_view(
         &self,
         name: &ReconcilerName,
@@ -432,9 +467,9 @@ impl ReconcilerRuntime {
                         AnyViewMap::WorkloadLifecycle(map) => {
                             map.get(target).cloned().unwrap_or_default()
                         }
-                        AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => {
-                            WorkloadLifecycleView::default()
-                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -476,7 +511,9 @@ impl ReconcilerRuntime {
                         AnyViewMap::ServiceMapHydrator(map) => {
                             map.get(target).cloned().unwrap_or_default()
                         }
-                        AnyViewMap::Unit | AnyViewMap::WorkloadLifecycle(_) => {
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_) => {
                             ServiceMapHydratorView::default()
                         }
                     }
@@ -501,6 +538,50 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::ServiceMapHydrator(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            // backend-discovery-bridge-service-reachability step 01-01 —
+            // Eq-diff skip + fsync-then-memory write-through, mirrors
+            // the ServiceMapHydrator arm above. The bridge's reconcile
+            // body (lands 01-02) returns a `BackendDiscoveryBridgeView`
+            // every tick; this arm persists it.
+            AnyReconcilerView::BackendDiscoveryBridge(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::BackendDiscoveryBridge(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_) => {
+                            BackendDiscoveryBridgeView::default()
+                        }
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::BackendDiscoveryBridge(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -554,7 +635,9 @@ impl ReconcilerRuntime {
         let entry = self.reconcilers.get(name)?;
         match &*entry.views.lock() {
             AnyViewMap::WorkloadLifecycle(map) => Some(map.clone()),
-            AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => None,
+            AnyViewMap::Unit
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::BackendDiscoveryBridge(_) => None,
         }
     }
 
@@ -626,7 +709,9 @@ impl ReconcilerRuntime {
         let entry = self.reconcilers.get(name)?;
         match &*entry.views.lock() {
             AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
-            AnyViewMap::Unit | AnyViewMap::WorkloadLifecycle(_) => None,
+            AnyViewMap::Unit
+            | AnyViewMap::WorkloadLifecycle(_)
+            | AnyViewMap::BackendDiscoveryBridge(_) => None,
         }
     }
 
@@ -906,7 +991,14 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // convergence-tick loop today; when the production hydrate path
         // lands (GH #160), the corresponding "any service has retry
         // memory recorded" predicate ships alongside.
-        AnyReconcilerView::Unit | AnyReconcilerView::ServiceMapHydrator(_) => false,
+        AnyReconcilerView::Unit
+        | AnyReconcilerView::ServiceMapHydrator(_)
+        // backend-discovery-bridge-service-reachability step 01-01 —
+        // the bridge's view carries dedup-fingerprint memory (per
+        // ADR-0035 / Persist inputs); it does not carry a
+        // backoff-pending signal, so this arm returns false. A future
+        // bridge-side retry policy would extend this match.
+        | AnyReconcilerView::BackendDiscoveryBridge(_) => false,
         AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
@@ -990,6 +1082,15 @@ async fn hydrate_desired(
                 desired,
                 actual: BTreeMap::new(),
             }))
+        }
+        // backend-discovery-bridge-service-reachability step 01-01 —
+        // RED scaffold. The real hydrate-desired path (intent +
+        // ServiceVipAllocator reads, per architecture.md § 4.2) lands
+        // in step 01-03. Until then this arm exists so the match stays
+        // exhaustive over every `AnyReconciler` variant.
+        #[expect(clippy::todo, reason = "RED scaffold: lands GREEN in step 01-03")]
+        AnyReconciler::BackendDiscoveryBridge(_) => {
+            todo!("RED scaffold: BackendDiscoveryBridge hydrate_desired lands in step 01-03")
         }
     }
 }
@@ -1178,6 +1279,14 @@ async fn hydrate_actual(
                 desired: BTreeMap::new(),
                 actual,
             }))
+        }
+        // backend-discovery-bridge-service-reachability step 01-01 —
+        // RED scaffold. The real hydrate-actual path (reads Running
+        // allocs via `alloc_status_rows_for_workload` per
+        // architecture.md § 4.2) lands in step 01-03.
+        #[expect(clippy::todo, reason = "RED scaffold: lands GREEN in step 01-03")]
+        AnyReconciler::BackendDiscoveryBridge(_) => {
+            todo!("RED scaffold: BackendDiscoveryBridge hydrate_actual lands in step 01-03")
         }
     }
 }

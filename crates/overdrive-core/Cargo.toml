@@ -108,6 +108,12 @@ trybuild.workspace = true
 # do not propagate to downstream consumers.
 overdrive-sim.path = "../overdrive-sim"
 tokio              = { workspace = true }
+# `tests/backend_discovery_bridge_types.rs` round-trips
+# `BackendDiscoveryBridgeView` through the same CBOR codec the
+# runtime-owned `ViewStore` uses (per ADR-0035 § 3 — CBOR via
+# `ciborium`). Dev-dep only — production runtime persistence lives
+# in `overdrive-control-plane`, which carries the regular dep.
+ciborium           = { workspace = true }
 # `toml` is now a regular dep — see [dependencies] above for the
 # Slice 01 / ADR-0047 §2 rationale. Tests inherit the regular dep,
 # so a separate dev-dep entry would be a duplicate.

@@ -1850,6 +1850,7 @@ dependencies = [
  "blake3",
  "bytecheck",
  "bytes",
+ "ciborium",
  "futures",
  "hex",
  "overdrive-sim",
