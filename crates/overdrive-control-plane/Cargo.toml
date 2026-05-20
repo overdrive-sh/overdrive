@@ -32,7 +32,7 @@ path = "src/bin/openapi.rs"
 # so `cargo nextest run --workspace` stays under the 60s slow-test
 # budget; CI exercises the gate in a dedicated `integration` job. See
 # `.claude/rules/testing.md` §"Integration vs unit gating".
-integration-tests = []
+integration-tests = ["overdrive-dataplane/integration-tests"]
 
 [dependencies]
 overdrive-core.workspace           = true

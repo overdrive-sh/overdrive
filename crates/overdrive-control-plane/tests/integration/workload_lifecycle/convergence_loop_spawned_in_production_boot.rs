@@ -147,6 +147,11 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         dataplane_override: Some(std::sync::Arc::new(
             overdrive_sim::adapters::dataplane::SimDataplane::new(),
         )),
+        // Step 02-03 — None means no probe-fault injection; the
+        // production probe path runs (or is bypassed entirely
+        // because `dataplane_override` short-circuits the
+        // `EbpfDataplane` construction above).
+        dataplane_probe_fault: None,
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))

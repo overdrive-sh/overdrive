@@ -647,6 +647,9 @@ mod event_capture {
                 // for &str.
                 let trimmed = val.trim_matches('"').to_owned();
                 self.iface = Some(trimmed);
+            } else if field.name() == "reason" {
+                let trimmed = val.trim_matches('"').to_owned();
+                self.other.insert("reason".to_owned(), trimmed);
             } else {
                 self.other.insert(field.name().to_owned(), val);
             }
@@ -665,6 +668,7 @@ mod event_capture {
     pub struct EventRow {
         pub name: String,
         pub iface: Option<String>,
+        pub fields: std::collections::BTreeMap<String, String>,
     }
 
     #[derive(Clone, Default)]
@@ -689,10 +693,16 @@ mod event_capture {
             // first-positional argument. tracing exposes this via
             // `Metadata::name()`.
             let metadata = event.metadata();
-            self.inner
-                .lock()
-                .expect("collector lock")
-                .push(EventRow { name: metadata.name().to_owned(), iface: fields.iface });
+            let mut fields_map: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            for (k, v) in &fields.other {
+                fields_map.insert(k.clone(), v.clone());
+            }
+            self.inner.lock().expect("collector lock").push(EventRow {
+                name: metadata.name().to_owned(),
+                iface: fields.iface,
+                fields: fields_map,
+            });
         }
     }
 }
@@ -769,6 +779,135 @@ async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
         saw_generic,
         "expected xdpgeneric attachment after fallback; client: {client_link} backend: {backend_link}",
     );
+
+    handle.shutdown(std::time::Duration::from_secs(2)).await;
+}
+
+// ----------------------------------------------------------------------------
+// S-BDB-14 / S-BDB-15 — Earned-Trust probe
+// ----------------------------------------------------------------------------
+
+/// S-BDB-14 — production boot refuses when the Earned-Trust probe
+/// fails.
+///
+/// `EbpfDataplane::new` succeeds (load + attach OK), then
+/// `EbpfDataplane::probe` returns `Err(DataplaneError::LoadFailed(...))`
+/// — we drive this via the `#[cfg(any(test, feature = "integration-tests"))]`
+/// `dataplane_probe_fault` injection seam on `ServerConfig`. The boot
+/// path maps the probe error to
+/// `ControlPlaneError::DataplaneBoot(DataplaneBootError::Probe { source })`
+/// and emits a structured `health.startup.refused` event with
+/// `reason = "dataplane.probe"` per architecture.md § 5.4.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial_test::serial(env)]
+async fn boot_refuses_when_earned_trust_probe_fails() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    require_cap_net_admin();
+
+    let fx = BootFixture::setup_veth_pair(Some("10.244.14.1/24")).expect("veth setup");
+    let tmp = TempDir::new().expect("tmp");
+    let data_dir = tmp.path().join("data");
+    let cfg_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("mkdir data");
+    std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
+
+    // Inject the probe-fault message. The verbatim text tracks the
+    // architecture.md § 5.4 contract — the boot path reconstructs
+    // `DataplaneError::LoadFailed(msg)` from this string and the
+    // error chain surfaces "probe: round-trip mismatch" OR
+    // "probe: BACKEND_MAP" through `Display`. See the
+    // `ServerConfig::dataplane_probe_fault` docstring for why the
+    // seam is `String`-shaped at this boundary.
+    let fault_msg = "probe: round-trip mismatch (injected by S-BDB-14 fixture)".to_owned();
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("parse bind"),
+        data_dir,
+        operator_config_dir: cfg_dir,
+        dataplane: Some(fx.dataplane_config()),
+        dataplane_pin_dir: Some(fx.pin_dir.clone()),
+        dataplane_probe_fault: Some(fault_msg),
+        ..Default::default()
+    };
+    let pin_path = fx.pin_dir.join("SERVICE_MAP");
+
+    let collector = event_capture::EventCollector::default();
+    let subscriber = tracing_subscriber::registry().with(collector.clone());
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let result = overdrive_control_plane::run_server(config).await;
+
+    use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
+    let err = result.expect_err("expected boot refusal when probe fault is injected");
+    let display = format!("{err}");
+
+    let is_probe = matches!(
+        &err,
+        ControlPlaneError::DataplaneBoot(DataplaneBootError::Probe {
+            source: overdrive_core::traits::dataplane::DataplaneError::LoadFailed(_),
+        }),
+    );
+    assert!(
+        is_probe,
+        "expected ControlPlaneError::DataplaneBoot(Probe {{ LoadFailed(_) }}); got: {err:?} \
+         (display: {display})",
+    );
+    assert!(
+        display.contains("probe: round-trip mismatch") || display.contains("probe: BACKEND_MAP"),
+        "expected Display to contain 'probe: round-trip mismatch' OR 'probe: BACKEND_MAP'; \
+         got: {display}",
+    );
+
+    // Structured-event assertion: at least one `health.startup.refused`
+    // event names the probe reason.
+    let events = collector.snapshot();
+    let has_refused = events.iter().any(|e| {
+        e.name == "health.startup.refused"
+            && e.fields.get("reason").is_some_and(|r| r == "dataplane.probe")
+    });
+    assert!(
+        has_refused,
+        "expected at least one health.startup.refused event with reason=dataplane.probe; \
+         observed events: {:?}",
+        events.iter().map(|e| (e.name.clone(), e.fields.clone())).collect::<Vec<_>>(),
+    );
+
+    // The SERVICE_MAP pin must be gone because `EbpfDataplane::Drop`
+    // fired when the boot path bailed via `?` on the probe error.
+    assert!(
+        !pin_path.exists(),
+        "expected SERVICE_MAP pin at {} to be removed by EbpfDataplane::Drop after probe failure",
+        pin_path.display(),
+    );
+}
+
+/// S-BDB-15 — production boot succeeds when the Earned-Trust probe
+/// round-trips a BACKEND_MAP sentinel. Boot reaches the HTTPS
+/// listener bind (a successful `run_server` return after the probe
+/// is the observable proof — the listener is already bound by the
+/// time `ServerHandle` is handed back, per `server_lifecycle.rs`).
+///
+/// The probe's `BACKEND_MAP::get(u32::MAX, 0) == None` postcondition
+/// is pinned by the `EbpfDataplane::probe` unit-test surface in
+/// `crates/overdrive-dataplane/src/lib.rs`. At this Tier 3 scope, the
+/// observable signal is "boot succeeds end-to-end with the live probe
+/// path engaged" — anything else duplicates the unit assertion.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial_test::serial(env)]
+async fn boot_succeeds_when_earned_trust_probe_round_trips_backend_map() {
+    require_cap_net_admin();
+
+    let fx = BootFixture::setup_veth_pair(Some("10.244.15.1/24")).expect("veth setup");
+    let tmp = TempDir::new().expect("tmp");
+    let data_dir = tmp.path().join("data");
+    let cfg_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("mkdir data");
+    std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
+    let config = server_config_with(&fx, &data_dir, &cfg_dir);
+
+    // No probe-fault injected → production probe path runs end-to-end.
+    let handle: ServerHandle =
+        overdrive_control_plane::run_server(config).await.expect("run_server with probe success");
 
     handle.shutdown(std::time::Duration::from_secs(2)).await;
 }

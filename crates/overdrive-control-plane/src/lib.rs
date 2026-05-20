@@ -402,6 +402,38 @@ pub struct ServerConfig {
     ///
     /// [`Dataplane`]: overdrive_core::traits::dataplane::Dataplane
     pub dataplane_override: Option<Arc<dyn overdrive_core::traits::dataplane::Dataplane>>,
+
+    /// Test-only failure-injection seam for the `EbpfDataplane::probe`
+    /// Earned-Trust call site. When `Some(msg)`, the boot path
+    /// constructs `DataplaneError::LoadFailed(msg)` and applies it to
+    /// the constructed `EbpfDataplane` via
+    /// [`overdrive_dataplane::EbpfDataplane::set_probe_fault`] BEFORE
+    /// `.probe().await` runs; the probe short-circuits to the
+    /// constructed error so the boot path exercises the
+    /// `DataplaneBootError::Probe` mapping arm and the
+    /// `health.startup.refused` emit per architecture.md § 5.4.
+    ///
+    /// The seam is `String`-shaped (not `DataplaneError`-shaped)
+    /// because `DataplaneError` cannot derive `Clone` — its `Io`
+    /// variant embeds `std::io::Error`. Storing the load-failure
+    /// message and reconstructing `LoadFailed(msg)` at the boot
+    /// boundary keeps the field `Clone` (and therefore `ServerConfig:
+    /// Clone`) without broadening `DataplaneError`'s public surface.
+    /// The S-BDB-14 fixture injects a verbatim "probe: round-trip
+    /// mismatch ..." string per architecture.md § 5.4.
+    ///
+    /// Gated behind `#[cfg(feature = "integration-tests")]` on both
+    /// this field declaration and its use site in the boot path.
+    /// Production builds compile the field out entirely; the
+    /// `..Default::default()` rest-pattern construction in production
+    /// callers never names it. The `cfg(test)` arm is deliberately
+    /// omitted — the boot-path call site forwards the feature into
+    /// `overdrive-dataplane` via the Cargo.toml dep, and using
+    /// `cfg(test)` here would let the control-plane's own `cargo
+    /// test --no-run` enable the call site without enabling
+    /// `set_probe_fault` on the dataplane dep.
+    #[cfg(feature = "integration-tests")]
+    pub dataplane_probe_fault: Option<String>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -409,8 +441,8 @@ impl std::fmt::Debug for ServerConfig {
     /// `ServerConfig` is replaced by a manual impl that elides the
     /// clock field.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServerConfig")
-            .field("bind", &self.bind)
+        let mut dbg = f.debug_struct("ServerConfig");
+        dbg.field("bind", &self.bind)
             .field("data_dir", &self.data_dir)
             .field("operator_config_dir", &self.operator_config_dir)
             .field("tick_cadence", &self.tick_cadence)
@@ -421,8 +453,10 @@ impl std::fmt::Debug for ServerConfig {
             .field(
                 "dataplane_override",
                 &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
-            )
-            .finish()
+            );
+        #[cfg(feature = "integration-tests")]
+        dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
+        dbg.finish()
     }
 }
 
@@ -468,6 +502,13 @@ impl Default for ServerConfig {
             // inject `Some(Arc::new(SimDataplane::new()))` per
             // architecture.md § 4.7.
             dataplane_override: None,
+            // Step 02-03: `None` means production default (probe
+            // runs against the real BACKEND_MAP via the typed
+            // `EbpfDataplane` handle). Tests inject
+            // `Some(DataplaneError::...)` to exercise the
+            // `DataplaneBootError::Probe` mapping arm (S-BDB-14).
+            #[cfg(feature = "integration-tests")]
+            dataplane_probe_fault: None,
         }
     }
 }
@@ -821,7 +862,8 @@ pub async fn run_server_with_obs_and_driver(
         if let Some(overridden) = config.dataplane_override.clone() {
             overridden
         } else {
-            let ebpf_dataplane = config
+            #[allow(unused_mut)] // mut needed only under cfg(test|integration-tests)
+            let mut ebpf_dataplane = config
                 .dataplane_pin_dir
                 .as_deref()
                 .map_or_else(
@@ -844,6 +886,57 @@ pub async fn run_server_with_obs_and_driver(
                     backend_iface: dataplane_cfg.backend_iface.clone(),
                     source,
                 })?;
+
+            // Step 02-03: Apply the test-only probe-fault seam BEFORE
+            // running the probe. Production builds compile both the
+            // field and this branch out entirely. The seam is
+            // `String`-shaped at the `ServerConfig` boundary (see the
+            // field docstring) and reconstructed into
+            // `DataplaneError::LoadFailed` here — the variant
+            // S-BDB-14's assertion (`matches!(... LoadFailed(_))`)
+            // expects.
+            //
+            // Gated on `feature = "integration-tests"` (NOT also
+            // `cfg(test)`) so the gate matches the upstream
+            // `EbpfDataplane::set_probe_fault` symbol's cfg —
+            // `cargo test --no-run -p overdrive-control-plane`
+            // without `--features integration-tests` would otherwise
+            // enable this branch (test-of-control-plane sets
+            // `cfg(test)` for control-plane) while leaving the
+            // dataplane dep compiled without the feature, so the
+            // method would be missing. The integration-tests feature
+            // forwards via the Cargo.toml dep — see this crate's
+            // `[features]` block.
+            #[cfg(feature = "integration-tests")]
+            if let Some(fault_msg) = config.dataplane_probe_fault.clone() {
+                ebpf_dataplane.set_probe_fault(
+                    overdrive_core::traits::dataplane::DataplaneError::LoadFailed(fault_msg),
+                );
+            }
+
+            // Step 02-03: Earned-Trust probe per architecture.md § 5.4
+            // and CLAUDE.md principle 12. Composition-root invariant
+            // "wire then probe then use" — the probe runs AFTER
+            // `new()` succeeds and BEFORE the first dataplane operation.
+            // On failure we emit a structured `health.startup.refused`
+            // event with `reason = "dataplane.probe"` and refuse to
+            // boot. The `?` causes `ebpf_dataplane` to drop, which
+            // detaches XDP and unlinks the SERVICE_MAP pin via the
+            // `EbpfDataplane::Drop` impl.
+            if let Err(source) = ebpf_dataplane.probe().await {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "dataplane.probe",
+                    client_iface = %dataplane_cfg.client_iface,
+                    backend_iface = %dataplane_cfg.backend_iface,
+                    error = %source,
+                    "Earned-Trust probe failed; refusing to boot"
+                );
+                return Err(error::ControlPlaneError::DataplaneBoot(
+                    error::DataplaneBootError::Probe { source },
+                ));
+            }
+
             Arc::new(ebpf_dataplane)
         };
     // Phase 2.2: production single-mode uses a placeholder node id;
