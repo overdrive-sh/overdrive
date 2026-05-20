@@ -2401,11 +2401,15 @@ THEN  within ≤ 5 reconciler ticks (≤ 500ms plus slack):
 
 Per `.claude/rules/testing.md` § "Tier 3 → Assertion rules", the
 test asserts on **observable kernel side effects** (BPF map state
-via typed handles), NOT on program internal reachability. A "real
-TCP connection succeeds" extension is deferred — the existing
-S-2.2-17 already covers end-to-end TCP through the VIP at the
-dataplane level; the walking-skeleton's responsibility is the
-bridge + boot wiring.
+via typed handles), NOT on program internal reachability. **AND**
+(D3 decision 2026-05-21 — do NOT defer) opens a real TCP connection
+to `<assigned_vip>:<port>` and asserts a round-trip payload through
+the kernel XDP / reverse-NAT path. The walking-skeleton is the
+joint e2e acceptance for #174 + #175; map state alone proves wiring,
+not reachability, and reachability IS the feature's value. DISTILL
+pins the bind-readiness wait shape and the listener choice (plain
+`nc -l` is unsuitable; `socat TCP-LISTEN:port,fork EXEC:cat` or a
+baked-in echo binary is the canonical shape).
 
 ### 66. Updated quality-attribute scenarios
 
@@ -2414,7 +2418,7 @@ bridge + boot wiring.
 | ASR-BDB-01 | Correctness — bridge ESR closure | DST harness; arbitrary alloc transitions for Service workloads with multiple listeners. | `BridgeEventuallyWritesBackendRow` + `BridgeIdempotentSteadyState` hold across the seeded fault catalogue. |
 | ASR-BDB-02 | Reliability — production boot under valid `[dataplane]` config | Production boot on Lima with `lb_veth_a` / `lb_veth_b`. | `EbpfDataplane` constructs, both XDP programs attach, probe round-trip succeeds. No `health.startup.refused` event. |
 | ASR-BDB-03 | Reliability — production boot under invalid `[dataplane]` config | Production boot with `[dataplane]` pointing at a non-existent iface. | `ControlPlaneError::DataplaneBoot(Construct { source: IfaceNotFound { iface }, .. })`; binary exits non-zero; operator-facing message suggests `ip link show`. |
-| ASR-BDB-04 | End-to-end — walking-skeleton | Tier 3 per § 65. | BACKEND_MAP + SERVICE_MAP populated within ≤ 5 reconciler ticks of alloc Running. |
+| ASR-BDB-04 | End-to-end — walking-skeleton | Tier 3 per § 65. | BACKEND_MAP + SERVICE_MAP populated within ≤ 5 reconciler ticks of alloc Running; AND a TCP round-trip to `<assigned_vip>:<port>` succeeds end-to-end within 2s (D3 decision 2026-05-21). |
 
 ### 67. C4 — see `docs/feature/backend-discovery-bridge-service-reachability/design/architecture.md`
 
@@ -2455,6 +2459,27 @@ reference):
 ADR-0049 / feature `service-vip-allocator` delivered 2026-05-19.
 VIPs are platform-issued and the bridge consumes the allocator's
 output; there is no skip-on-VIP-absent case.)
+
+Architect-surfaced deferrals (D1–D5) — all resolved 2026-05-21,
+no follow-up issues created:
+
+- **D1** `[dataplane] disabled = true` escape hatch — **do not ship**.
+  Boot refuses without `[dataplane]` `client_iface`/`backend_iface`
+  keys; hosts without XDP cannot run Service workloads.
+- **D2** `EbpfDataplane::probe()` Earned-Trust round-trip —
+  **ship in #175 Slice 2** alongside boot composition. Probe failure
+  → `ControlPlaneError::DataplaneBoot(Probe { .. })`.
+- **D3** Walking-skeleton real TCP connection through the VIP —
+  **in-gate, not deferred**. The test opens a TCP connection to
+  `<assigned_vip>:<port>` and asserts round-trip; map state alone
+  proves wiring, not reachability. DISTILL pins flake-mitigation
+  shape (bind-readiness wait + listener choice).
+- **D4** `host_ipv4` resolution via `getifaddrs` on `client_iface`
+  at boot — **ship in #175 Slice 2** as part of boot composition.
+  One-shot lookup, cached on `AppState`.
+- **D5** Bridge `View.listeners_skipped` telemetry — **WITHDRAWN**.
+  Operator-supplied VIPs are unrepresentable per ADR-0049 § 5;
+  nothing to skip or count.
 
 ---
 

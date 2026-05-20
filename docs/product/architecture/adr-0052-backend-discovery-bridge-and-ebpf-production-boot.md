@@ -505,12 +505,17 @@ map handles (`BackendMapHandle::keys()`, `HashOfMapsHandle::get_inner_entries()`
 NOT on program internal reachability — per `.claude/rules/testing.md`
 § "Tier 3 → Assertion rules".
 
-The optional "real TCP connection to VIP succeeds" step is
-**deferred**. The dataplane-side ASR-2.2-01 / S-2.2-17 already cover
-end-to-end TCP through the VIP; the walking-skeleton's responsibility
-is the *bridge + boot* surface — proving the row flows from intent to
-map. Adding the TCP step here would multiply the failure modes
-(`nc -l` race, port-not-listening flake) without adding signal.
+The "real TCP connection to VIP succeeds" step is **in-gate**
+(D3 decision 2026-05-21 — do NOT defer). The walking-skeleton is
+the joint e2e acceptance for #174 + #175: BPF map state alone proves
+wiring, not reachability, and reachability IS the feature's value.
+The test opens a TCP connection to `<assigned_vip>:<port>` and
+asserts a round-trip payload through the kernel XDP / reverse-NAT
+path. DISTILL pins the flake-mitigation shape: bind-readiness
+poll-connect-with-timeout (Service `Running` ≠ port bound), and the
+exec command's listener choice (plain `nc -l 8080` is unsuitable —
+DISTILL specifies a `socat TCP-LISTEN:8080,fork EXEC:cat`-equivalent
+or a baked-in echo binary).
 
 #### Two new DST invariants (Tier 1)
 

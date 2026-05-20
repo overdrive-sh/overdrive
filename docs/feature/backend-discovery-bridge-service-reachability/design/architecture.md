@@ -642,8 +642,7 @@ exhaustiveness pattern as `ViewStoreBoot` / `Cgroup` / `CgroupBootstrap`).
 
 ### 5.4 Earned-Trust probe (`EbpfDataplane::probe`)
 
-Concrete shape (deferral D2 — surfaced in `wave-decisions.md` for
-user approval):
+Concrete shape (D2 decision 2026-05-21 — ships in #175 Slice 2):
 
 ```rust
 // crates/overdrive-dataplane/src/lib.rs
@@ -856,6 +855,40 @@ async fn service_workload_running_populates_backend_map() {
     assert!(!inner_entries.is_empty(),
         "SERVICE_MAP inner is empty for {service_key:?}");
 
+    // D3 (decided 2026-05-21 — in-gate, NOT deferred):
+    // Real TCP round-trip through the kernel XDP / reverse-NAT path.
+    // Map state proves wiring; round-trip proves reachability — and
+    // the walking-skeleton is the joint e2e acceptance for #174 + #175.
+    //
+    // Flake-mitigation knobs (DISTILL pins the exact shape):
+    //   - Bind-readiness: AllocState::Running != port bound. Poll-
+    //     connect-with-timeout (50ms cadence, 2s budget) until the
+    //     backend's listener accepts.
+    //   - Listener choice: the Service exec command MUST produce a
+    //     deterministic bind + round-trip-capable listener (`nc -l`
+    //     alone echoes nothing and dies on close — DISTILL specifies
+    //     a `socat TCP-LISTEN:8080,fork EXEC:cat`-equivalent or a
+    //     baked-in echo binary). The shape below assumes echo
+    //     semantics.
+    let probe_payload = b"walking-skeleton-probe\n";
+    let response = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(50),
+        || async {
+            let mut stream = tokio::net::TcpStream::connect(
+                (assigned_vip, 8080)
+            ).await.ok()?;
+            stream.write_all(probe_payload).await.ok()?;
+            let mut buf = vec![0u8; probe_payload.len()];
+            stream.read_exact(&mut buf).await.ok()?;
+            Some(buf)
+        },
+    ).await;
+    assert_eq!(response.as_deref(), Some(&probe_payload[..]),
+        "TCP round-trip to {assigned_vip}:8080 did not echo \
+         {probe_payload:?} within 2s — XDP / reverse-NAT path or \
+         backend listener regression");
+
     // Cleanup runs via Drop on server / lima_fixture.
 }
 ```
@@ -873,7 +906,6 @@ for assertion purposes; this is a `#[cfg(any(test, feature =
 
 ### 6.3 What the test does NOT do
 
-- Does NOT open a real TCP connection through the VIP (deferral D3).
 - Does NOT assert on multiple replicas (covered by a separate Tier 1 DST invariant).
 - Does NOT exercise allocation failure / restart (covered by DST invariants).
 - Does NOT exercise the attach-mode fallback (covered by separate per-iface tests in `overdrive-dataplane/tests/integration/`).
@@ -968,5 +1000,5 @@ compiler rejects until the new arm is added. This is the
 | Multi-node owner-writer logic | Phase 1 single-node; multi-node lands in Phase 2+. | wave-decisions.md Q174.3 |
 | Schedule workload kind backend rows | ADR-0050 § 2: Schedule has no listeners. | wave-decisions.md § 1 |
 | Job workload kind backend rows | ADR-0050 § 2: Job has no listeners. | wave-decisions.md § 1 |
-| Operator-tunable `[dataplane] disabled = true` | Surfaced for user approval; recommendation = do not ship. | wave-decisions.md D1 |
+| Operator-tunable `[dataplane] disabled = true` | DECIDED 2026-05-21 — do not ship. Hosts without XDP cannot run Service workloads; boot refuses without `[dataplane]` `client_iface`/`backend_iface` keys. | wave-decisions.md D1 |
 | ~~Listener-skipped telemetry counter~~ | Withdrawn 2026-05-20 — VIP-less listeners are no longer representable; nothing to skip or count. | wave-decisions.md D5 |

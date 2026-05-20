@@ -555,7 +555,7 @@ wiring close.
 
 | Option | Scenario shape | Trade-offs |
 |---|---|---|
-| **A** | **One Tier 3 test** at `crates/overdrive-control-plane/tests/integration/backend_discovery_bridge/walking_skeleton.rs`. Submits a Service spec with one listener (`port=8080, protocol=tcp, vip=10.0.0.1`); waits for Running; reads `BACKEND_MAP` via the typed `BackendMapHandle` and asserts the expected backend entry is present. Optionally also opens a real TCP connection to `10.0.0.1:8080` and asserts data flow (extends to ASR-2.2-01 reuse). | + One test gates the whole feature — clear pass/fail signal. + Lives in the control-plane crate's `tests/integration/` (already gated by `integration-tests` feature). + Runs through `cargo xtask lima run --` per `.claude/rules/testing.md` § "Running tests — Lima VM". + Asserts on *observable kernel side effect* (`bpftool map dump` semantics via the typed handle) per `.claude/rules/testing.md` § "Tier 3 → Assertion rules" — NOT on program internal reachability. + Map-state assertion alone is sufficient; the real-TCP step is incremental. |
+| **A** | **One Tier 3 test** at `crates/overdrive-control-plane/tests/integration/backend_discovery_bridge/walking_skeleton.rs`. Submits a Service spec (operator-supplied VIP unrepresentable per ADR-0049 § 5; admission allocates a VIP); waits for Running; reads `BACKEND_MAP` via the typed `BackendMapHandle` and asserts the expected backend entry is present; resolves `SERVICE_MAP` for `(assigned_vip, port)` and asserts a non-empty inner; **AND opens a real TCP connection to `<assigned_vip>:<port>` and asserts a round-trip succeeds** (D3 decision 2026-05-21). | + One test gates the whole feature — clear pass/fail signal. + Lives in the control-plane crate's `tests/integration/` (already gated by `integration-tests` feature). + Runs through `cargo xtask lima run --` per `.claude/rules/testing.md` § "Running tests — Lima VM". + Asserts on *observable kernel side effect* (`bpftool map dump` semantics via the typed handle) per `.claude/rules/testing.md` § "Tier 3 → Assertion rules" — NOT on program internal reachability. + TCP round-trip proves reachability (the feature's true acceptance), not just wiring. − Bind-readiness wait shape (Service process spawned ≠ port bound) needs DISTILL specification to avoid the `nc -l` race / port-not-yet-listening flake class; the design commits to in-gate, DISTILL pins the shape. |
 | **B** | **Two tests** — one in `overdrive-control-plane` (the bridge writes the row), one in `overdrive-dataplane` (the dataplane programs the map). Compose at CI level. | − Loses the cross-component property. The bridge could write the row and the dataplane could program a map, but the *connection* between them is exactly what J-PLAT-004 closes. Splitting blinds the gate to the bug class. |
 | **C** | **DST-only walking skeleton** in `overdrive-sim` with `SimDataplane`. | − Doesn't exercise the real `EbpfDataplane`. The Tier 1 DST already runs the hydrator ESR pair; this would be redundant with the existing `HydratorEventuallyConverges` / `HydratorIdempotentSteadyState` invariants. − Doesn't gate #175. |
 
@@ -587,8 +587,9 @@ THEN within N reconciler ticks (≤ 5 × 100ms = 500ms),
      the host's lb_veth_a address and whose port = 8080
   AND the SERVICE_MAP for ServiceKey { vip=V, port=8080, proto=TCP }
      resolves to a non-empty inner map containing that BackendId
-  AND (optional Phase 2.2 stretch) opening a TCP connection to
-     V:8080 succeeds end-to-end and `nc -l 8080` accepts.
+  AND opening a TCP connection to V:8080 succeeds end-to-end
+     with a round-trip payload through the kernel XDP/reverse-NAT
+     path (D3 decision 2026-05-21 — in-gate, not deferred).
 ```
 
 **Test setup must explicitly verify the allocator memo is populated
@@ -601,14 +602,19 @@ admission path's allocator wiring (ADR-0049 § 4), not in the bridge
 itself, and surfacing it explicitly preserves the test's altitude per
 `.claude/rules/debugging.md` § 7.
 
-The optional TCP connection step is **deferred from the gate**. The
-map-state assertion is sufficient and structurally avoids the
-"`nc -l` race / port-not-yet-listening" flake class. The TCP step
-can land as a follow-up test once the map gate is green; it's not on
-the acceptance criteria for this feature unless it's needed to
-satisfy ASR-2.2-04 closure (the existing S-2.2-17 already covers TCP
-through-VIP at the dataplane level — the walking-skeleton's job is
-the bridge + boot, not the dataplane itself).
+The TCP round-trip step is **in-gate** (D3 decision 2026-05-21). The
+walking-skeleton is the joint e2e acceptance for #174 + #175 — BPF
+map state alone proves wiring, not reachability. Two flake risks
+inherit from the real-network shape and are DISTILL concerns to pin:
+(1) the Service's exec process is `Running` ≠ its TCP listener is
+bound — a poll-connect-with-timeout loop bridges that gap, and the
+exec command must be chosen so bind is deterministic (a plain
+`nc -l 8080` echoes nothing and dies after one connection — DISTILL
+picks a listener shape with deterministic bind + round-trip
+semantics, e.g. `socat TCP-LISTEN:8080,fork EXEC:cat` or a baked-in
+echo binary). (2) The 2s budget at 50ms poll cadence is an upper
+bound for both bind and the joint reconciler/dataplane convergence;
+DISTILL confirms or tightens.
 
 ### QJ.2 — Sequencing across DELIVER slices
 
@@ -879,16 +885,15 @@ Per CLAUDE.md § "Deferrals require GitHub issues — AND user approval
 BEFORE creation", the following items are surfaced here for explicit
 user decision; **no GH issues are created by this design wave**.
 
-| # | Item | Recommendation | User decision needed |
-|---|------|----------------|----------------------|
-| D1 | `[dataplane] disabled = true` config escape hatch for hosts without XDP kernel support. | **Do not ship.** Boot refuses without `[dataplane]` `client_iface`/`backend_iface` keys. | Confirm or override. |
-| D2 | Earned-Trust probe on `EbpfDataplane::probe()` — synthetic BACKEND_MAP write + read-back. | **Ship in #175 Slice 2.** Land alongside the boot composition. | Confirm or defer (creates a follow-up issue). |
-| D3 | Walking-skeleton's optional "real TCP connection to VIP succeeds" step. | **Defer.** Map-state assertion is sufficient. The TCP step is already covered by S-2.2-17 at the dataplane level. | Confirm or override. |
-| D4 | `node_ip` resolution — boot-time `getifaddrs` for the host's `client_iface` IPv4. | **Ship as part of the boot composition** in #175. The single-node assumption makes this a one-shot lookup at boot. | Confirm shape. |
-| D5 | ~~Bridge `View` telemetry field `listeners_skipped: u64` for VIP-less listener observability.~~ | **WITHDRAWN (2026-05-20).** No longer applicable — operator-supplied VIPs are unrepresentable per ADR-0049 § 5; there is no VIP-less-listener class to skip or count. Allocator-memo-absent is a structural impossibility in Phase 1's submit-time path (Q174.4 above); if it occurs, a structured debug event is emitted at the hydrate site rather than a per-target counter. | None — withdrawn. |
+| # | Item | Decision (2026-05-21) |
+|---|------|------------------------|
+| D1 | `[dataplane] disabled = true` config escape hatch for hosts without XDP kernel support. | **DECIDED — do not ship.** Boot refuses without `[dataplane]` `client_iface`/`backend_iface` keys. No escape hatch; hosts without XDP cannot run Service workloads (which is the truthful runtime state). |
+| D2 | Earned-Trust probe on `EbpfDataplane::probe()` — synthetic BACKEND_MAP write + read-back. | **DECIDED — ship in #175 Slice 2.** Lands alongside the boot composition. Probe failure → `ControlPlaneError::DataplaneBoot(Probe { .. })`. |
+| D3 | Walking-skeleton's "real TCP connection to VIP succeeds" step. | **DECIDED — do NOT defer; ship in-gate.** The walking-skeleton is the joint e2e acceptance for this feature; BPF-map-state alone proves wiring, not reachability. The Tier 3 test opens a TCP connection to `<assigned_vip>:<port>` and asserts a round-trip through the kernel XDP/reverse-NAT path. Flake mitigation (bind-readiness wait, listener choice) is a DISTILL concern; the design commits to the assertion being in-gate. |
+| D4 | `node_ip` resolution — boot-time `getifaddrs` for the host's `client_iface` IPv4. | **DECIDED — ship in #175 Slice 2** as part of boot composition. One-shot lookup at boot; cached on `AppState`. Phase 1 single-node assumption. |
+| D5 | ~~Bridge `View` telemetry field `listeners_skipped: u64` for VIP-less listener observability.~~ | **WITHDRAWN (2026-05-20).** No longer applicable — operator-supplied VIPs are unrepresentable per ADR-0049 § 5; there is no VIP-less-listener class to skip or count. Allocator-memo-absent is a structural impossibility in Phase 1's submit-time path (Q174.4 above); if it occurs, a structured debug event is emitted at the hydrate site rather than a per-target counter. |
 
-None of these are blockers. Each is a small structural choice that
-the user should confirm before DELIVER starts.
+All deferrals resolved as of 2026-05-21. None remain open for DELIVER.
 
 ---
 
