@@ -46,6 +46,16 @@ pub mod dataplane_update_service;
 /// contract (service-vip-allocator step 03-02).
 pub mod release_service_vip;
 
+/// Per-arm dispatch for `Action::WriteServiceBackendRow` per
+/// `docs/feature/backend-discovery-bridge-service-reachability/
+/// design/architecture.md` § 4.4. The wrapper writes the row to the
+/// ObservationStore; the bridge's next tick observes its own write
+/// via the dedup fingerprint in [`BackendDiscoveryBridgeView`].
+///
+/// [`BackendDiscoveryBridgeView`]:
+///     overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView
+pub mod write_service_backend_row;
+
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
 
@@ -754,18 +764,21 @@ async fn dispatch_single(
         Action::ReleaseServiceVip { spec_digest, correlation } => {
             release_service_vip::dispatch(&spec_digest, &correlation, allocator).await
         }
-        // backend-discovery-bridge-service-reachability step 01-01 —
-        // RED scaffold. The real per-arm dispatch lands in step 01-04 at
+        // backend-discovery-bridge-service-reachability step 01-04 —
+        // GREEN. The per-arm dispatch wrapper in
         // `crates/overdrive-control-plane/src/action_shim/
-        // write_service_backend_row.rs` and writes the row via
+        // write_service_backend_row.rs` writes the row via
         // `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
-        // Until then this arm exists so the match stays exhaustive over
-        // every `Action` variant — adding the variant in `overdrive-core`
-        // without this arm would be a non-exhaustive-match compile
-        // error, masking the rest of the workspace's wiring.
-        #[expect(clippy::todo, reason = "RED scaffold: lands GREEN in step 01-04")]
-        Action::WriteServiceBackendRow { row: _, correlation: _ } => {
-            todo!("RED scaffold: WriteServiceBackendRow dispatch lands in step 01-04")
+        // No correlation-driven follow-up at the shim level — the
+        // bridge's next tick reads the row stream (transitively
+        // through the runtime's hydrate path) and observes its own
+        // write via the dedup fingerprint in
+        // `BackendDiscoveryBridgeView::last_written_fingerprint`. An
+        // `ObservationStore::write` failure surfaces as
+        // `ShimError::Observation` via the typed `#[from]` variant
+        // per `.claude/rules/development.md` § Errors / pass-through.
+        action @ Action::WriteServiceBackendRow { .. } => {
+            write_service_backend_row::dispatch(&action, obs).await.map_err(ShimError::from)
         }
     }
 }

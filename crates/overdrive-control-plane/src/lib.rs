@@ -642,7 +642,6 @@ pub async fn run_server_with_obs_and_driver(
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
     runtime.register(workload_lifecycle()).await?;
-    let runtime = Arc::new(runtime);
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -663,6 +662,20 @@ pub async fn run_server_with_obs_and_driver(
     let node_id = overdrive_core::id::NodeId::new("local").map_err(|e| {
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
+
+    // backend-discovery-bridge-service-reachability step 01-04 —
+    // register the bridge reconciler at boot so the broker enqueues
+    // bridge evaluations on workload-scoped `AllocStatusRow`
+    // transitions (per architecture.md § 3 step 5 + § 4.7).
+    //
+    // Phase 01 wires `host_ipv4 = Ipv4Addr::LOCALHOST` as a
+    // single-commit transitional placeholder per
+    // `feedback_single_cut_greenfield_migrations.md` — step 02-01
+    // replaces this with `resolve_iface_ipv4(&dataplane_cfg.client_iface)?`
+    // in a one-line edit. NO feature flag, NO parallel boot path.
+    let host_ipv4: std::net::Ipv4Addr = std::net::Ipv4Addr::LOCALHOST;
+    runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
+    let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
 
@@ -883,4 +896,31 @@ pub fn workload_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
     use overdrive_core::reconciler::{AnyReconciler, WorkloadLifecycle};
 
     AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
+}
+
+/// Construct the `backend-discovery-bridge` reconciler per
+/// `docs/feature/backend-discovery-bridge-service-reachability/
+/// design/architecture.md` § 4.7 (boot composition).
+///
+/// The bridge converges `service_backends` observation rows for the
+/// workload's declared listeners against the actual Running alloc
+/// set, emitting `Action::WriteServiceBackendRow` on fingerprint
+/// drift. Both `host_ipv4` and `writer_node_id` are mandatory per
+/// `.claude/rules/development.md` § "Port-trait dependencies" — the
+/// reconciler is constructed once at boot and the runtime composes
+/// the same instance across every tick.
+///
+/// Phase 01 production boot threads `Ipv4Addr::LOCALHOST` as the
+/// `host_ipv4` placeholder (step 01-04, single-commit transitional
+/// shape); step 02-01 replaces this with the resolved interface
+/// IPv4 from the dataplane config.
+#[must_use]
+pub fn backend_discovery_bridge(
+    host_ipv4: std::net::Ipv4Addr,
+    writer_node_id: overdrive_core::id::NodeId,
+) -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::AnyReconciler;
+    use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
+
+    AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
 }

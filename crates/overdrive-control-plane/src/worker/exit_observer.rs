@@ -47,6 +47,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, WorkloadId};
+use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
 use overdrive_core::reconciler::{Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
@@ -231,6 +232,26 @@ pub fn spawn_with_runtime(
                         {
                             runtime.broker().submit(Evaluation {
                                 reconciler: workload_lifecycle_name(),
+                                target: target.clone(),
+                            });
+                            // backend-discovery-bridge-service-reachability
+                            // step 01-04 — re-enqueue the bridge for the
+                            // same workload-scoped target so the next tick
+                            // observes the AllocStatusRow transition the
+                            // exit observer just wrote (per
+                            // architecture.md § 3 step 5: "Broker
+                            // re-enqueues `BackendDiscoveryBridge` for the
+                            // workload (same enqueue site as
+                            // `WorkloadLifecycle`, keyed by
+                            // `WorkloadId`)"). The bridge's reconcile
+                            // body observes its own prior write via the
+                            // dedup fingerprint, so a Running → Failed
+                            // transition that removes a backend from the
+                            // running set fires a fresh
+                            // `Action::WriteServiceBackendRow` with the
+                            // updated `[backend]` slice.
+                            runtime.broker().submit(Evaluation {
+                                reconciler: backend_discovery_bridge_name(),
                                 target,
                             });
                         }
@@ -553,6 +574,20 @@ fn workload_lifecycle_name() -> ReconcilerName {
     #[allow(clippy::expect_used)]
     ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
         .expect("WorkloadLifecycle::NAME is a valid ReconcilerName by construction")
+}
+
+/// Canonical `ReconcilerName` for the bridge — sourced from the
+/// trait const per the same `refactor-reconciler-static-name` RCA
+/// pattern as [`workload_lifecycle_name`]. Used by the exit
+/// observer's re-enqueue site to fan out to BOTH the workload
+/// lifecycle reconciler AND the backend-discovery bridge for the
+/// same workload-scoped `AllocStatusRow` transition, per
+/// architecture.md § 3 step 5 of the backend-discovery-bridge
+/// feature.
+fn backend_discovery_bridge_name() -> ReconcilerName {
+    #[allow(clippy::expect_used)]
+    ReconcilerName::new(<BackendDiscoveryBridge as Reconciler>::NAME)
+        .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
