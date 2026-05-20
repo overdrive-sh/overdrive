@@ -143,4 +143,15 @@ mod integration {
     /// next submit. Owns S-VIP-06 (end-to-end) and S-VIP-07 (released-
     /// VIP reuse) per the DISTILL test-scenarios contract.
     mod vip_allocator_lifecycle;
+    /// `backend-discovery-bridge-service-reachability` (joint #174 + #175)
+    /// DISTILL — RED scaffolds per
+    /// `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`.
+    /// Walking-skeleton (S-BDB-01, S-BDB-18, S-BDB-19) + boot-composition
+    /// (S-BDB-11..S-BDB-17, S-BDB-20). All tests
+    /// `#[should_panic(expected = "RED scaffold")]` until DELIVER Slices
+    /// 1 and 2 land the bridge + production `EbpfDataplane` wiring.
+    mod backend_discovery_bridge {
+        mod boot_composition;
+        mod walking_skeleton;
+    }
 }

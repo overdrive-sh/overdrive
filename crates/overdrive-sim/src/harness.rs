@@ -597,6 +597,26 @@ impl Harness {
                 crate::invariants::workload_gc_absent_intent::evaluate_resubmit_after_gc_creates_fresh_alloc()
                     .await
             }
+            // backend-discovery-bridge-service-reachability (#174 + Atlas Q2)
+            // DISTILL — RED scaffolds. The `evaluate_red_scaffold() -> !`
+            // bodies `todo!("RED scaffold: ...")` per the scaffold module's
+            // `#![expect(clippy::todo, ...)]`. DELIVER Slice 1 (#174)
+            // replaces these placeholders with real evaluators wired
+            // against the harness's `SimObservationStore` +
+            // `BackendDiscoveryBridgeReconciler` stack. Returns `!`,
+            // coerces to `InvariantResult` at the match position.
+            Invariant::BridgeEventuallyWritesBackendRow => {
+                crate::invariants::backend_discovery_bridge::BridgeEventuallyWritesBackendRow
+                    .evaluate_red_scaffold()
+            }
+            Invariant::BridgeIdempotentSteadyState => {
+                crate::invariants::backend_discovery_bridge::BridgeIdempotentSteadyState
+                    .evaluate_red_scaffold()
+            }
+            Invariant::BridgeRecomputesFingerprintOnReplay => {
+                crate::invariants::backend_discovery_bridge::BridgeRecomputesFingerprintOnReplay
+                    .evaluate_red_scaffold()
+            }
         }
     }
 }
@@ -842,7 +862,18 @@ mod tests {
     // underlying todo!() / panic!() will fire a different panic
     // message, trip #[should_panic], and flag the test for review at
     // the moment the scaffold goes GREEN" handoff.
+    //
+    // 2026-05-20 — DISTILL of backend-discovery-bridge-service-reachability
+    // re-introduces RED scaffolds in
+    // `crate::invariants::backend_discovery_bridge`. The harness's
+    // exhaustive match dispatches every Invariant variant, so the
+    // scaffold's `todo!("RED scaffold: ...")` propagates through
+    // `Harness::run` and prevents this test from reaching its
+    // assertions. `#[should_panic]` restored per the same § "Downstream
+    // fallout" protocol; DELIVER Slice 1 (closes #174) replaces the
+    // todo! bodies and forces a review here at GREEN transition.
     #[test]
+    #[should_panic(expected = "RED scaffold")]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");
         // One result per invariant in the default catalogue.

@@ -19,7 +19,18 @@ use overdrive_sim::{Harness, Invariant};
 /// and the downstream-fallout `#[should_panic]` attribute is removed
 /// per `.claude/rules/testing.md` § "Downstream fallout on
 /// pre-existing tests" handoff procedure.
+///
+/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
+/// re-introduces RED scaffolds in `crate::invariants::backend_discovery_bridge`.
+/// `Harness::run(42)` walks every `Invariant` variant; the new scaffolds'
+/// `todo!("RED scaffold: ...")` propagates through `run` and prevents
+/// this test from reaching its assertions. `#[should_panic]` restored per
+/// the § "Downstream fallout" protocol; DELIVER Slice 1 (closes #174)
+/// removes the `todo!` bodies, the `RED scaffold` panic substring stops
+/// firing, `#[should_panic]` trips, and this test forces a review to
+/// remove the attribute (and this stanza) again.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn harness_run_is_deterministic_under_fixed_seed() {
     let a = Harness::new().run(42).expect("harness must compose");
     let b = Harness::new().run(42).expect("harness must compose");

@@ -30,7 +30,21 @@ use overdrive_sim::{Harness, Invariant, InvariantStatus};
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure. Test now asserts the green-bar invariant
 /// directly.
+///
+/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
+/// re-introduces RED scaffolds in `crate::invariants::backend_discovery_bridge`
+/// (`BridgeEventuallyWritesBackendRow`, `BridgeIdempotentSteadyState`,
+/// `BridgeRecomputesFingerprintOnReplay`). The harness's match-dispatch
+/// in `harness.rs` walks every `Invariant` variant, so the scaffold's
+/// `todo!("RED scaffold: ...")` panic propagates through `Harness::run`
+/// and prevents this test from reaching its assertions. `#[should_panic]`
+/// is restored per `.claude/rules/testing.md` § "Downstream fallout on
+/// pre-existing tests" until DELIVER Slice 1 (closes #174) lands the
+/// real evaluator bodies — at which point the `RED scaffold` substring
+/// stops firing, `#[should_panic]` trips, and this test forces a review
+/// to remove the attribute (and the docstring stanza) again.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn default_harness_run_passes_all_three_reconciler_invariants() {
     let report = Harness::new().run(42).expect("harness must compose");
 
@@ -177,7 +191,14 @@ fn write_through_ordering_passes_on_default_harness() {
 /// `default_harness_run_passes_all_three_reconciler_invariants` above
 /// for the rationale. The downstream-fallout `#[should_panic]` is
 /// removed; test asserts the green-bar property directly.
+///
+/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
+/// re-introduces RED scaffolds; same downstream-fallout pattern. See
+/// the 2026-05-20 stanza on
+/// `default_harness_run_passes_all_three_reconciler_invariants` for
+/// the full reason and the GREEN-transition checklist.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn full_default_catalogue_includes_three_view_store_invariants_and_passes_them() {
     let report = Harness::new().run(99).expect("harness must compose");
 
