@@ -13,4 +13,5 @@
 //! **RED scaffold** — every body panics via `todo!()` until
 //! DELIVER fills it per the carpaccio slice plan.
 
+pub mod backend_discovery_bridge;
 pub mod service_map_hydrator;

@@ -29,7 +29,7 @@
 
 use std::net::Ipv4Addr;
 
-use overdrive_core::id::{CorrelationKey, ServiceId};
+use overdrive_core::id::{CorrelationKey, NodeId, ServiceId};
 use overdrive_core::reconciler::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeView,
 };
@@ -123,11 +123,14 @@ fn action_write_service_backend_row_variant_constructs() {
 
 #[test]
 fn any_reconciler_backend_discovery_bridge_variant_constructs() {
-    // GIVEN: the canonical `BackendDiscoveryBridge` reconciler.
-    // Mirrors the construction pattern every other first-party
-    // reconciler uses (`WorkloadLifecycle::canonical()`,
-    // `ServiceMapHydrator::canonical()`).
-    let bridge = BackendDiscoveryBridge::canonical();
+    // GIVEN: a `BackendDiscoveryBridge` constructed with mandatory
+    // `host_ipv4` and `writer_node_id` parameters per step 01-02
+    // (`.claude/rules/development.md` § "Port-trait dependencies"
+    // — required, not defaulted).
+    let bridge = BackendDiscoveryBridge::new(
+        Ipv4Addr::new(10, 0, 0, 1),
+        NodeId::new("node-1").expect("'node-1' is a valid NodeId"),
+    );
 
     // WHEN: wrap into the runtime-dispatch `AnyReconciler` enum.
     let any = AnyReconciler::BackendDiscoveryBridge(bridge);

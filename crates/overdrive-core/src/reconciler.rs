@@ -1039,15 +1039,10 @@ impl AnyReconciler {
             Self::NoopHeartbeat(r) => r.name(),
             Self::WorkloadLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
-            // backend-discovery-bridge-service-reachability step 01-01
-            // — the bridge's marker struct exposes its name through a
-            // shim accessor today; the `Reconciler::name(&self)` trait
-            // method lands in step 01-02 alongside the `impl
-            // Reconciler for BackendDiscoveryBridge` block. Until then
-            // we read the name field directly through a sibling
-            // private accessor scoped to this dispatch — see
-            // `backend_discovery_bridge` module for the struct shape.
-            Self::BackendDiscoveryBridge(r) => r.canonical_name_for_dispatch(),
+            // backend-discovery-bridge-service-reachability step 01-02
+            // — bridge implements `Reconciler::name` via the trait
+            // method, matching every other arm.
+            Self::BackendDiscoveryBridge(r) => r.name(),
         }
     }
 
@@ -1071,17 +1066,10 @@ impl AnyReconciler {
             Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
             Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
-            // backend-discovery-bridge-service-reachability step 01-01
-            // — `BackendDiscoveryBridge::NAME` is the canonical
-            // `&'static str` anchor. The `Reconciler` trait impl
-            // lands in step 01-02; reading `BackendDiscoveryBridge::NAME`
-            // directly here (rather than via the trait const
-            // dispatch every other arm uses) is the
-            // pre-trait-impl shape that keeps the match exhaustive
-            // without prematurely binding `BackendDiscoveryBridge`
-            // to a `(State, View)` pair the reconcile body has not
-            // settled on yet.
-            Self::BackendDiscoveryBridge(_) => BackendDiscoveryBridge::NAME,
+            // backend-discovery-bridge-service-reachability step 01-02
+            // — bridge now implements `Reconciler`, so the trait
+            // const dispatch matches every other arm.
+            Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
         }
     }
 
@@ -1152,22 +1140,21 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::ServiceMapHydrator(next_view))
             }
-            // backend-discovery-bridge-service-reachability step 01-01
-            // — placeholder dispatch arm. The bridge's `Reconciler`
-            // trait impl lands in step 01-02; until then the dispatch
-            // returns an empty action list and the unchanged view so
-            // the runtime can register the variant in step 01-04's
-            // boot composition without triggering the cross-variant
-            // panic below. The reconcile body lands in 01-02 and the
-            // RED scaffolds in
-            // `crates/overdrive-sim/src/invariants/backend_discovery_bridge.rs`
-            // are the active failure surface until then.
+            // backend-discovery-bridge-service-reachability step 01-02
+            // — full dispatch. The bridge's `Reconciler` trait impl
+            // landed in this step; the runtime can now invoke the
+            // real reconcile body. Hydration arms land in 01-03,
+            // action-shim dispatch in 01-04, DST invariants close
+            // in 01-05.
             (
-                Self::BackendDiscoveryBridge(_),
-                AnyState::BackendDiscoveryBridge(_),
-                AnyState::BackendDiscoveryBridge(_),
+                Self::BackendDiscoveryBridge(r),
+                AnyState::BackendDiscoveryBridge(desired),
+                AnyState::BackendDiscoveryBridge(actual),
                 AnyReconcilerView::BackendDiscoveryBridge(view),
-            ) => (Vec::new(), AnyReconcilerView::BackendDiscoveryBridge(view.clone())),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::BackendDiscoveryBridge(next_view))
+            }
             // Cross-variant branches — statically impossible once the
             // runtime correctly hydrates matching state and view kinds.
             // The runtime tick loop ships in 02-03; until then these

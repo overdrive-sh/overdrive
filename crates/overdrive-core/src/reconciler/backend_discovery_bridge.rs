@@ -45,15 +45,21 @@
 //! random hash-seed of `HashMap` is structurally banned.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU16;
 
 use serde::{Deserialize, Serialize};
 
+use crate::SpiffeId;
 use crate::dataplane::backend_key::Proto;
-use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{AllocationId, ServiceId, ServiceVip, WorkloadId};
+use crate::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
+use crate::id::{
+    AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
+};
+use crate::traits::dataplane::Backend;
+use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 
-use super::{Reconciler, ReconcilerName};
+use super::{Action, Reconciler, ReconcilerName, TickContext};
 
 /// Desired-side projection: the workload's declared listener set,
 /// keyed by `ServiceId`, with each entry's VIP sourced from the
@@ -235,88 +241,393 @@ pub struct BackendDiscoveryBridgeView {
     pub last_written_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
-/// The bridge reconciler. Phase 1 lands an empty marker struct so
-/// the `AnyReconciler::BackendDiscoveryBridge(_)` variant has a
-/// concrete inner type to carry — the `Reconciler` trait impl,
-/// the `reconcile` body, and the `host_ipv4: Ipv4Addr` constructor
-/// parameter land in step 01-02 alongside the dedup loop.
+/// The bridge reconciler — step 01-02 lands the full struct +
+/// `impl Reconciler` body per architecture.md § 4.2.
 ///
-/// Holds only the canonical reconciler name today; the
-/// `host_ipv4` field lands in step 01-02 when the boot composition
-/// resolves the configured `client_iface` once via `getifaddrs` and
-/// hands the resolved IPv4 in at construction time. Phase 2.2 is
-/// single-node, so every Running alloc's backend endpoint uses this
-/// single IP.
+/// Both `host_ipv4` and `writer_node_id` are MANDATORY constructor
+/// parameters per `.claude/rules/development.md` § "Port-trait
+/// dependencies" — required, not defaulted. The host IPv4 is
+/// resolved once at boot via `getifaddrs` on the configured
+/// `client_iface` (Phase 2.2 is single-node, so every Running alloc's
+/// backend endpoint uses this IP); the writer node id is the local
+/// node's identity, stamped onto every emitted `LogicalTimestamp`
+/// for LWW tiebreaking.
 pub struct BackendDiscoveryBridge {
     /// Canonical reconciler name — `Self::NAME`. Constructed via
     /// the validating [`ReconcilerName::new`] in
-    /// [`BackendDiscoveryBridge::canonical`].
-    #[allow(dead_code, reason = "consumed by the Reconciler trait impl in step 01-02")]
+    /// [`BackendDiscoveryBridge::new`].
     name: ReconcilerName,
+    /// Host IPv4 for backend endpoint construction. Phase 2.2
+    /// single-node: every Running alloc resolves to this IP.
+    host_ipv4: Ipv4Addr,
+    /// Local node id, stamped onto every emitted
+    /// [`LogicalTimestamp`] for LWW tiebreaking.
+    writer_node_id: NodeId,
 }
 
 impl BackendDiscoveryBridge {
     /// Canonical kebab-case name; single compile-time anchor per
     /// the project's `Reconciler::NAME` convention.
-    ///
-    /// Exposed as a `pub const` so the runtime-side `static_name()`
-    /// dispatch (lands when this variant joins `AnyReconciler`)
-    /// can return `&'static str` matching the value the trait impl
-    /// (step 01-02) declares via `const NAME: &'static str`.
     pub const NAME: &'static str = "backend-discovery-bridge";
 
-    /// Construct the canonical `backend-discovery-bridge` instance.
-    /// Named constructor rather than `Default` because the name is
-    /// not defaultable — it carries the canonical string literal.
+    /// Construct a bridge bound to a host IPv4 + writer node id.
+    /// Both parameters are MANDATORY (no defaulted constructor) per
+    /// `.claude/rules/development.md` § "Port-trait dependencies"
+    /// — the runtime composes them at boot.
     ///
     /// # Panics
     ///
     /// Never — `Self::NAME` is a compile-time string literal
-    /// satisfying every `ReconcilerName` validation rule. Failure
-    /// would indicate a bug in the newtype constructor.
+    /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
-    pub fn canonical() -> Self {
+    pub fn new(host_ipv4: Ipv4Addr, writer_node_id: NodeId) -> Self {
         #[allow(clippy::expect_used)]
         let name = ReconcilerName::new(Self::NAME)
             .expect("'backend-discovery-bridge' is a valid ReconcilerName by construction");
-        Self { name }
+        Self { name, host_ipv4, writer_node_id }
     }
+}
 
-    /// Accessor used by the `AnyReconciler::name()` dispatch arm
-    /// landed in step 01-01. The `Reconciler::name(&self)` trait
-    /// method lands in step 01-02 alongside the `impl Reconciler
-    /// for BackendDiscoveryBridge` block; until then the dispatch
-    /// arm reads the field through this dedicated accessor so the
-    /// `AnyReconciler` match stays exhaustive without prematurely
-    /// committing the trait surface. Crate-visible so only the
-    /// `super` reconciler module dispatch reads it.
-    #[must_use]
-    pub(crate) const fn canonical_name_for_dispatch(&self) -> &ReconcilerName {
+impl Reconciler for BackendDiscoveryBridge {
+    const NAME: &'static str = "backend-discovery-bridge";
+
+    type State = BackendDiscoveryBridgeState;
+    type View = BackendDiscoveryBridgeView;
+
+    fn name(&self) -> &ReconcilerName {
         &self.name
     }
-}
 
-impl Default for BackendDiscoveryBridge {
-    fn default() -> Self {
-        Self::canonical()
+    /// Pure-sync per ADR-0035 — NO `.await`, NO `Instant::now()` /
+    /// `SystemTime::now()`, NO direct IntentStore / ObservationStore
+    /// / ViewStore writes, NO DB handle.
+    ///
+    /// Per architecture.md § 4.2:
+    ///
+    /// 1. Loop over `desired.desired.listeners`.
+    /// 2. Build `backends: Vec<Backend>` from `actual.actual.running`
+    ///    (one `Backend` per Running alloc; every alloc resolves to
+    ///    `self.host_ipv4` in Phase 2.2 single-node).
+    /// 3. Compute `new_fp = fingerprint(&listener.vip, &backends)`.
+    /// 4. Dedup against `view.last_written_fingerprint.get(service_id)`;
+    ///    emit `Action::WriteServiceBackendRow` if different.
+    /// 5. GC: shrink `next_view.last_written_fingerprint` to the
+    ///    service-ids still present in `desired.listeners`.
+    fn reconcile(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        view: &Self::View,
+        tick: &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        let mut actions: Vec<Action> = Vec::new();
+        let mut next_view = view.clone();
+
+        for (service_id, listener) in &desired.desired.listeners {
+            // Build backend set — one `Backend` per Running alloc.
+            // Phase 2.2 single-node: every alloc resolves to
+            // `self.host_ipv4`. The SpiffeId derives from the
+            // canonical `mint_identity(workload_id, alloc_id)` shape
+            // used everywhere else in the reconciler module.
+            let backends: Vec<Backend> = actual
+                .actual
+                .running
+                .iter()
+                .map(|alloc_id| Backend {
+                    alloc: mint_alloc_identity(&actual.actual.workload_id, alloc_id),
+                    addr: SocketAddr::new(IpAddr::V4(self.host_ipv4), listener.port.get()),
+                    weight: 1,
+                    healthy: true, // GH #170 ships real health
+                })
+                .collect();
+
+            let new_fp = fingerprint(&listener.vip, &backends);
+            let prev_fp = view.last_written_fingerprint.get(service_id).copied();
+
+            if Some(new_fp) == prev_fp {
+                // Dedup: no change since last successful write.
+                continue;
+            }
+
+            let vip_v4 = vip_to_ipv4(&listener.vip);
+            let target = format!("backend-discovery-bridge/{service_id}");
+            let spec_hash = ContentHash::of(new_fp.to_le_bytes().as_slice());
+            let correlation =
+                CorrelationKey::derive(&target, &spec_hash, "write-service-backend-row");
+
+            actions.push(Action::WriteServiceBackendRow {
+                row: ServiceBackendRow {
+                    service_id: *service_id,
+                    vip: vip_v4,
+                    backends,
+                    updated_at: LogicalTimestamp {
+                        counter: tick.tick.saturating_add(1),
+                        writer: self.writer_node_id.clone(),
+                    },
+                },
+                correlation,
+            });
+            next_view.last_written_fingerprint.insert(*service_id, new_fp);
+        }
+
+        // GC: drop dedup entries for services no longer in desired.
+        next_view
+            .last_written_fingerprint
+            .retain(|sid, _| desired.desired.listeners.contains_key(sid));
+
+        (actions, next_view)
     }
 }
 
-// NOTE: `impl Reconciler for BackendDiscoveryBridge` lands in step
-// 01-02 alongside the `reconcile` body and the `host_ipv4`
-// constructor parameter. Landing it here would force the type to
-// nominate a `type State = ...` / `type View = ...` pair that the
-// reconcile body has nothing to do with yet, and the
-// `AnyReconciler::BackendDiscoveryBridge` dispatch arm would either
-// `todo!()` (RED-on-greenbar) or land an empty pass-through body
-// (forward-incompatible with the 01-02 implementation). The struct
-// is a marker today; the trait impl arrives with the dispatch arm
-// in step 01-02.
-#[doc(hidden)]
-const _: fn() = || {
-    // Compile-time documentation: the [`Reconciler`] re-export is
-    // present so 01-02's `impl Reconciler for BackendDiscoveryBridge`
-    // can `use super::Reconciler` (or `use crate::reconciler::Reconciler`)
-    // without restructuring the imports landed in this commit.
-    const fn _assert_reconciler_in_scope<R: Reconciler + ?Sized>() {}
-};
+/// Derive a SpiffeId for a Running alloc — pure function over
+/// `(workload_id, alloc_id)`. Matches the project-wide shape used by
+/// `mint_identity` in the reconciler module.
+fn mint_alloc_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId {
+    let raw = format!(
+        "spiffe://overdrive.local/job/{}/alloc/{}",
+        workload_id.as_str(),
+        alloc_id.as_str()
+    );
+    #[allow(clippy::expect_used)]
+    SpiffeId::new(&raw).expect("derived SpiffeId is valid by construction")
+}
+
+/// Project a [`ServiceVip`] to the IPv4 wire shape used by
+/// `ServiceBackendRow`. Phase 2.2 ships IPv4-only per ADR-0049 § 5;
+/// the `None` arm is structurally unreachable. The newtype's own
+/// docstring on [`ServiceVip::try_as_ipv4`] documents the contract.
+fn vip_to_ipv4(vip: &ServiceVip) -> Ipv4Addr {
+    // mutants: skip — the unwrap_or branch is structurally
+    // unreachable in Phase 1: the allocator's `VipRange` is IPv4-only
+    // per ADR-0049 § 5. IPv6 admission is tracked in GH #155.
+    vip.try_as_ipv4().unwrap_or(Ipv4Addr::UNSPECIFIED)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wall_clock::UnixInstant;
+    use std::time::{Duration, Instant};
+
+    fn workload_id() -> WorkloadId {
+        WorkloadId::new("payments").expect("'payments' is a valid WorkloadId")
+    }
+
+    fn node_id() -> NodeId {
+        NodeId::new("node-1").expect("'node-1' is a valid NodeId")
+    }
+
+    fn host_ip() -> Ipv4Addr {
+        Ipv4Addr::new(10, 0, 0, 5)
+    }
+
+    fn alloc_id(suffix: &str) -> AllocationId {
+        AllocationId::new(suffix).expect("alloc id is valid")
+    }
+
+    fn service_id(value: u64) -> ServiceId {
+        ServiceId::new(value).expect("ServiceId accepts any u64")
+    }
+
+    fn service_vip(addr: Ipv4Addr) -> ServiceVip {
+        ServiceVip::new(IpAddr::V4(addr)).expect("ServiceVip accepts IPv4")
+    }
+
+    fn listener(addr: Ipv4Addr, port: u16) -> ProjectedListener {
+        ProjectedListener {
+            vip: service_vip(addr),
+            port: NonZeroU16::new(port).expect("port must be non-zero"),
+            protocol: Proto::Tcp,
+        }
+    }
+
+    fn tick(counter: u64) -> TickContext {
+        TickContext {
+            now: Instant::now(),
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(counter)),
+            tick: counter,
+            deadline: Instant::now() + Duration::from_secs(1),
+        }
+    }
+
+    fn empty_state() -> BackendDiscoveryBridgeState {
+        BackendDiscoveryBridgeState::empty_for_workload(workload_id())
+    }
+
+    fn bridge() -> BackendDiscoveryBridge {
+        BackendDiscoveryBridge::new(host_ip(), node_id())
+    }
+
+    /// S-BDB-09 unit-level proxy — empty desired set emits zero
+    /// actions and leaves the view unchanged.
+    #[test]
+    fn reconcile_empty_listeners_emits_zero_actions() {
+        let bridge = bridge();
+        let state = empty_state();
+        let view = BackendDiscoveryBridgeView::default();
+
+        let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick(1));
+
+        assert!(actions.is_empty(), "empty listener set must emit zero actions");
+        assert_eq!(view, next_view, "view must be unchanged when no listeners exist");
+    }
+
+    /// S-BDB-02 unit-level proxy — single listener + single Running
+    /// alloc + empty view emits one `WriteServiceBackendRow` action
+    /// carrying one backend, and the next-view records the
+    /// fingerprint.
+    #[test]
+    fn reconcile_single_alloc_emits_one_action() {
+        let bridge = bridge();
+        let sid = service_id(1);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 1), 8080));
+        state.actual.running.insert(alloc_id("alloc-a"));
+        let view = BackendDiscoveryBridgeView::default();
+
+        let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick(7));
+
+        assert_eq!(actions.len(), 1, "exactly one WriteServiceBackendRow expected");
+        let Action::WriteServiceBackendRow { row, .. } = &actions[0] else {
+            panic!("expected WriteServiceBackendRow, got {:?}", actions[0]);
+        };
+        assert_eq!(row.service_id, sid);
+        assert_eq!(row.vip, Ipv4Addr::new(10, 1, 0, 1));
+        assert_eq!(row.backends.len(), 1, "single Running alloc yields one backend");
+        assert_eq!(
+            row.backends[0].addr,
+            SocketAddr::new(IpAddr::V4(host_ip()), 8080),
+            "backend addr must be host_ipv4:listener.port"
+        );
+        assert_eq!(row.updated_at.counter, 8, "counter = tick.tick + 1");
+        assert_eq!(row.updated_at.writer, node_id());
+        assert!(
+            next_view.last_written_fingerprint.contains_key(&sid),
+            "next_view must record fingerprint for the written service"
+        );
+    }
+
+    /// S-BDB-05 unit-level proxy — dedup branch. Same inputs + a
+    /// view-from-prior-call emits zero actions.
+    #[test]
+    fn reconcile_dedup_branch_emits_zero_actions_on_unchanged_inputs() {
+        let bridge = bridge();
+        let sid = service_id(2);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 2), 9000));
+        state.actual.running.insert(alloc_id("alloc-b"));
+
+        // First tick — write happens, next_view records fingerprint.
+        let (actions_first, view_after_first) =
+            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
+        assert_eq!(actions_first.len(), 1, "first call must emit one action");
+
+        // Second tick — feed prior next_view back in; expect zero
+        // emissions (dedup).
+        let (actions_second, view_after_second) =
+            bridge.reconcile(&state, &state, &view_after_first, &tick(2));
+
+        assert!(
+            actions_second.is_empty(),
+            "second call with unchanged inputs + prior view must emit zero actions"
+        );
+        assert_eq!(view_after_first, view_after_second, "dedup must not mutate the view");
+    }
+
+    /// S-BDB-07 unit-level proxy — GC branch. Removing a service
+    /// from `desired.listeners` shrinks `next_view.last_written_fingerprint`.
+    #[test]
+    fn reconcile_gc_branch_drops_removed_service_id() {
+        let bridge = bridge();
+        let stale_sid = service_id(99);
+
+        // Seed the view with a fingerprint for a service no longer in
+        // desired.
+        let mut view = BackendDiscoveryBridgeView::default();
+        view.last_written_fingerprint.insert(stale_sid, 0xdead_beef_u64);
+
+        let state = empty_state(); // no listeners
+
+        let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick(1));
+
+        assert!(actions.is_empty(), "no listeners means no actions");
+        assert!(
+            !next_view.last_written_fingerprint.contains_key(&stale_sid),
+            "GC must drop fingerprint entries for services no longer in desired"
+        );
+    }
+
+    /// S-BDB-04 unit-level proxy — N Running allocs produce
+    /// `backends.len() == N`.
+    #[test]
+    fn reconcile_multi_replica_emits_all_backends() {
+        let bridge = bridge();
+        let sid = service_id(3);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 3), 8080));
+        state.actual.running.insert(alloc_id("alloc-x"));
+        state.actual.running.insert(alloc_id("alloc-y"));
+        state.actual.running.insert(alloc_id("alloc-z"));
+        let view = BackendDiscoveryBridgeView::default();
+
+        let (actions, _) = bridge.reconcile(&state, &state, &view, &tick(1));
+
+        assert_eq!(actions.len(), 1, "one row regardless of backend count");
+        let Action::WriteServiceBackendRow { row, .. } = &actions[0] else {
+            panic!("expected WriteServiceBackendRow");
+        };
+        assert_eq!(row.backends.len(), 3, "three Running allocs yield three backends");
+    }
+
+    /// S-BDB-03 unit-level proxy — terminated alloc. After
+    /// converging on a Running set, dropping a Running alloc on the
+    /// next tick emits a fresh row with the remaining backend(s)
+    /// only.
+    #[test]
+    fn reconcile_terminated_alloc_drops_backend() {
+        let bridge = bridge();
+        let sid = service_id(4);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 4), 8080));
+        state.actual.running.insert(alloc_id("alloc-m"));
+        state.actual.running.insert(alloc_id("alloc-n"));
+
+        // First tick — write with two backends.
+        let (actions_first, view_after_first) =
+            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
+        assert_eq!(actions_first.len(), 1);
+
+        // Second tick — one alloc terminated; expect a fresh row
+        // with one backend.
+        state.actual.running.remove(&alloc_id("alloc-n"));
+        let (actions_second, _) = bridge.reconcile(&state, &state, &view_after_first, &tick(2));
+
+        assert_eq!(actions_second.len(), 1, "removed alloc must trigger a fresh write");
+        let Action::WriteServiceBackendRow { row, .. } = &actions_second[0] else {
+            panic!("expected WriteServiceBackendRow");
+        };
+        assert_eq!(row.backends.len(), 1, "after termination, only one backend remains");
+    }
+
+    /// Fingerprint determinism — same inputs across multiple
+    /// invocations produce the same fingerprint. Proxy for the
+    /// architecture-mandated "deterministic across runs" property.
+    #[test]
+    fn fingerprint_deterministic_across_runs() {
+        let bridge = bridge();
+        let sid = service_id(5);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 5), 8080));
+        state.actual.running.insert(alloc_id("alloc-determ"));
+        let view = BackendDiscoveryBridgeView::default();
+
+        let (_, view_a) = bridge.reconcile(&state, &state, &view, &tick(1));
+        let (_, view_b) = bridge.reconcile(&state, &state, &view, &tick(1));
+
+        assert_eq!(
+            view_a.last_written_fingerprint.get(&sid),
+            view_b.last_written_fingerprint.get(&sid),
+            "fingerprint MUST be deterministic across reconcile invocations"
+        );
+    }
+}

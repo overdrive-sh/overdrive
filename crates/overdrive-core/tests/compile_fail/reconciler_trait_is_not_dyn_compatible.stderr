@@ -11,6 +11,7 @@ note: for a trait to be dyn compatible it needs to allow building a vtable
     |     const NAME: &'static str;
     |           ^^^^ the trait is not dyn compatible because it contains associated const `NAME`
     = help: the following types implement `overdrive_core::reconciler::Reconciler`:
+              overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge
               overdrive_core::reconciler::NoopHeartbeat
               overdrive_core::reconciler::WorkloadLifecycle
               overdrive_core::reconciler::ServiceMapHydrator
