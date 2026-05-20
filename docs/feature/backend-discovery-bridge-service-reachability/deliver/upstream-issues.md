@@ -104,4 +104,6 @@ algorithm duplication.
 
 **Deviation taken in 01-03**: no change. Documented here so a future step (or a focused remediation PR) can fix it deliberately. The fix is straightforward — use a deterministic `Instant` anchor (e.g. captured once via `OnceLock` at module init) — but the closure passed to `OnceLock::get_or_init(Instant::now)` is still detected by the AST scanner; the proper fix requires either a dst-lint scanner exemption for `#[cfg(test)]` modules, or replacing the `tick` builder with a `(now, deadline)` constructor that accepts the `Instant` as a parameter.
 
-**Status**: ACCEPTED (pre-existing from 01-02; surface to user before any remediation PR).
+**Resolution (focused remediation, commit `516eee0d`)**: extended the dst-lint scanner's existing `cfg_test_depth` tracking from the `std::fs`-in-`async-fn` clause to the banned-API scanner (`Instant::now` / `SystemTime::now` / wall-clock / RNG paths). The two `Instant::now()` calls at lines 446 and 449 are now exempt because they live inside `#[cfg(test)] mod tests {}`. `HashMap` / `HashSet` (`BannedKind::OrderedCollection`) remains flagged in test code — iteration-order invariants apply to DST-trajectory assertions even in fixtures. `cargo xtask dst-lint` on the workspace reports zero violations.
+
+**Status**: RESOLVED.
