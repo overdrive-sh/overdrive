@@ -93,3 +93,15 @@ algorithm duplication.
 **Status**: ACCEPTED.
 
 ---
+
+## UI-03 — `Instant::now()` in 01-02 test module trips dst-lint
+
+**Surfaced in**: step 01-03 (during quality-gate run).
+
+**Origin**: `crates/overdrive-core/src/reconciler/backend_discovery_bridge.rs:446,449` — the `tick(counter)` test helper landed by 01-02 (commit `04ba6ca1`) calls `Instant::now()` twice. `core` crates are scanned by `cargo xtask dst-lint`; both calls are flagged as banned-API violations per `.claude/rules/development.md` § "Reconciler I/O".
+
+**Production reality**: `dst-lint` flags both calls (2 violations) on the parent commit `04ba6ca1` before 01-03 began. The lint was passed-through at 01-02 commit time (whether by an oversight or because the gate was not re-run after the commit landed).
+
+**Deviation taken in 01-03**: no change. Documented here so a future step (or a focused remediation PR) can fix it deliberately. The fix is straightforward — use a deterministic `Instant` anchor (e.g. captured once via `OnceLock` at module init) — but the closure passed to `OnceLock::get_or_init(Instant::now)` is still detected by the AST scanner; the proper fix requires either a dst-lint scanner exemption for `#[cfg(test)]` modules, or replacing the `tick` builder with a `(now, deadline)` constructor that accepts the `Instant` as a parameter.
+
+**Status**: ACCEPTED (pre-existing from 01-02; surface to user before any remediation PR).

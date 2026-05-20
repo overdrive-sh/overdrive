@@ -21,6 +21,7 @@
 //! [`CertSerial`] (hex) are case-sensitive — they are not human-typed.
 
 use std::fmt::{self, Display, Formatter};
+use std::num::NonZeroU16;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -791,6 +792,47 @@ impl ServiceId {
     #[must_use]
     pub const fn get(self) -> u64 {
         self.0
+    }
+
+    /// Derive a content-addressed `ServiceId` from
+    /// `(vip, port, purpose)` per ADR-0052 § 1 / ADR-0040 § 1.
+    ///
+    /// The bytes hashed are the canonical wire encoding of each
+    /// input, separated by zero bytes to avoid ambiguous boundaries
+    /// (mirrors `CorrelationKey::derive`):
+    ///
+    /// 1. `vip.to_string().as_bytes()` — `ServiceVip`'s `Display`
+    ///    impl is the canonical wire form (`IpAddr::fmt`-derived).
+    /// 2. `port.get().to_be_bytes()` — big-endian `u16` so the byte
+    ///    sequence is stable across host endianness.
+    /// 3. `purpose.as_bytes()` — caller-supplied namespacing token,
+    ///    canonically `"service-map"` for the bridge.
+    ///
+    /// The first 8 bytes of the SHA-256 digest are interpreted as a
+    /// big-endian `u64` and wrapped in `ServiceId`. The full 64 bits
+    /// give ample collision resistance — `2^32` distinct
+    /// `(vip, port)` pairs collide with probability ~`2^-32` (the
+    /// birthday bound on a 64-bit space), and the project's
+    /// production cardinality is far below that.
+    ///
+    /// Per `.claude/rules/development.md` § "Hashing requires
+    /// deterministic serialization": the inputs are wrapped in a
+    /// canonical wire form before hashing — `Display` for `ServiceVip`
+    /// (deterministic per `IpAddr::fmt`), big-endian bytes for `u16`,
+    /// raw bytes for the string. No `serde_json::to_string` is in the
+    /// loop.
+    #[must_use]
+    pub fn derive(vip: &ServiceVip, port: NonZeroU16, purpose: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(vip.to_string().as_bytes());
+        hasher.update([0u8]);
+        hasher.update(port.get().to_be_bytes());
+        hasher.update([0u8]);
+        hasher.update(purpose.as_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        let mut head = [0u8; 8];
+        head.copy_from_slice(&digest[..8]);
+        Self(u64::from_be_bytes(head))
     }
 }
 
