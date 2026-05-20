@@ -125,3 +125,41 @@ algorithm duplication.
 No reconciler-signature change was required (Option H2 from the RCA was rejected): the hydrate-layer projection preserves the kind-agnostic reconciler invariant.
 
 **Status**: RESOLVED.
+
+
+---
+
+## UI-05 — Bridge → hydrator handoff missing in production; cross-reconciler enqueue introduced
+
+**Surfaced in**: step 02-04 (walking-skeleton resume investigation).
+
+**Origin (three concurrent defects)**:
+
+1. **`ServiceMapHydrator` was never registered at production boot.** `architecture.md` § 4.7 / § 6 carried `// existing` annotations next to `runtime.register(service_map_hydrator()).await?` and "Broker re-enqueues `ServiceMapHydrator` (existing behaviour)" — both claims were false. No `runtime.register(service_map_hydrator())` call site existed anywhere in `crates/overdrive-control-plane/src/lib.rs` prior to UI-05, and no factory function (`pub fn service_map_hydrator() -> AnyReconciler`) existed for it either. The architecture document's existing annotations described intent, not implementation.
+2. **No row-change re-enqueue mechanism existed.** `Action::WriteServiceBackendRow`'s action-shim dispatch (`write_service_backend_row::dispatch` at `crates/overdrive-control-plane/src/action_shim/write_service_backend_row.rs`) deliberately documented "no correlation-driven follow-up at the shim level" — the bridge observed its own write via its dedup fingerprint on its own next tick, but nothing triggered the downstream hydrator to tick. The handoff between two reconcilers was implicit-and-missing rather than explicit.
+3. **DST passed spuriously.** The Tier 1 evaluator `evaluate_bridge_to_hydrator_handoff` (S-BDB-19) hand-projects the bridge's written row directly into a hydrator state and ticks the hydrator manually — it never exercises the broker dispatch chain that production depends on. The evaluator's structural property (fingerprint identity across the boundary) was sound; what it could not prove was "in production, the bridge's write actually causes the hydrator to tick."
+
+**Production reality**: a Service submit through the real HTTPS driving port followed by `S-BDB-01`'s TCP round-trip through the VIP never plumbed to the kernel — the bridge wrote the `ServiceBackendRow`, but the `ServiceMapHydrator` (not registered, would not have been re-enqueued even if it were) never dispatched `Action::DataplaneUpdateService`, so the BPF maps stayed empty.
+
+**Resolution**: three landings in a single commit per `feedback_single_cut_greenfield_migrations.md`.
+
+- Added `Action::EnqueueEvaluation { reconciler: ReconcilerName, target: TargetResource }` to `overdrive_core::reconciler`. Reconcilers emit this to trigger downstream siblings on a specific target after their own observable side effects land. The cross-reconciler dependency is now explicit at the reconciler's action boundary; the alternative (implicit shim-layer triggers based on the emitting action shape) would couple the action shim to reconciler-pair-specific knowledge.
+- Added `enqueue_evaluation::dispatch` at `crates/overdrive-control-plane/src/action_shim/enqueue_evaluation.rs` — submits the carried `(reconciler, target)` pair to the per-runtime `EvaluationBroker` via a brief sync lock-grab-submit-release (per `.claude/rules/development.md` § Concurrency & async).
+- Updated `BackendDiscoveryBridge::reconcile` to emit `Action::EnqueueEvaluation { reconciler: "service-map-hydrator", target: "service/<service_id>" }` alongside every `Action::WriteServiceBackendRow`. The two actions land together — dedup branch suppresses both, write branch emits both. This pins the pairing at the bridge's source site.
+- Added `pub fn service_map_hydrator() -> AnyReconciler` factory and `runtime.register(service_map_hydrator()).await?` at production boot in `crates/overdrive-control-plane/src/lib.rs` (immediately after the bridge's registration so the bridge's emitted enqueue resolves against a registered reconciler on first drain).
+- Updated `architecture.md` § 4.7 and the step-3 narrative (around line 163) to remove the `// existing` misclaims and document the new `Action::EnqueueEvaluation` pattern + the bridge's dual emission.
+- All other exhaustive matches on `Action` (one site at `crates/overdrive-core/tests/acceptance/workload_lifecycle_terminal_decision.rs:505`) extended with the new variant per the single-cut migration rule. The new variant returns `None` for `action_terminal` — `EnqueueEvaluation` carries no terminal claim by construction.
+- Updated the bridge's 5 inline unit tests (`reconcile_single_alloc_emits_write_and_enqueue` renamed from the prior `reconcile_single_alloc_emits_one_action`; `reconcile_dedup_branch_emits_zero_actions_on_unchanged_inputs`, `reconcile_multi_replica_emits_all_backends`, `reconcile_terminated_alloc_drops_backend`) to assert dual emission shape (2 actions per drifted service, 0 on the dedup branch).
+- Updated the bridge's Tier 1 DST invariant evaluators (`evaluate_bridge_eventually_writes_backend_row` and `evaluate_bridge_recomputes_fingerprint_on_replay` at `crates/overdrive-sim/src/invariants/backend_discovery_bridge.rs`) so the per-tick action-count gate accepts the dual emission. The `apply_actions` helper already filters via `if let Action::WriteServiceBackendRow` so the new variant is ignored at apply time (it does not produce an observation row).
+- Added two new acceptance tests:
+  - `crates/overdrive-control-plane/tests/acceptance/bridge_emits_enqueue_evaluation_for_hydrator.rs` — pins the dual-emit shape at the bridge's reconcile surface (write + enqueue per drifted service; zero on dedup).
+  - `crates/overdrive-control-plane/tests/acceptance/service_map_hydrator_registered_at_boot.rs` — pins the production-boot registration (the hydrator MUST be present in `runtime.registered()` after the boot sequence).
+- All 6 existing test call sites of `action_shim::dispatch` (across `tests/acceptance/{streaming_submit,release_service_vip_dispatch,lifecycle_broadcast,action_shim_restart_uses_spec_from_action}.rs` and `tests/integration/vip_allocator_lifecycle.rs`) were updated to pass a fresh `parking_lot::Mutex<EvaluationBroker>` (the new 9th `dispatch` parameter; the production call site reads `state.runtime.broker_mutex()`).
+- The `SimObservationStore` was inspected for a special-case auto-enqueue on `service_backends` writes (the prompt's original third defect description). No such special case existed — the S-BDB-19 DST evaluator never went through the broker at all. The evaluator continues to pass post-UI-05 because the new `EnqueueEvaluation` action is ignored by the evaluator's existing `find_map` over `Action::WriteServiceBackendRow` patterns (the evaluator manually projects rather than going through the broker — that limitation persists and is the same property the in-process evaluator had pre-UI-05).
+
+Full workspace suite (1417 tests, 13 skipped) green via `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests`; `cargo xtask dst-lint` zero violations; `cargo dst --seed 42` reports all 32 invariants pass including the bridge-to-hydrator-handoff scenario.
+
+Landed in commit `f3a3f4ad`.
+
+**Status**: RESOLVED.
+
