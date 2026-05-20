@@ -123,6 +123,16 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // comment in `dst_clean_clone_green.rs`.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
+    // backend-discovery-bridge-service-reachability DISTILL — RED
+    // scaffolds. Evaluator bodies `todo!("RED scaffold: ...")` until
+    // DELIVER Slice 1 (closes #174) fills them. Listed here to keep
+    // the catalogue-length assertion in sync with `Invariant::ALL`;
+    // catalogue-walking tests below carry `#[should_panic(expected =
+    // "RED scaffold")]` per `.claude/rules/testing.md` § "Downstream
+    // fallout on pre-existing tests" until the bridge evaluators land.
+    "bridge-eventually-writes-backend-row",
+    "bridge-idempotent-steady-state",
+    "bridge-recomputes-fingerprint-on-replay",
 ];
 
 // -----------------------------------------------------------------------------
@@ -135,7 +145,19 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 /// downstream-fallout `#[should_panic]` attribute is removed per
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
+///
+/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
+/// re-introduces RED scaffolds for three bridge invariants. The harness
+/// walks every `Invariant::ALL` entry; the scaffolds' `todo!("RED
+/// scaffold: ...")` crashes the `cargo dst` subprocess, which fails
+/// this test's `out.status.success()` assertion. The assertion message
+/// embeds the subprocess stderr (which contains `RED scaffold`), so
+/// `#[should_panic(expected = "RED scaffold")]` matches. DELIVER Slice
+/// 1 (closes #174) lands the real evaluators; the panic substring stops
+/// firing, `#[should_panic]` trips, and this test forces a review here
+/// to remove the attribute (and this 2026-05-20 stanza) again.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &["--seed", "42"]);
@@ -250,7 +272,15 @@ fn first_line_of_stdout_names_the_seed() {
 /// downstream-fallout `#[should_panic]` attribute is removed per
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
+///
+/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
+/// re-introduces RED scaffolds; this test asserts
+/// `out.status.success()` on a full-catalogue subprocess run, so the
+/// bridge `todo!()` propagation tears it down. Same downstream-fallout
+/// protocol as `dst_with_fixed_seed_exits_zero_and_writes_artifacts`
+/// above — see that docstring for the GREEN-transition mechanics.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn first_line_of_stdout_names_the_seed_when_random() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &[]);
