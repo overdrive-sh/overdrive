@@ -88,12 +88,12 @@ pub mod exit_event_observable_outcome;
 pub mod workload_gc_absent_intent;
 
 // `backend-discovery-bridge-service-reachability` (joint #174 + #175)
-// DISTILL — RED scaffold per `docs/feature/backend-discovery-bridge-
-// service-reachability/distill/test-scenarios.md` S-BDB-02..S-BDB-10
-// (DST invariants) + S-BDB-06 (Atlas Q2 crash-recovery). Evaluator
-// bodies are `todo!("RED scaffold: ...")` until DELIVER Slice 1
-// (closes #174) lands the production bridge + lifts the placeholders
-// into real `Invariant::evaluate` impls.
+// Slice 1 (closes #174) — three DST evaluators per
+// `docs/feature/backend-discovery-bridge-service-reachability/
+// distill/test-scenarios.md` S-BDB-02..S-BDB-10 (DST invariants) +
+// S-BDB-06 (Atlas Q2 crash-recovery). The free-function evaluators
+// live in `backend_discovery_bridge::evaluate_bridge_*` and the
+// harness dispatches to them from the `Invariant::Bridge*` arms.
 pub mod backend_discovery_bridge;
 
 /// Catalogue of invariants the DST harness evaluates.
@@ -344,8 +344,8 @@ pub enum Invariant {
     /// so a resubmit mints a distinct `alloc_id` rather than
     /// reusing the GC'd row's id. Closes #148 AC §1.3.
     WorkloadGcResubmitCreatesFresh,
-    /// `backend-discovery-bridge-service-reachability` (#174) DISTILL —
-    /// eventually invariant. For every Service workload with `>= 1`
+    /// `backend-discovery-bridge-service-reachability` (#174) Slice 1
+    /// — eventually invariant. For every Service workload with `>= 1`
     /// listener AND an allocator-issued VIP for its `spec_digest` AND
     /// `>= 1` Running alloc, a `ServiceBackendRow` is eventually written
     /// whose `backends` field contains exactly the Running allocs'
@@ -353,29 +353,28 @@ pub enum Invariant {
     /// `crate::invariants::backend_discovery_bridge`. Closes S-BDB-02
     /// / S-BDB-03 / S-BDB-04 / S-BDB-10 per
     /// `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`.
-    /// SCAFFOLD: true — evaluator body lands GREEN in DELIVER Slice 1.
     BridgeEventuallyWritesBackendRow,
-    /// `backend-discovery-bridge-service-reachability` (#174) DISTILL —
-    /// always invariant. Once `obs.service_backends_rows(...).backends
+    /// `backend-discovery-bridge-service-reachability` (#174) Slice 1
+    /// — always invariant. Once `obs.service_backends_rows(...).backends
     /// == expected` for every Service workload, the bridge emits zero
     /// `Action::WriteServiceBackendRow` actions on subsequent ticks
     /// given unchanged inputs. Also exercises the View `retain` GC
     /// clause (S-BDB-07). The evaluator body lives in
-    /// `crate::invariants::backend_discovery_bridge`. SCAFFOLD: true.
+    /// `crate::invariants::backend_discovery_bridge`.
     BridgeIdempotentSteadyState,
     /// `backend-discovery-bridge-service-reachability` (Atlas Q2)
-    /// DISTILL — always invariant under the crash-recovery scenario
-    /// family. Injects a crash between `SimViewStore::write_through`
+    /// Slice 1 — always invariant under the crash-recovery scenario
+    /// family. Models a crash between `SimViewStore::write_through`
     /// fsync and the runtime's in-memory `BTreeMap::insert`; after
-    /// restart + `bulk_load`, asserts the bridge's first post-restart
-    /// tick re-projects from fresh inputs and either emits zero actions
-    /// (idempotent) or emits `Action::WriteServiceBackendRow` with the
-    /// new fingerprint (no silent skip on cached stale state). Proves
-    /// the fsync-then-memory ordering rule in
-    /// `.claude/rules/development.md` § "Reconciler I/O" is honored by
-    /// the bridge's reconcile body. The evaluator body lives in
+    /// the restart-equivalent `bulk_load`, asserts the bridge's
+    /// first post-restart tick re-projects from fresh inputs and
+    /// either emits zero actions (idempotent) or emits
+    /// `Action::WriteServiceBackendRow` with the new fingerprint (no
+    /// silent skip on cached stale state). Proves the
+    /// fsync-then-memory ordering rule in
+    /// `.claude/rules/development.md` § "Reconciler I/O" is honored
+    /// by the bridge's reconcile body. The evaluator body lives in
     /// `crate::invariants::backend_discovery_bridge`. Closes S-BDB-06.
-    /// SCAFFOLD: true.
     BridgeRecomputesFingerprintOnReplay,
 }
 
@@ -456,10 +455,10 @@ impl Invariant {
         Self::WorkloadGcOrphanConverges,
         Self::WorkloadGcResubmitCreatesFresh,
         // backend-discovery-bridge-service-reachability (#174 + Atlas Q2)
-        // DISTILL — RED scaffolds per
-        // `docs/feature/backend-discovery-bridge-service-reachability/distill/wave-decisions.md`
-        // DWD-04. Evaluator bodies `todo!` until DELIVER Slice 1 fills
-        // them.
+        // Slice 1 — three evaluators land in
+        // `crate::invariants::backend_discovery_bridge::
+        // evaluate_bridge_{eventually_writes_backend_row,
+        // idempotent_steady_state, recomputes_fingerprint_on_replay}`.
         Self::BridgeEventuallyWritesBackendRow,
         Self::BridgeIdempotentSteadyState,
         Self::BridgeRecomputesFingerprintOnReplay,

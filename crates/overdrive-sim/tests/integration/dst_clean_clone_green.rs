@@ -133,13 +133,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // AC §1.3.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
-    // backend-discovery-bridge-service-reachability DISTILL — RED
-    // scaffolds. Evaluator bodies `todo!("RED scaffold: ...")` until
-    // DELIVER Slice 1 (closes #174) fills them. Adding them here keeps
-    // the catalogue-length assertion in sync with `Invariant::ALL`; the
-    // catalogue-walking tests below carry `#[should_panic(expected =
-    // "RED scaffold")]` per `.claude/rules/testing.md` § "Downstream
-    // fallout on pre-existing tests" until the bridge evaluators land.
+    // backend-discovery-bridge-service-reachability Slice 1
+    // (closes #174) — three DST invariants land in
+    // `crate::invariants::backend_discovery_bridge`.
     "bridge-eventually-writes-backend-row",
     "bridge-idempotent-steady-state",
     "bridge-recomputes-fingerprint-on-replay",
@@ -152,26 +148,12 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 /// The whole default catalogue runs, every invariant passes, and the
 /// wall-clock budget (<60 s per KPI K1) is met.
 ///
-/// Step 08-02 GREEN handed off: the
-/// `HydratorEventuallyConverges` and `HydratorIdempotentSteadyState`
-/// scaffolds are GREEN, so the downstream-fallout `#[should_panic]`
-/// attribute is removed per `.claude/rules/testing.md` § "Downstream
-/// fallout on pre-existing tests" handoff procedure.
-///
-/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
-/// re-introduces RED scaffolds for three bridge invariants
-/// (`BridgeEventuallyWritesBackendRow`, `BridgeIdempotentSteadyState`,
-/// `BridgeRecomputesFingerprintOnReplay`). The harness walks every
-/// `Invariant::ALL` entry; the scaffolds' `todo!("RED scaffold: ...")`
-/// crashes the `cargo dst` subprocess, which fails this test's
-/// `out.status.success()` assertion. The assertion message embeds the
-/// subprocess stderr, which contains the `RED scaffold` substring, so
-/// `#[should_panic(expected = "RED scaffold")]` matches. DELIVER Slice
-/// 1 (closes #174) lands the real evaluators; the panic substring stops
-/// firing, `#[should_panic]` trips, and this test forces a review here
-/// to remove the attribute (and this 2026-05-20 stanza) again.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn default_catalogue_is_green_within_wall_clock_budget() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &["--seed", "42"]);
@@ -232,18 +214,12 @@ fn default_catalogue_is_green_within_wall_clock_budget() {
 
 /// Every named invariant in §7.1 scenario 2 appears in the summary.
 ///
-/// Step 08-02 GREEN handed off: the
-/// `HydratorEventuallyConverges` scaffold is GREEN, so the
-/// downstream-fallout `#[should_panic]` attribute is removed per
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests" handoff procedure.
-///
-/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
-/// re-introduces RED scaffolds; see the docstring on
-/// `default_catalogue_is_green_within_wall_clock_budget` above for the
-/// full reason and the GREEN-transition checklist.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn summary_names_every_expected_invariant() {
     let target = tempfile::tempdir().expect("tempdir");
     let out = run_dst(target.path(), &["--seed", "42"]);
@@ -304,16 +280,12 @@ fn intent_never_crosses_into_observation_is_evaluated_and_passes() {
 /// via `--only` and must report pass in isolation. This is the step's
 /// claim that every invariant body is wired and not just stubbed out.
 ///
-/// 2026-05-20 — DISTILL of `backend-discovery-bridge-service-reachability`
-/// adds three bridge invariants whose evaluator bodies `todo!()`. The
-/// `--only <bridge-name>` iteration crashes the `cargo dst` subprocess,
-/// failing this test's `out.status.success()` assertion on the first
-/// bridge name. `#[should_panic(expected = "RED scaffold")]` per the
-/// downstream-fallout protocol until DELIVER Slice 1 lands the bridge
-/// evaluators; same GREEN-transition mechanics as
-/// `default_catalogue_is_green_within_wall_clock_budget`.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed and the
+/// downstream-fallout `#[should_panic]` attribute is removed per
+/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+/// tests" handoff procedure.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn every_invariant_runs_green_when_selected_individually() {
     for name in EXPECTED_INVARIANTS {
         let target = tempfile::tempdir().expect("tempdir");
