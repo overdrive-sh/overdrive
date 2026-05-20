@@ -372,6 +372,36 @@ pub struct ServerConfig {
     /// — the same shape the parser returns. See architecture.md
     /// § 5.2.
     pub dataplane: Option<dataplane_config::DataplaneConfig>,
+
+    /// Optional override for the bpffs directory the `EbpfDataplane`
+    /// pins SERVICE_MAP into. `None` (the production default) means
+    /// `overdrive_dataplane::DEFAULT_PIN_DIR` = `/sys/fs/bpf/overdrive`.
+    /// Tests pass a per-test tempdir under `/sys/fs/bpf/<name>` to
+    /// avoid cross-test SERVICE_MAP pin collisions when many
+    /// integration tests boot the server concurrently inside Lima.
+    /// Per `feedback_single_cut_greenfield_migrations.md`, production
+    /// `serve` always reads `None` (single-cut to EbpfDataplane); the
+    /// field exists only for test isolation.
+    pub dataplane_pin_dir: Option<PathBuf>,
+
+    /// Optional injected [`Dataplane`] adapter — for tests whose
+    /// subject under test is NOT the dataplane attach path. When
+    /// `Some(_)`, the boot path uses this adapter and SKIPS
+    /// `EbpfDataplane::new`; when `None` (the production default),
+    /// the boot path constructs `EbpfDataplane` from the
+    /// `[dataplane]` config section per architecture.md § 5.2.
+    ///
+    /// Per architecture.md § 4.7, tests inject `SimDataplane` via
+    /// this field; production binaries (the CLI's `serve` subcommand)
+    /// pass `None` so the single-cut `EbpfDataplane` composition
+    /// per `feedback_single_cut_greenfield_migrations.md` is the
+    /// only production-reachable code path.
+    ///
+    /// Excluded from [`Debug`] / [`Default`] — `Arc<dyn Dataplane>`
+    /// is neither `Debug` nor `Default`.
+    ///
+    /// [`Dataplane`]: overdrive_core::traits::dataplane::Dataplane
+    pub dataplane_override: Option<Arc<dyn overdrive_core::traits::dataplane::Dataplane>>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -387,6 +417,11 @@ impl std::fmt::Debug for ServerConfig {
             .field("clock", &"<dyn Clock>")
             .field("vip_range", &"<VipRange>")
             .field("dataplane", &self.dataplane)
+            .field("dataplane_pin_dir", &self.dataplane_pin_dir)
+            .field(
+                "dataplane_override",
+                &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
+            )
             .finish()
     }
 }
@@ -423,6 +458,16 @@ impl Default for ServerConfig {
             // `parse_dataplane_section` and overwrite this with the
             // operator-supplied value.
             dataplane: Some(dataplane_config::DataplaneConfig::loopback()),
+            // Step 02-02: `None` means production default
+            // (`/sys/fs/bpf/overdrive`). Tests override to a per-test
+            // tempdir for SERVICE_MAP pin isolation.
+            dataplane_pin_dir: None,
+            // Step 02-02: `None` means production default
+            // (construct `EbpfDataplane` from the `[dataplane]`
+            // section). Tests that exercise unrelated subsystems
+            // inject `Some(Arc::new(SimDataplane::new()))` per
+            // architecture.md § 4.7.
+            dataplane_override: None,
         }
     }
 }
@@ -664,7 +709,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
 // may grow real `.await` points as the boot sequence evolves
 // (observation provisioning, lifecycle handshakes). Removing it now
 // would churn every call site for no functional gain.
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
@@ -751,13 +796,56 @@ pub async fn run_server_with_obs_and_driver(
     // as the convergence-loop spawn. The clock is required at
     // construction per `.claude/rules/development.md` § "Port-trait
     // dependencies"; there is no post-construction injection path.
-    // Phase 2.2: production single-mode boot threads `NoopDataplane`
-    // until the Slice 08-02 hydrator reconciler ships. Until then no
-    // `Action::DataplaneUpdateService` is emitted, so the dataplane
-    // parameter is unreachable at runtime. Slice 08-04 / Phase 2.3
-    // swaps in `EbpfDataplane` here.
+    //
+    // backend-discovery-bridge-service-reachability step 02-02 —
+    // wire `EbpfDataplane` as the single production `Dataplane`
+    // adapter per architecture.md § 5.2. Single-cut migration from
+    // `NoopDataplane` per `feedback_single_cut_greenfield_migrations.md`.
+    // Failure paths route through `DataplaneBootError::Construct`
+    // per architecture.md § 5.3.
+    //
+    // Tests whose subject under test is NOT the dataplane attach path
+    // (CLI HTTPS handshake, trust-triple round-trip, action-shim
+    // dispatch arms, observation-row read handlers) inject
+    // `SimDataplane` via `config.dataplane_override` per architecture.md
+    // § 4.7. Production binaries leave `dataplane_override = None` so
+    // `EbpfDataplane::new` is the only production-reachable adapter.
+    let dataplane_cfg =
+        config.dataplane.as_ref().ok_or_else(|| error::ControlPlaneError::Validation {
+            message: "missing required [dataplane] section in overdrive.toml \
+                      (client_iface + backend_iface)"
+                .to_owned(),
+            field: Some("dataplane".to_owned()),
+        })?;
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_host::NoopDataplane);
+        if let Some(overridden) = config.dataplane_override.clone() {
+            overridden
+        } else {
+            let ebpf_dataplane = config
+                .dataplane_pin_dir
+                .as_deref()
+                .map_or_else(
+                    || {
+                        overdrive_dataplane::EbpfDataplane::new(
+                            &dataplane_cfg.client_iface,
+                            &dataplane_cfg.backend_iface,
+                        )
+                    },
+                    |pin_dir| {
+                        overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
+                            &dataplane_cfg.client_iface,
+                            &dataplane_cfg.backend_iface,
+                            pin_dir,
+                        )
+                    },
+                )
+                .map_err(|source| error::DataplaneBootError::Construct {
+                    client_iface: dataplane_cfg.client_iface.clone(),
+                    backend_iface: dataplane_cfg.backend_iface.clone(),
+                    source,
+                })?;
+            Arc::new(ebpf_dataplane)
+        };
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on

@@ -647,6 +647,43 @@ impl EbpfDataplane {
     }
 }
 
+/// Graceful-shutdown RAII per architecture.md § 5.6 of
+/// `backend-discovery-bridge-service-reachability` (step 02-02).
+///
+/// On drop:
+///   - `_xdp_forward_link` / `_xdp_reverse_link` `XdpLinkId` fields
+///     drop in field declaration order, and aya detaches each XDP
+///     program from its iface as part of their `Drop`. No explicit
+///     action required here.
+///   - The SERVICE_MAP bpffs pin at `<pin_dir>/SERVICE_MAP` is
+///     unlinked best-effort. Failure on `remove_file` logs at debug
+///     — by the time `Drop` runs the caller may be unwinding from a
+///     panic, and `Drop` cannot bubble errors. The leftover-pin
+///     cleanup discipline in `.claude/rules/debugging.md` § "Leftover
+///     XDP attachments across runs" is the operator-side safety net
+///     when `Drop` is skipped (SIGKILL).
+///
+/// `NotFound` is treated as success (a prior unclean shutdown plus
+/// the cleanup-on-start logic in `new_with_pin_dir` can leave the
+/// pin gone before `Drop` runs).
+impl Drop for EbpfDataplane {
+    fn drop(&mut self) {
+        let pin_path = self.pin_dir.join(SERVICE_MAP_NAME);
+        if let Err(e) = std::fs::remove_file(&pin_path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::debug!(
+                    name: "xdp.shutdown.unlink_failed",
+                    path = %pin_path.display(),
+                    error = %e,
+                    "SERVICE_MAP pin unlink failed during shutdown"
+                );
+            }
+        }
+        // `XdpLinkId` fields held by `self` drop here; aya detaches
+        // each XDP program from its iface as part of `XdpLinkId::Drop`.
+    }
+}
+
 /// Classify an `io::Error` from `aya::programs::Xdp::attach` (which
 /// surfaces as `ProgramError::SyscallError { call: "bpf_link_create"
 /// | "netlink_set_xdp_fd", io_error }`) into either "fall back to

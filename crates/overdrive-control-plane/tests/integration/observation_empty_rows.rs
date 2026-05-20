@@ -101,6 +101,9 @@ async fn spawn_server_with_obs_handle()
         operator_config_dir: operator_config_dir.clone(),
         // `tick_cadence` + `clock` default per
         // `fix-convergence-loop-not-spawned` Step 01-02.
+        dataplane_override: Some(std::sync::Arc::new(
+            overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        )),
         ..Default::default()
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));

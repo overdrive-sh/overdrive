@@ -134,6 +134,19 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // Step 02-01 — required `[dataplane]` section. Tests use
         // the loopback shape so `getifaddrs(3)` resolves locally.
         dataplane: Some(overdrive_control_plane::dataplane_config::DataplaneConfig::loopback()),
+        // Step 02-02 — `None` means production default
+        // (`/sys/fs/bpf/overdrive`). This test exercises convergence-
+        // loop spawn against the production boot path, which goes
+        // through `EbpfDataplane::new` on Linux unless overridden via
+        // `dataplane_override` below.
+        dataplane_pin_dir: None,
+        // Step 02-02 — inject `SimDataplane` per architecture.md § 4.7
+        // so this test's subject-under-test (the convergence-loop
+        // tokio::spawn shape) does not pay the CAP_NET_ADMIN / CAP_BPF
+        // cost of constructing the production `EbpfDataplane`.
+        dataplane_override: Some(std::sync::Arc::new(
+            overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        )),
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))

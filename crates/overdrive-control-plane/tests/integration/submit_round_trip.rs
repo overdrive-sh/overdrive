@@ -102,6 +102,9 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         // submit_workload handler — and shutdown ordering in
         // `ServerHandle::shutdown` cancels the convergence task
         // before axum graceful so any in-flight ticks land cleanly.
+        dataplane_override: Some(std::sync::Arc::new(
+            overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        )),
         ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");

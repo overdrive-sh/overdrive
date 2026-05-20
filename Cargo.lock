@@ -1773,6 +1773,7 @@ dependencies = [
  "futures",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-sim",
  "overdrive-store-local",
  "proptest",
  "reqwest",
