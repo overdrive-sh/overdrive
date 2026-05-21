@@ -658,6 +658,52 @@ impl EbpfDataplane {
         }
     }
 
+    /// Snapshot of the `(BackendId, BackendEntryPod)` pairs currently
+    /// present in `BACKEND_MAP`.
+    ///
+    /// Test-only — gated behind `cfg(any(test, feature = "integration-
+    /// tests"))` per `backend-discovery-bridge-service-reachability/
+    /// design/architecture.md` § 6.2 / Atlas Q1: the production crate's
+    /// public surface MUST NOT widen the test-only inspector to
+    /// non-test consumers. The narrower `backend_map_keys()` /
+    /// `service_map_contains()` accessors above are kept public
+    /// because they are consumed by production debug tooling (and by
+    /// the in-feature S-2.2-10 orphan-GC verification); only the
+    /// full-entry iterator is gated.
+    ///
+    /// Used by the walking-skeleton (S-BDB-01) to assert a backend
+    /// matching `(host_ipv4, listener_port)` was written by the
+    /// `update_service` path. Returned in arbitrary order — callers
+    /// that need stability sort by the `(ipv4_host, port_host)` tuple.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects a
+    /// `keys()` iteration step or a `get()` lookup for a key the prior
+    /// iteration surfaced. The races that could surface here
+    /// (mid-iteration map mutation, kernel out-of-memory) are the
+    /// same that `backend_map_keys()` documents — the inspector
+    /// simply chains a `get()` per key.
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn backend_map_entries(
+        &self,
+    ) -> Result<Vec<(u32, crate::maps::BackendEntryPod)>, DataplaneError> {
+        let backend_map = self.backend_map.lock();
+        let keys = backend_map
+            .keys()
+            .collect::<Result<Vec<u32>, _>>()
+            .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP keys(): {e}")))?;
+        let mut entries = Vec::with_capacity(keys.len());
+        for key in keys {
+            let entry = backend_map
+                .get(&key, 0)
+                .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP get({key}): {e}")))?;
+            entries.push((key, entry));
+        }
+        drop(backend_map);
+        Ok(entries)
+    }
+
     /// Earned-Trust probe per `backend-discovery-bridge-service-
     /// reachability` architecture.md § 5.4 and CLAUDE.md principle 12.
     ///

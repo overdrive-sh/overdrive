@@ -152,6 +152,11 @@ mod integration {
     /// 1 and 2 land the bridge + production `EbpfDataplane` wiring.
     mod backend_discovery_bridge {
         mod boot_composition;
+        /// Shared fixture for the walking-skeleton (S-BDB-01) — spawns
+        /// a production server wired against a real `EbpfDataplane`
+        /// + drives `submit_workload` through the real HTTPS client.
+        /// Lives under `tests/` per architecture.md § 6.2 / Atlas Q1.
+        mod test_server;
         mod walking_skeleton;
     }
 }

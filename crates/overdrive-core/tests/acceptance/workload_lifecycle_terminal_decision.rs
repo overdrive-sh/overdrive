@@ -173,7 +173,11 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "at-ceiling must emit one FinalizeFailed action; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "at-ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::FinalizeFailed { terminal, alloc_id } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
@@ -224,7 +228,11 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "stop branch with one Running alloc emits one StopAllocation");
+    assert_eq!(
+        actions.len(),
+        2,
+        "stop branch with one Running alloc emits StopAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::StopAllocation { alloc_id, terminal } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
@@ -267,7 +275,11 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "fresh schedule must emit one StartAllocation");
+    assert_eq!(
+        actions.len(),
+        2,
+        "fresh schedule must emit StartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         // StartAllocation is non-terminal by construction — it does
         // not carry a `terminal` field. The mere fact the variant
@@ -323,7 +335,11 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "Failed-with-budget must emit one RestartAllocation");
+    assert_eq!(
+        actions.len(),
+        2,
+        "Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}
         other => panic!("expected RestartAllocation, got {other:?}"),

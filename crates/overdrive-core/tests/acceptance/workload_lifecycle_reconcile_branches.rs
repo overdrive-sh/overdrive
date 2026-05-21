@@ -210,9 +210,9 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
     // fires with Operator terminal).
     assert_eq!(
         actions.len(),
-        1,
-        "GC arm must emit exactly one StopAllocation for the orphan Running row; \
-         got {actions:?}",
+        2,
+        "GC arm must emit StopAllocation for the orphan Running row + bridge \
+         EnqueueEvaluation per UI-06; got {actions:?}",
     );
     match &actions[0] {
         Action::StopAllocation { terminal, .. } => {
@@ -319,7 +319,11 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // Under `==`: exactly one StopAllocation, naming the Running alloc.
-    assert_eq!(actions.len(), 1, "must emit exactly one StopAllocation; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "must emit StopAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::StopAllocation { alloc_id, .. } => {
             assert_eq!(
@@ -416,7 +420,11 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "must emit one StartAllocation; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "must emit StartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     assert!(
         matches!(
             actions[0],
@@ -442,8 +450,8 @@ fn restart_emitted_when_attempts_below_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(attempts_when_below_ceiling);
     assert_eq!(
         actions.len(),
-        1,
-        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation; got {actions:?}",
+        2,
+        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}",
     );
     assert!(
         matches!(
@@ -470,8 +478,8 @@ fn restart_suppressed_at_exact_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(RESTART_BACKOFF_CEILING);
     assert_eq!(
         actions.len(),
-        1,
-        "attempts == ceiling must emit one FinalizeFailed; got {actions:?}",
+        2,
+        "attempts == ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}",
     );
     assert!(
         matches!(actions[0], Action::FinalizeFailed { .. }),
@@ -491,8 +499,8 @@ fn restart_suppressed_above_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(RESTART_BACKOFF_CEILING + 1);
     assert_eq!(
         actions.len(),
-        1,
-        "attempts > ceiling must emit one FinalizeFailed; got {actions:?}",
+        2,
+        "attempts > ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}",
     );
     assert!(
         matches!(actions[0], Action::FinalizeFailed { .. }),
@@ -583,9 +591,9 @@ fn restart_emitted_when_now_equals_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        1,
-        "now_unix == seen_at + backoff must emit RestartAllocation \
-         (backoff elapsed); got {actions:?}",
+        2,
+        "now_unix == seen_at + backoff must emit RestartAllocation + bridge \
+         EnqueueEvaluation per UI-06 (backoff elapsed); got {actions:?}",
     );
     assert!(
         matches!(
@@ -611,9 +619,9 @@ fn restart_emitted_when_now_strictly_after_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        1,
-        "now_unix > seen_at + backoff must emit RestartAllocation \
-         (backoff elapsed); got {actions:?}",
+        2,
+        "now_unix > seen_at + backoff must emit RestartAllocation + bridge \
+         EnqueueEvaluation per UI-06 (backoff elapsed); got {actions:?}",
     );
 }
 
@@ -717,7 +725,11 @@ fn fresh_failure_writes_seen_at_into_next_view() {
     let (actions, next_view) = r.reconcile(&desired, &actual, &view, &tick);
 
     // RestartAllocation emitted for the failed alloc.
-    assert_eq!(actions.len(), 1, "fresh failure must emit one RestartAllocation; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "fresh failure must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
@@ -871,8 +883,8 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
 
     assert_eq!(
         actions_2.len(),
-        1,
-        "tick 2 after backoff elapsed must emit one RestartAllocation; got {actions_2:?}",
+        2,
+        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions_2:?}",
     );
     assert!(
         matches!(
@@ -1154,17 +1166,20 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
         // emitted actions, compare to expected — order-independent.
         assert_eq!(
             actions.len(),
-            3,
-            "kind={kind:?}: expected one StopAllocation per Running row; got {actions:?}",
+            4,
+            "kind={kind:?}: expected one StopAllocation per Running row + bridge EnqueueEvaluation per UI-06; got {actions:?}",
         );
         let expected_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc });
         let mut emitted: Vec<(String, Option<TerminalCondition>)> = actions
             .iter()
-            .map(|a| match a {
+            .filter_map(|a| match a {
                 Action::StopAllocation { alloc_id, terminal } => {
-                    (alloc_id.as_str().to_owned(), terminal.clone())
+                    Some((alloc_id.as_str().to_owned(), terminal.clone()))
                 }
-                other => panic!("kind={kind:?}: expected StopAllocation, got {other:?}"),
+                Action::EnqueueEvaluation { .. } => None, // Per UI-06: bridge re-enqueue paired with the Stop actions
+                other => panic!(
+                    "kind={kind:?}: expected StopAllocation or EnqueueEvaluation, got {other:?}"
+                ),
             })
             .collect();
         emitted.sort_by(|l, r| l.0.cmp(&r.0));
@@ -1357,9 +1372,9 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
         // (alloc-payments-1 — index 1 in the state list above).
         assert_eq!(
             actions.len(),
-            1,
+            2,
             "kind={kind:?}: mixed states must emit exactly one StopAllocation \
-             (the Running row); got {actions:?}",
+             (the Running row) + bridge EnqueueEvaluation per UI-06; got {actions:?}",
         );
         match &actions[0] {
             Action::StopAllocation { alloc_id, terminal } => {
@@ -1462,9 +1477,9 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
 
         assert_eq!(
             actions.len(),
-            1,
+            2,
             "kind={kind:?}: SystemGc-Terminated row + intent present must emit \
-             exactly one fresh placement; got {actions:?}",
+             exactly one fresh placement + bridge EnqueueEvaluation per UI-06; got {actions:?}",
         );
         match &actions[0] {
             Action::StartAllocation { alloc_id, .. } => {
@@ -1635,9 +1650,9 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         // alloc-payments-0).
         assert_eq!(
             actions.len(),
-            1,
+            2,
             "kind={kind:?}: SystemGc row + Failed row must emit exactly one action \
-             (against the Failed row, not the SystemGc row); got {actions:?}",
+             (against the Failed row, not the SystemGc row) + bridge EnqueueEvaluation per UI-06; got {actions:?}",
         );
         let action_alloc_id = match &actions[0] {
             Action::RestartAllocation { alloc_id, .. }
@@ -1802,9 +1817,9 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         // shape across kinds — the placement path is kind-agnostic.
         assert_eq!(
             actions.len(),
-            1,
+            2,
             "kind={kind:?}: filtered SystemGc-via-reason row + intent present must \
-             emit exactly one fresh placement; got {actions:?}",
+             emit exactly one fresh placement + bridge EnqueueEvaluation per UI-06; got {actions:?}",
         );
         match &actions[0] {
             Action::StartAllocation { alloc_id, .. } => {

@@ -1388,8 +1388,76 @@ impl Reconciler for WorkloadLifecycle {
             actions.push(release_action);
             next_view.released_for_terminal.insert(released_digest);
         }
+
+        // UI-06 (F1 fix per audit-reconciler-handoff-topology.md):
+        // dual-emit `Action::EnqueueEvaluation` routed at the
+        // `backend-discovery-bridge` whenever this tick mutates the
+        // alloc set the bridge depends on (StartAllocation /
+        // RestartAllocation / StopAllocation / FinalizeFailed).
+        //
+        // Pre-UI-06 the only enqueue site was the exit observer
+        // (`exit_observer.rs:253-256`) which fires only on workload
+        // exit. For long-lived Service workloads the bridge therefore
+        // never ticked after Pending → Running, never observed the
+        // Running alloc, never wrote a `ServiceBackendRow`, and the
+        // entire downstream hydrator → dataplane chain was structurally
+        // unreachable. The fix mirrors the UI-05 bridge → hydrator
+        // dual-emit pattern at the reconciler surface.
+        //
+        // Single emission per tick (not per action): the broker is LWW
+        // at `(ReconcilerName, TargetResource)` per ADR-0013 §8 /
+        // whitepaper §18, so duplicate enqueues collapse to one
+        // dispatch per drain cycle. Emitting once keeps the action
+        // vector compact and reflects the broker's actual dispatch
+        // shape. The target is `job/<workload_id>` — same scope the
+        // exit observer's bridge enqueue uses (`exit_observer.rs:231`),
+        // so post-UI-06 BOTH enqueue sites address the same broker key.
+        if actions.iter().any(is_alloc_mutating_action) {
+            #[allow(clippy::expect_used)]
+            {
+                let bridge_name = ReconcilerName::new(BACKEND_DISCOVERY_BRIDGE_NAME)
+                    .expect("'backend-discovery-bridge' is a valid ReconcilerName by construction");
+                let bridge_target = TargetResource::new(&format!("job/{}", desired.workload_id))
+                    .expect(
+                        "'job/<workload_id>' is a valid TargetResource by construction \
+                         (WorkloadId is constructor-validated, prefix is canonical)",
+                    );
+                actions.push(Action::EnqueueEvaluation {
+                    reconciler: bridge_name,
+                    target: bridge_target,
+                });
+            }
+        }
+
         (actions, next_view)
     }
+}
+
+/// UI-06 — name of the `BackendDiscoveryBridge` reconciler. Pinned to
+/// the same compile-time string literal as
+/// `<crate::reconciler::backend_discovery_bridge::BackendDiscoveryBridge
+/// as Reconciler>::NAME` — duplicated here as a `&'static str` so the
+/// `WorkloadLifecycle::reconcile` wrapper can construct a
+/// `ReconcilerName` without naming the full bridge type surface.
+const BACKEND_DISCOVERY_BRIDGE_NAME: &str = "backend-discovery-bridge";
+
+/// UI-06 — predicate: is `action` one of the four alloc-mutating
+/// variants the `BackendDiscoveryBridge` cares about?
+///
+/// The bridge re-renders `ServiceBackendRow` from the Running-alloc
+/// set on every tick; only transitions that ADD or REMOVE a Running
+/// alloc, or finalize an alloc as failed, change the bridge's view.
+/// The wildcard arm covers `Noop`, `HttpCall`, `WriteServiceBackendRow`,
+/// `DataplaneUpdateService`, `ReleaseServiceVip`, `EnqueueEvaluation` —
+/// none of which change the alloc set.
+const fn is_alloc_mutating_action(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::StartAllocation { .. }
+            | Action::RestartAllocation { .. }
+            | Action::StopAllocation { .. }
+            | Action::FinalizeFailed { .. }
+    )
 }
 
 impl WorkloadLifecycle {

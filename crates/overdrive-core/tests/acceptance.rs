@@ -154,4 +154,12 @@ mod acceptance {
     // (amended 2026-05-15) + persist-inputs discipline on
     // `released_for_terminal: BTreeSet<ContentHash>`.
     mod workload_lifecycle_release_service_vip;
+
+    // backend-discovery-bridge-service-reachability — UI-06
+    // WorkloadLifecycle → BackendDiscoveryBridge dual-emit (closes F1
+    // gap per audit-reconciler-handoff-topology.md). The reconciler
+    // appends one `Action::EnqueueEvaluation` routed at the bridge
+    // alongside every `StartAllocation` / `RestartAllocation` /
+    // `StopAllocation` / `FinalizeFailed`. Mirrors UI-05.
+    mod workload_lifecycle_enqueues_bridge_on_alloc_transitions;
 }
