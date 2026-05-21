@@ -1,0 +1,41 @@
+# `overdrive-testing` — shared real-infra test fixtures.
+#
+# `adapter-host` per ADR-0003 — these fixtures shell out to `ip(8)`
+# and manipulate real Linux network namespaces / veth pairs / route
+# tables / sysctls. The dst-lint gate scans only `core`-class crates
+# and skips this one.
+#
+# Dev-dependency only — never `[dependencies]`. The crate exists to
+# host fixtures whose only consumers are sibling crates' integration
+# tests; promoting it to a runtime dep would smuggle real-infra
+# I/O paths into production binaries. See
+# `.claude/rules/development.md` § "Shared real-infra test fixtures
+# — overdrive-testing".
+
+[package]
+name         = "overdrive-testing"
+version      = "0.0.0"
+description  = "Shared real-infra test fixtures (netns, veth, topology) for cross-crate integration tests."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention. Every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. This crate has no integration
+# tests of its own — every fixture is consumed by sibling crates'
+# `tests/integration/*.rs`. See `.claude/rules/testing.md` § "Workspace
+# convention".
+integration-tests = []
+
+[dependencies]
+
+[lints]
+workspace = true

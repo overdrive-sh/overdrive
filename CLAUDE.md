@@ -15,6 +15,7 @@ ADR-0003; the dst-lint gate (`xtask/src/dst_lint.rs`) scans only
 | `overdrive-host` | `adapter-host` | Production bindings from the core port traits to the host OS / kernel / network (`SystemClock`, `OsEntropy`, `TcpTransport`, etc.). Reconciler and policy crates MUST NOT depend on this — depending on `overdrive-host` is the explicit opt-in to real I/O. |
 | `overdrive-sim` | `adapter-sim` | `Sim*` bindings for the same traits, the turmoil DST harness, and the invariant catalogue. Owns `turmoil` and `StdRng` — nothing else should. See ADR-0004. |
 | `overdrive-store-local` | `adapter-host` | `LocalStore` (single-node `IntentStore` over `redb`). |
+| `overdrive-testing` | `adapter-host` | Shared real-infra test fixtures (netns, veth, topology). Linux-only items. Dev-dependency only — never `[dependencies]`. See `.claude/rules/development.md` § "Shared real-infra test fixtures — overdrive-testing". |
 | `overdrive-cli` | `binary` | Operator CLI entry point; `eyre`-based error reporting. |
 | `xtask` | `binary` | Build/lint/DST runner (`cargo xtask …`). Allowed to touch the filesystem and wall-clock; not scanned by dst-lint. |
 

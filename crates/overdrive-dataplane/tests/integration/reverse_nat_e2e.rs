@@ -58,7 +58,7 @@ use overdrive_dataplane::EbpfDataplane;
 use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
-use super::helpers::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
+use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
 
 // Stable IP / port plan shared across tests in this file. Both
 // scenarios (S-2.2-17, S-2.2-18) build a `ThreeIfaceTopology` (per
@@ -346,7 +346,7 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     // `dst=10.0.0.10` returns `RET_NO_NEIGH` and falls to XDP_PASS,
     // relying on kernel-stack forwarding + ARP resolution — a
     // multi-second delay that exceeds nc's timeout.
-    use super::helpers::netns::threeiface_ips::CLIENT_IP;
+    use overdrive_testing::netns::threeiface_ips::CLIENT_IP;
     let neigh_add_client = Command::new("ip")
         .args([
             "netns",

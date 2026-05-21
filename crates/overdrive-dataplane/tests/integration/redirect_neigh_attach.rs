@@ -45,7 +45,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::helpers::netns::{NetNsError, ThreeIfaceTopology};
+use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology};
 
 /// Kernel-observable name for the forward-path program. The kernel
 /// truncates BPF program names to `BPF_OBJ_NAME_LEN` = 16 (15 chars

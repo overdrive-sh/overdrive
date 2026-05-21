@@ -10,6 +10,7 @@ members = [
     "crates/overdrive-scheduler",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
+    "crates/overdrive-testing",
     "crates/overdrive-worker",
     "xtask",
 ]
@@ -28,6 +29,7 @@ default-members = [
     "crates/overdrive-scheduler",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
+    "crates/overdrive-testing",
     "crates/overdrive-worker",
     "xtask",
 ]
@@ -169,6 +171,7 @@ http-body-util    = "0.1"
 # --- Internal workspace crates -------------------------------------------
 overdrive-core        = { path = "crates/overdrive-core" }
 overdrive-store-local = { path = "crates/overdrive-store-local" }
+overdrive-testing     = { path = "crates/overdrive-testing" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn  = "deny"

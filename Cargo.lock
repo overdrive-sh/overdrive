@@ -1888,6 +1888,7 @@ dependencies = [
  "nix",
  "overdrive-core",
  "overdrive-store-local",
+ "overdrive-testing",
  "parking_lot",
  "proptest",
  "rkyv",
@@ -1966,6 +1967,10 @@ dependencies = [
  "tracing-subscriber",
  "trybuild",
 ]
+
+[[package]]
+name = "overdrive-testing"
+version = "0.0.0"
 
 [[package]]
 name = "overdrive-worker"

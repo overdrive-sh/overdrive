@@ -109,6 +109,12 @@ serde_json.workspace = true
 # drive a real `LocalIntentStore` over a `tempfile::TempDir` — the
 # canonical Phase 1 byte-level IntentStore impl per ADR-0020.
 overdrive-store-local.workspace = true
+# `overdrive-testing` — shared real-infra fixtures (`NetNs`,
+# `ThreeIfaceTopology`, `threeiface_ips`). Linux-only; consumed by
+# `tests/integration/{reverse_nat_e2e,sanity_mixed_batch,redirect_neigh_attach}.rs`.
+# See `.claude/rules/development.md` § "Shared real-infra test
+# fixtures — overdrive-testing".
+overdrive-testing.workspace     = true
 tempfile.workspace              = true
 tokio                           = { workspace = true, features = ["macros", "rt-multi-thread"] }
 hex.workspace                   = true

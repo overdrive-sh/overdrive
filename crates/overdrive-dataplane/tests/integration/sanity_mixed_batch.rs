@@ -73,10 +73,10 @@ use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::drop_counter_handle::DropCounterHandle;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
-use super::helpers::netns::{NetNsError, ThreeIfaceTopology};
 use super::helpers::packets::{
     ETH_HDR_LEN, IPV4_HDR_LEN, TCP_HDR_LEN, ipv4_header_checksum, tcp_checksum,
 };
+use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology};
 
 const PKT_LEN: usize = ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN;
 
