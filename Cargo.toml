@@ -134,9 +134,13 @@ hostname        = "0.4"
 libc            = "0.2"
 # `nix` provides safe Rust bindings to *nix syscalls. Used by
 # `overdrive-dataplane` for `if_nametoindex` (interface name → ifindex
-# resolution) per architecture.md §5 / S-2.2-03. Linux-only consumers
-# in the workspace; no portability shim needed here.
-nix             = { version = "0.29", default-features = false, features = ["net"] }
+# resolution) per architecture.md §5 / S-2.2-03, and by
+# `overdrive-worker::ExecDriver` for `setns(CLONE_NEWNET)` in the
+# `pre_exec` hook when an opt-in `netns_path` targets the spawned
+# child at a caller-managed network namespace (mirrors the CNI spec
+# model — `CNI_NETNS` — applied to native processes). Linux-only
+# consumers in the workspace; no portability shim needed here.
+nix             = { version = "0.29", default-features = false, features = ["net", "sched"] }
 # `ipnet` — IPv4/IPv6 CIDR types used by the VIP-pool allocator (ADR-0049).
 # `serde` feature gates `Deserialize` / `Serialize` impls for `Ipv4Net`,
 # used by the `[dataplane.vip_allocator]` TOML parser in

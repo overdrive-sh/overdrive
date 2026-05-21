@@ -25,6 +25,7 @@ mod integration {
         mod limit_write_failure_warns;
         mod live_map_bounded;
         mod missing_binary;
+        mod netns_entry;
         mod resize_updates_limits;
         mod resource_enforcement;
         mod start_and_running;

@@ -40,6 +40,14 @@ tokio.workspace          = true
 tracing.workspace        = true
 
 libc = { workspace = true }
+# `nix` — safe Rust bindings to *nix syscalls. Used by `ExecDriver`'s
+# opt-in `netns_path` builder to call `setns(CLONE_NEWNET)` in the
+# `pre_exec` hook so the spawned child enters a caller-managed
+# network namespace before `execve`. Mirrors the CNI spec model
+# (`CNI_NETNS`) applied to native processes. Workspace-pinned with
+# the `sched` feature per `.claude/rules/development.md`
+# § Dependencies.
+nix.workspace = true
 
 [dev-dependencies]
 overdrive-sim.path  = "../overdrive-sim"

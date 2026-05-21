@@ -1818,6 +1818,7 @@ dependencies = [
  "overdrive-host",
  "overdrive-sim",
  "overdrive-store-local",
+ "overdrive-testing",
  "overdrive-worker",
  "parking_lot",
  "proptest",
@@ -1978,6 +1979,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "libc",
+ "nix",
  "overdrive-core",
  "overdrive-sim",
  "parking_lot",
