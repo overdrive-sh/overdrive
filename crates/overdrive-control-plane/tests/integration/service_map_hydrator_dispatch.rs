@@ -63,6 +63,23 @@ impl Dataplane for FailingUpdateService {
     async fn drain_flow_events(&self) -> Result<Vec<FlowEvent>, DataplaneError> {
         Ok(Vec::new())
     }
+
+    async fn register_local_backend(
+        &self,
+        _vip: Ipv4Addr,
+        _vip_port: u16,
+        _backend: std::net::SocketAddrV4,
+    ) -> Result<(), DataplaneError> {
+        Ok(())
+    }
+
+    async fn deregister_local_backend(
+        &self,
+        _vip: Ipv4Addr,
+        _vip_port: u16,
+    ) -> Result<(), DataplaneError> {
+        Ok(())
+    }
 }
 
 fn fixed_tick() -> TickContext {

@@ -108,6 +108,7 @@ impl TestServer {
             &dataplane_config.client_iface,
             &dataplane_config.backend_iface,
             &pin_dir,
+            std::path::Path::new("/sys/fs/cgroup"),
         )
         .expect("EbpfDataplane::new_with_pin_dir");
         ebpf.probe().await.expect("EbpfDataplane probe");

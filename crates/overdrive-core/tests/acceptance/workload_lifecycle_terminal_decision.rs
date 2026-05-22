@@ -554,6 +554,12 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // makes no terminal claim by construction — the emitting
         // reconciler is the source of terminal claims, not the
         // broker dispatch surface.
-        | Action::EnqueueEvaluation { .. } => None,
+        | Action::EnqueueEvaluation { .. }
+        // ADR-0053 — RegisterLocalBackend / DeregisterLocalBackend
+        // are same-host LB primitives consumed by the
+        // cgroup_sock_addr program. They make no terminal claim
+        // — same rationale as DataplaneUpdateService above.
+        | Action::RegisterLocalBackend { .. }
+        | Action::DeregisterLocalBackend { .. } => None,
     }
 }

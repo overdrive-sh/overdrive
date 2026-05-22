@@ -65,6 +65,18 @@ pub mod write_service_backend_row;
 /// against `target` on the next convergence cycle.
 pub mod enqueue_evaluation;
 
+/// Per-arm dispatch for `Action::RegisterLocalBackend` per ADR-0053
+/// § 3. Invokes `Dataplane::register_local_backend` so the
+/// cgroup_sock_addr program rewrites subsequent
+/// `connect(vip:vip_port)` calls to the resolved backend address.
+pub mod register_local_backend;
+
+/// Per-arm dispatch for `Action::DeregisterLocalBackend` per ADR-0053
+/// § 3. Invokes `Dataplane::deregister_local_backend` to remove the
+/// LOCAL_BACKEND_MAP entry. Idempotent per the ADR-0053 § 2
+/// trait contract.
+pub mod deregister_local_backend;
+
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
 
@@ -813,6 +825,24 @@ async fn dispatch_single(
             drop(guard);
             Ok(())
         }
+        // ADR-0053 § 3 — same-host backend delivery via
+        // cgroup_sock_addr. The hydrator's classifier emits this
+        // variant for every backend whose IP matches `host_ipv4`
+        // (Phase 1 single-node: every Running alloc). The shim
+        // invokes `Dataplane::register_local_backend` which writes
+        // the LOCAL_BACKEND_MAP entry the cgroup_connect4_service
+        // program reads on every connect(2). No observation row
+        // dispatch — the cgroup hook is not an HTTP-call surface.
+        action @ Action::RegisterLocalBackend { .. } => {
+            register_local_backend::dispatch(&action, dataplane).await.map_err(ShimError::from)?;
+            Ok(())
+        }
+        action @ Action::DeregisterLocalBackend { .. } => {
+            deregister_local_backend::dispatch(&action, dataplane)
+                .await
+                .map_err(ShimError::from)?;
+            Ok(())
+        }
     }
 }
 
@@ -866,4 +896,12 @@ pub enum ShimError {
         #[from]
         source: PersistentAllocatorError,
     },
+    /// `register_local_backend` shim dispatch failed (ADR-0053 § 3).
+    /// Pass-through `#[from]` preserves the typed
+    /// `DataplaneError::LocalBackendInsert` cause.
+    #[error("register_local_backend dispatch failed")]
+    RegisterLocalBackend(#[from] register_local_backend::RegisterLocalBackendDispatchError),
+    /// `deregister_local_backend` shim dispatch failed (ADR-0053 § 3).
+    #[error("deregister_local_backend dispatch failed")]
+    DeregisterLocalBackend(#[from] deregister_local_backend::DeregisterLocalBackendDispatchError),
 }

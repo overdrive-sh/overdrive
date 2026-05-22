@@ -51,7 +51,7 @@ async fn production_boot_registers_both_bridge_and_hydrator() {
         .register(backend_discovery_bridge(host_ipv4, node_id))
         .await
         .expect("register backend-discovery-bridge");
-    runtime.register(service_map_hydrator()).await.expect("register service-map-hydrator");
+    runtime.register(service_map_hydrator(host_ipv4)).await.expect("register service-map-hydrator");
 
     let registered_names: Vec<String> =
         runtime.registered().into_iter().map(|n| n.as_str().to_owned()).collect();

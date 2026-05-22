@@ -72,7 +72,7 @@ fn make_tick(now_secs: u64) -> TickContext {
 
 #[test]
 fn dispatch_when_actual_pending_and_desired_present() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -95,7 +95,7 @@ fn dispatch_when_actual_pending_and_desired_present() {
 
 #[test]
 fn no_dispatch_when_actual_completed_matches_desired_fingerprint() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -125,7 +125,7 @@ fn no_dispatch_when_actual_completed_matches_desired_fingerprint() {
 
 #[test]
 fn dispatch_when_actual_completed_on_different_fingerprint() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -146,7 +146,7 @@ fn dispatch_when_actual_completed_on_different_fingerprint() {
 
 #[test]
 fn no_dispatch_when_failed_same_fingerprint_within_backoff() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -179,7 +179,7 @@ fn no_dispatch_when_failed_same_fingerprint_within_backoff() {
 
 #[test]
 fn dispatch_when_failed_same_fingerprint_after_backoff_elapsed() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -212,7 +212,7 @@ fn dispatch_when_failed_same_fingerprint_after_backoff_elapsed() {
 
 #[test]
 fn dispatch_when_failed_different_fingerprint_ignores_backoff() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -247,7 +247,7 @@ fn dispatch_when_failed_different_fingerprint_ignores_backoff() {
 
 #[test]
 fn gc_drops_retry_memory_for_services_no_longer_in_desired() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let alive_id = make_service_id(1);
     let dead_id = make_service_id(2);
     let mut desired = BTreeMap::new();
@@ -271,7 +271,7 @@ fn gc_drops_retry_memory_for_services_no_longer_in_desired() {
 
 #[test]
 fn iteration_order_is_btreemap_deterministic() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s1 = make_service_id(1);
     let s2 = make_service_id(2);
     let mut desired = BTreeMap::new();

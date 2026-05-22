@@ -797,6 +797,70 @@ pub enum Action {
         /// bridge → hydrator handoff).
         target: TargetResource,
     },
+
+    // -----------------------------------------------------------------
+    // ADR-0053 — same-host backend delivery via cgroup_sock_addr
+    // connect-time destination rewrite.
+    //
+    // Emitted by `ServiceMapHydrator::reconcile` for every backend
+    // whose IP matches the host's primary IPv4 (Phase 1 single-node:
+    // every Running alloc on this node). The action shim dispatches
+    // to `Dataplane::register_local_backend` which writes the
+    // (VIP, port) → (backend_ip, backend_port) entry into the
+    // kernel-side `LOCAL_BACKEND_MAP` consumed by the
+    // `cgroup_connect4_service` BPF program.
+    //
+    // Parallel to (not a replacement for)
+    // `Action::DataplaneUpdateService`: the XDP wire-boundary path
+    // remains for Phase 2+ remote backends. Phase 1 single-node
+    // emits this variant only; the XDP path receives no calls.
+    // -----------------------------------------------------------------
+    /// Register the local backend for `(vip, vip_port)`. Emitted by
+    /// `ServiceMapHydrator` for backends that classify as local
+    /// (`backend.addr.ip() == host_ipv4`). The action shim dispatches
+    /// via [`crate::traits::dataplane::Dataplane::register_local_backend`].
+    RegisterLocalBackend {
+        /// Identity of the service whose backend is being registered.
+        service_id: crate::id::ServiceId,
+        /// Virtual IP issued by `ServiceVipAllocator` (ADR-0049).
+        /// `Ipv4Addr` rather than `ServiceVip` per the parallel with
+        /// `DataplaneUpdateService.vip` — IPv6 VIPs are out of scope
+        /// for the cgroup path per ADR-0053 § 1.
+        vip: std::net::Ipv4Addr,
+        /// VIP port the listener accepts on. Phase 1 Service spec
+        /// ships a single TCP listener per Service per
+        /// architecture.md § 6; the hydrator passes the port
+        /// straight from the backend's `addr.port()`.
+        vip_port: u16,
+        /// Resolved local backend `(IPv4, port)`. The cgroup program
+        /// rewrites `connect(vip:vip_port)` calls inside the attached
+        /// cgroup to this address.
+        backend: std::net::SocketAddrV4,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "service-map-hydrator/<service_id>",
+        ///   spec_hash = ContentHash::of(fingerprint),
+        ///   purpose = "register-local-backend")`.
+        correlation: CorrelationKey,
+    },
+
+    /// Deregister the local backend for `(vip, vip_port)`. Emitted
+    /// when the service's backend set transitions to empty or the
+    /// previously-registered local backend is removed.
+    DeregisterLocalBackend {
+        /// Identity of the service whose backend is being removed.
+        service_id: crate::id::ServiceId,
+        /// VIP whose entry to remove.
+        vip: std::net::Ipv4Addr,
+        /// VIP port whose entry to remove.
+        vip_port: u16,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "service-map-hydrator/<service_id>",
+        ///   spec_hash = ContentHash::of(fingerprint),
+        ///   purpose = "deregister-local-backend")`.
+        correlation: CorrelationKey,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.
@@ -2342,27 +2406,53 @@ pub struct ServiceMapHydratorView {
 /// confirmed-applied fingerprint.
 pub struct ServiceMapHydrator {
     name: ReconcilerName,
+    /// Host's primary IPv4 — the classifier input per ADR-0053 § 4.
+    /// Every backend whose `addr.ip()` matches this value classifies
+    /// as local and routes through the cgroup_sock_addr path
+    /// (`Action::RegisterLocalBackend`); every other backend
+    /// classifies as remote and routes through the XDP wire-boundary
+    /// path (`Action::DataplaneUpdateService`).
+    ///
+    /// Phase 1 single-node: every Running alloc on this node has
+    /// `backend.addr.ip() == host_ipv4`, so the classifier
+    /// uniformly emits `RegisterLocalBackend`. Phase 2+ multi-host
+    /// scenarios produce mixed local + remote backend sets.
+    ///
+    /// `Ipv4Addr` rather than `IpAddr` — Phase 1 VIP allocator is
+    /// IPv4-only per ADR-0049; the trait method
+    /// `register_local_backend` takes `Ipv4Addr` per ADR-0053 § 2.
+    host_ipv4: std::net::Ipv4Addr,
 }
 
 impl ServiceMapHydrator {
     /// Construct the canonical `service-map-hydrator` instance.
+    ///
+    /// # Preconditions
+    ///
+    /// `host_ipv4` MUST be the same value
+    /// `BackendDiscoveryBridge` was constructed with — the bridge
+    /// writes `ServiceBackendRow` entries whose `addr.ip()` equals
+    /// `host_ipv4` for every same-host Running alloc, and the
+    /// hydrator's classifier compares against this same value.
+    /// Mismatch silently misclassifies every backend (Phase 1 sees
+    /// "every backend remote" if `host_ipv4` is wrong).
     ///
     /// # Panics
     ///
     /// Never — `Self::NAME` is a compile-time string literal
     /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
-    pub fn canonical() -> Self {
+    pub fn canonical(host_ipv4: std::net::Ipv4Addr) -> Self {
         #[allow(clippy::expect_used)]
         let name = ReconcilerName::new(<Self as Reconciler>::NAME)
             .expect("'service-map-hydrator' is a valid ReconcilerName by construction");
-        Self { name }
+        Self { name, host_ipv4 }
     }
-}
 
-impl Default for ServiceMapHydrator {
-    fn default() -> Self {
-        Self::canonical()
+    /// The host IPv4 the classifier compares backends against.
+    #[must_use]
+    pub const fn host_ipv4(&self) -> std::net::Ipv4Addr {
+        self.host_ipv4
     }
 }
 
@@ -2402,14 +2492,91 @@ impl Reconciler for ServiceMapHydrator {
             if need_dispatch {
                 let target_str = format!("service-map-hydrator/{service_id}");
                 let spec_hash = ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
-                let correlation = CorrelationKey::derive(&target_str, &spec_hash, "update-service");
 
-                actions.push(Action::DataplaneUpdateService {
-                    service_id: *service_id,
-                    vip: desired_svc.vip,
-                    backends: desired_svc.backends.clone(),
-                    correlation,
-                });
+                // ADR-0053 § 4 — per-backend Local-vs-Remote
+                // classification. Phase 1 single-node: every
+                // backend on a Running alloc has
+                // `addr.ip() == self.host_ipv4` and routes through
+                // the cgroup_sock_addr path. Phase 2+ multi-host
+                // scenarios produce mixed sets; the hydrator emits
+                // both variants concurrently.
+                let host_ipv4 = self.host_ipv4;
+                let vip_v4 = match desired_svc.vip.get() {
+                    std::net::IpAddr::V4(v4) => v4,
+                    // IPv6 VIPs are out of scope for the cgroup
+                    // path per ADR-0053 § 1. Phase 1 VIP allocator
+                    // is IPv4-only (ADR-0049) so this branch is
+                    // unreachable in practice; if a future IPv6
+                    // VIP slips through, the XDP path's existing
+                    // IPv6Unsupported handling catches it.
+                    std::net::IpAddr::V6(_) => {
+                        actions.push(Action::DataplaneUpdateService {
+                            service_id: *service_id,
+                            vip: desired_svc.vip,
+                            backends: desired_svc.backends.clone(),
+                            correlation: CorrelationKey::derive(
+                                &target_str,
+                                &spec_hash,
+                                "update-service",
+                            ),
+                        });
+                        let entry = next_view.retries.entry(*service_id).or_default();
+                        entry.attempts = entry.attempts.saturating_add(1);
+                        entry.last_failure_seen_at = tick.now_unix;
+                        entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
+                        continue;
+                    }
+                };
+
+                let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
+                    desired_svc.backends.iter().partition(|b| match b.addr.ip() {
+                        std::net::IpAddr::V4(v4) => v4 == host_ipv4,
+                        std::net::IpAddr::V6(_) => false,
+                    });
+
+                let remote_is_empty = remote.is_empty();
+                let local_is_empty = local.is_empty();
+
+                if !remote_is_empty {
+                    actions.push(Action::DataplaneUpdateService {
+                        service_id: *service_id,
+                        vip: desired_svc.vip,
+                        backends: remote.into_iter().cloned().collect(),
+                        correlation: CorrelationKey::derive(
+                            &target_str,
+                            &spec_hash,
+                            "update-service",
+                        ),
+                    });
+                }
+
+                for backend in &local {
+                    let backend_v4 = match backend.addr {
+                        std::net::SocketAddr::V4(s4) => s4,
+                        // partition above filters IPv6, so this is
+                        // unreachable, but the type system requires
+                        // an exhaustive match.
+                        std::net::SocketAddr::V6(_) => continue,
+                    };
+                    actions.push(Action::RegisterLocalBackend {
+                        service_id: *service_id,
+                        vip: vip_v4,
+                        vip_port: backend.addr.port(),
+                        backend: backend_v4,
+                        correlation: CorrelationKey::derive(
+                            &target_str,
+                            &spec_hash,
+                            "register-local-backend",
+                        ),
+                    });
+                }
+
+                // Empty-set transition: when the desired set is
+                // empty, no actions are emitted; the hydrator only
+                // sees a service in `desired` when it has at least
+                // one backend. The next tick may produce a
+                // registration once the backend set populates.
+                let _ = (local_is_empty, remote_is_empty);
 
                 // Bump retry memory — record *inputs* per
                 // `.claude/rules/development.md` § "Persist inputs,

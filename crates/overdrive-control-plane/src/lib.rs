@@ -384,6 +384,18 @@ pub struct ServerConfig {
     /// field exists only for test isolation.
     pub dataplane_pin_dir: Option<PathBuf>,
 
+    /// Optional override for the cgroup the `cgroup_connect4_service`
+    /// program attaches to per ADR-0053 § 7. `None` (the production
+    /// default) means
+    /// `overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH` =
+    /// `/sys/fs/cgroup/overdrive.slice` — the slice
+    /// `crates/overdrive-worker/src/cgroup_manager.rs` already
+    /// manages. Tests may inject a per-test tempdir under
+    /// `/sys/fs/cgroup/<name>` to avoid cross-test attachment
+    /// collisions when multiple integration tests boot the server
+    /// concurrently inside Lima.
+    pub dataplane_cgroup_attach_path: Option<PathBuf>,
+
     /// Optional injected [`Dataplane`] adapter — for tests whose
     /// subject under test is NOT the dataplane attach path. When
     /// `Some(_)`, the boot path uses this adapter and SKIPS
@@ -450,6 +462,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("vip_range", &"<VipRange>")
             .field("dataplane", &self.dataplane)
             .field("dataplane_pin_dir", &self.dataplane_pin_dir)
+            .field("dataplane_cgroup_attach_path", &self.dataplane_cgroup_attach_path)
             .field(
                 "dataplane_override",
                 &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
@@ -496,6 +509,10 @@ impl Default for ServerConfig {
             // (`/sys/fs/bpf/overdrive`). Tests override to a per-test
             // tempdir for SERVICE_MAP pin isolation.
             dataplane_pin_dir: None,
+            // ADR-0053 § 7: `None` means production default
+            // (`/sys/fs/cgroup/overdrive.slice`). Tests inject a
+            // per-test cgroup path for attachment isolation.
+            dataplane_cgroup_attach_path: None,
             // Step 02-02: `None` means production default
             // (construct `EbpfDataplane` from the `[dataplane]`
             // section). Tests that exercise unrelated subsystems
@@ -862,15 +879,23 @@ pub async fn run_server_with_obs_and_driver(
         if let Some(overridden) = config.dataplane_override.clone() {
             overridden
         } else {
+            // ADR-0053 § 7: resolve cgroup_attach_path with the
+            // production default when unset.
+            let cgroup_attach_path: std::path::PathBuf =
+                config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
+                    std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
+                });
             #[allow(unused_mut)] // mut needed only under cfg(test|integration-tests)
             let mut ebpf_dataplane = config
                 .dataplane_pin_dir
                 .as_deref()
                 .map_or_else(
                     || {
-                        overdrive_dataplane::EbpfDataplane::new(
+                        overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
                             &dataplane_cfg.client_iface,
                             &dataplane_cfg.backend_iface,
+                            std::path::Path::new(overdrive_dataplane::DEFAULT_PIN_DIR),
+                            cgroup_attach_path.as_path(),
                         )
                     },
                     |pin_dir| {
@@ -878,6 +903,7 @@ pub async fn run_server_with_obs_and_driver(
                             &dataplane_cfg.client_iface,
                             &dataplane_cfg.backend_iface,
                             pin_dir,
+                            cgroup_attach_path.as_path(),
                         )
                     },
                 )
@@ -966,7 +992,7 @@ pub async fn run_server_with_obs_and_driver(
     // `Action::EnqueueEvaluation { reconciler: "service-map-hydrator",
     // .. }` resolves against a registered reconciler when the
     // broker first drains.
-    runtime.register(service_map_hydrator()).await?;
+    runtime.register(service_map_hydrator(host_ipv4)).await?;
     let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
@@ -1232,8 +1258,10 @@ pub fn backend_discovery_bridge(
 /// for `cluster_status`'s deterministic registration listing; the
 /// runtime registers idempotently regardless of order.
 #[must_use]
-pub fn service_map_hydrator() -> overdrive_core::reconciler::AnyReconciler {
+pub fn service_map_hydrator(
+    host_ipv4: std::net::Ipv4Addr,
+) -> overdrive_core::reconciler::AnyReconciler {
     use overdrive_core::reconciler::{AnyReconciler, ServiceMapHydrator};
 
-    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical())
+    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4))
 }

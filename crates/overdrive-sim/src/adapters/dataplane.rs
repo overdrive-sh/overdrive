@@ -36,7 +36,7 @@
 //! `ReverseNatLockstep` invariant pins this at PR time.
 
 use std::collections::{BTreeMap, HashMap};
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -93,6 +93,13 @@ pub struct SimDataplane {
     /// helper in `overdrive_core::dataplane` handles the production
     /// userspace sum.
     drop_counter: Mutex<[u64; DropClass::VARIANT_COUNT as usize]>,
+    /// `LOCAL_BACKEND_MAP` mirror per ADR-0053 § 1. Single
+    /// `(vip, vip_port) → backend` map populated by
+    /// `register_local_backend` / `deregister_local_backend`.
+    /// `BTreeMap` per `.claude/rules/development.md` §
+    /// "Ordered-collection choice" — DST observers walk the
+    /// map and require deterministic iteration order.
+    local_backends: Mutex<BTreeMap<(Ipv4Addr, u16), SocketAddrV4>>,
 }
 
 impl SimDataplane {
@@ -104,7 +111,34 @@ impl SimDataplane {
             state: Mutex::new(ServiceState::new()),
             flow_events: Mutex::new(Vec::new()),
             drop_counter: Mutex::new([0_u64; DropClass::VARIANT_COUNT as usize]),
+            local_backends: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Read the locally-registered backend for `(vip, vip_port)`, if
+    /// any. Mirrors the production `EbpfDataplane`'s
+    /// `local_backend_for(vip, port)` accessor — DST harnesses read
+    /// this to assert on the ADR-0053 § 2 trait contract's
+    /// observable invariants without loading a real kernel.
+    ///
+    /// Not part of the `Dataplane` trait — this accessor is for
+    /// tests and DST invariant evaluators.
+    #[must_use]
+    pub fn local_backend_for(&self, vip: Ipv4Addr, vip_port: u16) -> Option<SocketAddrV4> {
+        self.local_backends.lock().get(&(vip, vip_port)).copied()
+    }
+
+    /// Snapshot every `(vip, port, backend)` triple currently in the
+    /// local-backend mirror, in `Ord` order on `(Ipv4Addr, u16)`.
+    /// Iteration order is a function of the keys (`BTreeMap`
+    /// invariant), never of insertion history — the property DST
+    /// seed reproducibility relies on.
+    ///
+    /// Not part of the `Dataplane` trait — this accessor is for
+    /// DST invariant evaluators that walk the entire map.
+    #[must_use]
+    pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, SocketAddrV4)> {
+        self.local_backends.lock().iter().map(|(&(v, p), &b)| (v, p, b)).collect()
     }
 
     /// Record a kernel-side drop event for `class`. Increments the
@@ -307,5 +341,30 @@ impl Dataplane for SimDataplane {
 
     async fn drain_flow_events(&self) -> Result<Vec<FlowEvent>, DataplaneError> {
         Ok(std::mem::take(&mut *self.flow_events.lock()))
+    }
+
+    async fn register_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        backend: SocketAddrV4,
+    ) -> Result<(), DataplaneError> {
+        // Single-map point write per ADR-0053 § 2 — overwrites any
+        // pre-existing entry for `(vip, vip_port)` atomically (the
+        // mutex acquisition IS the atomicity boundary; observers see
+        // either the prior backend or the new one, never a mix).
+        self.local_backends.lock().insert((vip, vip_port), backend);
+        Ok(())
+    }
+
+    async fn deregister_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+    ) -> Result<(), DataplaneError> {
+        // Idempotent per ADR-0053 § 2 — removing an entry that does
+        // not exist is `Ok(())`, never `KeyNotFound`.
+        self.local_backends.lock().remove(&(vip, vip_port));
+        Ok(())
     }
 }

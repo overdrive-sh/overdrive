@@ -150,7 +150,9 @@ fn dispatch_routes_service_map_hydrator_triple_to_hydrator_view() {
     // `AnyReconcilerView::ServiceMapHydrator(_)`. Mutant (delete arm):
     // wildcard panic. Closes the missed mutation flagged at line
     // 965 by the QUALITY_GATE wave's mutation run.
-    let any = AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical());
+    let any = AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+    ));
     let now = Instant::now();
     let tick = TickContext {
         now,

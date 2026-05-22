@@ -102,6 +102,7 @@ fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
 // -----------------------------------------------------------------------
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn submitted_job_reaches_running_via_real_server_boot() {
     let temp = TempDir::new().expect("tempdir");
     let data_dir = temp.path().join("data");
@@ -140,6 +141,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // through `EbpfDataplane::new` on Linux unless overridden via
         // `dataplane_override` below.
         dataplane_pin_dir: None,
+        dataplane_cgroup_attach_path: None,
         // Step 02-02 — inject `SimDataplane` per architecture.md § 4.7
         // so this test's subject-under-test (the convergence-loop
         // tokio::spawn shape) does not pay the CAP_NET_ADMIN / CAP_BPF

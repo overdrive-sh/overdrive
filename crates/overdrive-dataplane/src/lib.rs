@@ -64,12 +64,14 @@ use overdrive_core::traits::dataplane::{
 const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"));
 
 /// Production bpffs pin directory for SERVICE_MAP and any future
-/// HoM-shaped maps. The kernel-side declaration carries
-/// `pinning = ByName`; aya's loader joins this directory + the map
-/// name when resolving the pre-pinned FD via `BPF_OBJ_GET`. See
+/// HoM-shaped maps.
+///
+/// The kernel-side declaration carries `pinning = ByName`; aya's
+/// loader joins this directory + the map name when resolving the
+/// pre-pinned FD via `BPF_OBJ_GET`. See
 /// `.claude/rules/development.md` § "Sharing the outer HoM between
 /// userspace and the kernel-side ELF — `pinning = ByName`".
-const DEFAULT_PIN_DIR: &str = "/sys/fs/bpf/overdrive";
+pub const DEFAULT_PIN_DIR: &str = "/sys/fs/bpf/overdrive";
 
 /// SERVICE_MAP outer-map name. MUST match the `#[map]` `export_name`
 /// emitted from `crates/overdrive-bpf/src/maps/service_map.rs` —
@@ -86,6 +88,20 @@ const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
 /// (Slice 05-04: promoted from in-memory placeholder per
 /// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`).
 const REVERSE_NAT_MAP_NAME: &str = "REVERSE_NAT_MAP";
+
+/// LOCAL_BACKEND_MAP name per ADR-0053 § 1 — regular HASH map keyed
+/// on `LocalServiceKey { vip_host, port_host, _pad }` →
+/// `LocalBackendEntry { backend_ip_host, backend_port_host, _pad }`.
+/// aya supports HASH natively.
+const LOCAL_BACKEND_MAP_NAME: &str = "LOCAL_BACKEND_MAP";
+
+/// Default cgroup attach path for `cgroup_connect4_service` per
+/// ADR-0053 § 7.
+///
+/// Must be an ancestor of the control-plane process AND every
+/// workload cgroup. Matches the slice that
+/// `crates/overdrive-worker/src/cgroup_manager.rs` already manages.
+pub const DEFAULT_CGROUP_ATTACH_PATH: &str = "/sys/fs/cgroup/overdrive.slice";
 
 /// SERVICE_MAP outer-map capacity in services. 4096 per
 /// architecture.md § 10. MUST match the kernel-side
@@ -232,6 +248,26 @@ pub struct EbpfDataplane {
     #[allow(dead_code)]
     _xdp_reverse_link: aya::programs::xdp::XdpLinkId,
 
+    /// Userspace handle to LOCAL_BACKEND_MAP per ADR-0053 § 1.
+    /// Populated by `register_local_backend` /
+    /// `deregister_local_backend`; the
+    /// `cgroup_connect4_service` kernel program reads it on every
+    /// `connect(2)` from a process inside the attach cgroup.
+    local_backend_map: crate::maps::local_backend_map_handle::LocalBackendMapHandle,
+
+    /// Owns the `cgroup_connect4_service` cgroup_sock_addr
+    /// attachment. Dropping detaches the program per ADR-0053
+    /// § "Consequences" — Reliability — recoverability.
+    #[allow(dead_code)]
+    _cgroup_connect4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
+
+    /// Attach path the `cgroup_connect4_service` program is bound
+    /// to. Retained for the operator-surfaced
+    /// `DataplaneError::LocalBackendProbe` error message context
+    /// per ADR-0053 § 6.
+    #[allow(dead_code)]
+    cgroup_attach_path: std::path::PathBuf,
+
     /// Test-only failure-injection seam for [`Self::probe`]. When
     /// `Some(fault)`, `probe()` short-circuits to `Err(fault.clone())`
     /// BEFORE touching `BACKEND_MAP`. The seam is gated behind
@@ -276,13 +312,17 @@ impl EbpfDataplane {
         client_iface: &str,
         backend_iface: &str,
         pin_dir: &std::path::Path,
+        cgroup_attach_path: &std::path::Path,
     ) -> Result<Self, DataplaneError> {
-        use aya::programs::{Xdp, XdpFlags};
+        use aya::programs::{CgroupAttachMode, CgroupSockAddr, Xdp, XdpFlags};
         use nix::errno::Errno;
         use nix::net::if_::if_nametoindex;
 
         use crate::maps::hash_of_maps::HashOfMapsHandle;
-        use crate::maps::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};
+        use crate::maps::local_backend_map_handle::LocalBackendMapHandle;
+        use crate::maps::{
+            BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
+        };
 
         // Resolve both iface names → ifindexes. ENODEV / ENOENT map
         // to the typed IfaceNotFound variant. Both ifaces are
@@ -497,6 +537,59 @@ impl EbpfDataplane {
             }
         };
 
+        // ADR-0053 § 1 — recover LOCAL_BACKEND_MAP typed handle.
+        // Regular HASH; aya supports it natively. The kernel
+        // `#[map]` declaration in
+        // `crates/overdrive-bpf/src/maps/local_backend_map.rs` is
+        // what makes this map present in the loaded ELF.
+        let local_backend_map_inner =
+            aya::maps::HashMap::<_, LocalServiceKey, LocalBackendEntry>::try_from(
+                bpf.take_map(LOCAL_BACKEND_MAP_NAME).ok_or_else(|| {
+                    DataplaneError::LoadFailed("LOCAL_BACKEND_MAP not found in BPF object".into())
+                })?,
+            )
+            .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP try_from: {e}")))?;
+        let local_backend_map = LocalBackendMapHandle::new(local_backend_map_inner);
+
+        // ADR-0053 § 1 — load + attach cgroup_connect4_service.
+        // Open the cgroup directory FD (read-only is sufficient;
+        // aya's `attach` passes it through to
+        // `bpf_link_create(LinkTarget::Fd(cgroup_fd))`). The
+        // operator-supplied cgroup_attach_path MUST exist and be
+        // an ancestor of every workload cgroup per ADR-0053 § 7.
+        let cgroup_file = std::fs::File::open(cgroup_attach_path).map_err(|e| {
+            DataplaneError::LoadFailed(format!(
+                "open cgroup_attach_path {}: {e}",
+                cgroup_attach_path.display()
+            ))
+        })?;
+
+        let cgroup_prog: &mut CgroupSockAddr = bpf
+            .program_mut("cgroup_connect4_service")
+            .ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "cgroup_connect4_service program not found in BPF object".into(),
+                )
+            })?
+            .try_into()
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("cgroup_connect4_service program type: {e}"))
+            })?;
+        // aya recovers the attach type from the kernel-side
+        // `link_section = "cgroup/connect4"` emitted by the
+        // `#[cgroup_sock_addr(connect4)]` macro; no additional
+        // pinning here.
+        cgroup_prog.load().map_err(|e| {
+            DataplaneError::LoadFailed(format!("cgroup_connect4_service.load: {e}"))
+        })?;
+        let cgroup_link_id =
+            cgroup_prog.attach(&cgroup_file, CgroupAttachMode::Single).map_err(|e| {
+                DataplaneError::LoadFailed(format!(
+                    "cgroup_connect4_service.attach({}): {e}",
+                    cgroup_attach_path.display()
+                ))
+            })?;
+
         Ok(Self {
             bpf,
             service_map,
@@ -508,6 +601,9 @@ impl EbpfDataplane {
             pin_dir: pin_dir.to_path_buf(),
             _xdp_forward_link: xdp_forward_link,
             _xdp_reverse_link: xdp_reverse_link,
+            local_backend_map,
+            _cgroup_connect4_link: cgroup_link_id,
+            cgroup_attach_path: cgroup_attach_path.to_path_buf(),
             #[cfg(any(test, feature = "integration-tests"))]
             probe_fault: parking_lot::Mutex::new(None),
         })
@@ -522,7 +618,12 @@ impl EbpfDataplane {
     /// ingress) and `backend_iface` (reverse-path;
     /// `xdp_reverse_nat_lookup` ingress).
     pub fn new(client_iface: &str, backend_iface: &str) -> Result<Self, DataplaneError> {
-        Self::new_with_pin_dir(client_iface, backend_iface, std::path::Path::new(DEFAULT_PIN_DIR))
+        Self::new_with_pin_dir(
+            client_iface,
+            backend_iface,
+            std::path::Path::new(DEFAULT_PIN_DIR),
+            std::path::Path::new(DEFAULT_CGROUP_ATTACH_PATH),
+        )
     }
 
     /// Number of entries currently in REVERSE_NAT_MAP.
@@ -843,7 +944,77 @@ impl EbpfDataplane {
             .remove(&SENTINEL_BACKEND_ID)
             .map_err(|e| DataplaneError::LoadFailed(format!("probe: BACKEND_MAP delete: {e}")))?;
 
+        // ADR-0053 § 6 — Earned-Trust probe extension. Sentinel
+        // round-trip against LOCAL_BACKEND_MAP confirms the cgroup
+        // hook attached AND the map is programmable end-to-end.
+        // Sentinel: (vip=0.0.0.0, vip_port=0) → (backend=0.0.0.0:0).
+        // The sentinel is reserved per the typed-handle convention;
+        // production allocator-issued VIPs never use 0.0.0.0.
+        let sentinel_vip = Ipv4Addr::UNSPECIFIED;
+        let sentinel_vip_port: u16 = 0;
+        let sentinel_backend = std::net::SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+
+        self.local_backend_map.upsert(sentinel_vip, sentinel_vip_port, sentinel_backend).map_err(
+            |e| DataplaneError::LocalBackendProbe {
+                message: format!("LOCAL_BACKEND_MAP sentinel insert: {e}"),
+            },
+        )?;
+
+        let got = self.local_backend_map.get(sentinel_vip, sentinel_vip_port).map_err(|e| {
+            DataplaneError::LocalBackendProbe {
+                message: format!("LOCAL_BACKEND_MAP sentinel get: {e}"),
+            }
+        })?;
+        if got.is_none() {
+            return Err(DataplaneError::LocalBackendProbe {
+                message: "LOCAL_BACKEND_MAP sentinel round-trip missed: got None".to_string(),
+            });
+        }
+
+        self.local_backend_map.remove(sentinel_vip, sentinel_vip_port).map_err(|e| {
+            DataplaneError::LocalBackendProbe {
+                message: format!("LOCAL_BACKEND_MAP sentinel delete: {e}"),
+            }
+        })?;
+
         Ok(())
+    }
+
+    /// Public read-back surface for `LOCAL_BACKEND_MAP` — used by
+    /// the walking-skeleton test to assert the cgroup_sock_addr
+    /// path was populated. Mirrors the existing
+    /// [`Self::backend_map_entries`] inspector shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] when the underlying
+    /// map iteration fails.
+    pub fn local_backend_map_entries(
+        &self,
+    ) -> Result<Vec<(crate::maps::LocalServiceKey, crate::maps::LocalBackendEntry)>, DataplaneError>
+    {
+        self.local_backend_map
+            .entries()
+            .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP iter: {e}")))
+    }
+
+    /// Returns the LOCAL_BACKEND_MAP entry for `(vip, vip_port)`,
+    /// if any. Used by the walking-skeleton test to assert the
+    /// cgroup path was populated by the hydrator's
+    /// `Action::RegisterLocalBackend` dispatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] on lookup failure
+    /// other than `KeyNotFound` (which surfaces as `Ok(None)`).
+    pub fn local_backend_for(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+    ) -> Result<Option<crate::maps::LocalBackendEntry>, DataplaneError> {
+        self.local_backend_map
+            .get(vip, vip_port)
+            .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP get: {e}")))
     }
 
     /// Test-only seam: arm the probe-fault. The next call to
@@ -1384,6 +1555,37 @@ impl Dataplane for EbpfDataplane {
     /// see #27 (telemetry `ringbuf`)
     async fn drain_flow_events(&self) -> Result<Vec<FlowEvent>, DataplaneError> {
         Ok(vec![])
+    }
+
+    /// ADR-0053 § 2 — register or replace the local backend for
+    /// `(vip, vip_port)`. Point write against LOCAL_BACKEND_MAP via
+    /// the typed handle; kernel sees either the prior backend or
+    /// the new one — no torn states.
+    async fn register_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        backend: std::net::SocketAddrV4,
+    ) -> Result<(), DataplaneError> {
+        self.local_backend_map.upsert(vip, vip_port, backend).map_err(|e| {
+            DataplaneError::LocalBackendInsert {
+                source: std::io::Error::other(format!("aya HashMap::insert: {e}")),
+            }
+        })
+    }
+
+    /// ADR-0053 § 2 — idempotent removal. KeyNotFound is swallowed
+    /// inside the typed handle per the trait contract.
+    async fn deregister_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+    ) -> Result<(), DataplaneError> {
+        self.local_backend_map.remove(vip, vip_port).map_err(|e| {
+            DataplaneError::LocalBackendDelete {
+                source: std::io::Error::other(format!("aya HashMap::remove: {e}")),
+            }
+        })
     }
 }
 
