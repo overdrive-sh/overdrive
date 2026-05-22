@@ -186,8 +186,50 @@ pub mod wire {
     // SAFETY: repr(C), no padding-uninit issues (we always zero
     // `_pad`); aya needs the marker for raw map access.
     unsafe impl aya::Pod for VipPod {}
+
+    /// `LOCAL_BACKEND_MAP` outer-key POD per ADR-0053 § 1.
+    ///
+    /// 8-byte host-order tuple `(vip, vip_port, _pad)`. Matches
+    /// `crates/overdrive-bpf/src/maps/local_backend_map.rs`'s
+    /// kernel `LocalServiceKey` byte-for-byte.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[repr(C)]
+    pub struct LocalServiceKey {
+        /// VIP IPv4, host-order. `u32::from(Ipv4Addr::new(a, b, c, d))`.
+        pub vip_host: u32,
+        /// VIP port, host-order.
+        pub port_host: u16,
+        /// Padding to 8-byte alignment. Always zero.
+        pub _pad: u16,
+    }
+
+    // SAFETY: repr(C), `_pad` always 0, all fields fully
+    // byte-addressable. aya requires the marker for raw map access.
+    unsafe impl aya::Pod for LocalServiceKey {}
+
+    /// `LOCAL_BACKEND_MAP` outer-value POD per ADR-0053 § 1.
+    /// 8-byte host-order tuple `(backend_ip, backend_port, _pad)`.
+    /// Matches kernel `LocalBackendEntry` byte-for-byte.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(C)]
+    pub struct LocalBackendEntry {
+        /// Backend IPv4, host-order.
+        pub backend_ip_host: u32,
+        /// Backend port, host-order.
+        pub backend_port_host: u16,
+        /// Padding for 8-byte alignment. Always zero.
+        pub _pad: u16,
+    }
+
+    // SAFETY: same as LocalServiceKey.
+    unsafe impl aya::Pod for LocalBackendEntry {}
 }
 
 // Re-export at the crate-public level for `EbpfDataplane` field
 // naming and the integration tests.
-pub use wire::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};
+pub use wire::{
+    BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
+};
+
+// Typed userspace handle for `LOCAL_BACKEND_MAP` per ADR-0053 § 1.
+pub mod local_backend_map_handle;

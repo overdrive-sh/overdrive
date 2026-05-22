@@ -14,6 +14,7 @@
 pub mod backend_map;
 pub mod drop_counter;
 pub mod hash_of_maps;
+pub mod local_backend_map;
 pub mod maglev_map;
 pub mod reverse_nat_map;
 pub mod service_map;

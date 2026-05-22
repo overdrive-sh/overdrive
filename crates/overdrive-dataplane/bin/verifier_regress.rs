@@ -158,7 +158,10 @@ fn measure(
 ) -> Result<Vec<MeasuredRecord>> {
     use std::path::Path;
 
-    use aya::{EbpfLoader, programs::Xdp};
+    use aya::{
+        EbpfLoader,
+        programs::{CgroupSockAddr, Xdp},
+    };
     use overdrive_dataplane::maps::ServiceKey;
     use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
@@ -204,22 +207,44 @@ fn measure(
                 baseline.program,
             )
         })?;
-        // All baselined programs are XDP today. If/when TC programs
-        // ship a baseline, extend with a SchedClassifier branch (or
-        // dispatch on the ProgramSection) — the verified-insn read
-        // is identical across program types.
-        let xdp: &mut Xdp = program
-            .try_into()
-            .wrap_err_with(|| format!("program `{}` is not an XDP program", baseline.program))?;
-        xdp.load().wrap_err_with(|| format!("xdp.load() for `{}`", baseline.program))?;
-        let info = xdp.info().wrap_err_with(|| format!("xdp.info() for `{}`", baseline.program))?;
-        let insns = info.verified_instruction_count().ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "kernel did not report verified_instruction_count for `{}`; \
-                 requires kernel ≥5.16 (`bpf_prog_info.verified_insns`)",
-                baseline.program
-            )
-        })?;
+        // ADR-0053 § 1 added the cgroup_sock_addr program type; the
+        // verified-insn read is identical across program types (it's
+        // a `ProgramInfo::verified_instruction_count` query against
+        // a loaded program). Dispatch on the program section name —
+        // the only naming convention shared with the kernel-side
+        // attribute macros (`#[xdp]`, `#[cgroup_sock_addr(connect4)]`).
+        let insns = if baseline.program.starts_with("cgroup_") {
+            let cgroup: &mut CgroupSockAddr = program.try_into().wrap_err_with(|| {
+                format!("program `{}` is not a CgroupSockAddr program", baseline.program)
+            })?;
+            cgroup
+                .load()
+                .wrap_err_with(|| format!("cgroup_sock_addr.load() for `{}`", baseline.program))?;
+            let info = cgroup
+                .info()
+                .wrap_err_with(|| format!("cgroup_sock_addr.info() for `{}`", baseline.program))?;
+            info.verified_instruction_count().ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "kernel did not report verified_instruction_count for `{}`; \
+                     requires kernel ≥5.16 (`bpf_prog_info.verified_insns`)",
+                    baseline.program
+                )
+            })?
+        } else {
+            let xdp: &mut Xdp = program.try_into().wrap_err_with(|| {
+                format!("program `{}` is not an XDP program", baseline.program)
+            })?;
+            xdp.load().wrap_err_with(|| format!("xdp.load() for `{}`", baseline.program))?;
+            let info =
+                xdp.info().wrap_err_with(|| format!("xdp.info() for `{}`", baseline.program))?;
+            info.verified_instruction_count().ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "kernel did not report verified_instruction_count for `{}`; \
+                     requires kernel ≥5.16 (`bpf_prog_info.verified_insns`)",
+                    baseline.program
+                )
+            })?
+        };
         records.push(MeasuredRecord {
             program: baseline.program.clone(),
             verified_insns: u64::from(insns),
