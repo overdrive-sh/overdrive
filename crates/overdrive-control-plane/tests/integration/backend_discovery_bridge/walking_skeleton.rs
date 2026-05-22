@@ -273,46 +273,41 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
     //    AppState owns the other clone via `dataplane_override`).
     let dataplane = server.dataplane();
 
-    // 8. BACKEND_MAP must carry an entry whose
-    //    `(ipv4_host, port_host)` matches `(host_ipv4, listener_port)`
-    //    within 5s. The full pipeline is bridge tick (≤100ms) →
+    // 8. LOCAL_BACKEND_MAP must carry an entry for
+    //    `(assigned_vip, listener_port) → (host_ipv4, listener_port)`
+    //    within 5s per ADR-0053 § 2. The classifier in
+    //    `ServiceMapHydrator::reconcile` routes every backend whose
+    //    `addr.ip() == host_ipv4` to the cgroup_sock_addr path
+    //    (Action::RegisterLocalBackend → Dataplane::register_local_backend
+    //    → LOCAL_BACKEND_MAP). Phase 1 single-node: every Running alloc
+    //    on this node satisfies that predicate, so BACKEND_MAP (the XDP
+    //    path) receives no calls and LOCAL_BACKEND_MAP IS the assertion
+    //    surface. The full pipeline is bridge tick (≤100ms) →
     //    EnqueueEvaluation → hydrator tick (≤100ms) → action-shim
-    //    DataplaneUpdateService dispatch → BACKEND_MAP populated.
+    //    RegisterLocalBackend dispatch → LOCAL_BACKEND_MAP populated.
     //    5s gives 50 ticks of budget — generous against Lima FS
     //    contention.
-    let backend_present = poll_until(Duration::from_secs(5), Duration::from_millis(50), || async {
-        let entries = dataplane.backend_map_entries().ok()?;
-        entries
-            .into_iter()
-            .find(|(_, e)| e.ipv4_host == u32::from(host_ipv4) && e.port_host == listener_port)
+    let local_present = poll_until(Duration::from_secs(5), Duration::from_millis(50), || async {
+        dataplane.local_backend_for(assigned_vip, listener_port).ok().flatten().filter(|e| {
+            e.backend_ip_host == u32::from(host_ipv4) && e.backend_port_host == listener_port
+        })
     })
     .await;
     assert!(
-        backend_present.is_some(),
-        "S-BDB-01: BACKEND_MAP did not receive an entry for \
-         host_ipv4={host_ipv4}:{listener_port} within 5s — \
-         bridge or hydrator regression",
+        local_present.is_some(),
+        "S-BDB-01: LOCAL_BACKEND_MAP did not receive an entry mapping \
+         {assigned_vip}:{listener_port} → {host_ipv4}:{listener_port} within 5s — \
+         bridge or hydrator (ADR-0053 classifier) regression",
     );
 
-    // 9. SERVICE_MAP must resolve the (assigned_vip, listener_port)
-    //    outer key (the inner HoM lookup is implicit in
-    //    `service_map_contains`). Poll briefly — the hydrator's
-    //    DataplaneUpdateService dispatch populates BACKEND_MAP and
-    //    SERVICE_MAP in the same call, so this should already be
-    //    present, but Lima scheduling can produce a millisecond
-    //    of lag between the two map writes.
-    let service_present = poll_until(Duration::from_secs(2), Duration::from_millis(50), || async {
-        dataplane.service_map_contains(assigned_vip, listener_port).ok().filter(|b| *b)
-    })
-    .await;
-    assert!(
-        service_present.is_some(),
-        "S-BDB-01: SERVICE_MAP did not resolve {assigned_vip}:{listener_port} within 2s — \
-         hydrator did not run DataplaneUpdateService or the outer-map insert failed",
-    );
-
-    // 10. D3 in-gate TCP round-trip through the assigned VIP.
-    //     Per architecture.md § 6.2 D3 + DWD-03 K1/K3:
+    // 10. D3 in-gate TCP round-trip through the assigned VIP. Per
+    //     ADR-0053 § "Consequences" the cgroup_connect4_service
+    //     program rewrites the connect(2) destination from
+    //     (assigned_vip, listener_port) to (host_ipv4, listener_port)
+    //     for every process inside the dataplane's attach cgroup
+    //     (cgroup_attach_path defaults to "/sys/fs/cgroup" so this
+    //     test's process is in scope). Per architecture.md § 6.2 D3 +
+    //     DWD-03 K1/K3:
     //       - K1 bind-readiness wait: 50ms cadence × 2s budget
     //       - K3 payload literal `b"walking-skeleton-probe\n"`
     //         (24 bytes; the trailing newline is intentional — the
@@ -337,7 +332,8 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
         response.as_deref(),
         Some(probe_payload),
         "S-BDB-01: TCP round-trip to {assigned_vip}:{listener_port} did not echo \
-         {probe_payload:?} within 2s — XDP / reverse-NAT path or backend listener regression",
+         {probe_payload:?} within 2s — cgroup_sock_addr connect-time \
+         rewrite (ADR-0053) or backend listener regression",
     );
 
     // Cleanup: shutdown the server (drains in-flight + drops
@@ -419,23 +415,29 @@ fn iface_has_xdp(iface: &str) -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
-async fn bridge_to_hydrator_handoff_dispatches_dataplane_update_service() {
+async fn bridge_to_hydrator_handoff_dispatches_register_local_backend() {
     // In-process Tier 3 variant of the bridge → hydrator → dataplane
     // pipeline. The Tier 1 DST counterpart
     // (`bridge-to-hydrator-handoff`) landed in commit fc68beef.
     //
     // Property: once the bridge writes a ServiceBackendRow for a
-    // Running Service workload, the production ServiceMapHydrator
-    // picks it up on the next tick and dispatches
-    // Action::DataplaneUpdateService into the real EbpfDataplane;
-    // a corresponding service_hydration_results row with Completed
-    // status is observable, and SERVICE_MAP carries the outer slot.
+    // Running Service workload whose backend resides on host_ipv4
+    // (Phase 1 single-node — always true), the production
+    // ServiceMapHydrator picks it up on the next tick and the ADR-0053
+    // classifier dispatches Action::RegisterLocalBackend into the real
+    // EbpfDataplane. The observable consequence is a LOCAL_BACKEND_MAP
+    // entry for (assigned_vip, listener_port).
+    //
+    // Pre-ADR-0053 the hydrator dispatched Action::DataplaneUpdateService
+    // for every backend regardless of locality, populating BACKEND_MAP /
+    // SERVICE_MAP. That XDP path remains for Phase 2+ remote backends;
+    // Phase 1 single-node receives no calls there.
     //
     // The walking-skeleton (above) already proves the full e2e
-    // including TCP round-trip. This test pins the *property* that
-    // the handoff produces a Completed observation row — failure
-    // here without the walking-skeleton also failing means the
-    // hydrator dispatched but the observation write went sideways.
+    // including TCP round-trip via cgroup_sock_addr. This test pins
+    // the *handoff property* in isolation — failure here without the
+    // walking-skeleton also failing means the hydrator dispatched but
+    // the LOCAL_BACKEND_MAP write went sideways.
     require_cap_net_admin();
 
     let host_ipv4 = Ipv4Addr::new(10, 244, 19, 1);
@@ -467,32 +469,22 @@ async fn bridge_to_hydrator_handoff_dispatches_dataplane_update_service() {
 
     let dataplane = server.dataplane();
 
-    // Property: the hydrator MUST have dispatched
-    // Action::DataplaneUpdateService — observable via SERVICE_MAP
-    // containing the outer slot for (assigned_vip, listener_port).
-    let service_present = poll_until(Duration::from_secs(2), Duration::from_millis(50), || async {
-        dataplane.service_map_contains(assigned_vip, listener_port).ok().filter(|b| *b)
+    // Property per ADR-0053: the hydrator MUST have dispatched
+    // Action::RegisterLocalBackend (backend.addr.ip() == host_ipv4)
+    // — observable via LOCAL_BACKEND_MAP carrying
+    // (assigned_vip, listener_port) → (host_ipv4, listener_port).
+    let local_present = poll_until(Duration::from_secs(5), Duration::from_millis(50), || async {
+        dataplane.local_backend_for(assigned_vip, listener_port).ok().flatten().filter(|e| {
+            e.backend_ip_host == u32::from(host_ipv4) && e.backend_port_host == listener_port
+        })
     })
     .await;
     assert!(
-        service_present.is_some(),
-        "S-BDB-19: SERVICE_MAP did not resolve {assigned_vip}:{listener_port} within 2s — \
-         bridge wrote ServiceBackendRow but hydrator did not dispatch DataplaneUpdateService",
-    );
-
-    // BACKEND_MAP must also carry an entry — the hydrator's
-    // `update_service` call populates BACKEND_MAP as a side effect.
-    let backend_present = poll_until(Duration::from_secs(2), Duration::from_millis(50), || async {
-        let entries = dataplane.backend_map_entries().ok()?;
-        entries
-            .into_iter()
-            .find(|(_, e)| e.ipv4_host == u32::from(host_ipv4) && e.port_host == listener_port)
-    })
-    .await;
-    assert!(
-        backend_present.is_some(),
-        "S-BDB-19: BACKEND_MAP did not receive backend ({host_ipv4}, {listener_port}) — \
-         hydrator dispatch did not populate BACKEND_MAP",
+        local_present.is_some(),
+        "S-BDB-19: LOCAL_BACKEND_MAP did not receive an entry mapping \
+         {assigned_vip}:{listener_port} → {host_ipv4}:{listener_port} within 5s — \
+         bridge wrote ServiceBackendRow but hydrator did not dispatch \
+         RegisterLocalBackend (ADR-0053 classifier regression)",
     );
 
     server.shutdown().await;

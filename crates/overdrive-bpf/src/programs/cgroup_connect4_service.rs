@@ -64,12 +64,14 @@ fn try_cgroup_connect4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
     let user_port_nbo = unsafe { (*sock_addr).user_port };
 
     let vip_host = u32::from_be(user_ip4_nbo);
-    // `user_port` is stored as a u32 in `bpf_sock_addr`, but the
-    // significant port bits are the high 16 bits in network-byte
-    // order. After `from_be` we get the host-order port in the low
-    // 16 bits.
+    // `user_port` is a u32 in `bpf_sock_addr` whose LOW 16 bits carry
+    // the network-byte-order port (kernel copies `inet_sk->inet_dport`
+    // — already nbo — into the low 16 bits of this field; the high
+    // 16 bits are unused). Truncate to u16 to obtain the nbo port,
+    // THEN byte-swap to host order. Reading `u32::from_be(...) as u16`
+    // would swap the whole u32 and then take the wrong half — always 0.
     #[allow(clippy::cast_possible_truncation)]
-    let port_host = u32::from_be(user_port_nbo) as u16;
+    let port_host = u16::from_be(user_port_nbo as u16);
 
     let key = LocalServiceKey { vip_host, port_host, _pad: 0 };
 
@@ -84,9 +86,11 @@ fn try_cgroup_connect4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
     };
 
     // Hit — rewrite destination. Convert host-order map values
-    // back to network-order for the syscall context.
+    // back to network-order for the syscall context. `user_port`'s
+    // low 16 bits carry the network-byte-order port; widen the
+    // nbo u16 into the low 16 bits of the u32 (high 16 bits stay 0).
     let backend_ip_nbo = entry.backend_ip_host.to_be();
-    let backend_port_nbo = u32::from(entry.backend_port_host).to_be();
+    let backend_port_nbo = u32::from(entry.backend_port_host.to_be());
 
     // SAFETY: same as the read above — kernel-guaranteed struct
     // layout. The verifier permits in-place writes to specific
