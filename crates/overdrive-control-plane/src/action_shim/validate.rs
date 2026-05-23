@@ -190,13 +190,11 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
                 cgroup_keys.insert((vip, port));
                 cgroup_vips.insert(vip);
             }
-            // Cgroup route without a port is structurally impossible —
-            // `service_write_key` always returns `Some(port)` for the
-            // `Cgroup` arm. The fallthrough is here to keep the match
-            // exhaustive without `unreachable!()`.
             (WriteRoute::Cgroup, None) => {
-                // No-op: treat as non-write rather than panic; the
-                // invariant is upheld by `service_write_key` directly.
+                unreachable!(
+                    "service_write_key always returns Some(port) for the Cgroup route; \
+                     None here indicates a regression in service_write_key"
+                );
             }
         }
     }
