@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed. 2026-05-22. Decision-makers: Morgan (drafting); pending
-user ratification. Tags: phase-1, dataplane, lb, cgroup-bpf,
+Accepted (2026-05-23). Drafted 2026-05-22 by Morgan. Implementation
+landed across commits cd5b1644 → 6d62afe6 (closes #175, walking-
+skeleton S-BDB-01 e2e). Tags: phase-1, dataplane, lb, cgroup-bpf,
 walking-skeleton, j-plat-004.
 
 **Companion ADRs**: ADR-0040 (three-map split + HASH_OF_MAPS atomic
