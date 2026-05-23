@@ -110,6 +110,36 @@ exclude_globs = [
     # QUALITY_GATE wave's mutation-report citation.
     "crates/overdrive-sim/src/adapters/**",
     "crates/overdrive-sim/src/invariants/**",
+
+    # Rule 1 (extended) — `EbpfDataplane` and `LocalBackendMapHandle`
+    # are the userspace adapter surface that talks to the real BPF
+    # kernel objects (`HASH_OF_MAPS`, `LOCAL_BACKEND_MAP`, XDP attach,
+    # cgroup_sock_addr attach). Structurally identical exclusion
+    # rationale to the `crates/overdrive-bpf/**` entry above:
+    #
+    #   - Methods are `#[cfg(target_os = "linux")]`-gated; mutation
+    #     surface only reachable from Tier 3 integration tests under
+    #     `cargo xtask lima run -- ... --features integration-tests`
+    #     which require root + cgroup delegation.
+    #   - The default-lane nextest suite cannot reach them (compiles
+    #     macOS-side via `--no-run`, never executes), so every
+    #     mutation shows as MISSED — false negatives that erode the
+    #     kill-rate gate without exposing a real assertion gap.
+    #   - Per `.claude/rules/testing.md` § Mutation testing →
+    #     "What it's NOT for": "`unsafe` blocks and `aya-rs` eBPF
+    #     programs. Mutations can produce code the verifier rejects,
+    #     masquerading as 'caught.' Tier 2 and Tier 3 cover these."
+    #     `EbpfDataplane` is the userspace half of that aya boundary
+    #     and lives behind the same Tier 3 envelope.
+    #
+    # The Phase 17 mutation run flagged the entire surface of these
+    # two files under the per-PR `--diff origin/main` scope of the
+    # `overdrive-dataplane` package run; excluding them removes the
+    # vacuous-MISSED noise and lets the default-lane kill rate reflect
+    # genuine unit-level coverage of the other files in the crate
+    # (allocators, GC, swap, maglev tables, the `sys::bpf` helpers).
+    "crates/overdrive-dataplane/src/lib.rs",
+    "crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs",
 ]
 
 # ---------------------------------------------------------------------------
