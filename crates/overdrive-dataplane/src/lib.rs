@@ -258,6 +258,28 @@ pub struct EbpfDataplane {
     /// Owns the `cgroup_connect4_service` cgroup_sock_addr
     /// attachment. Dropping detaches the program per ADR-0053
     /// § "Consequences" — Reliability — recoverability.
+    ///
+    /// **Detach symmetry with XDP**: this field follows the same
+    /// RAII shape as `_xdp_forward_link` / `_xdp_reverse_link`
+    /// above — aya's `CgroupSockAddrLinkId` is a typed
+    /// `bpf_link_create`-backed handle whose `Drop` impl invokes
+    /// `close(2)` on the link fd, which detaches the program from
+    /// the cgroup at the kernel-link refcount boundary (mirror of
+    /// `aya::programs::xdp::XdpLinkId::drop` for XDP). The whole
+    /// struct's drop order — fields drop in declaration order, so
+    /// XDP links detach first, the BPF object's maps stay alive
+    /// until the cgroup link drops, then the cgroup link releases
+    /// last — is what makes the bpffs pin cleanup in the explicit
+    /// `Drop for EbpfDataplane` impl below sequence-safe. No
+    /// explicit detach call is needed; the same SIGKILL-skips-Drop
+    /// caveat documented for the XDP path applies here, and the
+    /// operator-side cleanup discipline in
+    /// `.claude/rules/debugging.md` § "Leftover XDP attachments
+    /// across runs" extends to cgroup_sock_addr attachments by the
+    /// same mechanism (an unclean shutdown leaves the program
+    /// attached until the next `EbpfDataplane::new` replaces it
+    /// or an operator runs the equivalent `bpftool cgroup detach`
+    /// sweep).
     #[allow(dead_code)]
     _cgroup_connect4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
 
