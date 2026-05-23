@@ -140,6 +140,37 @@ exclude_globs = [
     # (allocators, GC, swap, maglev tables, the `sys::bpf` helpers).
     "crates/overdrive-dataplane/src/lib.rs",
     "crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs",
+
+    # Rule 1 + Rule 4 (extended) — the `cargo verifier-regress` tool
+    # binary (`crates/overdrive-dataplane/bin/verifier_regress.rs`) is
+    # the Tier 4 verifier-complexity gate per
+    # `.claude/rules/testing.md` § "Verifier complexity
+    # (`cargo verifier-regress`)". Its `measure` function (the body
+    # cargo-mutants flagged at line 159:5 — "replace measure ->
+    # Result<Vec<MeasuredRecord>> with Ok(vec![])") loads a real BPF
+    # ELF into the kernel via aya, reads
+    # `ProgramInfo::verified_instruction_count`, and reports
+    # per-program complexity numbers. Structurally identical
+    # rationale to the EbpfDataplane entries above:
+    #
+    #   - The binary is `#[cfg(target_os = "linux")]`-gated and
+    #     requires real BPF program load (which needs root /
+    #     CAP_BPF + a kernel BPF object on disk). Unit-lane nextest
+    #     cannot exercise it.
+    #   - The gate's correctness IS verified by `cargo
+    #     verifier-regress` itself running in CI on every PR — the
+    #     production signal IS the Tier 4 gate output, not
+    #     per-line mutation kills.
+    #   - Per Rule 4 in this file: "Performance assertions are NOT
+    #     mutation-tested." `measure` is the upstream of every
+    #     verifier-budget perf assertion — its body shaping the
+    #     measured numbers is precisely the perf-assertion
+    #     production path.
+    #
+    # The Phase 17 mutation run flagged this when commit `cd5b1644`
+    # added cgroup_sock_addr dispatch to the same function; the
+    # unit-lane suite cannot kill the mutation by design.
+    "crates/overdrive-dataplane/bin/verifier_regress.rs",
 ]
 
 # ---------------------------------------------------------------------------
