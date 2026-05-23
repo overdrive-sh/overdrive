@@ -135,6 +135,12 @@ mod integration {
         mod subtree_control_delegation_is_idempotent;
     }
 
+    /// Runtime validator at the reconcile-output boundary — rejects
+    /// `Vec<Action>` returns that target the same service-LB VIP from
+    /// two or more write-Actions in one tick. Closes the inter-Action
+    /// conflict gap Phase 16 D11 surfaced.
+    mod reconcile_output_validator;
+
     /// `cargo openapi-{gen,check}` library + binary scenarios — relocated
     /// from xtask when the OpenAPI gate moved into overdrive-control-plane.
     /// Covers test-scenarios.md §3.3. See § "xtask is build / test / dev

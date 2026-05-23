@@ -77,6 +77,13 @@ pub mod register_local_backend;
 /// trait contract.
 pub mod deregister_local_backend;
 
+/// Reconcile-output invariant validator — rejects post-`reconcile`
+/// `Vec<Action>` returns that contain two or more write-actions
+/// targeting the same service-LB VIP (see the module docstring on
+/// [`validate`] for the full conflict taxonomy and fail-safe
+/// semantics).
+pub mod validate;
+
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
 

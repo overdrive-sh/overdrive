@@ -990,23 +990,48 @@ pub async fn run_convergence_tick(
         .await
         .map_err(ConvergenceError::ViewPersist)?;
 
-    // Dispatch through the action shim — this is where `.await`
-    // is permitted. Per-action error isolation lives in the shim.
-    // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
-    // after every successful `obs.write` per architecture.md §10.
-    action_shim::dispatch(
-        actions,
-        state.driver.as_ref(),
-        state.obs.as_ref(),
-        state.dataplane.as_ref(),
-        state.lifecycle_events.as_ref(),
-        &tick,
-        &state.node_id,
-        std::sync::Arc::clone(&state.allocator),
-        state.runtime.broker_mutex(),
-    )
-    .await
-    .map_err(ConvergenceError::Shim)?;
+    // Reconcile-output invariant validator — closes the inter-Action
+    // conflict gap that Phase 16 D11 surfaced. Sum-type-interior
+    // modelling on the `Action` enum is insufficient: the enum admits
+    // valid actions whose Vec-level composition is a bug (two writes
+    // to the same service-LB VIP in one tick produce non-deterministic
+    // dataplane post-state). On violation, fail-safe: skip dispatch
+    // this tick, persist View as normal (reconciler memory is
+    // independent of dispatch success — skipping the View update
+    // would re-trigger the same broken reconcile next tick), log a
+    // structured `reconciler.output.invariant_violation` event for
+    // operators. Convergence retries on the next tick; once the
+    // reconciler is fixed, normal dispatch resumes. The control-plane
+    // does NOT panic on a buggy reconciler.
+    if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
+        tracing::error!(
+            target: "overdrive::reconciler",
+            name = "reconciler.output.invariant_violation",
+            reconciler = %reconciler_name,
+            target = %target.as_str(),
+            tick = tick.tick,
+            violation = ?violation,
+            "reconciler emitted conflicting Actions in one tick; skipping dispatch"
+        );
+    } else {
+        // Dispatch through the action shim — this is where `.await`
+        // is permitted. Per-action error isolation lives in the shim.
+        // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
+        // after every successful `obs.write` per architecture.md §10.
+        action_shim::dispatch(
+            actions,
+            state.driver.as_ref(),
+            state.obs.as_ref(),
+            state.dataplane.as_ref(),
+            state.lifecycle_events.as_ref(),
+            &tick,
+            &state.node_id,
+            std::sync::Arc::clone(&state.allocator),
+            state.runtime.broker_mutex(),
+        )
+        .await
+        .map_err(ConvergenceError::Shim)?;
+    }
 
     // Cooperative yield — every action_shim::dispatch path on the
     // single-node SimObservationStore returns Ready synchronously
