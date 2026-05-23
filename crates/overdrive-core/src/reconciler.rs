@@ -2399,6 +2399,117 @@ pub struct ServiceMapHydratorView {
     pub retries: BTreeMap<ServiceId, RetryMemory>,
 }
 
+/// Reasons a backend address is rejected by the hydrator's
+/// `Action::RegisterLocalBackend` precondition guard (Phase 16
+/// review D12).
+///
+/// Every variant names a distinct address class that has no
+/// sensible meaning as a backend destination — registering the
+/// cgroup hook to rewrite `connect(vip:port)` to such an address
+/// would either loop traffic onto the same host (loopback), trap
+/// it on the link-local segment (link-local), broadcast it
+/// (multicast / broadcast), or collide with the service-VIP space
+/// itself.
+///
+/// The hydrator skips the action emission and logs a structured
+/// `tracing::warn!` for each rejected backend; the `Display` form
+/// here is what the warning carries so operators can grep for the
+/// specific class. Per `.claude/rules/development.md` § "Distinct
+/// failure modes get distinct error variants" — collapsing these
+/// into a single `Invalid` arm would lose the operator-actionable
+/// distinction (each class needs different remediation: a
+/// loopback hit suggests a misconfigured workload binding to
+/// `127.0.0.1`; a multicast hit suggests a corrupted observation
+/// row; a VIP-subnet hit suggests a misconfigured allocator
+/// range).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendAddressRejection {
+    /// `127.0.0.0/8`. RFC 1122 loopback — a backend address here
+    /// would route the rewritten connect to the host's own
+    /// loopback iface, almost always not the workload the
+    /// observation row claims.
+    Loopback,
+    /// `169.254.0.0/16`. RFC 3927 link-local — only valid on a
+    /// single L2 segment; not a sensible backend destination for a
+    /// service VIP that crosses cgroup boundaries.
+    LinkLocal,
+    /// `224.0.0.0/4`. RFC 5771 multicast — a TCP connect to a
+    /// multicast address is structurally meaningless; rejected
+    /// for the same reason ICMP-style "host unreachable" would
+    /// fire on a real socket.
+    Multicast,
+    /// `255.255.255.255` (limited broadcast). A TCP connect to
+    /// broadcast is structurally invalid.
+    Broadcast,
+    /// `0.0.0.0/8`. RFC 1122 "this host on this network" — the
+    /// `0.0.0.0` wildcard is a bind address, not a connect
+    /// destination.
+    Reserved,
+}
+
+impl core::fmt::Display for BackendAddressRejection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Loopback => f.write_str("loopback (127.0.0.0/8)"),
+            Self::LinkLocal => f.write_str("link-local (169.254.0.0/16)"),
+            Self::Multicast => f.write_str("multicast (224.0.0.0/4)"),
+            Self::Broadcast => f.write_str("broadcast (255.255.255.255)"),
+            Self::Reserved => f.write_str("reserved (0.0.0.0/8)"),
+        }
+    }
+}
+
+/// Classify a candidate backend address (Phase 16 review D12).
+/// Returns `Ok(())` if the address is in a routable unicast range
+/// suitable to be the destination of a rewritten
+/// `connect(vip:port)` from a process inside the attach cgroup;
+/// `Err(_)` if the address belongs to one of the reserved classes
+/// enumerated in `BackendAddressRejection`.
+///
+/// Pure function — no I/O, no allocation, no panics. Called from
+/// `ServiceMapHydrator::reconcile` immediately before emitting an
+/// `Action::RegisterLocalBackend`; rejected backends are skipped
+/// and logged via `tracing::warn!`.
+///
+/// **Out of scope for this guard**: the service-VIP subnet itself.
+/// The reviewer's D12 finding suggested rejecting backends in the
+/// VIP subnet to defend against a hydrator bug that loops a VIP
+/// to a VIP. The hydrator does not have access to the
+/// `ServiceVipAllocator`'s range at reconcile time (the range
+/// lives behind the allocator's private state), and threading it
+/// through the reconciler's State / View would widen the
+/// per-reconcile surface for a defense against a class of bug
+/// that has not occurred. Phase 1 single-node + the
+/// `ServiceVipAllocator` exhaustion semantics make a VIP↔backend
+/// collision structurally impossible (the allocator picks
+/// addresses from a configured range; backends come from real
+/// workload allocs with addresses outside that range). Defer
+/// until the VIP-subnet collision becomes a real failure mode.
+pub const fn classify_backend_address(
+    addr: std::net::Ipv4Addr,
+) -> Result<(), BackendAddressRejection> {
+    if addr.is_loopback() {
+        return Err(BackendAddressRejection::Loopback);
+    }
+    if addr.is_link_local() {
+        return Err(BackendAddressRejection::LinkLocal);
+    }
+    if addr.is_multicast() {
+        return Err(BackendAddressRejection::Multicast);
+    }
+    if addr.is_broadcast() {
+        return Err(BackendAddressRejection::Broadcast);
+    }
+    // RFC 1122 "this host" range: 0.0.0.0/8. `Ipv4Addr` does not
+    // expose `is_unspecified_network()` — only `is_unspecified()`
+    // for the exact `0.0.0.0` address. Check the first octet
+    // directly.
+    if addr.octets()[0] == 0 {
+        return Err(BackendAddressRejection::Reserved);
+    }
+    Ok(())
+}
+
 /// The Phase 2 hydrator reconciler. Activates J-PLAT-004 (per
 /// ADR-0042). Watches `service_backends` and `service_hydration_results`
 /// observation rows; emits one `Action::DataplaneUpdateService` per
@@ -2558,6 +2669,30 @@ impl Reconciler for ServiceMapHydrator {
                         // an exhaustive match.
                         std::net::SocketAddr::V6(_) => continue,
                     };
+                    // Phase 16 review D12: reject backend addresses
+                    // in reserved ranges (loopback / link-local /
+                    // multicast / broadcast / 0.0.0.0/8) BEFORE
+                    // emitting the action. A `RegisterLocalBackend`
+                    // for one of these would install a cgroup
+                    // rewrite that produces structurally invalid
+                    // traffic. Log a structured `tracing::warn!`
+                    // and skip — the next reconcile tick re-evaluates
+                    // (the observation row is the SSOT; if it
+                    // genuinely carries a malformed backend, the
+                    // skip persists until the bridge writes a
+                    // corrected row).
+                    if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
+                        tracing::warn!(
+                            name: "service_map_hydrator.register_local_backend.rejected",
+                            service_id = %service_id,
+                            vip = %vip_v4,
+                            vip_port = backend_v4.port(),
+                            backend = %backend_v4,
+                            reason = %reason,
+                            "skipping RegisterLocalBackend: backend address rejected by classifier"
+                        );
+                        continue;
+                    }
                     actions.push(Action::RegisterLocalBackend {
                         service_id: *service_id,
                         vip: vip_v4,
