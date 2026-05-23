@@ -116,13 +116,22 @@ impl SimDataplane {
     }
 
     /// Read the locally-registered backend for `(vip, vip_port)`, if
-    /// any. Mirrors the production `EbpfDataplane`'s
-    /// `local_backend_for(vip, port)` accessor — DST harnesses read
-    /// this to assert on the ADR-0053 § 2 trait contract's
-    /// observable invariants without loading a real kernel.
+    /// any. Returns `Option<SocketAddrV4>` directly — a DST-convenient
+    /// shape that differs from production `EbpfDataplane`'s
+    /// `local_backend_for` accessor (which returns
+    /// `Result<Option<LocalBackendEntry>>`, since real BPF map I/O is
+    /// fallible). The contract clause both adapters satisfy is the
+    /// observable post-state described in the `Dataplane` trait's
+    /// `register_local_backend` postcondition: a `connect(vip:vip_port)`
+    /// from inside the attach cgroup reaches the resolved backend.
+    /// Production verifies that via the walking-skeleton integration
+    /// test; the sim adapter exposes this accessor so DST invariant
+    /// evaluators can assert on the same post-state without loading a
+    /// real kernel.
     ///
-    /// Not part of the `Dataplane` trait — this accessor is for
-    /// tests and DST invariant evaluators.
+    /// This is a test-only accessor for DST invariant evaluators —
+    /// not part of the `Dataplane` trait. Existence here is a testing
+    /// convenience, not a trait-contract violation.
     #[must_use]
     pub fn local_backend_for(&self, vip: Ipv4Addr, vip_port: u16) -> Option<SocketAddrV4> {
         self.local_backends.lock().get(&(vip, vip_port)).copied()
@@ -134,8 +143,14 @@ impl SimDataplane {
     /// invariant), never of insertion history — the property DST
     /// seed reproducibility relies on.
     ///
-    /// Not part of the `Dataplane` trait — this accessor is for
-    /// DST invariant evaluators that walk the entire map.
+    /// This is a test-only accessor for DST invariant evaluators —
+    /// not part of the `Dataplane` trait. The production
+    /// `EbpfDataplane` does not expose an exactly-equivalent surface
+    /// (it has `local_backend_map_entries()` returning
+    /// `Vec<(LocalServiceKey, LocalBackendEntry)>` — same logical
+    /// content, different value-shape for the real BPF map row type).
+    /// Existence here is a testing convenience, not a trait-contract
+    /// violation.
     #[must_use]
     pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, SocketAddrV4)> {
         self.local_backends.lock().iter().map(|(&(v, p), &b)| (v, p, b)).collect()

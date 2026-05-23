@@ -76,9 +76,28 @@ impl LocalBackendMapHandle {
     /// Returns `MapError` for any failure other than `KeyNotFound`.
     pub fn remove(&self, vip: Ipv4Addr, vip_port: u16) -> Result<(), MapError> {
         let key = LocalServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        // Bind the lock-guarded `Remove` result to a local so the
+        // mutex guard drops before the match scrutinee is evaluated
+        // (clippy::significant_drop_in_scrutinee).
         let outcome = self.inner.lock().remove(&key);
+        // Three-arm match per Phase 16 review D7: collapsing the
+        // idempotent `KeyNotFound` branch into the `Ok(())` arm via
+        // `|` works mechanically (and clippy::match_same_arms
+        // suggests it) but hides the asymmetry — `Ok(())` is the
+        // load-bearing success path; `Err(KeyNotFound)` is the
+        // trait-contract-mandated swallow per ADR-0053 § 2.
+        // Splitting them documents that intent at the matcher; the
+        // identical bodies are the point, not a bug.
+        #[allow(
+            clippy::match_same_arms,
+            reason = "Phase 16 review D7: each arm carries distinct semantic intent — \
+                      success vs idempotent-swallow per ADR-0053 § 2 — that the \
+                      collapsed form would erase. Comments above the match document the \
+                      load-bearing distinction."
+        )]
         match outcome {
-            Ok(()) | Err(MapError::KeyNotFound) => Ok(()),
+            Ok(()) => Ok(()),
+            Err(MapError::KeyNotFound) => Ok(()), // idempotent per ADR-0053 § 2
             Err(e) => Err(e),
         }
     }
