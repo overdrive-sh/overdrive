@@ -35,6 +35,10 @@ mod integration {
     //! `redesign-drop-commit-index` — the per-entry index assertion
     //! has no consumer on the post-ADR-0020 wire shape.
     mod concurrent_submit_toctou;
+    /// Action-shim `deregister_local_backend::dispatch` mutation kill
+    /// per ADR-0053 § 3 — asserts the post-dispatch observable state
+    /// on `SimDataplane::local_backend_for`.
+    mod deregister_local_backend_dispatch;
     mod describe_round_trip;
     /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
     /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment

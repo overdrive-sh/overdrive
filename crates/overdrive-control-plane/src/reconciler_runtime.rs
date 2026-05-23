@@ -766,6 +766,59 @@ impl ReconcilerRuntime {
             map.insert(target.clone(), view);
         }
     }
+
+    /// Snapshot of the in-memory `BackendDiscoveryBridgeView` map for
+    /// `name`. Mirrors [`Self::loaded_service_map_hydrator_views_for_test`]
+    /// for the BackendDiscoveryBridge variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_backend_discovery_bridge_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, BackendDiscoveryBridgeView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::BackendDiscoveryBridge(map) => Some(map.clone()),
+            AnyViewMap::Unit
+            | AnyViewMap::WorkloadLifecycle(_)
+            | AnyViewMap::ServiceMapHydrator(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path with a typed
+    /// `BackendDiscoveryBridgeView`. Mirrors
+    /// [`Self::apply_next_service_map_hydrator_view_for_test`] for
+    /// the BackendDiscoveryBridge variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_backend_discovery_bridge_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: BackendDiscoveryBridgeView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::BackendDiscoveryBridge(next)).await
+    }
+
+    /// Seed the in-memory view for `(backend-discovery-bridge, target)`
+    /// directly, bypassing the `ViewStore`. Mirrors
+    /// [`Self::seed_service_map_hydrator_view_for_test`] for the
+    /// BackendDiscoveryBridge variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_backend_discovery_bridge_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: BackendDiscoveryBridgeView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&backend_discovery_bridge_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::BackendDiscoveryBridge(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
 }
 
 /// Build the canonical [`ReconcilerName`] for the [`WorkloadLifecycle`]
@@ -790,6 +843,16 @@ fn workload_lifecycle_canonical_name() -> ReconcilerName {
 fn service_map_hydrator_canonical_name() -> ReconcilerName {
     ReconcilerName::new(<ServiceMapHydrator as Reconciler>::NAME)
         .expect("ServiceMapHydrator::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(
+        <overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge
+            as Reconciler>::NAME,
+    )
+    .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------
