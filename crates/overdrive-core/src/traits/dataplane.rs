@@ -112,9 +112,17 @@ pub trait Dataplane: Send + Sync + 'static {
     ///
     /// # Preconditions
     /// - `vip` is an IPv4 service VIP issued by `ServiceVipAllocator`
-    ///   (ADR-0049). The adapter does not validate this; callers
-    ///   that pass non-allocator VIPs produce well-defined but
-    ///   operator-confusing behavior.
+    ///   (ADR-0049). The allocator produces values of the
+    ///   `overdrive_core::id::ServiceVip` newtype (validated `Ipv4Addr`
+    ///   range), and `ServiceMapHydrator` extracts the inner
+    ///   `Ipv4Addr` via `ServiceVip::get()` immediately before
+    ///   emitting `Action::RegisterLocalBackend` — so every VIP
+    ///   reaching this method has transited the typed allocator
+    ///   surface. The signature stays `Ipv4Addr` (rather than
+    ///   `ServiceVip`) for parallel with `update_service.vip` and to
+    ///   keep the cgroup-path call shape identical to the XDP path
+    ///   per ADR-0053 § 1; the type-system enforcement lives one
+    ///   call site up the stack.
     /// - `backend` is a `SocketAddrV4` reachable from the host
     ///   netns. Phase 1 single-node guarantees this when the
     ///   backend's allocation is Running on the same host.
@@ -123,12 +131,18 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - For every subsequent `connect(vip:vip_port)` from a
     ///   process inside the dataplane's attach cgroup, the kernel
     ///   establishes a connection to `backend.ip():backend.port()`
-    ///   instead.
+    ///   instead. **This is the observable postcondition every
+    ///   adapter MUST satisfy** — the
+    ///   `backend-discovery-bridge/walking_skeleton` integration
+    ///   test exercises exactly this: register a backend, perform a
+    ///   real `connect(vip:vip_port)` from inside the attach cgroup,
+    ///   assert the peer is `backend`. Per
+    ///   `.claude/rules/development.md` § "Trait definitions specify
+    ///   behavior, not just signature" — this is the contract clause
+    ///   the DST/integration equivalence harnesses check.
     /// - The application's `getpeername(2)` returns `backend`, not
     ///   `(vip, vip_port)`. Per Cilium ClusterIP semantics; see
     ///   ADR-0053 § "Consequences".
-    /// - `local_backends()` (test accessor on adapters that expose
-    ///   it) reflects the (vip, port, backend) triple.
     ///
     /// # Edge cases
     /// - Re-registration with the same `backend` is idempotent; the
@@ -171,8 +185,11 @@ pub trait Dataplane: Send + Sync + 'static {
     ///   calls for this `(vip, vip_port)`. The kernel proceeds with
     ///   the operator-supplied destination, which in Phase 1 typically
     ///   produces `ECONNREFUSED` (no listener on the VIP itself).
-    /// - `local_backends()` (test accessor on adapters that expose
-    ///   it) no longer contains `(vip, vip_port)`.
+    ///   This is the observable postcondition every adapter MUST
+    ///   satisfy — verifiable via a real `connect(vip:vip_port)`
+    ///   from inside the attach cgroup after deregistration (the
+    ///   inverse of the `register_local_backend` walking-skeleton
+    ///   check).
     ///
     /// # Edge cases
     /// - Removing a `(vip, vip_port)` that was never registered
