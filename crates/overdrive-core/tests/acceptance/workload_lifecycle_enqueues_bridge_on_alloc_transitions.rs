@@ -32,14 +32,14 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
-use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
+use overdrive_core::id::{AllocationId, ContentHash, NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
     Action, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext, WorkloadLifecycle,
     WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
 // -------------------------------------------------------------------
 // fixtures (mirror workload_lifecycle_reconcile_branches.rs shape)
@@ -375,5 +375,140 @@ fn converged_tick_emits_no_bridge_enqueue() {
     assert!(
         actions.is_empty(),
         "converged tick must emit zero actions (no spurious bridge enqueue); got {actions:?}"
+    );
+}
+
+// -------------------------------------------------------------------
+// Non-alloc-mutating action classifier — `is_alloc_mutating_action`
+// (reconciler.rs:1517) decides whether a given tick should append the
+// bridge enqueue. The four cases above (Start / Stop / GC / Finalize)
+// all return `true` from the predicate. This test pins the inverse
+// case: a tick whose only emitted action is `ReleaseServiceVip` —
+// which is observationally non-mutating to the bridge's alloc set —
+// MUST NOT trigger a spurious bridge enqueue.
+//
+// Mutation kill: `replace body with true` at reconciler.rs:1517 would
+// make every non-empty action vector trigger the bridge enqueue.
+// Without this test, the four positive-case assertions above can't
+// distinguish the real predicate from the always-true mutant, because
+// every case they cover happens to contain an alloc-mutating action
+// already. The Service-VIP release path is the only Phase-1 emission
+// site that produces a non-empty action vector whose contents are
+// strictly outside the alloc-mutating set, so it is the unique killer
+// for this mutation.
+// -------------------------------------------------------------------
+
+fn fake_spec_digest() -> ContentHash {
+    ContentHash::of(b"is-alloc-mutating-action-fixture-digest")
+}
+
+/// Construct an alloc row in the canonical "terminal-Operator-stopped
+/// Service alloc" shape — `state: Terminated` with a
+/// `terminal: Some(Stopped { by: Operator })` claim — used by the
+/// `service_vip_release_emission` path. Mirrors the shape used by
+/// `workload_lifecycle_release_service_vip.rs::alloc_terminal_operator_stopped`.
+fn terminal_operator_stopped_alloc(
+    alloc_id: &str,
+    workload_id: &str,
+    node_id: &str,
+) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: aid(alloc_id),
+        workload_id: jid(workload_id),
+        node_id: nid(node_id),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp { counter: 2, writer: nid(node_id) },
+        reason: Some(TransitionReason::Stopped { by: StoppedBy::Operator }),
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+    }
+}
+
+#[test]
+fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
+    // Build a Service workload that has reached a terminal-state
+    // observation row AND carries a populated `service_spec_digest`
+    // (the hydrator-supplied input the release-emission path
+    // requires). `desired.desired_to_stop = true` short-circuits
+    // `reconcile_inner` into the Stop branch, which — because no
+    // alloc is Running — emits an empty action list. The wrapper
+    // then appends the `Action::ReleaseServiceVip` via
+    // `service_vip_release_emission`.
+    //
+    // Net `actions` after the wrapper: `[ReleaseServiceVip]` — one
+    // entry, NOT in the alloc-mutating set. With the real
+    // predicate, `actions.iter().any(is_alloc_mutating_action)`
+    // returns false and no bridge enqueue is appended. With the
+    // mutated predicate (`body → true`), `any(...)` returns true
+    // (because the vec is non-empty) and a spurious bridge enqueue
+    // would be appended. The assertion below catches the spurious
+    // emission.
+    let workload_id = jid("payments");
+    let digest = fake_spec_digest();
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        aid("alloc-payments-0"),
+        terminal_operator_stopped_alloc("alloc-payments-0", "payments", "local"),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: true,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: Some(digest),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id,
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: Some(digest),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // Exactly one action: the release. Total length pins both the
+    // presence of the release AND the absence of any other emission
+    // (including the would-be-spurious bridge enqueue under the
+    // always-true mutant).
+    assert_eq!(
+        actions.len(),
+        1,
+        "Service terminal-state tick must emit exactly one action (ReleaseServiceVip); \
+         a bridge EnqueueEvaluation here would be spurious since no alloc-set mutation \
+         occurred; got {actions:?}"
+    );
+    assert!(
+        matches!(actions[0], Action::ReleaseServiceVip { .. }),
+        "the single emitted action must be ReleaseServiceVip; got {actions:?}"
+    );
+    // Belt-and-braces: explicitly assert that NO EnqueueEvaluation
+    // routed at the bridge appears, regardless of total count.
+    let bridge_enqueues = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::EnqueueEvaluation { reconciler, .. }
+                    if reconciler.as_str() == "backend-discovery-bridge"
+            )
+        })
+        .count();
+    assert_eq!(
+        bridge_enqueues, 0,
+        "non-alloc-mutating tick (ReleaseServiceVip only) must emit ZERO bridge enqueues; \
+         got {bridge_enqueues} in {actions:?} — `is_alloc_mutating_action` may have been \
+         mutated to always return true"
     );
 }
