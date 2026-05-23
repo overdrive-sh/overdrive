@@ -44,9 +44,13 @@ pub struct LocalBackendEntry {
     /// network-order bytes back onto the syscall context.
     pub backend_ip_host: u32,
     /// Backend port, host-order. Written as `user_port =
-    /// (backend_port_host as u32).to_be()` — the kernel UAPI
-    /// stores the port in the upper 16 bits of `user_port` per the
-    /// in-tree `bpf_sock_addr` definition.
+    /// u32::from(backend_port_host.to_be())` — `to_be()` swaps the
+    /// host-order `u16` into network-byte-order, then widens into
+    /// the low 16 bits of `user_port` (high 16 bits stay zero).
+    /// Per the in-tree `bpf_sock_addr` definition, only the low 16
+    /// bits of `user_port` carry the NBO port; the high half is
+    /// undefined. See `.claude/rules/development.md` §
+    /// "`bpf_sock_addr.user_port` — low-16-NBO in a u32".
     pub backend_port_host: u16,
     /// Padding for 8-byte alignment. Always zero.
     pub _pad: u16,
