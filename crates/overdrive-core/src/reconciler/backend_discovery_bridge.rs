@@ -269,12 +269,10 @@ pub struct BackendDiscoveryBridge {
 /// downstream sibling the bridge re-enqueues on every
 /// `WriteServiceBackendRow` emission (UI-05 cross-reconciler handoff).
 ///
-/// Pinned to the same compile-time string literal as
-/// `<crate::reconciler::ServiceMapHydrator as Reconciler>::NAME` —
-/// kept out-of-scope from the bridge module so this file does not
-/// pull in the hydrator's full type surface (the bridge only needs
-/// the name + target shape to emit `EnqueueEvaluation`).
-const SERVICE_MAP_HYDRATOR_NAME: &str = "service-map-hydrator";
+/// Compile-time alias to `<ServiceMapHydrator as Reconciler>::NAME` —
+/// a rename of the hydrator's `NAME` constant without updating this
+/// reference is a compile error, not a silent handoff failure.
+const SERVICE_MAP_HYDRATOR_NAME: &str = <super::ServiceMapHydrator as Reconciler>::NAME;
 
 impl BackendDiscoveryBridge {
     /// Canonical kebab-case name; single compile-time anchor per

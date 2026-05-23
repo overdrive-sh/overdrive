@@ -1497,13 +1497,13 @@ impl Reconciler for WorkloadLifecycle {
     }
 }
 
-/// UI-06 — name of the `BackendDiscoveryBridge` reconciler. Pinned to
-/// the same compile-time string literal as
-/// `<crate::reconciler::backend_discovery_bridge::BackendDiscoveryBridge
-/// as Reconciler>::NAME` — duplicated here as a `&'static str` so the
-/// `WorkloadLifecycle::reconcile` wrapper can construct a
-/// `ReconcilerName` without naming the full bridge type surface.
-const BACKEND_DISCOVERY_BRIDGE_NAME: &str = "backend-discovery-bridge";
+/// UI-06 — name of the `BackendDiscoveryBridge` reconciler.
+///
+/// Compile-time alias to `<BackendDiscoveryBridge as Reconciler>::NAME`
+/// — a rename of the bridge's `NAME` constant without updating this
+/// reference is a compile error, not a silent handoff failure.
+const BACKEND_DISCOVERY_BRIDGE_NAME: &str =
+    <backend_discovery_bridge::BackendDiscoveryBridge as Reconciler>::NAME;
 
 /// UI-06 — predicate: is `action` one of the four alloc-mutating
 /// variants the `BackendDiscoveryBridge` cares about?
