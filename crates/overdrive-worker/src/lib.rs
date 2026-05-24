@@ -7,12 +7,6 @@
 //! sees only the `Driver` trait surface (from `overdrive-core`); the
 //! impl is plugged in by the binary at `AppState` construction time.
 //!
-//! # Status
-//!
-//! Phase: phase-1-first-workload, slice 2 (US-02) GREEN landed; slice
-//! 4 (US-04 `node_health` writer half) remains RED scaffold until
-//! delivered.
-
 // `forbid(unsafe_code)` is intentionally NOT set: `Driver::stop` on
 // Linux invokes `libc::kill(pid, SIGTERM)`, which requires `unsafe`.
 // Per `.claude/rules/development.md`, the worker crate is class
@@ -22,9 +16,6 @@
 // comment documenting the precondition.
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
-
-/// SCAFFOLD marker — see this file's module docs.
-pub const SCAFFOLD: bool = true;
 
 pub mod cgroup_manager;
 pub mod driver;

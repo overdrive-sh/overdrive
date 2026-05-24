@@ -1,11 +1,6 @@
 # `overdrive-worker` — worker subsystem per ADR-0029. Hosts
 # `ExecDriver`, workload-cgroup management, and the `node_health`
 # row writer at startup. Class `adapter-host`.
-#
-# SCAFFOLD: true — phase-1-first-workload DISTILL wave landed the
-# crate with panic-bodied bodies per `.claude/rules/testing.md`
-# § "RED scaffolds and intentionally-failing commits". The DELIVER
-# crafter implements the `Driver` trait impl + cgroupfs writes.
 
 [package]
 name         = "overdrive-worker"
