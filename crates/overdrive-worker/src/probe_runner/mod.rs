@@ -101,6 +101,7 @@ impl ProbeRunner {
         clippy::unused_async,
         reason = "RED scaffold; GREEN body in slice-01 will .await on injected probers"
     )]
+    // mutants: skip — RED scaffold; GREEN body lands in slice 01-03 per ADR-0054 §7
     pub async fn probe(&self) -> Result<(), ProbeRunnerError> {
         todo!("RED scaffold: ProbeRunner::probe (Earned Trust gate) — lands GREEN in slice-01")
     }
