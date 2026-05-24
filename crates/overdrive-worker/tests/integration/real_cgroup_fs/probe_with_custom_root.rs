@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use overdrive_core::traits::{CgroupFs, ProbeError};
 use overdrive_host::RealCgroupFs;
+use serial_test::serial;
 
 async fn snapshot_top_level(root: &Path) -> BTreeSet<OsString> {
     let mut entries = BTreeSet::new();
@@ -46,6 +47,7 @@ async fn snapshot_top_level(root: &Path) -> BTreeSet<OsString> {
 }
 
 #[tokio::test]
+#[serial(cgroup)]
 async fn with_probe_root_scopes_away_from_real_cgroupfs() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let sys_fs_cgroup = Path::new("/sys/fs/cgroup");

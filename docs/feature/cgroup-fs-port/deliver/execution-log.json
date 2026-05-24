@@ -274,6 +274,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-24T15:37:26Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:39:37Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:47:22Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:47:22Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier 3 kernel-semantics scenarios are themselves the structural defense \u2014 no PBT-worthy unit logic at this layer; the substrate behavior IS the kernel",
+      "t": "2026-05-24T15:47:22Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:55:57Z"
     }
   ]
 }

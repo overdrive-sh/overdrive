@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use serial_test::serial;
 
 async fn snapshot_top_level(root: &Path) -> BTreeSet<OsString> {
     let mut entries = BTreeSet::new();
@@ -25,6 +26,7 @@ async fn snapshot_top_level(root: &Path) -> BTreeSet<OsString> {
 }
 
 #[tokio::test]
+#[serial(cgroup)]
 async fn probe_succeeds_against_real_cgroupfs() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let before = snapshot_top_level(cgroup_root).await;

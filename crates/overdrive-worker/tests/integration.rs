@@ -25,9 +25,23 @@ mod integration {
 
     // Step 01-02 (cgroup-fs-port migration): Tier 3 acceptance tests
     // for `overdrive_host::RealCgroupFs::probe()`.
+    //
+    // Step 01-08 (cgroup-fs-port migration): Class C kernel-semantics
+    // scenarios per ADR-0054 § D3 + DISTILL Class C. Each scenario
+    // exercises a kernel-side effect that SimCgroupFs cannot model
+    // (cgroup.kill mass-kill, subtree_control EBUSY, controller
+    // EINVAL, pseudo-file synthesis at mkdir, rmdir auto-reap, PID
+    // movement via cgroup.procs). Proves SimCgroupFs's
+    // non-replacement contract is honest.
     mod real_cgroup_fs {
+        mod cgroup_kill_terminates_pids;
+        mod controller_validation;
         mod probe_success;
         mod probe_with_custom_root;
+        mod procs_pid_movement;
+        mod pseudo_file_synthesis;
+        mod rmdir_auto_reap;
+        mod subtree_control_ebusy;
     }
 
     // Step 01-05 (cgroup-fs-port migration): E1 KEEP-TEMPFILE rows
@@ -36,14 +50,20 @@ mod integration {
     // that `CgroupManager` correctly propagates a REAL `io::Error`
     // from a REAL `tokio::fs::*` syscall against the REAL kernel VFS.
     // ENOTDIR-via-regular-file-in-dir-slot is a contrivance to
-    // *trigger* the error; the test *boundary* is real. Candidates
-    // for retirement once Class C scenario
-    // `write_to_readonly_cgroup_file` lands (per
-    // `docs/feature/cgroup-fs-port/distill/test-scenarios.md` § E1
-    // rows 8 / 10 rationale).
+    // *trigger* the error; the test *boundary* is real.
+    //
+    // Step 01-08 (cgroup-fs-port migration): Class C
+    // `write_to_readonly_cgroup_file` scenario — production-realistic
+    // EACCES propagation from a kernel-read-only pseudo-file
+    // (cgroup.events) through CgroupManager-wired RealCgroupFs to the
+    // caller. Per DISTILL § E1 rows 8 / 10 rationale, this scenario
+    // is the candidate replacement for the two KEEP-TEMPFILE rows
+    // above; retirement of those is a follow-on DELIVER decision
+    // once this scenario is green.
     mod cgroup_manager {
         mod cgroup_kill_propagates_real_io_error;
         mod remove_workload_scope_propagates_real_io_error;
+        mod write_to_readonly_cgroup_file;
     }
 
     mod exec_driver {
@@ -53,7 +73,13 @@ mod integration {
         // migrated the suite off `tempfile::TempDir` onto real
         // `/sys/fs/cgroup`; this guard reaps any leftover scope on
         // panic / SIGKILL so the next test's mkdir does not hit EEXIST.
-        mod cleanup;
+        //
+        // Re-used cross-sibling by the Class C real_cgroup_fs tests
+        // (step 01-08) and the cgroup_manager
+        // write_to_readonly_cgroup_file test — `pub` so siblings under
+        // the `integration` mod can import it via
+        // `super::super::exec_driver::cleanup::AllocCleanup`.
+        pub mod cleanup;
         mod limit_write_failure_warns;
         mod live_map_bounded;
         mod missing_binary;
