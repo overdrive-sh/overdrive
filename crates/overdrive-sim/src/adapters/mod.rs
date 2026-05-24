@@ -16,6 +16,7 @@
 
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
 
+pub mod cgroup_fs;
 pub mod clock;
 pub mod dataplane;
 pub mod driver;
@@ -26,3 +27,5 @@ pub mod transport;
 // reconciler-memory-redb step 01-03 — `SimViewStore` impl of
 // `overdrive_control_plane::view_store::ViewStore` per ADR-0035 §2.
 pub mod view_store;
+
+pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
