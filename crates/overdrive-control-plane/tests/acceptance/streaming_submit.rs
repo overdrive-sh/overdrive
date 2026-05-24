@@ -34,7 +34,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
-use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
@@ -70,6 +70,37 @@ fn payments_spec() -> JobSpecInput {
             args: vec![],
         }),
     }
+}
+
+/// Service-kind sibling of [`payments_spec`] with `replicas == 2` for
+/// the regression test against issue #140 — `ConvergedRunning` must
+/// gate on `running_count >= replicas_desired`.
+fn payments_service_spec() -> ServiceSpecInput {
+    ServiceSpecInput {
+        id: "payments-v0".to_string(),
+        replicas: 2,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/usr/local/bin/payments".to_string(),
+            args: vec![],
+        }),
+        listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+    }
+}
+
+/// Build a `POST /v1/jobs` request from a [`ServiceSpecInput`] with the
+/// given Accept header — Service-kind sibling of [`build_submit_request`].
+fn build_service_submit_request(spec: &ServiceSpecInput, accept: &str) -> Request<Body> {
+    let body =
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec.clone()) })
+            .expect("serialize");
+    Request::builder()
+        .method(Method::POST)
+        .uri("/v1/jobs")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, accept)
+        .body(Body::from(body))
+        .expect("build request")
 }
 
 fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
@@ -1330,5 +1361,123 @@ async fn unchanged_resubmit_with_different_kind_uses_stored_discriminator_for_st
         "Job completed successfully but stream reported {:?} — streaming dispatch \
          used the request's workload_kind (Service) instead of the stored kind (Job)",
         terminal_line["kind"]
+    );
+}
+
+// ===========================================================================
+// Regression — issue #140: Service streaming lane must NOT emit
+// `converged_running` until the count of Running rows for the workload
+// meets `replicas_desired`. Prior to the fix, the single-row shortcut
+// (`rows.iter().any(state == Running)`) emitted `ConvergedRunning` the
+// moment the FIRST allocation reached Running, regardless of how many
+// replicas the operator asked for.
+// ===========================================================================
+
+#[tokio::test]
+async fn streaming_lane_does_not_emit_converged_running_until_running_count_meets_replicas_desired()
+{
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
+    let router = build_router(state.clone());
+
+    let workload_id = WorkloadId::from_str("payments-v0").expect("workload id");
+    let alloc_0 = AllocationId::from_str("alloc-payments-0").expect("alloc id 0");
+    let alloc_1 = AllocationId::from_str("alloc-payments-1").expect("alloc id 1");
+
+    // Drive: send the Service submit request in a task so we can drive
+    // the broadcast channel from the main test fixture concurrently.
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_service_submit_request(&payments_service_spec(), "application/x-ndjson"))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    // Wait until the handler has committed `Accepted` and subscribed.
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // -----------------------------------------------------------------
+    // First replica reaches Running. Under the prior (buggy) code path
+    // `check_terminal` would emit `ConvergedRunning` here even though
+    // the Service requested `replicas == 2`.
+    // -----------------------------------------------------------------
+    write_row(
+        state.obs.as_ref(),
+        &alloc_0,
+        &workload_id,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_0.clone(),
+            workload_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    // Give the streaming task a moment to process the event.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(
+        !request_task.is_finished(),
+        "stream MUST NOT terminate when only 1 of 2 desired replicas is Running"
+    );
+
+    // -----------------------------------------------------------------
+    // Second replica reaches Running — the count gate is now met.
+    // The stream MUST emit `converged_running` and terminate promptly.
+    // -----------------------------------------------------------------
+    write_row(
+        state.obs.as_ref(),
+        &alloc_1,
+        &workload_id,
+        AllocState::Running,
+        2,
+        Some(TransitionReason::Started),
+    )
+    .await;
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_1.clone(),
+            workload_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("stream completes within nominal timeout once second replica is Running")
+        .expect("task ok");
+
+    // The terminal line must be `converged_running` — not the cap timer
+    // `converged_failed` (which would mean the count gate never fired).
+    let last = lines.last().expect("at least one streaming line");
+    assert_eq!(
+        last["kind"], "converged_running",
+        "stream must terminate with `converged_running` once running_count >= replicas_desired; \
+         got {last}"
+    );
+
+    // Exactly ONE `converged_running` line — the gate did not flap.
+    let converged_count = lines.iter().filter(|l| l["kind"] == "converged_running").count();
+    assert_eq!(
+        converged_count, 1,
+        "exactly one `converged_running` line expected; got {converged_count} in {lines:?}"
     );
 }

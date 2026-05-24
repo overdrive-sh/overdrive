@@ -465,6 +465,29 @@ pub async fn submit_workload(
                 // issued VIP rides on `SubmitEvent::Accepted` per
                 // ADR-0049 (amended 2026-05-15) / step 02-03d; Schedule
                 // emits `vip: None`.
+                //
+                // `replicas_desired` is hydrated from the validated
+                // aggregate already in scope and threaded into the
+                // streaming task per issue #140: the streaming-lane
+                // `ConvergedRunning` gate compares the count of
+                // Running rows for this workload against this value.
+                // Schedule arms never actually reach this builder —
+                // the submit handler rejects Schedule at the validation
+                // step above with HTTP 400. The `unreachable!()` arm
+                // is structurally defended and panics with a citation
+                // if the rejection above ever drifts.
+                let replicas_desired = match &intent {
+                    WorkloadIntent::Service(s) => s.replicas,
+                    WorkloadIntent::Schedule(_) => unreachable!(
+                        "Schedule rejected at submit (handlers.rs validation step \
+                         returns HTTP 400 before reaching this branch); \
+                         Job uses build_workload_stream"
+                    ),
+                    WorkloadIntent::Job(_) => unreachable!(
+                        "Job dispatch is the sibling arm above; this branch is \
+                         Service-or-Schedule only"
+                    ),
+                };
                 let accepted_vip = service_vip.map(|v| v.get().to_string());
                 let accepted = crate::streaming::build_accepted(
                     spec_digest,
@@ -472,8 +495,12 @@ pub async fn submit_workload(
                     outcome,
                     accepted_vip,
                 );
-                let stream =
-                    crate::streaming::build_stream(state.clone(), workload_id.clone(), accepted);
+                let stream = crate::streaming::build_stream(
+                    state.clone(),
+                    workload_id.clone(),
+                    accepted,
+                    replicas_desired,
+                );
                 Body::from_stream(stream)
             }
         };
