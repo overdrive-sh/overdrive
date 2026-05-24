@@ -1992,6 +1992,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trybuild",
 ]
 
 [[package]]

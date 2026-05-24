@@ -1,0 +1,8 @@
+// RED scaffold (step 01-01): this .stderr fixture is intentionally
+// empty — the fixture body in `exec_driver_missing_fs.rs` is a stub
+// that does nothing, so no diagnostic is produced yet. The real
+// diagnostic shape (mismatched arity / missing `fs` parameter) is
+// captured at step 01-05 when `ExecDriver::new` gains its third
+// mandatory parameter and the fixture body is activated. Until then
+// the parent `tests/compile_fail.rs` does not invoke trybuild
+// against this file, so this fixture is never read.

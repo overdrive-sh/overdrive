@@ -51,6 +51,16 @@ proptest.workspace  = true
 tempfile.workspace  = true
 serial_test.workspace = true
 tracing-subscriber.workspace = true
+# `trybuild` — compile-fail fixture harness per ADR-0054 § migration
+# step 01-01. Used to pin the post-01-05 `ExecDriver::new` arity at
+# compile time (a constructor missing the mandatory
+# `fs: Arc<dyn CgroupFs>` parameter must fail to compile, not at
+# runtime). The fixture itself lands as a RED scaffold at 01-01 and
+# goes GREEN at 01-05 when the arity change ships. Workspace-pinned
+# at `=1.0.101` per `.claude/rules/testing.md` § "Compile-fail testing
+# (trybuild)" — pin exactly to keep `.stderr` fixtures stable across
+# rustc upgrades.
+trybuild.workspace  = true
 
 [lints]
 workspace = true
