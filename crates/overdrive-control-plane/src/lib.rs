@@ -781,6 +781,19 @@ pub async fn run_server(
     // the actionable `CgroupBootstrap(DelegationMissing)` message.
     cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
 
+    // Per the cgroup v2 kernel contract, a parent's `subtree_control`
+    // must delegate controllers BEFORE any child can enable them in
+    // its own `subtree_control`. `create_and_enrol_control_plane_slice`
+    // writes `+cpu +memory +io +pids` to
+    // `overdrive.slice/cgroup.subtree_control` (step 2 of its
+    // four-step sequence), which is a prerequisite for the
+    // workloads-slice bootstrap below. Order is load-bearing: moving
+    // this call after the workloads bootstrap produces ENOENT on the
+    // child's `subtree_control` write because the kernel does not see
+    // the controllers at the parent level.
+    cgroup_manager::create_and_enrol_control_plane_slice()
+        .map_err(error::ControlPlaneError::from)?;
+
     // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
     // § "Production fix #2": delegate `+cpu +memory +io +pids` to
     // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
@@ -828,19 +841,12 @@ pub async fn run_server_with_obs_and_driver(
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
-    // ADR-0028 preflight now runs in `run_server` (the outer
-    // composition boundary) BEFORE the workloads-slice bootstrap.
-    // Tests that compose `run_server_with_obs_and_driver` directly
-    // are responsible for running the preflight themselves if they
-    // need it (typically they run on a properly configured Lima VM).
-    cgroup_manager::create_and_enrol_control_plane_slice()
-        .map_err(error::ControlPlaneError::from)?;
-    // Step 01-07 (cgroup-fs-port migration): the workloads-slice
-    // bootstrap moved UP to `run_server` (the binary-composition
-    // boundary), where the `Arc<dyn CgroupFs>` adapter is in scope.
-    // Tests that compose `run_server_with_obs_and_driver` directly are
-    // responsible for their own cgroup bootstrap (typically a real-
-    // cgroupfs prelude — see the integration suite under
+    // ADR-0028 preflight, parent-slice delegation, and workloads-slice
+    // bootstrap all run in `run_server` (the outer composition
+    // boundary). Tests that compose `run_server_with_obs_and_driver`
+    // directly are responsible for running these themselves if they
+    // need real cgroupfs (typically they run on a properly configured
+    // Lima VM — see the integration suite under
     // `crates/overdrive-control-plane/tests/integration/cgroup_isolation/`
     // and `crates/overdrive-worker/tests/integration/exec_driver/`).
 
