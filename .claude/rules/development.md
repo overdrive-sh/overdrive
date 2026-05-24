@@ -1963,6 +1963,37 @@ always produces a fixed-length value, the read path must still
 defend against corruption, truncation, or future schema evolution
 that changes the length.
 
+### Logically unreachable `None` / `Err` — use `unreachable!()`, not `?` or `.expect()`
+
+When a prior guard guarantees that an `Option` is `Some` (or a
+`Result` is `Ok`), do not propagate with `?` — that suggests early
+return is a valid path and hides the invariant from future readers.
+Use `.unwrap_or_else(|| unreachable!("..."))` to make the invariant
+explicit and signal "this is a logic error" rather than "a runtime
+failure I hope won't happen."
+
+```rust
+// Bad — suggests None is a valid early-return path
+let running = rows.iter().filter(|r| r.is_running()).max_by_key(|r| r.ts)?;
+
+// Bad — expect panics the process; never use in production library code
+let running = rows.iter().filter(|r| r.is_running()).max_by_key(|r| r.ts)
+    .expect("at least one running");
+
+// Good — communicates the invariant: a prior guard made this unreachable
+let running = rows.iter().filter(|r| r.is_running()).max_by_key(|r| r.ts)
+    .unwrap_or_else(|| unreachable!("running_count >= 1 guarantees at least one Running row"));
+```
+
+**`.expect()` has no place in production library code** — it panics
+and kills the process. The only legitimate use is at CLI / binary
+boundaries (per § "Concurrency & async" → `.expect()` in CLI
+binaries) where a panic IS the intended exit strategy. In library
+and core crates, either propagate the error via `?` into a typed
+variant, or use `unreachable!()` when a logical invariant makes the
+path structurally impossible.
+
+
 ### Concurrency & async
 
 - **Tokio is the standard runtime.** Do not reach for `async-std`,

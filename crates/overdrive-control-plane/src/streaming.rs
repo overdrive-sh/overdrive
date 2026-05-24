@@ -518,27 +518,41 @@ async fn lagged_recover(
 ) -> Option<SubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
     let job_rows: Vec<_> = rows.into_iter().filter(|r| r.workload_id == *workload_id).collect();
-    let latest = job_rows.iter().max_by_key(|r| r.updated_at.counter)?;
-
-    if let Some(cond) = &latest.terminal {
-        // Promote the row to a synthetic LifecycleEvent shape so the
-        // projection helper can be reused. `from` mirrors `to`
-        // because we have no prior-state context in the snapshot.
-        let to_wire: AllocStateWire = latest.state.into();
+    // Fail-fast: ANY terminal row closes the stream regardless of
+    // running-count (docstring invariant, RCA §7 Q1/Q2).  Scan all
+    // rows, not just the LWW winner, because a sibling allocation may
+    // have a higher counter yet be non-terminal.
+    if let Some(terminal_row) =
+        job_rows.iter().filter(|r| r.terminal.is_some()).max_by_key(|r| r.updated_at.counter)
+    {
+        let cond = terminal_row
+            .terminal
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("filter guarantees terminal.is_some()"));
+        let to_wire: AllocStateWire = terminal_row.state.into();
         let event = LifecycleEvent {
-            alloc_id: latest.alloc_id.clone(),
-            workload_id: latest.workload_id.clone(),
+            alloc_id: terminal_row.alloc_id.clone(),
+            workload_id: terminal_row.workload_id.clone(),
             from: to_wire,
             to: to_wire,
-            reason: latest.reason.clone().unwrap_or(
+            reason: terminal_row.reason.clone().unwrap_or(
                 overdrive_core::TransitionReason::DriverInternalError { detail: String::new() },
             ),
-            detail: latest.detail.clone(),
+            detail: terminal_row.detail.clone(),
             source: crate::api::TransitionSource::Reconciler,
-            at: format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str()),
+            at: format!(
+                "{}@{}",
+                terminal_row.updated_at.counter,
+                terminal_row.updated_at.writer.as_str()
+            ),
             terminal: Some(cond.clone()),
         };
         return Some(submit_event_from_terminal(cond, &event));
+    }
+
+    // Guard: need at least one row to proceed to the running-count gate.
+    if job_rows.is_empty() {
+        return None;
     }
 
     // Non-terminal — count Running rows for this workload and emit
@@ -557,7 +571,10 @@ async fn lagged_recover(
         let running = job_rows
             .iter()
             .filter(|r| r.state == AllocState::Running)
-            .max_by_key(|r| r.updated_at.counter)?;
+            .max_by_key(|r| r.updated_at.counter)
+            .unwrap_or_else(|| {
+                unreachable!("running_count >= 1 guarantees at least one Running row")
+            });
         return Some(SubmitEvent::ConvergedRunning {
             alloc_id: running.alloc_id.to_string(),
             started_at: format!(
