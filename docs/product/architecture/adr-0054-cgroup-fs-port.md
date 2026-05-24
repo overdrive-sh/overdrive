@@ -12,6 +12,13 @@ refines the DST seam established by ADR-0016 and the
 `overdrive-worker`-owned cgroup surface established by ADR-0026 §
 Amendment 2026-04-27 + ADR-0029.
 
+**Amendment 2026-05-24**: § Production probe (RealCgroupFs)
+restructured to round-trip on `cgroup.subtree_control` (kernel-
+managed pseudo-file) instead of a regular file inside the probe
+cgroup. The original spec was empirically falsified by DELIVER step
+01-02 — cgroupfs only permits kernel-managed pseudo-files inside
+cgroup directories. See § Alternatives considered → Alternative F.
+
 ## Context
 
 ADR-0026 chose direct `std::fs` writes against `/sys/fs/cgroup` for the
@@ -202,18 +209,60 @@ pub trait CgroupFs: Send + Sync + 'static {
     /// # Production probe (RealCgroupFs)
     ///
     /// At `<cgroup_root>/.overdrive-probe-<uuid>/`:
-    /// 1. `create_dir(&probe_dir)` — directory exists.
-    /// 2. `write(&probe_dir.join("probe-file"), b"probe\n")` — byte
-    ///    round-trip works.
-    /// 3. (host adapter additionally reads back the file via
-    ///    `tokio::fs::read` and asserts bytes match — Earned Trust
-    ///    requires demonstrated round-trip, not just write-and-pray).
-    /// 4. `remove_dir(&probe_dir.join("probe-file"))` then
-    ///    `remove_dir(&probe_dir)` — teardown succeeds.
+    /// 1. `create_dir(&probe_dir)` — directory exists. On real
+    ///    cgroupfs, the kernel synthesises the per-cgroup pseudo-files
+    ///    (`cgroup.procs`, `cgroup.subtree_control`, `cgroup.events`,
+    ///    `cgroup.kill`, …) inside the new leaf cgroup as a side effect.
+    /// 2. `write(&probe_dir.join("cgroup.subtree_control"), b"")` — a
+    ///    no-op write against a kernel-managed pseudo-file. The kernel
+    ///    parses the empty controller-diff payload and applies it as a
+    ///    no-op (no controller enabled, no controller disabled). This
+    ///    falsifies "filesystem mounted read-only", "wrong cgroup
+    ///    version", "permission denied", "broken bind mount", and any
+    ///    kernel-side rejection of the write surface — without
+    ///    requiring the probe to create regular files inside the
+    ///    cgroup (which cgroupfs forbids — only kernel-managed
+    ///    pseudo-files exist inside cgroup directories).
+    /// 3. `tokio::fs::read(&probe_dir.join("cgroup.subtree_control"))`
+    ///    — the kernel returns the current controller list as a
+    ///    newline-delimited ASCII payload (may be empty on a fresh
+    ///    leaf cgroup; may contain entries inherited from the parent
+    ///    if the substrate is already controller-populated). The
+    ///    Earned Trust assertion is **"read does NOT error" + "kernel
+    ///    returned bytes are valid UTF-8"** — NOT byte-equality with
+    ///    what was written (the kernel response is its own canonical
+    ///    form, not the empty payload). A non-UTF-8 read response is
+    ///    the substrate-lying signal (kernel bug, corruption,
+    ///    something pretending to be cgroupfs); it surfaces as
+    ///    `ProbeError::RoundTripMismatch { wrote: vec![], read }`.
+    /// 4. `remove_dir(&probe_dir)` — teardown succeeds because the
+    ///    leaf cgroup is empty (no descendants, no live processes);
+    ///    the kernel garbage-collects the synthesised pseudo-files
+    ///    automatically. No `remove_file` step against
+    ///    `cgroup.subtree_control` — the kernel forbids unlinking
+    ///    its own pseudo-files.
     ///
-    /// On failure, the probe surfaces the originating `io::Error`
-    /// in `ProbeError::Substrate { source }`; the composition root
-    /// emits `health.startup.refused` with the structured cause.
+    /// On any substrate-level failure (mkdir EACCES, write EROFS,
+    /// read EIO, rmdir EBUSY, …), the probe surfaces the originating
+    /// `io::Error` in `ProbeError::Substrate { source }`; the
+    /// composition root emits `health.startup.refused` with the
+    /// structured cause.
+    ///
+    /// **Rationale for `cgroup.subtree_control` over a regular file
+    /// inside the probe cgroup.** The original probe specification
+    /// (pre-amendment-2026-05-24) wrote a regular `probe-file` inside
+    /// the probe cgroup and read it back for byte-equality. Empirical
+    /// testing during DELIVER step 01-02 against real `/sys/fs/cgroup`
+    /// falsified that spec: cgroupfs only permits kernel-managed
+    /// pseudo-files inside cgroup directories — `mkdir` of a leaf
+    /// cgroup converts the directory into a cgroup, and subsequent
+    /// regular-file creation is rejected by the kernel. The amended
+    /// spec round-trips on `cgroup.subtree_control` — a kernel-managed
+    /// pseudo-file production cgroup-management code ALREADY touches
+    /// (every controller-enablement write goes through it) — so the
+    /// probe exercises the actual production substrate surface. See
+    /// § Alternatives considered → Alternative F for the rejected
+    /// regular-file approach.
     ///
     /// # Sim probe (SimCgroupFs)
     ///
@@ -243,10 +292,16 @@ pub enum ProbeError {
     },
 
     /// Probe succeeded structurally but the round-trip assertion
-    /// failed (bytes written did not match bytes read back). Indicates
-    /// the substrate is lying about the write — the failure mode
-    /// Earned Trust specifically defends against (Docker overlayfs
-    /// fsync no-op, WSL2 DrvFs caching, tmpfs eviction).
+    /// failed. For RealCgroupFs this fires when the kernel returns a
+    /// non-UTF-8 response from `cgroup.subtree_control` (the kernel's
+    /// canonical response is a newline-delimited ASCII controller
+    /// list; non-UTF-8 indicates the substrate is lying about being
+    /// cgroupfs). For SimCgroupFs this fires when the in-memory store
+    /// returns bytes other than what the probe wrote (the BTreeMap is
+    /// the substrate; mismatch indicates a Sim-side bug or test-
+    /// configuration drift). The `wrote` field is `vec![]` for the
+    /// Real path (we wrote an empty no-op payload); it carries the
+    /// probe payload for the Sim path.
     #[error("CgroupFs probe round-trip mismatch: wrote {wrote:?}, read {read:?}")]
     RoundTripMismatch { wrote: Vec<u8>, read: Vec<u8> },
 }
@@ -515,21 +570,38 @@ impl CgroupFs for RealCgroupFs {
     }
     async fn probe(&self) -> Result<(), ProbeError> {
         let probe_dir = self.probe_root.join(format!(".overdrive-probe-{}", uuid::Uuid::new_v4()));
-        let probe_file = probe_dir.join("probe-file");
-        let payload: &[u8] = b"probe\n";
-        // 1. mkdir
+        // `cgroup.subtree_control` is a kernel-managed pseudo-file
+        // that exists in every cgroup directory the kernel
+        // synthesises. Production cgroup-management code already
+        // writes to it (every controller-enablement goes through this
+        // surface); the probe round-trips a no-op empty payload.
+        let subtree_ctl = probe_dir.join("cgroup.subtree_control");
+        // 1. mkdir the probe leaf cgroup. The kernel synthesises the
+        //    per-cgroup pseudo-files inside as a side effect.
         self.create_dir(&probe_dir).await.map_err(|source| ProbeError::Substrate { source })?;
-        // 2. write
-        self.write(&probe_file, payload).await.map_err(|source| ProbeError::Substrate { source })?;
-        // 3. read-back via tokio::fs::read (intentional: the adapter must demonstrate
-        //    round-trip; the trait's read surface is intentionally absent because the
-        //    cgroup manager never reads, but the probe must)
-        let read_back = tokio::fs::read(&probe_file).await.map_err(|source| ProbeError::Substrate { source })?;
-        if read_back != payload {
-            return Err(ProbeError::RoundTripMismatch { wrote: payload.to_vec(), read: read_back });
+        // 2. Write an empty (no-op) controller diff. The kernel
+        //    parses the empty payload and applies it without state
+        //    change. This falsifies "mounted read-only", "wrong
+        //    cgroup version", "permission denied", "broken bind
+        //    mount", and any kernel-side rejection of the write
+        //    surface.
+        self.write(&subtree_ctl, b"").await.map_err(|source| ProbeError::Substrate { source })?;
+        // 3. Read back via tokio::fs::read (intentional: the adapter
+        //    must demonstrate round-trip; the trait's read surface is
+        //    intentionally absent because the cgroup manager never
+        //    reads, but the probe must). Assert "read does NOT error"
+        //    + "kernel response is valid UTF-8" — NOT byte-equality
+        //    (the kernel returns its own canonical controller-list
+        //    response, not the empty payload we wrote).
+        let read_back = tokio::fs::read(&subtree_ctl).await.map_err(|source| ProbeError::Substrate { source })?;
+        if std::str::from_utf8(&read_back).is_err() {
+            return Err(ProbeError::RoundTripMismatch { wrote: Vec::new(), read: read_back });
         }
-        // 4. teardown
-        tokio::fs::remove_file(&probe_file).await.map_err(|source| ProbeError::Substrate { source })?;
+        // 4. Teardown — rmdir the empty leaf cgroup. The kernel
+        //    garbage-collects the synthesised pseudo-files
+        //    automatically. No remove_file step against
+        //    cgroup.subtree_control — the kernel forbids unlinking
+        //    its own pseudo-files.
         self.remove_dir(&probe_dir).await.map_err(|source| ProbeError::Substrate { source })?;
         Ok(())
     }
@@ -541,9 +613,17 @@ The probe exercises the exact set of substrate lies Earned Trust
 demands (CLAUDE.md principle 12): "(d) when designing for environments
 known to lie (Docker overlayfs `fsync` no-op, WSL2 DrvFs, tmpfs,
 vendor SDKs in flux), the probe MUST exercise the specific lie."
-The round-trip read-back catches every shape of substrate dishonesty
-(overlayfs no-op write, tmpfs eviction, kernel rejection silently
-ignored by the syscall path).
+Round-tripping on `cgroup.subtree_control` — a kernel-managed
+pseudo-file production cgroup-management code already touches — gives
+the probe a substrate surface identical to the production write path,
+so any kernel-side rejection (read-only mount, wrong cgroup version,
+denied delegation, broken bind mount, kernel returning garbage) fires
+at boot rather than at first workload start. The amended spec
+supersedes the pre-amendment-2026-05-24 design that wrote a regular
+`probe-file` inside the probe cgroup — empirically falsified during
+DELIVER step 01-02 against real `/sys/fs/cgroup` (cgroupfs only
+permits kernel-managed pseudo-files inside cgroup directories). See
+§ Alternatives considered → Alternative F.
 
 ### Sim adapter (`overdrive-sim::SimCgroupFs`)
 
@@ -772,7 +852,69 @@ any flavour are explicitly forbidden by `.claude/rules/development.md`
 § "Port-trait dependencies" → "mandatory not defaulted at the call
 site". Explicitly rejected by the rule.
 
-### Alternative F — Wrap `tokio::fs::*` directly (no port)
+### Alternative F — Regular-file round-trip inside the probe cgroup (rejected post-empirical-test, 2026-05-24)
+
+The original ADR (§ Production probe, pre-amendment-2026-05-24)
+specified a four-step round-trip writing a regular `probe-file`
+inside the probe cgroup directory:
+
+```
+1. create_dir(<probe_root>/.overdrive-probe-<uuid>)
+2. write(<probe_dir>/probe-file, b"probe\n")
+3. tokio::fs::read(<probe_file>) and assert byte-equal to step 2
+4. remove_file(<probe_file>) then remove_dir(<probe_dir>)
+```
+
+**Rejected.** Empirically falsified during DELIVER step 01-02
+(2026-05-24) by the crafter running C-probe-success against real
+`/sys/fs/cgroup` via `cargo xtask lima run --` (executing as root).
+Step 2 fails with the kernel rejecting the regular-file write: when
+`probe_root = /sys/fs/cgroup`, the `mkdir` of step 1 turns
+`.overdrive-probe-<uuid>` into a leaf cgroup, and cgroupfs only
+permits kernel-managed pseudo-files (`cgroup.procs`,
+`cgroup.subtree_control`, `cgroup.events`, `cgroup.kill`, …) inside
+cgroup directories — creating the regular file `probe-file` is
+rejected by the kernel substrate.
+
+This is the same kernel-side-effects boundary the ADR's own § Scope
+block (in the trait docstring) warned about — "SimCgroupFs does NOT
+model kernel side effects (kernel-managed pseudo-files)" — but the
+original production-side probe spec walked into the boundary without
+noticing.
+
+The remediation (Option A, user-approved 2026-05-24) round-trips on
+`cgroup.subtree_control` — a kernel-managed pseudo-file production
+code already touches via every controller-enablement write. The
+kernel parses an empty controller-diff payload as a no-op, and reads
+back its own canonical controller-list response. The semantic of
+"round-trip" shifts slightly — from "bytes I wrote = bytes I read"
+to "kernel acknowledges the write AND returns parseable bytes on
+read" — but the failure modes the probe exists to catch
+(filesystem read-only, wrong cgroup version, permission denied,
+broken bind mount, kernel returning garbage) all still fire. The
+amended probe spec uses surfaces production code ALREADY touches,
+which the regular-file approach did not.
+
+Other alternatives considered for the remediation and rejected:
+
+- **Option B — Probe at the slice level above the cgroup boundary**
+  (write a regular file at `/sys/fs/cgroup/overdrive.slice/` parent
+  before creating any leaf cgroup). Rejected: the slice itself is
+  also a cgroup, so the regular-file restriction applies there too;
+  and the probe would no longer test the leaf-cgroup creation path
+  that production exercises on every workload start.
+- **Option C — Skip the round-trip; assert only that mkdir +
+  rmdir succeed.** Rejected: drops the substrate-lying detection
+  (overlayfs no-op, kernel rejection silently ignored), which is the
+  Earned Trust load-bearing assertion.
+- **Option D — Round-trip on `cgroup.procs`** (also a
+  kernel-managed pseudo-file). Rejected: writes to `cgroup.procs`
+  require a real PID payload and move that PID into the cgroup;
+  the probe has no spare PID to move, and using the probe's own PID
+  would attempt to move the boot-time process into a transient
+  cgroup that's about to be rmdir'd.
+
+### Alternative G — Wrap `tokio::fs::*` directly (no port)
 
 Just thin async functions in `overdrive-worker` that call
 `tokio::fs::*` and provide a `cfg(test)` swap.
