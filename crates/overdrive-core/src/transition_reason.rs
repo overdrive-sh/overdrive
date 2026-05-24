@@ -432,6 +432,118 @@ pub enum TerminalCondition {
     Failed { exit_code: i32 },
 }
 
+// `TerminalCondition::Stable` / `::ServiceFailed` ARE NOT appended at
+// this step. AC#5 of slice 01-01 originally proposed an additive
+// append, but empirical investigation showed that adding any new
+// variant to this `rkyv::Archive`-derived enum shifts the archived
+// inline footprint (rkyv lays out enum size as `max(variant_payloads)`
+// + tag — even Boxed variants change alignment, which shifts every
+// consumer that holds `Option<TerminalCondition>` inline, e.g.
+// `AllocStatusRowV1`). The right landing for these variants is the
+// step that ALSO bumps the affected envelopes' V<N+1> + adds matching
+// schema-evolution fixtures per `.claude/rules/development.md` §
+// "Version-bump procedure". That step is the Service-lifecycle
+// reconciler wiring (slice 01-03+ per ADR-0055); deferring keeps
+// slice 01-01 binary-compatible with every existing
+// schema-evolution fixture.
+//
+// Companion types `ServiceFailureReason` and `ProbeWitness` ARE
+// defined below — they are pure value types with no runtime
+// consumer in this step's surface, but their type-level presence
+// supports the Service-reconciler scaffold in
+// `crate::service_lifecycle` which re-exports them.
+
+/// Reason a Service alloc transitioned to a terminal Failed state.
+///
+/// Per ADR-0055 § 4 + ADR-0056 (wire projection): single
+/// `#[non_exhaustive]` enum; additive variants only.
+///
+/// Lives in `transition_reason.rs` (and is re-exported from
+/// `service_lifecycle.rs`) so it can be carried inside
+/// [`TerminalCondition::ServiceFailed`] without inducing a module-
+/// dependency cycle. The Service-lifecycle reconciler is the sole
+/// constructor; downstream consumers branch on the variant for
+/// operator-facing render.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "reason", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ServiceFailureReason {
+    /// Startup deadline elapsed before any successful probe.
+    /// `probe_idx` names the last-attempted probe; `attempts`
+    /// records how many attempts were made.
+    StartupTimeout { probe_idx: u32, attempts: u32 },
+    /// Startup probe exhausted `max_attempts` without a Pass result
+    /// within `startup_deadline`. `last_fail` carries the last
+    /// observed `ProbeStatus::Fail.last_fail_reason` for direct
+    /// operator-renderable surface.
+    StartupProbeFailed { probe_idx: u32, last_fail: String, attempts: u32 },
+    /// Workload exited before any startup probe could pass AND
+    /// within `startup_deadline` window. Closes RCA-A coinflip
+    /// case per US-08.
+    EarlyExit { exit_code: i32 },
+    /// Liveness probe consecutive-failure count reached its
+    /// threshold AND restart-budget reached
+    /// `RESTART_BACKOFF_CEILING`. Composes with the existing
+    /// `BackoffExhausted` JobLifecycle pathway for Service-kind
+    /// liveness-driven restart attempts.
+    LivenessProbeFailed { probe_idx: u32, attempts: u32 },
+}
+
+/// Names which probe's Pass moved the reconciler to Stable.
+///
+/// Per DDD-7 (multi-probe AND-of-all semantic): when N startup
+/// probes are declared, all must Pass; the witness names the
+/// **last-to-Pass** probe. Renderer surfaces as `witness:
+/// startup probe #<idx> (<mechanic_summary>)`.
+///
+/// Lives in `transition_reason.rs` (and is re-exported from
+/// `service_lifecycle.rs`) so it can be carried inside
+/// [`TerminalCondition::Stable`] without inducing a module-
+/// dependency cycle.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProbeWitness {
+    /// 0-indexed position of the witnessing probe within its role
+    /// array.
+    pub probe_idx: u32,
+    /// Operator-facing role name (`"startup"` / `"readiness"` /
+    /// `"liveness"`). Carried as `String` to keep
+    /// `transition_reason.rs` decoupled from `observation::ProbeRole`
+    /// (which lives in a separate module — projection happens at the
+    /// reconciler's emission site).
+    pub role: String,
+    /// Operator-facing summary (e.g. `"tcp 0.0.0.0:8080"`,
+    /// `"http GET http://0.0.0.0:8080/healthz"`,
+    /// `"exec /usr/local/bin/healthcheck.sh"`). Reconciler
+    /// composes from `ProbeDescriptor.mechanic` at the deciding
+    /// tick.
+    pub mechanic_summary: String,
+    /// `true` IFF this witness was the platform's inferred default
+    /// probe per ADR-0058.
+    pub inferred: bool,
+}
+
 /// Initiator of a `Cancelled` transition.
 #[derive(
     Debug,

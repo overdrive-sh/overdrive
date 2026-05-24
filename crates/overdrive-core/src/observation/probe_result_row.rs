@@ -22,29 +22,12 @@
 //! traps.md` documents the prior-known gap that motivated the
 //! discriminant-pinning callout. The schema-evolution test lives at
 //! `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`.
-//!
-//! RED scaffold — types and envelope land empty here; bodies and
-//! schema-evolution fixture land in slice 01.
-// SCAFFOLD: true
 
 #![allow(dead_code)]
-#![expect(clippy::todo, reason = "RED scaffold; lands GREEN in slice-01")]
-#![allow(
-    clippy::doc_markdown,
-    clippy::doc_lazy_continuation,
-    clippy::too_long_first_doc_paragraph,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::unused_async,
-    clippy::missing_panics_doc,
-    clippy::missing_errors_doc,
-    clippy::module_name_repetitions,
-    clippy::struct_field_names,
-    reason = "DISTILL RED scaffold; per `.claude/rules/testing.md` § 'RED scaffolds' lints land when DELIVER replaces todo!() bodies + rewrites docs"
-)]
 
 use serde::{Deserialize, Serialize};
 
+use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::id::AllocationId;
 
 /// 0-indexed position of a probe within its role's TOML array (or
@@ -53,7 +36,22 @@ use crate::id::AllocationId;
 /// `ProbeIdx` is the load-bearing cross-step variable per
 /// `discuss/shared-artifacts-registry.md`: it MUST match across
 /// (parser → ProbeResultRow PK → CLI render → wire payloads).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(transparent)]
 pub struct ProbeIdx(pub u32);
 
 impl ProbeIdx {
@@ -66,6 +64,12 @@ impl ProbeIdx {
     }
 }
 
+impl std::fmt::Display for ProbeIdx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Role of a probe within the per-Service lifecycle.
 ///
 /// Per ADR-0057: three roles `startup`, `readiness`, `liveness`,
@@ -74,7 +78,21 @@ impl ProbeIdx {
 ///   readiness/liveness: continuous post-Stable).
 /// - What the probe gates (startup: `Stable` predicate; readiness:
 ///   `Backend.healthy`; liveness: `RestartAllocation`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeRole {
     Startup,
@@ -89,7 +107,17 @@ pub enum ProbeRole {
 /// US-06. Adapters DO NOT write `Pending`; absence of the row IS
 /// pending. The render layer materialises `Pending` from row
 /// absence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case", tag = "status", content = "data")]
 pub enum ProbeStatus {
     Pass,
@@ -102,10 +130,17 @@ pub enum ProbeStatus {
 /// Composite PK: `(alloc_id, probe_idx)`. LWW resolution per
 /// `last_observed_at` (logical timestamp inherited from the
 /// `ObservationRow` envelope; not duplicated here).
-///
-/// RED scaffold — fields documented; rkyv derives + envelope wiring
-/// land in slice 01.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ProbeResultRowV1 {
     /// Allocation this probe targets.
     pub alloc_id: AllocationId,
@@ -133,6 +168,11 @@ pub struct ProbeResultRowV1 {
 /// persistence boundary.
 pub type ProbeResultRow = ProbeResultRowV1;
 
+/// Documentation alias for "the latest payload variant of
+/// [`ProbeResultRowEnvelope`]". Mirrors the alias-to-payload
+/// convention from ADR-0048 UI-02.
+pub type ProbeResultRowLatest = ProbeResultRowV1;
+
 /// Codec-internal envelope enum per ADR-0048.
 ///
 /// NOT re-exported from `crates/overdrive-core/src/lib.rs` — only
@@ -141,44 +181,56 @@ pub type ProbeResultRow = ProbeResultRowV1;
 ///
 /// Discriminant pinning per ADR-0054 §5 QR1: `V1 = 0`. Future
 /// variants append at the tail only. The schema-evolution fixture
-/// at `crates/overdrive-core/tests/schema_evolution/
-/// probe_result_row.rs` pins both the archived bytes AND
-/// `FIXTURE_V1_DISCRIMINANT: u8 = 0`.
-///
-/// RED scaffold — rkyv derives land in slice 01.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(u8)]
+/// at `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`
+/// pins both the archived bytes AND `FIXTURE_V1_DISCRIMINANT: u8 = 0`.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ProbeResultRowEnvelope {
-    V1(ProbeResultRowV1) = 0,
+    V1(ProbeResultRowV1),
 }
 
-impl ProbeResultRowEnvelope {
-    /// Wrap the current `Latest` payload into the envelope. The
-    /// persistence-boundary code is the only call site.
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "RED scaffold; production body in slice-01 will consume payload into Self::V1"
-    )]
-    pub fn latest(payload: ProbeResultRowV1) -> Self {
-        let _ = payload;
-        todo!("RED scaffold: ProbeResultRowEnvelope::latest — wire into Self::V1 in slice-01")
+impl VersionedEnvelope for ProbeResultRowEnvelope {
+    type Latest = ProbeResultRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
     }
 
-    /// Project the envelope into the current `Latest` payload.
-    /// Older variants chain through `From` impls; V1 returns
-    /// self-payload unchanged.
-    pub fn into_latest(self) -> Result<ProbeResultRowV1, EnvelopeError> {
-        todo!("RED scaffold: ProbeResultRowEnvelope::into_latest — implement V1 arm in slice-01")
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
     }
-}
 
-/// Envelope projection error — surfaces when archived bytes decode
-/// into an envelope variant that cannot be projected to the current
-/// `Latest`. Slice 01 has only V1, so this is structurally
-/// unreachable today; the variant exists for forward-compat per
-/// ADR-0048.
-#[derive(Debug, thiserror::Error)]
-pub enum EnvelopeError {
-    #[error("envelope variant {variant} cannot be projected to latest")]
-    UnsupportedVariant { variant: u8 },
+    /// Discriminant offset for `ProbeResultRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined for canonical V1 payloads — rkyv 0.8
+    /// places the outer enum's discriminant byte at a stable offset
+    /// from the END of the archive, independent of variable-length
+    /// payload growth. Pinned at the GREEN landing of slice 01-01
+    /// alongside the schema-evolution fixture's
+    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` constant. Re-pin alongside
+    /// the fixture at every version bump per
+    /// `.claude/rules/development.md` § "Version-bump procedure".
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(56)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `ProbeResultRowEnvelope::latest(...)` (alloc_id 14 chars,
+        // ProbeStatus::Pass — no string payload) and inspecting the
+        // byte at `bytes.len() - 56`; the perturbation surfaces
+        // `"invalid discriminant 'N' for enum
+        // 'ArchivedProbeResultRowEnvelope'"` at the top of the rkyv
+        // bytecheck error chain (no preceding `trace:` frame),
+        // confirming it is the outer-envelope tag and not a nested
+        // enum's tag.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "ProbeResultRowEnvelope"
+    }
 }

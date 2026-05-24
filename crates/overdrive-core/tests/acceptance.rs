@@ -169,5 +169,6 @@ mod acceptance {
     // V1 roundtrip + discriminant pinning per ADR-0054 §5 QR1.
     // Slices 01 / 02 / 03 / 07. RED scaffolds.
     mod health_check_toml_parse;
+    mod probe_descriptor_roundtrip;
     mod probe_result_row_envelope;
 }

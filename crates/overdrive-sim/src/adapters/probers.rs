@@ -1,35 +1,30 @@
 //! Sim bindings for the three Prober port traits.
 //!
 //! Per ADR-0054 §2 + `.claude/rules/development.md` § "Production
-//! code is not shaped by simulation": sim adapters are
-//! queue-driven outcome injection. Production uses real sockets /
-//! hyper / Command; neither side imposes structural concessions
-//! on the other.
+//! code is not shaped by simulation": sim adapters are queue-driven
+//! outcome injection.
 //!
-//! Per ADR-0059 §2 / DDD-17: `SimExecProber` does NOT assert
+//! Production uses real sockets / hyper / Command; neither side
+//! imposes structural concessions on the other.
+//!
+//! Per ADR-0059 §2 / DDD-17: [`SimExecProber`] does NOT assert
 //! cgroup membership — that's a Tier 3 concern. Membership is the
-//! production-adapter contract (asserted by
-//! `crates/overdrive-worker/tests/integration/exec_probe_cgroup_
-//! membership.rs`).
+//! production-adapter contract.
 //!
 //! Sim adapters MUST validate inputs identically to the production
 //! adapter per `nw-tdd-methodology` § "Integration Test Contract:
-//! Test Doubles Must Validate Inputs". A `SimTcpProber` that
+//! Test Doubles Must Validate Inputs". A [`SimTcpProber`] that
 //! accepts a zero-port input that `TokioTcpProber` would reject is
 //! a wiring-bug-hider.
-//!
-//! RED scaffold — outcome-queue + injection API land in slice 01.
-// SCAFFOLD: true
 
-#![allow(
-    clippy::too_long_first_doc_paragraph,
-    clippy::missing_const_for_fn,
-    clippy::needless_pass_by_value,
-    reason = "RED scaffold; GREEN bodies in slice-01..03 introduce Mutex<VecDeque>, consume outcomes, and prevent the const-fn classification"
-)]
 #![allow(dead_code)]
-#![expect(clippy::todo, reason = "RED scaffold; lands GREEN in slice-01")]
+#![allow(
+    clippy::missing_const_for_fn,
+    reason = "constructors take a `Mutex<...>` field which is not const-constructible in stable Rust 1.85"
+)]
 
+use std::collections::VecDeque;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -37,24 +32,38 @@ use overdrive_core::traits::prober::{
     ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
 };
 
-/// Queue-driven `TcpProber` sim binding. Outcomes are pushed by
-/// the harness via `enqueue_outcome`; the trait's `probe()` pops
-/// the front of the queue. If empty, returns a configured default
-/// (typically `Pass` for happy-path tests, `Fail { "connection
-/// refused" }` for sad-path).
-pub struct SimTcpProber;
+/// Queue-driven [`TcpProber`] sim binding.
+///
+/// Outcomes are pushed by the harness via
+/// [`SimTcpProber::enqueue_outcome`]; the trait's `probe()` pops
+/// the front of the queue. If the queue is empty, returns
+/// `ProbeOutcome::Pass` (the conservative happy-path default the
+/// harness can override by enqueueing a `Fail`).
+pub struct SimTcpProber {
+    queue: Mutex<VecDeque<ProbeOutcome>>,
+}
 
 impl SimTcpProber {
+    #[must_use]
     pub fn new() -> Self {
-        Self
+        Self { queue: Mutex::new(VecDeque::new()) }
     }
 
     /// Enqueue the outcome the next `probe()` call will return.
+    /// Outcomes are FIFO — the property test
+    /// `SimProberFifoIsObserved` (slice-01 acceptance suite) pins
+    /// this invariant.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal queue mutex is poisoned — which only
+    /// happens if a previous `probe()` panicked while holding the
+    /// lock. The trait's `probe()` body holds the lock for one
+    /// `pop_front` call with no fallible operation between
+    /// acquisition and release, so poisoning is not reachable
+    /// through correct test usage.
     pub fn enqueue_outcome(&self, outcome: ProbeOutcome) {
-        let _ = outcome;
-        todo!(
-            "RED scaffold: SimTcpProber::enqueue_outcome — Mutex<VecDeque<ProbeOutcome>> in slice-01"
-        )
+        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(outcome);
     }
 }
 
@@ -70,26 +79,39 @@ impl TcpProber for SimTcpProber {
         &self,
         host: &str,
         port: u16,
-        timeout: Duration,
+        _timeout: Duration,
     ) -> Result<ProbeOutcome, ProbeFailure> {
-        let _ = (host, port, timeout);
-        todo!("RED scaffold: SimTcpProber::probe — pop from outcome queue in slice-01")
+        // Input validation mirrors the production adapter — per
+        // `nw-tdd-methodology` § "Test Doubles Must Validate Inputs".
+        if host.is_empty() {
+            return Err(ProbeFailure::InvalidTarget {
+                reason: "tcp probe host must be non-empty".to_string(),
+            });
+        }
+        if port == 0 {
+            return Err(ProbeFailure::InvalidTarget {
+                reason: "tcp probe port must be in 1..=65535".to_string(),
+            });
+        }
+        let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
     }
 }
 
-/// Queue-driven `HttpProber` sim binding.
-pub struct SimHttpProber;
+/// Queue-driven [`HttpProber`] sim binding.
+pub struct SimHttpProber {
+    queue: Mutex<VecDeque<ProbeOutcome>>,
+}
 
 impl SimHttpProber {
+    #[must_use]
     pub fn new() -> Self {
-        Self
+        Self { queue: Mutex::new(VecDeque::new()) }
     }
 
+    /// Enqueue the outcome the next `probe()` call will return.
     pub fn enqueue_outcome(&self, outcome: ProbeOutcome) {
-        let _ = outcome;
-        todo!(
-            "RED scaffold: SimHttpProber::enqueue_outcome — Mutex<VecDeque<ProbeOutcome>> in slice-02"
-        )
+        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(outcome);
     }
 }
 
@@ -101,27 +123,40 @@ impl Default for SimHttpProber {
 
 #[async_trait]
 impl HttpProber for SimHttpProber {
-    async fn probe(&self, url: &str, timeout: Duration) -> Result<ProbeOutcome, ProbeFailure> {
-        let _ = (url, timeout);
-        todo!("RED scaffold: SimHttpProber::probe — pop from outcome queue in slice-02")
+    async fn probe(&self, url: &str, _timeout: Duration) -> Result<ProbeOutcome, ProbeFailure> {
+        if url.is_empty() {
+            return Err(ProbeFailure::InvalidTarget {
+                reason: "http probe url must be non-empty".to_string(),
+            });
+        }
+        if !url.starts_with("http://") {
+            return Err(ProbeFailure::InvalidTarget {
+                reason: format!("http probe url must start with `http://`; got {url:?}"),
+            });
+        }
+        let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
     }
 }
 
-/// Queue-driven `ExecProber` sim binding. Does NOT assert cgroup
-/// membership (per ADR-0059 §2 — that's a Tier 3 concern, asserted
-/// by the production-adapter integration test).
-pub struct SimExecProber;
+/// Queue-driven [`ExecProber`] sim binding.
+///
+/// Does NOT assert cgroup membership (per ADR-0059 §2 — that's a
+/// Tier 3 concern, asserted by the production-adapter integration
+/// test).
+pub struct SimExecProber {
+    queue: Mutex<VecDeque<ProbeOutcome>>,
+}
 
 impl SimExecProber {
+    #[must_use]
     pub fn new() -> Self {
-        Self
+        Self { queue: Mutex::new(VecDeque::new()) }
     }
 
+    /// Enqueue the outcome the next `probe()` call will return.
     pub fn enqueue_outcome(&self, outcome: ProbeOutcome) {
-        let _ = outcome;
-        todo!(
-            "RED scaffold: SimExecProber::enqueue_outcome — Mutex<VecDeque<ProbeOutcome>> in slice-03"
-        )
+        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(outcome);
     }
 }
 
@@ -137,9 +172,69 @@ impl ExecProber for SimExecProber {
         &self,
         command: &[String],
         cgroup_scope_path: &str,
-        timeout: Duration,
+        _timeout: Duration,
     ) -> Result<ProbeOutcome, ProbeFailure> {
-        let _ = (command, cgroup_scope_path, timeout);
-        todo!("RED scaffold: SimExecProber::probe — pop from outcome queue in slice-03")
+        if command.is_empty() {
+            return Err(ProbeFailure::InvalidTarget {
+                reason: "exec probe command must be non-empty".to_string(),
+            });
+        }
+        if cgroup_scope_path.is_empty() {
+            return Err(ProbeFailure::InvalidTarget {
+                reason: "exec probe cgroup_scope_path must be non-empty".to_string(),
+            });
+        }
+        let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test code per workspace convention")]
+mod tests {
+    //! Proptest invariants for the `SimProber` FIFO contract per
+    //! AC#6 (slice-01).
+
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn arb_probe_outcome() -> impl Strategy<Value = ProbeOutcome> {
+        prop_oneof![
+            Just(ProbeOutcome::Pass),
+            "[a-zA-Z0-9 :]{0,30}".prop_map(|reason| ProbeOutcome::Fail { reason }),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        /// S-SHCP-FIFO-01 — for arbitrary outcome sequences,
+        /// dequeue order equals enqueue order through [`SimTcpProber`].
+        #[test]
+        fn sim_tcp_prober_fifo_is_observed(
+            outcomes in prop::collection::vec(arb_probe_outcome(), 1..=16),
+        ) {
+            let prober = SimTcpProber::new();
+            for outcome in &outcomes {
+                prober.enqueue_outcome(outcome.clone());
+            }
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            let observed: Vec<ProbeOutcome> = runtime.block_on(async {
+                let mut acc = Vec::with_capacity(outcomes.len());
+                for _ in 0..outcomes.len() {
+                    let result = prober
+                        .probe("127.0.0.1", 8080, Duration::from_millis(1))
+                        .await
+                        .expect("sim prober inputs valid");
+                    acc.push(result);
+                }
+                acc
+            });
+            prop_assert_eq!(observed, outcomes);
+        }
     }
 }

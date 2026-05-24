@@ -1,0 +1,480 @@
+{
+  "roadmap": {
+    "project_id": "service-health-check-probes",
+    "created_at": "2026-05-24T15:28:14Z",
+    "total_steps": 8,
+    "phases": 3,
+    "notes": "Lands GitHub #170 (supersedes #169 settle-window primitive). Six ADRs: 0054 (ProbeRunner subsystem), 0055 (ServiceLifecycleReconciler), 0056 (ServiceSubmitEvent V2 wire evolution \u2014 single-cut delete ConvergedRunning/ConvergedFailed, add Stable/Failed), 0057 ([[health_check.*]] TOML spec), 0058 (default TCP startup probe inference \u2014 honest-by-default), 0059 (exec-probe cgroup placement). Object-oriented Rust paradigm per CLAUDE.md; @nw-software-crafter for implementation. The eight slice scaffolds in docs/feature/service-health-check-probes/slices/ are the decomposition starting point. Slices 01+08 collapse into phase 01 (walking-skeleton + EarlyExit are structurally one composition root flow per slice-08 \u00a7Importance); slice 04 (readiness) co-lands with slice 07 (kind rejection) in step 03-01 because slice 07 is a small parallel parser change; slices 02/03/05/06 each own their own step. Reconciler shape per ADR-0035/0036: pure sync reconcile, runtime-owned ViewStore, View persists inputs (consecutive_failures, consecutive_successes, stable_announced set, startup_attempts) not derived deadlines per .claude/rules/development.md \u00a7 \"Persist inputs, not derived state\". rkyv envelope `ProbeResultRowEnvelope::V1` per ADR-0048 with discriminant pinning (`const FIXTURE_V1_DISCRIMINANT: u8 = 0;`) per QR1 callout in feature-delta.md. ServiceSubmitEvent wire is single-cut greenfield migration per CLAUDE.md \u00a7 feedback_single_cut_greenfield_migrations.md (no parallel-fields period, delete ConvergedRunning/ConvergedFailed in same diff as Stable/Failed). Mutation gate \u226580% kill rate per `.claude/rules/testing.md`; all Tier 3 tests gated behind `integration-tests` feature and run via `cargo xtask lima run --` per Lima rule. Effort estimates advisory per CLAUDE.md.",
+    "reviews": []
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton \u2014 foundation types + default TCP startup probe + ServiceLifecycle plumbing",
+      "description": "Establishes the structural foundation every later slice composes onto, then lands the end-to-end coinflip-as-Service regression guard for RCA-A. Three steps split foundational types (port traits, ProbeResultRow envelope, ProbeDescriptor / ProbeMechanic / ProbeRole / ProbeIdx aggregate, ServiceFailureReason + ProbeWitness + ServiceLifecycleState + ServiceLifecycleView in overdrive-core) from TOML parser extension (ServiceSpec V1\u2192V2 envelope per ADR-0048 procedure, default TCP startup inference per ADR-0058) from the reconciler + wire + ProbeRunner subsystem + walking-skeleton integration test. Slice 08's EarlyExit detection branch is co-located in step 01-03 because the EarlyExit code path is the ServiceLifecycleReconciler's other RCA-A-closing branch (the coinflip-as-Service 100-seed regression test naturally exercises both StartupProbeFailed and EarlyExit). Single-cut wire migration per CLAUDE.md \u00a7 feedback_single_cut_greenfield_migrations.md \u2014 `ServiceSubmitEvent::ConvergedRunning` / `ConvergedFailed` are deleted in the same diff that adds `Stable` / `Failed { reason: ServiceFailureReason }`.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Foundation types \u2014 Prober trait surface + ProbeResultRowEnvelope V1 + ProbeDescriptor aggregate + ServiceLifecycleState/View + TerminalCondition::Stable/Failed variants + workspace deps",
+          "description": "Lands the typed foundation every later step composes onto. CREATE NEW: crates/overdrive-core/src/traits/prober.rs declares three port traits (`TcpProber`, `HttpProber`, `ExecProber`) with FULL rustdoc per `.claude/rules/development.md` \u00a7 \"Trait definitions specify behavior, not just signature\" \u2014 preconditions, postconditions, edge cases, observable invariants (cgroup-placement-failure surface mapping to `ProbeFailure::ExecSpawnFailed { reason }` per ADR-0054 QR2). CREATE NEW: crates/overdrive-core/src/observation/probe_result_row.rs with `ProbeResultRow` payload + `ProbeResultRowEnvelope::V1(ProbeResultRowV1)` rkyv envelope per ADR-0048 procedure (alias-to-payload, `pub type ProbeResultRow = ProbeResultRowV1`, codec-internal envelope not re-exported from lib.rs, golden-bytes fixture in crates/overdrive-core/tests/schema_evolution/probe_result_row.rs pinning `const FIXTURE_V1_DISCRIMINANT: u8 = 0;` per ADR-0054 \u00a75 QR1). CREATE NEW: crates/overdrive-core/src/aggregate/probe_descriptor.rs with `ProbeDescriptor`, `ProbeMechanic { Tcp { host, port } | Http { path, port, host } | Exec { command, args } }`, `ProbeRole { Startup | Readiness | Liveness }`, `ProbeIdx` newtype with `FromStr` / `Display` / serde per \u00a7 Newtype completeness. CREATE NEW: crates/overdrive-core/src/service_lifecycle.rs with `ServiceFailureReason { StartupProbeFailed { probe_idx, last_fail, attempts } | EarlyExit { exit_code } | BackoffExhausted { attempts } }` (#[non_exhaustive], #[from] for ProbeFailure) + `ProbeWitness { probe_idx, role, mechanic_summary, inferred }` + `ServiceLifecycleState` + `ServiceLifecycleView` (typed View \u2014 Serialize+Deserialize+Default+Clone+Send+Sync per ADR-0035; carries `stable_announced: BTreeSet<AllocationId>`, `consecutive_failures: BTreeMap<(AllocationId, ProbeIdx), u32>`, `consecutive_successes: BTreeMap<(AllocationId, ProbeIdx), u32>`, `startup_attempts: BTreeMap<(AllocationId, ProbeIdx), u32>`; ALL inputs, NEVER derived deadlines). EXTEND: crates/overdrive-core/src/transition_reason.rs adds `TerminalCondition::Stable { settled_in: Duration, witness: ProbeWitness }` and `TerminalCondition::Failed { reason: ServiceFailureReason }` per ADR-0037 \u00a75 additive minor SemVer (#[non_exhaustive] preserved). EXTEND: workspace Cargo.toml promotes `hyper-util` + `tokio-util` from transitive to direct workspace deps with `.workspace = true` consumers (used in later steps); workspace member declares `integration-tests = []` per \u00a7 Workspace convention. Sim adapters scaffold: CREATE NEW crates/overdrive-sim/src/adapters/probers.rs with `SimTcpProber` / `SimHttpProber` / `SimExecProber` queue-driven (`enqueue_outcome(probe_idx, outcome)`) \u2014 `Arc<Mutex<VecDeque<ProbeOutcome>>>` per-prober, no auto-progress per \u00a7 \"Production code is not shaped by simulation\" (production probers do not get sim-shape concessions). EXTEND xtask::dst_lint AST scanner: new clause scans `overdrive-worker::probe_runner::ProbeRunner` impl blocks (or its eventual location) for a declared `probe(&self) -> Result<(), ProbeError>` method per ADR-0054 \u00a77 Earned-Trust; this is the third-layer structural enforcement per `.claude/rules/development.md` principle 12.\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero). No legacy bug-prone code in scope this step.",
+          "criteria": "All foundation types declared with full rustdoc + derives; ProbeResultRowEnvelope V1 round-trips bit-identically; golden-bytes fixture pins V1 discriminant byte; all newtypes (ProbeIdx) round-trip Display/FromStr/serde; SimTcpProber/SimHttpProber/SimExecProber implement their trait surface returning queue-driven outcomes; xtask::dst_lint Earned-Trust scanner declared (firing once probe_runner module lands in 01-03); workspace deps land; cargo check --workspace --all-features passes; trybuild compile-pass fixture proves Box<dyn TcpProber> dyn-compatibility.",
+          "test_file": "crates/overdrive-core/tests/acceptance/probe_result_row_envelope.rs",
+          "scenario_name": "probe_result_row_envelope_v1_roundtrip_pins_discriminant_byte_and_archived_bytes",
+          "acceptance_criteria": [
+            "S-SHCP-ENV-01 \u2192 proptest `ProbeResultRowEnvelopeRoundtrip` over `arbitrary::<ProbeResultRowV1>()` \u2014 for every generated row, `archive_for_store` \u2192 `from_store_bytes` \u2192 byte-equal AND `into_latest()` returns Ok(value) PartialEq-equal to original. Universe = full ProbeResultRowV1 product type (alloc_id \u00d7 probe_idx \u00d7 role \u00d7 status \u00d7 last_observed_at \u00d7 last_fail_reason). Lands at crates/overdrive-core/tests/acceptance/probe_result_row_envelope.rs",
+            "S-SHCP-ENV-02 \u2192 schema-evolution fixture at crates/overdrive-core/tests/schema_evolution/probe_result_row.rs declares `const FIXTURE_V1: &str = \"...\"` (hex-encoded archived bytes of a canonical ProbeResultRowV1) AND `const FIXTURE_V1_DISCRIMINANT: u8 = 0;`. Test hex-decodes FIXTURE_V1, asserts byte[0] == FIXTURE_V1_DISCRIMINANT, rkyv-deserialises into ProbeResultRowEnvelope, calls into_latest(), asserts equality against canonical Latest projection. Per ADR-0054 \u00a75 QR1 + `.claude/rules/testing.md` \u00a7 Archive schema-evolution roundtrip.",
+            "S-SHCP-ENV-03 \u2192 behavioural test: unknown envelope variant (synthesise byte[0] = 0xff) deserialises into `EnvelopeError::UnknownVariant`; ObservationStore consumer logs + skips (warn-not-fail-fast) per ADR-0048 \u00a7 Unknown / malformed handling is asymmetric by layer (observation gossips, converges).",
+            "Three port traits declared in crates/overdrive-core/src/traits/prober.rs with rustdoc preconditions (`TcpProber::probe` \u2014 host must be parseable IP, port > 0; `HttpProber::probe` \u2014 URL must be plain HTTP per Phase 1; `ExecProber::probe` \u2014 command must be non-empty, cgroup_path must exist), postconditions (Pass = TCP connected within timeout / 2xx within timeout / exit code 0 within timeout), edge cases (HTTP 3xx \u2192 Fail with Redirect{code} per US-02 / research \u00a7 6.1 Pitfall 5; exec command-not-found \u2192 Fail with ExecSpawnFailed{reason}; cgroup-placement EACCES/ENOSPC \u2192 ExecSpawnFailed{reason} per ADR-0054 QR2 (NOT auto-retried)), observable invariants (probe outcome is deterministic for fixed inputs against the same backing system; no side effect on caller besides the returned ProbeOutcome).",
+            "Newtype `ProbeIdx(u8)` per \u00a7 Newtype completeness \u2014 FromStr returns Result<Self, ParseError> with case-insensitive accept; Display canonical decimal form; serde matches Display/FromStr; proptest `ProbeIdxRoundtrip` for every valid u8 0..=255 round-trips.",
+            "TerminalCondition gains two new variants behind #[non_exhaustive]: a Stable variant observably carries the elapsed duration from alloc start to the first startup-probe Pass observation, plus a witness identifier sufficient to attribute the Pass (probe index, role, mechanic-kind summary, whether inferred); a Failed variant observably carries a typed reason discriminated by failure class (StartupTimeout, StartupProbeFailed, EarlyExit, LivenessProbeFailed). Existing variants unchanged; rkyv archive layout pinned via schema_evolution fixture (additive variant \u2014 V<N>Envelope bump deferred to whichever step first lands a breaking shape change; this step's additive append is binary-compatible per ADR-0048 \u00a7 \"Why a per-type rkyv enum is forward-compatible across variant additions\").",
+            "SimTcpProber / SimHttpProber / SimExecProber implement their trait surface; queue-driven via `Arc<Mutex<VecDeque<ProbeOutcome>>>` (BTreeMap-keyed where iteration matters; HashMap forbidden without dst-lint marker); proptest `SimProberFifoIsObserved` \u2014 for arbitrary outcome sequences, dequeue order equals enqueue order.",
+            "xtask::dst_lint AST scanner clause declared at xtask/src/dst_lint.rs that walks `overdrive-worker::probe_runner` (or its eventual mod location); test asserts the scanner fires when ProbeRunner impl is missing the `probe(&self)` method (negative proof for now \u2014 ProbeRunner lands in 01-03; clause is dormant until then).",
+            "trybuild compile-pass fixture crates/overdrive-core/tests/compile_pass/prober_traits_are_dyn_compatible.rs proves `Arc<dyn TcpProber>` / `Arc<dyn HttpProber>` / `Arc<dyn ExecProber>` all compile.",
+            "Workspace Cargo.toml gets `hyper-util.workspace = true` + `tokio-util.workspace = true` direct refs (already transitive via hyper / tokio); MIT licenses verified.",
+            "cargo check --workspace --all-features passes on Lima (per Lima rule); cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/observation/probe_result_row.rs --file crates/overdrive-core/src/aggregate/probe_descriptor.rs --file crates/overdrive-core/src/service_lifecycle.rs --file crates/overdrive-core/src/traits/prober.rs kill rate \u2265 80%."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/traits/prober.rs [CREATE NEW]",
+            "crates/overdrive-core/src/traits/mod.rs [EXTEND \u2014 pub mod prober]",
+            "crates/overdrive-core/src/observation/probe_result_row.rs [CREATE NEW]",
+            "crates/overdrive-core/src/observation/mod.rs [EXTEND \u2014 pub mod probe_result_row]",
+            "crates/overdrive-core/src/aggregate/probe_descriptor.rs [CREATE NEW]",
+            "crates/overdrive-core/src/aggregate/mod.rs [EXTEND]",
+            "crates/overdrive-core/src/service_lifecycle.rs [CREATE NEW]",
+            "crates/overdrive-core/src/lib.rs [EXTEND \u2014 pub mod service_lifecycle; un-re-exported envelope per ADR-0048]",
+            "crates/overdrive-core/src/transition_reason.rs [EXTEND \u2014 add Stable/Failed variants on TerminalCondition]",
+            "crates/overdrive-core/tests/acceptance/probe_result_row_envelope.rs [CREATE NEW]",
+            "crates/overdrive-core/tests/acceptance/probe_descriptor_roundtrip.rs [CREATE NEW]",
+            "crates/overdrive-core/tests/schema_evolution/probe_result_row.rs [CREATE NEW]",
+            "crates/overdrive-core/tests/schema_evolution.rs [EXTEND \u2014 declare mod probe_result_row]",
+            "crates/overdrive-core/tests/compile_pass/prober_traits_are_dyn_compatible.rs [CREATE NEW]",
+            "crates/overdrive-sim/src/adapters/probers.rs [CREATE NEW]",
+            "crates/overdrive-sim/src/adapters/mod.rs [EXTEND]",
+            "crates/overdrive-sim/src/lib.rs [EXTEND]",
+            "xtask/src/dst_lint.rs [EXTEND \u2014 Earned-Trust ProbeRunner::probe declaration scanner]",
+            "Cargo.toml [EXTEND \u2014 promote hyper-util, tokio-util to workspace deps]",
+            "crates/overdrive-worker/Cargo.toml [EXTEND \u2014 hyper-util.workspace = true; tokio-util.workspace = true; integration-tests = [] confirmed]",
+            "crates/overdrive-sim/Cargo.toml [EXTEND \u2014 confirm integration-tests = []]"
+          ],
+          "dependencies": [],
+          "time_estimate_hours": 5
+        },
+        {
+          "id": "01-02",
+          "name": "TOML parser extension \u2014 [[health_check.startup]] (TCP only) + default TCP inference per ADR-0058 + ServiceSpec V1\u2192V2 envelope bump",
+          "description": "Lands ADR-0057's `[[health_check.startup]]` TOML section recognition (TCP variant only this step; HTTP / Exec arrive in 02-01 / 02-02) and ADR-0058's honest-by-default inference (no probes declared AND \u22651 listener \u2192 synthesised `ProbeDescriptor { role: Startup, mechanic: Tcp { host: \"0.0.0.0\", port: listener[0].port }, inferred: true, timeout_seconds: 5, interval_seconds: 2, max_attempts: 30 }`). EXTEND crates/overdrive-core/src/aggregate/workload_spec.rs (custom Deserialize per ADR-0047 \u00a72) to accept the section under `[service]` only \u2014 `[[health_check.*]]` under `[job]` / `[schedule]` is left to step 03-01 to reject with `ParseError::ProbesNotAllowedOnKind`. EXTEND `ParseError` enum (in same file) with TCP-relevant variants for this step: `TcpProbeMissingPort { probe_idx }`, `ProbeTimeoutZero { probe_idx }`, `ProbeIntervalZero { probe_idx }`, `ProbeMaxAttemptsZero { probe_idx }`. EXTEND `ServiceSpec` aggregate at crates/overdrive-core/src/aggregate/service_spec.rs with `startup_probes: Vec<ProbeDescriptor>` field (readiness/liveness fields added empty here for V2 envelope shape; populated by 02-01/02-02 and 03-01/03-02). ServiceSpec V1\u2192V2 envelope bump per ADR-0048 single-commit procedure: appended V2 variant on `ServiceSpecEnvelope`, `From<ServiceSpecV1> for ServiceSpecV2` impl (additive \u2014 old V1 specs have zero probes, post-conversion equivalent to V2 with `startup_probes: vec![]`), `pub type ServiceSpec = ServiceSpecV2`, `Latest = ServiceSpecV2`, NEW golden-bytes fixture in crates/overdrive-core/tests/schema_evolution/service_spec.rs (V1 fixture pinned untouched per ADR-0048 \u00a7 Version-bump procedure step 6 \u2014 never touch prior FIXTURE_V<N> literals). Opt-out per DDD-16: explicit `[[health_check.startup]] = []` empty array is structurally distinguished from absent block (parser distinguishes via custom-Deserialize visitor seeing a present-but-empty array vs an absent key); when explicit-empty, NO default is synthesised (preserves Phase-1 first-Running semantics).\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero). The TOML parser body (overdrive-core/src/aggregate/workload_spec.rs) is touched-existing-code; the new branches are Stage 0 from-the-start.",
+          "criteria": "TOML parser recognises [[health_check.startup]] with type=\"tcp\" under [service]; default TCP-inference synthesises one ProbeDescriptor when Service has \u22651 listener and zero declared probes; opt-out empty array is structurally distinguished from absent block; ServiceSpec V1\u2192V2 envelope bump per ADR-0048 with FIXTURE_V1 untouched and FIXTURE_V2 added; all parse-error variants for TCP probes land; case-insensitive type matching per \u00a7 Newtype completeness; cargo nextest run -p overdrive-core --features integration-tests --no-run on macOS; cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests passes on Lima.",
+          "test_file": "crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs",
+          "scenario_name": "service_without_probes_with_listener_infers_default_tcp_startup_probe",
+          "acceptance_criteria": [
+            "S-SHCP-INFER-01 \u2014 proptest `DefaultTcpStartupInference` over arbitrary `ServiceSpec { listeners: vec_of_at_least_one_listener, probes: empty }` \u2014 for every such spec, parse \u2192 ServiceSpec carries exactly ONE inferred ProbeDescriptor { role: Startup, mechanic: Tcp { host: \"0.0.0.0\", port: listeners[0].port }, inferred: true, timeout_seconds: 5, interval_seconds: 2, max_attempts: 30 }. Universe = full Listener product. Lands at crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs",
+            "S-SHCP-INFER-02 \u2014 proptest `ExplicitEmptyOptsOutOfInference` \u2014 for arbitrary [[health_check.startup]] = [] empty arrays, parse \u2192 ServiceSpec.startup_probes is empty AND inferred-default is NOT synthesised. Preserves Phase-1 first-Running semantics.",
+            "Parse-error variant tests: TcpProbeMissingPort, ProbeTimeoutZero, ProbeIntervalZero, ProbeMaxAttemptsZero each fire on the expected malformed TOML fixture; ParseError Display includes operator-facing guidance.",
+            "ServiceSpec envelope bump: V1 fixture at crates/overdrive-core/tests/schema_evolution/service_spec.rs::FIXTURE_V1 EXISTS UNTOUCHED (rg verifies pre-step content unchanged in diff); FIXTURE_V2 added as new const with new hex-encoded bytes for a canonical V2 with one probe; both fixtures deserialise through `into_latest()` and PartialEq the canonical Latest projection; per ADR-0048 \u00a7 Version-bump procedure single-commit discipline (envelope variant, type alias, From<V1> for V2, latest() constructor, fixture, all land in one commit).",
+            "Case-insensitive `type = \"TCP\"` / `type = \"Tcp\"` / `type = \"tcp\"` all parse to ProbeMechanic::Tcp (per \u00a7 Newtype completeness case-insensitive accept).",
+            "Custom Deserialize visitor structurally distinguishes absent `[[health_check.startup]]` block (synthesise default) from present-but-empty `[[health_check.startup]] = []` (no synthesis); proptest covers both edge cases against arbitrary base specs.",
+            "Default values per ADR-0057 \u00a72: timeout_seconds 5 (DIVERGES from K8s 1s \u2014 justified per research \u00a7 2.1 K8s 1s as operational pain point), interval_seconds 2 startup, max_attempts 30 (yields 60s startup_deadline matching K8s `failureThreshold \u00d7 periodSeconds`); per-field omission in TOML falls back to defaults; explicit zero is rejected with the dedicated ParseError variant.",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/aggregate/workload_spec.rs --file crates/overdrive-core/src/aggregate/service_spec.rs kill rate \u2265 80%."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs [EXTEND \u2014 TOML [[health_check.startup]] TCP branch, default inference, ParseError variants]",
+            "crates/overdrive-core/src/aggregate/service_spec.rs [EXTEND \u2014 ServiceSpecV2 with startup_probes/readiness_probes/liveness_probes Vec fields; ServiceSpecEnvelope::V2; From<V1> for V2 additive; latest() constructor]",
+            "crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs [CREATE NEW]",
+            "crates/overdrive-core/tests/schema_evolution/service_spec.rs [EXTEND \u2014 append FIXTURE_V2 const + test; FIXTURE_V1 NEVER touched]"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "time_estimate_hours": 4
+        },
+        {
+          "id": "01-03",
+          "name": "ServiceLifecycleReconciler + ProbeRunner subsystem + TokioTcpProber + ServiceSubmitEvent V1\u2192V2 single-cut + walking-skeleton integration test (Slice 01 + Slice 08 EarlyExit branch + RCA-A coinflip 100-seed regression)",
+          "description": "Lands the heart of the feature end-to-end. CREATE NEW: crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs implements ServiceLifecycleReconciler per ADR-0035 collapsed Reconciler trait (pure sync `fn reconcile(&self, desired: &ServiceLifecycleState, actual: &ServiceLifecycleState, view: &ServiceLifecycleView, tick: &TickContext) -> (Vec<Action>, ServiceLifecycleView)`); NO .await, NO port dependencies, NO wall-clock outside `tick.now`. Reconcile branches: (a) AllocStatusRow.state == Running AND any startup-probe Pass row exists AND alloc NOT in view.stable_announced \u2192 emit `Action::SetTerminalCondition { Stable { settled_in: tick.now_unix - started_at, witness: ProbeWitness { probe_idx, role: Startup, mechanic_summary, inferred } } }` AND insert alloc into next-View's stable_announced; (b) startup_attempts \u2265 max_attempts AND no Pass row AND startup_deadline elapsed \u2192 emit `SetTerminalCondition { Failed { reason: StartupProbeFailed { probe_idx, last_fail, attempts } } }`; (c) AllocStatusRow.state == Failed AND elapsed_since_started_at < startup_deadline AND no Pass row exists \u2192 emit `SetTerminalCondition { Failed { reason: EarlyExit { exit_code } } }` (Slice 08's RCA-A regression branch); (d) all other inputs \u2192 no actions, no view mutation (dedup per S-SHCP-RECON-02). Per `.claude/rules/development.md` \u00a7 \"Persist inputs, not derived state\" \u2014 the View carries `stable_announced` (set), `startup_attempts` (counter); deadlines are recomputed every tick from `started_at` + the live spec's `startup_deadline`. Per ADR-0035 AnyReconciler dispatch enum: EXTEND crates/overdrive-core/src/reconcilers/mod.rs with `AnyState::ServiceLifecycle(...)`, `AnyReconcilerView::ServiceLifecycle(...)`, `AnyReconciler::ServiceLifecycle(...)` variants + match arms. CREATE NEW: crates/overdrive-worker/src/probe_runner/{mod,supervisor,tcp_prober}.rs implements ProbeRunner subsystem per ADR-0054 \u00a72 \u2014 per-alloc supervisor (`tokio::task::JoinSet`) spawning per-probe-instance tasks; each task loops on `clock.sleep(interval)` + `prober.probe()` + `observation_store.write_probe_result(row)`; CancellationToken per-alloc and per-probe for cooperative shutdown. CREATE NEW: TokioTcpProber at crates/overdrive-worker/src/probe_runner/tcp_prober.rs \u2014 tokio::net::TcpStream::connect wrapped in tokio::time::timeout; production binding only (Lima-tested). EXTEND: ObservationStore trait at crates/overdrive-core/src/traits/observation_store.rs adds `async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError>` + `async fn list_probe_results_for_alloc(&self, alloc_id: &AllocationId) -> Result<Vec<ProbeResultRow>, _>` (LWW per `(alloc_id, probe_idx)`). EXTEND LocalObservationStore at crates/overdrive-store-local/src/observation_store.rs with new redb table for probe results (composite PK on (alloc_id, probe_idx)). EXTEND ExecDriver at crates/overdrive-worker/src/driver.rs with `on_alloc_running` / `on_alloc_terminal` callbacks signalling probe_runner.start_alloc / stop_alloc per Slice 01 / Slice 05 wiring. EXTEND AllocationSpec at crates/overdrive-core/src/traits/driver.rs adds `probe_descriptors: Vec<ProbeDescriptor>` field; Job/Schedule kinds pass empty. SINGLE-CUT wire migration per CLAUDE.md \u00a7 feedback_single_cut_greenfield_migrations.md: EXTEND crates/overdrive-control-plane/src/api.rs \u2014 DELETE `ServiceSubmitEvent::ConvergedRunning` / `ConvergedFailed` variants + ADD `Stable { settled_in: Duration, witness: ProbeWitnessWire }` / `Failed { reason: ServiceFailureReasonWire, stderr_tail: Option<String> }` in same diff; CREATE NEW `ProbeWitnessWire` + `ServiceFailureReasonWire` + `ProbeResultRowJson` types (utoipa::ToSchema per ADR-0033/ADR-0009 convention); EXTEND crates/overdrive-control-plane/src/streaming.rs action-shim with TerminalCondition\u2192ServiceSubmitEvent mapping at a SINGLE write site (ADR-0037 \u00a74 byte-equality across AllocStatusRow.terminal and emitted wire event). DELETE per \u00a7 Deletion discipline: any existing tests covering ConvergedRunning/ConvergedFailed variants \u2014 deleted in the SAME commit; rg verifies zero references remain. EXTEND crates/overdrive-cli/src/commands/job.rs Service-kind submit match arms \u2014 replace any `\"live\"` / `\"running (took live)\"` literal path with Stable / Failed render. CREATE NEW Tier-3 walking-skeleton integration test at crates/overdrive-cli/tests/integration/service_honest_stable.rs (behind `integration-tests` feature; Lima required) \u2014 three fixtures: (A) examples/coinflip-as-service.toml (Service exec exits 1 within 30ms; 100 deterministic seeds assert \u226599 emit Failed { EarlyExit { exit_code: 1 } } AND zero emit Stable AND zero captured-output substring contains \"(took live)\" \u2014 the K1 north-star regression guard for RCA-A), (B) quick-bind fixture (Service binds 8080 within 600ms; assert Stable with settled_in in [500ms, 2000ms]), (C) never-binds fixture (assert Failed { StartupProbeFailed } with last_fail \"connection refused\" after startup_deadline). In-process server + direct handler call per crates/overdrive-cli/CLAUDE.md (NEVER subprocess).\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero). The action-shim and streaming files have pre-existing terminal-propagation code (Stage 1 first \u2014 state-delta migration of any existing JobLifecycle TerminalCondition handlers, THEN Stage 2 PBT amplification for the new Service-kind branch).\n\nEXEMPT FROM PARADIGM: the Tier-3 walking-skeleton integration test (service_honest_stable.rs) is single-example by design (real composition root, real Lima VM, real TCP listener) \u2014 proptest at Tier 3 is forbidden per Mandate 11 / .claude/rules/testing.md \u00a7 \"Property-based testing\" call-site restriction. Compensate with property-based test at Tier-1 acceptance on adjacent slot: service_lifecycle_stable.rs carries the Stable/Failed/EarlyExit decision-purity proptests.",
+          "criteria": "ServiceLifecycleReconciler reconcile is pure sync; AnyReconciler/AnyState/AnyReconcilerView extended with Service variants; ProbeRunner per-alloc supervisor + per-probe tokio tasks compile and pass Earned-Trust probe gate; TokioTcpProber works against real loopback listener; LocalObservationStore extended with probe_result table; ExecDriver hooks fire on alloc lifecycle transitions; ServiceSubmitEvent V1\u2192V2 single-cut migration (ConvergedRunning/ConvergedFailed DELETED, Stable/Failed ADDED, all tests covering old variants DELETED, all in same diff per \u00a7 Deletion discipline); cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'test(service_honest_stable)' passes; coinflip 100-seed regression test PASSES at \u226599/100 Failed (the K1 north-star); zero captured-output substring matches \"(took live)\".",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_stable.rs",
+          "scenario_name": "given_running_alloc_with_pass_startup_probe_when_reconcile_then_emits_stable_once",
+          "acceptance_criteria": [
+            "S-SHCP-RECON-01 \u2014 proptest `StableEmittedOnRunningWithPassProbe` \u2014 universe = arbitrary (AllocStatusRow.state \u2208 {Pending,Running,Failed}) \u00d7 (probe Pass-rows present 0..3) \u00d7 (alloc in stable_announced set Y/N) \u00d7 (elapsed since started_at 0..3600s). For every state where state==Running AND any startup-probe Pass row exists AND alloc NOT in stable_announced: reconcile emits exactly ONE Action::SetTerminalCondition { Stable { settled_in: elapsed_to_first_pass, witness } } AND next-View.stable_announced contains the alloc. Lands at crates/overdrive-control-plane/tests/acceptance/service_lifecycle_stable.rs",
+            "S-SHCP-RECON-02 \u2014 proptest `StableDedupedOnceAnnounced` \u2014 for arbitrary inputs identical to S-SHCP-RECON-01 case EXCEPT alloc IS in stable_announced: reconcile emits ZERO actions AND next-View == view (idempotent).",
+            "S-SHCP-RECON-03 \u2014 proptest `StartupProbeFailedEmittedAfterExhaustion` \u2014 for arbitrary view.startup_attempts \u2265 max_attempts AND no Pass row exists AND elapsed \u2265 startup_deadline: reconcile emits exactly ONE Action::SetTerminalCondition { Failed { reason: StartupProbeFailed { probe_idx, last_fail, attempts: <observed counter> } } }.",
+            "S-SHCP-RECON-04 \u2014 proptest `EarlyExitDetectedBeforeAnyPass` (the RCA-A close) \u2014 universe = arbitrary AllocStatusRow.state == Failed \u00d7 exit_code 0..255 \u00d7 elapsed_since_started 0..startup_deadline \u00d7 NO Pass row exists. For every such tuple: reconcile emits Action::SetTerminalCondition { Failed { reason: EarlyExit { exit_code } } } AND wire-event projection is ServiceSubmitEvent::Failed { reason: EarlyExit { exit_code }, stderr_tail: ... }.",
+            "S-SHCP-PURITY-01 \u2014 compile-time witness: ServiceLifecycleReconciler::reconcile is callable from a non-async non-tokio context (sync `fn`); the signature has no `&mut self`, no `.await`, no `&dyn Clock`/`&dyn Transport`/`&dyn ObservationStore` parameter. Lands at crates/overdrive-control-plane/tests/acceptance/service_lifecycle_purity.rs",
+            "S-SHCP-PURITY-02 \u2014 ServiceLifecycleView carries no derived-state slots: no boolean recording \"alloc has been announced Stable\" expressed as cached outcome, no `next_*_at`-shaped deadline computed at write time (rg verifiable for `next_*_at`, `*_deadline`, `is_stable`-shaped identifiers as field names). The View carries only inputs \u2014 semantically: (i) a per-allocation Stable-announcement record sufficient to make Stable emission idempotent (a once-only flag per alloc), (ii) per-allocation-per-probe consecutive-failure counters, (iii) per-allocation-per-probe consecutive-success counters, and (iv) per-allocation-per-probe startup-attempt counters. Container choice (BTreeMap vs HashMap-with-marker) is the crafter's per `.claude/rules/development.md` \u00a7 \"Ordered-collection choice\" \u2014 observed iteration \u21d2 BTreeMap, point-access only \u21d2 HashMap with `// dst-lint: hashmap-ok <reason>`; the AC does not prescribe.",
+            "S-SHCP-PURITY-03 \u2014 proptest `TerminalBytesEqualOnRowAndWireEvent` \u2014 for arbitrary reconcile output, action-shim writes AllocStatusRow.terminal AND constructs LifecycleEvent.terminal from the SAME Action.terminal value in the SAME call frame; rkyv-archived bytes compare byte-equal per ADR-0037 \u00a73 / \u00a74.",
+            "S-SHCP-WIRE-01 \u2014 serde roundtrip property: arbitrary ServiceSubmitEvent::Stable values round-trip through serde JSON byte-equal.",
+            "S-SHCP-WIRE-02 \u2014 serde roundtrip property: arbitrary ServiceSubmitEvent::Failed { reason: <every ServiceFailureReason variant> } values round-trip through serde JSON byte-equal.",
+            "S-SHCP-WIRE-03 \u2014 proptest `EveryTypedReasonHasWireProjection` \u2014 for every ServiceFailureReason variant V, exists ServiceFailureReasonWire variant W such that W is the JSON projection of V; lockstep property catches a missing wire arm at PR time.",
+            "S-SHCP-01-{01,02,03} \u2014 Tier-1 acceptance tests at crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs exercise SimTcpProber: enqueued Pass \u2192 ProbeRunner writes Pass row to ObservationStore; enqueued Fail{reason} \u2192 ProbeRunner writes Fail row; trait-wiring witness: ProbeRunner integration compiles against the SimTcpProber's TcpProber impl.",
+            "S-SHCP-INT-01-{01,02,03} \u2014 Tier-3 integration tests at crates/overdrive-worker/tests/integration/probe_runner/real_tcp_probe.rs (Lima required) \u2014 TokioTcpProber against real 127.0.0.1:0 ephemeral-bound listener (connect succeeds \u2192 Pass); against unbound port (connect refused \u2192 Fail { reason: \"connection refused\" }); against bound-but-non-accepting listener with short timeout \u2192 Fail { reason: \"timeout after 5s\" }.",
+            "S-SHCP-INT-CLI-01..05 \u2014 Tier-3 walking-skeleton integration test at crates/overdrive-cli/tests/integration/service_honest_stable.rs (Lima required, in-process server per crates/overdrive-cli/CLAUDE.md): (01) coinflip-as-Service fixture \u00d7 100 deterministic seeds: \u226599/100 emit Failed { EarlyExit { exit_code: 1 } } AND zero emit Stable AND zero captured-output contains literal \"(took live)\" \u2014 the K1 north-star regression guard; (02) quick-bind fixture: Stable emitted with settled_in in [500ms, 2000ms]; (03) never-binds fixture: Failed { StartupProbeFailed } emitted with last_fail \"connection refused\" after startup_deadline; (04) byte-equality: AllocStatusRow.terminal and captured LifecycleEvent.terminal rkyv-bytes equal; (05) in-process composition root probe gate: ProbeRunner::probe() at startup succeeds against sacrificial 127.0.0.1:0 listener.",
+            "Single-cut migration evidence: rg `ConvergedRunning|ConvergedFailed` crates/ returns zero matches in source AND tests; the deletion lands in the same diff as the Stable/Failed addition per CLAUDE.md \u00a7 feedback_single_cut_greenfield_migrations.md.",
+            "AnyReconciler / AnyState / AnyReconcilerView dispatch enums extended with ServiceLifecycle variants and match arms; cargo check --workspace --all-features passes.",
+            "ProbeRunner Earned-Trust gate: `ProbeRunner::probe(&self)` method declared, exercised by ReconcilerRuntime composition root at register time; failure surfaces as ControlPlaneError::Internal AND emits structured `health.startup.refused` tracing event AND CLI exits non-zero. xtask::dst_lint scanner from 01-01 FIRES if probe() method missing.",
+            "ExecDriver lifecycle hooks: on_alloc_running signals probe_runner.start_alloc(alloc_id, probe_descriptors); on_alloc_terminal signals stop_alloc(alloc_id); existing exec_driver integration tests continue to pass.",
+            "AllocationSpec.probe_descriptors field added; Job/Schedule kinds construct AllocationSpec with empty Vec (verifiable by direct unit test against existing Job/Schedule code paths).",
+            "LocalObservationStore extended with redb table for probe results; integration test asserts write_probe_result/list_probe_results_for_alloc round-trip across reopens.",
+            "Existing tests covering ConvergedRunning/ConvergedFailed variants DELETED in same commit per \u00a7 Deletion discipline (not commented, not gated, not repurposed); rg evidence.",
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs --file crates/overdrive-control-plane/src/api.rs --file crates/overdrive-control-plane/src/streaming.rs kill rate \u2265 80%; same for overdrive-worker probe_runner files."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs [CREATE NEW]",
+            "crates/overdrive-control-plane/src/reconcilers/mod.rs [EXTEND \u2014 pub mod service_lifecycle]",
+            "crates/overdrive-core/src/reconcilers/mod.rs [EXTEND \u2014 AnyState/AnyReconcilerView/AnyReconciler ServiceLifecycle variants + match arms]",
+            "crates/overdrive-control-plane/src/api.rs [EXTEND \u2014 DELETE ConvergedRunning/ConvergedFailed; ADD Stable/Failed + ProbeWitnessWire/ServiceFailureReasonWire/ProbeResultRowJson with utoipa::ToSchema]",
+            "crates/overdrive-control-plane/src/streaming.rs [EXTEND \u2014 TerminalCondition\u2192ServiceSubmitEvent mapping at single write site per ADR-0037 \u00a74]",
+            "crates/overdrive-control-plane/src/action_shim.rs [EXTEND \u2014 write AllocStatusRow.terminal + emit LifecycleEvent.terminal byte-equal at single call frame]",
+            "crates/overdrive-cli/src/commands/job.rs [EXTEND \u2014 Service-kind Stable/Failed render arms; delete any 'live'/'took live' literal paths]",
+            "crates/overdrive-cli/src/render.rs [EXTEND \u2014 Stable/Failed multi-line render shapes per Slice 01 + Slice 08 render]",
+            "crates/overdrive-worker/src/probe_runner/mod.rs [CREATE NEW \u2014 ProbeRunner with probe() Earned-Trust gate]",
+            "crates/overdrive-worker/src/probe_runner/supervisor.rs [CREATE NEW \u2014 per-alloc JoinSet + CancellationToken]",
+            "crates/overdrive-worker/src/probe_runner/tcp_prober.rs [CREATE NEW \u2014 TokioTcpProber]",
+            "crates/overdrive-worker/src/lib.rs [EXTEND \u2014 pub mod probe_runner]",
+            "crates/overdrive-worker/src/driver.rs [EXTEND \u2014 on_alloc_running/on_alloc_terminal hooks]",
+            "crates/overdrive-core/src/traits/observation_store.rs [EXTEND \u2014 write_probe_result + list_probe_results_for_alloc methods]",
+            "crates/overdrive-core/src/traits/driver.rs [EXTEND \u2014 AllocationSpec.probe_descriptors: Vec<ProbeDescriptor>]",
+            "crates/overdrive-store-local/src/observation_store.rs [EXTEND \u2014 new redb table for probe results, LWW on (alloc_id, probe_idx)]",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs [EXTEND \u2014 register ServiceLifecycleReconciler at composition root; invoke ProbeRunner::probe() Earned-Trust gate before serving]",
+            "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_stable.rs [CREATE NEW]",
+            "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_purity.rs [CREATE NEW]",
+            "crates/overdrive-control-plane/tests/acceptance/service_submit_event_v2.rs [CREATE NEW]",
+            "crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs [CREATE NEW]",
+            "crates/overdrive-worker/tests/integration/probe_runner/real_tcp_probe.rs [CREATE NEW]",
+            "crates/overdrive-worker/tests/integration/probe_runner/mod.rs [CREATE NEW]",
+            "crates/overdrive-worker/tests/integration.rs [EXTEND]",
+            "crates/overdrive-cli/tests/integration/service_honest_stable.rs [CREATE NEW]",
+            "crates/overdrive-cli/tests/integration.rs [EXTEND]",
+            "examples/coinflip-as-service.toml [CREATE NEW \u2014 RCA-A fixture]",
+            "examples/quick-bind-service.toml [CREATE NEW]",
+            "examples/never-binds-service.toml [CREATE NEW]",
+            "VERIFICATION AC: rg 'ConvergedRunning|ConvergedFailed' crates/ returns zero matches",
+            "VERIFICATION AC: rg '(took live)' crates/overdrive-cli/src/ returns zero matches"
+          ],
+          "dependencies": [
+            "01-01",
+            "01-02"
+          ],
+          "time_estimate_hours": 8
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Probe mechanics \u2014 HTTP startup + Exec startup (in-cgroup) + CLI Probes section",
+      "description": "Stacks two additional probe mechanics onto the TokioTcpProber pathway from Phase 01 then lands the operator-visible Probes section in `alloc status`. HTTP probe in 02-01 (Slice 02 \u2014 hyper-util based, plain HTTP only per ADR-0057 C6, no redirect-follow per research \u00a7 6.1 Pitfall 5). Exec probe in 02-02 (Slice 03 \u2014 reuses cgroup_manager::place_pid_in_scope per ADR-0059, NOT clone3+CLONE_INTO_CGROUP per nix-rust/nix#2120 deferral). CLI Probes section in 02-03 (Slice 06 \u2014 render-only step, no reconciler change; renders for Service-kind allocs, absent for Job/Schedule). Each step composes onto Phase 01's ProbeRunner trait surface and SimXxxProber adapters from step 01-01; the production probers land per-step and gain their Tier-3 Lima integration tests per-step.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "HTTP startup probe \u2014 TOML parser HTTP variant + HyperHttpProber + SimHttpProber wiring + Tier-3 real HTTP integration",
+          "description": "EXTEND crates/overdrive-core/src/aggregate/workload_spec.rs TOML parser with HTTP variant: `type = \"http\", path = \"/healthz\", port = 8080, [host = ...]` (host optional, defaults to 0.0.0.0). Phase 1 plain HTTP only \u2014 `https://` URL scheme rejected at parse time with `ParseError::HttpsNotSupported { probe_idx }` per Slice 02 \u00a7Out of scope + ADR-0057 C6. GET method only (no POST / custom HTTP methods Phase 1 per US-02 Technical Notes). NEW ParseError variants: `HttpProbeMissingPath { probe_idx }`, `HttpsNotSupported { probe_idx }`. CREATE NEW: crates/overdrive-worker/src/probe_runner/http_prober.rs `HyperHttpProber` over `hyper-util::client::legacy::Client` (workspace dep landed in 01-01); per-request `tokio::time::timeout` wrapper; HTTP 2xx \u2192 Pass; HTTP 3xx (any) \u2192 Fail { reason: \"HTTP <code> (redirect not followed)\" } \u2014 no redirect-follow per research \u00a7 6.1 Pitfall 5; HTTP 4xx/5xx \u2192 Fail { reason: \"HTTP <code>\" }; connection refused \u2192 Fail { reason: \"connection refused\" }; timeout \u2192 Fail { reason: \"timeout after <N>s\" }. EXTEND: ProbeRunner supervisor dispatch on ProbeMechanic::Http to HyperHttpProber. SimHttpProber already exists from 01-01; queue-driven outcomes exercise the wiring at Tier 1. CREATE NEW Tier-3 integration test at crates/overdrive-worker/tests/integration/probe_runner/real_http_probe.rs (Lima required) \u2014 real tokio-spawned HTTP server fixtures returning 200 / 503 / 302 / connection-refused.\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero). TOML parser extension is Stage 1 first (state-delta of new HTTP arm) then Stage 2 PBT amplification.\n\nEXEMPT FROM PARADIGM: Tier-3 real-HTTP integration tests are single-example (real tokio server fixture, real Lima VM, real port binding) per Mandate 11. Compensate with property-based test at Tier-1 acceptance: probe_runner_http_outcome.rs carries the HTTP-status-classification proptests over SimHttpProber.",
+          "criteria": "TOML parser accepts [[health_check.startup]] type=\"http\" with HttpProbeMissingPath/HttpsNotSupported parse errors; HyperHttpProber classifies 2xx/3xx/4xx/5xx/refused/timeout into named Pass/Fail outcomes per US-02 AC; SimHttpProber Tier-1 acceptance tests pass at default lane; HyperHttpProber Tier-3 integration tests pass under Lima against real tokio server fixtures.",
+          "test_file": "crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs",
+          "scenario_name": "http_prober_classifies_status_codes_into_named_outcomes",
+          "acceptance_criteria": [
+            "S-SHCP-PARSE-01 \u2014 proptest over arbitrary HTTP TOML sections with valid (path, port) tuples \u2014 parser produces ProbeDescriptor { mechanic: Http { path, port, host: None }, timeout_seconds: 5, interval_seconds: 2, max_attempts: 30 } per ADR-0057 \u00a72 defaults.",
+            "S-SHCP-PARSE-02 \u2014 for arbitrary HTTP TOML with port present and path absent \u2014 parser returns ParseError::HttpProbeMissingPath { probe_idx: <observed> }.",
+            "S-SHCP-PARSE-08 \u2014 for any TOML containing `https://` URL \u2014 parser returns ParseError::HttpsNotSupported { probe_idx } at parse time per ADR-0057 C6 Phase-1 plain-HTTP restriction.",
+            "S-SHCP-02-{01..04} \u2014 proptest `HttpProberStatusCodeClassification` over SimHttpProber queue-driven outcomes \u2014 universe = full HTTP status code u16 0..=999. For every status: 200..=299 \u2192 Pass; 300..=399 \u2192 Fail { reason: \"HTTP <code> (redirect not followed)\" }; 400..=599 \u2192 Fail { reason: \"HTTP <code>\" }; connection-refused enqueue \u2192 Fail { reason: \"connection refused\" }. Lands at crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs",
+            "S-SHCP-INT-02-{01,02,03} \u2014 Tier-3 integration tests at crates/overdrive-worker/tests/integration/probe_runner/real_http_probe.rs (Lima): real tokio HTTP server on 127.0.0.1:0 returning 200 \u2192 HyperHttpProber returns Pass; returning 503 \u2192 Fail { \"HTTP 503\" }; returning 302 with Location header \u2192 Fail { \"HTTP 302 (redirect not followed)\" } (no redirect-follow). In-process server is hyper Server::bind on ephemeral port.",
+            "ProbeRunner supervisor dispatches ProbeMechanic::Http to HyperHttpProber; xtask::dst_lint Earned-Trust scanner continues firing PASS (probe() method present).",
+            "rustdoc on HttpProber trait declares NO redirect-follow as observable invariant per ADR-0054 \u00a73 / research \u00a7 6.1 Pitfall 5; preserved at trait level so any future adapter MUST honour.",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-worker --file crates/overdrive-worker/src/probe_runner/http_prober.rs --file crates/overdrive-core/src/aggregate/workload_spec.rs kill rate \u2265 80%."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs [EXTEND \u2014 HTTP variant TOML parsing + ParseError::HttpProbeMissingPath + ParseError::HttpsNotSupported]",
+            "crates/overdrive-worker/src/probe_runner/http_prober.rs [CREATE NEW \u2014 HyperHttpProber]",
+            "crates/overdrive-worker/src/probe_runner/supervisor.rs [EXTEND \u2014 dispatch ProbeMechanic::Http to HyperHttpProber]",
+            "crates/overdrive-worker/src/probe_runner/mod.rs [EXTEND \u2014 pub mod http_prober]",
+            "crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs [CREATE NEW]",
+            "crates/overdrive-worker/tests/integration/probe_runner/real_http_probe.rs [CREATE NEW]",
+            "crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs [EXTEND \u2014 S-SHCP-PARSE-01/02/08]"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "time_estimate_hours": 4
+        },
+        {
+          "id": "02-02",
+          "name": "Exec startup probe (in-cgroup) \u2014 TOML parser exec variant + CgroupExecProber reusing cgroup_manager::place_pid_in_scope + cgroup.kill timeout cleanup",
+          "description": "EXTEND TOML parser with `type = \"exec\", command = [String], [args = [String]], [timeout_seconds]` per ADR-0057. NEW ParseError variant: `ExecProbeMissingCommand { probe_idx }` (empty command array). CREATE NEW: crates/overdrive-worker/src/probe_runner/exec_prober.rs `CgroupExecProber` \u2014 spawns subprocess via tokio::process::Command, places PID into the workload's cgroup scope via `cgroup_manager::place_pid_in_scope(pid, alloc_scope)` reuse per ADR-0059 \u00a72 DDD-17 (NOT clone3+CLONE_INTO_CGROUP per nix-rust/nix#2120 deferral / P3-Q12); exit 0 within timeout \u2192 Pass; exit non-zero \u2192 Fail { reason: \"exit <code>\" }; command-not-found \u2192 Fail { reason: \"exec: command not found\" } (mapped from io::Error kind); timeout \u2192 SIGKILL via `cgroup.kill` per DDD-18 (Linux 5.14+) with PID-loop fallback for 5.10\u20135.13 \u2192 Fail { reason: \"timeout after <N>s\" }. Cgroup-placement errors (ENOSPC/EACCES/ENOENT/EBUSY) \u2192 Fail { reason: \"ExecSpawnFailed: <errno-text>\" } per ADR-0054 QR2; NOT auto-retried by runner. EXTEND: ProbeRunner supervisor dispatch on ProbeMechanic::Exec. SimExecProber already exists from 01-01.\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero).\n\nEXEMPT FROM PARADIGM: Tier-3 cgroup-membership integration tests are single-example (real Lima VM, sudo, real cgroup v2 hierarchy, real /proc/<pid>/cgroup read) per Mandate 11. Compensate with property-based test at Tier-1 acceptance: probe_runner_exec_outcome.rs carries the exit-code-classification + timeout proptests over SimExecProber.",
+          "criteria": "TOML parser accepts exec variant with ExecProbeMissingCommand parse error; CgroupExecProber spawns child + places into alloc cgroup + classifies exit / not-found / timeout / cgroup-place-failed into named outcomes; timeout SIGKILL via cgroup.kill (Linux \u22655.14 in Lima); Tier-3 integration test asserts /proc/<pid>/cgroup membership names alloc-<id>.scope (NOT worker scope \u2014 the load-bearing prod/sim divergence test per ADR-0059 \u00a72); cgroup-leak detection one-liner per .claude/rules/testing.md \u00a7 \"Leaked workload cgroups across runs\" runs cleanly post-test.",
+          "test_file": "crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs",
+          "scenario_name": "exec_prober_classifies_exit_code_and_timeout_into_named_outcomes",
+          "acceptance_criteria": [
+            "S-SHCP-PARSE-03 \u2014 proptest over arbitrary exec TOML sections with non-empty command \u2014 parser produces ProbeDescriptor { mechanic: Exec { command, args }, defaults applied }.",
+            "S-SHCP-PARSE-04 \u2014 for arbitrary exec TOML with empty command array \u2014 parser returns ParseError::ExecProbeMissingCommand { probe_idx: <observed> }.",
+            "S-SHCP-03-{01..04} \u2014 proptest over SimExecProber queue-driven outcomes \u2014 universe = exit_code i32 \u2208 {0, 1..=255}: exit 0 \u2192 Pass; exit non-zero N \u2192 Fail { \"exit N\" }; command-not-found \u2192 Fail { \"exec: command not found\" }; timeout \u2192 Fail { \"timeout after <N>s\" } AND SIGKILL signal recorded.",
+            "S-SHCP-INT-03-{01,02,03} \u2014 Tier-3 integration tests at crates/overdrive-worker/tests/integration/probe_runner/real_exec_probe_cgroup.rs (Lima sudo required, #[cfg(target_os = \"linux\")]): (01) /bin/true \u2192 Pass; (02) /bin/sleep 3600 with timeout_seconds=2 \u2192 Fail { \"timeout after 2s\" } AND `cgroup.kill` fired (signal trace), child reaped within bounded time; (03) cgroup-membership assertion \u2014 spawned PID's /proc/<pid>/cgroup contains literal `alloc-<id>.scope` substring, NOT the worker's scope (the load-bearing prod/sim divergence test per ADR-0059 \u00a72).",
+            "Cgroup-placement EACCES/ENOSPC/ENOENT/EBUSY surfaced as Fail { \"ExecSpawnFailed: <errno-text>\" } per ADR-0054 QR2; NOT auto-retried by runner (runner-policy decision deferred to future operator-config knob per P3-Q12).",
+            "Reuse: CgroupExecProber calls `overdrive_worker::cgroup_manager::place_pid_in_scope` (existing per ADR-0026) AND `cgroup_kill` (existing); no new cgroup primitives.",
+            "Cgroup-leak hygiene: tests use AllocCleanup-shape RAII guard per .claude/rules/testing.md \u00a7 \"Leaked workload cgroups across runs\" \u2014 Drop fires cgroup.kill on every scope created; integration suite re-runs cleanly after test crash without manual cleanup.",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests -E 'test(real_exec_probe_cgroup)' passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-worker --file crates/overdrive-worker/src/probe_runner/exec_prober.rs kill rate \u2265 80%."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs [EXTEND \u2014 exec variant TOML parsing + ParseError::ExecProbeMissingCommand]",
+            "crates/overdrive-worker/src/probe_runner/exec_prober.rs [CREATE NEW \u2014 CgroupExecProber]",
+            "crates/overdrive-worker/src/probe_runner/supervisor.rs [EXTEND \u2014 dispatch ProbeMechanic::Exec to CgroupExecProber]",
+            "crates/overdrive-worker/src/probe_runner/mod.rs [EXTEND \u2014 pub mod exec_prober]",
+            "crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs [CREATE NEW]",
+            "crates/overdrive-worker/tests/integration/probe_runner/real_exec_probe_cgroup.rs [CREATE NEW]",
+            "crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs [EXTEND \u2014 S-SHCP-PARSE-03/04]"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "time_estimate_hours": 5
+        },
+        {
+          "id": "02-03",
+          "name": "CLI alloc status \u2014 Probes section render (TUI + JSON) per ADR-0033 enrichment",
+          "description": "Pure render-layer step per Slice 06. EXTEND crates/overdrive-cli/src/render.rs with `probes_section` function \u2014 per-mechanic summary formatter (TCP: `tcp <host>:<port>`; HTTP: `http GET http://<host>:<port><path>`; Exec: `exec <command>`); rendered iff `kind == Service AND probes_present`; absent for Job/Schedule per US-06 AC. EXTEND crates/overdrive-cli/src/commands/alloc.rs JSON-mode handler with ProbeResultRowJson marshalling per ADR-0033 enrichment shape; ProbeResultRowJson type already exists from 01-03. Render contracts per US-06: each probe row shows role + probe_idx + mechanic_summary + last status + last_observed_at; `(inferred)` suffix for synthesised default probes; `last=pending` for probes with no ProbeResultRow yet; `(<consecutive_failures>/<threshold>)` suffix when liveness/readiness probe currently failing. NO_COLOR env var respected per US-06 AC. Snapshot tests via `insta` (existing dev-dep in overdrive-cli).\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero).\n\nEXEMPT FROM PARADIGM: insta snapshot tests are golden-output diffs (LSP-style golden-file pattern). Compensate with property-based test at unit level on adjacent slot: probes_section_render carries a proptest `ProbeRenderIsKindGuarded` over arbitrary (workload_kind \u00d7 probes_present) \u2014 for every (kind, present) pair, render output contains \"Probes:\" iff (kind == Service AND present).",
+          "criteria": "Probes section renders for Service-kind allocs with probes; absent for Job/Schedule; per-mechanic summary correct; (inferred) suffix on default-inferred probes; last=pending for un-observed probes; NO_COLOR respected; snapshot tests pass; JSON-mode ProbeResultRowJson marshalling per ADR-0033 OpenAPI schema.",
+          "test_file": "crates/overdrive-cli/tests/acceptance/probes_section_render.rs",
+          "scenario_name": "service_alloc_with_three_probes_renders_one_row_per_probe_with_role_and_mechanic_summary",
+          "acceptance_criteria": [
+            "S-SHCP-CLI-{01..06} \u2014 render contracts: (01) Stable Service with startup+readiness+liveness probes renders ONE row per probe with role, probe_idx, mechanic summary, last status, last_observed_at; (02) Job-kind alloc \u2192 ZERO Probes section (rg verifiable on render output); (03) Schedule-kind alloc \u2192 ZERO Probes section; (04) Fail row renders `last_fail_reason` (e.g. \"HTTP 503\"); (05) Probe with no result yet \u2192 `last=pending`; (06) Inferred default probe renders `(inferred)` suffix.",
+            "proptest `ProbeRenderIsKindGuarded` over arbitrary (workload_kind \u00d7 probes_present_bool) \u2014 for every (kind, present): output contains literal substring \"Probes:\" iff (kind == Service AND present); otherwise zero occurrences. Universe = full WorkloadKind enum \u00d7 bool.",
+            "insta snapshot tests pin per-mechanic line shapes; snapshot files committed under crates/overdrive-cli/tests/snapshots/.",
+            "NO_COLOR env var test: with NO_COLOR=1, render output contains zero ANSI escape sequences (rg-verifiable).",
+            "JSON-mode output: `overdrive alloc status --json --job <id>` for a Service-kind alloc includes `probes: [ProbeResultRowJson...]` array; for a Job-kind alloc the field is absent (Option::None serialized as omitted via #[serde(skip_serializing_if = \"Option::is_none\")]).",
+            "OpenAPI schema generated for ProbeResultRowJson via utoipa::ToSchema; existing OpenAPI gate (crates/overdrive-control-plane/src/bin/openapi.rs check) passes.",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-cli --file crates/overdrive-cli/src/render.rs --file crates/overdrive-cli/src/commands/alloc.rs kill rate \u2265 80%."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-cli/src/render.rs [EXTEND \u2014 probes_section function + per-mechanic formatter]",
+            "crates/overdrive-cli/src/commands/alloc.rs [EXTEND \u2014 JSON-mode ProbeResultRowJson marshalling]",
+            "crates/overdrive-cli/tests/acceptance/probes_section_render.rs [CREATE NEW]",
+            "crates/overdrive-cli/tests/snapshots/ [CREATE NEW \u2014 insta snapshot files]",
+            "crates/overdrive-cli/tests/acceptance.rs [EXTEND]"
+          ],
+          "dependencies": [
+            "02-01",
+            "02-02"
+          ],
+          "time_estimate_hours": 3.5
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Lifecycle \u2014 kind rejection + readiness + liveness + RCA-A hardening",
+      "description": "Closes the feature. 03-01 lands kind rejection for Job/Schedule (Slice 07 \u2014 pure parser change, parallelisable with Phase 01 but landed here for sequencing simplicity) co-located with readiness probe semantics flipping Backend.healthy in the dataplane fingerprint (Slice 04 \u2014 extends ServiceLifecycleReconciler with the readiness branch). 03-02 lands liveness probe semantics triggering Action::RestartAllocation (Slice 05) plus the full Slice 08 EarlyExit hardening (CLI render contracts beyond what Phase 01's walking-skeleton coinflip-100-seed regression test covered; multi-line failure surface with exit_code / elapsed / stderr_tail / guidance; exit-0-within-deadline edge case). Both steps extend the same ServiceLifecycleReconciler from Phase 01; both extend its View with additional input slots per \u00a7 \"Persist inputs, not derived state\".",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Kind rejection on Job/Schedule (Slice 07) + readiness probe flips Backend.healthy in fingerprint (Slice 04)",
+          "description": "TWO sub-concerns landed in one step. (A) SLICE 07 KIND REJECTION: EXTEND TOML parser at crates/overdrive-core/src/aggregate/workload_spec.rs with validation pass after kind detection \u2014 scan for `[[health_check.*]]` arrays under non-Service blocks; emit `ParseError::ProbesNotAllowedOnKind { kind, guidance }` where guidance is per-kind constant text in crates/overdrive-core/src/aggregate/probe_descriptor.rs (Job: \"Job has no readiness question; on completion is enough.\"; Schedule: \"Schedule composes per-fire; declare probes on the Service the Schedule fires.\"). EXTEND CLI render at crates/overdrive-cli/src/commands/job.rs to surface the ParseError with multi-line guidance + suggested remediation per Slice 07 \u00a7Outcome. (B) SLICE 04 READINESS: EXTEND ServiceLifecycleReconciler::reconcile with the readiness branch \u2014 for each alloc, for each readiness probe, derive `Backend.healthy` from `(latest_readiness_status == Pass)` per alloc per tick; emit `Action::WriteServiceBackendRow { backend, healthy }` when state transitions. EXTEND ServiceLifecycleView with `readiness_consecutive_successes: BTreeMap<(AllocationId, ProbeIdx), u32>` (input counter per ADR-0055 \u00a76; default success_threshold = 1 per ADR-0057 \u00a72 / DDD-8; configurable upward). Initial state: `Backend.healthy = false` until first readiness Pass per Slice 04 \u00a7Initial state (avoids inverse race). Service without readiness probes \u2192 all backends `healthy = true` post-Stable (backward-compat default per S-SHCP-RECON-08b). EXTEND TOML parser to accept `[[health_check.readiness]]` body shape (HTTP/TCP/Exec all valid mechanics; reuses existing 02-01/02-02 parse paths).\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero). ServiceLifecycleReconciler::reconcile body is touched-NEW-code from Phase 01 (Stage 0 from start; the new readiness branch is added in this step without legacy migration overhead).",
+          "criteria": "Kind rejection: Job/Schedule + any health_check section \u2192 ParseError::ProbesNotAllowedOnKind with per-kind guidance; Service + probes \u2192 no error (regression guard); CLI surfaces multi-line error with exit code 1. Readiness: ServiceLifecycleReconciler emits WriteServiceBackendRow with healthy flag derived per-tick from latest_readiness_status; dataplane fingerprint at crates/overdrive-core/src/dataplane/fingerprint.rs is sensitive to the flag (existing test pattern at line ~148); initial state = unhealthy until first Pass; Service without readiness probes = all backends healthy post-Stable.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_readiness.rs",
+          "scenario_name": "readiness_pass_to_fail_flips_backend_healthy_within_one_tick",
+          "acceptance_criteria": [
+            "S-SHCP-PARSE-05 \u2014 proptest over arbitrary Job-kind TOML with any [[health_check.*]] role \u2014 parser returns ParseError::ProbesNotAllowedOnKind { kind: \"job\", guidance: <job-specific text> }.",
+            "S-SHCP-PARSE-06 \u2014 proptest over arbitrary Schedule-kind TOML with any [[health_check.*]] role \u2014 parser returns ParseError::ProbesNotAllowedOnKind { kind: \"schedule\", guidance: <schedule-specific text> }.",
+            "S-SHCP-PARSE-07 \u2014 Service-kind + health_check section \u2192 parses successfully (regression guard).",
+            "S-SHCP-CLI-{12,13,14} \u2014 CLI handler for `overdrive job submit` against bad-TOML fixtures (Job+probe, Schedule+probe) surfaces multi-line error with guidance text AND exits 1; Service+probe fixture parses + exits 0 (regression guard).",
+            "S-SHCP-RECON-07 \u2014 proptest `ReadinessFlipsBackendHealthyWithinOneTick` \u2014 universe = arbitrary (alloc backend count 1..=3) \u00d7 (per-backend readiness status \u2208 {Pass, Fail}) \u00d7 (View.readiness_consecutive_successes 0..=10). For every state: reconcile emits WriteServiceBackendRow per backend where healthy = (latest_status == Pass AND consecutive_successes >= success_threshold). Lands at crates/overdrive-control-plane/tests/acceptance/service_lifecycle_readiness.rs",
+            "S-SHCP-RECON-08 \u2014 readiness Fail\u2192Pass restores healthy within 1 tick: for arbitrary preconditions with prior Fail \u2192 next-tick Pass, reconcile emits WriteServiceBackendRow with healthy=true.",
+            "S-SHCP-RECON-08b \u2014 proptest `ServiceWithoutReadinessProbesIsHealthyPostStable` \u2014 for arbitrary Service with zero readiness probes AND state=Stable, every Backend.healthy = true.",
+            "S-SHCP-RECON-08c \u2014 proptest `BackendHealthyFalseBeforeFirstReadinessPass` \u2014 for arbitrary spawned alloc with readiness probe AND no Pass row yet, Backend.healthy = false (avoids inverse race per Slice 04 \u00a7Initial state).",
+            "Dataplane fingerprint regression: existing test pattern `fingerprint_is_sensitive_to_health_flag` at crates/overdrive-core/src/dataplane/fingerprint.rs:148 continues to pass; new test asserts that toggling readiness Pass\u2192Fail changes compute_fingerprint(vip, backends) output (the K2 contract).",
+            "ServiceLifecycleView gains an additional input slot recording, per allocation-and-readiness-probe, the count of consecutive readiness Pass observations (an input counter \u2014 never a derived deadline, never a cached `healthy: bool`); the reconciler recomputes Backend.healthy on every tick from this counter plus the live spec's success_threshold per \u00a7 \"Persist inputs, not derived state\". Container choice (BTreeMap vs HashMap-with-marker) is the crafter's per \u00a7 \"Ordered-collection choice\".",
+            "Readiness flapping (Fail/Pass/Fail/Pass) does NOT trigger restart (restart is Liveness, step 03-02) \u2014 explicit proptest asserts zero Action::RestartAllocation emissions under readiness-only state changes.",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests + -p overdrive-core + -p overdrive-cli passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs kill rate \u2265 80% (the new readiness branch covered)."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs [EXTEND \u2014 kind-rejection validation pass + ParseError::ProbesNotAllowedOnKind + readiness section parser]",
+            "crates/overdrive-core/src/aggregate/probe_descriptor.rs [EXTEND \u2014 per-kind guidance text constants]",
+            "crates/overdrive-cli/src/commands/job.rs [EXTEND \u2014 multi-line error rendering for kind-rejection]",
+            "crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs [EXTEND \u2014 readiness branch in reconcile; new View slot read]",
+            "crates/overdrive-core/src/service_lifecycle.rs [EXTEND \u2014 ServiceLifecycleView.readiness_consecutive_successes; ServiceLifecycleState additions]",
+            "crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs [EXTEND \u2014 S-SHCP-PARSE-05/06/07]",
+            "crates/overdrive-cli/tests/acceptance/probes_kind_rejection_cli.rs [CREATE NEW \u2014 S-SHCP-CLI-12/13/14]",
+            "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_readiness.rs [CREATE NEW]"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "time_estimate_hours": 4.5
+        },
+        {
+          "id": "03-02",
+          "name": "Liveness probe triggers Action::RestartAllocation (Slice 05) + RCA-A render hardening (Slice 08 CLI surface beyond Phase-01 walking skeleton)",
+          "description": "TWO sub-concerns landed together. (A) SLICE 05 LIVENESS: EXTEND ServiceLifecycleReconciler::reconcile with the liveness branch \u2014 for each liveness probe, if `view.consecutive_failures[(alloc_id, probe_idx)] >= failure_threshold` AND alloc.state == Running AND alloc NOT under restart cooldown \u2192 emit `Action::RestartAllocation { alloc_id, reason: RestartReason::LivenessExhausted { probe_idx, consecutive_failures, threshold } }`. EXTEND ServiceLifecycleView with `consecutive_failures: BTreeMap<(AllocationId, ProbeIdx), u32>` (already declared in 01-01 schema; populated/read here). Recovery (one Pass) resets the counter to 0 in next-View per S-SHCP-RECON-10. After RESTART_BACKOFF_CEILING (5) liveness-driven restarts the existing JobLifecycle `BackoffExhausted` path fires via the shared Action::RestartAllocation pipeline \u2014 emit `Failed { reason: BackoffExhausted { attempts: 5 } }` per S-SHCP-RECON-11 (composes with existing budget). EXTEND TOML parser to accept `[[health_check.liveness]]` body with `failure_threshold: u32` (default 3 per ADR-0057 \u00a72 / DDD-14). EXTEND `Action::RestartAllocation` reason field via additive enum variant `RestartReason::LivenessExhausted` at crates/overdrive-core/src/reconcilers/mod.rs (#[non_exhaustive] preserved). NO cascading-restart governor in Phase 1 single-node (per ADR-0055 \u00a77 / DDD-9 / P3-Q11 deferral \u2014 `RestartAllocation` emitted unconditionally; future LivenessRestartGovernor non-breaking addition). Liveness probes are app-internal only per research \u00a7 6.2 best practice 1 / C11 (no dependency-checking external services). (B) SLICE 08 CLI HARDENING beyond Phase-01 walking-skeleton: EXTEND crates/overdrive-cli/src/render.rs Failed-render with multi-line shape for EarlyExit including stderr_tail (the K1 north-star surface beyond just the test assertion); cover Slice 08 edge cases: exit-0-within-deadline IS still EarlyExit (Service-kind expects long-lived per S-SHCP-RECON-06); exit-AFTER-Stable is NOT EarlyExit (falls through to liveness/BackoffExhausted paths per S-SHCP-RECON-05); plumb stderr_tail from ExitObserver through ServiceSubmitEvent::Failed.stderr_tail to the CLI per Slice 08 \u00a7Adds onto Slice 01. CROSS-CUTTING RCA-A regression guard at every CLI render path: zero substring matches of literal \"(took live)\" for any Service-kind alloc per S-SHCP-CLI-{07..11}.\n\nTEST PARADIGM (mandatory, Rust-translated): Unit tests for this step MUST be written as property-based tests via proptest! {} blocks with explicit Strategy generators + invariant assertions over a declared state universe (the proptest equivalent of state-delta matchers). Single-example #[test] is FALLBACK only \u2014 document why in a `// bypass:` comment if used. Acceptance scenarios MUST be framed as proptest invariants (quantified preconditions + invariant outcomes) where the contract supports it; classic single-case #[tokio::test] is fallback. Integration and E2E tests REMAIN single-example (under the integration-tests feature gate per .claude/rules/testing.md) \u2014 they verify wiring, not invariants. Universe declaration is mandatory even when only one slot is checked.\n\nSTAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero). ServiceLifecycleReconciler::reconcile body is touched-existing-NEW code from Phase 01 (Stage 0 from start; this step adds the liveness branch).\n\nEXEMPT FROM PARADIGM: CLI render snapshot tests for EarlyExit / Failed multi-line shapes are golden-output diffs (LSP-style). Compensate with property-based test at unit level on adjacent slot: service_early_exit_render.rs carries a proptest `ServiceKindRenderNeverContainsTookLive` over arbitrary Service-kind alloc render scenarios \u2014 universe = full ServiceFailureReason \u00d7 stderr_tail.is_some \u00d7 exit_code; for every state, render output must NOT contain literal \"(took live)\".",
+          "criteria": "Liveness: 3 consecutive liveness fails on Service alloc \u2192 exactly one Action::RestartAllocation { reason: LivenessExhausted } emitted within 1 tick; recovery before threshold resets counter (no restart); 5 liveness-driven restarts \u2192 eventual Failed { BackoffExhausted { attempts: 5 } } via shared budget. EarlyExit: render multi-line block with exit_code/elapsed/stderr_tail; exit-0-within-deadline still EarlyExit; exit-after-Stable NOT EarlyExit; zero render path emits literal \"(took live)\" for any Service-kind alloc (cross-cutting RCA-A guard).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_liveness.rs",
+          "scenario_name": "three_consecutive_liveness_fails_emits_restart_allocation_within_one_tick",
+          "acceptance_criteria": [
+            "S-SHCP-RECON-09 \u2014 proptest `LivenessExhaustionTriggersRestartAllocation` \u2014 universe = arbitrary (alloc state \u2208 {Running, others}) \u00d7 (consecutive_failures 0..=10) \u00d7 (failure_threshold 1..=10) \u00d7 (restart_count 0..=RESTART_BACKOFF_CEILING). For every state where alloc.state==Running AND consecutive_failures >= failure_threshold AND restart_count < RESTART_BACKOFF_CEILING: reconcile emits exactly ONE Action::RestartAllocation { alloc_id, reason: RestartReason::LivenessExhausted { probe_idx, consecutive_failures: <observed>, threshold: <observed> } }. Lands at crates/overdrive-control-plane/tests/acceptance/service_lifecycle_liveness.rs",
+            "S-SHCP-RECON-10 \u2014 proptest `LivenessRecoveryResetsCounter` \u2014 for arbitrary state with Fail/Fail/Pass sequence (< threshold), next-View.consecutive_failures[(alloc_id, probe_idx)] == 0 AND zero RestartAllocation emitted.",
+            "S-SHCP-RECON-11 \u2014 proptest `BackoffExhaustionAfterRestartCeiling` \u2014 for arbitrary state where restart_count == RESTART_BACKOFF_CEILING AND liveness re-triggers: reconcile emits Failed { reason: BackoffExhausted { attempts: 5 } } via the shared JobLifecycle BackoffExhausted path; composes with existing restart-budget pipeline.",
+            "S-SHCP-RECON-05 \u2014 proptest `ExitAfterStableIsNotEarlyExit` \u2014 for arbitrary state where alloc.state==Failed AND alloc was previously in view.stable_announced: reconcile does NOT emit Failed { EarlyExit }; falls through to liveness/BackoffExhausted paths.",
+            "S-SHCP-RECON-06 \u2014 proptest `ExitZeroWithinDeadlineIsStillEarlyExit` \u2014 for arbitrary state where alloc.state==Failed AND exit_code==0 AND elapsed < startup_deadline AND no Pass row: reconcile emits Failed { EarlyExit { exit_code: 0 } } (Service-kind expects long-lived).",
+            "S-SHCP-CLI-{07..11} \u2014 CLI render contracts: (07) Failed { EarlyExit } renders multi-line block with `exit_code: <N>`, `elapsed: <N>s (startup_deadline=<N>s)`, `stderr_tail: \"<text>\"` lines; (08) exit-0-within-deadline render includes Service-kind guidance text \"The workload exited before any startup probe could pass...\"; (09\u201311) \u2014 proptest `ServiceKindRenderNeverContainsTookLive` \u2014 universe = full ServiceFailureReason \u00d7 stderr_tail.is_some \u00d7 exit_code i32; for every Service-kind render output, zero substring matches of literal \"(took live)\". The cross-cutting RCA-A regression guard applied at every render path. Lands at crates/overdrive-cli/tests/acceptance/service_early_exit_render.rs",
+            "Action::RestartAllocation reason field extended with RestartReason::LivenessExhausted variant; #[non_exhaustive] preserved; existing JobLifecycle restart pipeline consumes the variant without change.",
+            "The per-allocation-per-liveness-probe consecutive-failure counter slot (declared in 01-01's View) is populated by this step's reconcile body: per-tick increment on a Fail observation, reset to zero on a Pass observation; persisted as INPUT only (per \u00a7 \"Persist inputs, not derived state\" \u2014 never as a precomputed `should_restart: bool` or a `next_restart_at` deadline); the restart-trigger predicate is recomputed against the live failure_threshold every tick.",
+            "stderr_tail plumbing: ExitObserver captures last-N-bytes of stderr; carried through to LifecycleEvent.stderr_tail; surfaced on ServiceSubmitEvent::Failed.stderr_tail; rendered by CLI. End-to-end byte-equality property test asserts substring survives the pipeline.",
+            "Liveness on Job/Schedule rejected at parse time per step 03-01 (regression \u2014 still passes).",
+            "Phase-1 single-node has no cascading-restart surface; architecture preserves Phase 2+ governor seam (P3-Q11 / DDD-9) \u2014 RestartAllocation emitted unconditionally.",
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests passes; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs --package overdrive-cli --file crates/overdrive-cli/src/render.rs kill rate \u2265 80%."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs [EXTEND \u2014 liveness section parser + failure_threshold default]",
+            "crates/overdrive-core/src/reconcilers/mod.rs [EXTEND \u2014 RestartReason::LivenessExhausted additive variant on Action::RestartAllocation reason enum]",
+            "crates/overdrive-control-plane/src/reconcilers/service_lifecycle/mod.rs [EXTEND \u2014 liveness branch + EarlyExit branches in reconcile]",
+            "crates/overdrive-core/src/service_lifecycle.rs [EXTEND \u2014 ServiceLifecycleView.consecutive_failures populated]",
+            "crates/overdrive-cli/src/render.rs [EXTEND \u2014 Failed { EarlyExit } multi-line shape with stderr_tail; exit-0-within-deadline guidance text]",
+            "crates/overdrive-control-plane/src/api.rs [EXTEND \u2014 ServiceSubmitEvent::Failed.stderr_tail plumbing]",
+            "crates/overdrive-worker/src/worker/exit_observer.rs [EXTEND \u2014 stderr_tail capture if not already present]",
+            "crates/overdrive-control-plane/src/streaming.rs [EXTEND \u2014 stderr_tail propagation through wire event]",
+            "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_liveness.rs [CREATE NEW]",
+            "crates/overdrive-cli/tests/acceptance/service_early_exit_render.rs [CREATE NEW]"
+          ],
+          "dependencies": [
+            "01-03",
+            "03-01"
+          ],
+          "time_estimate_hours": 5
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-cli/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-store-local/src/",
+      "xtask/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-worker/tests/",
+      "crates/overdrive-cli/tests/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/target/**",
+      "docs/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "user",
+    "approved_at": "TODO"
+  },
+  "reviews": [
+    {
+      "review_id": "arch_rev_20260524_shcp_roadmap",
+      "reviewer": "nw-solution-architect-reviewer",
+      "date": "2026-05-24",
+      "iteration": 1,
+      "verdict": "conditionally_approved",
+      "critical_issues_count": 0,
+      "high_issues_count": 2,
+      "medium_issues_count": 2,
+      "low_issues_count": 0,
+      "praise_count": 6,
+      "findings": [
+        {
+          "label": "issue (blocking)",
+          "severity": "high",
+          "id": "H1a",
+          "location": "phases[0].steps[0].criteria (step 01-01)",
+          "description": "AC names struct field members (settled_in, reason) \u2014 implementation coupling. Rewrite to specify observable behavior (Stable carries duration + witness; Failed carries kind/source)."
+        },
+        {
+          "label": "issue (blocking)",
+          "severity": "high",
+          "id": "H1b",
+          "location": "phases[0].steps[0,2], phases[2].steps[0,1] criteria",
+          "description": "AC prescribes exact ServiceLifecycleView field names and types (BTreeSet<AllocationId>, BTreeMap<...>). Rewrite to specify input-state semantics (per-alloc stable-announced flag, per-probe counters) leaving the data-structure choice to the crafter under dst-lint discipline."
+        },
+        {
+          "label": "suggestion (non-blocking)",
+          "severity": "medium",
+          "id": "M1",
+          "location": "all 8 steps",
+          "description": "AC criterion density 12\u201318 per step exceeds threshold; consolidate repeated S-SHCP-* scenarios into per-group AC pointing to distill/test-scenarios.md as SSOT."
+        },
+        {
+          "label": "suggestion (non-blocking)",
+          "severity": "medium",
+          "id": "M2",
+          "location": "all 8 step descriptions",
+          "description": "Descriptions repeat CREATE NEW/EXTEND/DELETE inventory already in implementation_scope; trim descriptions to intent + constraints only."
+        }
+      ],
+      "praise": [
+        "External validity solid \u2014 walking-skeleton integration test (01-03) + CLI render contracts establish invocable e2e path.",
+        "All six ADRs (0054\u20130059) cited at load-bearing decision points; no architectural conflation with implementation.",
+        "Every step carries proptest-translated TEST PARADIGM directive with Tier-1/2/3 tier mapping.",
+        "ServiceSubmitEvent V1\u2192V2 single-cut migration enforced per CLAUDE.md feedback memory (no parallel-fields shim).",
+        "K1 regression guard front-and-center (coinflip-100-seed in 01-03, cross-cutting (took live) substring guard in 03-02).",
+        "Decomposition ratio transparent; file-per-step density rationale documented; TCP/HTTP/Exec pattern reuse justified as orthogonal mechanics."
+      ],
+      "conditions_for_full_approval": [
+        "H1a/H1b: rewrite ACs in steps 01-01, 01-03, 03-01, 03-02 to decouple from struct field names and data-structure types",
+        "Recommended (non-blocking): address M1/M2 to bring word count within threshold"
+      ],
+      "address_log": [
+        {
+          "finding_id": "H1a",
+          "locator": "phases[0].steps[0].acceptance_criteria[4] (step 01-01 \u2014 TerminalCondition variants AC)",
+          "note": "Reworded to describe observable carry-payload of Stable (elapsed duration + witness identifier with probe index/role/mechanic/inferred) and Failed (typed reason discriminated by failure class) without naming struct fields settled_in / witness / reason."
+        },
+        {
+          "finding_id": "H1b",
+          "locator": "phases[0].steps[2].acceptance_criteria[5] (step 01-03 \u2014 S-SHCP-PURITY-02)",
+          "note": "Reworded to specify input-state semantics (per-alloc idempotency record; per-alloc-per-probe consecutive-failure / consecutive-success / startup-attempt counters) and to defer container-type choice to crafter under \u00a7 \"Ordered-collection choice\"; no `BTreeSet<...>` / `BTreeMap<...>` tokens prescribed."
+        },
+        {
+          "finding_id": "H1b",
+          "locator": "phases[2].steps[0].acceptance_criteria[9] (step 03-01 \u2014 ServiceLifecycleView readiness slot)",
+          "note": "Reworded to describe input-counter semantics (consecutive readiness Pass count per alloc-and-probe) plus the inputs-not-derived recomputation contract; removed prescribed `BTreeMap<(AllocationId, ProbeIdx), u32>` type and `readiness_consecutive_successes` field name."
+        },
+        {
+          "finding_id": "H1b",
+          "locator": "phases[2].steps[1].acceptance_criteria[7] (step 03-02 \u2014 consecutive_failures populated)",
+          "note": "Reworded to describe behavioral slot (per-alloc-per-liveness-probe consecutive-failure counter) and per-tick increment/reset contract; removed `ServiceLifecycleView.consecutive_failures` direct field reference."
+        }
+      ]
+    },
+    {
+      "review_id": "arch_rev_20260524_shcp_roadmap_iter2",
+      "reviewer": "nw-solution-architect-reviewer",
+      "date": "2026-05-24",
+      "iteration": 2,
+      "verdict": "APPROVED",
+      "critical_issues_count": 0,
+      "high_issues_count": 0,
+      "medium_issues_count": 2,
+      "low_issues_count": 0,
+      "addressed_in_iter1": [
+        "H1a",
+        "H1b"
+      ],
+      "verification": [
+        "H1a (01-01 TerminalCondition AC) \u2014 RESOLVED: Stable/Failed now described by observable carry-payload; no settled_in/witness/reason field tokens.",
+        "H1b (01-03 PURITY-02) \u2014 RESOLVED: View slots described as input-state semantics; container choice deferred to crafter per \u00a7 Ordered-collection choice.",
+        "H1b (03-01 readiness slot) \u2014 RESOLVED: input-counter semantics; Backend.healthy recomputed every tick from counter + live success_threshold.",
+        "H1b (03-02 liveness counter) \u2014 RESOLVED: behavioral slot with increment-on-Fail/reset-on-Pass; restart predicate recomputed against live failure_threshold."
+      ],
+      "preserved_verbatim": [
+        "all S-SHCP-* scenario IDs",
+        "all test file paths",
+        "all proptest invariant names",
+        "all mutation kill-rate thresholds"
+      ],
+      "deferred_non_blocking": [
+        "M1: AC criterion density 12\u201318/step still exceeds threshold; consolidate next revision pointing to distill/test-scenarios.md as SSOT.",
+        "M2: Step description verbosity still repeats implementation_scope inventory; trim next revision."
+      ],
+      "blockers": "none",
+      "summary": "Roadmap approved for implementation."
+    }
+  ]
+}

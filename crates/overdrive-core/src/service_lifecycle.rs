@@ -14,24 +14,21 @@
 //! `.claude/rules/development.md` § "Persist inputs, not derived
 //! state".
 //!
-//! RED scaffold — types declared; reconcile body lands in
-//! `crates/overdrive-control-plane/src/reconcilers/service_lifecycle/`
-//! across slices 01, 04, 05, 08.
-// SCAFFOLD: true
+//! `ServiceFailureReason` and `ProbeWitness` live in
+//! [`crate::transition_reason`] (so they can be carried inside
+//! [`crate::TerminalCondition::ServiceFailed`] / `::Stable` without
+//! inducing a module-dependency cycle) and are re-exported here
+//! for ergonomics — callers under `service_lifecycle::*` get the
+//! same surface they had before the cycle-breaking relocation.
 
 #![allow(dead_code)]
 #![allow(
     clippy::doc_markdown,
     clippy::doc_lazy_continuation,
     clippy::too_long_first_doc_paragraph,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::unused_async,
-    clippy::missing_panics_doc,
-    clippy::missing_errors_doc,
     clippy::module_name_repetitions,
     clippy::struct_field_names,
-    reason = "DISTILL RED scaffold; per `.claude/rules/testing.md` § 'RED scaffolds' lints land when DELIVER replaces todo!() bodies + rewrites docs"
+    reason = "DISTILL RED scaffold; behavioural expansion in subsequent slices"
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -40,66 +37,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::id::AllocationId;
-use crate::observation::{ProbeIdx, ProbeRole};
+use crate::observation::ProbeIdx;
 
-/// Reason a Service alloc transitioned to a terminal Failed state.
-///
-/// Per ADR-0055 §4 + ADR-0056 (wire projection): single
-/// `#[non_exhaustive]` enum; additive variants only.
-///
-/// **Note: the existing `TerminalCondition::Failed { exit_code: i32 }`
-/// variant in `crates/overdrive-core/src/transition_reason.rs`
-/// (line 432) is the Job-kind shape from ADR-0037 Amendment
-/// 2026-05-10. The Service-kind needs a NEW variant; DESIGN ADR-0055
-/// proposes a Service-distinct variant
-/// `TerminalCondition::ServiceFailed { reason: ServiceFailureReason }`
-/// to avoid collision with the Job-kind shape. Naming the variant
-/// `Failed { reason: ServiceFailureReason }` (per the user-stories /
-/// slice briefs) would be a rkyv-discriminant collision; the actual
-/// landed name in slice 01 will be `ServiceFailed` or similar. This
-/// is an in-scope DELIVER-wave naming decision that the
-/// `service_lifecycle` reconciler ties into.**
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "reason", content = "data", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ServiceFailureReason {
-    /// Startup probe exhausted `max_attempts` without a Pass result
-    /// within `startup_deadline`. `last_fail` carries the last
-    /// observed `ProbeStatus::Fail.last_fail_reason` for direct
-    /// operator-renderable surface.
-    StartupProbeFailed { probe_idx: ProbeIdx, last_fail: String, attempts: u32 },
-    /// Workload exited before any startup probe could pass AND
-    /// within `startup_deadline` window. Closes RCA-A coinflip
-    /// case per US-08.
-    EarlyExit { exit_code: i32 },
-    /// Liveness probe consecutive-failure count reached its
-    /// threshold AND restart-budget reached
-    /// `RESTART_BACKOFF_CEILING`. Composes with the existing
-    /// `BackoffExhausted` JobLifecycle pathway for Service-kind
-    /// liveness-driven restart attempts.
-    BackoffExhausted { attempts: u32 },
-}
-
-/// Names which probe's Pass moved the reconciler to Stable.
-///
-/// Per DDD-7 (multi-probe AND-of-all semantic): when N startup
-/// probes are declared, all must Pass; the witness names the
-/// **last-to-Pass** probe. Renderer surfaces as `witness:
-/// startup probe #<idx> (<mechanic_summary>)`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProbeWitness {
-    pub probe_idx: ProbeIdx,
-    pub role: ProbeRole,
-    /// Operator-facing summary (e.g. `"tcp 0.0.0.0:8080"`,
-    /// `"http GET http://0.0.0.0:8080/healthz"`,
-    /// `"exec /usr/local/bin/healthcheck.sh"`). Reconciler
-    /// composes from `ProbeDescriptor.mechanic` at the deciding
-    /// tick.
-    pub mechanic_summary: String,
-    /// `true` IFF this witness was the platform's inferred default
-    /// probe per ADR-0058.
-    pub inferred: bool,
-}
+// Re-exports — see file-header docstring for the cycle-breaking
+// rationale.
+pub use crate::transition_reason::{ProbeWitness, ServiceFailureReason};
 
 /// `ServiceLifecycleState` — typed projection of intent +
 /// observation for the Service reconciler per ADR-0055 §2 +
@@ -109,10 +51,10 @@ pub struct ProbeWitness {
 /// sourced from `alloc_status` rows + `probe_result` rows per
 /// alloc.
 ///
-/// RED scaffold — full field tree lands in slice 01.
+/// RED scaffold — full field tree lands in slice 01-03+.
 #[derive(Debug, Clone, Default)]
 pub struct ServiceLifecycleState {
-    // Full desired/actual decomposition lands in slice 01; this
+    // Full desired/actual decomposition lands in slice 01-03+; this
     // scaffold preserves the trait surface so AnyReconciler /
     // AnyState match arms compile.
 }
@@ -132,9 +74,6 @@ pub struct ServiceLifecycleState {
 /// `HashMap`/`HashSet` — iteration order is observed by DST
 /// invariants AND by the LWW write ordering at the persistence
 /// boundary.
-///
-/// RED scaffold — fields enumerated; serde derives land in
-/// slice 01 (per ADR-0035/0036 CBOR ViewStore convention).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServiceLifecycleView {
     /// Per-alloc count of consecutive startup-probe attempts that
