@@ -1,19 +1,16 @@
 //! Regression test — step 01-01 of `fix-orphaned-node-health-writer`.
 //!
-//! Pins the missing boot-time `node_health` write per ADR-0025 § 3
-//! step 5 (amended by ADR-0029 — writer relocated to worker-subsystem
-//! startup). `run_server_with_obs_and_driver` wires the
-//! `ObservationStore` but never invokes `overdrive_worker::
+//! Pins the boot-time `node_health` write per ADR-0025 § 3 step 5
+//! (amended by ADR-0029 — writer relocated to worker-subsystem
+//! startup). Before the fix, `run_server_with_obs_and_driver` wired
+//! the `ObservationStore` but never invoked `overdrive_worker::
 //! write_node_health_row`; `GET /v1/nodes` on a healthy single-node
-//! deployment returns `[]` instead of one row.
+//! deployment returned `[]` instead of one row.
 //!
 //! This test boots the server through the SAME entry point the CLI
 //! uses (`run_server` → `run_server_with_obs_and_driver`) and asserts
 //! the observation store carries exactly one `NodeHealthRow` after
-//! startup. It MUST FAIL today (zero rows in the store, `assertion
-//! left: 0, right: 1`) and pass after step 01-02 lands the
-//! `start_local_node` helper + call site in
-//! `run_server_with_obs_and_driver`.
+//! startup, written by `start_local_node`.
 //!
 //! Port-to-port principle: if a future refactor deletes the
 //! `start_local_node` call, this test flips red — the test enters
@@ -42,12 +39,6 @@ use tempfile::TempDir;
 /// Boot the server through the public `run_server_with_obs_and_driver`
 /// driving port and assert the `ObservationStore` carries exactly one
 /// `NodeHealthRow` after startup completes.
-///
-/// Fails today: the boot path never calls
-/// `overdrive_worker::write_node_health_row`. The expected failure
-/// shape is `assertion left: 0, right: 1` (zero rows in the store) —
-/// NOT a compile error, NOT a panic from elsewhere. Step 01-02 wires
-/// the writer and turns this test green.
 #[tokio::test]
 async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
     let tmp = TempDir::new().expect("tempdir");

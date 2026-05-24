@@ -46,11 +46,9 @@ mod integration {
     /// asserts the observer's terminal row carries the last 5.
     mod exit_observer_stderr_tail;
     mod idempotent_resubmit;
-    /// Step 01-01 of `fix-orphaned-node-health-writer` — RED
-    /// regression for the missing boot-time `node_health` write per
-    /// ADR-0025 § 3 step 5 (amended by ADR-0029). Fails today; step
-    /// 01-02 wires `overdrive_worker::start_local_node` into
-    /// `run_server_with_obs_and_driver` to GREEN it. See
+    /// Regression test for the boot-time `node_health` write per
+    /// ADR-0025 § 3 step 5 (amended by ADR-0029). `start_local_node`
+    /// in `run_server_with_obs_and_driver` writes the row. See
     /// `docs/feature/fix-orphaned-node-health-writer/deliver/rca.md`.
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;

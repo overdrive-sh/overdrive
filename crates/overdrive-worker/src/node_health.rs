@@ -224,9 +224,10 @@ mod tests {
     /// Reads `hostname::get()` in the test so the assertion is
     /// invariant under whatever the test environment's hostname is.
     /// If `hostname::get()` returns a value `NodeId::new` rejects
-    /// (e.g. a hostname with `.` characters on macOS dev hosts), the
-    /// test surfaces the IdResolve error verbatim — the production
-    /// code path's failure mode is the test's failure mode.
+    /// (e.g. a hostname containing `@` or `/`, or one that starts
+    /// with a non-alphanumeric character), the test surfaces the
+    /// IdResolve error verbatim — the production code path's failure
+    /// mode is the test's failure mode.
     #[tokio::test]
     async fn write_without_id_override_falls_back_to_hostname() {
         let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
