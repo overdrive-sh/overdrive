@@ -112,8 +112,9 @@ pub enum CliError {
     )]
     ProbeRefused {
         /// The `ProbeError` Display rendering. Carries the underlying
-        /// `io::Error` for `ProbeError::Substrate` or the wrote/read
-        /// bytes for `ProbeError::RoundTripMismatch`.
+        /// `io::Error` for `ProbeError::Substrate`, the wrote/read
+        /// bytes for `ProbeError::RoundTripMismatch`, or the corrupt
+        /// read bytes for `ProbeError::SubstrateCorrupt`.
         cause: String,
     },
 }

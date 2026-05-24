@@ -37,6 +37,9 @@ async fn b_probe_injected_substrate_error() {
         ProbeError::RoundTripMismatch { .. } => {
             panic!("expected ProbeError::Substrate, got RoundTripMismatch")
         }
+        ProbeError::SubstrateCorrupt { .. } => {
+            panic!("expected ProbeError::Substrate, got SubstrateCorrupt")
+        }
     }
 }
 
@@ -53,6 +56,9 @@ async fn b_probe_round_trip_mismatch() {
         }
         ProbeError::Substrate { .. } => {
             panic!("expected ProbeError::RoundTripMismatch, got Substrate")
+        }
+        ProbeError::SubstrateCorrupt { .. } => {
+            panic!("expected ProbeError::RoundTripMismatch, got SubstrateCorrupt")
         }
     }
 }

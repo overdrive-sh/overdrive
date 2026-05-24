@@ -224,6 +224,10 @@ pub trait CgroupFs: Send + Sync + 'static {
     ///   the failure mode Earned Trust specifically defends against
     ///   (Docker overlayfs `fsync` no-op, WSL2 DrvFs caching, tmpfs
     ///   eviction).
+    /// - [`ProbeError::SubstrateCorrupt`] — the substrate returned
+    ///   bytes that are not valid UTF-8. cgroupfs pseudo-files are
+    ///   kernel-generated text; non-UTF-8 indicates corruption,
+    ///   a non-cgroupfs mount, or something impersonating cgroupfs.
     async fn probe(&self) -> Result<(), ProbeError>;
 
     /// Adapter discriminator for diagnostic logging.
@@ -266,4 +270,10 @@ pub enum ProbeError {
     /// `fsync` no-op, WSL2 DrvFs caching, tmpfs eviction).
     #[error("CgroupFs probe round-trip mismatch: wrote {wrote:?}, read {read:?}")]
     RoundTripMismatch { wrote: Vec<u8>, read: Vec<u8> },
+
+    /// Read-back bytes are not valid UTF-8. cgroupfs pseudo-files are
+    /// kernel-generated text; non-UTF-8 indicates substrate corruption,
+    /// a non-cgroupfs mount, or something impersonating cgroupfs.
+    #[error("CgroupFs probe substrate corrupt: read bytes are not valid UTF-8 ({} bytes: {read:?})", read.len())]
+    SubstrateCorrupt { read: Vec<u8> },
 }

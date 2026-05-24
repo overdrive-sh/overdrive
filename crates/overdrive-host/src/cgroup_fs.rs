@@ -150,7 +150,7 @@ impl CgroupFs for RealCgroupFs {
         };
         if std::str::from_utf8(&read_back).is_err() {
             best_effort_remove_dir(&probe_dir).await;
-            return Err(ProbeError::RoundTripMismatch { wrote: vec![], read: read_back });
+            return Err(ProbeError::SubstrateCorrupt { read: read_back });
         }
 
         // (4) teardown — no `remove_file` step: the kernel forbids
