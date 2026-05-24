@@ -27,7 +27,7 @@ use async_trait::async_trait;
 use overdrive_control_plane::action_shim::dataplane_update_service::{self, DispatchOutcome};
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };

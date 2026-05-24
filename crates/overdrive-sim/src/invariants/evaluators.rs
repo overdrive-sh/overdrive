@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{NodeId, WorkloadId};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler, TickContext,
     WorkloadLifecycle,
 };
@@ -753,8 +753,8 @@ pub struct BrokerDrainOrderSnapshot {
     /// The ordered sequence of `(ReconcilerName, TargetResource)` keys
     /// the broker dispatched during a single drain pass.
     pub dispatched_order: Vec<(
-        overdrive_core::reconciler::ReconcilerName,
-        overdrive_core::reconciler::TargetResource,
+        overdrive_core::reconcilers::ReconcilerName,
+        overdrive_core::reconcilers::TargetResource,
     )>,
 }
 
@@ -828,8 +828,8 @@ pub struct DispatchRecord {
     /// permutation-invariant on the target axis (one entry per drained
     /// eval, per the §8 entry-collapse contract).
     pub dispatched: Vec<(
-        overdrive_core::reconciler::ReconcilerName,
-        overdrive_core::reconciler::TargetResource,
+        overdrive_core::reconcilers::ReconcilerName,
+        overdrive_core::reconcilers::TargetResource,
     )>,
 }
 
@@ -913,7 +913,7 @@ pub fn evaluate_dispatch_routing_is_name_restricted(
 
     // (d) Smoking-gun — any dispatched entry naming a reconciler NOT in
     //     the submitted set is a fan-out regression.
-    let submitted_names: std::collections::BTreeSet<&overdrive_core::reconciler::ReconcilerName> =
+    let submitted_names: std::collections::BTreeSet<&overdrive_core::reconcilers::ReconcilerName> =
         submitted.iter().map(|e| &e.reconciler).collect();
     for (r, t) in &record.dispatched {
         if !submitted_names.contains(r) {
@@ -1254,7 +1254,7 @@ pub fn ordering_verdict<V: PartialEq>(
 pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
     use overdrive_core::wall_clock::UnixInstant;
     use rand::{Rng, SeedableRng};
 
@@ -1438,7 +1438,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
 pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
 
     use crate::adapters::view_store::SimViewStore;
 
@@ -1631,7 +1631,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
 pub async fn evaluate_write_through_ordering() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
 
     use crate::adapters::view_store::SimViewStore;
 
@@ -1932,10 +1932,11 @@ mod tests {
     /// can demonstrate divergence at a non-trivial position; 01-05 keeps
     /// the fixture deliberately tiny so the failure-message assertion
     /// pins the position index, not incidental ordering.
-    fn drain_fixture()
-    -> Vec<(overdrive_core::reconciler::ReconcilerName, overdrive_core::reconciler::TargetResource)>
-    {
-        use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+    fn drain_fixture() -> Vec<(
+        overdrive_core::reconcilers::ReconcilerName,
+        overdrive_core::reconcilers::TargetResource,
+    )> {
+        use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
         let r = ReconcilerName::new("noop-heartbeat")
             .expect("noop-heartbeat is a valid ReconcilerName");
         let t_a =
@@ -1983,18 +1984,18 @@ mod tests {
     // `tests/invariant_evaluators.rs` (the regression-test proof).
     // -----------------------------------------------------------------
 
-    fn dispatch_jl_reconciler() -> overdrive_core::reconciler::ReconcilerName {
-        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    fn dispatch_jl_reconciler() -> overdrive_core::reconcilers::ReconcilerName {
+        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
             .expect("job-lifecycle is a valid ReconcilerName")
     }
 
-    fn dispatch_noop_reconciler() -> overdrive_core::reconciler::ReconcilerName {
-        overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+    fn dispatch_noop_reconciler() -> overdrive_core::reconcilers::ReconcilerName {
+        overdrive_core::reconcilers::ReconcilerName::new("noop-heartbeat")
             .expect("noop-heartbeat is a valid ReconcilerName")
     }
 
-    fn dispatch_target(raw: &str) -> overdrive_core::reconciler::TargetResource {
-        overdrive_core::reconciler::TargetResource::new(raw).expect("valid TargetResource")
+    fn dispatch_target(raw: &str) -> overdrive_core::reconcilers::TargetResource {
+        overdrive_core::reconcilers::TargetResource::new(raw).expect("valid TargetResource")
     }
 
     /// Branch (c, d) — happy path single eval.
@@ -2175,7 +2176,7 @@ mod tests {
 
     #[test]
     fn reconciler_is_pure_passes_for_deterministic_reconciler() {
-        use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+        use overdrive_core::reconcilers::{AnyReconciler, NoopHeartbeat};
 
         // The deterministic witness is the real `NoopHeartbeat` —
         // wrapping it in `AnyReconciler::NoopHeartbeat` exercises the
@@ -2458,7 +2459,7 @@ mod tests {
         // ones must produce Match. A mutation that flips the inner
         // PartialEq comparison surfaces here.
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconciler::WorkloadLifecycleView;
+        use overdrive_core::reconcilers::WorkloadLifecycleView;
 
         let mut a = WorkloadLifecycleView::default();
         a.restart_counts.insert(AllocationId::new("alloc-a").expect("valid"), 1);
@@ -2515,7 +2516,7 @@ mod tests {
         // the `==` on either guard would collapse one of these two
         // assertions.
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconciler::WorkloadLifecycleView;
+        use overdrive_core::reconcilers::WorkloadLifecycleView;
 
         let id = AllocationId::new("alloc-payments-0").expect("valid");
         let mut original = WorkloadLifecycleView::default();

@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
     WorkloadLifecycleView,
 };

@@ -17,7 +17,7 @@ use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::SpiffeId;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
-use overdrive_core::reconciler::{AnyReconciler, AnyState, ServiceMapHydrator, TargetResource};
+use overdrive_core::reconcilers::{AnyReconciler, AnyState, ServiceMapHydrator, TargetResource};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{

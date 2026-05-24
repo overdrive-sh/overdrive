@@ -25,7 +25,7 @@
 //! trait) is now covered by the typed `ReconcileFn<R>` alias in
 //! `tests/acceptance/reconciler_trait_surface.rs::enforce_pure_sync_signature`.
 
-use overdrive_core::reconciler::Reconciler;
+use overdrive_core::reconcilers::Reconciler;
 
 fn main() {
     // Coercing a concrete reconciler into `Box<dyn Reconciler<...>>`

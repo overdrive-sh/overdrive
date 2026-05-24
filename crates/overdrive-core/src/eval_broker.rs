@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::reconciler::{ReconcilerName, TargetResource};
+use crate::reconcilers::{ReconcilerName, TargetResource};
 
 /// Per-broker counter snapshot rendered by `cluster status` and the
 /// ADR-0017 storm-proofing invariant.

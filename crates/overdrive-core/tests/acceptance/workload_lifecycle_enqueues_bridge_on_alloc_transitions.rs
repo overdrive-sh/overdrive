@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, ContentHash, NodeId, Region, WorkloadId};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext, WorkloadLifecycle,
     WorkloadLifecycleState, WorkloadLifecycleView,
 };
@@ -114,8 +114,8 @@ fn fresh_tick() -> TickContext {
 fn assert_single_bridge_enqueue<'a>(
     actions: &'a [Action],
     workload_id: &WorkloadId,
-) -> (&'a overdrive_core::reconciler::ReconcilerName, &'a TargetResource) {
-    let mut found: Option<(&overdrive_core::reconciler::ReconcilerName, &TargetResource)> = None;
+) -> (&'a overdrive_core::reconcilers::ReconcilerName, &'a TargetResource) {
+    let mut found: Option<(&overdrive_core::reconcilers::ReconcilerName, &TargetResource)> = None;
     let mut count = 0;
     for action in actions {
         if let Action::EnqueueEvaluation { reconciler, target } = action {

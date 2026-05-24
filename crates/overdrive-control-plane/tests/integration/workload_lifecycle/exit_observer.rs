@@ -34,7 +34,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
@@ -168,7 +168,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut tick_n = 0_u64;
@@ -192,7 +192,7 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
 }
 
 async fn drive_ticks(h: &Harness, start: Instant, range: std::ops::Range<u64>) {
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     for tick_n in range {
@@ -253,7 +253,7 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
     // `LifecycleEvent { to: Failed }` after the obs write. The test
     // breaks as soon as that event arrives, BEFORE the next tick's
     // reconciler emits `RestartAllocation`.
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_failed_at: Option<String> = None;
@@ -359,7 +359,7 @@ async fn crashed_alloc_eventually_reaches_non_running() {
     // greater than prior_counter that resolves to Failed or fresh
     // Running is acceptable — what is forbidden is staying stuck at
     // the original Running row's counter.
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut left_running = false;
@@ -451,7 +451,7 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         );
 
         let workload_lifecycle_name =
-            overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+            overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
                 .expect("job-lifecycle reconciler name");
         let deadline = start + Duration::from_secs(120);
         let mut saw_failed = false;
@@ -523,7 +523,7 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_ev = None;

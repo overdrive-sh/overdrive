@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, ServiceDesired, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, TickContext,
 };
@@ -388,8 +388,8 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
 
     use overdrive_core::dataplane::backend_key::Proto;
     use overdrive_core::id::{AllocationId, WorkloadId};
-    use overdrive_core::reconciler::Reconciler;
-    use overdrive_core::reconciler::backend_discovery_bridge::{
+    use overdrive_core::reconcilers::Reconciler;
+    use overdrive_core::reconcilers::backend_discovery_bridge::{
         BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
         ProjectedListener,
     };
@@ -669,7 +669,7 @@ mod retry_budget_proptest {
 
     use overdrive_core::dataplane::fingerprint::fingerprint;
     use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
-    use overdrive_core::reconciler::{
+    use overdrive_core::reconcilers::{
         Action, Reconciler, RetryMemory, ServiceDesired, ServiceMapHydrator,
         ServiceMapHydratorState, ServiceMapHydratorView, TickContext, backoff_for_attempt,
     };

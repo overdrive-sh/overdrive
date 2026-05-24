@@ -22,7 +22,7 @@ use overdrive_core::aggregate::{
     AggregateError, IntentKey, Job, JobSpecInput, ServiceV1, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::id::WorkloadId;
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
 };
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};

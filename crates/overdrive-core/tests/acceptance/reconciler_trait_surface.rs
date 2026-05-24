@@ -24,7 +24,7 @@ use proptest::prelude::*;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
     TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
 };

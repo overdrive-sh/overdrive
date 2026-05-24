@@ -20,7 +20,7 @@
 //! [`super::ShimError::RegisterLocalBackend`] for the per-arm
 //! dispatch contract.
 
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::dataplane::{Dataplane, DataplaneError};
 use thiserror::Error;
 

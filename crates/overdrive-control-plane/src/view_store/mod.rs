@@ -49,7 +49,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 
 /// Result alias for `ViewStore` operations — keeps call sites short
 /// without forcing the long error type on every signature.

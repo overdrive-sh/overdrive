@@ -6,7 +6,7 @@
 //! fails with E0432 (unresolved import) — exactly the diagnostic shape
 //! the runtime's collapsed contract demands.
 
-use overdrive_core::reconciler::LibsqlHandle;
+use overdrive_core::reconcilers::LibsqlHandle;
 
 fn main() {
     let _: Option<LibsqlHandle> = None;

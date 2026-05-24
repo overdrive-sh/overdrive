@@ -1732,14 +1732,14 @@ mod tests {
     // Reconcile-body inspector tests (scenario 3.3)
     // -------------------------------------------------------------
 
-    /// Path to the real `overdrive-core` reconciler source — relative
-    /// to `xtask/Cargo.toml`'s manifest dir, which is `xtask/`.
-    fn real_core_reconciler_source_path() -> std::path::PathBuf {
+    /// Path to a reconciler source file inside `overdrive-core` —
+    /// relative to the workspace root.
+    fn reconciler_source_path(filename: &str) -> std::path::PathBuf {
         let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         crate_dir
             .parent()
             .expect("xtask crate lives directly under workspace root")
-            .join("crates/overdrive-core/src/reconciler.rs")
+            .join(format!("crates/overdrive-core/src/reconcilers/{filename}"))
     }
 
     #[test]
@@ -1823,15 +1823,15 @@ mod tests {
     }
 
     /// Scenario 3.3 — the real `WorkloadLifecycle::reconcile` body inside
-    /// `crates/overdrive-core/src/reconciler.rs` must contain no
-    /// banned construct.
+    /// `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`
+    /// must contain no banned construct.
     #[test]
     fn workload_lifecycle_reconcile_body_passes_dst_lint() {
-        let path = real_core_reconciler_source_path();
+        let path = reconciler_source_path("workload_lifecycle.rs");
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let violations = inspect_workload_lifecycle_reconcile_body(&source)
-            .expect("overdrive-core reconciler.rs must parse");
+            .expect("workload_lifecycle.rs must parse");
         assert!(
             violations.is_empty(),
             "WorkloadLifecycle::reconcile body must contain no banned construct \
@@ -1843,8 +1843,8 @@ mod tests {
     }
 
     /// S-2.2-30 — the real `ServiceMapHydrator::reconcile` body inside
-    /// `crates/overdrive-core/src/reconciler.rs` must contain no
-    /// banned construct per ADR-0035 §2 / ADR-0013 §2.
+    /// `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs`
+    /// must contain no banned construct per ADR-0035 §2 / ADR-0013 §2.
     ///
     /// This is the static-analysis counterpart to the runtime
     /// `ReconcilerIsPure` DST invariant: it gates at PR time that the
@@ -1852,11 +1852,11 @@ mod tests {
     /// `Instant::now`, no `SystemTime::now`, no direct DB handle.
     #[test]
     fn service_map_hydrator_reconcile_body_passes_dst_lint() {
-        let path = real_core_reconciler_source_path();
+        let path = reconciler_source_path("service_map_hydrator.rs");
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let violations = inspect_service_map_hydrator_reconcile_body(&source)
-            .expect("overdrive-core reconciler.rs must parse");
+            .expect("service_map_hydrator.rs must parse");
         assert!(
             violations.is_empty(),
             "ServiceMapHydrator::reconcile body must contain no banned construct \

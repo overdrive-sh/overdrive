@@ -106,7 +106,7 @@ use crate::AppState;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
 use crate::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::reconciler::{TargetResource, backoff_for_attempt};
+use overdrive_core::reconcilers::{TargetResource, backoff_for_attempt};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
@@ -1103,7 +1103,7 @@ mod tests {
     use overdrive_core::TransitionReason;
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-    use overdrive_core::reconciler::WorkloadLifecycleView;
+    use overdrive_core::reconcilers::WorkloadLifecycleView;
     use overdrive_core::traits::driver::DriverType;
     use overdrive_core::traits::observation_store::{
         AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -1167,8 +1167,9 @@ mod tests {
     ) -> ReconcilerRuntime {
         let mut runtime = make_runtime(tmp);
         runtime.register(crate::workload_lifecycle()).await.expect("register");
-        let target = overdrive_core::reconciler::TargetResource::new(&format!("job/{workload_id}"))
-            .expect("target");
+        let target =
+            overdrive_core::reconcilers::TargetResource::new(&format!("job/{workload_id}"))
+                .expect("target");
         let view = WorkloadLifecycleView {
             restart_counts: BTreeMap::from([(alloc_id.clone(), restart_count)]),
             ..Default::default()

@@ -32,10 +32,10 @@ use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
 use overdrive_core::id::{AllocationId, NodeId, ServiceId};
-use overdrive_core::reconciler::backend_discovery_bridge::{
+use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, RetryMemory, ServiceMapHydrator,
     ServiceMapHydratorView, TargetResource, WorkloadLifecycle, WorkloadLifecycleView,
 };

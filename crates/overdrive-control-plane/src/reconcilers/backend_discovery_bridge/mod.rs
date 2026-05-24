@@ -4,9 +4,9 @@
 //! Bridges Service intent + Running alloc observations onto the
 //! `service_backends` ObservationStore table. Per architecture.md
 //! § 4.1-4.2 the canonical reconciler types and trait impl live in
-//! `overdrive-core::reconciler::backend_discovery_bridge` alongside
+//! `overdrive-core::reconcilers::backend_discovery_bridge` alongside
 //! the `Reconciler` trait and its `WorkloadLifecycle` /
-//! `ServiceMapHydrator` peers — [`overdrive_core::reconciler::AnyReconciler`]
+//! `ServiceMapHydrator` peers — [`overdrive_core::reconcilers::AnyReconciler`]
 //! holds the concrete type in its `BackendDiscoveryBridge` variant,
 //! and `overdrive-core` cannot depend on `overdrive-control-plane`.
 //!
@@ -15,7 +15,7 @@
 //! backend_discovery_bridge/`) per architecture.md § 4.1. It
 //! re-exports the public surface for callers that previously
 //! imported from this path; the reconciler's actual implementation
-//! is in `overdrive_core::reconciler::backend_discovery_bridge`.
+//! is in `overdrive_core::reconcilers::backend_discovery_bridge`.
 //!
 //! Layout mirrors the sibling [`crate::reconcilers::service_map_hydrator`]
 //! shape:
@@ -28,7 +28,7 @@
 
 pub mod fingerprint;
 
-pub use overdrive_core::reconciler::backend_discovery_bridge::{
+pub use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
     ProjectedListener, RunningAllocSet, ServiceListenerSet,
 };

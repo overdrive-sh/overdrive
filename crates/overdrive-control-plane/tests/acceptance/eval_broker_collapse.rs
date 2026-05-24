@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::view_store::{ProbeError, ViewStore, ViewStoreExt};
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

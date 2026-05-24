@@ -9,7 +9,7 @@
 //! per the same rationale as
 //! [`super::register_local_backend::dispatch`].
 
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::dataplane::{Dataplane, DataplaneError};
 use thiserror::Error;
 

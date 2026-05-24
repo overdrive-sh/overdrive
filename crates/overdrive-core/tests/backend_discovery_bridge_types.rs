@@ -2,7 +2,7 @@
 //! of `backend-discovery-bridge-service-reachability`.
 //!
 //! Pins the State/View/Action surface introduced in this step. Tests
-//! enter through the public `overdrive_core::reconciler` driving surface
+//! enter through the public `overdrive_core::reconcilers` driving surface
 //! and assert observable construction + CBOR-roundtrip outcomes only —
 //! no internal structure is inspected.
 //!
@@ -30,10 +30,10 @@
 use std::net::Ipv4Addr;
 
 use overdrive_core::id::{CorrelationKey, NodeId, ServiceId};
-use overdrive_core::reconciler::backend_discovery_bridge::{
+use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconciler::{Action, AnyReconciler};
+use overdrive_core::reconcilers::{Action, AnyReconciler};
 use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 
 #[test]

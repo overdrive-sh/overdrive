@@ -46,7 +46,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::reconciler::{Action, Reconciler, ReconcilerName, TickContext};
+use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
 
 // ---------------------------------------------------------------------------
 // 1 + 2 + 3: minimal post-collapse impl pinning the new trait surface

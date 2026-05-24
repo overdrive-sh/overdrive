@@ -48,11 +48,11 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::reconciler::backend_discovery_bridge::{
+use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
     ProjectedListener,
 };
-use overdrive_core::reconciler::{Action, Reconciler, TickContext};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::wall_clock::UnixInstant;
 

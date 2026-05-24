@@ -33,7 +33,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use redb::{Database, Durability, ReadableTable, TableDefinition};
 
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 
 use super::{ProbeError, Result as VsResult, ViewStore, ViewStoreError};
 

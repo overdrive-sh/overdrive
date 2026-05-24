@@ -18,12 +18,12 @@ use std::num::NonZeroU16;
 
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::reconciler::Reconciler;
-use overdrive_core::reconciler::backend_discovery_bridge::{
+use overdrive_core::reconcilers::Reconciler;
+use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
     ProjectedListener,
 };
-use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::wall_clock::UnixInstant;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
@@ -155,7 +155,7 @@ fn bridge_dedup_branch_emits_zero_actions_including_no_enqueue() {
 /// action-shim dispatch wrapper, the DST evaluator).
 #[test]
 fn enqueue_evaluation_action_variant_is_publicly_constructible() {
-    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+    use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
     let reconciler = ReconcilerName::new("service-map-hydrator").expect("valid name");
     let target = TargetResource::new("service/1").expect("valid target");

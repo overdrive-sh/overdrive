@@ -59,7 +59,7 @@
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 
 /// Route the action would take through the dataplane port boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,7 +244,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 
     use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
-    use overdrive_core::reconciler::Action;
+    use overdrive_core::reconcilers::Action;
 
     use super::{ReconcilerOutputViolation, WriteRoute, validate_reconcile_output};
 

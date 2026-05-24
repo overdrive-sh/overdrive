@@ -1195,8 +1195,8 @@ fn spawn_convergence_loop(
 /// migration — `Box<dyn Reconciler>` is no longer object-safe under
 /// the trait's new `type View` + `async fn hydrate` shape.
 #[must_use]
-pub fn noop_heartbeat() -> overdrive_core::reconciler::AnyReconciler {
-    use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+pub fn noop_heartbeat() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, NoopHeartbeat};
 
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
@@ -1211,8 +1211,8 @@ pub fn noop_heartbeat() -> overdrive_core::reconciler::AnyReconciler {
 /// Per US-03 (Slice 3 of phase-1-first-workload), this is registered
 /// at boot alongside `noop-heartbeat`.
 #[must_use]
-pub fn workload_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
-    use overdrive_core::reconciler::{AnyReconciler, WorkloadLifecycle};
+pub fn workload_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, WorkloadLifecycle};
 
     AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
 }
@@ -1237,9 +1237,9 @@ pub fn workload_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
 pub fn backend_discovery_bridge(
     host_ipv4: std::net::Ipv4Addr,
     writer_node_id: overdrive_core::id::NodeId,
-) -> overdrive_core::reconciler::AnyReconciler {
-    use overdrive_core::reconciler::AnyReconciler;
-    use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
+) -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::AnyReconciler;
+    use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
 
     AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
 }
@@ -1260,8 +1260,8 @@ pub fn backend_discovery_bridge(
 #[must_use]
 pub fn service_map_hydrator(
     host_ipv4: std::net::Ipv4Addr,
-) -> overdrive_core::reconciler::AnyReconciler {
-    use overdrive_core::reconciler::{AnyReconciler, ServiceMapHydrator};
+) -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, ServiceMapHydrator};
 
     AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4))
 }

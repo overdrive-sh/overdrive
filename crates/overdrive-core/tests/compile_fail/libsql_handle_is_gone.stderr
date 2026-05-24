@@ -1,5 +1,5 @@
-error[E0432]: unresolved import `overdrive_core::reconciler::LibsqlHandle`
+error[E0432]: unresolved import `overdrive_core::reconcilers::LibsqlHandle`
  --> tests/compile_fail/libsql_handle_is_gone.rs:9:5
   |
-9 | use overdrive_core::reconciler::LibsqlHandle;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `LibsqlHandle` in `reconciler`
+9 | use overdrive_core::reconcilers::LibsqlHandle;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `LibsqlHandle` in `reconcilers`

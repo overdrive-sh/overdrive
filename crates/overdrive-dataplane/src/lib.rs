@@ -16,11 +16,6 @@
     reason = "Phase 2.2 RED scaffolds in maglev/* and swap.rs; lints self-trip when scaffolds go GREEN. Strip when Slice 08 closes the last scaffold."
 )]
 
-// Phase 2.2 module scaffolds per
-// `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
-// DWD-3 file-path inventory. Bodies panic via `todo!()` until
-// DELIVER fills them per the carpaccio slice plan.
-pub mod loader;
 pub mod maps;
 pub mod swap;
 

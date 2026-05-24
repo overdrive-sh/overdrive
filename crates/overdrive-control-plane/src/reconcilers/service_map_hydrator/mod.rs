@@ -47,12 +47,12 @@
 //! service_map_hydrator/`) per architecture.md § 9. It re-exports
 //! the public surface for callers that previously imported from
 //! this path; the reconciler's actual implementation is in
-//! `overdrive_core::reconciler`.
+//! `overdrive_core::reconcilers`.
 
 pub mod state;
 pub mod view;
 
-pub use overdrive_core::reconciler::ServiceMapHydrator;
+pub use overdrive_core::reconcilers::ServiceMapHydrator;
 pub use state::{ServiceDesired, ServiceHydrationStatus, ServiceMapHydratorState};
 pub use view::{RetryMemory, ServiceMapHydratorView};
 

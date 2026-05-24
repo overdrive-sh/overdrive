@@ -12,9 +12,9 @@
 //!
 //! [`ServiceBackendRow`]: overdrive_core::traits::observation_store::ServiceBackendRow
 //! [`BackendDiscoveryBridgeView`]:
-//!     overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView
+//!     overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView
 
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ObservationStoreError,
 };
@@ -72,7 +72,7 @@ mod tests {
     use std::sync::Arc;
 
     use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip};
-    use overdrive_core::reconciler::Action;
+    use overdrive_core::reconcilers::Action;
     use overdrive_core::traits::observation_store::{
         LogicalTimestamp, ObservationStore, ServiceBackendRow,
     };
