@@ -327,15 +327,6 @@ impl CgroupFs for SimCgroupFs {
         if let Some(kind) = self.take_pending_error(SimOp::Probe, &probe_root) {
             return Err(ProbeError::Substrate { source: io::Error::from(kind) });
         }
-        // Round-trip mismatch injection — set by
-        // [`SimCgroupFs::inject_round_trip_mismatch`]; consumed once.
-        let mismatch_injected = {
-            let mut flag = self.round_trip_mismatch.lock();
-            let cur = *flag;
-            *flag = false;
-            cur
-        };
-
         let probe_file = probe_root.join("probe-file");
         let payload = b"probe\n".to_vec();
 
@@ -353,6 +344,17 @@ impl CgroupFs for SimCgroupFs {
         let read_back = {
             let state = self.state.lock();
             state.get(&probe_file).map(|(_, bytes)| bytes.clone()).unwrap_or_default()
+        };
+
+        // Round-trip mismatch injection — set by
+        // [`SimCgroupFs::inject_round_trip_mismatch`]; consumed once,
+        // deferred to after the write step so an earlier create_dir /
+        // write failure does not silently discard the flag.
+        let mismatch_injected = {
+            let mut flag = self.round_trip_mismatch.lock();
+            let cur = *flag;
+            *flag = false;
+            cur
         };
 
         // (4) round-trip assertion. If injection flag set, corrupt the

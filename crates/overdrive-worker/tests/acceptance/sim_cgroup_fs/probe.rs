@@ -93,3 +93,28 @@ async fn b_probe_write_error_cleans_up_probe_root() {
 
     assert!(sim.snapshot().is_empty(), "probe root must be cleaned up after write-step failure");
 }
+
+#[tokio::test]
+async fn b_probe_create_dir_error_preserves_round_trip_mismatch_flag() {
+    let (sim, fs) = fresh();
+
+    // Inject both: a CreateDir failure AND a round-trip mismatch.
+    sim.inject_error(
+        SimOp::CreateDir,
+        PathBuf::from("/sim-probe-root"),
+        io::ErrorKind::PermissionDenied,
+    );
+    sim.inject_round_trip_mismatch();
+
+    // First probe: CreateDir fails → ProbeError::Substrate.
+    let err = fs.probe().await.expect_err("create_dir error fires");
+    assert!(matches!(err, ProbeError::Substrate { .. }), "expected Substrate, got {err:?}");
+
+    // Second probe: the mismatch flag must NOT have been consumed by
+    // the first call — it should fire now.
+    let err = fs.probe().await.expect_err("round-trip mismatch fires on retry");
+    assert!(
+        matches!(err, ProbeError::RoundTripMismatch { .. }),
+        "expected RoundTripMismatch, got {err:?}",
+    );
+}
