@@ -74,12 +74,12 @@ fn canonical_v2_payload() -> ServiceSpecLatest {
 /// commits. Per ADR-0048 § Version-bump procedure step 6: every
 /// future bump appends a new `FIXTURE_V<N>` constant; existing
 /// fixtures stay verbatim.
-const FIXTURE_V1: &str = "__PINNED_AT_GREEN__";
+const FIXTURE_V1: &str = "7376632d7072652d70726f6265732f7573722f62696e2f736572766572000000901f00000000000000000000000000008e000000d0ffffff010000008f000000d2ffffffdcffffff000000000000000064000000000000000000000800000000c0ffffff01000000000000000000000000000000000000000000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `ServiceSpecEnvelope::V2(canonical_v2_payload())`. Pinned on the
 /// GREEN landing of step 01-02.
-const FIXTURE_V2: &str = "__PINNED_AT_GREEN__";
+const FIXTURE_V2: &str = "7376632d776974682d70726f62652f7573722f62696e2f736572766572000000822300000000000000000000302e302e302e30ff8223000000000000000000000000000005000000020000001e00000000000000000000000000000000000000010000000000000001000000000000008e00000090ffffff010000008f00000092ffffff9cffffff00000000000000006400000000000000000000080000000080ffffff010000007cffffff01000000b4ffffff00000000acffffff00000000";
 
 /// V1 fixture decodes through the bumped envelope and projects to the
 /// canonical V2 `Latest` (with three empty probe vectors). This is the
@@ -90,17 +90,8 @@ fn service_spec_v1_decodes_through_current_envelope() {
     // V1 -> Latest: From<V1> for V2 fills the three probe Vecs with
     // empty. The expected Latest projection is the V1 payload re-cast
     // into V2 shape with no probes.
-    let v1 = canonical_v1_payload();
-    let expected: ServiceSpecLatest = v1.clone().into();
-
-    let envelope = ServiceSpecEnvelope::V1(v1);
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
-    let fixture_hex = if FIXTURE_V1 == "__PINNED_AT_GREEN__" {
-        hex::encode(bytes.as_ref())
-    } else {
-        FIXTURE_V1.to_string()
-    };
-    assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(&fixture_hex, &expected);
+    let expected: ServiceSpecLatest = canonical_v1_payload().into();
+    assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(FIXTURE_V1, &expected);
 }
 
 /// V2 fixture is a canonical Latest projection that round-trips
@@ -108,14 +99,7 @@ fn service_spec_v1_decodes_through_current_envelope() {
 #[test]
 fn service_spec_v2_decodes_through_current_envelope() {
     let expected = canonical_v2_payload();
-    let envelope = ServiceSpecEnvelope::latest(expected.clone());
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
-    let fixture_hex = if FIXTURE_V2 == "__PINNED_AT_GREEN__" {
-        hex::encode(bytes.as_ref())
-    } else {
-        FIXTURE_V2.to_string()
-    };
-    assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(&fixture_hex, &expected);
+    assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(FIXTURE_V2, &expected);
 }
 
 // ---------------------------------------------------------------------
