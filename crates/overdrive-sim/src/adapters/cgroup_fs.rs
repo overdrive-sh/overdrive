@@ -237,6 +237,9 @@ impl CgroupFs for SimCgroupFs {
             let mut acc = PathBuf::new();
             for component in path.components() {
                 acc.push(component);
+                if matches!(component, std::path::Component::RootDir) {
+                    continue;
+                }
                 let is_target = acc == path;
                 match state.get(&acc) {
                     Some((SimEntry::File, _)) => {
@@ -340,9 +343,11 @@ impl CgroupFs for SimCgroupFs {
         self.create_dir(&probe_root).await.map_err(|source| ProbeError::Substrate { source })?;
 
         // (2) write the canonical probe payload.
-        self.write(&probe_file, &payload)
-            .await
-            .map_err(|source| ProbeError::Substrate { source })?;
+        if let Err(source) = self.write(&probe_file, &payload).await {
+            // Best-effort teardown — mirrors RealCgroupFs::probe.
+            let _ = self.remove_dir(&probe_root).await;
+            return Err(ProbeError::Substrate { source });
+        }
 
         // (3) read-back via direct BTreeMap lookup.
         let read_back = {

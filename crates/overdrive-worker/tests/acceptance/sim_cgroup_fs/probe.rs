@@ -21,6 +21,17 @@ async fn b_probe_happy() {
 }
 
 #[tokio::test]
+async fn b_probe_leaves_state_empty() {
+    let (sim, fs) = fresh();
+    fs.probe().await.expect("probe succeeds");
+    let snapshot = sim.snapshot();
+    assert!(
+        snapshot.is_empty(),
+        "probe postcondition: all scratch artifacts removed, but state contains: {snapshot:?}"
+    );
+}
+
+#[tokio::test]
 async fn b_probe_injected_substrate_error() {
     let (sim, fs) = fresh();
     sim.inject_error(
@@ -61,4 +72,24 @@ async fn b_probe_round_trip_mismatch() {
             panic!("expected ProbeError::RoundTripMismatch, got SubstrateCorrupt")
         }
     }
+}
+
+#[tokio::test]
+async fn b_probe_write_error_cleans_up_probe_root() {
+    let (sim, fs) = fresh();
+    sim.inject_error(
+        SimOp::Write,
+        PathBuf::from("/sim-probe-root/probe-file"),
+        io::ErrorKind::PermissionDenied,
+    );
+
+    let err = fs.probe().await.expect_err("write-step error fires");
+    match err {
+        ProbeError::Substrate { source } => {
+            assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+        }
+        other => panic!("expected ProbeError::Substrate, got {other:?}"),
+    }
+
+    assert!(sim.snapshot().is_empty(), "probe root must be cleaned up after write-step failure");
 }
