@@ -58,38 +58,15 @@ fn canonical_v1_payload() -> ProbeResultRowLatest {
 /// Hex-encoded rkyv-archived bytes of
 /// `ProbeResultRowEnvelope::V1(canonical_v1_payload())`. Pinned on
 /// the GREEN landing of step 01-01 and NEVER touched on subsequent
-/// commits.
-const FIXTURE_V1: &str = "__PINNED_AT_GREEN__";
-
-// `alloc_status_row_v1_decodes_through_current_envelope` is the
-// pattern — but here we cannot pin the fixture hex until the
-// crafter has run the binary once to materialise the bytes. Until
-// the FIXTURE_V1 constant is real, the test below uses the
-// canonical roundtrip path: archive(canonical) → bytes → assert
-// hex matches FIXTURE_V1, then decode → equality. The bootstrap
-// helper at the bottom emits the canonical hex on demand.
+/// commits. Per ADR-0048 § Version-bump procedure step 6: every
+/// future bump appends a new `FIXTURE_V<N>` constant; existing
+/// fixtures stay verbatim.
+const FIXTURE_V1: &str = "616c6c6f632d70726f62652d3031000000000000000000008e000000e8ffffff0000000000000000000000000000000000000000000000000068e5cf8b0100000000000000000000";
 
 #[test]
 fn probe_result_row_v1_decodes_through_current_envelope() {
     let expected = canonical_v1_payload();
-    // Bootstrap path: until FIXTURE_V1 is pinned, the test is
-    // self-bootstrapping — archive the canonical payload, then run
-    // the harness against its own hex. This is mechanically
-    // equivalent to a pinned fixture and catches every drift the
-    // pinned fixture would, EXCEPT the case where the canonical
-    // archived layout itself drifts (the canonical fn would change
-    // alongside it). For the slice-01 landing this is acceptable
-    // because the schema is greenfield — there are no historical
-    // bytes to defend yet. The fixture pin transitions to a real
-    // hex literal in the next commit that touches this envelope.
-    let envelope = ProbeResultRowEnvelope::latest(expected.clone());
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
-    let fixture_hex = if FIXTURE_V1 == "__PINNED_AT_GREEN__" {
-        hex::encode(bytes.as_ref())
-    } else {
-        FIXTURE_V1.to_string()
-    };
-    assert_envelope_v_roundtrip::<ProbeResultRowEnvelope>(&fixture_hex, &expected);
+    assert_envelope_v_roundtrip::<ProbeResultRowEnvelope>(FIXTURE_V1, &expected);
 }
 
 /// Triangulation defense for the empirically-pinned
