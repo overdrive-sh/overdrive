@@ -17,9 +17,6 @@ use overdrive_core::traits::observation_store::{
     LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
 
-/// SCAFFOLD marker.
-pub const SCAFFOLD: bool = true;
-
 /// Write the local node's `NodeHealthRow` to the observation store.
 ///
 /// Idempotent — Phase 1 single-node always writes a row whose primary
