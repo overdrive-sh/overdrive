@@ -115,7 +115,8 @@ commit (`28956fc7`).
    if running_count >= replicas_desired.get() {
        let running = job_rows.iter()
            .filter(|r| r.state == AllocState::Running)
-           .max_by_key(|r| r.updated_at.counter)?;
+           .max_by_key(|r| r.updated_at.counter)
+           .unwrap_or_else(|| unreachable!("running_count >= 1 guarantees at least one Running row"));
        return Some(SubmitEvent::ConvergedRunning {
            alloc_id: running.alloc_id.to_string(),
            started_at: format!("{}@{}",
