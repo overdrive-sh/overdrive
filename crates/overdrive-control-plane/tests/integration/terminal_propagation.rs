@@ -59,8 +59,11 @@ async fn bootstrap_async(
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
-    let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
+    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
+        std::path::PathBuf::from("/sys/fs/cgroup"),
+        sim_clock.clone(),
+        Arc::new(overdrive_host::RealCgroupFs::new()),
+    ));
 
     // SimClock is passed at construction so the convergence-tick's
     // `tick.now_unix` snapshot advances with simulation time. The

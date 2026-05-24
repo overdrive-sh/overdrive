@@ -61,6 +61,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let driver = Arc::new(ExecDriver::new(
         std::path::PathBuf::from("/sys/fs/cgroup"),
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_host::RealCgroupFs::new()),
     ));
 
     // Cleanup guard — see workload_lifecycle/cleanup.rs.

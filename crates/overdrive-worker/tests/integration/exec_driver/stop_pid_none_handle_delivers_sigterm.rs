@@ -23,6 +23,7 @@ use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, Resources,
 };
+use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
@@ -40,8 +41,12 @@ async fn stop_with_pid_none_handle_still_delivers_sigterm() {
 
     let stop_grace = Duration::from_secs(5);
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()))
-            .with_stop_grace(stop_grace),
+        ExecDriver::new(
+            cgroup_root.to_path_buf(),
+            Arc::new(SimClock::new()),
+            Arc::new(RealCgroupFs::new()),
+        )
+        .with_stop_grace(stop_grace),
     );
 
     let alloc = AllocationId::new("alloc-pid-none").expect("valid alloc id");

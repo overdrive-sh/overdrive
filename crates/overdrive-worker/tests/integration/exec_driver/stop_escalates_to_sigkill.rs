@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
+use overdrive_host::RealCgroupFs;
 use overdrive_worker::ExecDriver;
 use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
 use serial_test::serial;
@@ -146,8 +147,12 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     // SIGKILL escalation path to fire. `SimClock` would park
     // indefinitely waiting for `tick()`. See `TokioWallClock` above.
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(TokioWallClock))
-            .with_stop_grace(Duration::from_millis(250)),
+        ExecDriver::new(
+            cgroup_root.to_path_buf(),
+            Arc::new(TokioWallClock),
+            Arc::new(RealCgroupFs::new()),
+        )
+        .with_stop_grace(Duration::from_millis(250)),
     );
 
     let alloc = AllocationId::new("alloc-stop-sigkill").expect("valid alloc id");

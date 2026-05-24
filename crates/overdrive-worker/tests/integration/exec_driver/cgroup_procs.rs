@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
+use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
@@ -30,8 +31,11 @@ async fn child_pid_appears_in_cgroup_procs() {
     create_workloads_slice_with_controllers(cgroup_root)
         .expect("workloads.slice bootstrap succeeds");
 
-    let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new())));
+    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
+        cgroup_root.to_path_buf(),
+        Arc::new(SimClock::new()),
+        Arc::new(RealCgroupFs::new()),
+    ));
 
     let alloc = AllocationId::new("alloc-cgroup-procs-test").expect("valid alloc id");
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());

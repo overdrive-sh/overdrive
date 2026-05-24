@@ -759,9 +759,16 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
         Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
 
     // Production default — `ExecDriver` rooted at `/sys/fs/cgroup`.
+    // The `fs: Arc<dyn CgroupFs>` parameter is mandatory per ADR-0054
+    // § D5; production wires `RealCgroupFs`. Step 01-06 of the
+    // cgroup-fs-port migration will move the `RealCgroupFs::probe()`
+    // call into a startup gate that runs BEFORE this construction;
+    // for now the adapter is instantiated inline at the same site
+    // as the `SystemClock` injection.
     let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
         std::path::PathBuf::from("/sys/fs/cgroup"),
         Arc::new(overdrive_host::SystemClock),
+        Arc::new(overdrive_host::RealCgroupFs::new()),
     ));
 
     run_server_with_obs_and_driver(config, obs, driver).await

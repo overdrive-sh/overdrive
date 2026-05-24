@@ -127,6 +127,7 @@ impl TestServer {
         let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
             std::path::PathBuf::from("/sys/fs/cgroup"),
             Arc::new(overdrive_host::SystemClock),
+            Arc::new(overdrive_host::RealCgroupFs::new()),
         ));
 
         let config = ServerConfig {

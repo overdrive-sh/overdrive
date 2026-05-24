@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
+use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
@@ -33,8 +34,12 @@ async fn limit_write_failure_warns_and_continues() {
         .expect("workloads.slice bootstrap succeeds");
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()))
-            .with_force_limit_write_failure(true),
+        ExecDriver::new(
+            cgroup_root.to_path_buf(),
+            Arc::new(SimClock::new()),
+            Arc::new(RealCgroupFs::new()),
+        )
+        .with_force_limit_write_failure(true),
     );
 
     let alloc = AllocationId::new("alloc-limit-write-fail").expect("valid alloc id");

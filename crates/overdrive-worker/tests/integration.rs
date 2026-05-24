@@ -21,6 +21,22 @@ mod integration {
         mod probe_with_custom_root;
     }
 
+    // Step 01-05 (cgroup-fs-port migration): E1 KEEP-TEMPFILE rows
+    // 8 + 10 relocated here per ADR-0054 § D5. These tempfile-backed
+    // tests against `RealCgroupFs` defend the substrate boundary —
+    // that `CgroupManager` correctly propagates a REAL `io::Error`
+    // from a REAL `tokio::fs::*` syscall against the REAL kernel VFS.
+    // ENOTDIR-via-regular-file-in-dir-slot is a contrivance to
+    // *trigger* the error; the test *boundary* is real. Candidates
+    // for retirement once Class C scenario
+    // `write_to_readonly_cgroup_file` lands (per
+    // `docs/feature/cgroup-fs-port/distill/test-scenarios.md` § E1
+    // rows 8 / 10 rationale).
+    mod cgroup_manager {
+        mod cgroup_kill_propagates_real_io_error;
+        mod remove_workload_scope_propagates_real_io_error;
+    }
+
     mod exec_driver {
         mod cgroup_procs;
         // Per-alloc RAII cleanup helper used by every real-cgroupfs test

@@ -108,7 +108,11 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
         .expect("workloads.slice bootstrap succeeds");
 
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), clock.clone()));
+    let driver = Arc::new(ExecDriver::new(
+        cgroup_root.to_path_buf(),
+        clock.clone(),
+        Arc::new(overdrive_host::RealCgroupFs::new()),
+    ));
     let driver_dyn: Arc<dyn Driver> = driver.clone();
 
     let node_id = NodeId::new("test-node").expect("valid node id");
