@@ -128,8 +128,10 @@ impl CgroupFs for RealCgroupFs {
         // (2) write — empty payload is a no-op controller-diff the
         // kernel parses and applies (no controller enabled, no
         // controller disabled). On a non-cgroupfs substrate
-        // (e.g. test routing to tempdir), the pseudo-file does not
-        // exist and this step surfaces the originating ENOENT.
+        // (e.g. test routing to tempdir), `tokio::fs::write` will
+        // CREATE the file (it is not kernel-synthesised), so the
+        // probe proceeds to step (3) and only fails at step (4)
+        // `remove_dir` with `DirectoryNotEmpty`.
         if let Err(source) = self.write(&subtree_control, b"").await {
             best_effort_remove_dir(&probe_dir).await;
             return Err(ProbeError::Substrate { source });
