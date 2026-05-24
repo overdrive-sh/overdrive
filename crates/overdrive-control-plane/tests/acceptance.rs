@@ -155,4 +155,9 @@ mod acceptance {
     //      was `// existing` wiring).
     mod bridge_emits_enqueue_evaluation_for_hydrator;
     mod service_map_hydrator_registered_at_boot;
+
+    // Regression: ADR-0028 ordering invariant — preflight must
+    // execute before the workloads-slice bootstrap in `run_server`.
+    // See `docs/feature/fix-preflight-ordering/bugfix-rca.md`.
+    mod preflight_before_workloads_bootstrap;
 }

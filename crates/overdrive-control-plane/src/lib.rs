@@ -772,13 +772,15 @@ pub async fn run_server(
 
     // Per ADR-0028 (as superseded in part by ADR-0034), run the cgroup
     // v2 delegation pre-flight at the start of the boot path — BEFORE
-    // any on-disk side effects (no CA mint, no IntentStore open, no
-    // listener bind). The pre-flight stays in `_with_obs_and_driver`
-    // so tests that compose directly into the inner entrypoint still
-    // run it; the WORKLOADS-slice bootstrap below moves UP to here
-    // because it routes through the `Arc<dyn CgroupFs>` the driver
-    // owns, and `fs` is only in scope at this composition boundary.
-    //
+    // any on-disk side effects. The preflight uses direct `std::fs`
+    // reads (no `CgroupFs` port dependency) and must execute before
+    // the workloads-slice bootstrap below, which creates directories
+    // and writes `cgroup.subtree_control` on real cgroupfs. Without
+    // this ordering, a misconfigured host sees
+    // `WorkloadsBootstrap(WriteFailed: PermissionDenied)` instead of
+    // the actionable `CgroupBootstrap(DelegationMissing)` message.
+    cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
+
     // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
     // § "Production fix #2": delegate `+cpu +memory +io +pids` to
     // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
@@ -826,12 +828,11 @@ pub async fn run_server_with_obs_and_driver(
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
-    // Per ADR-0028 (as superseded in part by ADR-0034), run the cgroup
-    // v2 delegation pre-flight at the start of the boot path — BEFORE
-    // any on-disk side effects (no CA mint, no IntentStore open, no
-    // listener bind). On failure, the server refuses to start and
-    // produces no on-disk artefacts.
-    cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
+    // ADR-0028 preflight now runs in `run_server` (the outer
+    // composition boundary) BEFORE the workloads-slice bootstrap.
+    // Tests that compose `run_server_with_obs_and_driver` directly
+    // are responsible for running the preflight themselves if they
+    // need it (typically they run on a properly configured Lima VM).
     cgroup_manager::create_and_enrol_control_plane_slice()
         .map_err(error::ControlPlaneError::from)?;
     // Step 01-07 (cgroup-fs-port migration): the workloads-slice
