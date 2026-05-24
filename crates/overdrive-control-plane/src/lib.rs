@@ -339,6 +339,20 @@ pub struct ServerConfig {
     /// controls time.
     pub clock: Arc<dyn Clock>,
 
+    /// `[node]` config block per ADR-0025 (amended by ADR-0029).
+    /// Carries the operator-supplied `id_override` (hostname fallback
+    /// when `None`), `region` (Phase 1 default `"local"`), and
+    /// declared `capacity`. Consumed by
+    /// [`overdrive_worker::start_local_node`] at boot to write the
+    /// local node's `NodeHealthRow` to the `ObservationStore` per
+    /// ADR-0025 step 5.
+    ///
+    /// `NodeConfig: Default` ships sensible Phase 1 defaults so
+    /// existing `..Default::default()` rest-pattern construction in
+    /// test fixtures continues to work without touching every
+    /// fixture's TOML.
+    pub node: overdrive_worker::NodeConfig,
+
     /// Address-pool definition for [`PersistentServiceVipAllocator`]
     /// per ADR-0049 (amended 2026-05-15 — default-with-override
     /// posture). When the operator-supplied TOML carries
@@ -459,6 +473,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("operator_config_dir", &self.operator_config_dir)
             .field("tick_cadence", &self.tick_cadence)
             .field("clock", &"<dyn Clock>")
+            .field("node", &self.node)
             .field("vip_range", &"<VipRange>")
             .field("dataplane", &self.dataplane)
             .field("dataplane_pin_dir", &self.dataplane_pin_dir)
@@ -497,6 +512,7 @@ impl Default for ServerConfig {
             operator_config_dir: PathBuf::new(),
             tick_cadence: DEFAULT_TICK_CADENCE,
             clock: Arc::new(overdrive_host::SystemClock),
+            node: overdrive_worker::NodeConfig::default(),
             vip_range: VipRange::default(),
             // Per step 02-01: `Default` populates the loopback
             // `[dataplane]` shape so existing test fixtures using
@@ -795,6 +811,20 @@ pub async fn run_server_with_obs_and_driver(
         std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
     )
     .map_err(error::ControlPlaneError::from)?;
+
+    // Per ADR-0025 step 5 (amended by ADR-0029): the worker subsystem
+    // writes the local node's `NodeHealthRow` to the ObservationStore
+    // BEFORE the listener binds. A failure here refuses the boot per
+    // the ADR-0025 §3 step 5 contract — operators see the typed
+    // `ControlPlaneError::NodeHealthWrite` variant at the CLI layer
+    // rather than a silently-orphaned writer leaving `GET /v1/nodes`
+    // empty. Per `.claude/rules/development.md` § "Never flatten a
+    // typed error to `Internal(String)` at a composition boundary"
+    // the conversion is `#[from]` — never
+    // `ControlPlaneError::internal("context", e)`.
+    overdrive_worker::start_local_node(&obs, &config.node, &config.clock)
+        .await
+        .map_err(error::ControlPlaneError::from)?;
 
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls

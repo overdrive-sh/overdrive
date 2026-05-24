@@ -32,6 +32,7 @@ integration-tests = []
 [dependencies]
 overdrive-core.workspace = true
 async-trait.workspace    = true
+hostname.workspace       = true
 parking_lot.workspace    = true
 rkyv.workspace           = true
 serde.workspace          = true

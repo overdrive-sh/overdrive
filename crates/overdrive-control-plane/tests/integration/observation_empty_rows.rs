@@ -127,11 +127,18 @@ fn canary_node_health_row() -> NodeHealthRow {
 }
 
 // -----------------------------------------------------------------------
-// AC (b): empty store → 200 with explicit `{"rows": []}` for /v1/nodes
+// AC (b): fresh-boot store → 200 with EXACTLY ONE boot-time node_health
+// row per ADR-0025 § 3 step 5 (writer wired by step 01-02 of
+// `fix-orphaned-node-health-writer`). Prior to that wiring the boot
+// produced an empty `node_health` table and this test asserted
+// `body.rows.is_empty()`; that assertion was a contract on the
+// orphaned-writer bug, not on real behaviour. The structural invariant
+// now: a healthy single-node Phase 1 boot ALWAYS surfaces the local
+// node's row.
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn get_v1_nodes_returns_empty_rows_array_on_fresh_store() {
+async fn get_v1_nodes_returns_boot_time_node_health_row_on_fresh_store() {
     let (handle, bound, _tmp, ca_pem, _obs) = spawn_server_with_obs_handle().await;
     let client = client_trusting(&ca_pem);
 
@@ -140,7 +147,13 @@ async fn get_v1_nodes_returns_empty_rows_array_on_fresh_store() {
 
     assert_eq!(resp.status(), reqwest::StatusCode::OK, "fresh-store GET must be HTTP 200");
     let body: NodeList = resp.json().await.expect("decode NodeList");
-    assert!(body.rows.is_empty(), "fresh store must yield zero rows; got {}", body.rows.len());
+    assert_eq!(
+        body.rows.len(),
+        1,
+        "ADR-0025 step 5: healthy single-node boot must surface exactly one \
+         node_health row (the boot-time writer's output); got {} rows",
+        body.rows.len(),
+    );
 
     handle.shutdown(Duration::from_secs(2)).await;
 }
@@ -166,21 +179,38 @@ async fn get_v1_nodes_returns_injected_canary_node_health_row() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     let body: NodeList = resp.json().await.expect("decode NodeList");
+    // Two rows: the boot-time writer's row (per ADR-0025 step 5) plus
+    // the canary injected by this test. The handler must surface BOTH
+    // — a hardcoded short-circuit return would surface neither.
     assert_eq!(
         body.rows.len(),
-        1,
-        "handler must surface the canary node_health row; got {} rows",
+        2,
+        "handler must surface the boot-time row PLUS the canary node_health \
+         row; got {} rows",
         body.rows.len(),
+    );
+    assert!(
+        body.rows.iter().any(|r| r.node_id == "canary-node-03-03"),
+        "handler must include the injected canary node_health row in the \
+         response; got rows: {:?}",
+        body.rows,
     );
 
     handle.shutdown(Duration::from_secs(2)).await;
 }
 
 // -----------------------------------------------------------------------
-// AC (e): Honest-empty-state (K7) — `/v1/nodes` response JSON must
-// contain the explicit `"rows":[]` field, not an omitted-rows body. A
-// handler that returns `{}` would pass the deserialise-to-default path
-// silently; CLI rendering depends on the field being present.
+// AC (e): Honest-rows-field (K7-adjacent) — `/v1/nodes` response JSON
+// must contain the explicit `"rows"` field, not an omitted-rows body.
+// A handler that returns `{}` would pass the deserialise-to-default
+// path silently; CLI rendering depends on the field being present.
+//
+// Post-`fix-orphaned-node-health-writer` (step 01-02 of that feature):
+// boot now writes one row per ADR-0025 step 5, so the body shape is
+// `{"rows":[{...}]}` rather than `{"rows":[]}`. The `[]` substring
+// assertion that originally lived here was a contract on the
+// orphaned-writer bug; it's been replaced with the array-shape
+// assertion that holds against any non-empty `rows` payload.
 //
 // `/v1/allocs` honest-empty-state coverage moved to
 // `acceptance::alloc_status_snapshot::s_as_09_*` — the post-cleanup
@@ -189,7 +219,7 @@ async fn get_v1_nodes_returns_injected_canary_node_health_row() {
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn response_body_nodes_field_rows_is_explicit_empty_array_not_omitted() {
+async fn response_body_nodes_field_rows_is_explicit_array_not_omitted() {
     let (handle, bound, _tmp, ca_pem, _obs) = spawn_server_with_obs_handle().await;
     let client = client_trusting(&ca_pem);
 
@@ -206,9 +236,13 @@ async fn response_body_nodes_field_rows_is_explicit_empty_array_not_omitted() {
         nodes_raw.contains("\"rows\""),
         "nodes response must carry explicit `rows` field; got {nodes_raw:?}",
     );
+    // The boot-time writer (per ADR-0025 step 5) produces one row, so
+    // the serialised body must include an opening `[` for the rows
+    // array. The shape `"rows":[…]` is the structural assertion that
+    // a `{}` deserialise-to-default body would fail.
     assert!(
-        nodes_raw.contains("[]"),
-        "nodes response must serialise empty array `[]`; got {nodes_raw:?}",
+        nodes_raw.contains("\"rows\":["),
+        "nodes response must serialise `rows` as a JSON array; got {nodes_raw:?}",
     );
 
     handle.shutdown(Duration::from_secs(2)).await;
