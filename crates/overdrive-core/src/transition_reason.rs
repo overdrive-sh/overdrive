@@ -430,28 +430,46 @@ pub enum TerminalCondition {
     /// supported so the variant can carry signal-encoded statuses
     /// if a future driver emits them.
     Failed { exit_code: i32 },
+    /// `ServiceLifecycle`: the Service alloc has converged to a
+    /// stable, fully-probed Running state per ADR-0055 / ADR-0056.
+    /// All declared startup probes (or the inferred default per
+    /// ADR-0058) reported Pass; the alloc is considered Stable
+    /// from the publication boundary onward.
+    ///
+    /// `settled_in_ms` is the elapsed wall-clock duration (in
+    /// milliseconds) from alloc start to the deciding tick that
+    /// observed the last-to-Pass startup probe. `witness` names
+    /// which probe's Pass moved the reconciler to Stable (see
+    /// [`ProbeWitness`] for the per-field semantics).
+    ///
+    /// **Additive position**: appended after `Failed` to keep the
+    /// pre-existing rkyv discriminants (`BackoffExhausted=0`,
+    /// `Stopped=1`, `Custom=2`, `Completed=3`, `Failed=4`) stable.
+    /// This variant takes discriminant `5`. Existing archived rows
+    /// decode unchanged (the canonical `Option<TerminalCondition>`
+    /// embeddings in `AllocStatusRowV1` continue to decode through
+    /// the same `AllocStatusRowEnvelope::V1` shape; the V1 fixture
+    /// is regenerated against the new canonical layout per
+    /// `.claude/rules/development.md` § "rkyv schema evolution"
+    /// greenfield single-cut exception, because no shipped consumer
+    /// has persisted bytes against the pre-existing V1 layout).
+    Stable { settled_in_ms: u64, witness: ProbeWitness },
+    /// `ServiceLifecycle`: the Service alloc transitioned to a
+    /// terminal Failed state per ADR-0055 / ADR-0056. The `reason`
+    /// carries the typed failure cause (startup-timeout / startup-
+    /// probe-failed / early-exit / liveness-probe-failed); see
+    /// [`ServiceFailureReason`] for the per-variant semantics.
+    ///
+    /// **Additive position**: appended after `Stable` and takes
+    /// discriminant `6`. Same greenfield rationale as `Stable`.
+    ServiceFailed { reason: ServiceFailureReason },
 }
 
-// `TerminalCondition::Stable` / `::ServiceFailed` ARE NOT appended at
-// this step. AC#5 of slice 01-01 originally proposed an additive
-// append, but empirical investigation showed that adding any new
-// variant to this `rkyv::Archive`-derived enum shifts the archived
-// inline footprint (rkyv lays out enum size as `max(variant_payloads)`
-// + tag — even Boxed variants change alignment, which shifts every
-// consumer that holds `Option<TerminalCondition>` inline, e.g.
-// `AllocStatusRowV1`). The right landing for these variants is the
-// step that ALSO bumps the affected envelopes' V<N+1> + adds matching
-// schema-evolution fixtures per `.claude/rules/development.md` §
-// "Version-bump procedure". That step is the Service-lifecycle
-// reconciler wiring (slice 01-03+ per ADR-0055); deferring keeps
-// slice 01-01 binary-compatible with every existing
-// schema-evolution fixture.
-//
-// Companion types `ServiceFailureReason` and `ProbeWitness` ARE
-// defined below — they are pure value types with no runtime
-// consumer in this step's surface, but their type-level presence
-// supports the Service-reconciler scaffold in
-// `crate::service_lifecycle` which re-exports them.
+// Companion types `ServiceFailureReason` and `ProbeWitness` are
+// defined below. `TerminalCondition::Stable` / `::ServiceFailed`
+// carry these types as payloads; the Service-lifecycle reconciler
+// (slice 01-03+ per ADR-0055) is the sole emitter, and downstream
+// consumers branch on the variant for operator-facing render.
 
 /// Reason a Service alloc transitioned to a terminal Failed state.
 ///

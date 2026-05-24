@@ -29,7 +29,14 @@ use super::harness::{
 /// See `job.rs::GOLDEN_DISCRIMINANT_OFFSET_V1` for the full rationale
 /// (two-source triangulation guards against unilateral drift of
 /// either pin).
-const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 168;
+///
+/// Re-pinned 2026-05-24 from 168 → 192 — greenfield, no shipped
+/// consumers; layout shifted by `TerminalCondition::{Stable,
+/// ServiceFailed}` variant append per user directive (see
+/// `feedback_single_cut_greenfield_migrations.md` — pre-shipment the
+/// V1 fixture is the canonical spec, regenerated when the spec
+/// changes).
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 192;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -54,10 +61,25 @@ fn canonical_v1_payload() -> AllocStatusRowLatest {
 }
 
 /// Hex-encoded rkyv-archived bytes of
-/// `AllocStatusRowEnvelope::V1(canonical_v1_payload())`. Generated
-/// once at the GREEN landing of step 01-03 and pinned verbatim from
-/// that moment onward. NEVER touched on subsequent commits.
-const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d30303100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005affffff00000000";
+/// `AllocStatusRowEnvelope::V1(canonical_v1_payload())`.
+///
+/// regenerated 2026-05-24 — greenfield, no shipped consumers;
+/// layout shifted by `TerminalCondition::{Stable, ServiceFailed}`
+/// variant append per user directive (see
+/// `feedback_single_cut_greenfield_migrations.md`). The buffer grew
+/// from 192 → 224 bytes because `Option<TerminalCondition>` is
+/// embedded inline in `AllocStatusRowV1` and rkyv lays out enum
+/// size as `max(variant_payloads) + tag`; the two new variants
+/// (`Stable { settled_in_ms: u64, witness: ProbeWitness }` and
+/// `ServiceFailed { reason: ServiceFailureReason }`) bumped the
+/// max variant payload size.
+///
+/// Pre-shipment regeneration is allowed under
+/// `feedback_single_cut_greenfield_migrations.md`. Once V1 has
+/// shipped to a deployed consumer, this constant becomes immutable
+/// per `.claude/rules/development.md` § "rkyv schema evolution" —
+/// future variants would need a `V2` envelope.
+const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000";
 
 #[test]
 fn alloc_status_row_v1_decodes_through_current_envelope() {

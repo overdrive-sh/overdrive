@@ -485,6 +485,24 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 /// cannot be written into an [`ObservationStore`]. Phase 2+ extensions
 /// add variants here as new row shapes are introduced (compiled policy
 /// verdicts, revoked operator certs, ...).
+// `large_enum_variant`: the `AllocStatus` variant carries
+// `AllocStatusRow` which is ~304 bytes since the 2026-05-24 append of
+// `TerminalCondition::{Stable, ServiceFailed}` per ADR-0055 / ADR-0056
+// (the inline `Option<TerminalCondition>` footprint grew because
+// `Stable { settled_in_ms: u64, witness: ProbeWitness }` is now the
+// max-payload variant). Boxing `AllocStatus(Box<AllocStatusRow>)`
+// would be the structurally-correct fix but would touch ~28 call
+// sites across control-plane / worker / store-local / sim / core
+// testing — out of scope for the slice 01-01 follow-up that
+// introduced the variants. Tracked as in-scope follow-up work; the
+// allow is the locally-scoped containment, not the design choice.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "AllocStatusRow grew past 200B threshold with the 2026-05-24 \
+              TerminalCondition::{Stable,ServiceFailed} variant append; \
+              boxing the variant requires touching ~28 call sites across \
+              workspace crates and is the next refactor follow-up"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObservationRow {
     AllocStatus(AllocStatusRow),
@@ -591,25 +609,39 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// measured from the END of the archive bytes.
     ///
     /// Empirically determined against canonical V1 payloads of
-    /// varying `listeners: Vec<ListenerRow>` sizes: rkyv 0.8 places
-    /// the outer enum's discriminant byte 168 bytes from the END of
-    /// the archive, stable across all payload sizes (the trailing
-    /// "root" structure has a fixed footprint; only the leading slab
-    /// grows with variable-length data).
+    /// varying `listeners: Vec<ListenerRow>` / `detail` / `stderr_tail`
+    /// / `terminal` shapes: rkyv 0.8 places the outer enum's
+    /// discriminant byte 192 bytes from the END of the archive,
+    /// stable across all payload sizes (the trailing "root"
+    /// structure has a fixed footprint; only the leading slab grows
+    /// with variable-length data).
+    ///
+    /// **Repinned 2026-05-24** (greenfield, no shipped consumers; per
+    /// the `feedback_single_cut_greenfield_migrations` rule): the
+    /// previously-pinned offset of 168 reflected the canonical V1
+    /// layout before `TerminalCondition::Stable` and `::ServiceFailed`
+    /// were appended. Appending those two variants grew the inline
+    /// footprint of `Option<TerminalCondition>` (which `AllocStatusRowV1`
+    /// embeds inline), which extended the trailing root structure by
+    /// 24 bytes. The new offset of 192 was empirically located by
+    /// flipping each stable-zero byte in canonical archives to 0xFE
+    /// and observing which one caused rkyv to reject the archive with
+    /// `invalid discriminant '254' for enum
+    /// 'ArchivedAllocStatusRowEnvelope'`.
     ///
     /// Re-pin alongside the schema-evolution fixture at every
     /// version-bump per
     /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
     /// docstring.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(168)
+        Some(192)
     }
 
     fn known_discriminants() -> &'static [u8] {
         // V1 carries rkyv discriminant 0 (declaration order — first
         // variant). Empirically verified by archiving a canonical
         // `AllocStatusRowEnvelope::latest(...)` and inspecting the
-        // byte at `bytes.len() - 168`.
+        // byte at `bytes.len() - 192`.
         &[0]
     }
 

@@ -18,7 +18,9 @@ use std::str::FromStr;
 
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_core::transition_reason::{
+    ProbeWitness, ServiceFailureReason, StoppedBy, TerminalCondition,
+};
 use proptest::prelude::*;
 use rkyv::rancor;
 
@@ -44,12 +46,64 @@ fn arb_custom_detail() -> impl Strategy<Value = Option<Vec<u8>>> {
     prop_oneof![Just(None), prop::collection::vec(any::<u8>(), 0..=64).prop_map(Some),]
 }
 
+/// Operator-facing role name strategy for [`ProbeWitness`] —
+/// constrained to the three first-party roles per ADR-0058.
+fn arb_probe_role() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just(String::from("startup")),
+        Just(String::from("readiness")),
+        Just(String::from("liveness")),
+    ]
+}
+
+/// Operator-facing mechanic summary strategy for [`ProbeWitness`] —
+/// ASCII printable, bounded length, mirrors the renderer's expected
+/// shape (`tcp 0.0.0.0:8080`, `http GET ...`, `exec /bin/check.sh`).
+fn arb_mechanic_summary() -> impl Strategy<Value = String> {
+    "[a-z]{3,5} [A-Za-z0-9 /:.,_-]{0,32}"
+}
+
+fn arb_probe_witness() -> impl Strategy<Value = ProbeWitness> {
+    (any::<u32>(), arb_probe_role(), arb_mechanic_summary(), any::<bool>()).prop_map(
+        |(probe_idx, role, mechanic_summary, inferred)| ProbeWitness {
+            probe_idx,
+            role,
+            mechanic_summary,
+            inferred,
+        },
+    )
+}
+
+fn arb_service_failure_reason() -> impl Strategy<Value = ServiceFailureReason> {
+    prop_oneof![
+        (any::<u32>(), any::<u32>()).prop_map(|(probe_idx, attempts)| {
+            ServiceFailureReason::StartupTimeout { probe_idx, attempts }
+        }),
+        (any::<u32>(), "[A-Za-z0-9 ]{0,32}", any::<u32>()).prop_map(
+            |(probe_idx, last_fail, attempts)| {
+                ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts }
+            }
+        ),
+        any::<i32>().prop_map(|exit_code| ServiceFailureReason::EarlyExit { exit_code }),
+        (any::<u32>(), any::<u32>()).prop_map(|(probe_idx, attempts)| {
+            ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts }
+        }),
+    ]
+}
+
 fn arb_terminal_condition() -> impl Strategy<Value = TerminalCondition> {
     prop_oneof![
         any::<u32>().prop_map(|attempts| TerminalCondition::BackoffExhausted { attempts }),
         arb_stopped_by().prop_map(|by| TerminalCondition::Stopped { by }),
         (arb_custom_type_name(), arb_custom_detail())
             .prop_map(|(type_name, detail)| TerminalCondition::Custom { type_name, detail }),
+        // ServiceLifecycle variants landed 2026-05-24 (slice 01-01
+        // follow-up to AC#5). Both round-trip via the same row-level
+        // rkyv codec as the pre-existing variants.
+        (any::<u64>(), arb_probe_witness()).prop_map(|(settled_in_ms, witness)| {
+            TerminalCondition::Stable { settled_in_ms, witness }
+        }),
+        arb_service_failure_reason().prop_map(|reason| TerminalCondition::ServiceFailed { reason }),
     ]
 }
 
