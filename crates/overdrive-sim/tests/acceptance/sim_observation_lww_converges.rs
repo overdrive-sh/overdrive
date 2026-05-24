@@ -114,52 +114,52 @@ async fn witness_three_peer_cluster_converges_on_overlapping_writes() {
 
     // alloc-1: peer-A at T1, peer-B at T2 (T2 wins)
     peer_a
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-1"),
             &node("node-a"),
             1,
             AllocState::Running,
-        )))
+        ))))
         .await
         .expect("write alloc-1 T1");
     peer_b
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-1"),
             &node("node-b"),
             2,
             AllocState::Draining,
-        )))
+        ))))
         .await
         .expect("write alloc-1 T2");
 
     // alloc-2: peer-C only
     peer_c
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-2"),
             &node("node-c"),
             1,
             AllocState::Running,
-        )))
+        ))))
         .await
         .expect("write alloc-2 T1");
 
     // alloc-3: tiebreak — same counter, two writers. "node-c" > "node-a" lex.
     peer_a
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-3"),
             &node("node-a"),
             7,
             AllocState::Running,
-        )))
+        ))))
         .await
         .expect("write alloc-3 tiebreak-a");
     peer_c
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-3"),
             &node("node-c"),
             7,
             AllocState::Draining,
-        )))
+        ))))
         .await
         .expect("write alloc-3 tiebreak-c");
 
@@ -228,21 +228,21 @@ async fn partitioned_cluster_with_competing_rows_is_not_converged() {
     // Both peers write conflicting rows for the same alloc_id. Because
     // they are partitioned, neither row reaches the other peer.
     peer_a
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-split"),
             &node("peer-a"),
             1,
             AllocState::Running,
-        )))
+        ))))
         .await
         .expect("write on peer-a");
     peer_b
-        .write(ObservationRow::AllocStatus(row(
+        .write(ObservationRow::AllocStatus(Box::new(row(
             &alloc("alloc-split"),
             &node("peer-b"),
             1,
             AllocState::Draining,
-        )))
+        ))))
         .await
         .expect("write on peer-b");
 
@@ -343,7 +343,7 @@ async fn run_scenario(scenario: &ConcurrentWriteScenario) -> ConvergenceReport {
         let alloc_id = &allocs[w.alloc_idx];
         let writer = &peers[w.writer_idx];
         let state = if w.draining { AllocState::Draining } else { AllocState::Running };
-        peer.write(ObservationRow::AllocStatus(row(alloc_id, writer, w.counter, state)))
+        peer.write(ObservationRow::AllocStatus(Box::new(row(alloc_id, writer, w.counter, state))))
             .await
             .expect("scenario write must succeed");
     }

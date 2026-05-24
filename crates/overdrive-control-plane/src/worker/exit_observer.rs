@@ -517,7 +517,7 @@ async fn handle_exit_event(
         kind: prior.kind,
         listeners: Vec::new(),
     };
-    obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+    obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
     Ok(Some((row, prior_state)))
 }
 

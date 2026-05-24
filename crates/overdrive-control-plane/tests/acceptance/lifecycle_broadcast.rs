@@ -455,7 +455,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
+    obs.write(ObservationRow::AllocStatus(Box::new(prior_row))).await.expect("seed prior row");
 
     // Dispatch a Stop action — should write Terminated row AND emit broadcast.
     // ADR-0037 §4: emission sites outside a reconciler tick (here, a

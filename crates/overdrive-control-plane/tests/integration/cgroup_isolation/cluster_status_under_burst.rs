@@ -108,7 +108,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
+    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
 
     // Give the workload a moment to actually saturate the cores; the
     // shell needs to fork its `nproc`-many busy loops and the kernel

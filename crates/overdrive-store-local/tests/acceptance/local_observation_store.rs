@@ -77,7 +77,7 @@ async fn write_then_read_alloc_status_within_lifetime() {
         .expect("open observation store");
 
     let row = alloc_row("alloc-1", AllocState::Running, 1);
-    store.write(ObservationRow::AllocStatus(row.clone())).await.expect("write row");
+    store.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await.expect("write row");
 
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     assert_eq!(rows, vec![row], "single write must appear on read");
@@ -110,8 +110,14 @@ async fn restart_round_trip_alloc_status() {
 
     {
         let store = LocalObservationStore::open(&path).expect("open (lifetime 1)");
-        store.write(ObservationRow::AllocStatus(row_a.clone())).await.expect("write row_a");
-        store.write(ObservationRow::AllocStatus(row_b.clone())).await.expect("write row_b");
+        store
+            .write(ObservationRow::AllocStatus(Box::new(row_a.clone())))
+            .await
+            .expect("write row_a");
+        store
+            .write(ObservationRow::AllocStatus(Box::new(row_b.clone())))
+            .await
+            .expect("write row_b");
         drop(store);
     }
 
@@ -157,7 +163,7 @@ async fn subscribe_all_delivers_subsequent_writes() {
     let mut sub = store.subscribe_all().await.expect("subscribe");
 
     let row = alloc_row("alloc-1", AllocState::Running, 1);
-    let written = ObservationRow::AllocStatus(row.clone());
+    let written = ObservationRow::AllocStatus(Box::new(row.clone()));
     store.write(written.clone()).await.expect("write after subscribe");
 
     let delivered = timeout(Duration::from_secs(2), sub.next())
@@ -175,7 +181,10 @@ async fn subscriber_opened_after_write_does_not_see_historical_row() {
 
     // Write happens BEFORE the subscription — future-only contract.
     let historical = alloc_row("alloc-historical", AllocState::Terminated, 1);
-    store.write(ObservationRow::AllocStatus(historical.clone())).await.expect("historical write");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(historical.clone())))
+        .await
+        .expect("historical write");
 
     let mut sub = store.subscribe_all().await.expect("subscribe AFTER write");
 
@@ -198,8 +207,11 @@ async fn overwrite_same_key_replaces_first_row() {
     let initial = alloc_row("alloc-1", AllocState::Pending, 1);
     let updated = alloc_row("alloc-1", AllocState::Running, 2);
 
-    store.write(ObservationRow::AllocStatus(initial)).await.expect("write initial");
-    store.write(ObservationRow::AllocStatus(updated.clone())).await.expect("write updated");
+    store.write(ObservationRow::AllocStatus(Box::new(initial))).await.expect("write initial");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(updated.clone())))
+        .await
+        .expect("write updated");
 
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     assert_eq!(rows.len(), 1, "same-key writes collapse to one row");
@@ -234,7 +246,10 @@ async fn out_of_order_alloc_status_does_not_regress() {
 
     // Newer (counter=5, Running) is written first.
     let newer = alloc_row("alloc-1", AllocState::Running, 5);
-    store.write(ObservationRow::AllocStatus(newer.clone())).await.expect("write newer row");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(newer.clone())))
+        .await
+        .expect("write newer row");
 
     // Subscribe BEFORE the older write — if the older row is emitted,
     // the subscription will deliver it within the bounded poll window.
@@ -244,7 +259,7 @@ async fn out_of_order_alloc_status_does_not_regress() {
     // delivery. The state field differs so a regression to the older
     // row is observable.
     let older = alloc_row("alloc-1", AllocState::Pending, 2);
-    store.write(ObservationRow::AllocStatus(older)).await.expect("write older row");
+    store.write(ObservationRow::AllocStatus(Box::new(older))).await.expect("write older row");
 
     // Contract: losers do not emit. The subscription must time out
     // because the older write was rejected by LWW.

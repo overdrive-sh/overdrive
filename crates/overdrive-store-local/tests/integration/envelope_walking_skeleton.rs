@@ -102,7 +102,7 @@ async fn operator_restart_observes_yesterday_alloc_status_without_subtree_overru
 
     let store = LocalObservationStore::open(&redb_path).expect("open #1");
     store
-        .write(ObservationRow::AllocStatus(row.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
         .await
         .expect("write yesterday alloc-status");
     drop(store);

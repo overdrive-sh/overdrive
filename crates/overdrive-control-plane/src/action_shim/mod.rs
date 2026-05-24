@@ -515,7 +515,7 @@ async fn dispatch_single(
                 prior_stderr_tail,
                 prior_row.kind,
             );
-            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -598,7 +598,7 @@ async fn dispatch_single(
             // driver's `release_for_exit_emission` is idempotent for
             // unknown allocs anyway; the explicit None-check here makes
             // the AC contract structurally readable at the call site.
-            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             if state == AllocState::Running {
                 if let Some(handle) = &handle_opt {
                     driver.release_for_exit_emission(handle);
@@ -691,7 +691,7 @@ async fn dispatch_single(
             // None) does NOT fire — restart-rejected reuses the prior
             // alloc id, but the new watcher was never spawned, so no
             // gate is awaited.
-            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // mutants::skip — Running gate exercised by exit_observer_running_gate integration test; dispatch_single requires full Driver+ObservationStore wiring
             if state == AllocState::Running {
                 if let Some(handle) = &handle_opt {
@@ -754,7 +754,7 @@ async fn dispatch_single(
                 None,
                 prior_row.kind,
             );
-            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }

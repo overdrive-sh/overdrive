@@ -136,7 +136,7 @@ async fn write_row(
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
+    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +351,7 @@ async fn write_terminal_row(
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
+    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
 
 /// A row whose `terminal` is `BackoffExhausted { attempts: N }` must cause

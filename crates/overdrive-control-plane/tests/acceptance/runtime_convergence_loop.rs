@@ -124,7 +124,11 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .await
+        .expect("seed Running alloc row");
 
     // --- Submit ONE evaluation. The convergence-tick loop in
     //     `lib.rs::run_server_with_obs_and_driver` drains the broker per
@@ -291,7 +295,11 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .await
+        .expect("seed Running alloc row");
 
     // --- Submit ONE evaluation naming `job-lifecycle` only.
     let target = TargetResource::new("job/payments").expect("valid target");
@@ -1043,7 +1051,11 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .await
+        .expect("seed Failed alloc row");
 
     // Seed cached view with the supplied restart_counts and
     // last_failure_seen_at = now_unix (zero — the backoff window has

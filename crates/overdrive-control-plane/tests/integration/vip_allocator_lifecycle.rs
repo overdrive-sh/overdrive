@@ -568,7 +568,9 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
     };
     state
         .obs
-        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(terminal_row))
+        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(Box::new(
+            terminal_row,
+        )))
         .await
         .expect("write terminal observation row");
 

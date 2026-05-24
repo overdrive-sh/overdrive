@@ -485,27 +485,27 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 /// cannot be written into an [`ObservationStore`]. Phase 2+ extensions
 /// add variants here as new row shapes are introduced (compiled policy
 /// verdicts, revoked operator certs, ...).
-// `large_enum_variant`: the `AllocStatus` variant carries
-// `AllocStatusRow` which is ~304 bytes since the 2026-05-24 append of
-// `TerminalCondition::{Stable, ServiceFailed}` per ADR-0055 / ADR-0056
-// (the inline `Option<TerminalCondition>` footprint grew because
-// `Stable { settled_in_ms: u64, witness: ProbeWitness }` is now the
-// max-payload variant). Boxing `AllocStatus(Box<AllocStatusRow>)`
-// would be the structurally-correct fix but would touch ~28 call
-// sites across control-plane / worker / store-local / sim / core
-// testing — out of scope for the slice 01-01 follow-up that
-// introduced the variants. Tracked as in-scope follow-up work; the
-// allow is the locally-scoped containment, not the design choice.
-#[expect(
-    clippy::large_enum_variant,
-    reason = "AllocStatusRow grew past 200B threshold with the 2026-05-24 \
-              TerminalCondition::{Stable,ServiceFailed} variant append; \
-              boxing the variant requires touching ~28 call sites across \
-              workspace crates and is the next refactor follow-up"
-)]
+///
+/// # Why `AllocStatus` carries `Box<AllocStatusRow>`
+///
+/// [`AllocStatusRow`] grew past the `large_enum_variant` clippy
+/// threshold (~304 bytes) when `TerminalCondition::{Stable,
+/// ServiceFailed}` were appended on 2026-05-24 per ADR-0055 /
+/// ADR-0056 — the inline `Option<TerminalCondition>` footprint is
+/// dominated by `Stable { settled_in_ms: u64, witness: ProbeWitness }`.
+/// Leaving the variant unboxed would 6× the memory cost of every
+/// other variant in the enum (`NodeHealth`, `ServiceHydration`,
+/// `ServiceBackend`) because the enum's discriminant + slot is sized
+/// to its largest variant.
+///
+/// The `Box` is a private implementation detail — public callers
+/// continue to construct `ObservationRow::AllocStatus(Box::new(row))`
+/// and destructuring readers see `&AllocStatusRow` via auto-deref.
+/// `ObservationStore::write` still takes `ObservationRow` by value;
+/// the boxing happens at construction sites only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObservationRow {
-    AllocStatus(AllocStatusRow),
+    AllocStatus(Box<AllocStatusRow>),
     NodeHealth(NodeHealthRow),
     /// `service_hydration_results` row — written by the action shim
     /// on `Action::DataplaneUpdateService` dispatch per

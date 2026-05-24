@@ -67,7 +67,7 @@ async fn alloc_status_rows_on_fresh_store_is_empty() {
 async fn alloc_status_rows_returns_written_row_exactly() {
     let store = SimObservationStore::single_peer(peer(), STEP_SEED);
     let row = alloc_row("alloc-r1", AllocState::Running, 1);
-    store.write(ObservationRow::AllocStatus(row.clone())).await.expect("write");
+    store.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await.expect("write");
 
     let rows = store.alloc_status_rows().await.expect("alloc_status_rows");
 
@@ -91,9 +91,9 @@ async fn alloc_status_rows_surfaces_each_distinct_alloc_id() {
     let r1 = alloc_row("alloc-1", AllocState::Pending, 1);
     let r2 = alloc_row("alloc-2", AllocState::Running, 2);
     let r3 = alloc_row("alloc-3", AllocState::Terminated, 3);
-    store.write(ObservationRow::AllocStatus(r1.clone())).await.expect("write r1");
-    store.write(ObservationRow::AllocStatus(r2.clone())).await.expect("write r2");
-    store.write(ObservationRow::AllocStatus(r3.clone())).await.expect("write r3");
+    store.write(ObservationRow::AllocStatus(Box::new(r1.clone()))).await.expect("write r1");
+    store.write(ObservationRow::AllocStatus(Box::new(r2.clone()))).await.expect("write r2");
+    store.write(ObservationRow::AllocStatus(Box::new(r3.clone()))).await.expect("write r3");
 
     let rows = store.alloc_status_rows().await.expect("alloc_status_rows");
     assert_eq!(
@@ -169,7 +169,7 @@ async fn node_health_rows_surfaces_each_distinct_node_id() {
 async fn alloc_and_node_rows_do_not_cross_project() {
     let store = SimObservationStore::single_peer(peer(), STEP_SEED);
     store
-        .write(ObservationRow::AllocStatus(alloc_row("alloc-r1", AllocState::Running, 1)))
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row("alloc-r1", AllocState::Running, 1))))
         .await
         .expect("write alloc");
     store

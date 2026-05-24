@@ -98,7 +98,7 @@ async fn seed_running_row(
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    obs.write(ObservationRow::AllocStatus(row)).await.expect("seed Running row");
+    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
 }
 
 #[tokio::test]

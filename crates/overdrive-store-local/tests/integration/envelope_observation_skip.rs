@@ -102,7 +102,7 @@ async fn malformed_alloc_status_row_is_logged_and_skipped_but_valid_row_surfaces
     let k1_row = make_alloc_row("alloc-01");
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::AllocStatus(k1_row.clone())).await.expect("write K1");
+        store.write(ObservationRow::AllocStatus(Box::new(k1_row.clone()))).await.expect("write K1");
     } // store dropped; redb lock released
 
     // K2: 16 bytes of 0xFF — does not decode through the envelope.
@@ -151,7 +151,7 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
     let k1_row = make_alloc_row("alloc-01");
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::AllocStatus(k1_row.clone())).await.expect("write K1");
+        store.write(ObservationRow::AllocStatus(Box::new(k1_row.clone()))).await.expect("write K1");
     }
 
     // K2: malformed.
@@ -176,7 +176,10 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
     // path — overwrites the garbage bytes.
     let mut k2_row = k1_row.clone();
     k2_row.alloc_id = k2_alloc.clone();
-    store.write(ObservationRow::AllocStatus(k2_row.clone())).await.expect("re-write K2 valid");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(k2_row.clone())))
+        .await
+        .expect("re-write K2 valid");
 
     // Second read: 2 rows, no additional decode event.
     let rows2 = store.alloc_status_rows().await.expect("read #2");

@@ -110,7 +110,9 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior alloc row");
+    obs.write(ObservationRow::AllocStatus(Box::new(prior_row)))
+        .await
+        .expect("seed prior alloc row");
 
     // Construct the RestartAllocation action with a fully-populated
     // spec carrying operator-declared command + args.

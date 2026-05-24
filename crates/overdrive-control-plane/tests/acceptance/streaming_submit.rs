@@ -206,7 +206,7 @@ async fn write_row(
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
     };
-    obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
+    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
 
 /// Fire a `LifecycleEvent` through the broadcast channel.
@@ -1083,7 +1083,7 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
         kind: overdrive_core::aggregate::WorkloadKind::Job,
         listeners: Vec::new(),
     };
-    state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
+    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 
     let router = build_router(state.clone());
 
@@ -1578,7 +1578,11 @@ async fn lagged_recover_terminal_scan_covers_all_rows_not_just_lww_winner() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: vec![],
     };
-    state.obs.write(ObservationRow::AllocStatus(terminal_row)).await.expect("obs write A");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(terminal_row)))
+        .await
+        .expect("obs write A");
 
     // Allocation B: non-terminal Pending at counter=6 (LWW winner).
     let pending_row = AllocStatusRow {
@@ -1594,7 +1598,7 @@ async fn lagged_recover_terminal_scan_covers_all_rows_not_just_lww_winner() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: vec![],
     };
-    state.obs.write(ObservationRow::AllocStatus(pending_row)).await.expect("obs write B");
+    state.obs.write(ObservationRow::AllocStatus(Box::new(pending_row))).await.expect("obs write B");
 
     let router = build_router(state.clone());
 

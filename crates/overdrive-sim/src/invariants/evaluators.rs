@@ -525,7 +525,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 listeners: Vec::new(),
             };
             let peer = cluster.peer(writer);
-            if let Err(err) = peer.write(ObservationRow::AllocStatus(row)).await {
+            if let Err(err) = peer.write(ObservationRow::AllocStatus(Box::new(row))).await {
                 return result(
                     name,
                     InvariantStatus::Fail,

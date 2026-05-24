@@ -164,7 +164,7 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
 
     let peer_a = cluster.peer(&node("node-a"));
     peer_a
-        .write(ObservationRow::AllocStatus(AllocStatusRow {
+        .write(ObservationRow::AllocStatus(Box::new(AllocStatusRow {
             alloc_id: AllocationId::from_str("alloc-1").expect("alloc id"),
             workload_id: WorkloadId::from_str("payments").expect("job id"),
             node_id: node("node-a"),
@@ -176,7 +176,7 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
             stderr_tail: None,
             kind: overdrive_core::aggregate::WorkloadKind::Service,
             listeners: Vec::new(),
-        }))
+        })))
         .await
         .expect("write");
 

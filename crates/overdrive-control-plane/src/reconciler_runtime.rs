@@ -1885,7 +1885,11 @@ mod tests {
                 kind: WorkloadKind::Service,
                 listeners: vec![],
             };
-            state.obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
+            state
+                .obs
+                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .await
+                .expect("write alloc row");
         }
 
         // -------------------------------------------------------------
