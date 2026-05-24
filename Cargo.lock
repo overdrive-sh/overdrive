@@ -1977,6 +1977,7 @@ name = "overdrive-worker"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "hostname",
  "libc",
  "nix",
  "overdrive-core",

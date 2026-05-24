@@ -379,6 +379,18 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     WorkloadsBootstrap(#[from] overdrive_worker::cgroup_manager::WorkloadsBootstrapError),
 
+    /// Boot-time `node_health` row write failure
+    /// (`overdrive_worker::start_local_node`). Pass-through embedding
+    /// so the composition root can `matches!(e,
+    /// ControlPlaneError::NodeHealthWrite(_))` for structured boot
+    /// diagnostics without `Display`-grepping. Same boot-path shape
+    /// as `WorkloadsBootstrap` above: happens BEFORE the listener
+    /// binds, so the `to_response` arm is exhaustiveness-only.
+    /// Per `.claude/rules/development.md` § "Never flatten a typed
+    /// error to `Internal(String)` at a composition boundary".
+    #[error(transparent)]
+    NodeHealthWrite(#[from] overdrive_worker::NodeHealthWriteError),
+
     /// `ViewStore` boot-time failure per ADR-0035 §5 (Earned Trust).
     /// Pass-through embedding so `overdrive-cli::commands::serve` can
     /// `matches!(e, ControlPlaneError::ViewStoreBoot(_))` to emit the
@@ -515,6 +527,15 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
         ControlPlaneError::WorkloadsBootstrap(e) => (
             // Same shape as `CgroupBootstrap` above: workloads-slice
             // bootstrap failures happen BEFORE the listener binds.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::NodeHealthWrite(e) => (
+            // Same shape as `WorkloadsBootstrap` above: boot-time
+            // node_health writes happen BEFORE the listener binds, so
+            // this arm is exhaustiveness-only. The composition root
+            // branches on `matches!(e, NodeHealthWrite(_))` for
+            // structured boot diagnostics.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

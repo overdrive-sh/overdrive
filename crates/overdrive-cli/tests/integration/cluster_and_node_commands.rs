@@ -94,11 +94,21 @@ async fn cluster_status_against_in_process_server_returns_typed_output_with_reco
 }
 
 // -------------------------------------------------------------------
-// (b) node::list returns empty rows and phase-1-first-workload message
+// (b) node::list returns the boot-time row and carries the
+//     phase-1-first-workload empty-state message
 // -------------------------------------------------------------------
+//
+// Post-`fix-orphaned-node-health-writer` (step 01-02 of that
+// feature): boot writes one `node_health` row per ADR-0025 step 5, so
+// `node::list` on a healthy single-node boot returns a single-element
+// `rows` vec — NOT the zero-row shape that pre-dated the wiring fix.
+// `empty_state_message` is unconditionally set by the handler today;
+// the CLI renderer decides whether to display it based on `rows`
+// emptiness. The assertion shape here pins both: the data is correct
+// AND the message-field plumbing is still wired.
 
 #[tokio::test]
-async fn node_list_against_in_process_server_returns_empty_rows_with_phase_1_first_workload_message()
+async fn node_list_against_in_process_server_returns_boot_time_row_with_phase_1_first_workload_message()
  {
     let (handle, tmp) = spawn_server().await;
     let cfg = config_path(tmp.path());
@@ -107,10 +117,17 @@ async fn node_list_against_in_process_server_returns_empty_rows_with_phase_1_fir
     let output: NodeListOutput =
         overdrive_cli::commands::node::list(args).await.expect("node::list");
 
-    assert!(output.rows.is_empty(), "fresh store must report zero node rows");
+    assert_eq!(
+        output.rows.len(),
+        1,
+        "ADR-0025 step 5: healthy single-node boot must report exactly \
+         one node row; got {} rows",
+        output.rows.len(),
+    );
     assert!(
         output.empty_state_message.contains("phase-1-first-workload"),
-        "empty-state message must reference `phase-1-first-workload`; got: {}",
+        "empty-state message field must reference `phase-1-first-workload` \
+         (renderer chooses whether to display based on rows emptiness); got: {}",
         output.empty_state_message,
     );
 

@@ -93,13 +93,21 @@ async fn from_config_loads_trust_triple_and_builds_client() {
     // wrong CA (TLS handshake would fail).
     //
     // Uses `node_list` as the proof-of-life endpoint: `/v1/nodes` is
-    // the real observation-read handler wired in step 03-03 and
-    // renders `{"rows":[]}` on a fresh store. The `/v1/cluster/info`
-    // route is still stubbed until step 03-05 wires the real handler,
-    // so we cannot decode it as `ClusterStatus` from this test.
+    // the real observation-read handler wired in step 03-03. Per
+    // ADR-0025 step 5 (wired by step 01-02 of
+    // `fix-orphaned-node-health-writer`), a healthy single-node boot
+    // surfaces exactly one row. The `/v1/cluster/info` route is still
+    // stubbed until step 03-05 wires the real handler, so we cannot
+    // decode it as `ClusterStatus` from this test.
     let live = build_client_for(&config_path);
     let nodes = live.node_list().await.expect("live node_list");
-    assert!(nodes.rows.is_empty(), "fresh store must report zero node rows");
+    assert_eq!(
+        nodes.rows.len(),
+        1,
+        "ADR-0025 step 5: healthy single-node boot must report exactly \
+         one node row; got {} rows",
+        nodes.rows.len(),
+    );
 
     handle.shutdown(Duration::from_secs(2)).await;
 }
@@ -109,8 +117,10 @@ async fn from_config_loads_trust_triple_and_builds_client() {
 // -------------------------------------------------------------------
 //
 // Pins the `/v1/nodes` observation-read endpoint that IS wired to the
-// real handler as of step 03-03. `/v1/nodes` returns `{"rows":[]}` on
-// a fresh store and decodes deterministically into `NodeList`.
+// real handler as of step 03-03. Per ADR-0025 step 5 (wired by
+// `fix-orphaned-node-health-writer` step 01-02), a healthy single-
+// node boot surfaces exactly one row; the response decodes
+// deterministically into `NodeList`.
 //
 // `/v1/allocs` was previously exercised via the bare `alloc_status()`
 // method; the bare-GET shape is gone (S-AS-09 / single-cut greenfield).
@@ -123,7 +133,13 @@ async fn node_list_against_in_process_server_returns_ok() {
     let client = build_client_for(&config_path);
 
     let nodes = client.node_list().await.expect("node_list");
-    assert!(nodes.rows.is_empty(), "fresh store must report zero node rows");
+    assert_eq!(
+        nodes.rows.len(),
+        1,
+        "ADR-0025 step 5: healthy single-node boot must report exactly \
+         one node row; got {} rows",
+        nodes.rows.len(),
+    );
 
     handle.shutdown(Duration::from_secs(2)).await;
 }

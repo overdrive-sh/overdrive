@@ -238,15 +238,22 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     // a query against an unknown job returns HTTP 404 with
     // `body.error == "not_found"`. That shape proves both the route is
     // mounted AND the handler is the real one (a stub returning 200
-    // would not produce 404). `/v1/nodes` keeps the bare `{"rows":[]}`
-    // shape (no query, no envelope reshape).
+    // would not produce 404). Per ADR-0025 step 5 (wired by step
+    // 01-02 of `fix-orphaned-node-health-writer`), a healthy single-
+    // node boot writes ONE `node_health` row, so the GET surfaces a
+    // single-element rows array — NOT the legacy `{"rows":[]}` shape.
+    // The structural assertion is "the `rows` field is present and is
+    // a non-empty JSON array"; the per-row content is pinned by
+    // `tests/integration/observation_empty_rows.rs::
+    //  get_v1_nodes_returns_boot_time_node_health_row_on_fresh_store`.
     let nodes_url = format!("https://localhost:{}/v1/nodes", bound.port());
     let nodes_resp = client.get(&nodes_url).send().await.expect("GET /v1/nodes");
     assert_eq!(nodes_resp.status(), reqwest::StatusCode::OK, "GET /v1/nodes expected 200");
     let nodes_body = nodes_resp.text().await.expect("body");
-    assert_eq!(
-        nodes_body, r#"{"rows":[]}"#,
-        "fresh-store observation read at /v1/nodes must surface canonical empty envelope"
+    assert!(
+        nodes_body.starts_with(r#"{"rows":[{"#),
+        "GET /v1/nodes must surface the boot-time node_health row inside \
+         a non-empty `rows` array; got {nodes_body:?}",
     );
 
     let allocs_url = format!("https://localhost:{}/v1/allocs?job=ghost-v0", bound.port());
