@@ -46,6 +46,13 @@ mod integration {
     /// asserts the observer's terminal row carries the last 5.
     mod exit_observer_stderr_tail;
     mod idempotent_resubmit;
+    /// Step 01-01 of `fix-orphaned-node-health-writer` — RED
+    /// regression for the missing boot-time `node_health` write per
+    /// ADR-0025 § 3 step 5 (amended by ADR-0029). Fails today; step
+    /// 01-02 wires `overdrive_worker::start_local_node` into
+    /// `run_server_with_obs_and_driver` to GREEN it. See
+    /// `docs/feature/fix-orphaned-node-health-writer/deliver/rca.md`.
+    mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
     /// `reconciler-memory-redb`). Probe-failure refusal + bulk-load at
