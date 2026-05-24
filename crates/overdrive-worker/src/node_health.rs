@@ -267,4 +267,50 @@ mod tests {
             "node_id must match the hostname-fallback value",
         );
     }
+
+    /// Test 3 — `start_local_node` wrapper passthrough.
+    /// Kills the mutation `start_local_node body -> Ok(())`. The
+    /// wrapper IS a single-line passthrough today (per ADR-0029 it
+    /// exists as the worker-startup contract boundary, not because it
+    /// adds logic), so the structural defence is: invoking the wrapper
+    /// MUST observably write a row to the obs store. A mutation that
+    /// replaces the body with `Ok(())` returns success without writing
+    /// — this assertion catches that exact shape.
+    ///
+    /// Lives in this module rather than `lib.rs` so it's adjacent to
+    /// the writer it wraps; the test does NOT duplicate the override /
+    /// hostname-path coverage above (those exercise the inner
+    /// `write_node_health_row` directly).
+    #[tokio::test]
+    async fn start_local_node_wrapper_observably_writes_row() {
+        let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+            NodeId::new("test-writer").expect("valid writer"),
+            0,
+        ));
+        let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+
+        let config = NodeConfig {
+            id_override: Some("wrapper-test-node".to_owned()),
+            region: "local".to_owned(),
+            capacity: overdrive_core::traits::driver::Resources { cpu_milli: 0, memory_bytes: 0 },
+        };
+
+        crate::start_local_node(&obs, &config, &clock)
+            .await
+            .expect("start_local_node must succeed against SimObservationStore");
+
+        let rows = obs.node_health_rows().await.expect("read rows");
+        assert_eq!(
+            rows.len(),
+            1,
+            "start_local_node must observably write exactly one row; \
+             got {} rows (mutation `body -> Ok(())` produces 0)",
+            rows.len(),
+        );
+        assert_eq!(
+            rows[0].node_id,
+            NodeId::new("wrapper-test-node").expect("valid id"),
+            "wrapper must route the config through to the writer",
+        );
+    }
 }
