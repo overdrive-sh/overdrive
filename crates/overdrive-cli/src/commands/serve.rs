@@ -166,11 +166,7 @@ async fn run_inner(
     // Production callers never set the variable; the binary honours
     // it without --help advertisement (same convention as
     // `$OVERDRIVE_CONFIG_DIR`).
-    let probe_adapter = match std::env::var(PROBE_ROOT_ENV_VAR) {
-        Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
-        _ => RealCgroupFs::new(),
-    };
-    let fs: Arc<dyn CgroupFs> = Arc::new(probe_adapter);
+    let fs: Arc<dyn CgroupFs> = Arc::new(build_probe_adapter());
     if let Err(probe_err) = fs.probe().await {
         let cause = probe_err.to_string();
         tracing::error!(
@@ -242,6 +238,17 @@ async fn run_inner(
     })?;
 
     Ok(ServeHandle { inner, endpoint })
+}
+
+/// Construct the production [`RealCgroupFs`] for the Earned-Trust
+/// probe, honouring the test-only [`PROBE_ROOT_ENV_VAR`] override.
+/// Production callers leave the env var unset and the probe runs
+/// against `/sys/fs/cgroup`.
+fn build_probe_adapter() -> RealCgroupFs {
+    match std::env::var(PROBE_ROOT_ENV_VAR) {
+        Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
+        _ => RealCgroupFs::new(),
+    }
 }
 
 /// Condense a `ControlPlaneError::Internal(...)` rendering into an

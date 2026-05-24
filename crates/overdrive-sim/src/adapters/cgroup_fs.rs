@@ -178,6 +178,24 @@ impl SimCgroupFs {
         self.state.lock().clone()
     }
 
+    /// Walk strict ancestors of `path` and return `Err(NotADirectory)`
+    /// if any ancestor exists as a [`SimEntry::File`]. Mirrors kernel
+    /// POSIX semantics: a non-directory component used as a directory
+    /// raises `ENOTDIR` before the target operation is attempted.
+    fn check_no_file_ancestor(state: &State, path: &Path) -> io::Result<()> {
+        let mut acc = PathBuf::new();
+        for component in path.components() {
+            acc.push(component);
+            if acc == path {
+                break;
+            }
+            if let Some((SimEntry::File, _)) = state.get(&acc) {
+                return Err(io::Error::from(io::ErrorKind::NotADirectory));
+            }
+        }
+        Ok(())
+    }
+
     /// Take a pending error from the schedule for `(op, path)`, if any.
     /// Returns `Some(kind)` once per matching injection; `None`
     /// otherwise.
@@ -247,16 +265,7 @@ impl CgroupFs for SimCgroupFs {
             // Walk strict ancestors. If any exists as a File, the kernel
             // returns `ENOTDIR` (component used as dir is a file)
             // BEFORE attempting the open.
-            let mut acc = PathBuf::new();
-            for component in path.components() {
-                acc.push(component);
-                if acc == path {
-                    break;
-                }
-                if let Some((SimEntry::File, _)) = state.get(&acc) {
-                    return Err(io::Error::from(io::ErrorKind::NotADirectory));
-                }
-            }
+            Self::check_no_file_ancestor(&state, path)?;
             // Parent-existence check — matches Real adapter NotFound shape
             // per ADR-0054 § Trait contract (the trait docstring pins
             // `Err(NotFound)` when the parent is absent).
@@ -285,16 +294,7 @@ impl CgroupFs for SimCgroupFs {
             // Walk ancestors. If any strict ancestor exists as a File,
             // the kernel returns `ENOTDIR` (component used as dir is a
             // file) BEFORE attempting the target removal.
-            let mut acc = PathBuf::new();
-            for component in path.components() {
-                acc.push(component);
-                if acc == path {
-                    break;
-                }
-                if let Some((SimEntry::File, _)) = state.get(&acc) {
-                    return Err(io::Error::from(io::ErrorKind::NotADirectory));
-                }
-            }
+            Self::check_no_file_ancestor(&state, path)?;
             let entry = match state.get(path) {
                 Some(e) => e.clone(),
                 None => return Err(io::Error::from(io::ErrorKind::NotFound)),

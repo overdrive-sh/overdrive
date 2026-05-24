@@ -187,15 +187,21 @@ pub trait CgroupFs: Send + Sync + 'static {
     ///
     /// # Production probe (RealCgroupFs)
     ///
-    /// At `<cgroup_root>/.overdrive-probe-<uuid>/`:
-    /// 1. `create_dir(&probe_dir)` — directory exists.
-    /// 2. `write(&probe_dir.join("probe-file"), b"probe\n")` — byte
-    ///    round-trip works.
-    /// 3. (host adapter additionally reads back the file via
-    ///    `tokio::fs::read` and asserts bytes match — Earned Trust
-    ///    requires demonstrated round-trip, not just write-and-pray).
-    /// 4. `remove_dir(&probe_dir.join("probe-file"))` then
-    ///    `remove_dir(&probe_dir)` — teardown succeeds.
+    /// Per ADR-0054 § Production probe (amended 2026-05-24) — round-
+    /// trip on the kernel-managed `cgroup.subtree_control` pseudo-file
+    /// at `<cgroup_root>/.overdrive-probe-<uuid>/`:
+    /// 1. `create_dir(&probe_dir)` — the kernel synthesises
+    ///    `cgroup.subtree_control` (and siblings) inside the new leaf.
+    /// 2. `write(&probe_dir.join("cgroup.subtree_control"), b"")` — an
+    ///    empty controller-diff the kernel parses and accepts as a
+    ///    no-op.
+    /// 3. `tokio::fs::read(&probe_dir.join("cgroup.subtree_control"))`
+    ///    — Earned Trust requires demonstrated round-trip; the kernel
+    ///    returns the current controller list (may be empty). The
+    ///    assertion is "read returned Ok AND bytes are valid UTF-8",
+    ///    NOT byte-equality with the empty payload.
+    /// 4. `remove_dir(&probe_dir)` — the kernel reaps its own pseudo-
+    ///    files on `rmdir`.
     ///
     /// On failure, the probe surfaces the originating
     /// [`std::io::Error`] in [`ProbeError::Substrate`]; the

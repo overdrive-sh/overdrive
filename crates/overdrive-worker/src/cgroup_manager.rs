@@ -266,11 +266,6 @@ impl WorkloadsBootstrapError {
     }
 }
 
-// Bootstrap surface removed as a free fn at step 01-07: per ADR-0054
-// § D5 the surface is an async method on `CgroupManager` that routes
-// every filesystem mutation through `self.fs.{create_dir,write}`. See
-// `CgroupManager::create_workloads_slice_with_controllers` below.
-
 /// Compute `cpu.weight` from `cpu_milli` per ADR-0026 D9:
 /// `clamp(cpu_milli / 10, 1, 10000)`.
 #[must_use]
@@ -490,16 +485,10 @@ impl CgroupManager {
 }
 
 // ---------------------------------------------------------------------------
-// Unit tests — pure-logic helpers retained in #[cfg(test)] mod tests
+// Unit tests — pure-logic helpers (CgroupPath validation, cpu_weight_for
+// arithmetic, EBUSY discrimination). FS-touching coverage lives in
+// `tests/acceptance/cgroup_manager/` against `SimCgroupFs`.
 // ---------------------------------------------------------------------------
-//
-// Per ADR-0054 § E1 KEEP-INLINE rows 1-5: the following pure-logic
-// tests stay inline (no FS, no port involvement). The 7 CONVERT
-// rows (cgroup_kill, remove_workload_scope, create_workload_scope,
-// place_pid_in_scope, write_resource_limits,
-// write_resource_limits_warn_on_error, plus cgroup_kill_writes_one_newline)
-// have moved to SimCgroupFs-backed acceptance tests under
-// `tests/acceptance/cgroup_manager/`.
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
@@ -586,9 +575,7 @@ mod tests {
         );
     }
 
-    // E1 KEEP-AND-MOVE rows 15 + 16 (per DISTILL § E1) — bootstrap
-    // pair tests moved at step 01-07 alongside the async conversion
-    // of the bootstrap surface from a sync free fn to an async method
-    // on `CgroupManager`. See
-    // `tests/acceptance/cgroup_manager/workloads_slice_bootstrap.rs`.
+    // Bootstrap-pair coverage lives in
+    // `tests/acceptance/cgroup_manager/workloads_slice_bootstrap.rs`
+    // against `SimCgroupFs`.
 }

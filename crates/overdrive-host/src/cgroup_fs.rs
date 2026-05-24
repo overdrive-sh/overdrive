@@ -131,10 +131,7 @@ impl CgroupFs for RealCgroupFs {
         // (e.g. test routing to tempdir), the pseudo-file does not
         // exist and this step surfaces the originating ENOENT.
         if let Err(source) = self.write(&subtree_control, b"").await {
-            // Best-effort teardown on failure — primary cause is what
-            // matters; partial leftover under a non-cgroupfs probe
-            // root is acceptable per the amended contract.
-            let _ = tokio::fs::remove_dir(&probe_dir).await;
+            best_effort_remove_dir(&probe_dir).await;
             return Err(ProbeError::Substrate { source });
         }
 
@@ -147,12 +144,12 @@ impl CgroupFs for RealCgroupFs {
         let read_back = match tokio::fs::read(&subtree_control).await {
             Ok(bytes) => bytes,
             Err(source) => {
-                let _ = tokio::fs::remove_dir(&probe_dir).await;
+                best_effort_remove_dir(&probe_dir).await;
                 return Err(ProbeError::Substrate { source });
             }
         };
         if std::str::from_utf8(&read_back).is_err() {
-            let _ = tokio::fs::remove_dir(&probe_dir).await;
+            best_effort_remove_dir(&probe_dir).await;
             return Err(ProbeError::RoundTripMismatch { wrote: vec![], read: read_back });
         }
 
@@ -168,4 +165,12 @@ impl CgroupFs for RealCgroupFs {
     fn kind(&self) -> &'static str {
         "overdrive_host::RealCgroupFs"
     }
+}
+
+/// Best-effort teardown of the probe scratch directory after a probe
+/// step failed. Per ADR-0054 § Production probe — the primary cause
+/// is what matters; partial leftover under a non-cgroupfs probe root
+/// is acceptable per the amended contract.
+async fn best_effort_remove_dir(probe_dir: &Path) {
+    let _ = tokio::fs::remove_dir(probe_dir).await;
 }
