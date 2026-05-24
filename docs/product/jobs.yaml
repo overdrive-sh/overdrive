@@ -108,6 +108,36 @@ jobs:
     served_by_phase: 1
     status: active
 
+  - id: J-OPS-004
+    title: "Submit a Service-kind workload and trust the wire signal to reflect operator-meaningful liveness, not kernel bare-fork acceptance"
+    situation: >
+      When I, an Overdrive platform engineer, submit a Service-kind
+      workload via `overdrive job submit <spec>` against a single-node
+      dev host, possibly with declared health-check probes (HTTP / TCP
+      / Exec on startup / readiness / liveness roles) or omitting them
+      entirely (default TCP-connect inference),
+    motivation: >
+      I want the streaming wire to emit ServiceSubmitEvent::Stable
+      only after probe-derived operator-meaningful liveness has been
+      reached, and ServiceSubmitEvent::Failed (with an actionable
+      reason: StartupProbeFailed | EarlyExit { exit_code }) when the
+      Service does not stabilise within startup_deadline OR when the
+      workload exits before any startup probe passes,
+    outcome: >
+      so the platform never reports a Service as "stable" while its
+      workload is actually exiting with code 1 within milliseconds of
+      exec (RCA root cause A,
+      docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md),
+      readiness probes can flip Backend.healthy continuously to remove
+      unhealthy backends from the dataplane fingerprint, liveness
+      probes can trigger restart of wedged backends, and the operator
+      can inspect current probe state via `overdrive alloc status
+      --job <id>`. Extends J-OPS-003 to the Service workload kind
+      with operator-declared liveness contracts.
+    source: GH #170; RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment)
+    served_by_phase: 1
+    status: active
+
   - id: J-OPS-003
     title: "Run my actual workload on the walking-skeleton control plane and trust the platform to converge to the declared replica count"
     situation: >
@@ -165,3 +195,16 @@ changelog:
       "deferred placeholder" to "served by an active feature." Source
       extended to whitepaper §7 (BPF Map Architecture — hydration as
       reconciler) alongside §18.
+  - date: 2026-05-24
+    change: >
+      Added J-OPS-004 for service-health-check-probes (GH #170). The
+      Service-honesty sub-job extends J-OPS-003 to address RCA root
+      cause A
+      (docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md):
+      kernel-accepted exec is NOT operator-meaningful liveness. The
+      job introduces declarative HTTP / TCP / Exec probes per startup
+      / readiness / liveness roles on Service kind only, with default
+      TCP-connect startup probe inference when no probes are declared.
+      Supersedes GH #169's rejected settle-window primitive (operator
+      framing rejected synthetic-timer shape in favour of k8s-shape
+      declarative probes).

@@ -1,0 +1,131 @@
+schema_version: 1
+
+# Product-level Service-kind submit journey.
+#
+# Pairs with `submit-a-job.yaml` (the original walking-skeleton submit
+# journey from phase-1-control-plane-core). This journey extends the
+# submit shape to the Service workload kind with operator-declared
+# health-check probes, and is the product-level summary of the detailed
+# feature-level journey at
+# `docs/feature/service-health-check-probes/discuss/journey-service-honest-stable.yaml`.
+#
+# Feature origin: service-health-check-probes DISCUSS wave (2026-05-24,
+# GH #170).
+
+journey:
+  name: "Submit a Service and trust the stable / failed signal"
+  goal: >
+    An operator runs `overdrive job submit <spec>` for a Service-kind
+    workload, declares probes (HTTP / TCP / Exec on startup / readiness
+    / liveness roles) OR omits them entirely (default TCP-connect
+    inference), and receives a streaming wire signal that reflects the
+    Service's probe-derived operator-meaningful liveness — Stable when
+    healthy, Failed with an actionable reason (StartupProbeFailed |
+    EarlyExit { exit_code }) when not. Closes RCA root cause A from
+    docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md
+    for the Service workload kind.
+  persona: >
+    Ana, Overdrive platform engineer. Has been bitten by the coinflip
+    exit-1 RCA on 2026-05-09; iterates on Service specs frequently
+    (5-10 submits per hour). Wants honest signal so she can trust the
+    CLI as the SSOT of "is my Service serving?".
+    Secondary: Omar, future operator using same CLI once auth lands.
+  job_id: J-OPS-004
+
+  emotional_arc:
+    start: >
+      Anxious — "last time the CLI lied; will it lie again?"
+    middle: >
+      Skeptical → focused. Accepted line lands; probing progress is
+      visible; ProbeResultRows are landing in the obs store.
+    end: >
+      Trusting (happy path) — Stable arrives with a real `settled_in`
+      Duration and a named witness probe. OR Relieved (sad path) —
+      Failed arrives with an actionable reason; Ana can fix the spec.
+
+steps:
+  - id: 1
+    name: "Submit Service spec"
+    command: "overdrive job submit payments.toml"
+    summary: >
+      CLI reads TOML with [service] block (per ADR-0047). Spec MAY
+      carry [[health_check.startup|readiness|liveness]] arrays; if
+      absent, platform infers a default TCP-connect startup probe
+      against listener[0].port. Server validates, commits via
+      IntentStore, dispatches StartAllocation.
+    emotional_state:
+      entry: "Anxious"
+      exit: "Skeptical — Accepted landed, stream continues."
+
+  - id: 2
+    name: "Probes execute, results land in observation store"
+    command: "(internal — observable via streaming progress)"
+    summary: >
+      Worker's ProbeRunner schedules each declared/inferred probe on
+      its interval. Each tick writes ProbeResultRow (LWW per
+      (alloc_id, probe_idx)) with status Pass | Fail and last_fail_reason.
+      HTTP plain GET; TCP connect; Exec inside workload cgroup.
+    emotional_state:
+      entry: "Skeptical"
+      exit: "Focused — work is visible."
+
+  - id: 3
+    name: "Service reconciler decides Stable or Failed"
+    command: "(internal — observable via streaming terminal event)"
+    summary: >
+      ServiceLifecycleReconciler reads ProbeResultRow + AllocStatusRow,
+      emits Action::SetTerminalCondition { Stable | Failed }. Action
+      shim writes AllocStatusRow.terminal AND broadcasts
+      LifecycleEvent.terminal (ADR-0037 byte-equality). Streaming
+      forwards onto ServiceSubmitEvent::Stable { settled_in, witness }
+      or ServiceSubmitEvent::Failed { reason: EarlyExit |
+      StartupProbeFailed }.
+    emotional_state:
+      entry: "Focused"
+      exit: "Trusting (happy) OR Relieved (sad) — both honest."
+
+  - id: 4
+    name: "Operator inspects probe state via `alloc status`"
+    command: "overdrive alloc status --job <service-id>"
+    summary: >
+      CLI renders Service-kind alloc status with a Probes section
+      (ADR-0033 enrichment) listing each declared/inferred probe with
+      role, probe_idx, mechanic, last status, last_observed_at,
+      optional last_fail_reason. Probes section ABSENT for Job and
+      Schedule kinds.
+    emotional_state:
+      entry: "Curious"
+      exit: "Informed."
+
+integration_validation:
+  shared_artifacts_summary:
+    - >
+      probe_idx — assigned at parse time (TOML array position OR 0 for
+      inferred default). Single integer across ProbeResultRow PK,
+      streaming progress line, alloc status render, and Failed reason
+      payloads. Must match byte-for-byte or operator loses trail.
+    - >
+      settled_in — Duration computed by Service reconciler at deciding
+      tick (now - AllocStatusRow.started_at). Must be a real measurement,
+      never a sentinel literal like the deprecated "live" string.
+    - >
+      terminal_byte_equality — AllocStatusRow.terminal and
+      LifecycleEvent.terminal carry byte-equal TerminalCondition values
+      from the same action-shim call site (ADR-0037 §3 guarantee).
+
+related_features:
+  - id: service-health-check-probes
+    role: "Ships the implementation of this journey."
+  - id: phase-1-control-plane-core
+    role: "Walking-skeleton submit predecessor; this journey extends it for Service kind."
+  - id: workload-kind-discriminator
+    role: "Established the per-kind protocol shape (ADR-0047) this journey relies on."
+
+changelog:
+  - date: 2026-05-24
+    feature: service-health-check-probes
+    change: >
+      Initial product-level journey for Service-kind submit with
+      probe-derived Stable/Failed semantics. Walking skeleton is the
+      default-TCP-connect-startup-probe slice (no operator-declared
+      probes; platform infers one against listener[0].port).
