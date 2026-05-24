@@ -21,7 +21,7 @@ pub mod cgroup_manager;
 pub mod driver;
 pub mod node_health;
 
-pub use cgroup_manager::CgroupPath;
+pub use cgroup_manager::{CgroupManager, CgroupPath};
 pub use driver::ExecDriver;
 pub use node_health::{NodeConfig, NodeHealthWriteError};
 

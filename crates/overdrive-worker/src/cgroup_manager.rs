@@ -4,13 +4,28 @@
 //! `overdrive.slice/workloads.slice/<alloc_id>.scope` directories,
 //! writes `cpu.weight` / `memory.max` per ADR-0026, and removes the
 //! scope after process reap. Five filesystem operations per workload
-//! lifecycle, no `cgroups-rs` dep (ADR-0026 D6).
+//! lifecycle.
+//!
+//! # `CgroupManager` — port-routed surface (ADR-0054)
+//!
+//! Per ADR-0054 § D5, the cgroup-manager surface is a struct that
+//! holds an `Arc<dyn CgroupFs>` and a `cgroup_root: PathBuf`. Every
+//! mutation goes through the port (`self.fs.{create_dir,write,
+//! remove_dir}`); no direct `tokio::fs::*` references in the methods.
+//! Production wires `RealCgroupFs`; tests wire `SimCgroupFs`.
+//!
+//! Mandatory-not-defaulted constructor per
+//! `.claude/rules/development.md` § "Port-trait dependencies": both
+//! `cgroup_root` and `fs` must be supplied at construction — no
+//! `Default`, no `with_fs` / `with_cgroup_root` builder.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::driver::Resources;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -320,30 +335,192 @@ pub fn create_workloads_slice_with_controllers(
     Ok(())
 }
 
-/// Create the workload scope directory under `root`.
-/// `mkdir -p` semantics; idempotent on directory already existing.
+/// Compute `cpu.weight` from `cpu_milli` per ADR-0026 D9:
+/// `clamp(cpu_milli / 10, 1, 10000)`.
+#[must_use]
+pub fn cpu_weight_for(cpu_milli: u32) -> u32 {
+    (cpu_milli / 10).clamp(1, 10_000)
+}
+
+// ---------------------------------------------------------------------------
+// CgroupManager — port-routed surface (ADR-0054 § D5)
+// ---------------------------------------------------------------------------
+
+/// Workload-cgroup management routed through the [`CgroupFs`] port.
 ///
-/// Uses `tokio::fs::create_dir_all` per `.claude/rules/development.md`
-/// § Concurrency & async — sync `std::fs::*` is forbidden inside
-/// `async fn` in adapter-host crates and the dst-lint gate enforces
-/// it at PR time.
+/// Per ADR-0054 § D5. Every filesystem mutation flows through
+/// `self.fs.{create_dir,write,remove_dir}`; no direct `tokio::fs::*`
+/// references in method bodies. Production wires
+/// `overdrive_host::RealCgroupFs`; tests wire
+/// `overdrive_sim::SimCgroupFs`.
 ///
-/// # Errors
+/// # Construction
 ///
-/// Returns an error if the cgroupfs is not mounted, the parent slice
-/// does not exist (when not creating recursively), or the running UID
-/// lacks delegation.
-pub async fn create_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+/// Mandatory-not-defaulted per `.claude/rules/development.md`
+/// § "Port-trait dependencies": both `cgroup_root` and `fs` are
+/// required at [`CgroupManager::new`]; there is no `Default` impl
+/// and no builder. Tests that forget to inject the port fail to
+/// compile rather than silently inheriting wall-clock / OS-cgroupfs
+/// behaviour.
+#[derive(Clone)]
+pub struct CgroupManager {
+    fs: Arc<dyn CgroupFs>,
+    cgroup_root: PathBuf,
+}
+
+impl CgroupManager {
+    /// Construct a `CgroupManager`. Both parameters are mandatory.
+    #[must_use]
+    pub fn new(cgroup_root: PathBuf, fs: Arc<dyn CgroupFs>) -> Self {
+        Self { fs, cgroup_root }
+    }
+
+    /// Borrow the configured cgroup root.
+    #[must_use]
+    pub fn cgroup_root(&self) -> &Path {
+        &self.cgroup_root
+    }
+
+    /// Create the workload scope directory under the configured
+    /// cgroup root.
+    ///
+    /// # Errors
+    /// Returns the underlying `std::io::Error` from
+    /// [`CgroupFs::create_dir`].
+    pub async fn create_workload_scope(&self, scope: &CgroupPath) -> Result<(), std::io::Error> {
+        let dir = scope.resolve(&self.cgroup_root);
+        self.fs.create_dir(&dir).await
+    }
+
+    /// Place a process PID into the workload scope's `cgroup.procs`
+    /// file. Writes `"{pid}\n"`.
+    ///
+    /// # Errors
+    /// Returns the underlying `std::io::Error` from
+    /// [`CgroupFs::write`].
+    pub async fn place_pid_in_scope(
+        &self,
+        scope: &CgroupPath,
+        pid: u32,
+    ) -> Result<(), std::io::Error> {
+        let path = scope.resolve(&self.cgroup_root).join("cgroup.procs");
+        let payload = format!("{pid}\n");
+        self.fs.write(&path, payload.as_bytes()).await
+    }
+
+    /// Write `cpu.weight` and `memory.max` for the given scope,
+    /// derived from `Resources` per ADR-0026 D9.
+    ///
+    /// # Errors
+    /// Returns the underlying `std::io::Error` if either limit file
+    /// cannot be written.
+    pub async fn write_resource_limits(
+        &self,
+        scope: &CgroupPath,
+        resources: &Resources,
+    ) -> Result<(), std::io::Error> {
+        let dir = scope.resolve(&self.cgroup_root);
+        let weight = cpu_weight_for(resources.cpu_milli);
+        let weight_payload = format!("{weight}\n");
+        let memory_payload = format!("{}\n", resources.memory_bytes);
+        self.fs.write(&dir.join("cpu.weight"), weight_payload.as_bytes()).await?;
+        self.fs.write(&dir.join("memory.max"), memory_payload.as_bytes()).await?;
+        Ok(())
+    }
+
+    /// Wrapper for [`Self::write_resource_limits`] that converts a
+    /// write error into a structured warning log AND returns to the
+    /// caller per ADR-0026 D9 warn-and-continue disposition.
+    pub async fn write_resource_limits_warn_on_error(
+        &self,
+        scope: &CgroupPath,
+        resources: &Resources,
+    ) {
+        if let Err(err) = self.write_resource_limits(scope, resources).await {
+            warn!(
+                scope = %scope,
+                error = %err,
+                "cgroup resource-limit write failed; continuing per ADR-0026 D9"
+            );
+        }
+    }
+
+    /// Mass-kill every process in the workload cgroup via the kernel's
+    /// `cgroup.kill` interface (cgroup v2, kernel 5.14+) — writes
+    /// `1\n` to `<scope>/cgroup.kill`.
+    ///
+    /// Idempotent — `NotFound` (scope already gone) is reported as
+    /// `Ok`. Invalid-argument writes (a path that exists but is not a
+    /// v2 cgroup) surface to the caller.
+    ///
+    /// # Errors
+    /// Returns the underlying `std::io::Error` if the write fails for
+    /// a reason other than the scope being absent.
+    pub async fn cgroup_kill(&self, scope: &CgroupPath) -> Result<(), std::io::Error> {
+        let path = scope.resolve(&self.cgroup_root).join("cgroup.kill");
+        match self.fs.write(&path, b"1\n").await {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Remove the workload scope directory after process reap.
+    /// Idempotent — succeeds when the directory is already gone.
+    ///
+    /// # Errors
+    /// Returns the underlying `std::io::Error` if `rmdir` fails for a
+    /// reason other than the directory being absent.
+    pub async fn remove_workload_scope(&self, scope: &CgroupPath) -> Result<(), std::io::Error> {
+        let dir = scope.resolve(&self.cgroup_root);
+        match self.fs.remove_dir(&dir).await {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transitional in-crate shim — REMOVE IN STEP 01-05
+// ---------------------------------------------------------------------------
+//
+// REMOVE IN STEP 01-05 — transitional shim per ADR-0054 § D5 single-cut
+// migration sequence. `ExecDriver::new` does not yet take an
+// `Arc<dyn CgroupFs>` parameter (that arity change ships at 01-05),
+// so the existing call sites in `driver.rs` cannot construct a
+// `CgroupManager` without smuggling state through a side channel.
+//
+// These `pub(crate)` shims preserve the pre-refactor semantics
+// (`tokio::fs::*` directly, byte-equivalent to the deleted free
+// fns) while the new `CgroupManager` struct sits next to them.
+// Step 01-05 rips the shims, plumbs `Arc<dyn CgroupFs>` through
+// `ExecDriver::new`, holds a `CgroupManager` instance on the driver,
+// and rewrites every shim call site to `self.cgroup_manager.foo()`.
+//
+// The shims are NOT public (`pub(crate)`); their names carry the
+// `cgroup_manager_legacy_` prefix announcing transitional status;
+// the section header above is the structural defense against the
+// shim outliving 01-05.
+//
+// Single-cut posture is preserved: the OLD public free-fn signatures
+// (`pub async fn create_workload_scope`, `pub async fn cgroup_kill`,
+// ...) ARE DELETED; the shim functions are crate-private and
+// renamed.
+
+/// Transitional shim — see module-level comment. Mirrors the
+/// pre-refactor `create_workload_scope` semantics.
+pub(crate) async fn cgroup_manager_legacy_create_workload_scope(
+    root: &Path,
+    scope: &CgroupPath,
+) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
     tokio::fs::create_dir_all(&dir).await
 }
 
-/// Place a process PID into the workload scope's `cgroup.procs` file.
-///
-/// # Errors
-///
-/// Returns an error if the scope's `cgroup.procs` cannot be written.
-pub async fn place_pid_in_scope(
+/// Transitional shim — see module-level comment. Mirrors the
+/// pre-refactor `place_pid_in_scope` semantics.
+pub(crate) async fn cgroup_manager_legacy_place_pid_in_scope(
     root: &Path,
     scope: &CgroupPath,
     pid: u32,
@@ -352,25 +529,9 @@ pub async fn place_pid_in_scope(
     tokio::fs::write(&path, format!("{pid}\n")).await
 }
 
-/// Compute `cpu.weight` from `cpu_milli` per ADR-0026 D9:
-/// `clamp(cpu_milli / 10, 1, 10000)`.
-#[must_use]
-pub fn cpu_weight_for(cpu_milli: u32) -> u32 {
-    (cpu_milli / 10).clamp(1, 10_000)
-}
-
-/// Write `cpu.weight` and `memory.max` for the given scope, derived
-/// from `Resources` per ADR-0026 D9.
-///
-/// On failure, the caller `tracing::warn!`s and continues per ADR-0026
-/// D9 warn-and-continue disposition. This helper itself surfaces the
-/// io error to the caller so the caller can decide.
-///
-/// # Errors
-///
-/// Returns the underlying io error if either limit file cannot be
-/// written.
-pub async fn write_resource_limits(
+/// Transitional shim — see module-level comment. Mirrors the
+/// pre-refactor `write_resource_limits` semantics.
+pub(crate) async fn cgroup_manager_legacy_write_resource_limits(
     root: &Path,
     scope: &CgroupPath,
     resources: &Resources,
@@ -382,15 +543,14 @@ pub async fn write_resource_limits(
     Ok(())
 }
 
-/// Wrapper for `write_resource_limits` that converts a write error
-/// into a structured warning log AND returns `Ok(())` to the caller
-/// per ADR-0026 D9 warn-and-continue disposition.
-pub async fn write_resource_limits_warn_on_error(
+/// Transitional shim — see module-level comment. Mirrors the
+/// pre-refactor `write_resource_limits_warn_on_error` semantics.
+pub(crate) async fn cgroup_manager_legacy_write_resource_limits_warn_on_error(
     root: &Path,
     scope: &CgroupPath,
     resources: &Resources,
 ) {
-    if let Err(err) = write_resource_limits(root, scope, resources).await {
+    if let Err(err) = cgroup_manager_legacy_write_resource_limits(root, scope, resources).await {
         warn!(
             scope = %scope,
             error = %err,
@@ -399,26 +559,12 @@ pub async fn write_resource_limits_warn_on_error(
     }
 }
 
-/// Mass-kill every process in the workload cgroup.
-///
-/// Uses the kernel's `cgroup.kill` interface (cgroup v2, kernel 5.14+)
-/// — writes `1\n` to `<scope>/cgroup.kill`, which atomically delivers
-/// SIGKILL to every task in the cgroup including grandchildren that
-/// escaped the driver's tokio `Child` handle (e.g. `/bin/sh -c '...'`
-/// shells whose `sleep` child reparents to init when the shell dies).
-///
-/// Idempotent — `NotFound` (scope already gone) is reported as `Ok`.
-/// Invalid-argument writes (a path that exists but is not a v2 cgroup)
-/// surface to the caller; production wires `/sys/fs/cgroup` so this
-/// code path is the happy path on Lima / LVH / production hosts alike.
-///
-/// # Errors
-///
-/// Returns the underlying io error if the write fails for a reason
-/// other than the scope being absent. The caller is expected to
-/// `tracing::warn!` and continue — terminal cleanup is best-effort by
-/// design.
-pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+/// Transitional shim — see module-level comment. Mirrors the
+/// pre-refactor `cgroup_kill` semantics.
+pub(crate) async fn cgroup_manager_legacy_cgroup_kill(
+    root: &Path,
+    scope: &CgroupPath,
+) -> Result<(), std::io::Error> {
     let path = scope.resolve(root).join("cgroup.kill");
     match tokio::fs::write(&path, "1\n").await {
         Ok(()) => Ok(()),
@@ -427,24 +573,12 @@ pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io:
     }
 }
 
-/// Remove the workload scope directory after process reap.
-/// Idempotent — succeeds when the directory is already gone.
-///
-/// Honours the cgroup v2 contract: the kernel-managed virtual files
-/// inside a workload scope (`cgroup.procs`, `cpu.weight`, `memory.max`,
-/// ...) cannot be `unlink`ed individually and are reaped automatically
-/// by `rmdir(2)`. The single `tokio::fs::remove_dir` call is therefore
-/// the complete teardown — no `remove_dir_all` fallback is needed
-/// because real cgroupfs never returns `ENOTEMPTY` for a workload
-/// scope. The integration tests run against real `/sys/fs/cgroup` per
-/// `.claude/rules/testing.md` § "Running tests — Lima VM" and observe
-/// the same kernel semantics as production.
-///
-/// # Errors
-///
-/// Returns the underlying io error if `rmdir` fails for a reason
-/// other than the directory being absent.
-pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+/// Transitional shim — see module-level comment. Mirrors the
+/// pre-refactor `remove_workload_scope` semantics.
+pub(crate) async fn cgroup_manager_legacy_remove_workload_scope(
+    root: &Path,
+    scope: &CgroupPath,
+) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
     match tokio::fs::remove_dir(&dir).await {
         Ok(()) => Ok(()),
@@ -454,8 +588,16 @@ pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<()
 }
 
 // ---------------------------------------------------------------------------
-// Unit tests — pure-logic helpers (no real cgroupfs)
+// Unit tests — pure-logic helpers retained in #[cfg(test)] mod tests
 // ---------------------------------------------------------------------------
+//
+// Per ADR-0054 § E1 KEEP-INLINE rows 1-5: the following pure-logic
+// tests stay inline (no FS, no port involvement). The 7 CONVERT
+// rows (cgroup_kill, remove_workload_scope, create_workload_scope,
+// place_pid_in_scope, write_resource_limits,
+// write_resource_limits_warn_on_error, plus cgroup_kill_writes_one_newline)
+// have moved to SimCgroupFs-backed acceptance tests under
+// `tests/acceptance/cgroup_manager/`.
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
@@ -496,206 +638,6 @@ mod tests {
         assert_eq!(cpu_weight_for(100_000), 10_000, "100k mCPU at upper clamp");
         assert_eq!(cpu_weight_for(200_000), 10_000, "200k mCPU clamps down to 10_000");
         assert_eq!(cpu_weight_for(1000), 100, "1000 mCPU → weight 100");
-    }
-
-    /// `cgroup_kill` is idempotent on `NotFound` (the scope is gone
-    /// or never existed). Pins the match-guard mutations on the
-    /// `err.kind() == NotFound` branch.
-    #[tokio::test]
-    async fn cgroup_kill_is_idempotent_on_missing_scope() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-missing-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-
-        let result = cgroup_kill(tmp.path(), &scope).await;
-        assert!(
-            result.is_ok(),
-            "cgroup_kill on a missing scope must be idempotent (Ok); got {result:?}",
-        );
-    }
-
-    /// `cgroup_kill` writes `1\n` to `<scope>/cgroup.kill` on the
-    /// happy path. Pins the body-replace mutation (`-> Ok(())` skips
-    /// the write entirely; `cgroup.kill` would not appear on disk).
-    #[tokio::test]
-    async fn cgroup_kill_writes_one_to_cgroup_kill_file() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-kill-write-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        let scope_dir = scope.resolve(tmp.path());
-        std::fs::create_dir_all(&scope_dir).expect("create scope dir");
-
-        cgroup_kill(tmp.path(), &scope).await.expect("cgroup_kill on real dir succeeds");
-
-        let written = std::fs::read_to_string(scope_dir.join("cgroup.kill"))
-            .expect("cgroup.kill must be written");
-        assert_eq!(
-            written, "1\n",
-            "cgroup_kill must write '1\\n' to cgroup.kill (kernel cgroup.kill protocol)",
-        );
-    }
-
-    /// `cgroup_kill` propagates non-`NotFound` errors rather than
-    /// swallowing them. Pins the match-guard mutation that flips
-    /// `err.kind() == NotFound` to `true` (which would route every
-    /// error through the idempotent arm).
-    ///
-    /// Setup creates a regular file at the *scope* path; writing
-    /// `<file>/cgroup.kill` then fails with a non-`NotFound` error
-    /// (typically `NotADirectory` / `ENOTDIR`). The unmutated guard
-    /// propagates; the `-> true` mutant turns it into `Ok(())`.
-    #[tokio::test]
-    async fn cgroup_kill_propagates_non_notfound_errors() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-blocker-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        let scope_as_path = scope.resolve(tmp.path());
-        if let Some(parent) = scope_as_path.parent() {
-            std::fs::create_dir_all(parent).expect("create parent slice dirs");
-        }
-        // Place a regular file where the scope DIR would be — writing
-        // `<file>/cgroup.kill` produces a non-NotFound error.
-        std::fs::write(&scope_as_path, b"blocker").expect("write blocker file");
-
-        let result = cgroup_kill(tmp.path(), &scope).await;
-        let err = result.expect_err("non-NotFound errors must propagate");
-        assert_ne!(
-            err.kind(),
-            std::io::ErrorKind::NotFound,
-            "the test setup must NOT produce NotFound (would render the test vacuous)",
-        );
-    }
-
-    /// `remove_workload_scope` is idempotent on `NotFound`. Pins
-    /// the outer match-guard mutations.
-    #[tokio::test]
-    async fn remove_workload_scope_is_idempotent_on_missing_scope() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-missing-1.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-
-        let result = remove_workload_scope(tmp.path(), &scope).await;
-        assert!(
-            result.is_ok(),
-            "remove_workload_scope on missing scope must be idempotent; got {result:?}",
-        );
-    }
-
-    /// `remove_workload_scope` propagates non-`NotFound` errors from
-    /// the underlying `remove_dir` rather than swallowing them. Pins
-    /// the outer match-guard mutation that flips
-    /// `err.kind() == NotFound` to `true` (which would route every
-    /// error through the idempotent arm).
-    ///
-    /// Setup creates a regular file at the *scope* path; `remove_dir`
-    /// against a non-directory inode returns `NotADirectory`
-    /// (`ENOTDIR`). The unmutated guard propagates the error; the
-    /// `-> true` mutant returns `Ok(())`.
-    #[tokio::test]
-    async fn remove_workload_scope_propagates_non_notfound_errors() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-blocker-1.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        let scope_as_path = scope.resolve(tmp.path());
-        if let Some(parent) = scope_as_path.parent() {
-            std::fs::create_dir_all(parent).expect("create parent slice dirs");
-        }
-        // Place a regular file where the scope DIR would be —
-        // `remove_dir` against a non-directory inode produces a
-        // non-NotFound error (NotADirectory / ENOTDIR).
-        std::fs::write(&scope_as_path, b"blocker").expect("write blocker file");
-
-        let result = remove_workload_scope(tmp.path(), &scope).await;
-        let err = result.expect_err("non-NotFound errors must propagate");
-        assert_ne!(
-            err.kind(),
-            std::io::ErrorKind::NotFound,
-            "the test setup must NOT produce NotFound (would render the test vacuous)",
-        );
-    }
-
-    /// `create_workload_scope` writes a directory. Kills body→Ok(())
-    /// — the mutant skips `create_dir_all`, so the directory does
-    /// NOT appear on disk; the assertion catches the missing dir.
-    #[tokio::test]
-    async fn create_workload_scope_writes_a_real_directory() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-create-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-
-        let result = create_workload_scope(tmp.path(), &scope).await;
-        assert!(result.is_ok(), "create_workload_scope must succeed; got {result:?}");
-        let scope_dir = scope.resolve(tmp.path());
-        assert!(scope_dir.exists(), "scope dir must exist on disk after create");
-        assert!(scope_dir.is_dir(), "scope path must be a directory");
-    }
-
-    /// `place_pid_in_scope` writes the pid to `cgroup.procs`. Kills
-    /// body→Ok(()).
-    #[tokio::test]
-    async fn place_pid_in_scope_writes_pid_to_cgroup_procs() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-place-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
-
-        let result = place_pid_in_scope(tmp.path(), &scope, 1234).await;
-        assert!(result.is_ok(), "place_pid_in_scope must succeed; got {result:?}");
-
-        let procs = std::fs::read_to_string(scope.resolve(tmp.path()).join("cgroup.procs"))
-            .expect("read cgroup.procs");
-        assert_eq!(procs, "1234\n", "cgroup.procs must contain the pid + newline");
-    }
-
-    /// `write_resource_limits` writes cpu.weight and memory.max.
-    /// Kills body→Ok(()) and pins the cpu_weight_for delegation.
-    #[tokio::test]
-    async fn write_resource_limits_writes_cpu_weight_and_memory_max() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-limits-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
-
-        let resources = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 };
-        let result = write_resource_limits(tmp.path(), &scope, &resources).await;
-        assert!(result.is_ok(), "write_resource_limits must succeed; got {result:?}");
-
-        let weight = std::fs::read_to_string(scope.resolve(tmp.path()).join("cpu.weight"))
-            .expect("read cpu.weight");
-        assert_eq!(weight, "10\n", "cpu.weight must be cpu_milli/10 = 10");
-
-        let memmax = std::fs::read_to_string(scope.resolve(tmp.path()).join("memory.max"))
-            .expect("read memory.max");
-        assert_eq!(
-            memmax,
-            format!("{}\n", 256 * 1024 * 1024),
-            "memory.max must equal memory_bytes",
-        );
-    }
-
-    /// `write_resource_limits_warn_on_error` returns `()` and only
-    /// warns on failure. Pins body→() (the mutant returns nothing
-    /// either, but production also writes side effects on success;
-    /// the mutant skips the call entirely → cpu.weight does NOT
-    /// appear on disk). The assertion catches the missing file.
-    #[tokio::test]
-    async fn write_resource_limits_warn_on_error_writes_files_on_success() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-warn-ok-0.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
-
-        let resources = Resources { cpu_milli: 200, memory_bytes: 1024 * 1024 };
-        write_resource_limits_warn_on_error(tmp.path(), &scope, &resources).await;
-
-        assert!(
-            scope.resolve(tmp.path()).join("cpu.weight").exists(),
-            "cpu.weight must be written on the happy path",
-        );
-        assert!(
-            scope.resolve(tmp.path()).join("memory.max").exists(),
-            "memory.max must be written on the happy path",
-        );
     }
 
     /// `WorkloadsBootstrapError::from_subtree_control_io` discriminates
@@ -741,6 +683,11 @@ mod tests {
             "NotFound must map to WriteFailed (NOT EBUSY); got {mapped:?}",
         );
     }
+
+    // E1 KEEP-TEMPFILE rows 8 + 10 (per DISTILL § E1) — bootstrap
+    // pair tests using tempfile against
+    // `create_workloads_slice_with_controllers`. Stay in place at this
+    // step; defer move to step 01-07.
 
     /// `create_workloads_slice_with_controllers` performs the two
     /// load-bearing writes on `cgroup_root`: `mkdir -p

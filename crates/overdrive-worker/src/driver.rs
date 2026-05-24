@@ -35,8 +35,9 @@ use overdrive_core::traits::driver::{
 };
 
 use crate::cgroup_manager::{
-    self, CgroupPath, cgroup_kill, create_workload_scope, place_pid_in_scope,
-    remove_workload_scope, write_resource_limits,
+    self, CgroupPath, cgroup_manager_legacy_cgroup_kill,
+    cgroup_manager_legacy_create_workload_scope, cgroup_manager_legacy_place_pid_in_scope,
+    cgroup_manager_legacy_remove_workload_scope, cgroup_manager_legacy_write_resource_limits,
 };
 
 /// Default grace window between SIGTERM and SIGKILL during stop.
@@ -405,7 +406,9 @@ impl Driver for ExecDriver {
 
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
-        if let Err(err) = create_workload_scope(&self.cgroup_root, &scope).await {
+        if let Err(err) =
+            cgroup_manager_legacy_create_workload_scope(&self.cgroup_root, &scope).await
+        {
             return Err(start_rejected(format!("create workload scope: {err}")));
         }
 
@@ -417,7 +420,8 @@ impl Driver for ExecDriver {
                 "force_limit_write_failure injected",
             ))
         } else {
-            write_resource_limits(&self.cgroup_root, &scope, &spec.resources).await
+            cgroup_manager_legacy_write_resource_limits(&self.cgroup_root, &scope, &spec.resources)
+                .await
         };
         if let Err(err) = limit_result {
             warn!(
@@ -441,7 +445,8 @@ impl Driver for ExecDriver {
             Some(path) => match tokio::fs::File::open(path).await {
                 Ok(f) => Some(std::os::fd::OwnedFd::from(f.into_std().await)),
                 Err(source) => {
-                    let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+                    let _ = cgroup_manager_legacy_remove_workload_scope(&self.cgroup_root, &scope)
+                        .await;
                     return Err(DriverError::NetnsEntry {
                         driver: DriverType::Exec,
                         netns_path: path.display().to_string(),
@@ -458,7 +463,8 @@ impl Driver for ExecDriver {
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
-                let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+                let _ =
+                    cgroup_manager_legacy_remove_workload_scope(&self.cgroup_root, &scope).await;
                 // A spawn failure when `netns_path` is set most
                 // likely came from the netns-entry `pre_exec` hook
                 // (setns(2) returned EPERM / EINVAL — the open()
@@ -483,10 +489,12 @@ impl Driver for ExecDriver {
             // child.id() returns None only after wait() — should not
             // happen here since we just spawned. Treat as fatal start
             // failure for safety.
-            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+            let _ = cgroup_manager_legacy_remove_workload_scope(&self.cgroup_root, &scope).await;
             return Err(start_rejected("tokio Child returned no pid (already reaped?)"));
         };
-        if let Err(err) = place_pid_in_scope(&self.cgroup_root, &scope, pid).await {
+        if let Err(err) =
+            cgroup_manager_legacy_place_pid_in_scope(&self.cgroup_root, &scope, pid).await
+        {
             // Best-effort kill + cleanup. We don't await here —
             // the tokio Child's drop handler does not reap, but the
             // OS will reap orphans. For defence-in-depth we send
@@ -501,7 +509,7 @@ impl Driver for ExecDriver {
                     libc::kill(raw, libc::SIGKILL);
                 }
             }
-            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+            let _ = cgroup_manager_legacy_remove_workload_scope(&self.cgroup_root, &scope).await;
             return Err(start_rejected(format!("place pid in scope: {err}")));
         }
 
@@ -648,9 +656,9 @@ impl Driver for ExecDriver {
         //       every member of that group regardless of cgroup
         //       residency.
         send_sigkill_pgrp(pid_for_pgrp_kill);
-        let _ = cgroup_kill(&self.cgroup_root, &scope).await;
+        let _ = cgroup_manager_legacy_cgroup_kill(&self.cgroup_root, &scope).await;
         // 5. Tear down the cgroup scope. NotFound is benign.
-        let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+        let _ = cgroup_manager_legacy_remove_workload_scope(&self.cgroup_root, &scope).await;
 
         // If the grace window elapsed, the watcher is still running;
         // it will resolve once SIGKILL finishes reaping the child.
@@ -692,8 +700,12 @@ impl Driver for ExecDriver {
                 None => return Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
             }
         };
-        cgroup_manager::write_resource_limits_warn_on_error(&self.cgroup_root, &scope, &resources)
-            .await;
+        cgroup_manager::cgroup_manager_legacy_write_resource_limits_warn_on_error(
+            &self.cgroup_root,
+            &scope,
+            &resources,
+        )
+        .await;
         Ok(())
     }
 
