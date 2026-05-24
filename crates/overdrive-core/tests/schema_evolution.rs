@@ -26,5 +26,6 @@ mod schema_evolution {
     mod probe_result_row;
     mod service_backend_row;
     mod service_hydration_result_row;
+    mod service_spec;
     mod workload_intent;
 }

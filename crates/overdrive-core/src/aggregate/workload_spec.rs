@@ -149,6 +149,52 @@ pub enum ParseError {
         /// input.
         field: String,
     },
+
+    // -----------------------------------------------------------------
+    // Step 01-02 — service-health-check-probes per ADR-0057 §3.
+    // -----------------------------------------------------------------
+    /// `[[health_check.startup]]` with `type = "tcp"` is missing the
+    /// `port` field. `probe_idx` is the 0-indexed position within
+    /// the per-role array.
+    #[error(
+        "[[health_check.startup]][{probe_idx}]: tcp probe is missing required field `port` — add `port = <listener_port>`"
+    )]
+    TcpProbeMissingPort {
+        /// 0-indexed position within the per-role array.
+        probe_idx: usize,
+    },
+
+    /// `timeout_seconds = 0` is rejected — probe attempts MUST have a
+    /// non-zero timeout per ADR-0057 §3.
+    #[error(
+        "[[health_check.*]][{probe_idx}]: field `timeout_seconds` must be > 0 — set a positive value or omit the field to inherit the ADR-0057 default of 5"
+    )]
+    ProbeTimeoutZero { probe_idx: usize },
+
+    /// `interval_seconds = 0` is rejected — probes MUST tick at a
+    /// non-zero cadence per ADR-0057 §3.
+    #[error(
+        "[[health_check.*]][{probe_idx}]: field `interval_seconds` must be > 0 — set a positive value or omit the field to inherit the ADR-0057 default of 2 (startup/readiness) / 10 (liveness)"
+    )]
+    ProbeIntervalZero { probe_idx: usize },
+
+    /// `max_attempts = 0` on a startup probe is rejected per ADR-0057
+    /// §3 (startup-only field).
+    #[error(
+        "[[health_check.startup]][{probe_idx}]: field `max_attempts` must be > 0 — set a positive value or omit the field to inherit the ADR-0057 default of 30"
+    )]
+    ProbeMaxAttemptsZero { probe_idx: usize },
+
+    /// `type = "<value>"` is not one of the recognised mechanics
+    /// (`tcp` for step 01-02; `http` and `exec` land in later slices).
+    #[error(
+        "[[health_check.*]][{probe_idx}]: unknown probe type `{found}` (supported types: tcp; http and exec land in later slices)"
+    )]
+    UnknownProbeType {
+        probe_idx: usize,
+        /// Verbatim operator-supplied `type` token.
+        found: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -403,41 +449,13 @@ pub struct Listener {
 // Per-kind specs
 // ---------------------------------------------------------------------------
 
-/// Validated `[service]` body — `id`, `replicas`, `[exec]`, `[resources]`,
-/// listeners. Slice 01 lands the type with the minimal field set the
-/// parser needs to discriminate kinds; Slice 06 will expand the
-/// listener carrier shape.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    utoipa::ToSchema,
-)]
-pub struct ServiceSpec {
-    pub id: String,
-    pub replicas: u32,
-    pub exec: ExecInput,
-    pub resources: ResourcesInput,
-    /// Operator-declared `[[listener]]` blocks in declaration order.
-    /// Slice 06 of `workload-kind-discriminator` per ADR-0047 §1
-    /// (Service listener fields). Validated at parse time:
-    ///
-    /// * MUST carry at least one element
-    ///   ([`ParseError::ListenerMissing`]).
-    /// * No two elements share `(vip, port, protocol)` — when both
-    ///   `vip` are `None`, comparison is `(port, protocol)` only
-    ///   ([`ParseError::ListenerDuplicate`]).
-    /// * `protocol` is restricted to `tcp` / `udp` (case-insensitive
-    ///   parse, lowercase canonical render).
-    /// * `port` is non-zero ([`ParseError::ListenerPortZero`]).
-    pub listeners: Vec<Listener>,
-}
+// `ServiceSpec` (= `ServiceSpecV2`) lives in
+// `crate::aggregate::service_spec`. Per ADR-0057 step 01-02 the type
+// carries three `Vec<ProbeDescriptor>` fields (startup / readiness /
+// liveness) and is wrapped by `ServiceSpecEnvelope`. We re-import here
+// so the parser-side enum types (`WorkloadSpec`, `WorkloadSpecInput`)
+// continue to use the bare `ServiceSpec` name unchanged.
+pub use crate::aggregate::service_spec::ServiceSpec;
 
 /// Validated `[job]` body. `replicas` is intentionally absent — Job is
 /// run-to-completion per ADR-0047 §1.
@@ -649,7 +667,28 @@ impl WorkloadSpecInput {
             // decision. Walk the top-level table for a `listener` key
             // whose value is an array.
             let listeners = parse_listeners(table)?;
-            return Ok(Self::Service(ServiceSpec { id, replicas, exec, resources, listeners }));
+
+            // Step 01-02 — ADR-0057 §1 [[health_check.startup]] TCP
+            // variant + ADR-0058 default-inference. Discover the
+            // `health_check.startup` value (absent vs explicit-empty
+            // vs populated) and either parse declared probes or
+            // synthesise the default TCP probe against `listeners[0]`.
+            let (startup_probes, startup_was_explicit) = parse_startup_probes(table, &listeners)?;
+            // Readiness/liveness population is owned by later slices
+            // (02-01 / 02-02). For this step they remain empty —
+            // ServiceSpecV2 envelope shape is stable across slices.
+            let _ = startup_was_explicit;
+
+            return Ok(Self::Service(ServiceSpec {
+                id,
+                replicas,
+                exec,
+                resources,
+                listeners,
+                startup_probes,
+                readiness_probes: vec![],
+                liveness_probes: vec![],
+            }));
         }
 
         // Job-shaped path (with or without [schedule]).
@@ -864,4 +903,221 @@ fn parse_one_listener(entry: &toml::value::Table) -> Result<Listener, ParseError
 /// pair.
 fn format_listener_pair(l: Listener) -> String {
     format!("(port={}, protocol={})", l.port.get(), l.protocol)
+}
+
+// ---------------------------------------------------------------------------
+// Step 01-02 — [[health_check.startup]] (TCP only) parsing + ADR-0058
+// default-inference. HTTP / Exec mechanics land in slices 02-01 / 02-02.
+// ---------------------------------------------------------------------------
+
+use crate::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use crate::observation::ProbeRole;
+
+/// ADR-0057 §2 default values for a startup probe — operator omits
+/// `timeout_seconds` / `interval_seconds` / `max_attempts` → these apply.
+const STARTUP_TIMEOUT_DEFAULT_S: u32 = 5;
+const STARTUP_INTERVAL_DEFAULT_S: u32 = 2;
+const STARTUP_MAX_ATTEMPTS_DEFAULT: u32 = 30;
+
+/// Discover and parse `[[health_check.startup]]` per ADR-0057 §1 +
+/// apply the ADR-0058 default-inference rule.
+///
+/// Returns `(probes, was_explicit)` where `was_explicit` is `true` iff
+/// the operator wrote `[[health_check.startup]]` (whether as an array
+/// of tables OR `health_check.startup = []` — both shapes are
+/// "explicit"). When the operator omits the section entirely AND the
+/// service has at least one listener, the parser synthesises a single
+/// default TCP probe per ADR-0058.
+///
+/// Per DDD-16 the empty-array shape is the explicit opt-out: zero
+/// probes survive (preserves Phase-1 first-Running semantics).
+fn parse_startup_probes(
+    table: &toml::value::Table,
+    listeners: &[Listener],
+) -> Result<(Vec<ProbeDescriptor>, bool), ParseError> {
+    // The TOML shape is `[[health_check.startup]]` (array of tables) or
+    // `health_check.startup = []` (explicit-empty literal). Both
+    // descend through a nested-table chain: `health_check.startup` is
+    // a sub-key on a `health_check` table when written via the array-
+    // of-tables shape, AND when written via the inline-array shape.
+    let (startup_value_opt, was_explicit) = table
+        .get("health_check")
+        .and_then(toml::Value::as_table)
+        .and_then(|hc| hc.get("startup"))
+        .map_or((None, false), |v| (Some(v.clone()), true));
+
+    let entries: Vec<&toml::value::Table> = match startup_value_opt.as_ref() {
+        None => Vec::new(),
+        Some(v) => v.as_array().map_or_else(
+            || {
+                Err(ParseError::Field {
+                    section: "[[health_check.startup]]",
+                    message: "must be an array of tables (or `health_check.startup = []` for the explicit-empty opt-out)".to_string(),
+                })
+            },
+            |arr| {
+                arr.iter()
+                    .map(|entry| {
+                        entry.as_table().ok_or_else(|| ParseError::Field {
+                            section: "[[health_check.startup]]",
+                            message: "each entry must be a table".to_string(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            },
+        )?,
+    };
+
+    // Default-inference per ADR-0058: zero probes declared AND no
+    // explicit shape AND at least one listener -> synthesise default.
+    if !was_explicit && !listeners.is_empty() {
+        let first = &listeners[0];
+        let inferred = ProbeDescriptor {
+            role: ProbeRole::Startup,
+            mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: first.port.get() },
+            timeout_seconds: STARTUP_TIMEOUT_DEFAULT_S,
+            interval_seconds: STARTUP_INTERVAL_DEFAULT_S,
+            max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
+            failure_threshold: None,
+            success_threshold: None,
+            inferred: true,
+        };
+        return Ok((vec![inferred], false));
+    }
+
+    // Parse each declared entry into a ProbeDescriptor.
+    let mut out = Vec::with_capacity(entries.len());
+    for (probe_idx, entry) in entries.iter().enumerate() {
+        out.push(parse_one_startup_probe(entry, probe_idx)?);
+    }
+    Ok((out, was_explicit))
+}
+
+/// Parse one `[[health_check.startup]]` entry. TCP variant only this
+/// step; HTTP / Exec land in slices 02-01 / 02-02.
+fn parse_one_startup_probe(
+    entry: &toml::value::Table,
+    probe_idx: usize,
+) -> Result<ProbeDescriptor, ParseError> {
+    // type field — case-insensitive per § Newtype completeness.
+    let type_raw = entry.get("type").ok_or_else(|| ParseError::Field {
+        section: "[[health_check.startup]]",
+        message: format!("entry [{probe_idx}]: required field `type` is missing"),
+    })?;
+    let type_str = type_raw.as_str().ok_or_else(|| ParseError::Field {
+        section: "[[health_check.startup]]",
+        message: format!("entry [{probe_idx}]: field `type` must be a string"),
+    })?;
+
+    let mechanic = match type_str.to_ascii_lowercase().as_str() {
+        "tcp" => {
+            let port_raw =
+                entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
+            let port_int = port_raw.as_integer().ok_or_else(|| ParseError::Field {
+                section: "[[health_check.startup]]",
+                message: format!("entry [{probe_idx}]: field `port` must be an integer"),
+            })?;
+            let port_u16 = u16::try_from(port_int).map_err(|_| ParseError::Field {
+                section: "[[health_check.startup]]",
+                message: format!("entry [{probe_idx}]: field `port` must be in 1..=65535"),
+            })?;
+            if port_u16 == 0 {
+                return Err(ParseError::TcpProbeMissingPort { probe_idx });
+            }
+            let host =
+                entry.get("host").and_then(toml::Value::as_str).unwrap_or("0.0.0.0").to_string();
+            ProbeMechanic::Tcp { host, port: port_u16 }
+        }
+        other => {
+            return Err(ParseError::UnknownProbeType { probe_idx, found: other.to_string() });
+        }
+    };
+
+    let timeout_seconds =
+        parse_optional_positive_u32(entry, "timeout_seconds", STARTUP_TIMEOUT_DEFAULT_S, probe_idx)
+            .map_err(|err| map_zero_to_named_error(err, "timeout_seconds", probe_idx))?;
+    let interval_seconds = parse_optional_positive_u32(
+        entry,
+        "interval_seconds",
+        STARTUP_INTERVAL_DEFAULT_S,
+        probe_idx,
+    )
+    .map_err(|err| map_zero_to_named_error(err, "interval_seconds", probe_idx))?;
+    let max_attempts =
+        parse_optional_positive_u32(entry, "max_attempts", STARTUP_MAX_ATTEMPTS_DEFAULT, probe_idx)
+            .map_err(|err| map_zero_to_named_error(err, "max_attempts", probe_idx))?;
+
+    Ok(ProbeDescriptor {
+        role: ProbeRole::Startup,
+        mechanic,
+        timeout_seconds,
+        interval_seconds,
+        max_attempts,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    })
+}
+
+/// Local intermediate-error variant for the zero-field rejection
+/// pipeline. Allows [`parse_optional_positive_u32`] to surface a
+/// generic "field is zero" outcome that the caller maps to one of
+/// the field-specific named ParseError variants
+/// (`ProbeTimeoutZero` / `ProbeIntervalZero` / `ProbeMaxAttemptsZero`).
+enum OptionalPositiveU32Error {
+    Zero,
+    Field(ParseError),
+}
+
+/// Pull an optional positive-u32 field from a probe entry, defaulting
+/// to `default` when absent. Returns `OptionalPositiveU32Error::Zero`
+/// if the operator explicitly wrote `0`; the caller maps to the
+/// field-specific named ParseError.
+fn parse_optional_positive_u32(
+    entry: &toml::value::Table,
+    field: &str,
+    default: u32,
+    probe_idx: usize,
+) -> Result<u32, OptionalPositiveU32Error> {
+    let Some(value) = entry.get(field) else {
+        return Ok(default);
+    };
+    let int = value.as_integer().ok_or_else(|| {
+        OptionalPositiveU32Error::Field(ParseError::Field {
+            section: "[[health_check.startup]]",
+            message: format!(
+                "entry [{probe_idx}]: field `{field}` must be a non-negative integer fitting in u32"
+            ),
+        })
+    })?;
+    if int == 0 {
+        return Err(OptionalPositiveU32Error::Zero);
+    }
+    u32::try_from(int).map_err(|_| {
+        OptionalPositiveU32Error::Field(ParseError::Field {
+            section: "[[health_check.startup]]",
+            message: format!(
+                "entry [{probe_idx}]: field `{field}` must be a non-negative integer fitting in u32"
+            ),
+        })
+    })
+}
+
+/// Map an `OptionalPositiveU32Error::Zero` to the field-specific
+/// named variant (`ProbeTimeoutZero` / `ProbeIntervalZero` /
+/// `ProbeMaxAttemptsZero`). A `Field` carries through verbatim.
+fn map_zero_to_named_error(
+    err: OptionalPositiveU32Error,
+    field: &str,
+    probe_idx: usize,
+) -> ParseError {
+    match err {
+        OptionalPositiveU32Error::Zero => match field {
+            "timeout_seconds" => ParseError::ProbeTimeoutZero { probe_idx },
+            "interval_seconds" => ParseError::ProbeIntervalZero { probe_idx },
+            "max_attempts" => ParseError::ProbeMaxAttemptsZero { probe_idx },
+            _ => unreachable!("map_zero_to_named_error only called for the three known fields"),
+        },
+        OptionalPositiveU32Error::Field(parse_error) => parse_error,
+    }
 }

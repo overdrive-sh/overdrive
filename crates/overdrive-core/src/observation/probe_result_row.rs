@@ -92,6 +92,7 @@ impl std::fmt::Display for ProbeIdx {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    utoipa::ToSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeRole {

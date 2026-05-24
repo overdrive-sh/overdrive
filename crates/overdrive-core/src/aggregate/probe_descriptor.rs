@@ -13,25 +13,6 @@
 //! and `inferred: true`. An empty `[[health_check.startup]] = []`
 //! array is the explicit opt-out (preserves Phase 1 first-Running
 //! semantics).
-//!
-//! RED scaffold — types and validation rules sketched; rkyv +
-//! parser-side land in slice 01 / 02 / 03 + slice 07.
-// SCAFFOLD: true
-
-#![allow(dead_code)]
-#![allow(
-    clippy::doc_markdown,
-    clippy::doc_lazy_continuation,
-    clippy::too_long_first_doc_paragraph,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::unused_async,
-    clippy::missing_panics_doc,
-    clippy::missing_errors_doc,
-    clippy::module_name_repetitions,
-    clippy::struct_field_names,
-    reason = "DISTILL RED scaffold; per `.claude/rules/testing.md` § 'RED scaffolds' lints land when DELIVER replaces todo!() bodies + rewrites docs"
-)]
 
 use serde::{Deserialize, Serialize};
 
@@ -40,8 +21,22 @@ use crate::observation::ProbeRole;
 /// Concrete mechanic for a probe attempt.
 ///
 /// Per ADR-0054: three mechanics, each backed by a distinct port
-/// trait (`TcpProber` / `HttpProber` / `ExecProber`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// trait (`TcpProber` / `HttpProber` / `ExecProber`). Step 01-02
+/// lands the `Tcp` variant; `Http` lands in step 02-01 and `Exec`
+/// in step 02-02 — all three are part of the enum so the
+/// `ServiceSpec` envelope shape is stable across slices.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProbeMechanic {
     /// TCP-connect against `host:port`. Default for inferred probes
@@ -72,7 +67,18 @@ pub enum ProbeMechanic {
 /// `inferred` distinguishes platform-synthesised default probes
 /// (per ADR-0058) from operator-declared probes. Renderer surfaces
 /// as `(inferred)` suffix per US-06 AC.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
 pub struct ProbeDescriptor {
     pub role: ProbeRole,
     pub mechanic: ProbeMechanic,

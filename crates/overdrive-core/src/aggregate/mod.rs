@@ -34,17 +34,36 @@ use crate::traits::intent_store::IntentStoreError;
 // and `JobSpecInput` remain in this module as the production path until
 // downstream slices (02–06) migrate every reader.
 // ---------------------------------------------------------------------------
+pub use self::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+pub use self::service_spec::{
+    ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
+};
+
+// Re-export the parser-side `ExecInput` / `ResourcesInput` from
+// `workload_spec` under disambiguating aliases. The wire-shape twins
+// (`ExecInput` / `ResourcesInput` defined directly in this module)
+// remain the canonical wire-side types; the parser-side variants are
+// what `ServiceSpecV{1,2}` carry and what schema-evolution fixtures
+// construct.
 pub use self::workload_spec::{
-    CronExpr, JobSpec, Listener, ParseError, ScheduleSpec, ServiceSpec, ServiceVip, WorkloadKind,
-    WorkloadSpec, WorkloadSpecInput,
+    CronExpr, JobSpec, Listener, ParseError, ScheduleSpec, ServiceVip, WorkloadKind, WorkloadSpec,
+    WorkloadSpecInput,
+};
+pub use self::workload_spec::{
+    ExecInput as ParserExecInput, ResourcesInput as ParserResourcesInput,
 };
 
 mod workload_spec;
 
-// SCAFFOLD: true — service-health-check-probes feature.
-// `ProbeDescriptor` aggregate type per ADR-0057. Lands in slices
-// 01 / 02 / 03 + 04 / 05 / 07.
+// `ProbeDescriptor` aggregate type per ADR-0057. Lands additively
+// across slices 01 / 02 / 03 + 04 / 05 / 07 — TCP mechanic in 01-02,
+// HTTP in 02-01, Exec in 02-02.
 pub mod probe_descriptor;
+
+// `ServiceSpec` parser-side aggregate + per-type rkyv envelope per
+// ADR-0048 + ADR-0057. Step 01-02 lands the V1 → V2 envelope bump
+// with the three `Vec<ProbeDescriptor>` fields.
+mod service_spec;
 
 // ---------------------------------------------------------------------------
 // Aggregate error
