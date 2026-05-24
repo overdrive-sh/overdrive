@@ -246,6 +246,7 @@ async fn run_inner(
 /// against `/sys/fs/cgroup`.
 fn build_probe_adapter() -> RealCgroupFs {
     match std::env::var(PROBE_ROOT_ENV_VAR) {
+        // mutants: skip — crate-level #![forbid(unsafe_code)] prevents unit-testing env var mutation; integration tests cover the set-path case
         Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
         _ => RealCgroupFs::new(),
     }
