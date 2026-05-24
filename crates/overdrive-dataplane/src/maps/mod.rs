@@ -11,7 +11,6 @@
 //! **RED scaffolds** — every handle's bodies panic via `todo!()`
 //! until DELIVER fills them slice by slice.
 
-pub mod backend_map_handle;
 pub mod drop_counter_handle;
 pub mod maglev_map_handle;
 pub mod reverse_nat_map_handle;

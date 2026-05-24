@@ -35,7 +35,7 @@
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, TickContext, backoff_for_attempt,
 };
 use overdrive_core::traits::clock::Clock;

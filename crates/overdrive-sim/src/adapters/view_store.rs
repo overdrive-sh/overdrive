@@ -41,7 +41,7 @@ use parking_lot::Mutex;
 use overdrive_control_plane::view_store::{
     ProbeError, Result as VsResult, ViewStore, ViewStoreError,
 };
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
 /// Reserved reconciler name the Earned-Trust probe writes its sentinel
 /// row under. Validated by `ReconcilerName::new` at construction so any
@@ -180,7 +180,7 @@ impl ViewStore for SimViewStore {
         // The contract is: callers pass `Reconciler::NAME` (or
         // `AnyReconciler::static_name()`), which by construction is
         // a literal validated against `ReconcilerName::new` — see
-        // the `Reconciler::NAME` doc on `overdrive_core::reconciler`.
+        // the `Reconciler::NAME` doc on `overdrive_core::reconcilers`.
         // The `expect` therefore can only fire if a caller violates
         // the contract by passing arbitrary runtime bytes; the
         // compile-fail fixture

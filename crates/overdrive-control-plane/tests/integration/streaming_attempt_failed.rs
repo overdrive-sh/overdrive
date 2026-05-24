@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     AnyReconciler, RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, TargetResource,
     WorkloadLifecycle, WorkloadLifecycleView,
 };

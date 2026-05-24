@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
 
-use overdrive_core::reconciler::ReconcilerName;
+use overdrive_core::reconcilers::ReconcilerName;
 
 use crate::api::ErrorBody;
 use crate::view_store::{ProbeError, ViewStoreError};

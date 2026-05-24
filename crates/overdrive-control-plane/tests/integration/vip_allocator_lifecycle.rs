@@ -80,7 +80,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{CorrelationKey, NodeId};
-use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -578,9 +578,9 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
 
     // ---- (5) Drive convergence ticks — should emit ReleaseServiceVip.
     let reconciler_name =
-        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("reconciler name");
+        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("reconciler name");
     let target_resource =
-        overdrive_core::reconciler::TargetResource::new(&format!("job/{workload_id}"))
+        overdrive_core::reconcilers::TargetResource::new(&format!("job/{workload_id}"))
             .expect("valid target");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);

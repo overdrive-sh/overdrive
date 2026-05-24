@@ -23,7 +23,7 @@
 //! [`EvaluationBroker`]: overdrive_core::eval_broker::EvaluationBroker
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 
 /// Dispatch one `Action::EnqueueEvaluation`. Submits an
 /// [`Evaluation { reconciler, target }`] to the per-runtime
@@ -66,7 +66,7 @@ pub fn dispatch(action: &Action, broker: &mut EvaluationBroker) {
 )]
 mod tests {
     use overdrive_core::eval_broker::EvaluationBroker;
-    use overdrive_core::reconciler::{Action, ReconcilerName, TargetResource};
+    use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource};
 
     use super::dispatch;
 

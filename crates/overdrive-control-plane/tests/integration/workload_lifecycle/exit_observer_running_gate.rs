@@ -76,7 +76,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -235,7 +235,7 @@ async fn watcher_cannot_emit_exit_before_running_row_committed() {
     // the exit observer reads the present prior row and writes
     // Failed.
     let start = Instant::now();
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
 
@@ -344,7 +344,7 @@ async fn degraded_escalation_still_fires_running_gate() {
     let start = Instant::now();
 
     let mut events = h.state.lifecycle_events.subscribe();
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
 

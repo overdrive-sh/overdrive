@@ -243,13 +243,13 @@ fn entropy_determinism_fails_when_two_sim_entropies_disagree() {
 // living next to its GREEN sibling.
 // ---------------------------------------------------------------------------
 
-fn jl_reconciler() -> overdrive_core::reconciler::ReconcilerName {
-    overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+fn jl_reconciler() -> overdrive_core::reconcilers::ReconcilerName {
+    overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle is a valid ReconcilerName")
 }
 
-fn target(raw: &str) -> overdrive_core::reconciler::TargetResource {
-    overdrive_core::reconciler::TargetResource::new(raw).expect("valid TargetResource")
+fn target(raw: &str) -> overdrive_core::reconcilers::TargetResource {
+    overdrive_core::reconcilers::TargetResource::new(raw).expect("valid TargetResource")
 }
 
 /// Happy path: every drained eval is dispatched against its named
@@ -289,7 +289,7 @@ fn dispatch_routing_passes_when_each_eval_dispatches_named_reconciler_only() {
 #[test]
 fn dispatch_routing_fails_on_mocked_fanout_regression() {
     let jl = jl_reconciler();
-    let noop = overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+    let noop = overdrive_core::reconcilers::ReconcilerName::new("noop-heartbeat")
         .expect("noop-heartbeat is a valid ReconcilerName");
     let t = target("job/payments");
 
@@ -321,7 +321,7 @@ fn dispatch_routing_fails_on_mocked_fanout_regression() {
 #[test]
 fn dispatch_routing_fails_when_only_unsubmitted_reconciler_was_dispatched() {
     let jl = jl_reconciler();
-    let noop = overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+    let noop = overdrive_core::reconcilers::ReconcilerName::new("noop-heartbeat")
         .expect("noop-heartbeat is a valid ReconcilerName");
     let t = target("job/payments");
 

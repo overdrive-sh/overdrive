@@ -30,7 +30,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, noop_heartbeat};
 use overdrive_core::UnixInstant;
 use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, AnyReconcilerView, AnyState, ReconcilerName, TickContext,
 };
 use overdrive_core::traits::driver::{Driver, DriverType};

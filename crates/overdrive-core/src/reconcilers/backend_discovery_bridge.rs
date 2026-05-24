@@ -272,7 +272,8 @@ pub struct BackendDiscoveryBridge {
 /// Compile-time alias to `<ServiceMapHydrator as Reconciler>::NAME` —
 /// a rename of the hydrator's `NAME` constant without updating this
 /// reference is a compile error, not a silent handoff failure.
-const SERVICE_MAP_HYDRATOR_NAME: &str = <super::ServiceMapHydrator as Reconciler>::NAME;
+const SERVICE_MAP_HYDRATOR_NAME: &str =
+    <super::service_map_hydrator::ServiceMapHydrator as Reconciler>::NAME;
 
 impl BackendDiscoveryBridge {
     /// Canonical kebab-case name; single compile-time anchor per

@@ -23,7 +23,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::id::WorkloadId;
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
     WorkloadLifecycleState, WorkloadLifecycleView,
 };
@@ -123,7 +123,7 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     // shows no Running alloc, WorkloadLifecycle must emit a StartAllocation.
     // This is the happy-path Slice 3 acceptance: the first reconciler
     // exercises the scheduler and emits a Start.
-    use overdrive_core::reconciler::Action;
+    use overdrive_core::reconcilers::Action;
 
     let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();

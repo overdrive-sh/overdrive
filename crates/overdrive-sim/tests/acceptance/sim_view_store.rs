@@ -20,7 +20,7 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_sim::adapters::view_store::SimViewStore;
 
 /// Fixed `&'static str` reconciler name for the proptest. The

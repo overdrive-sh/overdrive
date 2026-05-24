@@ -30,7 +30,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
@@ -148,7 +148,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
 
     let target = TargetResource::new("job/backoff-exhaust").expect("valid target");
     let workload_lifecycle_name =
-        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("valid name");
+        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(120);
 
@@ -243,7 +243,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 
     let target = TargetResource::new("job/term-stop").expect("valid target");
     let workload_lifecycle_name =
-        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("valid name");
+        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(120);
 
@@ -359,7 +359,7 @@ async fn non_terminal_transitions_emit_none() {
 
     let target = TargetResource::new("job/non-term").expect("valid target");
     let workload_lifecycle_name =
-        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("valid name");
+        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
 

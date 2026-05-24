@@ -24,5 +24,5 @@
 //! placement is load-bearing — see the corresponding `view.rs`
 //! docstring.
 
-pub use overdrive_core::reconciler::{ServiceDesired, ServiceMapHydratorState};
+pub use overdrive_core::reconcilers::{ServiceDesired, ServiceMapHydratorState};
 pub use overdrive_core::traits::observation_store::ServiceHydrationStatus;

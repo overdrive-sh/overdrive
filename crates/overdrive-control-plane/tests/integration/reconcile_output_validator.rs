@@ -25,7 +25,7 @@ use overdrive_control_plane::action_shim::validate::{
     ReconcilerOutputViolation, WriteRoute, validate_reconcile_output,
 };
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 
 fn correlation(purpose: &str) -> CorrelationKey {
     let hash = ContentHash::of(purpose.as_bytes());

@@ -664,7 +664,7 @@ const fn harness_registered_reconcilers(_hosts: &[Host]) -> usize {
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
     use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+    use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
     const N: u64 = 3;
 
@@ -712,7 +712,7 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 fn drive_broker_collapse_multi_key()
 -> (u64, evaluators::BrokerCountersSnapshot, evaluators::BrokerDrainOrderSnapshot) {
     use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+    use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
     const N: u64 = 3;
 
@@ -757,7 +757,7 @@ fn drive_broker_collapse_multi_key()
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::DispatchRecord) {
     use overdrive_core::eval_broker::Evaluation;
-    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+    use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
     let r_jl =
         ReconcilerName::new("job-lifecycle").expect("job-lifecycle is a valid ReconcilerName");
@@ -785,8 +785,8 @@ fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::Dispatc
 
 /// Construct the reconciler the harness twin-invokes for the
 /// `ReconcilerIsPure` invariant.
-fn harness_purity_reconciler() -> overdrive_core::reconciler::AnyReconciler {
-    use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+fn harness_purity_reconciler() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, NoopHeartbeat};
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
 

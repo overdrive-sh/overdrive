@@ -73,7 +73,7 @@ pub mod id;
 // compile chain. See § "xtask is build / test / dev orchestration"
 // in `.claude/rules/development.md` for the layering rule.
 pub mod maglev;
-pub mod reconciler;
+pub mod reconcilers;
 pub mod traits;
 // `UnixInstant` — portable wall-clock instant for persistable
 // deadlines. See `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`

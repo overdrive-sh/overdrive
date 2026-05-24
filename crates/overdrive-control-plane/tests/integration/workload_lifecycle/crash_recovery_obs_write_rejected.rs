@@ -41,7 +41,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -142,7 +142,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) {
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut tick_n = 0_u64;
@@ -201,7 +201,7 @@ async fn transient_obs_write_recovers_on_retry() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut saw_failed_event = false;
@@ -276,7 +276,7 @@ async fn terminal_obs_write_escalates_via_lifecycle_event() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_degraded_event = None;

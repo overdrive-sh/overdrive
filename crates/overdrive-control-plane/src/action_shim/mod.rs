@@ -23,7 +23,7 @@ use std::sync::Arc;
 use overdrive_core::TransitionReason;
 use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError, DriverType};
 use overdrive_core::traits::observation_store::{
@@ -54,7 +54,7 @@ pub mod release_service_vip;
 /// via the dedup fingerprint in [`BackendDiscoveryBridgeView`].
 ///
 /// [`BackendDiscoveryBridgeView`]:
-///     overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView
+///     overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView
 pub mod write_service_backend_row;
 
 /// Per-arm dispatch for `Action::EnqueueEvaluation` per UI-05 (the

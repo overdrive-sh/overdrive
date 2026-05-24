@@ -43,9 +43,9 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
 use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
-use overdrive_core::reconciler::ServiceMapHydrator;
-use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView;
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::ServiceMapHydrator;
+use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
+use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName,
     ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
     WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
@@ -372,7 +372,7 @@ impl ReconcilerRuntime {
         let view = self.view_for_workload_lifecycle(target);
         let attempts = view.restart_counts.get(alloc_id).copied().unwrap_or(0);
         let attempt_index = attempts.saturating_add(1);
-        let will_restart = attempt_index < overdrive_core::reconciler::RESTART_BACKOFF_CEILING;
+        let will_restart = attempt_index < overdrive_core::reconcilers::RESTART_BACKOFF_CEILING;
         (attempt_index, will_restart)
     }
 
@@ -849,7 +849,7 @@ fn service_map_hydrator_canonical_name() -> ReconcilerName {
 #[allow(clippy::expect_used)]
 fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
     ReconcilerName::new(
-        <overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge
+        <overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge
             as Reconciler>::NAME,
     )
     .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
@@ -1108,7 +1108,7 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
-                    < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
+                    < overdrive_core::reconcilers::RESTART_BACKOFF_CEILING
             })
         }
     }
@@ -1177,7 +1177,7 @@ async fn hydrate_desired(
                 let fp = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
                 desired.insert(
                     row.service_id,
-                    overdrive_core::reconciler::ServiceDesired {
+                    overdrive_core::reconcilers::ServiceDesired {
                         vip,
                         backends: row.backends,
                         fingerprint: fp,
@@ -1198,13 +1198,13 @@ async fn hydrate_desired(
             let workload_id = workload_id_from_target(target)?;
             let listeners = hydrate_bridge_desired_listeners(state, &workload_id).await?;
             let s =
-                overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeState {
+                overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
                     desired:
-                        overdrive_core::reconciler::backend_discovery_bridge::ServiceListenerSet {
+                        overdrive_core::reconcilers::backend_discovery_bridge::ServiceListenerSet {
                             workload_id: workload_id.clone(),
                             listeners,
                         },
-                    actual: overdrive_core::reconciler::backend_discovery_bridge::RunningAllocSet {
+                    actual: overdrive_core::reconcilers::backend_discovery_bridge::RunningAllocSet {
                         workload_id,
                         running: std::collections::BTreeSet::new(),
                     },
@@ -1271,7 +1271,7 @@ async fn hydrate_bridge_desired_listeners(
 ) -> Result<
     BTreeMap<
         overdrive_core::id::ServiceId,
-        overdrive_core::reconciler::backend_discovery_bridge::ProjectedListener,
+        overdrive_core::reconcilers::backend_discovery_bridge::ProjectedListener,
     >,
     ConvergenceError,
 > {
@@ -1327,7 +1327,7 @@ async fn hydrate_bridge_desired_listeners(
             overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
         listeners.insert(
             service_id,
-            overdrive_core::reconciler::backend_discovery_bridge::ProjectedListener {
+            overdrive_core::reconcilers::backend_discovery_bridge::ProjectedListener {
                 vip: assigned_vip,
                 port: listener.port,
                 protocol: listener.protocol,
@@ -1566,13 +1566,13 @@ async fn hydrate_actual(
                 .map(|r| r.alloc_id)
                 .collect();
             let s =
-                overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeState {
+                overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
                     desired:
-                        overdrive_core::reconciler::backend_discovery_bridge::ServiceListenerSet {
+                        overdrive_core::reconcilers::backend_discovery_bridge::ServiceListenerSet {
                             workload_id: workload_id.clone(),
                             listeners: BTreeMap::new(),
                         },
-                    actual: overdrive_core::reconciler::backend_discovery_bridge::RunningAllocSet {
+                    actual: overdrive_core::reconcilers::backend_discovery_bridge::RunningAllocSet {
                         workload_id,
                         running,
                     },
@@ -1684,7 +1684,7 @@ mod tests {
     #[tokio::test]
     async fn restart_status_flips_at_ceiling_boundary() {
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconciler::{
+        use overdrive_core::reconcilers::{
             RESTART_BACKOFF_CEILING, TargetResource, WorkloadLifecycleView,
         };
 
@@ -1742,8 +1742,8 @@ mod tests {
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::dataplane::backend_key::Proto;
         use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
-        use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
-        use overdrive_core::reconciler::{AnyReconciler, AnyState, TargetResource};
+        use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+        use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource};
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{

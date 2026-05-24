@@ -36,7 +36,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;

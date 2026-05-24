@@ -36,7 +36,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;

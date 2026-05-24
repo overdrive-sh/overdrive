@@ -16,4 +16,4 @@
 //! holds the concrete type in its `ServiceMapHydrator` variant, and
 //! `overdrive-core` cannot depend on `overdrive-control-plane`.
 
-pub use overdrive_core::reconciler::{RetryMemory, ServiceMapHydratorView};
+pub use overdrive_core::reconcilers::{RetryMemory, ServiceMapHydratorView};

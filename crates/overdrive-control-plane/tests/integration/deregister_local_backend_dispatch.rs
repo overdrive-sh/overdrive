@@ -26,7 +26,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 
 use overdrive_control_plane::action_shim::deregister_local_backend;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId};
-use overdrive_core::reconciler::Action;
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 

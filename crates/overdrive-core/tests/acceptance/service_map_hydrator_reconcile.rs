@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, Reconciler, RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
     ServiceMapHydratorView, TickContext,
 };
@@ -294,7 +294,7 @@ fn iteration_order_is_btreemap_deterministic() {
 
 // ---- Phase 16 review D12: backend-address classifier ---------------
 
-use overdrive_core::reconciler::{BackendAddressRejection, classify_backend_address};
+use overdrive_core::reconcilers::{BackendAddressRejection, classify_backend_address};
 
 #[test]
 fn classify_backend_address_accepts_routable_unicast() {

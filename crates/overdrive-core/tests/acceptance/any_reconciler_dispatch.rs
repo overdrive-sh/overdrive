@@ -33,10 +33,10 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Node, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
-use overdrive_core::reconciler::backend_discovery_bridge::{
+use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconciler::{
+use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, TickContext, WorkloadLifecycle,
     WorkloadLifecycleState,
@@ -125,7 +125,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         service_spec_digest: None,
     };
     let view = AnyReconcilerView::WorkloadLifecycle(
-        overdrive_core::reconciler::WorkloadLifecycleView::default(),
+        overdrive_core::reconcilers::WorkloadLifecycleView::default(),
     );
 
     let (_actions, returned_view) = any.reconcile(

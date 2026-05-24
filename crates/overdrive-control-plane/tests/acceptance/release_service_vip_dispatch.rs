@@ -32,7 +32,7 @@ use async_trait::async_trait;
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
-use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
 };
@@ -112,7 +112,7 @@ async fn release_action_dispatch_invokes_allocator_release() {
 
     // ---- Construct the Action::ReleaseServiceVip from the same digest.
     // The CorrelationKey shape mirrors the reconciler-emission site in
-    // overdrive-core::reconciler::release_service_vip — derived from
+    // overdrive-core::reconcilers::release_service_vip — derived from
     // (target = "job-lifecycle/<workload>", spec_hash = digest,
     // purpose = "release-service-vip") so an end-to-end test in 03-03
     // sees the same correlation derivation.

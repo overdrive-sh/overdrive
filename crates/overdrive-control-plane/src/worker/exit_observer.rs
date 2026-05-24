@@ -47,8 +47,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, WorkloadId};
-use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
-use overdrive_core::reconciler::{Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle};
+use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES,
