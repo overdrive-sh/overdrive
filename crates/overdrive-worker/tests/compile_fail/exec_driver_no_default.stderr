@@ -4,8 +4,13 @@ error[E0599]: no function or associated item named `default` found for struct `E
  14 |     let _driver = ExecDriver::default();
     |                               ^^^^^^^ function or associated item not found in `ExecDriver`
     |
-note: if you're trying to build a new `ExecDriver`, consider using `ExecDriver::new` which returns `ExecDriver`
+note: if you're trying to build a new `ExecDriver` consider using one of the following associated functions:
+      ExecDriver::new
+      ExecDriver::new_with_default_fs
    --> src/driver.rs
     |
     |     pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>) -> Self {
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+    |     pub fn new_with_default_fs(cgroup_root: PathBuf, clock: Arc<dyn Clock>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

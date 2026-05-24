@@ -26,6 +26,16 @@ integration-tests = []
 
 [dependencies]
 overdrive-core.workspace = true
+# `overdrive-host` — production adapter crate (`adapter-host`).
+# Promoted from dev-dep to regular dep at step 01-06 of the
+# cgroup-fs-port migration: `ExecDriver::new_with_default_fs` is the
+# composition-root factory the control-plane crate calls so it never
+# has to name the `CgroupFs` trait or `RealCgroupFs` directly,
+# preserving the ADR-0029 invariant that `overdrive-control-plane`
+# does NOT depend on `overdrive-worker`-internal port semantics. The
+# previous dev-dep usage (Tier 3 `real_cgroup_fs/*` tests) is
+# subsumed by this regular dep — same crate, same impl.
+overdrive-host.path      = "../overdrive-host"
 async-trait.workspace    = true
 hostname.workspace       = true
 parking_lot.workspace    = true
@@ -47,14 +57,10 @@ nix.workspace = true
 
 [dev-dependencies]
 overdrive-sim.path  = "../overdrive-sim"
-# `overdrive-host` — production adapter crate (`adapter-host`). Used
-# by the Tier 3 integration suite under
-# `tests/integration/real_cgroup_fs/` (step 01-02 of the cgroup-fs-port
-# migration) to exercise `RealCgroupFs::probe()` against real
-# `/sys/fs/cgroup` and against a tempdir-scoped probe root. Dev-dep
-# only — production wiring of `RealCgroupFs` into the composition
-# root lands at step 01-06.
-overdrive-host.path = "../overdrive-host"
+# NOTE: `overdrive-host` was promoted to a regular `[dependencies]`
+# entry at step 01-06 of the cgroup-fs-port migration — see the
+# `[dependencies]` block above. The Tier 3 `real_cgroup_fs/*` tests
+# continue to consume `RealCgroupFs` through that regular dep.
 proptest.workspace  = true
 tempfile.workspace  = true
 serial_test.workspace = true

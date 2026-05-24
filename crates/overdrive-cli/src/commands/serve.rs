@@ -16,10 +16,25 @@ use std::time::Duration;
 
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::dataplane::Dataplane;
+use overdrive_host::RealCgroupFs;
 use url::Url;
 
 use crate::http_client::CliError;
+
+/// Test-only env var honoured by [`run_inner`] to override the
+/// `RealCgroupFs` probe root. When unset (the production default),
+/// the probe runs against `/sys/fs/cgroup` via
+/// [`RealCgroupFs::new`]. When set, the probe runs under the supplied
+/// path so integration tests can force probe-failure without
+/// requiring privileged FS mutations on the real cgroup hierarchy.
+///
+/// TEST-HOOK-ONLY: this env var has NO documented use outside the
+/// CLI integration test suite. It does NOT appear in `--help` and
+/// the binary honours it without flagging — same convention as the
+/// `OPENTELEMETRY_*` / `OVERDRIVE_CONFIG_DIR` env vars.
+const PROBE_ROOT_ENV_VAR: &str = "OVERDRIVE_TEST_PROBE_ROOT";
 
 /// Default drain deadline for `ServeHandle::shutdown`. In-flight
 /// requests complete within this window; new connections are refused
@@ -125,6 +140,55 @@ async fn run_inner(
     dataplane_override: Option<Arc<dyn Dataplane>>,
 ) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
+
+    // ADR-0054 § Composition root wiring — Earned-Trust probe.
+    //
+    // Construct the production cgroupfs adapter and round-trip on the
+    // kernel-managed `cgroup.subtree_control` pseudo-file BEFORE the
+    // worker subsystem starts. On failure, emit a structured
+    // `health.startup.refused` event whose `cause` field carries the
+    // typed `ProbeError` Display rendering (NOT collapsed to
+    // `Internal(String)` per `.claude/rules/development.md` § "Never
+    // flatten a typed error to `Internal(String)` at a composition
+    // boundary"), and return `CliError::ProbeRefused { cause }`.
+    //
+    // The probe runs BEFORE `run_server`, so it executes before
+    // `cgroup_preflight` (ADR-0028) AND before any FS write the
+    // worker subsystem would issue. When the probe fails, the
+    // listener never binds, the convergence loop never spawns, and
+    // no on-disk artefacts are created — operators see the typed
+    // refusal rather than a downstream Transport failure that would
+    // mask the substrate problem.
+    //
+    // The test-only `OVERDRIVE_TEST_PROBE_ROOT` env var swaps the
+    // probe root from `/sys/fs/cgroup` to a caller-supplied path so
+    // integration tests can force probe-failure deterministically.
+    // Production callers never set the variable; the binary honours
+    // it without --help advertisement (same convention as
+    // `$OVERDRIVE_CONFIG_DIR`).
+    let probe_adapter = match std::env::var(PROBE_ROOT_ENV_VAR) {
+        Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
+        _ => RealCgroupFs::new(),
+    };
+    let probe_fs: Arc<dyn CgroupFs> = Arc::new(probe_adapter);
+    if let Err(probe_err) = probe_fs.probe().await {
+        let cause = probe_err.to_string();
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "cgroup_fs.probe",
+            cause = %cause,
+            adapter = probe_fs.kind(),
+            "CgroupFs probe refused; composition root will not start worker subsystem"
+        );
+        return Err(CliError::ProbeRefused { cause });
+    }
+    // Probe succeeded — the substrate honors the contract. Drop the
+    // probe adapter; `run_server` constructs its own production
+    // adapter for the live worker subsystem (both are stateless
+    // wrappers around `tokio::fs::*`, so the probe and the live
+    // adapter share substrate semantics by construction).
+    drop(probe_fs);
 
     // `..Default::default()` populates `tick_cadence`
     // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
