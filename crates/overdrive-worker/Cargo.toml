@@ -47,6 +47,14 @@ nix.workspace = true
 
 [dev-dependencies]
 overdrive-sim.path  = "../overdrive-sim"
+# `overdrive-host` — production adapter crate (`adapter-host`). Used
+# by the Tier 3 integration suite under
+# `tests/integration/real_cgroup_fs/` (step 01-02 of the cgroup-fs-port
+# migration) to exercise `RealCgroupFs::probe()` against real
+# `/sys/fs/cgroup` and against a tempdir-scoped probe root. Dev-dep
+# only — production wiring of `RealCgroupFs` into the composition
+# root lands at step 01-06.
+overdrive-host.path = "../overdrive-host"
 proptest.workspace  = true
 tempfile.workspace  = true
 serial_test.workspace = true

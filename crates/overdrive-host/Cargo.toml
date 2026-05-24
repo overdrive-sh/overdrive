@@ -33,6 +33,12 @@ async-trait.workspace    = true
 bytes.workspace          = true
 rand.workspace           = true
 tokio.workspace          = true
+# `uuid` v4 — used by `RealCgroupFs::probe` to mint a per-call probe
+# directory under `<probe_root>/.overdrive-probe-<uuid>/`. Parallel
+# probes (under test or in production composition root races) MUST
+# scope independent scratch namespaces — UUID v4 provides that with
+# no coordination cost.
+uuid                     = { workspace = true }
 
 [lints]
 workspace = true

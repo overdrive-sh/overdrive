@@ -1910,6 +1910,7 @@ dependencies = [
  "overdrive-core",
  "rand 0.8.6",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1981,6 +1982,7 @@ dependencies = [
  "libc",
  "nix",
  "overdrive-core",
+ "overdrive-host",
  "overdrive-sim",
  "parking_lot",
  "proptest",

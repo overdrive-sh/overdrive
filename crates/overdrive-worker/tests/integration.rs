@@ -14,6 +14,13 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
+    // Step 01-02 (cgroup-fs-port migration): Tier 3 acceptance tests
+    // for `overdrive_host::RealCgroupFs::probe()`.
+    mod real_cgroup_fs {
+        mod probe_success;
+        mod probe_with_custom_root;
+    }
+
     mod exec_driver {
         mod cgroup_procs;
         // Per-alloc RAII cleanup helper used by every real-cgroupfs test
