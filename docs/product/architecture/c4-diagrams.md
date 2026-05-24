@@ -321,4 +321,134 @@ The diagram makes five architectural properties visually explicit:
    is deleted per `.claude/rules/development.md` § "Deletion
    discipline".
 
+## Phase 1 — Service Health-Check Probes component diagram (Mermaid)
+
+**Source:** `docs/feature/service-health-check-probes/` DESIGN-wave
+artifacts + ADR-0054..ADR-0059.
+**ADRs:** ADR-0054 (ProbeRunner), ADR-0055
+(ServiceLifecycleReconciler), ADR-0056 (ServiceSubmitEvent
+evolution), ADR-0057 (TOML spec), ADR-0058 (default-probe
+inference), ADR-0059 (exec-probe cgroup placement). Amendments to
+ADR-0032 / ADR-0033 / ADR-0037 / ADR-0048 / ADR-0050.
+**Date:** 2026-05-24.
+
+System Context (L1) and Container (L2) inherit unchanged: no new
+external actors, no new top-level containers. `overdrive-worker`
+gains the ProbeRunner subsystem; `overdrive-control-plane` gains
+the `ServiceLifecycleReconciler` (a sibling of `WorkloadLifecycle`
+under the `reconcilers/` module).
+
+### C4 Level 2 — Container annotation (Phase 1 service-health-check-probes)
+
+```mermaid
+C4Container
+  title Container Diagram annotation — Phase 1 Service Health-Check Probes
+
+  Person(operator, "Platform Engineer (Ana)", "Submits Service specs with [[health_check.*]] sections via `overdrive job submit`; inspects probe status via `overdrive alloc status --job <id>`")
+
+  Container(cli, "overdrive-cli", "Rust binary", "Parses [[health_check.*]] TOML; submits ServiceSpec with probes to control plane via NDJSON; renders Probes section for Service kind")
+  Container(ctrl, "overdrive-control-plane", "Rust crate", "EXTENDED — ServiceLifecycleReconciler (new sibling to WorkloadLifecycle); ServiceSubmitEvent V2 wire shape (Stable, Failed); action shim maps TerminalCondition to wire variant")
+  Container(worker, "overdrive-worker", "Rust crate", "EXTENDED — ProbeRunner subsystem; per-alloc supervisor + per-probe tokio tasks; TcpProber/HttpProber/CgroupExecProber production bindings")
+  ContainerDb(obs, "LocalObservationStore (redb)", "Single-writer ObservationStore", "NEW table — ProbeResultRow keyed (alloc_id, probe_idx) LWW; rkyv envelope V1 per ADR-0048")
+  ContainerDb(intent, "LocalIntentStore (redb)", "IntentStore", "ServiceSpec V2 — gains startup_probes/readiness_probes/liveness_probes Vec fields; rkyv envelope V1→V2")
+
+  Rel(operator, cli, "Submits Service spec with [[health_check.*]] TOML")
+  Rel(cli, ctrl, "Streams ServiceSubmitEvent V2 (NDJSON) — Stable / Failed wire variants")
+  Rel(ctrl, intent, "Persists ServiceSpec V2 with probe descriptors")
+  Rel(ctrl, worker, "Delegates per-alloc lifecycle (ExecDriver.start signals ProbeRunner.start_alloc on Running)")
+  Rel(worker, obs, "Writes ProbeResultRow per probe per tick (LWW)")
+  Rel(ctrl, obs, "Reads probe_results on hydrate_actual into ServiceLifecycleState")
+```
+
+### C4 Level 3 — ProbeRunner subsystem topology
+
+This is the load-bearing new component diagram for the feature.
+See `brief.md` § 86 for the canonical embedding; reproduced here
+for cross-reference.
+
+```mermaid
+C4Component
+  title Component Diagram — ProbeRunner subsystem (Phase 1 service-health-check-probes)
+
+  Container_Boundary(worker, "overdrive-worker (adapter-host)") {
+    Component(runner, "ProbeRunner", "Rust struct (Arc-shared per node)", "start_alloc / stop_alloc / probe() Earned Trust gate; holds CancellationTokens per alloc")
+    Component(supervisor, "Per-alloc supervisor task", "tokio::task", "Spawns N per-probe tasks via JoinSet; cancels on alloc terminal")
+    Component(probe_task, "Per-probe-instance task", "tokio::task", "Loops: select(cancel, sleep(interval)) → probe.probe() → write ProbeResultRow → repeat")
+    Component(tcp_prober, "TokioTcpProber", "production binding of TcpProber", "tokio::net::TcpStream::connect + tokio::time::timeout")
+    Component(http_prober, "HyperHttpProber", "production binding of HttpProber", "hyper::client + connection pool + per-request timeout")
+    Component(exec_prober, "CgroupExecProber", "production binding of ExecProber", "Command::spawn + place_pid_in_scope (ADR-0026 reuse) + cgroup.kill on timeout (ADR-0059)")
+    Component(cgmgr, "cgroup_manager (existing per ADR-0026)", "module", "place_pid_in_scope, cgroup_kill; reused by ExecProber")
+  }
+
+  Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
+    Component(reconciler_runtime, "ReconcilerRuntime (existing per ADR-0035)", "Reads probe_results into ServiceLifecycleState.actual on hydrate_actual; dispatches to ServiceLifecycleReconciler")
+    Component(service_reconciler, "ServiceLifecycleReconciler", "Pure sync reconcile (per development.md § Reconciler I/O)", "Consumes ProbeResultRow via actual; emits Stable/Failed (startup gate) / WriteServiceBackendRow (readiness) / RestartAllocation (liveness)")
+    Component(action_shim, "action_shim (existing per ADR-0023, EXTENDED)", "Action dispatch", "New: maps TerminalCondition::Stable | Failed onto ServiceSubmitEvent::Stable | Failed (V2 wire); preserves ADR-0037 §4 byte-equality contract")
+    Component(streaming, "streaming.rs (existing per ADR-0032, EXTENDED)", "NDJSON broadcast subscriber", "Routes Service-kind LifecycleEvent.terminal to ServiceSubmitEvent V2 wire variants")
+  }
+
+  Container_Boundary(core, "overdrive-core") {
+    Component(core_traits, "traits::prober (NEW module)", "TcpProber / HttpProber / ExecProber port traits with rustdoc preconditions, postconditions, edge cases, observable invariants per development.md")
+    Component(core_obs, "observation::probe_result (NEW module)", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
+    Component(core_tc, "transition_reason (EXTENDED)", "TerminalCondition gains Stable, Failed variants; ServiceFailureReason enum NEW")
+    Component(core_spec, "aggregate::ServiceSpec (EXTENDED)", "Gains startup_probes / readiness_probes / liveness_probes Vec<ProbeDescriptor>; rkyv envelope V2")
+  }
+
+  ContainerDb(obs_store, "LocalObservationStore (redb)", "EXTENDED — write_probe_result + list_probe_results_for_alloc methods on trait; new redb table for ProbeResultRow keyed (alloc_id, probe_idx) LWW")
+  Container(exec_driver, "ExecDriver (existing per ADR-0030)", "Per-alloc supervisor signals ProbeRunner on alloc Running and terminal")
+
+  Rel(exec_driver, runner, "on_alloc_running(alloc_id, probe_descriptors) / on_alloc_terminal(alloc_id)")
+  Rel(runner, supervisor, "spawn per-alloc supervisor task; pass CancellationToken")
+  Rel(supervisor, probe_task, "spawn N per-probe tasks via JoinSet")
+  Rel(probe_task, tcp_prober, "TcpProber::probe (TCP mechanic)")
+  Rel(probe_task, http_prober, "HttpProber::probe (HTTP mechanic)")
+  Rel(probe_task, exec_prober, "ExecProber::probe (Exec mechanic)")
+  Rel(exec_prober, cgmgr, "place_pid_in_scope + cgroup_kill")
+  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, probe_idx)")
+  Rel(reconciler_runtime, obs_store, "list_probe_results_for_alloc on hydrate_actual")
+  Rel(reconciler_runtime, service_reconciler, "reconcile(desired, actual, view, tick) → (Vec<Action>, View)")
+  Rel(service_reconciler, action_shim, "Emits Stable/Failed Action::SetTerminalCondition + WriteServiceBackendRow + RestartAllocation")
+  Rel(action_shim, streaming, "Single write site — row write + broadcast write byte-equal per ADR-0037 §4")
+  Rel(core_traits, runner, "Trait surface (Arc<dyn TcpProber/HttpProber/ExecProber>)")
+  Rel(core_obs, obs_store, "Row shape; rkyv envelope V1")
+```
+
+The diagram makes six architectural properties visually explicit:
+
+1. **Reconciler is a pure consumer of observation rows** (per
+   `.claude/rules/development.md` § "Reconciler I/O"). The
+   `ServiceLifecycleReconciler` has no edge to `ProbeRunner`,
+   `TcpProber`, `HttpProber`, or `ExecProber` — it reads from
+   `actual.probe_results` only. Probe execution is observation
+   production; the reconciler is the pure decision boundary.
+2. **Per-alloc-per-probe failure isolation** (per ADR-0054 §2 +
+   feature-delta Risk #1). Each per-probe-instance task owns its
+   own `clock.sleep(interval)` and `probe.probe()` call; no
+   shared scheduler, no head-of-line blocking across probes.
+   `JoinSet` drop on supervisor cancel guarantees bounded
+   shutdown.
+3. **Three port traits, three production adapters, three sim
+   adapters** (per ADR-0054 §3). Each trait carries explicit
+   rustdoc preconditions, postconditions, edge cases. DST
+   equivalence harnesses drive each pair independently per
+   `.claude/rules/development.md` § "Trait definitions specify
+   behavior, not just signature".
+4. **Cgroup-aware exec via reused cgroup-manager primitives**
+   (per ADR-0059). `CgroupExecProber` reuses
+   `place_pid_in_scope` + `cgroup_kill` from `ExecDriver`'s
+   existing module; bounded new code in the exec-probe path.
+5. **LWW observation, not append-mode** (per ADR-0054 §5 +
+   `.claude/rules/development.md` § "Persist inputs, not derived
+   state"). Composite primary key `(alloc_id, probe_idx)`;
+   `redb::insert` semantics give LWW structurally; no merge
+   logic. Operational history (consecutive failures,
+   last_observed_at) is the reconciler's recomputation at read
+   time, not a persisted derived field.
+6. **`Stable` non-terminal semantics encoded structurally** (per
+   ADR-0055 §2 / §4). The `ServiceLifecycleView::stable_announced`
+   `BTreeSet<AllocationId>` is the publication-side dedup gate;
+   `TerminalCondition::Stable` carries no `is_terminal: bool`
+   flag because the dedup lives in the reconciler View. ADR-0037
+   layering rule preserved verbatim — streaming forwards
+   `LifecycleEvent.terminal` without re-deriving.
 

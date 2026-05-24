@@ -3001,6 +3001,436 @@ the downstream VIP consumer. System Context
 
 ---
 
+## Phase 1 service-health-check-probes extension
+
+**Source:** `docs/feature/service-health-check-probes/design/` (DESIGN
+wave artifacts under `docs/feature/service-health-check-probes/` —
+DISCUSS already landed, DESIGN appends here).
+**ADRs:** ADR-0054 (ProbeRunner subsystem), ADR-0055
+(ServiceLifecycleReconciler), ADR-0056 (ServiceSubmitEvent
+Stable/Failed evolution), ADR-0057 (`[[health_check.*]]` TOML spec),
+ADR-0058 (default-probe inference), ADR-0059 (exec-probe cgroup
+placement). Amendments to ADR-0032, ADR-0033, ADR-0037, ADR-0048,
+ADR-0050.
+**Date:** 2026-05-24.
+**Closes:** RCA-A
+(`docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md`)
+for Service kind, structurally.
+
+This section extends §§ 1–74 with the application-architecture
+decisions landed by feature `service-health-check-probes`. Nothing in
+§§ 1–74 is rewritten. The feature builds on the workload-kind
+discriminator (ADR-0047 / §§ 54–58) to add operator-declared probe
+semantics to the Service kind.
+
+### 75. ProbeRunner subsystem — `overdrive-worker` adapter-host
+
+Per ADR-0054. A new module tree
+`crates/overdrive-worker/src/probe_runner/` lands as a sibling of
+`ExecDriver` (ADR-0030) and `CgroupManager` (ADR-0026). The runner
+holds an `Arc` shared across every Service-kind alloc on the node;
+when an alloc reaches `Running`, the runner spawns a per-alloc
+supervisor task that in turn spawns one per-probe-instance tokio
+task per declared probe. Per-task isolation via
+`tokio_util::sync::CancellationToken`; supervisor cancellation
+aborts every per-probe task via `JoinSet` drop.
+
+The task graph shape ("per-alloc-per-probe tokio task") matches
+Kubernetes' `prober.Manager` design (research § 3.3 D5) and was
+chosen over (b) per-alloc multiplex via `select!` and (c) shared
+worker-process scheduler. Rationale: (b) head-of-line blocks fast
+probes behind slow ones; (c) introduces cross-alloc cascading
+failure surface. The chosen shape gives independent failure
+isolation per probe at a cost of ~1 KB per supervisor.
+
+Three new port traits land in `overdrive-core::traits::prober`
+(NEW module):
+
+- `TcpProber` — `async fn probe(SocketAddrV4, Duration) -> ProbeOutcome`
+- `HttpProber` — `async fn probe(HttpProbeRequest, Duration) -> ProbeOutcome`
+- `ExecProber` — `async fn probe(ExecProbeSpec, Duration, &CgroupPath) -> ProbeOutcome`
+
+Each trait carries rustdoc pinning preconditions, postconditions,
+edge cases, and observable invariants per
+`.claude/rules/development.md` § "Trait definitions specify
+behavior, not just signature". Production bindings
+(`TokioTcpProber`, `HyperHttpProber`, `CgroupExecProber`) live in
+`overdrive-worker`; sim bindings (`SimTcpProber`, `SimHttpProber`,
+`SimExecProber`) live in `crates/overdrive-sim/src/adapters/probers.rs`
+(new) and honour the same trait surface (per `.claude/rules/development.md`
+§ "Production code is not shaped by simulation").
+
+Earned Trust composition-root invariant: the runner exposes
+`async fn probe(&self) -> Result<(), ProbeRunnerError>`; the
+composition root (`overdrive-cli::commands::serve`) calls it after
+construction and before binding the HTTP server. Failure refuses
+startup via `health.startup.refused` structured event (per ADR-0035
+§7).
+
+### 76. ProbeResultRow — LWW observation, additive ObservationStore row
+
+Per ADR-0054 §5. A new rkyv-archived row `ProbeResultRow` lives in
+`crates/overdrive-core/src/observation/probe_result.rs` (new) with
+composite primary key `(alloc_id, probe_idx)` — LWW per
+`.claude/rules/development.md` § "Persist inputs, not derived
+state". The `ObservationStore` trait gains two methods
+(`write_probe_result`, `list_probe_results_for_alloc`); the return
+type is `BTreeMap<ProbeIdx, ProbeResultRow>` per
+`.claude/rules/development.md` § "Ordered-collection choice"
+(iterated by reconciler + render).
+
+Per ADR-0048 § "Version-bump procedure", `ProbeResultRow` ships as
+`ProbeResultRowEnvelope::V1(ProbeResultRowV1)` with its own
+`FIXTURE_V1` constant. Existing fixtures are unaffected (greenfield
+row).
+
+### 77. ServiceLifecycleReconciler — typed View, pure reconcile, `Stable` non-terminal
+
+Per ADR-0055. A new reconciler lives at
+`crates/overdrive-control-plane/src/reconcilers/service_lifecycle/`
+(new module tree). `AnyState`, `AnyReconcilerView`, `AnyReconciler`
+enums (per §§ 34–35) gain a `ServiceLifecycle(...)` variant each;
+match arms in `AnyReconciler::reconcile` and `AnyReconciler::name`
+gain corresponding cases.
+
+The typed `ServiceLifecycleView` carries five maps (per
+`.claude/rules/development.md` § "Persist inputs, not derived
+state"): `liveness_consecutive_failures`,
+`readiness_consecutive_successes`, `stable_announced` set,
+`startup_attempts_per_probe`. The `Stable` predicate is recomputed
+every tick from observation inputs (`probe_results` + spec); it is
+NEVER persisted as a derived field. The `stable_announced` set is
+the publication-side dedup gate that prevents the deciding-tick
+emission from re-firing every subsequent tick.
+
+`reconcile` is pure sync per `.claude/rules/development.md` §
+"Reconciler I/O" — no `.await`, no I/O, no wall-clock outside
+`tick.now`. Decision priority: terminal check (EarlyExit) → startup
+gate (Stable / StartupProbeFailed) → readiness branch
+(Backend.healthy flip via `Action::WriteServiceBackendRow`) →
+liveness branch (`Action::RestartAllocation` on threshold).
+
+Multi-startup-probe AND-of-all semantics per ADR-0055 §5 (P2-Q7):
+every declared startup probe must Pass for Stable. Witness names
+the LAST probe to cross threshold. OR-semantics deferred behind
+a future operator-configurable combinator knob (non-breaking).
+
+Readiness `successThreshold` default = 1 (matches K8s default per
+P2-Q8 / ADR-0055 §6). Configurable upward via TOML
+`success_threshold` field. The counter (input) is persisted; the
+healthy gate (output) is recomputed every tick.
+
+Cascading-restart rate-limiter (P2-Q9): Phase 1 single-node
+single-replica has no cascading surface;
+`Action::RestartAllocation` is emitted unconditionally;
+architecture leaves room for a future Phase 2+
+`LivenessRestartGovernor` reconciler that filters restarts per
+per-Service budget. No `gh issue` required for this future surface
+because the user is not promised it.
+
+### 78. TerminalCondition gains `Stable` and `Failed`; ServiceFailureReason enum
+
+Per ADR-0056 §1. `overdrive-core::transition_reason::TerminalCondition`
+gains two additive variants (per ADR-0037 §5 SemVer convention):
+
+```rust
+TerminalCondition::Stable { settled_in: Duration, witness: ProbeWitness },
+TerminalCondition::Failed { reason: ServiceFailureReason },
+```
+
+`Stable` is **non-terminal** semantically (Service alloc continues
+to process readiness/liveness/restart after emission). The
+non-terminal property is encoded structurally via
+`ServiceLifecycleView::stable_announced` set, NOT via a flag on
+`TerminalCondition` itself. ADR-0037's layering rule ("reconciler
+decides terminal-or-not; streaming forwards without re-deriving")
+is preserved verbatim: the streaming consumer cannot tell `Stable`
+apart from `BackoffExhausted` structurally; both flow through
+`LifecycleEvent.terminal: Some(...)`.
+
+`ServiceFailureReason` is a new enum at
+`overdrive-core::transition_reason` next to `TerminalCondition`:
+
+```rust
+#[non_exhaustive]
+pub enum ServiceFailureReason {
+    StartupProbeFailed { probe_idx, attempts, last_fail, elapsed, startup_deadline },
+    EarlyExit { exit_code, elapsed, startup_deadline, stderr_tail },
+    BackoffExhausted { attempts, last_exit_code, stderr_tail },
+}
+```
+
+Per P1-Q3 resolution: single per-kind enum (not per-condition
+sub-enums); operator-facing single surface; future variants
+additive minor per ADR-0037 §5 convention. Wire projection
+`ServiceFailureReasonWire` is kept in lockstep via property test
+`every_typed_reason_has_wire_projection`.
+
+### 79. ServiceSubmitEvent V1 → V2 wire shape
+
+Per ADR-0056. `ServiceSubmitEvent` (per ADR-0047 §3 / §55) is
+amended:
+
+- DELETED: `ConvergedRunning`, `ConvergedFailed` (single-cut greenfield
+  migration per `feedback_single_cut_greenfield_migrations.md`).
+- ADDED: `Stable { alloc_id, settled_in_ms, witness: ProbeWitnessWire }`
+- ADDED: `Failed { reason: ServiceFailureReasonWire }`
+- PRESERVED: `Accepted`, `Pending`, `Running` (informational, not
+  terminal), `ConvergedStopped`.
+
+The wire is JSON-on-NDJSON per ADR-0032; no rkyv envelope bump on
+the wire (additive variants are serde-compatible with `#[serde(tag
+= "kind")]`). The persisted `AllocStatusRow.terminal` field carries
+the new variants via `TerminalCondition` (additive); no envelope
+bump required there either.
+
+Action-shim integration follows ADR-0037 §4 byte-equality contract
+unchanged: the mapping `TerminalCondition → ServiceSubmitEvent`
+happens at a single site in `streaming.rs`; row write + broadcast
+write are both sourced from the same `Action::SetTerminalCondition`
+payload.
+
+### 80. Streaming-cap (P2-Q5) — deliberate non-decision
+
+Per ADR-0056 §5 / `feature-delta.md` C10. The 60s `streaming_cap`
+default is unchanged. Slow-warming Services (>60s startup budget)
+receive `ServiceSubmitEvent::Running` until cap; cap elapses;
+client exits with existing Timeout. Reconciler continues driving
+probes after disconnect; `Stable` eventually lands on
+`AllocStatusRow`; operator inspects via `alloc status` (Probes
+section per US-06 / §82 below).
+
+No new operator knob in Phase 1. If operator feedback demands
+per-spec `[service.streaming].timeout_seconds` or
+`--wait-cap` CLI flag, a new ADR adds it (additive).
+
+### 81. `[[health_check.*]]` TOML spec + ServiceSpec aggregate extension
+
+Per ADR-0057. The TOML parser (per ADR-0047 §2 / ADR-0051)
+accepts three new array-of-tables sections under the `[service]`
+discriminator only:
+
+- `[[health_check.startup]]` — required: `type`, `port` (TCP) or
+  `path`+`port` (HTTP) or `command` (Exec); optional:
+  `timeout_seconds` (default 5), `interval_seconds` (default 2),
+  `max_attempts` (default 30 → `startup_deadline = 60s`).
+- `[[health_check.readiness]]` — same body + `success_threshold`
+  (default 1) + `failure_threshold` (default 1).
+- `[[health_check.liveness]]` — same body + `failure_threshold`
+  (default 3); `interval_seconds` defaults to 10 (slower than
+  readiness to avoid restart-storm pressure).
+
+Defaults diverge from K8s where defensible (per P2-Q4 / ADR-0057
+§2): timeout 5s vs K8s 1s (K8s 1s widely criticised); intervals 2s
+startup/readiness vs K8s 10s (Phase 1 single-node makes 2s
+cheap); failure_threshold 1 readiness / 3 liveness matches K8s
+restart-storm posture.
+
+Probes on `[job]` or `[schedule]` rejected at parse time with
+`ParseError::ProbesNotAllowedOnKind { kind, guidance }` (per
+ADR-0057 §4 / US-07). The kind discriminator from ADR-0047 is the
+gate; `ProbeDescriptor` appears ONLY on `ServiceSpec`
+structurally — Job/Schedule cannot represent probes.
+
+`ServiceSpec` (per ADR-0050) gains three Vec fields:
+`startup_probes`, `readiness_probes`, `liveness_probes`. The
+rkyv envelope bumps `ServiceSpecEnvelope::V1 → V2` per ADR-0048
+"Version-bump procedure" — single commit, fixture file added,
+existing `FIXTURE_V1` untouched.
+
+### 82. Default-probe inference — "honest by default"
+
+Per ADR-0058. When operator submits a Service spec with:
+
+- `[[health_check.startup]]` ABSENT, AND
+- `[[listener]]` non-empty
+
+→ parser synthesises ONE TCP-connect probe targeting
+`SocketAddrV4(0.0.0.0, listeners[0].port)` with
+timeout=5s, interval=2s, max_attempts=30 (startup_deadline=60s),
+`inferred = true`. The synthesised probe behaves identically to
+an explicitly-declared TCP probe in the reconciler; the
+`inferred` flag is operator-visibility-only (CLI marks `(inferred)`
+in Probes section).
+
+Explicit opt-out: `[[health_check.startup]] = []` empty array →
+no startup gate → alloc reaches Stable immediately on Running
+(preserves Phase 1 spec compatibility for operators who genuinely
+want first-Running semantics).
+
+This DIVERGES from K8s / Nomad default ("no probe, ready on
+exec") — a deliberate choice per ADR-0058 §4: RCA-A proves
+kernel-accepted exec is not operator-meaningful liveness; the
+platform must do better by default. The inference rule is a
+SemVer contract; future changes require an operator-configurable
+knob.
+
+### 83. Exec-probe cgroup placement — `cgroup.procs` write (Phase 1)
+
+Per ADR-0059. The `CgroupExecProber` uses mechanism (b) —
+`tokio::process::Command::spawn` + post-spawn write of the child's
+PID to `<alloc_cgroup>/cgroup.procs`. Reuses
+`cgroup_manager::place_pid_in_scope` from `ExecDriver` per
+ADR-0026; reuses `cgroup_manager::cgroup_kill` for timeout
+cleanup (mass-kill via cgroup.kill, prevents orphaned
+descendants).
+
+Mechanism (a) — `clone3 + CLONE_INTO_CGROUP` — is structurally
+cleaner (atomic, no transient parent-cgroup membership) but
+deferred: `nix` 0.27 does not wrap the flag; the production
+sim adapter shape would diverge; code reuse with `ExecDriver` is
+lost. Phase 2+ may migrate to (a) once `nix-rust/nix#2120` ships;
+non-breaking trait-internal swap.
+
+The probe runs INSIDE the workload's cgroup; CPU + memory
+consumption attribute to the workload's limits (per ADR-0026
+`cpu.weight` + `memory.max`). Matches K8s semantic (probes inside
+the container's cgroup).
+
+### 84. CLI render — Probes section for Service kind
+
+Per US-06 / ADR-0033 enrichment. `crates/overdrive-cli/src/render.rs`
+Service-kind handler emits a Probes section under each alloc:
+
+```
+Allocations:
+  alloc-payments-0   state=Running   terminal=Stable
+    Probes:
+      startup   #0  http GET /healthz       last=ok    at 18:42:11Z
+      readiness #0  http GET /healthz       last=ok    at 18:42:43Z
+      liveness  #0  http GET /healthz       last=ok    at 18:42:43Z
+```
+
+Section present iff `kind == Service AND probes_present`; absent
+for Job and Schedule kinds (renderer-side guard). Inferred default
+probe rendered with `(inferred)` marker. JSON-mode shape per ADR-0056
+§6 (`ProbeResultRowJson` via `utoipa::ToSchema`).
+
+### 85. Updated quality-attribute scenarios
+
+| ASR | Quality attribute | Scenario | Pass criterion |
+|---|---|---|---|
+| ASR-SHCP-01 | Reliability — Service-submit honesty (K1) | `coinflip-as-service.toml` submitted 100×; exits 1 within 50ms | ≥ 99 / 100 emit `ServiceSubmitEvent::Failed { reason: EarlyExit { ... } }`, zero emit `Stable` |
+| ASR-SHCP-02 | Reliability — Dataplane health convergence (K2) | 3-backend Service; backend 2 readiness HTTP probe returns 503 | Within 1 reconciler tick, `Backend{2}.healthy = false`; fingerprint changes |
+| ASR-SHCP-03 | Reliability — Liveness restart effectiveness (K3) | Service alloc with `failure_threshold = 3`; liveness HTTP probe returns 503 | Within 3×interval + 1 tick, `Action::RestartAllocation { reason: LivenessExhausted { .. } }` emitted; `restart_count` increments |
+| ASR-SHCP-04 | Usability — Probes section visibility (K4) | Stable Service with 3 probes; `alloc status --job <id>` | 100% of probes rendered in Probes section; Job/Schedule kinds show 0% Probes section |
+| ASR-SHCP-05 | Functional correctness — kind rejection (K5) | TOML with `[job]` + `[[health_check.startup]]` | 100% rejected at parse time with `ParseError::ProbesNotAllowedOnKind` |
+| ASR-SHCP-06 | Performance — runner CPU guardrail | 1 Service alloc with 3 probes ticking at 2s/2s/10s | CPU consumption per alloc-with-3-probes ≤ 0.5% sustained |
+| ASR-SHCP-07 | Reliability — fault isolation per probe | Two probes on one alloc; one probe hangs 5s timeout, the other completes 100ms | Fast probe completes within 100ms ± scheduling jitter; slow probe times out at 5s; no cross-probe head-of-line |
+| ASR-SHCP-08 | Maintainability — trait equivalence | DST equivalence harness drives `TcpProber` / `HttpProber` / `ExecProber` impl pairs through same sequence | Sim and production adapters produce same `ProbeOutcome` for every step |
+
+### 86. C4 — see `c4-diagrams.md` § Phase 1 Service Health-Check Probes
+
+The feature ships:
+
+- **L1 (System Context)** — unchanged. Operator → CLI → control
+  plane → worker boundary is preserved.
+- **L2 (Container)** — annotated to mark `overdrive-worker` as
+  "extended with ProbeRunner subsystem"; new arrow from
+  `overdrive-worker` (ProbeRunner) to `LocalObservationStore`
+  (writes `ProbeResultRow`).
+- **L3 (Component)** — NEW diagram for ProbeRunner subsystem
+  topology. Embedded below.
+
+```mermaid
+C4Component
+  title Component Diagram — ProbeRunner subsystem (Phase 1 Service health-check probes)
+
+  Container_Boundary(worker, "overdrive-worker (adapter-host)") {
+    Component(runner, "ProbeRunner", "Rust struct (Arc-shared per node)", "start_alloc / stop_alloc / probe() Earned Trust gate; holds CancellationTokens per alloc")
+    Component(supervisor, "Per-alloc supervisor task", "tokio::task", "Spawns N per-probe tasks via JoinSet; cancels on alloc terminal")
+    Component(probe_task, "Per-probe-instance task", "tokio::task", "Loops: select(cancel, sleep(interval)) → probe.probe() → write ProbeResultRow → repeat")
+    Component(tcp_prober, "TokioTcpProber", "production binding of TcpProber", "tokio::net::TcpStream::connect + tokio::time::timeout")
+    Component(http_prober, "HyperHttpProber", "production binding of HttpProber", "hyper::client + connection pool + per-request timeout")
+    Component(exec_prober, "CgroupExecProber", "production binding of ExecProber", "Command::spawn + place_pid_in_scope + cgroup.kill on timeout")
+    Component(cgmgr, "cgroup_manager (existing)", "module from ADR-0026", "place_pid_in_scope, cgroup_kill; reused by ExecProber")
+  }
+
+  Container(core_traits, "overdrive-core::traits::prober", "Three port traits — TcpProber / HttpProber / ExecProber — declared with rustdoc preconditions, postconditions, edge cases, invariants per development.md")
+  Container(core_obs, "overdrive-core::observation::probe_result", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
+  Container(obs_store, "LocalObservationStore", "redb-backed; write_probe_result + list_probe_results_for_alloc")
+  Container(reconciler_runtime, "ReconcilerRuntime", "Reads probe_results into ServiceLifecycleState.actual on hydrate_actual")
+  Container(service_reconciler, "ServiceLifecycleReconciler", "Pure sync reconcile; consumes ProbeResultRow via actual; emits Stable/Failed/WriteServiceBackendRow/RestartAllocation Actions")
+  Container(exec_driver, "ExecDriver (existing per ADR-0030)", "Per-alloc supervisor signals ProbeRunner on alloc Running and terminal")
+
+  Rel(exec_driver, runner, "on_alloc_running(alloc_id, probe_descriptors) / on_alloc_terminal(alloc_id)")
+  Rel(runner, supervisor, "spawn per-alloc supervisor task; pass CancellationToken")
+  Rel(supervisor, probe_task, "spawn N per-probe tasks via JoinSet")
+  Rel(probe_task, tcp_prober, "TcpProber::probe (TCP mechanic)")
+  Rel(probe_task, http_prober, "HttpProber::probe (HTTP mechanic)")
+  Rel(probe_task, exec_prober, "ExecProber::probe (Exec mechanic)")
+  Rel(exec_prober, cgmgr, "place_pid_in_scope + cgroup_kill")
+  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, probe_idx)")
+  Rel(reconciler_runtime, obs_store, "list_probe_results_for_alloc on hydrate_actual")
+  Rel(reconciler_runtime, service_reconciler, "reconcile(desired, actual, view, tick) → (Vec<Action>, View)")
+  Rel(core_traits, runner, "Trait surface (Arc<dyn TcpProber/HttpProber/ExecProber>)")
+  Rel(core_obs, obs_store, "Row shape; rkyv envelope V1")
+```
+
+### 87. Updated handoff annotations — service-health-check-probes
+
+To DEVOPS (platform-architect, parallel with DISTILL):
+
+- New CI integration tests gated on `integration-tests` feature:
+  - `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'test(service_honest_stable)'` — K1 100-trial regression test for RCA-A closure
+  - `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(readiness_flips_backend_healthy)'` — K2
+  - `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(liveness_threshold_triggers_restart)'` — K3
+  - `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'test(render_probes_section)'` — K4
+  - `cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests -E 'test(reject_probes_on_job_schedule)'` — K5
+  - `cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests -E 'test(exec_prober_cgroup_membership)'` — ADR-0059 Tier 3
+- New schema-evolution fixture file:
+  `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`
+  pinning `ProbeResultRowEnvelope::V1` archived bytes
+- `ServiceSpecEnvelope::V2` fixture: `FIXTURE_V1` untouched;
+  new `FIXTURE_V2_FORWARD_ROUNDTRIP` test
+- New OpenAPI schemas: `ProbeResultRowJson`,
+  `ProbeWitnessWire`, `ServiceFailureReasonWire`,
+  `ServiceSubmitEvent::Stable`, `ServiceSubmitEvent::Failed` —
+  all `utoipa::ToSchema` derives; `cargo openapi-check` rerun
+- DST invariant additions: `ProbeRunnerCleanCancellation`
+  (cancel token → all per-probe tasks drop within 1s);
+  `ServiceLifecycleStableIsDeduplicated` (multiple ticks after
+  Stable do NOT re-emit deciding action);
+  `ProbeResultRowIsLww` (latest write per `(alloc_id, probe_idx)`
+  wins; no append-mode)
+- **K2a — ProbeRunner memory footprint guardrail (regression-only,
+  not a leading KPI).** K2 above measures CPU only (≤ 0.5 % per
+  Service-alloc-with-3-probes); it does not catch growth in
+  per-probe HTTP-client connection-pool memory. On a 10-alloc node
+  × 3 HTTP probes (≈ 30 simultaneous pool entries) the footprint
+  could grow to ~ 10 MB without surfacing in the CPU number.
+  Steady-state RSS attributable to `ProbeRunner` per
+  Service-alloc-with-3-HTTP-probes ≤ 1 MB at the 99th percentile.
+  Measurement: `cargo xtask lima run -- cargo xtask
+  integration-test vm` with the K2 fixture extended to 10 allocs
+  × 3 HTTP probes; measure `/proc/self/status:VmRSS` delta between
+  baseline (no probes declared) and probe-runner-active
+  steady-state after 60 s. Captured as a regression guardrail
+  rather than a leading KPI because `hyper-util`'s connection-pool
+  sizing is hard to predict pre-implementation; the K2a number is
+  a regression line, not a design target. The DEVOPS instrumentation
+  surface owns the gating wiring (CI failure shape, baseline
+  storage, trend tracking).
+
+External integrations in this feature: **none**. The HTTP probes
+target operator-declared local endpoints (the workload's own
+listener); they are not third-party services. No contract tests
+recommended.
+
+New crate workspace dependencies (lockstep with DELIVER):
+
+- `hyper-util` ~ 0.1.x (HTTP client connection pool for
+  `HyperHttpProber`); already in workspace graph via
+  `axum` transitive
+- `tokio-util` ~ 0.7.x (`CancellationToken`); already in
+  workspace graph via `tokio` transitive
+
+No new top-level dependencies. License audit: both are MIT
+(`hyper-util`) and MIT (`tokio-util`); compliant with workspace OSS
+policy.
+
+---
+
 ## Changelog
 
 | Date | Change |
@@ -3020,6 +3450,7 @@ the downstream VIP consumer. System Context
 | 2026-05-14 | Phase 1 service-vip-allocator extension (§63–§74). Added ADR-0049 (platform-issued Service VIP allocator: shared pool primitive under `overdrive-dataplane`; `IntentStore`-persisted; submit-time admission; reconciler-driven reclamation). Closes GH #167. Generalises ADR-0046's `BackendIdAllocator` into a two-layer factoring at `crates/overdrive-dataplane/src/allocators/`: pure core `PoolAllocator<T: Token>` + persistence shim `IntentBackedAllocator<T>`. New `ServiceVipAllocator = IntentBackedAllocator<ServiceVip>`. New `Action::ReleaseServiceVip` variant. New TOML config subsection `[dataplane.vip_allocator]`. New rkyv envelope `AllocatorEntryEnvelope` per ADR-0048. Admission-level rejection of operator-supplied `vip = Some(...)` per AC-06 (preserves ADR-0047 § 4a `Option<ServiceVip>` field shape verbatim). `ServiceVip` newtype consolidated to single IPv4-only canonical declaration at `overdrive-core::id::ServiceVip(Ipv4Addr)`; duplicate at `aggregate/workload_spec.rs:360` deleted in same commit. Earned Trust `probe()` enforced via subtype + structural (xtask AST scanner) + behavioural (CI gold-test) layers. Reuse Analysis: 8 EXTEND, 5 REUSE AS-IS, 4 CREATE NEW (justified). C4 Component diagram added at `c4-diagrams.md` § Phase 1 Service VIP Allocator. — Morgan. |
 | 2026-05-14 (amendment 2) | service-vip-allocator allocator-design course-correction. During DELIVER step 01-01 implementation the crafter discovered that the originally-designed generic `PoolAllocator<T: Token>` core + `IntentBackedAllocator<T>` shim is overstated abstraction — the actually-shared logic between `BackendIdAllocator` and `ServiceVipAllocator` is thinner than the `Token` trait surface required (memo + monotonic counter + memo-hit-returns-existing), while `T::Range` bakes `VipRange` (a CIDR-shaped concept) into a generic core that `BackendIdAllocator` has no use for. The landing shape (6/6 tests passing in Lima as of 2026-05-14) is two concrete allocators (`BackendIdAllocator` relocated body-untouched + new concrete `ServiceVipAllocator`) plus a concrete `PersistentServiceVipAllocator` shim. AC-05 is satisfied as shape-similarity, not literal code reuse. §63 rewritten (drops Token/PoolAllocator framing); §69 narrowed (single ServiceVip envelope; no AllocatorTokenBytes sum); §71 / §72 updated to name `PersistentServiceVipAllocator`; §74 handoff annotations updated. ADR-0049 § Considered alternatives gains Alt-0 documenting the rejection; § Amendments records the new shape. Roadmap step 01-04 absorbed into 01-01 (relocation forced by deleting the generic); total_steps 11 → 10. C4 diagram updated. — Morgan. |
 | 2026-05-14 (amendment) | service-vip-allocator Q5 resolution amendment. Per user direction citing `.claude/rules/development.md` § "Type-driven design" → "make invalid states unrepresentable": ADR-0049 § 5 rewritten from admission-level rejection (preserving `Listener.vip: Option<ServiceVip>` for forward-compatibility) to **parser-level removal of the `vip` field on `Listener`** entirely. The prior "Option-shaped field is forward-compatible" framing defended a feature (operator-pinned VIPs) the project has explicitly decided against — the deferral-without-issue shape CLAUDE.md § "Deferrals require GitHub issues" forbids. Greenfield single-cut: field, validator, error variant, and slice-06's defending tests delete in one commit. ADR-0049 § 5a (new) records the placement decision for the assigned VIP — Option C of three: the allocator's own persisted `allocator_entries` memo IS the source of truth (Option A — aggregate field — rejected as putting an operator-shape field that's not operator-set on the aggregate; Option B — observation-only — rejected as introducing a second source of truth and chicken-and-egg restart hydration). Submit-echo and `alloc status` consult `ServiceVipAllocator::get(&spec_digest)` at render time. `Job`/`ServiceSpec` stays purely operator-input. Cascade: §64 admission flow loses the `listener.vip = Some(...)` projection step; §66 rewritten to parser-level removal; §67a (new) records placement decision; §67 `ServiceVip` consolidation references updated; §74 handoff annotations updated (parser change; `AdmissionError::VipNotOperatorAssignable` deleted). C4 component diagram updated. Real spec-shape back-propagation to slice-06 documented in `docs/feature/service-vip-allocator/design/upstream-changes.md` (rewritten — was "zero change to Slice 06 spec shape"). Reuse Analysis verdict shifts from 8 EXTEND/5 REUSE/4 CREATE to 7 EXTEND/4 REUSE/4 CREATE/2 DELETE. — Morgan. |
+| 2026-05-24 | Phase 1 service-health-check-probes extension (§§75–87). Added ADR-0054 (ProbeRunner subsystem — per-alloc-per-probe tokio tasks in `overdrive-worker`; `TcpProber`/`HttpProber`/`ExecProber` port traits; `ProbeResultRow` LWW observation). Added ADR-0055 (ServiceLifecycleReconciler — typed View, pure sync reconcile, `Stable` non-terminal condition extending ADR-0037; AND-of-all multi-startup-probe semantic; readiness `successThreshold` default 1; cascading-restart rate-limiter Phase 2+ surface). Added ADR-0056 (ServiceSubmitEvent V1→V2 — `Stable { settled_in, witness }` + `Failed { reason: ServiceFailureReason }`; single per-kind reason enum; `ConvergedRunning`/`ConvergedFailed` deleted per single-cut greenfield migration; streaming-cap 60s unchanged as deliberate non-decision). Added ADR-0057 (`[[health_check.*]]` TOML spec — defaults table aligned with K8s where defensible (timeout 5s vs K8s 1s justified); kind rejection for `[job]`/`[schedule]`; `ServiceSpecEnvelope::V1→V2` bump per ADR-0048). Added ADR-0058 (default-probe inference — "honest by default" TCP-connect on `listener[0]` when probes absent; explicit opt-out via empty array; divergence from K8s/Nomad defaults justified by RCA-A). Added ADR-0059 (exec-probe cgroup placement — `cgroup.procs` write Phase 1; reuses `place_pid_in_scope` from ExecDriver; `clone3 + CLONE_INTO_CGROUP` deferred to Phase 2+ pending `nix-rust/nix#2120`). Amendments to ADR-0032 (Service wire variants), ADR-0037 (TerminalCondition gains `Stable`, `Failed` additive variants), ADR-0048 (`ProbeResultRowEnvelope::V1` + `ServiceSpecEnvelope::V2` fixtures), ADR-0050 (`ServiceSpec` gains `startup_probes`/`readiness_probes`/`liveness_probes` Vec fields). C4 Component diagram added for ProbeRunner subsystem topology (§86). Closes RCA-A (`docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md`) for Service kind structurally — `Stable` cannot fire from a kernel-accepted exec; it fires only from a reconciler-confirmed startup-gate pass against `ProbeResultRow.status == Pass`. — Morgan. |
 | 2026-05-04 | Phase 2.1 eBPF dataplane scaffolding extension (§40–§43). Added ADR-0038 (eBPF crate layout `overdrive-bpf` + `overdrive-dataplane`; `xtask bpf-build` + `build.rs` artifact-check shim build pipeline; `bpf-linker` provisioning via Lima image + xtask dev-setup + which-or-hint; `default-members` exclusion for the kernel-side crate; `EbpfDataplane` mirroring `SimDataplane`'s constructor seam). Two new crates: `overdrive-bpf` (class `binary`, target `bpfel-unknown-none`, `#![no_std]`, `aya-ebpf`-only) and `overdrive-dataplane` (class `adapter-host`, hosts `EbpfDataplane` impl of `Dataplane` port). `cargo xtask bpf-build` is NEW; `cargo xtask bpf-unit` and `cargo xtask integration-test vm` filled in (against the no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter); `verifier-regress` and `xdp-perf` remain stubbed for #29. Workspace `members` grows from 9 to 11 entries; new `default-members` declaration excludes `overdrive-bpf` so `cargo check --workspace` builds on macOS. Lima image `cargo install --locked` line extended with `bpf-linker`. C4 L1 (System Context) + L2 (Container) added at `c4-diagrams.md` § Phase 2.1; L3 deliberately skipped (loader is a single struct with two no-op methods). dst-lint scope unchanged — both new crates are non-`core`. ADR-0029 mirrored as the closest-precedent extraction ADR. — Morgan. |
 | 2026-05-24 | Phase 1 cgroup-fs-port extension. Added ADR-0054 (`CgroupFs` port trait — narrow, cgroup-semantic; lives in `overdrive-core::traits::cgroup_fs`; `RealCgroupFs` adapter in `overdrive-host` wrapping `tokio::fs::*`; `SimCgroupFs` adapter in `overdrive-sim` over a `BTreeMap<PathBuf, Vec<u8>>` byte store with per-(method, path) injectable error schedule). Closes GH #136. Refactors the eight free functions in `crates/overdrive-worker/src/cgroup_manager.rs` into methods on a new `CgroupManager` struct holding `Arc<dyn CgroupFs>`; `ExecDriver::new` signature gains a mandatory `fs: Arc<dyn CgroupFs>` parameter (no builder, no default — per `.claude/rules/development.md` § "Port-trait dependencies"). Composition root in `overdrive-cli`'s `serve` subcommand instantiates `RealCgroupFs`, calls `probe()` (Earned Trust per CLAUDE.md principle 12 — round-trip a payload through the substrate; failure surfaces as `health.startup.refused` event and the binary exits non-zero), threads `Arc<dyn CgroupFs>` through the worker subsystem entrypoint into `ExecDriver::new`. `AppState` gains no new field — control-plane crate never names `CgroupFs`, preserving ADR-0029's `overdrive-control-plane`-does-NOT-depend-on-`overdrive-worker` invariant. ADR-0026's direct-cgroupfs-writes mechanism unchanged in substance; only the call surface from `tokio::fs::*` to `self.fs.{create_dir, write, remove_dir}.await` changes. **Non-replacement contract** recorded: SimCgroupFs is byte-write only and does NOT model kernel-side effects (`cgroup.kill` mass-kill, `subtree_control` EBUSY-on-live-child, controller-value rejection, kernel-managed pseudo-files); Tier 3 integration tests under `cargo xtask lima run --` stay mandatory for kernel-semantic coverage; ADR-0034's removal of `--allow-no-cgroups` continues to hold (SimCgroupFs cannot smuggle in as a production wiring because the existing `cgroup_preflight` v2-delegation gate from ADR-0028 still requires real `/sys/fs/cgroup`). Cancellation semantics for SimCgroupFs: method-entry deterministic (mutation happens atomically inside the method body before the first `.await`; mid-syscall is a kernel concept that does not apply in-process); K3 (seed → bit-identical trajectory) extends naturally — only nondeterminism source is the BTreeMap-keyed injection schedule. Migration is single-cut greenfield per `feedback_single_cut_greenfield_migrations`: no compatibility shim, no `cfg(test)` swap, no `#[deprecated]`. Existing 12 tempfile-based unit tests triaged per-test — 8 convert to SimCgroupFs (logic + byte-side-effect assertions), 4 stay tempfile-backed against `RealCgroupFs` (`ENOTDIR` error-kind discrimination requires real kernel VFS semantics). No new external dep — `tokio::fs` already in workspace; `BTreeMap` std; `parking_lot::Mutex` already in workspace; `uuid` already in workspace (probe tempdir naming). C4 Container diagram embedded in ADR-0054; System-Context (L1) deliberately omitted (internal refactor at known scale, no external boundary change). ADR-0016 / ADR-0026 / ADR-0028 / ADR-0029 / ADR-0030 / ADR-0034 / ADR-0049 (Earned Trust precedent at §71) cross-referenced. — Morgan. |
 | 2026-05-24 (amendment) | ADR-0054 § Production probe (RealCgroupFs) amended in-place. The original probe spec wrote a regular `probe-file` inside the probe cgroup and asserted byte-equality on read-back; DELIVER step 01-02 empirically falsified this against real `/sys/fs/cgroup` — cgroupfs only permits kernel-managed pseudo-files inside cgroup directories, so the regular-file write was rejected by the kernel substrate. Amended spec round-trips on `cgroup.subtree_control` (kernel-managed pseudo-file production code already touches): step 1 `create_dir` the probe leaf cgroup, step 2 `write(&probe_dir.join("cgroup.subtree_control"), b"")` (kernel-supported no-op empty controller-diff), step 3 `tokio::fs::read` and assert "no error + valid UTF-8 response" (NOT byte-equality with what was written — kernel returns its own canonical controller-list payload), step 4 `remove_dir` (no `remove_file` — kernel forbids unlinking its own pseudo-files; kernel garbage-collects them on rmdir). `ProbeError::RoundTripMismatch { wrote, read }` repurposed: for RealCgroupFs `wrote = vec![]` and the leg fires on non-UTF-8 kernel response (substrate-lying signal); for SimCgroupFs unchanged semantics. The 2026-05-24 brief.md row above implicitly carries the amended probe semantic — the "round-trip a payload through the substrate" framing remains accurate at this row's level of detail; the specifics live in ADR-0054 § Production probe and § Alternatives considered → Alternative F (the rejected regular-file approach, with empirical disproof). Scenario names (`C-probe-success`, `C-probe-with-custom-root`) and DISTILL-level scope unchanged — only the probe internals shift. User-approved 2026-05-24. — Morgan. |

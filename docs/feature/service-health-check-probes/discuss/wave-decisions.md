@@ -114,7 +114,62 @@ All 4 blocking (B1–B4) and 4 non-blocking (R1–R4) findings landed correctly 
 - All 8 research recommendations (D1–D8) now covered: D2/D4/D7/D8 confirmed by DISCUSS choices; D5 in P1-Q1; D3 in US-01 Technical Notes; D1 in P2-Q8; D6 in P2-Q9
 - All 5 research pitfalls now mitigated by constraint or AC
 
+## Design Decisions Summary (2026-05-24, appended by DESIGN wave)
+
+The DESIGN wave (`nw-solution-architect`, Morgan) consumed all 9
+open questions surfaced by DISCUSS and produced the artifact tree
+captured in `feature-delta.md` § "Wave: DESIGN / REF Artifact
+index". Below is a compact summary; the canonical content lives in
+`feature-delta.md` and ADRs 0054–0059.
+
+### Open questions resolution (9 of 9)
+
+| ID | Resolution | ADR |
+|---|---|---|
+| P1-Q1 (ProbeRunner placement / task graph) | `overdrive-worker`; per-alloc supervisor + per-probe-instance tokio task; matches K8s prober.Manager shape | ADR-0054 |
+| P1-Q2 (Exec-probe cgroup placement) | `cgroup.procs` write Phase 1 (reuses `place_pid_in_scope` from ADR-0030); `clone3 + CLONE_INTO_CGROUP` deferred Phase 2+ pending `nix-rust/nix#2120` | ADR-0059 |
+| P1-Q3 (ServiceFailureReason SemVer) | Single per-kind enum (not per-condition); `#[non_exhaustive]`; additive variants per ADR-0037 §5; wire projection kept in lockstep via property test | ADR-0056 |
+| P2-Q4 (TOML defaults) | timeout 5s (diverges from K8s 1s, justified); intervals 2/2/10s (startup/readiness/liveness); max_attempts 30; failure_threshold 1/3 (readiness/liveness); success_threshold 1 | ADR-0057 |
+| P2-Q5 (Streaming cap interplay) | 60s cap unchanged; deliberate non-decision in Phase 1; operator workflow is submit → cap → `alloc status` for slow-warming Services; per-spec knob deferred behind future operator-UX iteration | ADR-0056 |
+| P2-Q6 (`--json` Probes shape) | `ProbeResultRowJson` via `utoipa::ToSchema` per ADR-0009 / ADR-0033 enrichment convention | ADR-0056 |
+| P2-Q7 (Multi-probe AND/OR) | AND-of-all (every startup probe must Pass for Stable); witness names last-to-pass; OR-combinator reserved as future knob | ADR-0055 |
+| P2-Q8 (Readiness successThreshold) | Default 1 (matches K8s); configurable upward; counter persisted as input in `View::readiness_consecutive_successes`; gate recomputed every tick | ADR-0055 |
+| P2-Q9 (Cascading-restart rate-limiting) | Phase 1 single-node has no cascading surface; `Action::RestartAllocation` emitted unconditionally; future Phase 2+ `LivenessRestartGovernor` reconciler is non-breaking addition | ADR-0055 |
+
+### New ADRs
+
+- **ADR-0054** — ProbeRunner subsystem
+- **ADR-0055** — ServiceLifecycleReconciler
+- **ADR-0056** — ServiceSubmitEvent Stable/Failed evolution
+- **ADR-0057** — `[[health_check.*]]` TOML spec
+- **ADR-0058** — Default-probe inference ("honest by default")
+- **ADR-0059** — Exec-probe cgroup placement
+
+### SSOT artifacts touched
+
+- `docs/product/architecture/brief.md` — appended §§ 75–87
+  (Application Architecture extension)
+- `docs/product/architecture/c4-diagrams.md` — appended Service
+  Health-Check Probes section (L2 annotation + L3 ProbeRunner
+  subsystem)
+
+### New deferrals surfaced (5 P3, all non-blocking)
+
+P3-Q10 (nwave-ai outcomes CLI tool absence), P3-Q11 (Phase 2+
+cascading-restart governor), P3-Q12 (Phase 2+ clone3 migration),
+P3-Q13 (Phase 2+ per-spec streaming-cap knob), P3-Q14 (Phase 2+
+OR-combinator knob). None promised to operators; no `gh issue
+create` required per CLAUDE.md § "Deferrals require GitHub
+issues — AND user approval BEFORE creation". Each is captured in
+`feature-delta.md` § "Wave: DESIGN / REF Open questions deferred"
+with an explicit trigger for when to revisit.
+
+### Verdict
+
+READY-FOR-DEVOPS-AND-DISTILL.
+
 ## Changelog
 
 - 2026-05-24 — DISCUSS wave decisions captured. Walking skeleton candidate confirmed as Slice 01 (default TCP-connect startup probe). DIVERGE wave absent — risk noted, mitigation is direct grounding in RCA-A + J-OPS-003 extension.
 - 2026-05-24 — Research-alignment review actioned. See "Research Alignment Review (2026-05-24)" section above.
+- 2026-05-24 — DESIGN wave appended. Six new ADRs (0054–0059); brief.md §§ 75–87; c4-diagrams.md Service Health-Check Probes section. All 9 open questions resolved. See "Design Decisions Summary" section above.
