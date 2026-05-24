@@ -15,5 +15,6 @@ note: for a trait to be dyn compatible it needs to allow building a vtable
               overdrive_core::reconcilers::NoopHeartbeat
               overdrive_core::reconcilers::ServiceMapHydrator
               overdrive_core::reconcilers::WorkloadLifecycle
+              overdrive_core::service_lifecycle::ServiceLifecycleReconciler
             consider defining an enum where each variant holds one of these types,
             implementing `overdrive_core::reconcilers::Reconciler` for this new enum and using it instead
