@@ -23,6 +23,7 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use axum::routing::post;
+use http_body_util::BodyExt as _;
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
 use overdrive_control_plane::api::{
@@ -34,7 +35,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
-use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
@@ -70,6 +71,37 @@ fn payments_spec() -> JobSpecInput {
             args: vec![],
         }),
     }
+}
+
+/// Service-kind sibling of [`payments_spec`] with `replicas == 2` for
+/// the regression test against issue #140 — `ConvergedRunning` must
+/// gate on `running_count >= replicas_desired`.
+fn payments_service_spec() -> ServiceSpecInput {
+    ServiceSpecInput {
+        id: "payments-v0".to_string(),
+        replicas: 2,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/usr/local/bin/payments".to_string(),
+            args: vec![],
+        }),
+        listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+    }
+}
+
+/// Build a `POST /v1/jobs` request from a [`ServiceSpecInput`] with the
+/// given Accept header — Service-kind sibling of [`build_submit_request`].
+fn build_service_submit_request(spec: &ServiceSpecInput, accept: &str) -> Request<Body> {
+    let body =
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec.clone()) })
+            .expect("serialize");
+    Request::builder()
+        .method(Method::POST)
+        .uri("/v1/jobs")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, accept)
+        .body(Body::from(body))
+        .expect("build request")
 }
 
 fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
@@ -1330,5 +1362,277 @@ async fn unchanged_resubmit_with_different_kind_uses_stored_discriminator_for_st
         "Job completed successfully but stream reported {:?} — streaming dispatch \
          used the request's workload_kind (Service) instead of the stored kind (Job)",
         terminal_line["kind"]
+    );
+}
+
+// ===========================================================================
+// Regression — issue #140: Service streaming lane must NOT emit
+// `converged_running` until the count of Running rows for the workload
+// meets `replicas_desired`. Prior to the fix, the single-row shortcut
+// (`rows.iter().any(state == Running)`) emitted `ConvergedRunning` the
+// moment the FIRST allocation reached Running, regardless of how many
+// replicas the operator asked for.
+// ===========================================================================
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn streaming_lane_does_not_emit_converged_running_until_running_count_meets_replicas_desired()
+{
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
+    let router = build_router(state.clone());
+
+    let workload_id = WorkloadId::from_str("payments-v0").expect("workload id");
+    let alloc_0 = AllocationId::from_str("alloc-payments-0").expect("alloc id 0");
+    let alloc_1 = AllocationId::from_str("alloc-payments-1").expect("alloc id 1");
+
+    // Incremental line channel — the spawned task sends each parsed
+    // NDJSON line as it arrives so the main fixture can confirm event
+    // processing before asserting on stream liveness, eliminating the
+    // wall-clock sleep race that made the prior version's "has not
+    // finished" assertion vacuous under CI load.
+    let (line_tx, mut line_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_service_submit_request(&payments_service_spec(), "application/x-ndjson"))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let mut body = response.into_body();
+        let mut lines = Vec::new();
+        let mut buf = String::new();
+
+        while let Some(frame) = body.frame().await {
+            let frame = frame.expect("body frame");
+            if let Ok(data) = frame.into_data() {
+                buf.push_str(std::str::from_utf8(&data).expect("utf8"));
+                while let Some(pos) = buf.find('\n') {
+                    let trimmed = buf[..pos].trim();
+                    if !trimmed.is_empty() {
+                        let value: Value = serde_json::from_str(trimmed)
+                            .expect(&format!("valid json line: {trimmed}"));
+                        let _ = line_tx.send(value.clone());
+                        lines.push(value);
+                    }
+                    buf = buf[pos + 1..].to_string();
+                }
+            }
+        }
+        let remaining = buf.trim();
+        if !remaining.is_empty() {
+            let value: Value =
+                serde_json::from_str(remaining).expect(&format!("valid json line: {remaining}"));
+            let _ = line_tx.send(value.clone());
+            lines.push(value);
+        }
+        lines
+    });
+
+    // Wait for the `accepted` line — confirms the handler has committed
+    // the intent and subscribed to the broadcast channel.
+    let accepted = tokio::time::timeout(Duration::from_secs(2), line_rx.recv())
+        .await
+        .expect("accepted line within 2s")
+        .expect("channel open");
+    assert_eq!(accepted["kind"], "accepted");
+
+    // -----------------------------------------------------------------
+    // First replica reaches Running. Under the prior (buggy) code path
+    // `check_terminal` would emit `ConvergedRunning` here even though
+    // the Service requested `replicas == 2`.
+    // -----------------------------------------------------------------
+    write_row(
+        state.obs.as_ref(),
+        &alloc_0,
+        &workload_id,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_0.clone(),
+            workload_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    // Wait for the `lifecycle_transition` line — confirms the handler
+    // consumed the Running event. The handler emits this line BEFORE
+    // calling `check_terminal` (streaming.rs:258-278), so receiving it
+    // proves the broadcast event was processed. A few yields after let
+    // `check_terminal` (async obs-store read) complete.
+    let transition = tokio::time::timeout(Duration::from_secs(2), line_rx.recv())
+        .await
+        .expect("lifecycle_transition line within 2s")
+        .expect("channel open");
+    assert_eq!(
+        transition["kind"], "lifecycle_transition",
+        "expected lifecycle_transition after first Running event; got {transition}"
+    );
+
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    assert!(
+        !request_task.is_finished(),
+        "stream MUST NOT terminate when only 1 of 2 desired replicas is Running"
+    );
+
+    // -----------------------------------------------------------------
+    // Second replica reaches Running — the count gate is now met.
+    // The stream MUST emit `converged_running` and terminate promptly.
+    // -----------------------------------------------------------------
+    write_row(
+        state.obs.as_ref(),
+        &alloc_1,
+        &workload_id,
+        AllocState::Running,
+        2,
+        Some(TransitionReason::Started),
+    )
+    .await;
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_1.clone(),
+            workload_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("stream completes within nominal timeout once second replica is Running")
+        .expect("task ok");
+
+    // The terminal line must be `converged_running` — not the cap timer
+    // `converged_failed` (which would mean the count gate never fired).
+    let last = lines.last().expect("at least one streaming line");
+    assert_eq!(
+        last["kind"], "converged_running",
+        "stream must terminate with `converged_running` once running_count >= replicas_desired; \
+         got {last}"
+    );
+
+    // Exactly ONE `converged_running` line — the gate did not flap.
+    let converged_count = lines.iter().filter(|l| l["kind"] == "converged_running").count();
+    assert_eq!(
+        converged_count, 1,
+        "exactly one `converged_running` line expected; got {converged_count} in {lines:?}"
+    );
+}
+
+// ===========================================================================
+// Regression — lagged_recover terminal scan must cover ALL rows, not just
+// the LWW winner
+//
+// Root cause: `lagged_recover` picks `latest = max_by_key(counter)` and
+// only checks `latest.terminal`. With replicas > 1, if allocation A
+// terminates (counter=5) and sibling B transitions to Pending (counter=6),
+// `latest` is B with `terminal = None` — A's terminal condition is
+// invisible. The stream expires via the cap timer as
+// `ConvergedFailed { Timeout }` instead of emitting the correct terminal.
+//
+// The docstring invariant ("fail-fast: any single terminal row closes the
+// stream regardless of running-count") was not satisfied by the code.
+// ===========================================================================
+
+#[tokio::test]
+async fn lagged_recover_terminal_scan_covers_all_rows_not_just_lww_winner() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let sim_clock = Arc::new(SimClock::new());
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    state.streaming_cap = Duration::from_secs(60);
+
+    let alloc_a = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let alloc_b = AllocationId::from_str("alloc-payments-1").expect("alloc id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
+
+    // Allocation A: terminal (BackoffExhausted) at counter=5.
+    let terminal_row = AllocStatusRow {
+        alloc_id: alloc_a.clone(),
+        workload_id: workload_id.clone(),
+        node_id: sample_node(),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp { counter: 5, writer: sample_node() },
+        reason: Some(TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(1),
+            signal: None,
+            stderr_tail: None,
+        }),
+        detail: None,
+        terminal: Some(overdrive_core::transition_reason::TerminalCondition::BackoffExhausted {
+            attempts: 3,
+        }),
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: vec![],
+    };
+    state.obs.write(ObservationRow::AllocStatus(terminal_row)).await.expect("obs write A");
+
+    // Allocation B: non-terminal Pending at counter=6 (LWW winner).
+    let pending_row = AllocStatusRow {
+        alloc_id: alloc_b.clone(),
+        workload_id: workload_id.clone(),
+        node_id: sample_node(),
+        state: AllocState::Pending,
+        updated_at: LogicalTimestamp { counter: 6, writer: sample_node() },
+        reason: Some(TransitionReason::Scheduling),
+        detail: None,
+        terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: vec![],
+    };
+    state.obs.write(ObservationRow::AllocStatus(pending_row)).await.expect("obs write B");
+
+    let router = build_router(state.clone());
+
+    // Submit with replicas=2 Service spec, NDJSON streaming.
+    // Do NOT emit any lifecycle events — the bus stays silent.
+    // The only recovery path is `lagged_recover` via the post-subscribe
+    // snapshot.
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_service_submit_request(&payments_service_spec(), "application/x-ndjson"))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    // Wall-clock timeout — the fix makes lagged_recover find alloc A's
+    // terminal synchronously. Without the fix, the stream hangs until
+    // the 60s SimClock cap fires (which never advances here).
+    let lines = tokio::time::timeout(Duration::from_millis(500), request_task)
+        .await
+        .expect("request must complete within 500ms — bug: hangs until cap timer")
+        .expect("task ok");
+
+    // The terminal line must be `converged_failed` with
+    // `BackoffExhausted`, NOT `Timeout` from the cap timer.
+    let last = lines.last().expect("at least one streaming line");
+    assert_eq!(
+        last["kind"], "converged_failed",
+        "stream must emit `converged_failed` from alloc A's terminal; got {last}"
+    );
+    let terminal_reason = &last["data"]["terminal_reason"];
+    // terminal_reason may be a string or an object with a "kind" key,
+    // depending on the serialisation path.
+    let contains_backoff = terminal_reason.as_str().is_some_and(|s| s.contains("backoff"))
+        || terminal_reason["kind"].as_str().is_some_and(|s| s.contains("backoff"));
+    assert!(
+        contains_backoff,
+        "terminal_reason must be BackoffExhausted, not Timeout; got {terminal_reason}"
     );
 }

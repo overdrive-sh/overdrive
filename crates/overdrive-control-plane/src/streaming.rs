@@ -94,6 +94,8 @@
 // `rust_2024_compatibility = warn` does not block commits.
 #![allow(tail_expr_drop_order)]
 
+use std::num::NonZeroU32;
+
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
@@ -153,12 +155,24 @@ impl std::io::Write for BytesMutW<'_> {
 /// the first line is structurally guaranteed to land before the
 /// reconcile path is entered.
 ///
+/// `replicas_desired` is hydrated once at stream start (from the
+/// validated `ServiceV1.replicas` aggregate the handler has in scope)
+/// per the issue #140 fix. The streaming task captures it by value
+/// (`NonZeroU32: Copy`) and passes it to both `check_terminal` and
+/// `lagged_recover` so the `ConvergedRunning` gate (`running_count >=
+/// replicas_desired`) is evaluated against the operator-declared
+/// replica count, not the single-row shortcut. Phase 1 invariants
+/// (immutable aggregate; re-submit of a different spec is `Conflict`)
+/// guarantee `replicas_desired` cannot change mid-stream, so the
+/// one-shot hydration is correct for the stream's entire lifetime.
+///
 /// The returned stream yields `Result<Bytes, std::io::Error>` items
 /// that axum's `Body::from_stream(...)` wraps into the response body.
 pub fn build_stream(
     state: AppState,
     workload_id: WorkloadId,
     accepted: SubmitEvent,
+    replicas_desired: NonZeroU32,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
     let clock = state.clock.clone();
@@ -205,7 +219,7 @@ pub fn build_stream(
         //    the terminal event and end the stream — analogous to
         //    ADR-0032 §7 lagged-recovery, applied to the subscribe-race
         //    rather than the buffer-overflow class.
-        if let Some(terminal) = lagged_recover(&*obs, &workload_id).await {
+        if let Some(terminal) = lagged_recover(&*obs, &workload_id, replicas_desired).await {
             match emit_line(&terminal) {
                 Ok(line) => {
                     yield Ok(line);
@@ -260,6 +274,7 @@ pub fn build_stream(
                                 &*obs,
                                 &workload_id,
                                 &event,
+                                replicas_desired,
                             ).await {
                                 match emit_line(&terminal) {
                                     Ok(line) => {
@@ -281,6 +296,7 @@ pub fn build_stream(
                             if let Some(terminal) = lagged_recover(
                                 &*obs,
                                 &workload_id,
+                                replicas_desired,
                             ).await {
                                 match emit_line(&terminal) {
                                     Ok(line) => {
@@ -341,53 +357,78 @@ pub fn build_stream(
     }
 }
 
-/// Phase 1 walking-skeleton workloads have `replicas == 1`, so any
-/// single `state == Running` row for the job triggers `ConvergedRunning`.
-/// The reconciler is the gate that decides when to emit
-/// `Action::StartAllocation` per the desired replica count, so a row
-/// only gets written if the reconciler says go — which is what makes
-/// the single-row shortcut safe at `replicas == 1`.
+/// Project a single broadcast [`LifecycleEvent`] into a terminal-or-
+/// running [`SubmitEvent`], gated on the operator-declared
+/// `replicas_desired` per issue #140.
 ///
 /// Per ADR-0037 §4: terminal classification is the reconciler's
-/// decision, durably stamped onto `Action.terminal` and threaded
-/// onto `LifecycleEvent.terminal` by the action shim. This function
-/// reads `event.terminal` as the single source of truth for the
-/// terminal projection — no view lookups, no `restart_counts >=
-/// CEILING` recomputation.
+/// decision, durably stamped onto `Action.terminal` and threaded onto
+/// `LifecycleEvent.terminal` by the action shim. This function reads
+/// `event.terminal` as the single source of truth for the terminal
+/// projection — no view lookups, no `restart_counts >= CEILING`
+/// recomputation.
 ///
-/// TODO(#140): gate `ConvergedRunning` on `running_count >=
-/// replicas_desired` once a multi-replica workload lands. Hydrate
-/// `replicas_desired` once at stream start rather than reading the
-/// IntentStore per broadcast event.
+/// Contract (per `.claude/rules/development.md` § *Trait definitions
+/// specify behavior, not just signature*):
+///
+/// * **Preconditions** — `obs` is the live observation store wired
+///   into `AppState`; `workload_id` is the Service the stream is
+///   bound to; `replicas_desired` is the validated `ServiceV1.replicas`
+///   carrying the `NonZero` invariant from the constructor.
+/// * **Postconditions** — returns `Some(ConvergedRunning { ... })`
+///   only when **every** of the following holds: `event.terminal` is
+///   `None`, `event.to == Running`, and the observation store
+///   carries at least `replicas_desired.get()` rows with
+///   `(workload_id == self, state == Running)`. Returns
+///   `Some(<terminal variant>)` whenever `event.terminal.is_some()`,
+///   bypassing the running-count gate (fail-fast on any single
+///   terminal claim — RCA §7). Otherwise returns `None`.
+/// * **Edge cases** — `replicas_desired == 1` behaves identically to
+///   the prior single-row shortcut by construction
+///   (`running_count >= 1` is equivalent to `rows.any(state ==
+///   Running)`). An obs read that returns `Err(_)` is treated as
+///   "not yet converged" and the function returns `None`; the next
+///   broadcast event will re-attempt the snapshot.
+/// * **Invariant** — a single terminal claim closes the stream
+///   regardless of the running-count gate state. This matches the
+///   pre-fix terminal-projection semantics (RCA §7 Q1 / Q2): any
+///   one allocation's `BackoffExhausted` / `Stopped` / `Custom`
+///   surfaces immediately, even with `replicas_desired > 1` and
+///   other allocations still pending or running.
 async fn check_terminal(
     obs: &dyn ObservationStore,
     workload_id: &WorkloadId,
     event: &LifecycleEvent,
+    replicas_desired: NonZeroU32,
 ) -> Option<SubmitEvent> {
     // Terminal path — project the reconciler-emitted terminal claim
     // (per ADR-0037 §4) into the wire-shape SubmitEvent. Both
     // `AllocStatusRow.terminal` and `LifecycleEvent.terminal` carry
     // the same value from the same dispatch frame — drift is
-    // structurally impossible.
+    // structurally impossible. Fail-fast: a single terminal claim
+    // closes the stream regardless of how many other allocations
+    // are still pending or running (RCA §7).
     if let Some(cond) = &event.terminal {
         return Some(submit_event_from_terminal(cond, event));
     }
 
-    // Success path — Running observation for this job → ConvergedRunning.
-    // Phase 1 walking-skeleton workloads have replicas=1 so a single
-    // running row in the obs store meets the bar; see TODO(#140) on the
-    // function docstring for the multi-replica gate. We read the obs
-    // store rather than trusting event.to alone so that a Running
-    // broadcast event without a corresponding obs row (e.g. a pre-stop
-    // Running event in the stop-while-streaming scenario) does NOT
-    // prematurely close the stream.
+    // Success path — emit `ConvergedRunning` only when at least
+    // `replicas_desired` rows for this workload have reached
+    // `state == Running`. We read the obs store rather than trusting
+    // `event.to` alone so that a Running broadcast event without a
+    // corresponding obs row (e.g. a pre-stop Running event in the
+    // stop-while-streaming scenario) does NOT prematurely close the
+    // stream — and so the count is computed against the durable
+    // surface, not a transient broadcast view.
     if matches!(event.to, AllocStateWire::Running) {
         if let Ok(rows) = obs.alloc_status_rows().await {
-            let has_running = rows.iter().any(|r| {
-                r.workload_id == *workload_id
-                    && r.state == overdrive_core::traits::observation_store::AllocState::Running
-            });
-            if has_running {
+            let running_count: u32 = rows
+                .iter()
+                .filter(|r| r.workload_id == *workload_id && r.state == AllocState::Running)
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX);
+            if running_count >= replicas_desired.get() {
                 return Some(SubmitEvent::ConvergedRunning {
                     alloc_id: event.alloc_id.to_string(),
                     started_at: event.at.clone(),
@@ -437,54 +478,113 @@ fn submit_event_from_terminal(cond: &TerminalCondition, event: &LifecycleEvent) 
     }
 }
 
-/// On `Lagged(_)` (or the pre-subscribe snapshot), inspect the
-/// LWW-winner `AllocStatusRow`. Per ADR-0037 §4 the row's `terminal`
-/// field is the authoritative durable surface for terminal claims —
-/// no view consultation needed.
+/// On `Lagged(_)` (or the pre-subscribe snapshot), classify the
+/// observation-store snapshot for this workload against the
+/// operator-declared `replicas_desired`. Per ADR-0037 §4 the row's
+/// `terminal` field is the authoritative durable surface for
+/// terminal claims — no view consultation needed.
+///
+/// Contract (per `.claude/rules/development.md` § *Trait definitions
+/// specify behavior, not just signature*):
+///
+/// * **Preconditions** — `obs` is the live observation store;
+///   `workload_id` is the Service the stream is bound to;
+///   `replicas_desired` carries the `NonZero` invariant from the
+///   validated `ServiceV1.replicas`. Called at exactly two sites in
+///   [`build_stream`]: the pre-subscribe-window bridge and the
+///   `broadcast::error::RecvError::Lagged(_)` recovery arm.
+/// * **Postconditions** — returns `Some(<terminal variant>)` when
+///   the LWW-winner row for `workload_id` carries
+///   `Some(TerminalCondition)` (fail-fast: any single terminal row
+///   closes the stream regardless of running-count). Returns
+///   `Some(ConvergedRunning { ... })` when the count of rows with
+///   `state == Running` for `workload_id` meets or exceeds
+///   `replicas_desired.get()`; the emitted `alloc_id` / `started_at`
+///   identify the **most-recently-updated** Running row (not
+///   necessarily the LWW winner of the whole row set, which may be
+///   a non-Running transition even when sibling Running counts have
+///   met the gate). Otherwise returns `None`.
+/// * **Edge cases** — `replicas_desired == 1` behaves identically to
+///   the prior single-row shortcut by construction. Zero observation
+///   rows for `workload_id` returns `None`. An obs read failure
+///   returns `None` (the next broadcast event re-classifies).
+/// * **Invariant** — terminal-projection bypasses the running-count
+///   gate (RCA §7 Q1 / Q2 — fail-fast semantics preserved across the
+///   replicas-aware refactor).
 async fn lagged_recover(
     obs: &dyn ObservationStore,
     workload_id: &WorkloadId,
+    replicas_desired: NonZeroU32,
 ) -> Option<SubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
-    let latest = rows
-        .into_iter()
-        .filter(|r| r.workload_id == *workload_id)
-        .max_by_key(|r| r.updated_at.counter)?;
-
-    if let Some(cond) = &latest.terminal {
-        // Promote the row to a synthetic LifecycleEvent shape so the
-        // projection helper can be reused. `from` mirrors `to`
-        // because we have no prior-state context in the snapshot.
-        let to_wire: AllocStateWire = latest.state.into();
+    let job_rows: Vec<_> = rows.into_iter().filter(|r| r.workload_id == *workload_id).collect();
+    // Fail-fast: ANY terminal row closes the stream regardless of
+    // running-count (docstring invariant, RCA §7 Q1/Q2).  Scan all
+    // rows, not just the LWW winner, because a sibling allocation may
+    // have a higher counter yet be non-terminal.
+    if let Some(terminal_row) =
+        job_rows.iter().filter(|r| r.terminal.is_some()).max_by_key(|r| r.updated_at.counter)
+    {
+        let cond = terminal_row
+            .terminal
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("filter guarantees terminal.is_some()"));
+        let to_wire: AllocStateWire = terminal_row.state.into();
         let event = LifecycleEvent {
-            alloc_id: latest.alloc_id.clone(),
-            workload_id: latest.workload_id.clone(),
+            alloc_id: terminal_row.alloc_id.clone(),
+            workload_id: terminal_row.workload_id.clone(),
             from: to_wire,
             to: to_wire,
-            reason: latest.reason.clone().unwrap_or(
+            reason: terminal_row.reason.clone().unwrap_or(
                 overdrive_core::TransitionReason::DriverInternalError { detail: String::new() },
             ),
-            detail: latest.detail.clone(),
+            detail: terminal_row.detail.clone(),
             source: crate::api::TransitionSource::Reconciler,
-            at: format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str()),
+            at: format!(
+                "{}@{}",
+                terminal_row.updated_at.counter,
+                terminal_row.updated_at.writer.as_str()
+            ),
             terminal: Some(cond.clone()),
         };
         return Some(submit_event_from_terminal(cond, &event));
     }
 
-    // Non-terminal — preserve the prior success-path semantics for
-    // Running rows (Phase 1 walking-skeleton single-replica gate).
-    match latest.state {
-        AllocState::Running => Some(SubmitEvent::ConvergedRunning {
-            alloc_id: latest.alloc_id.to_string(),
+    // Guard: need at least one row to proceed to the running-count gate.
+    if job_rows.is_empty() {
+        return None;
+    }
+
+    // Non-terminal — count Running rows for this workload and emit
+    // `ConvergedRunning` only when the count meets the operator's
+    // `replicas_desired`. The `alloc_id` / `started_at` seed for the
+    // wire event is the most-recently-updated Running row — `latest`
+    // may itself be a non-Running transition (e.g. a Pending row
+    // that arrived after sibling Running rows already met the gate).
+    let running_count: u32 = job_rows
+        .iter()
+        .filter(|r| r.state == AllocState::Running)
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    if running_count >= replicas_desired.get() {
+        let running = job_rows
+            .iter()
+            .filter(|r| r.state == AllocState::Running)
+            .max_by_key(|r| r.updated_at.counter)
+            .unwrap_or_else(|| {
+                unreachable!("running_count >= 1 guarantees at least one Running row")
+            });
+        return Some(SubmitEvent::ConvergedRunning {
+            alloc_id: running.alloc_id.to_string(),
             started_at: format!(
                 "{}@{}",
-                latest.updated_at.counter,
-                latest.updated_at.writer.as_str()
+                running.updated_at.counter,
+                running.updated_at.writer.as_str()
             ),
-        }),
-        _ => None,
+        });
     }
+    None
 }
 
 /// Build the synchronous `Accepted` event the handler emits before
@@ -1097,6 +1197,7 @@ pub enum ScheduleSubmitEvent {
 #[allow(clippy::expect_used)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::num::NonZeroU32;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -1201,7 +1302,11 @@ mod tests {
             terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Reconciler }),
         };
 
-        let result = check_terminal(&*obs, &workload_id, &event).await;
+        // `replicas_desired` is immaterial here — `event.terminal.is_some()`
+        // takes the fail-fast terminal-projection branch which bypasses
+        // the running-count gate per the RCA §7 invariant.
+        let replicas_desired = NonZeroU32::new(1).expect("non-zero");
+        let result = check_terminal(&*obs, &workload_id, &event, replicas_desired).await;
 
         assert!(
             matches!(result, Some(SubmitEvent::ConvergedStopped { .. })),
