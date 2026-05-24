@@ -743,7 +743,10 @@ async fn bulk_load_service_vip_allocator(
     Ok(Arc::new(tokio::sync::Mutex::new(allocator)))
 }
 
-pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
+pub async fn run_server(
+    config: ServerConfig,
+    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+) -> Result<ServerHandle, error::ControlPlaneError> {
     // Wire the Phase 1 observation store (`LocalObservationStore`
     // single-node per ADR-0012, revised 2026-04-24) internally and the
     // production `ExecDriver` from the worker subsystem (ADR-0029),
@@ -752,30 +755,25 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     // handle for the canary-injection Fixture-Theater defence without
     // introducing a test-only hook into the production boot path.
     //
-    // Per ADR-0029, this is the binary-composition boundary. The CLI's
-    // `serve` subcommand may also call `run_server_with_obs_and_driver`
-    // directly when it needs a non-default driver under tests.
+    // Per ADR-0029 / ADR-0054 § Composition root wiring, this is the
+    // binary-composition boundary. The CLI's `serve` subcommand
+    // constructs the production cgroupfs adapter at boot, probes it,
+    // and threads the SAME `Arc<dyn CgroupFs>` through here — the
+    // probed substrate IS the used substrate (Earned Trust invariant).
+    // Tests pass either the production adapter (Lima integration
+    // suite, real `/sys/fs/cgroup`) or the sim adapter (DST / sim
+    // path). The trait name `CgroupFs` from `overdrive-core` is fine
+    // in this signature — control-plane already depends on
+    // `overdrive-core` for every other port trait (`Clock`,
+    // `Driver`, `IntentStore`, `ObservationStore`); the concrete
+    // production binding is NOT named here.
     let obs: Arc<dyn ObservationStore> =
         Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
 
-    // Production default — `ExecDriver` rooted at `/sys/fs/cgroup`.
-    // The control-plane crate calls the
-    // `ExecDriver::new_with_default_fs` factory (which internally
-    // wires the production cgroupfs adapter) rather than naming the
-    // port trait or its concrete production binding here. This
-    // preserves ADR-0029's invariant that the control-plane crate
-    // does NOT name worker-internal port traits — and removes the
-    // temporary cross-boundary host-cgroup-adapter construction
-    // that step 01-05 introduced as a mechanical migration shim.
-    //
-    // The composition-root probe runs in `overdrive-cli`'s `serve`
-    // subcommand BEFORE this `run_server` is invoked (ADR-0054
-    // § Composition root wiring); `run_server` itself is the
-    // in-process convenience used by integration tests that do not
-    // exercise the probe path.
-    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new_with_default_fs(
+    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
         std::path::PathBuf::from("/sys/fs/cgroup"),
         Arc::new(overdrive_host::SystemClock),
+        fs,
     ));
 
     run_server_with_obs_and_driver(config, obs, driver).await

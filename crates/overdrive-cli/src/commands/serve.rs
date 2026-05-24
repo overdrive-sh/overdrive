@@ -170,25 +170,28 @@ async fn run_inner(
         Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
         _ => RealCgroupFs::new(),
     };
-    let probe_fs: Arc<dyn CgroupFs> = Arc::new(probe_adapter);
-    if let Err(probe_err) = probe_fs.probe().await {
+    let fs: Arc<dyn CgroupFs> = Arc::new(probe_adapter);
+    if let Err(probe_err) = fs.probe().await {
         let cause = probe_err.to_string();
         tracing::error!(
             name: "health.startup.refused",
             target: "overdrive::health",
             reason = "cgroup_fs.probe",
             cause = %cause,
-            adapter = probe_fs.kind(),
+            adapter = fs.kind(),
             "CgroupFs probe refused; composition root will not start worker subsystem"
         );
         return Err(CliError::ProbeRefused { cause });
     }
-    // Probe succeeded — the substrate honors the contract. Drop the
-    // probe adapter; `run_server` constructs its own production
-    // adapter for the live worker subsystem (both are stateless
-    // wrappers around `tokio::fs::*`, so the probe and the live
-    // adapter share substrate semantics by construction).
-    drop(probe_fs);
+    // Same Arc cloned into run_server → ExecDriver::new — probed
+    // substrate IS used substrate (Earned Trust per ADR-0054 §
+    // Composition root). The CLI constructs `fs` ONCE; the probe
+    // succeeded against THIS exact handle, and the worker subsystem
+    // downstream calls methods on a clone of THIS same Arc. Threading
+    // a different RealCgroupFs instance — even one that happens to
+    // share `/sys/fs/cgroup` substrate semantics — would break the
+    // invariant: probe-success is a property of the handle that was
+    // probed, not of "some handle to the same substrate".
 
     // `..Default::default()` populates `tick_cadence`
     // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
@@ -204,7 +207,7 @@ async fn run_inner(
         dataplane_override,
         ..Default::default()
     };
-    let inner = run_server(config).await.map_err(|e| {
+    let inner = run_server(config, fs.clone()).await.map_err(|e| {
         // ADR-0035 §5 + reconciler-memory-redb step 01-06: any
         // `ViewStore` boot-time failure (open RedbViewStore, probe,
         // bulk_load) surfaces as the typed

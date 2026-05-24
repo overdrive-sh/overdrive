@@ -269,34 +269,6 @@ impl ExecDriver {
         }
     }
 
-    /// Convenience constructor that wires the production [`CgroupFs`]
-    /// adapter ([`overdrive_host::RealCgroupFs`]) internally so callers
-    /// that do not otherwise need to name the [`CgroupFs`] trait
-    /// (notably the control-plane `run_server` default-driver site)
-    /// stay ignorant of the cgroupfs port — preserving the ADR-0029
-    /// invariant that `overdrive-control-plane` does NOT name worker-
-    /// internal port traits.
-    ///
-    /// **Composition-root callers (the `overdrive-cli` binary) SHOULD
-    /// NOT use this factory.** The binary's `serve` subcommand
-    /// constructs its OWN `Arc::new(RealCgroupFs::new())` so it can
-    /// call `.probe().await` BEFORE the worker subsystem starts (per
-    /// ADR-0054 § Composition root wiring) and then threads the
-    /// `Arc<dyn CgroupFs>` into the explicit `new(cgroup_root, clock,
-    /// fs)` constructor above. Use this factory only when the caller
-    /// has no probe requirement of its own (e.g. `run_server`'s
-    /// default-driver convenience for in-process tests that do not
-    /// exercise the probe path).
-    ///
-    /// `clock` is still required positional — there is no fallback
-    /// to `SystemClock` here per `.claude/rules/development.md`
-    /// § "Port-trait dependencies" (mandatory not defaulted).
-    #[must_use]
-    pub fn new_with_default_fs(cgroup_root: PathBuf, clock: Arc<dyn Clock>) -> Self {
-        let fs: Arc<dyn CgroupFs> = Arc::new(overdrive_host::RealCgroupFs::new());
-        Self::new(cgroup_root, clock, fs)
-    }
-
     /// Target every spawned child at `netns_path` (typically
     /// `/var/run/netns/<name>`). On `Driver::start`, the driver
     /// opens the path as an `OwnedFd` and installs a `pre_exec`

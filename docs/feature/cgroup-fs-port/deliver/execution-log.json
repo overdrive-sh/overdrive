@@ -183,6 +183,55 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-24T14:10:03Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T14:11:53Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T14:19:01Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T14:21:01Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: E2 subprocess walking-skeleton + criterion 7/8 grep gates are the structural defense; no PBT-worthy unit logic",
+      "t": "2026-05-24T14:21:01Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T14:29:34Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T14:37:02Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS - fix-up: removed new_with_default_fs factory anti-pattern per user review; threaded Arc<dyn CgroupFs> through run_server signature",
+      "t": "2026-05-24T15:08:21Z"
     }
   ]
 }

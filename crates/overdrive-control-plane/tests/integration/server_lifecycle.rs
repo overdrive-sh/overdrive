@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_host::RealCgroupFs;
 use reqwest::Version;
 use tempfile::TempDir;
 
@@ -93,7 +94,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         )),
         ..Default::default()
     };
-    let handle: ServerHandle = run_server(config).await.expect("run_server");
+    let handle: ServerHandle =
+        run_server(config, Arc::new(RealCgroupFs::new())).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");
     let ca_pem: String = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem)
