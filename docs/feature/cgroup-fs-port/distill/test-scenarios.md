@@ -751,7 +751,17 @@ decision for AC6: per the feature-delta § "Reuse Analysis" row 6
 (12 tests today), each test is classified into one of three buckets.
 The DELIVER crafter MUST honor this matrix.
 
-The 12 existing tests in `crates/overdrive-worker/src/cgroup_manager.rs`
+**Scope**: this matrix covers ONLY the 16 inline `#[test]` /
+`#[tokio::test]` bodies in `crates/overdrive-worker/src/cgroup_manager.rs`
+mod `tests`. The existing acceptance tests at
+`crates/overdrive-worker/tests/acceptance/cgroup_path_validation.rs`
+and `crates/overdrive-worker/tests/acceptance/cgroup_path_roundtrip.rs`
+test the `CgroupPath` newtype's `FromStr` validation and `Display ↔
+FromStr` round-trip respectively — they do NOT touch the filesystem
+and are NOT affected by the `CgroupFs` port migration. They stay
+untouched; AC6 does not apply to them.
+
+The 16 existing tests in `crates/overdrive-worker/src/cgroup_manager.rs`
 mod `tests`:
 
 | # | Test name                                                                   | Bucket | Destination                                                                                |
