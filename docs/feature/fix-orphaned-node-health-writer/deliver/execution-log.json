@@ -29,6 +29,13 @@
       "s": "SKIPPED",
       "d": "NOT_APPLICABLE: GREEN lands in step 01-02 \u2014 this step deliberately leaves the regression test RED as the contract for the next step's GREEN target",
       "t": "2026-05-24T08:34:18Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T08:36:54Z"
     }
   ]
 }
