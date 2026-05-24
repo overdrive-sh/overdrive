@@ -55,7 +55,12 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
     let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
+    let handle = overdrive_cli::commands::serve::run_with_dataplane(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+    )
+    .await
+    .expect("serve::run");
     (handle, tmp)
 }
 

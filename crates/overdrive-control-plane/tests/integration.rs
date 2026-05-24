@@ -35,6 +35,10 @@ mod integration {
     //! `redesign-drop-commit-index` — the per-entry index assertion
     //! has no consumer on the post-ADR-0020 wire shape.
     mod concurrent_submit_toctou;
+    /// Action-shim `deregister_local_backend::dispatch` mutation kill
+    /// per ADR-0053 § 3 — asserts the post-dispatch observable state
+    /// on `SimDataplane::local_backend_for`.
+    mod deregister_local_backend_dispatch;
     mod describe_round_trip;
     /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
     /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment
@@ -131,6 +135,12 @@ mod integration {
         mod subtree_control_delegation_is_idempotent;
     }
 
+    /// Runtime validator at the reconcile-output boundary — rejects
+    /// `Vec<Action>` returns that target the same service-LB VIP from
+    /// two or more write-Actions in one tick. Closes the inter-Action
+    /// conflict gap Phase 16 D11 surfaced.
+    mod reconcile_output_validator;
+
     /// `cargo openapi-{gen,check}` library + binary scenarios — relocated
     /// from xtask when the OpenAPI gate moved into overdrive-control-plane.
     /// Covers test-scenarios.md §3.3. See § "xtask is build / test / dev
@@ -143,4 +153,20 @@ mod integration {
     /// next submit. Owns S-VIP-06 (end-to-end) and S-VIP-07 (released-
     /// VIP reuse) per the DISTILL test-scenarios contract.
     mod vip_allocator_lifecycle;
+    /// `backend-discovery-bridge-service-reachability` (joint #174 + #175)
+    /// DISTILL — RED scaffolds per
+    /// `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`.
+    /// Walking-skeleton (S-BDB-01, S-BDB-18, S-BDB-19) + boot-composition
+    /// (S-BDB-11..S-BDB-17, S-BDB-20). All tests
+    /// `#[should_panic(expected = "RED scaffold")]` until DELIVER Slices
+    /// 1 and 2 land the bridge + production `EbpfDataplane` wiring.
+    mod backend_discovery_bridge {
+        mod boot_composition;
+        /// Shared fixture for the walking-skeleton (S-BDB-01) — spawns
+        /// a production server wired against a real `EbpfDataplane`
+        /// + drives `submit_workload` through the real HTTPS client.
+        /// Lives under `tests/` per architecture.md § 6.2 / Atlas Q1.
+        mod test_server;
+        mod walking_skeleton;
+    }
 }

@@ -27,11 +27,15 @@
 #![allow(clippy::expect_used)]
 
 use std::collections::BTreeMap;
+use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Node, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
+use overdrive_core::reconciler::backend_discovery_bridge::{
+    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
+};
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, TickContext, WorkloadLifecycle,
@@ -150,7 +154,9 @@ fn dispatch_routes_service_map_hydrator_triple_to_hydrator_view() {
     // `AnyReconcilerView::ServiceMapHydrator(_)`. Mutant (delete arm):
     // wildcard panic. Closes the missed mutation flagged at line
     // 965 by the QUALITY_GATE wave's mutation run.
-    let any = AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical());
+    let any = AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+    ));
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -185,4 +191,63 @@ fn dispatch_routes_service_map_hydrator_triple_to_hydrator_view() {
     // above, retained here as a no-op assertion to make the
     // dependency obvious.
     let _ = Action::Noop;
+}
+
+// -------------------------------------------------------------------
+// L1260 — BackendDiscoveryBridge dispatch arm
+// (backend-discovery-bridge-service-reachability step 01-02)
+// -------------------------------------------------------------------
+
+#[test]
+fn dispatch_routes_backend_discovery_bridge_triple_to_bridge_view() {
+    // Construct a `BackendDiscoveryBridge`, wrap it in
+    // `AnyReconciler::BackendDiscoveryBridge`, and dispatch with the
+    // matching state + view triple. Production: routes to
+    // `BackendDiscoveryBridge::reconcile` → returns
+    // `AnyReconcilerView::BackendDiscoveryBridge(_)`. Mutant (delete
+    // match arm at reconciler.rs:1260): wildcard `_ => panic!` fires
+    // instead, so the dispatch panics. The variant-of-returned-view
+    // assertion below is uniquely produced by the BackendDiscoveryBridge
+    // arm — any other arm (or the panic wildcard) would not return
+    // `AnyReconcilerView::BackendDiscoveryBridge(_)`.
+    //
+    // Phase 17 mutation gap: until this test, the `delete match arm`
+    // mutation for the BackendDiscoveryBridge dispatch arm was MISSED
+    // by the default-lane suite — every existing dispatch test covers
+    // one of the other three arms (NoopHeartbeat, WorkloadLifecycle,
+    // ServiceMapHydrator) only.
+    let writer = NodeId::new("writer-1").expect("valid NodeId");
+    let any = AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(
+        Ipv4Addr::new(10, 0, 0, 5),
+        writer,
+    ));
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    // Empty bridge state — no listeners, no Running allocs. The
+    // bridge's reconcile body returns an empty action list and the
+    // unchanged view; the variant of the returned view is the
+    // discriminating signal for this test.
+    let workload_id = WorkloadId::new("payments").expect("valid WorkloadId");
+    let desired = BackendDiscoveryBridgeState::empty_for_workload(workload_id.clone());
+    let actual = BackendDiscoveryBridgeState::empty_for_workload(workload_id);
+    let view = AnyReconcilerView::BackendDiscoveryBridge(BackendDiscoveryBridgeView::default());
+
+    let (_actions, returned_view) = any.reconcile(
+        &AnyState::BackendDiscoveryBridge(desired),
+        &AnyState::BackendDiscoveryBridge(actual),
+        &view,
+        &tick,
+    );
+
+    assert!(
+        matches!(returned_view, AnyReconcilerView::BackendDiscoveryBridge(_)),
+        "BackendDiscoveryBridge dispatch must return \
+         AnyReconcilerView::BackendDiscoveryBridge; got {returned_view:?}",
+    );
 }

@@ -64,12 +64,14 @@ use overdrive_core::traits::dataplane::{
 const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"));
 
 /// Production bpffs pin directory for SERVICE_MAP and any future
-/// HoM-shaped maps. The kernel-side declaration carries
-/// `pinning = ByName`; aya's loader joins this directory + the map
-/// name when resolving the pre-pinned FD via `BPF_OBJ_GET`. See
+/// HoM-shaped maps.
+///
+/// The kernel-side declaration carries `pinning = ByName`; aya's
+/// loader joins this directory + the map name when resolving the
+/// pre-pinned FD via `BPF_OBJ_GET`. See
 /// `.claude/rules/development.md` § "Sharing the outer HoM between
 /// userspace and the kernel-side ELF — `pinning = ByName`".
-const DEFAULT_PIN_DIR: &str = "/sys/fs/bpf/overdrive";
+pub const DEFAULT_PIN_DIR: &str = "/sys/fs/bpf/overdrive";
 
 /// SERVICE_MAP outer-map name. MUST match the `#[map]` `export_name`
 /// emitted from `crates/overdrive-bpf/src/maps/service_map.rs` —
@@ -86,6 +88,20 @@ const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
 /// (Slice 05-04: promoted from in-memory placeholder per
 /// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`).
 const REVERSE_NAT_MAP_NAME: &str = "REVERSE_NAT_MAP";
+
+/// LOCAL_BACKEND_MAP name per ADR-0053 § 1 — regular HASH map keyed
+/// on `LocalServiceKey { vip_host, port_host, _pad }` →
+/// `LocalBackendEntry { backend_ip_host, backend_port_host, _pad }`.
+/// aya supports HASH natively.
+const LOCAL_BACKEND_MAP_NAME: &str = "LOCAL_BACKEND_MAP";
+
+/// Default cgroup attach path for `cgroup_connect4_service` per
+/// ADR-0053 § 7.
+///
+/// Must be an ancestor of the control-plane process AND every
+/// workload cgroup. Matches the slice that
+/// `crates/overdrive-worker/src/cgroup_manager.rs` already manages.
+pub const DEFAULT_CGROUP_ATTACH_PATH: &str = "/sys/fs/cgroup/overdrive.slice";
 
 /// SERVICE_MAP outer-map capacity in services. 4096 per
 /// architecture.md § 10. MUST match the kernel-side
@@ -231,6 +247,58 @@ pub struct EbpfDataplane {
     /// the program.
     #[allow(dead_code)]
     _xdp_reverse_link: aya::programs::xdp::XdpLinkId,
+
+    /// Userspace handle to LOCAL_BACKEND_MAP per ADR-0053 § 1.
+    /// Populated by `register_local_backend` /
+    /// `deregister_local_backend`; the
+    /// `cgroup_connect4_service` kernel program reads it on every
+    /// `connect(2)` from a process inside the attach cgroup.
+    local_backend_map: crate::maps::local_backend_map_handle::LocalBackendMapHandle,
+
+    /// Owns the `cgroup_connect4_service` cgroup_sock_addr
+    /// attachment. Dropping detaches the program per ADR-0053
+    /// § "Consequences" — Reliability — recoverability.
+    ///
+    /// **Detach symmetry with XDP**: this field follows the same
+    /// RAII shape as `_xdp_forward_link` / `_xdp_reverse_link`
+    /// above — aya's `CgroupSockAddrLinkId` is a typed
+    /// `bpf_link_create`-backed handle whose `Drop` impl invokes
+    /// `close(2)` on the link fd, which detaches the program from
+    /// the cgroup at the kernel-link refcount boundary (mirror of
+    /// `aya::programs::xdp::XdpLinkId::drop` for XDP). The whole
+    /// struct's drop order — fields drop in declaration order, so
+    /// XDP links detach first, the BPF object's maps stay alive
+    /// until the cgroup link drops, then the cgroup link releases
+    /// last — is what makes the bpffs pin cleanup in the explicit
+    /// `Drop for EbpfDataplane` impl below sequence-safe. No
+    /// explicit detach call is needed; the same SIGKILL-skips-Drop
+    /// caveat documented for the XDP path applies here, and the
+    /// operator-side cleanup discipline in
+    /// `.claude/rules/debugging.md` § "Leftover XDP attachments
+    /// across runs" extends to cgroup_sock_addr attachments by the
+    /// same mechanism (an unclean shutdown leaves the program
+    /// attached until the next `EbpfDataplane::new` replaces it
+    /// or an operator runs the equivalent `bpftool cgroup detach`
+    /// sweep).
+    #[allow(dead_code)]
+    _cgroup_connect4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
+
+    /// Attach path the `cgroup_connect4_service` program is bound
+    /// to. Retained for the operator-surfaced
+    /// `DataplaneError::LocalBackendProbe` error message context
+    /// per ADR-0053 § 6.
+    #[allow(dead_code)]
+    cgroup_attach_path: std::path::PathBuf,
+
+    /// Test-only failure-injection seam for [`Self::probe`]. When
+    /// `Some(fault)`, `probe()` short-circuits to `Err(fault.clone())`
+    /// BEFORE touching `BACKEND_MAP`. The seam is gated behind
+    /// `#[cfg(any(test, feature = "integration-tests"))]`; production
+    /// builds compile the field out entirely. Use by S-BDB-14 to
+    /// drive the `DataplaneBootError::Probe` mapping arm without
+    /// corrupting the BACKEND_MAP itself.
+    #[cfg(any(test, feature = "integration-tests"))]
+    probe_fault: parking_lot::Mutex<Option<DataplaneError>>,
 }
 
 impl EbpfDataplane {
@@ -266,13 +334,17 @@ impl EbpfDataplane {
         client_iface: &str,
         backend_iface: &str,
         pin_dir: &std::path::Path,
+        cgroup_attach_path: &std::path::Path,
     ) -> Result<Self, DataplaneError> {
-        use aya::programs::{Xdp, XdpFlags};
+        use aya::programs::{CgroupAttachMode, CgroupSockAddr, Xdp, XdpFlags};
         use nix::errno::Errno;
         use nix::net::if_::if_nametoindex;
 
         use crate::maps::hash_of_maps::HashOfMapsHandle;
-        use crate::maps::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};
+        use crate::maps::local_backend_map_handle::LocalBackendMapHandle;
+        use crate::maps::{
+            BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
+        };
 
         // Resolve both iface names → ifindexes. ENODEV / ENOENT map
         // to the typed IfaceNotFound variant. Both ifaces are
@@ -487,6 +559,59 @@ impl EbpfDataplane {
             }
         };
 
+        // ADR-0053 § 1 — recover LOCAL_BACKEND_MAP typed handle.
+        // Regular HASH; aya supports it natively. The kernel
+        // `#[map]` declaration in
+        // `crates/overdrive-bpf/src/maps/local_backend_map.rs` is
+        // what makes this map present in the loaded ELF.
+        let local_backend_map_inner =
+            aya::maps::HashMap::<_, LocalServiceKey, LocalBackendEntry>::try_from(
+                bpf.take_map(LOCAL_BACKEND_MAP_NAME).ok_or_else(|| {
+                    DataplaneError::LoadFailed("LOCAL_BACKEND_MAP not found in BPF object".into())
+                })?,
+            )
+            .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP try_from: {e}")))?;
+        let local_backend_map = LocalBackendMapHandle::new(local_backend_map_inner);
+
+        // ADR-0053 § 1 — load + attach cgroup_connect4_service.
+        // Open the cgroup directory FD (read-only is sufficient;
+        // aya's `attach` passes it through to
+        // `bpf_link_create(LinkTarget::Fd(cgroup_fd))`). The
+        // operator-supplied cgroup_attach_path MUST exist and be
+        // an ancestor of every workload cgroup per ADR-0053 § 7.
+        let cgroup_file = std::fs::File::open(cgroup_attach_path).map_err(|e| {
+            DataplaneError::LoadFailed(format!(
+                "open cgroup_attach_path {}: {e}",
+                cgroup_attach_path.display()
+            ))
+        })?;
+
+        let cgroup_prog: &mut CgroupSockAddr = bpf
+            .program_mut("cgroup_connect4_service")
+            .ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "cgroup_connect4_service program not found in BPF object".into(),
+                )
+            })?
+            .try_into()
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("cgroup_connect4_service program type: {e}"))
+            })?;
+        // aya recovers the attach type from the kernel-side
+        // `link_section = "cgroup/connect4"` emitted by the
+        // `#[cgroup_sock_addr(connect4)]` macro; no additional
+        // pinning here.
+        cgroup_prog.load().map_err(|e| {
+            DataplaneError::LoadFailed(format!("cgroup_connect4_service.load: {e}"))
+        })?;
+        let cgroup_link_id =
+            cgroup_prog.attach(&cgroup_file, CgroupAttachMode::Single).map_err(|e| {
+                DataplaneError::LoadFailed(format!(
+                    "cgroup_connect4_service.attach({}): {e}",
+                    cgroup_attach_path.display()
+                ))
+            })?;
+
         Ok(Self {
             bpf,
             service_map,
@@ -498,6 +623,11 @@ impl EbpfDataplane {
             pin_dir: pin_dir.to_path_buf(),
             _xdp_forward_link: xdp_forward_link,
             _xdp_reverse_link: xdp_reverse_link,
+            local_backend_map,
+            _cgroup_connect4_link: cgroup_link_id,
+            cgroup_attach_path: cgroup_attach_path.to_path_buf(),
+            #[cfg(any(test, feature = "integration-tests"))]
+            probe_fault: parking_lot::Mutex::new(None),
         })
     }
 
@@ -510,7 +640,12 @@ impl EbpfDataplane {
     /// ingress) and `backend_iface` (reverse-path;
     /// `xdp_reverse_nat_lookup` ingress).
     pub fn new(client_iface: &str, backend_iface: &str) -> Result<Self, DataplaneError> {
-        Self::new_with_pin_dir(client_iface, backend_iface, std::path::Path::new(DEFAULT_PIN_DIR))
+        Self::new_with_pin_dir(
+            client_iface,
+            backend_iface,
+            std::path::Path::new(DEFAULT_PIN_DIR),
+            std::path::Path::new(DEFAULT_CGROUP_ATTACH_PATH),
+        )
     }
 
     /// Number of entries currently in REVERSE_NAT_MAP.
@@ -644,6 +779,320 @@ impl EbpfDataplane {
             Ok(None) => Ok(false),
             Err(e) => Err(DataplaneError::LoadFailed(format!("SERVICE_MAP lookup: {e}"))),
         }
+    }
+
+    /// Snapshot of the `(BackendId, BackendEntryPod)` pairs currently
+    /// present in `BACKEND_MAP`.
+    ///
+    /// Test-only — gated behind `cfg(any(test, feature = "integration-
+    /// tests"))` per `backend-discovery-bridge-service-reachability/
+    /// design/architecture.md` § 6.2 / Atlas Q1: the production crate's
+    /// public surface MUST NOT widen the test-only inspector to
+    /// non-test consumers. The narrower `backend_map_keys()` /
+    /// `service_map_contains()` accessors above are kept public
+    /// because they are consumed by production debug tooling (and by
+    /// the in-feature S-2.2-10 orphan-GC verification); only the
+    /// full-entry iterator is gated.
+    ///
+    /// Used by the walking-skeleton (S-BDB-01) to assert a backend
+    /// matching `(host_ipv4, listener_port)` was written by the
+    /// `update_service` path. Returned in arbitrary order — callers
+    /// that need stability sort by the `(ipv4_host, port_host)` tuple.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects a
+    /// `keys()` iteration step or a `get()` lookup for a key the prior
+    /// iteration surfaced. The races that could surface here
+    /// (mid-iteration map mutation, kernel out-of-memory) are the
+    /// same that `backend_map_keys()` documents — the inspector
+    /// simply chains a `get()` per key.
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn backend_map_entries(
+        &self,
+    ) -> Result<Vec<(u32, crate::maps::BackendEntryPod)>, DataplaneError> {
+        let backend_map = self.backend_map.lock();
+        let keys = backend_map
+            .keys()
+            .collect::<Result<Vec<u32>, _>>()
+            .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP keys(): {e}")))?;
+        let mut entries = Vec::with_capacity(keys.len());
+        for key in keys {
+            let entry = backend_map
+                .get(&key, 0)
+                .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP get({key}): {e}")))?;
+            entries.push((key, entry));
+        }
+        drop(backend_map);
+        Ok(entries)
+    }
+
+    /// Earned-Trust probe per `backend-discovery-bridge-service-
+    /// reachability` architecture.md § 5.4 and CLAUDE.md principle 12.
+    ///
+    /// Writes a sentinel `BACKEND_MAP` entry under `BackendId::PROBE
+    /// = u32::MAX`, reads it back, asserts byte-equal, then deletes
+    /// it. Proves the HoM pin-by-name reuse path + `BACKEND_MAP`
+    /// programmability work on this kernel BEFORE accepting traffic.
+    ///
+    /// **Composition-root invariant**: the production boot path
+    /// (`overdrive-control-plane::serve_with_config`) MUST call
+    /// `probe().await` AFTER [`Self::new`] / [`Self::new_with_pin_dir`]
+    /// succeeds and BEFORE the first downstream dataplane operation.
+    /// On failure the boot path refuses to start with a structured
+    /// `health.startup.refused` event (`reason = "dataplane.probe"`)
+    /// and surfaces `DataplaneBootError::Probe { source }` to the
+    /// operator. The error chain's `Display` contains either
+    /// "probe: round-trip mismatch" (the sentinel byte-equality
+    /// check) or "probe: BACKEND_MAP <step>: <underlying-error>"
+    /// (one of the three map syscalls).
+    ///
+    /// # Preconditions
+    ///
+    /// None. The probe operates on the typed `BACKEND_MAP` handle the
+    /// constructor owns; no external resource is required beyond what
+    /// the constructor already guarantees (loaded BPF ELF, attached
+    /// XDP, pinned SERVICE_MAP).
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(())`: `BACKEND_MAP` is byte-equal to its pre-probe state
+    /// — the sentinel was written, read back, and deleted. A caller
+    /// that immediately inspects `BACKEND_MAP::get(u32::MAX, 0)` MUST
+    /// observe `None`.
+    ///
+    /// On `Err(DataplaneError::LoadFailed(msg))`: `BACKEND_MAP` MAY
+    /// contain partial sentinel state (if the failure occurred between
+    /// the insert and the delete). The caller MUST NOT use the
+    /// dataplane after a failed probe — the Earned-Trust contract is
+    /// violated and the kernel's view of the map is undefined relative
+    /// to userspace expectations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] with a message starting
+    /// with `"probe: BACKEND_MAP insert: ..."`, `"probe: BACKEND_MAP
+    /// get: ..."`, `"probe: round-trip mismatch ..."`, or `"probe:
+    /// BACKEND_MAP delete: ..."` depending on which step rejected.
+    // `#[allow(clippy::unused_async)]` is required because the probe
+    // body uses only synchronous parking_lot::Mutex guards against
+    // the `BackendMapHandle`; there is no `.await` inside. The
+    // function MUST stay async because the boot path calls
+    // `.probe().await` (composition root invariant "wire then probe
+    // then use" per CLAUDE.md principle 12) and future probe
+    // additions (TLS-handshake roundtrip, kernel-side ringbuf drain)
+    // will need real awaits. Treating the signature as async-stable
+    // matches the rest of the `Dataplane` trait surface.
+    #[allow(clippy::unused_async)]
+    pub async fn probe(&self) -> Result<(), DataplaneError> {
+        use crate::maps::wire::BackendEntryPod;
+
+        // Sentinel BackendId — `u32::MAX` is reserved for the probe
+        // per architecture.md § 5.4. Real BackendIds come from the
+        // monotonic-counter allocator and never reach this value.
+        const SENTINEL_BACKEND_ID: u32 = u32::MAX;
+
+        // Test-only short-circuit: when the failure-injection seam is
+        // armed, surface the configured fault BEFORE touching the
+        // kernel. The seam is the single production-shape concession
+        // permitted by `.claude/rules/development.md` § "Production
+        // code is not shaped by simulation" — it is gated behind
+        // `cfg(any(test, feature = "integration-tests"))`, the field
+        // is compiled out in production builds, and the branch
+        // collapses to nothing for the production code path. The
+        // `.take()` runs against a freshly-taken guard that drops
+        // before the `if let` so clippy's
+        // `significant_drop_in_scrutinee` lint is satisfied.
+        #[cfg(any(test, feature = "integration-tests"))]
+        {
+            let armed_fault = self.probe_fault.lock().take();
+            if let Some(fault) = armed_fault {
+                return Err(fault);
+            }
+        }
+
+        // Sentinel POD — `127.0.0.1` host-order (`0x7F_00_00_01`),
+        // port = 0, weight = 0, healthy = 0, `_pad` = zeroed.
+        // Field names match the actual `BackendEntryPod` struct
+        // (`ipv4_host` / `port_host`), not the architecture.md
+        // pseudo-code spelling (`ipv4` / `port`) which predates the
+        // 05-04 wire-type rename.
+        let sentinel = BackendEntryPod {
+            ipv4_host: 0x7F_00_00_01,
+            port_host: 0,
+            weight: 0,
+            healthy: 0,
+            _pad: [0; 3],
+        };
+
+        // Step 1 — write.
+        self.backend_map
+            .lock()
+            .insert(SENTINEL_BACKEND_ID, sentinel, 0)
+            .map_err(|e| DataplaneError::LoadFailed(format!("probe: BACKEND_MAP insert: {e}")))?;
+
+        // Step 2 — read-back. Bind the lookup `Result` to a local so
+        // the `parking_lot::MutexGuard` drops before the `match`
+        // arm runs — keeps clippy's
+        // `significant_drop_in_scrutinee` lint satisfied without
+        // holding the lock across the error-formatting path.
+        let read_back = self.backend_map.lock().get(&SENTINEL_BACKEND_ID, 0);
+        let got: Option<BackendEntryPod> = match read_back {
+            Ok(v) => Some(v),
+            Err(aya::maps::MapError::KeyNotFound) => None,
+            Err(e) => {
+                return Err(DataplaneError::LoadFailed(format!("probe: BACKEND_MAP get: {e}")));
+            }
+        };
+
+        // Step 3 — assert byte-equal. Mismatch (either `None` or a
+        // different value) is the structural signal that
+        // `BACKEND_MAP` programmability is broken on this kernel.
+        if got != Some(sentinel) {
+            // Best-effort cleanup before bailing — leave `BACKEND_MAP`
+            // in a clean state if we can. Errors here are swallowed:
+            // the round-trip mismatch is the real story and a delete
+            // failure on an already-broken map would only mask it.
+            let _ = self.backend_map.lock().remove(&SENTINEL_BACKEND_ID);
+            return Err(DataplaneError::LoadFailed(format!(
+                "probe: round-trip mismatch (got {got:?}, want {sentinel:?})"
+            )));
+        }
+
+        // Step 4 — delete. After a clean delete, `BACKEND_MAP` is
+        // byte-equal to its pre-probe state.
+        self.backend_map
+            .lock()
+            .remove(&SENTINEL_BACKEND_ID)
+            .map_err(|e| DataplaneError::LoadFailed(format!("probe: BACKEND_MAP delete: {e}")))?;
+
+        // ADR-0053 § 6 — Earned-Trust probe extension. Sentinel
+        // round-trip against LOCAL_BACKEND_MAP confirms the cgroup
+        // hook attached AND the map is programmable end-to-end.
+        // Sentinel: (vip=0.0.0.0, vip_port=0) → (backend=0.0.0.0:0).
+        // The sentinel is reserved per the typed-handle convention;
+        // production allocator-issued VIPs never use 0.0.0.0.
+        let sentinel_vip = Ipv4Addr::UNSPECIFIED;
+        let sentinel_vip_port: u16 = 0;
+        let sentinel_backend = std::net::SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+
+        self.local_backend_map.upsert(sentinel_vip, sentinel_vip_port, sentinel_backend).map_err(
+            |e| DataplaneError::LocalBackendProbe {
+                message: format!("LOCAL_BACKEND_MAP sentinel insert: {e}"),
+            },
+        )?;
+
+        let got = self.local_backend_map.get(sentinel_vip, sentinel_vip_port).map_err(|e| {
+            DataplaneError::LocalBackendProbe {
+                message: format!("LOCAL_BACKEND_MAP sentinel get: {e}"),
+            }
+        })?;
+        if got.is_none() {
+            return Err(DataplaneError::LocalBackendProbe {
+                message: "LOCAL_BACKEND_MAP sentinel round-trip missed: got None".to_string(),
+            });
+        }
+
+        self.local_backend_map.remove(sentinel_vip, sentinel_vip_port).map_err(|e| {
+            DataplaneError::LocalBackendProbe {
+                message: format!("LOCAL_BACKEND_MAP sentinel delete: {e}"),
+            }
+        })?;
+
+        Ok(())
+    }
+
+    /// Public read-back surface for `LOCAL_BACKEND_MAP` — used by
+    /// the walking-skeleton test to assert the cgroup_sock_addr
+    /// path was populated. Mirrors the existing
+    /// [`Self::backend_map_entries`] inspector shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] when the underlying
+    /// map iteration fails.
+    pub fn local_backend_map_entries(
+        &self,
+    ) -> Result<Vec<(crate::maps::LocalServiceKey, crate::maps::LocalBackendEntry)>, DataplaneError>
+    {
+        self.local_backend_map
+            .entries()
+            .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP iter: {e}")))
+    }
+
+    /// Returns the LOCAL_BACKEND_MAP entry for `(vip, vip_port)`,
+    /// if any. Used by the walking-skeleton test to assert the
+    /// cgroup path was populated by the hydrator's
+    /// `Action::RegisterLocalBackend` dispatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] on lookup failure
+    /// other than `KeyNotFound` (which surfaces as `Ok(None)`).
+    pub fn local_backend_for(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+    ) -> Result<Option<crate::maps::LocalBackendEntry>, DataplaneError> {
+        self.local_backend_map
+            .get(vip, vip_port)
+            .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP get: {e}")))
+    }
+
+    /// Test-only seam: arm the probe-fault. The next call to
+    /// [`Self::probe`] consumes the armed fault and returns it
+    /// verbatim BEFORE touching the kernel. Used by S-BDB-14 to
+    /// exercise the `DataplaneBootError::Probe` mapping arm without
+    /// corrupting the real BACKEND_MAP.
+    ///
+    /// Takes `&self` because the seam mutates only the interior
+    /// `parking_lot::Mutex` — no exclusive borrow required. This
+    /// matches the rest of `EbpfDataplane`'s mutating surface
+    /// (`update_service` et al. take `&self` and route through
+    /// interior `Mutex`/`Atomic`s).
+    ///
+    /// Gated behind `#[cfg(any(test, feature = "integration-tests"))]`
+    /// — the symbol does not exist in production builds.
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn set_probe_fault(&self, fault: DataplaneError) {
+        *self.probe_fault.lock() = Some(fault);
+    }
+}
+
+/// Graceful-shutdown RAII per architecture.md § 5.6 of
+/// `backend-discovery-bridge-service-reachability` (step 02-02).
+///
+/// On drop:
+///   - `_xdp_forward_link` / `_xdp_reverse_link` `XdpLinkId` fields
+///     drop in field declaration order, and aya detaches each XDP
+///     program from its iface as part of their `Drop`. No explicit
+///     action required here.
+///   - The SERVICE_MAP bpffs pin at `<pin_dir>/SERVICE_MAP` is
+///     unlinked best-effort. Failure on `remove_file` logs at debug
+///     — by the time `Drop` runs the caller may be unwinding from a
+///     panic, and `Drop` cannot bubble errors. The leftover-pin
+///     cleanup discipline in `.claude/rules/debugging.md` § "Leftover
+///     XDP attachments across runs" is the operator-side safety net
+///     when `Drop` is skipped (SIGKILL).
+///
+/// `NotFound` is treated as success (a prior unclean shutdown plus
+/// the cleanup-on-start logic in `new_with_pin_dir` can leave the
+/// pin gone before `Drop` runs).
+impl Drop for EbpfDataplane {
+    fn drop(&mut self) {
+        let pin_path = self.pin_dir.join(SERVICE_MAP_NAME);
+        if let Err(e) = std::fs::remove_file(&pin_path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::debug!(
+                    name: "xdp.shutdown.unlink_failed",
+                    path = %pin_path.display(),
+                    error = %e,
+                    "SERVICE_MAP pin unlink failed during shutdown"
+                );
+            }
+        }
+        // `XdpLinkId` fields held by `self` drop here; aya detaches
+        // each XDP program from its iface as part of `XdpLinkId::Drop`.
     }
 }
 
@@ -1128,6 +1577,37 @@ impl Dataplane for EbpfDataplane {
     /// see #27 (telemetry `ringbuf`)
     async fn drain_flow_events(&self) -> Result<Vec<FlowEvent>, DataplaneError> {
         Ok(vec![])
+    }
+
+    /// ADR-0053 § 2 — register or replace the local backend for
+    /// `(vip, vip_port)`. Point write against LOCAL_BACKEND_MAP via
+    /// the typed handle; kernel sees either the prior backend or
+    /// the new one — no torn states.
+    async fn register_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        backend: std::net::SocketAddrV4,
+    ) -> Result<(), DataplaneError> {
+        self.local_backend_map.upsert(vip, vip_port, backend).map_err(|e| {
+            DataplaneError::LocalBackendInsert {
+                source: std::io::Error::other(format!("aya HashMap::insert: {e}")),
+            }
+        })
+    }
+
+    /// ADR-0053 § 2 — idempotent removal. KeyNotFound is swallowed
+    /// inside the typed handle per the trait contract.
+    async fn deregister_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+    ) -> Result<(), DataplaneError> {
+        self.local_backend_map.remove(vip, vip_port).map_err(|e| {
+            DataplaneError::LocalBackendDelete {
+                source: std::io::Error::other(format!("aya HashMap::remove: {e}")),
+            }
+        })
     }
 }
 

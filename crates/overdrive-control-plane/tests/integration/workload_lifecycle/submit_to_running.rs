@@ -55,6 +55,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     // Cleanup guard — fires on test exit (panic or success) and

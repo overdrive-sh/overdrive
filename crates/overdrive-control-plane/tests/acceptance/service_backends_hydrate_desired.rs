@@ -61,6 +61,7 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
         Arc::new(SimDataplane::new()),
         node_id("writer-1"),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     )
 }
 
@@ -84,7 +85,9 @@ fn sample_backends() -> Vec<Backend> {
 }
 
 fn hydrator_reconciler() -> AnyReconciler {
-    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical())
+    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+    ))
 }
 
 // ---------------------------------------------------------------------------

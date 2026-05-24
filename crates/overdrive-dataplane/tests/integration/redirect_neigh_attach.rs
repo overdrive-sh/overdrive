@@ -45,7 +45,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::helpers::netns::{NetNsError, ThreeIfaceTopology};
+use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology};
 
 /// Kernel-observable name for the forward-path program. The kernel
 /// truncates BPF program names to `BPF_OBJ_NAME_LEN` = 16 (15 chars
@@ -128,8 +128,13 @@ fn loader_attaches_xdp_reverse_nat_on_backend_veth_and_retires_tc_egress() {
 
     // Driving port — the loader. Two ifaces under ADR-0045: client-
     // facing for forward path, backend-facing for reverse path.
-    let _dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir(lb_veth_a, lb_veth_b, pin_dir) must succeed");
+    let _dataplane = EbpfDataplane::new_with_pin_dir(
+        &topo.lb_veth_a,
+        &topo.lb_veth_b,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir(lb_veth_a, lb_veth_b, pin_dir) must succeed");
 
     // === Assertion (a) — xdp_service_map_lookup on lb_veth_a ingress. ===
     //

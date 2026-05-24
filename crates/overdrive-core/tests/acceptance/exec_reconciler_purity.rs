@@ -174,9 +174,14 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // Then exactly one StartAllocation, and the spec carries the
-    // operator's declared command + args (NOT /bin/sleep + ["60"]).
-    assert_eq!(actions.len(), 1, "must emit one StartAllocation; got {actions:?}");
+    // Then a StartAllocation paired with the UI-06 bridge enqueue;
+    // the spec carries the operator's declared command + args
+    // (NOT /bin/sleep + ["60"]).
+    assert_eq!(
+        actions.len(),
+        2,
+        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions:?}",
+    );
     match &actions[0] {
         Action::StartAllocation { spec, .. } => {
             assert_eq!(
@@ -243,9 +248,14 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // Then exactly one RestartAllocation, and the spec carries the
-    // operator's declared command + args + resources.
-    assert_eq!(actions.len(), 1, "must emit one RestartAllocation; got {actions:?}");
+    // Then a RestartAllocation paired with the UI-06 bridge enqueue;
+    // the spec carries the operator's declared command + args +
+    // resources.
+    assert_eq!(
+        actions.len(),
+        2,
+        "must emit RestartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions:?}",
+    );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, spec, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
@@ -325,8 +335,14 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
 
     // Also pin that the produced action carries the expected shape on
     // both invocations — guards against a pathological case where the
-    // function is deterministic but produces wrong output.
-    assert_eq!(actions_a.len(), 1);
+    // function is deterministic but produces wrong output. Per UI-06
+    // WorkloadLifecycle dual-emits StartAllocation + EnqueueEvaluation
+    // (bridge), so the vec length is 2.
+    assert_eq!(
+        actions_a.len(),
+        2,
+        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions_a:?}",
+    );
     match &actions_a[0] {
         Action::StartAllocation { spec, .. } => {
             assert_eq!(spec.command, "/opt/payments/bin/server");

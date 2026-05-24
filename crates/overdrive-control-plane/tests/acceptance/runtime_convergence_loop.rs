@@ -71,6 +71,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     )
 }
 
@@ -255,6 +256,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     // --- Preload IntentStore with one converged Job (replicas=1).
@@ -453,6 +455,7 @@ async fn stop_after_failed_alloc_drains_broker() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     // --- Preload IntentStore: one Job. The driver will reject its
@@ -706,6 +709,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     // --- Preload a Job that the SimDriver will reject — this drives
@@ -987,6 +991,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     // Seed Job (intent) so hydrate_desired returns Some(job).

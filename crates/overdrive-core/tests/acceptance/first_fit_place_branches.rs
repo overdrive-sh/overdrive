@@ -165,7 +165,11 @@ fn placement_returns_node_when_capacity_fits() {
 
     let actions = placement_actions(nodes, job, BTreeMap::new());
 
-    assert_eq!(actions.len(), 1, "expected one StartAllocation; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "expected StartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions:?}",
+    );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {
             assert_eq!(node_id.as_str(), "local", "must place on the only fitting node");
@@ -195,7 +199,11 @@ fn placement_succeeds_at_exact_cpu_fit_with_memory_excess() {
 
     let actions = placement_actions(nodes, job, BTreeMap::new());
 
-    assert_eq!(actions.len(), 1, "exact-fit on cpu must place; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "exact-fit on cpu must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06); got {actions:?}",
+    );
     assert!(matches!(
         actions[0],
         Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
@@ -223,7 +231,11 @@ fn placement_succeeds_at_exact_memory_fit_with_cpu_excess() {
 
     let actions = placement_actions(nodes, job, BTreeMap::new());
 
-    assert_eq!(actions.len(), 1, "exact-fit on memory must place; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "exact-fit on memory must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06); got {actions:?}",
+    );
     assert!(matches!(
         actions[0],
         Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
@@ -331,8 +343,8 @@ fn node_free_capacity_excludes_non_running_allocs_on_same_node() {
 
     assert_eq!(
         actions.len(),
-        1,
-        "Pending alloc must NOT reserve capacity; placement must succeed; got {actions:?}",
+        2,
+        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(bridge) per UI-06); got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {

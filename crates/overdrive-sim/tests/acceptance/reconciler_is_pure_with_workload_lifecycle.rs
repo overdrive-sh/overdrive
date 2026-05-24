@@ -143,7 +143,11 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
 
     let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "exactly one StartAllocation expected; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "StartAllocation + bridge EnqueueEvaluation expected per UI-06; got {actions:?}",
+    );
     let action = actions.first().expect("one action present");
     match action {
         Action::StartAllocation { workload_id, node_id, .. } => {

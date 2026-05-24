@@ -597,6 +597,39 @@ impl Harness {
                 crate::invariants::workload_gc_absent_intent::evaluate_resubmit_after_gc_creates_fresh_alloc()
                     .await
             }
+            // backend-discovery-bridge-service-reachability (#174 + Atlas Q2)
+            // GREEN — Slice 1 (closes #174). The three evaluators drive
+            // the real `BackendDiscoveryBridge::reconcile` against a
+            // `SimObservationStore`, applying emitted
+            // `Action::WriteServiceBackendRow` actions via the action
+            // shim simulation (`apply_actions` helper inside the module).
+            // The Atlas Q2 evaluator (S-BDB-06) additionally exercises
+            // the fsync-then-memory ordering contract from
+            // `.claude/rules/development.md` § "Reconciler I/O".
+            Invariant::BridgeEventuallyWritesBackendRow => {
+                crate::invariants::backend_discovery_bridge::evaluate_bridge_eventually_writes_backend_row()
+                    .await
+            }
+            Invariant::BridgeIdempotentSteadyState => {
+                crate::invariants::backend_discovery_bridge::evaluate_bridge_idempotent_steady_state()
+                    .await
+            }
+            Invariant::BridgeRecomputesFingerprintOnReplay => {
+                crate::invariants::backend_discovery_bridge::evaluate_bridge_recomputes_fingerprint_on_replay()
+                    .await
+            }
+            // backend-discovery-bridge-service-reachability step 02-04 —
+            // bridge → hydrator handoff (S-BDB-19). Drives
+            // `BackendDiscoveryBridge::reconcile` → applies
+            // `Action::WriteServiceBackendRow` to `SimObservationStore`
+            // → projects `service_backends_rows` back into
+            // `ServiceMapHydratorState.desired` → ticks
+            // `ServiceMapHydrator::reconcile` → asserts the dispatched
+            // `Action::DataplaneUpdateService` carries the bridge-
+            // written VIP + backends.
+            Invariant::BridgeToHydratorHandoff => {
+                crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff().await
+            }
         }
     }
 }
@@ -833,15 +866,14 @@ mod tests {
         assert_eq!(cat, vec![Invariant::SingleLeader]);
     }
 
-    // Step 08-02 GREEN: the `HydratorEventuallyConverges` and
-    // `HydratorIdempotentSteadyState` evaluators landed; the prior
-    // `#[should_panic(expected = "RED scaffold")]` attribute was the
-    // downstream-fallout guard documented in
-    // `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-    // tests" — removed here per the same section's "removing the
-    // underlying todo!() / panic!() will fire a different panic
-    // message, trip #[should_panic], and flag the test for review at
-    // the moment the scaffold goes GREEN" handoff.
+    // Phase 01-05 (closes #174) GREEN: the three
+    // backend-discovery-bridge evaluators landed; the prior
+    // `#[should_panic(expected = "RED scaffold")]` downstream-fallout
+    // guard (documented in `.claude/rules/testing.md` § "Downstream
+    // fallout on pre-existing tests") is removed per the same
+    // section's "removing the underlying todo!() / panic!() will fire
+    // a different panic message, trip #[should_panic], and flag the
+    // test for review at the moment the scaffold goes GREEN" handoff.
     #[test]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");

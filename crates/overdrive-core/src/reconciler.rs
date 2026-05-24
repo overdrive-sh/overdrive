@@ -169,9 +169,24 @@ use crate::id::{
 };
 use crate::traits::dataplane::Backend;
 use crate::traits::driver::{AllocationSpec, Resources};
-use crate::traits::observation_store::{AllocState, AllocStatusRow, ServiceHydrationStatus};
+use crate::traits::observation_store::{
+    AllocState, AllocStatusRow, ServiceBackendRow, ServiceHydrationStatus,
+};
 use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
+
+// `backend-discovery-bridge-service-reachability` step 01-01 — bridge
+// reconciler's pure type surface (State / View / marker struct). The
+// `Reconciler` trait impl + `reconcile` body land in step 01-02; the
+// runtime hydration arms land in step 01-03; the action-shim dispatch
+// arm lands in step 01-04. See `docs/feature/
+// backend-discovery-bridge-service-reachability/design/architecture.md`
+// § 4.
+pub mod backend_discovery_bridge;
+
+use backend_discovery_bridge::{
+    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
+};
 
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
@@ -372,6 +387,11 @@ pub enum AnyState {
     /// `ServiceMapHydrator` reconciler's typed projection — see
     /// [`ServiceMapHydratorState`]. Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(ServiceMapHydratorState),
+    /// `BackendDiscoveryBridge` reconciler's typed projection — see
+    /// [`backend_discovery_bridge::BackendDiscoveryBridgeState`].
+    /// Phase 2.2 (`backend-discovery-bridge-service-reachability`
+    /// step 01-01).
+    BackendDiscoveryBridge(BackendDiscoveryBridgeState),
 }
 
 /// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.
@@ -691,6 +711,156 @@ pub enum Action {
         /// row deterministically.
         correlation: CorrelationKey,
     },
+
+    // -----------------------------------------------------------------
+    // backend-discovery-bridge-service-reachability step 01-01 —
+    // bridge reconciler's `WriteServiceBackendRow` emission per
+    // architecture.md § 4.3.
+    //
+    // Emitted by `BackendDiscoveryBridge::reconcile` (lands in step
+    // 01-02) when the freshly-computed `(vip, [backend])` fingerprint
+    // for a `(workload_id, service_id)` differs from the per-service
+    // entry in `view.last_written_fingerprint`. The action shim's
+    // per-arm dispatch lands in step 01-04 at
+    // `crates/overdrive-control-plane/src/action_shim/
+    // write_service_backend_row.rs` and writes the row via
+    // `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+    // -----------------------------------------------------------------
+    /// Write a `ServiceBackendRow` to the ObservationStore. Emitted
+    /// by `BackendDiscoveryBridge` per architecture.md § 4.3; the
+    /// action shim's wrapper dispatches into
+    /// `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+    /// No correlation-driven follow-up is required at the shim level
+    /// — the bridge's next tick reads `service_backends_rows`
+    /// (transitively through the runtime's hydrate path landing in
+    /// step 01-03) and observes its own write via the dedup
+    /// fingerprint persisted in the bridge's `View`.
+    WriteServiceBackendRow {
+        /// The full `ServiceBackendRow` payload — the persistence
+        /// boundary takes whole rows, not deltas, per
+        /// `crate::traits::observation_store::ObservationStore`'s
+        /// LWW contract.
+        row: ServiceBackendRow,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "backend-discovery-bridge/<workload_id>",
+        ///   spec_hash = ContentHash::of(rkyv-archive of fingerprint),
+        ///   purpose = "write-service-backend-row")` so a future
+        /// audit / replay surface can correlate the dispatch with
+        /// the resulting observation row deterministically.
+        correlation: CorrelationKey,
+    },
+
+    // -----------------------------------------------------------------
+    // backend-discovery-bridge-service-reachability — UI-05
+    // architectural remediation. Cross-reconciler handoff at the
+    // action boundary.
+    //
+    // Emitted by a reconciler to trigger a sibling reconciler on a
+    // specific target after its own observable side effects land.
+    // The alternative — implicit shim-layer triggers based on the
+    // emitting action's shape — would couple the action shim to
+    // reconciler-pair-specific knowledge. The action-shim's per-arm
+    // dispatch wrapper at
+    // `crates/overdrive-control-plane/src/action_shim/
+    // enqueue_evaluation.rs` calls
+    // `EvaluationBroker::submit(Evaluation { reconciler, target })`.
+    //
+    // The broker is LWW at the `(ReconcilerName, TargetResource)`
+    // key per ADR-0013 §8 / whitepaper §18: a second submit at the
+    // same key during the same drain cycle collapses to one
+    // dispatch, so emission is naturally idempotent.
+    // -----------------------------------------------------------------
+    /// Enqueue a reconciliation evaluation for another reconciler.
+    /// Emitted by a reconciler to trigger a downstream sibling on a
+    /// specific target after its own observable side effects land
+    /// (e.g. the `backend-discovery-bridge` emits this alongside
+    /// each `WriteServiceBackendRow` so the `service-map-hydrator`
+    /// ticks against the bridge-written row).
+    ///
+    /// The action-shim wrapper at
+    /// [`crates::overdrive_control_plane::action_shim::enqueue_evaluation`]
+    /// (crate-local) calls
+    /// [`EvaluationBroker::submit`](crate::eval_broker::EvaluationBroker::submit)
+    /// with the carried `(reconciler, target)` pair.
+    EnqueueEvaluation {
+        /// Name of the downstream reconciler to enqueue. The action
+        /// shim looks this up against the runtime's registered set
+        /// when constructing the broker `Evaluation` — an unregistered
+        /// name silently no-ops at drain time (the broker is keyed on
+        /// name but does not validate against the registry; the
+        /// drain-side dispatch is the structural defense).
+        reconciler: ReconcilerName,
+        /// Target the downstream reconciler should reconcile against
+        /// (typically the resource the emitting reconciler's
+        /// observable write concerns — e.g. a `service/<id>` for the
+        /// bridge → hydrator handoff).
+        target: TargetResource,
+    },
+
+    // -----------------------------------------------------------------
+    // ADR-0053 — same-host backend delivery via cgroup_sock_addr
+    // connect-time destination rewrite.
+    //
+    // Emitted by `ServiceMapHydrator::reconcile` for every backend
+    // whose IP matches the host's primary IPv4 (Phase 1 single-node:
+    // every Running alloc on this node). The action shim dispatches
+    // to `Dataplane::register_local_backend` which writes the
+    // (VIP, port) → (backend_ip, backend_port) entry into the
+    // kernel-side `LOCAL_BACKEND_MAP` consumed by the
+    // `cgroup_connect4_service` BPF program.
+    //
+    // Parallel to (not a replacement for)
+    // `Action::DataplaneUpdateService`: the XDP wire-boundary path
+    // remains for Phase 2+ remote backends. Phase 1 single-node
+    // emits this variant only; the XDP path receives no calls.
+    // -----------------------------------------------------------------
+    /// Register the local backend for `(vip, vip_port)`. Emitted by
+    /// `ServiceMapHydrator` for backends that classify as local
+    /// (`backend.addr.ip() == host_ipv4`). The action shim dispatches
+    /// via [`crate::traits::dataplane::Dataplane::register_local_backend`].
+    RegisterLocalBackend {
+        /// Identity of the service whose backend is being registered.
+        service_id: crate::id::ServiceId,
+        /// Virtual IP issued by `ServiceVipAllocator` (ADR-0049).
+        /// `Ipv4Addr` rather than `ServiceVip` per the parallel with
+        /// `DataplaneUpdateService.vip` — IPv6 VIPs are out of scope
+        /// for the cgroup path per ADR-0053 § 1.
+        vip: std::net::Ipv4Addr,
+        /// VIP port the listener accepts on. Phase 1 Service spec
+        /// ships a single TCP listener per Service per
+        /// architecture.md § 6; the hydrator passes the port
+        /// straight from the backend's `addr.port()`.
+        vip_port: u16,
+        /// Resolved local backend `(IPv4, port)`. The cgroup program
+        /// rewrites `connect(vip:vip_port)` calls inside the attached
+        /// cgroup to this address.
+        backend: std::net::SocketAddrV4,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "service-map-hydrator/<service_id>",
+        ///   spec_hash = ContentHash::of(fingerprint),
+        ///   purpose = "register-local-backend")`.
+        correlation: CorrelationKey,
+    },
+
+    /// Deregister the local backend for `(vip, vip_port)`. Emitted
+    /// when the service's backend set transitions to empty or the
+    /// previously-registered local backend is removed.
+    DeregisterLocalBackend {
+        /// Identity of the service whose backend is being removed.
+        service_id: crate::id::ServiceId,
+        /// VIP whose entry to remove.
+        vip: std::net::Ipv4Addr,
+        /// VIP port whose entry to remove.
+        vip_port: u16,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived from
+        /// `(target = "service-map-hydrator/<service_id>",
+        ///   spec_hash = ContentHash::of(fingerprint),
+        ///   purpose = "deregister-local-backend")`.
+        correlation: CorrelationKey,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.
@@ -962,6 +1132,14 @@ pub enum AnyReconciler {
     /// Phase 2 (Slice 08; ASR-2.2-04) — `service-map-hydrator`.
     /// Activates J-PLAT-004 per ADR-0042. See [`ServiceMapHydrator`].
     ServiceMapHydrator(ServiceMapHydrator),
+    /// Phase 2.2 (`backend-discovery-bridge-service-reachability`
+    /// step 01-01) — bridges WorkloadLifecycle's Running alloc set
+    /// to `service_backends` observation rows the
+    /// `ServiceMapHydrator` consumes. See
+    /// [`backend_discovery_bridge::BackendDiscoveryBridge`]. The
+    /// `Reconciler` trait impl lands in step 01-02 alongside the
+    /// reconcile body.
+    BackendDiscoveryBridge(BackendDiscoveryBridge),
 }
 
 impl AnyReconciler {
@@ -972,6 +1150,10 @@ impl AnyReconciler {
             Self::NoopHeartbeat(r) => r.name(),
             Self::WorkloadLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
+            // backend-discovery-bridge-service-reachability step 01-02
+            // — bridge implements `Reconciler::name` via the trait
+            // method, matching every other arm.
+            Self::BackendDiscoveryBridge(r) => r.name(),
         }
     }
 
@@ -995,6 +1177,10 @@ impl AnyReconciler {
             Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
             Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
+            // backend-discovery-bridge-service-reachability step 01-02
+            // — bridge now implements `Reconciler`, so the trait
+            // const dispatch matches every other arm.
+            Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
         }
     }
 
@@ -1065,6 +1251,21 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::ServiceMapHydrator(next_view))
             }
+            // backend-discovery-bridge-service-reachability step 01-02
+            // — full dispatch. The bridge's `Reconciler` trait impl
+            // landed in this step; the runtime can now invoke the
+            // real reconcile body. Hydration arms land in 01-03,
+            // action-shim dispatch in 01-04, DST invariants close
+            // in 01-05.
+            (
+                Self::BackendDiscoveryBridge(r),
+                AnyState::BackendDiscoveryBridge(desired),
+                AnyState::BackendDiscoveryBridge(actual),
+                AnyReconcilerView::BackendDiscoveryBridge(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::BackendDiscoveryBridge(next_view))
+            }
             // Cross-variant branches — statically impossible once the
             // runtime correctly hydrates matching state and view kinds.
             // The runtime tick loop ships in 02-03; until then these
@@ -1099,6 +1300,11 @@ pub enum AnyReconcilerView {
     /// `ServiceMapHydrator` reconciler's view — see
     /// [`ServiceMapHydratorView`]. Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(ServiceMapHydratorView),
+    /// `BackendDiscoveryBridge` reconciler's view — see
+    /// [`backend_discovery_bridge::BackendDiscoveryBridgeView`].
+    /// Phase 2.2 (`backend-discovery-bridge-service-reachability`
+    /// step 01-01).
+    BackendDiscoveryBridge(BackendDiscoveryBridgeView),
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,8 +1452,76 @@ impl Reconciler for WorkloadLifecycle {
             actions.push(release_action);
             next_view.released_for_terminal.insert(released_digest);
         }
+
+        // UI-06 (F1 fix per audit-reconciler-handoff-topology.md):
+        // dual-emit `Action::EnqueueEvaluation` routed at the
+        // `backend-discovery-bridge` whenever this tick mutates the
+        // alloc set the bridge depends on (StartAllocation /
+        // RestartAllocation / StopAllocation / FinalizeFailed).
+        //
+        // Pre-UI-06 the only enqueue site was the exit observer
+        // (`exit_observer.rs:253-256`) which fires only on workload
+        // exit. For long-lived Service workloads the bridge therefore
+        // never ticked after Pending → Running, never observed the
+        // Running alloc, never wrote a `ServiceBackendRow`, and the
+        // entire downstream hydrator → dataplane chain was structurally
+        // unreachable. The fix mirrors the UI-05 bridge → hydrator
+        // dual-emit pattern at the reconciler surface.
+        //
+        // Single emission per tick (not per action): the broker is LWW
+        // at `(ReconcilerName, TargetResource)` per ADR-0013 §8 /
+        // whitepaper §18, so duplicate enqueues collapse to one
+        // dispatch per drain cycle. Emitting once keeps the action
+        // vector compact and reflects the broker's actual dispatch
+        // shape. The target is `job/<workload_id>` — same scope the
+        // exit observer's bridge enqueue uses (`exit_observer.rs:231`),
+        // so post-UI-06 BOTH enqueue sites address the same broker key.
+        if actions.iter().any(is_alloc_mutating_action) {
+            #[allow(clippy::expect_used)]
+            {
+                let bridge_name = ReconcilerName::new(BACKEND_DISCOVERY_BRIDGE_NAME)
+                    .expect("'backend-discovery-bridge' is a valid ReconcilerName by construction");
+                let bridge_target = TargetResource::new(&format!("job/{}", desired.workload_id))
+                    .expect(
+                        "'job/<workload_id>' is a valid TargetResource by construction \
+                         (WorkloadId is constructor-validated, prefix is canonical)",
+                    );
+                actions.push(Action::EnqueueEvaluation {
+                    reconciler: bridge_name,
+                    target: bridge_target,
+                });
+            }
+        }
+
         (actions, next_view)
     }
+}
+
+/// UI-06 — name of the `BackendDiscoveryBridge` reconciler.
+///
+/// Compile-time alias to `<BackendDiscoveryBridge as Reconciler>::NAME`
+/// — a rename of the bridge's `NAME` constant without updating this
+/// reference is a compile error, not a silent handoff failure.
+const BACKEND_DISCOVERY_BRIDGE_NAME: &str =
+    <backend_discovery_bridge::BackendDiscoveryBridge as Reconciler>::NAME;
+
+/// UI-06 — predicate: is `action` one of the four alloc-mutating
+/// variants the `BackendDiscoveryBridge` cares about?
+///
+/// The bridge re-renders `ServiceBackendRow` from the Running-alloc
+/// set on every tick; only transitions that ADD or REMOVE a Running
+/// alloc, or finalize an alloc as failed, change the bridge's view.
+/// The wildcard arm covers `Noop`, `HttpCall`, `WriteServiceBackendRow`,
+/// `DataplaneUpdateService`, `ReleaseServiceVip`, `EnqueueEvaluation` —
+/// none of which change the alloc set.
+const fn is_alloc_mutating_action(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::StartAllocation { .. }
+            | Action::RestartAllocation { .. }
+            | Action::StopAllocation { .. }
+            | Action::FinalizeFailed { .. }
+    )
 }
 
 impl WorkloadLifecycle {
@@ -2125,6 +2399,117 @@ pub struct ServiceMapHydratorView {
     pub retries: BTreeMap<ServiceId, RetryMemory>,
 }
 
+/// Reasons a backend address is rejected by the hydrator's
+/// `Action::RegisterLocalBackend` precondition guard (Phase 16
+/// review D12).
+///
+/// Every variant names a distinct address class that has no
+/// sensible meaning as a backend destination — registering the
+/// cgroup hook to rewrite `connect(vip:port)` to such an address
+/// would either loop traffic onto the same host (loopback), trap
+/// it on the link-local segment (link-local), broadcast it
+/// (multicast / broadcast), or collide with the service-VIP space
+/// itself.
+///
+/// The hydrator skips the action emission and logs a structured
+/// `tracing::warn!` for each rejected backend; the `Display` form
+/// here is what the warning carries so operators can grep for the
+/// specific class. Per `.claude/rules/development.md` § "Distinct
+/// failure modes get distinct error variants" — collapsing these
+/// into a single `Invalid` arm would lose the operator-actionable
+/// distinction (each class needs different remediation: a
+/// loopback hit suggests a misconfigured workload binding to
+/// `127.0.0.1`; a multicast hit suggests a corrupted observation
+/// row; a VIP-subnet hit suggests a misconfigured allocator
+/// range).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendAddressRejection {
+    /// `127.0.0.0/8`. RFC 1122 loopback — a backend address here
+    /// would route the rewritten connect to the host's own
+    /// loopback iface, almost always not the workload the
+    /// observation row claims.
+    Loopback,
+    /// `169.254.0.0/16`. RFC 3927 link-local — only valid on a
+    /// single L2 segment; not a sensible backend destination for a
+    /// service VIP that crosses cgroup boundaries.
+    LinkLocal,
+    /// `224.0.0.0/4`. RFC 5771 multicast — a TCP connect to a
+    /// multicast address is structurally meaningless; rejected
+    /// for the same reason ICMP-style "host unreachable" would
+    /// fire on a real socket.
+    Multicast,
+    /// `255.255.255.255` (limited broadcast). A TCP connect to
+    /// broadcast is structurally invalid.
+    Broadcast,
+    /// `0.0.0.0/8`. RFC 1122 "this host on this network" — the
+    /// `0.0.0.0` wildcard is a bind address, not a connect
+    /// destination.
+    Reserved,
+}
+
+impl core::fmt::Display for BackendAddressRejection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Loopback => f.write_str("loopback (127.0.0.0/8)"),
+            Self::LinkLocal => f.write_str("link-local (169.254.0.0/16)"),
+            Self::Multicast => f.write_str("multicast (224.0.0.0/4)"),
+            Self::Broadcast => f.write_str("broadcast (255.255.255.255)"),
+            Self::Reserved => f.write_str("reserved (0.0.0.0/8)"),
+        }
+    }
+}
+
+/// Classify a candidate backend address (Phase 16 review D12).
+/// Returns `Ok(())` if the address is in a routable unicast range
+/// suitable to be the destination of a rewritten
+/// `connect(vip:port)` from a process inside the attach cgroup;
+/// `Err(_)` if the address belongs to one of the reserved classes
+/// enumerated in `BackendAddressRejection`.
+///
+/// Pure function — no I/O, no allocation, no panics. Called from
+/// `ServiceMapHydrator::reconcile` immediately before emitting an
+/// `Action::RegisterLocalBackend`; rejected backends are skipped
+/// and logged via `tracing::warn!`.
+///
+/// **Out of scope for this guard**: the service-VIP subnet itself.
+/// The reviewer's D12 finding suggested rejecting backends in the
+/// VIP subnet to defend against a hydrator bug that loops a VIP
+/// to a VIP. The hydrator does not have access to the
+/// `ServiceVipAllocator`'s range at reconcile time (the range
+/// lives behind the allocator's private state), and threading it
+/// through the reconciler's State / View would widen the
+/// per-reconcile surface for a defense against a class of bug
+/// that has not occurred. Phase 1 single-node + the
+/// `ServiceVipAllocator` exhaustion semantics make a VIP↔backend
+/// collision structurally impossible (the allocator picks
+/// addresses from a configured range; backends come from real
+/// workload allocs with addresses outside that range). Defer
+/// until the VIP-subnet collision becomes a real failure mode.
+pub const fn classify_backend_address(
+    addr: std::net::Ipv4Addr,
+) -> Result<(), BackendAddressRejection> {
+    if addr.is_loopback() {
+        return Err(BackendAddressRejection::Loopback);
+    }
+    if addr.is_link_local() {
+        return Err(BackendAddressRejection::LinkLocal);
+    }
+    if addr.is_multicast() {
+        return Err(BackendAddressRejection::Multicast);
+    }
+    if addr.is_broadcast() {
+        return Err(BackendAddressRejection::Broadcast);
+    }
+    // RFC 1122 "this host" range: 0.0.0.0/8. `Ipv4Addr` does not
+    // expose `is_unspecified_network()` — only `is_unspecified()`
+    // for the exact `0.0.0.0` address. Check the first octet
+    // directly.
+    if addr.octets()[0] == 0 {
+        return Err(BackendAddressRejection::Reserved);
+    }
+    Ok(())
+}
+
 /// The Phase 2 hydrator reconciler. Activates J-PLAT-004 (per
 /// ADR-0042). Watches `service_backends` and `service_hydration_results`
 /// observation rows; emits one `Action::DataplaneUpdateService` per
@@ -2132,27 +2517,53 @@ pub struct ServiceMapHydratorView {
 /// confirmed-applied fingerprint.
 pub struct ServiceMapHydrator {
     name: ReconcilerName,
+    /// Host's primary IPv4 — the classifier input per ADR-0053 § 4.
+    /// Every backend whose `addr.ip()` matches this value classifies
+    /// as local and routes through the cgroup_sock_addr path
+    /// (`Action::RegisterLocalBackend`); every other backend
+    /// classifies as remote and routes through the XDP wire-boundary
+    /// path (`Action::DataplaneUpdateService`).
+    ///
+    /// Phase 1 single-node: every Running alloc on this node has
+    /// `backend.addr.ip() == host_ipv4`, so the classifier
+    /// uniformly emits `RegisterLocalBackend`. Phase 2+ multi-host
+    /// scenarios produce mixed local + remote backend sets.
+    ///
+    /// `Ipv4Addr` rather than `IpAddr` — Phase 1 VIP allocator is
+    /// IPv4-only per ADR-0049; the trait method
+    /// `register_local_backend` takes `Ipv4Addr` per ADR-0053 § 2.
+    host_ipv4: std::net::Ipv4Addr,
 }
 
 impl ServiceMapHydrator {
     /// Construct the canonical `service-map-hydrator` instance.
+    ///
+    /// # Preconditions
+    ///
+    /// `host_ipv4` MUST be the same value
+    /// `BackendDiscoveryBridge` was constructed with — the bridge
+    /// writes `ServiceBackendRow` entries whose `addr.ip()` equals
+    /// `host_ipv4` for every same-host Running alloc, and the
+    /// hydrator's classifier compares against this same value.
+    /// Mismatch silently misclassifies every backend (Phase 1 sees
+    /// "every backend remote" if `host_ipv4` is wrong).
     ///
     /// # Panics
     ///
     /// Never — `Self::NAME` is a compile-time string literal
     /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
-    pub fn canonical() -> Self {
+    pub fn canonical(host_ipv4: std::net::Ipv4Addr) -> Self {
         #[allow(clippy::expect_used)]
         let name = ReconcilerName::new(<Self as Reconciler>::NAME)
             .expect("'service-map-hydrator' is a valid ReconcilerName by construction");
-        Self { name }
+        Self { name, host_ipv4 }
     }
-}
 
-impl Default for ServiceMapHydrator {
-    fn default() -> Self {
-        Self::canonical()
+    /// The host IPv4 the classifier compares backends against.
+    #[must_use]
+    pub const fn host_ipv4(&self) -> std::net::Ipv4Addr {
+        self.host_ipv4
     }
 }
 
@@ -2192,14 +2603,115 @@ impl Reconciler for ServiceMapHydrator {
             if need_dispatch {
                 let target_str = format!("service-map-hydrator/{service_id}");
                 let spec_hash = ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
-                let correlation = CorrelationKey::derive(&target_str, &spec_hash, "update-service");
 
-                actions.push(Action::DataplaneUpdateService {
-                    service_id: *service_id,
-                    vip: desired_svc.vip,
-                    backends: desired_svc.backends.clone(),
-                    correlation,
-                });
+                // ADR-0053 § 4 — per-backend Local-vs-Remote
+                // classification. Phase 1 single-node: every
+                // backend on a Running alloc has
+                // `addr.ip() == self.host_ipv4` and routes through
+                // the cgroup_sock_addr path. Phase 2+ multi-host
+                // scenarios produce mixed sets; the hydrator emits
+                // both variants concurrently.
+                let host_ipv4 = self.host_ipv4;
+                let vip_v4 = match desired_svc.vip.get() {
+                    std::net::IpAddr::V4(v4) => v4,
+                    // IPv6 VIPs are out of scope for the cgroup
+                    // path per ADR-0053 § 1. Phase 1 VIP allocator
+                    // is IPv4-only (ADR-0049) so this branch is
+                    // unreachable in practice; if a future IPv6
+                    // VIP slips through, the XDP path's existing
+                    // IPv6Unsupported handling catches it.
+                    std::net::IpAddr::V6(_) => {
+                        actions.push(Action::DataplaneUpdateService {
+                            service_id: *service_id,
+                            vip: desired_svc.vip,
+                            backends: desired_svc.backends.clone(),
+                            correlation: CorrelationKey::derive(
+                                &target_str,
+                                &spec_hash,
+                                "update-service",
+                            ),
+                        });
+                        let entry = next_view.retries.entry(*service_id).or_default();
+                        entry.attempts = entry.attempts.saturating_add(1);
+                        entry.last_failure_seen_at = tick.now_unix;
+                        entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
+                        continue;
+                    }
+                };
+
+                let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
+                    desired_svc.backends.iter().partition(|b| match b.addr.ip() {
+                        std::net::IpAddr::V4(v4) => v4 == host_ipv4,
+                        std::net::IpAddr::V6(_) => false,
+                    });
+
+                let remote_is_empty = remote.is_empty();
+                let local_is_empty = local.is_empty();
+
+                if !remote_is_empty {
+                    actions.push(Action::DataplaneUpdateService {
+                        service_id: *service_id,
+                        vip: desired_svc.vip,
+                        backends: remote.into_iter().cloned().collect(),
+                        correlation: CorrelationKey::derive(
+                            &target_str,
+                            &spec_hash,
+                            "update-service",
+                        ),
+                    });
+                }
+
+                for backend in &local {
+                    let backend_v4 = match backend.addr {
+                        std::net::SocketAddr::V4(s4) => s4,
+                        // partition above filters IPv6, so this is
+                        // unreachable, but the type system requires
+                        // an exhaustive match.
+                        std::net::SocketAddr::V6(_) => continue,
+                    };
+                    // Phase 16 review D12: reject backend addresses
+                    // in reserved ranges (loopback / link-local /
+                    // multicast / broadcast / 0.0.0.0/8) BEFORE
+                    // emitting the action. A `RegisterLocalBackend`
+                    // for one of these would install a cgroup
+                    // rewrite that produces structurally invalid
+                    // traffic. Log a structured `tracing::warn!`
+                    // and skip — the next reconcile tick re-evaluates
+                    // (the observation row is the SSOT; if it
+                    // genuinely carries a malformed backend, the
+                    // skip persists until the bridge writes a
+                    // corrected row).
+                    if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
+                        tracing::warn!(
+                            name: "service_map_hydrator.register_local_backend.rejected",
+                            service_id = %service_id,
+                            vip = %vip_v4,
+                            vip_port = backend_v4.port(),
+                            backend = %backend_v4,
+                            reason = %reason,
+                            "skipping RegisterLocalBackend: backend address rejected by classifier"
+                        );
+                        continue;
+                    }
+                    actions.push(Action::RegisterLocalBackend {
+                        service_id: *service_id,
+                        vip: vip_v4,
+                        vip_port: backend.addr.port(),
+                        backend: backend_v4,
+                        correlation: CorrelationKey::derive(
+                            &target_str,
+                            &spec_hash,
+                            "register-local-backend",
+                        ),
+                    });
+                }
+
+                // Empty-set transition: when the desired set is
+                // empty, no actions are emitted; the hydrator only
+                // sees a service in `desired` when it has at least
+                // one backend. The next tick may produce a
+                // registration once the backend set populates.
+                let _ = (local_is_empty, remote_is_empty);
 
                 // Bump retry memory — record *inputs* per
                 // `.claude/rules/development.md` § "Persist inputs,

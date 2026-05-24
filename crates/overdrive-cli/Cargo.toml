@@ -90,6 +90,15 @@ rkyv.workspace               = true
 # client-visible `spec_digest`). The pattern mirrors
 # `crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs`.
 overdrive-store-local.path   = "../overdrive-store-local"
+# `overdrive-sim` provides the `SimDataplane` adapter every CLI
+# integration test injects via `serve::run_with_dataplane`. Per step
+# 02-02 of `backend-discovery-bridge-service-reachability` the
+# production `serve::run` constructs `EbpfDataplane`, which requires
+# CAP_NET_ADMIN / CAP_BPF — too heavy for tests whose subject under
+# test is the HTTPS / CLI / observation-row surface. The architecture
+# (architecture.md § 4.7) prescribes `SimDataplane` injection for this
+# lane.
+overdrive-sim.path           = "../overdrive-sim"
 # `serial_test` serialises tests that mutate process-wide environment
 # variables. Rust edition 2024 + `unsafe_op_in_unsafe_fn = deny` makes
 # `std::env::set_var` / `std::env::remove_var` explicit unsafe, but

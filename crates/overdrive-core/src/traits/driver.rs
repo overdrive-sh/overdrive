@@ -93,6 +93,17 @@ pub enum DriverError {
     NotFound { alloc: AllocationId },
     #[error("driver I/O: {0}")]
     Io(#[from] std::io::Error),
+    /// The driver was configured with a target network namespace
+    /// path (opt-in, mirroring the CNI spec's `CNI_NETNS`) but the
+    /// `pre_exec` hook could not enter it before `execve` — either
+    /// the path could not be opened (`netns_path` does not exist,
+    /// caller lacks permission) or `setns(CLONE_NEWNET)` failed.
+    /// Distinct from `StartRejected` because the failure mode is a
+    /// pre-fork netns-targeting setup error, not a workload-spec
+    /// rejection — callers can `matches!` on this variant when
+    /// diagnosing test-fixture netns plumbing.
+    #[error("driver {driver} could not enter netns {netns_path}: {source}")]
+    NetnsEntry { driver: DriverType, netns_path: String, source: std::io::Error },
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,

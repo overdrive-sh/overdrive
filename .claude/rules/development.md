@@ -554,6 +554,85 @@ is fixed.
 
 ---
 
+## Shared real-infra test fixtures — `overdrive-testing`
+
+`overdrive-testing` is the workspace's `adapter-host`-class home for
+real-OS test fixtures shared across more than one crate's
+integration tests. Today it owns the netns / veth / route / sysctl
+plumbing (`NetNs`, `ThreeIfaceTopology`, `threeiface_ips`) consumed
+by `overdrive-dataplane`'s reverse-NAT and sanity-batch Tier 3
+tests and by `overdrive-control-plane`'s backend-discovery-bridge
+walking-skeleton. Future BPF program-loading harnesses, real-
+filesystem fixtures shared by more than one consumer, and cross-
+crate veth helpers belong here too.
+
+### What lives here
+
+- Real-OS fixtures: network namespace creation, veth pair setup,
+  ip-route plumbing, sysctl tweaks, capability gating, RAII
+  cleanup, anything that shells out to `ip(8)` / `bpftool` / similar.
+- Helpers whose only consumers are *integration tests* in two or
+  more crates, OR a single crate's tests where the setup is non-
+  trivial enough that duplication would drift (e.g., the 3-netns
+  topology + routes + sysctls in `netns::ThreeIfaceTopology`).
+
+### What does NOT live here
+
+- **Pure in-process test doubles.** Those are `Sim*` adapters in
+  `overdrive-sim` (`crate_class = "adapter-sim"`). The sim/host
+  split is load-bearing per § "Port-trait dependencies"; do not
+  collapse the two crates.
+- **Production code.** This is a `dev-dependencies`-only crate. A
+  production binary that picked it up would smuggle real-infra
+  shell-outs (`ip netns add ...`) into the production binary.
+- **Single-consumer fixtures.** A helper used by exactly one
+  crate's tests stays local in that crate's `tests/integration/
+  helpers/` tree. Promote to `overdrive-testing` only when a
+  second consumer needs the same shape AND the structure is non-
+  trivial enough that copy-paste would drift.
+
+### Mechanics
+
+- **`crate_class = "adapter-host"`** per ADR-0003. Real OS I/O
+  expected; dst-lint scans only `core`-class crates and skips this
+  one.
+- **Dev-dep only.** Consumers add `overdrive-testing.workspace =
+  true` under `[dev-dependencies]`, never `[dependencies]`. This
+  mirrors the placement rule for `overdrive-sim` but with the
+  opposite class — production wires `overdrive-host`, tests wire
+  either `overdrive-sim` (pure in-process) or `overdrive-testing`
+  (real OS).
+- **`integration-tests = []`** feature declared per workspace
+  convention (§ Cargo.toml conventions). The crate has no
+  integration tests of its own — every fixture is consumed by
+  sibling crates' `tests/integration/*.rs`.
+- **Linux-only items** are gated `#[cfg(target_os = "linux")]` at
+  the item level. Consumers gate their own tests the same way (or,
+  more commonly, behind their own `integration-tests` feature
+  whose body is already Linux-only). The crate itself compiles on
+  macOS / non-Linux developer surfaces but exposes no public items
+  off-Linux.
+
+### Promotion criteria
+
+Promote a fixture into `overdrive-testing` when at least one of:
+
+1. **≥ 2 crates** need the same real-infra setup. Copy-paste across
+   crates' `tests/` trees produces silent drift the first time one
+   side is patched and the other is not.
+2. **Non-trivial setup** that would be unsafe to duplicate even for
+   one consumer (the 3-netns + routes + sysctls topology shape is
+   the canonical example — 12 `ip` invocations whose ordering
+   matters; copy-paste invites subtle reordering bugs that surface
+   only as flaky Tier 3 failures).
+
+Single-consumer fixtures with simple shapes (one veth pair, no
+routes, no sysctls) stay local in that crate's `tests/integration/
+helpers/` — a single-consumer fixture in `overdrive-testing`
+widens the crate's surface for no benefit.
+
+---
+
 ## Production code is not shaped by simulation
 
 **Production code MUST NOT carry extra logic, extra arms, extra yields,
@@ -2295,6 +2374,53 @@ This is the load-bearing rule the typed userspace handles
 host-order inputs, write host-order to the BPF map, and the kernel-side
 program does the conversion. Any drift in either direction is caught by
 S-2.2-17 (Tier 2 lockstep test).
+
+### `bpf_sock_addr.user_port` — low-16-NBO in a u32
+
+A specific instance of the endianness-lockstep rule above, with a
+shape that has bitten this codebase once (commit `6af32443`, ADR-0053
+walking-skeleton). `bpf_sock_addr.user_port` is declared `u32` but
+**only the low 16 bits carry the port**, in network byte order — the
+kernel copies `inet_sk->inet_dport` (already NBO) into the low half;
+the high half is undefined / zero. Same applies to `user_port` on the
+write path (e.g. rewriting destination port in `cgroup/connect4`).
+
+**Correct read** — cast to `u16` first to discard the high half, then
+`from_be` to swap into host order:
+
+```rust
+let port_host: u16 = u16::from_be(ctx.user_port as u16);
+```
+
+**Correct write** — `to_be` the host-order `u16`, then widen back to
+`u32` (high half left zero):
+
+```rust
+ctx.user_port = u32::from(host_port.to_be());
+```
+
+**Anti-pattern that compiles, verifies, and silently returns 0:**
+
+```rust
+// BUGGY: from_be on the full u32 byte-swaps all four bytes; the
+// `as u16` truncation then takes the LOW half of the swapped value,
+// which is the HIGH half of the original — always zero. Result: every
+// lookup keyed on `(addr, port)` misses, every connect rewrite
+// targets port 0.
+let port_host = u32::from_be(ctx.user_port) as u16;
+```
+
+**No Tier 2 backstop exists for this.** `BPF_PROG_TEST_RUN` returns
+`ENOTSUPP` for `cgroup_sock_addr` programs on kernel ≤ 6.8 —
+`cg_sock_addr_verifier_ops.test_run` is null in mainline, so the
+PKTGEN/SETUP/CHECK triptych cannot exercise a synthetic
+`bpf_sock_addr` ctx. Regressions surface only at Tier 3 (real
+connect / sendmsg through the cgroup) as "connection hangs" or
+"lookup miss" with no kernel-side drop. **This rule IS the
+structural defense.**
+
+See also `### Userspace map insertion → Endianness lockstep` above
+for the broader rule this is a specific instance of.
 
 ### `HASH_OF_MAPS` — hand-rolled until aya 0.14+
 

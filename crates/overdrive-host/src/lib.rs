@@ -22,11 +22,9 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod clock;
-pub mod dataplane;
 pub mod entropy;
 pub mod transport;
 
 pub use clock::SystemClock;
-pub use dataplane::NoopDataplane;
 pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;

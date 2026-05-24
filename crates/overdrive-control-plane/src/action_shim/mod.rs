@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
+use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::dataplane::Dataplane;
@@ -45,6 +46,43 @@ pub mod dataplane_update_service;
 /// [`release_service_vip`] for the lock discipline + idempotency
 /// contract (service-vip-allocator step 03-02).
 pub mod release_service_vip;
+
+/// Per-arm dispatch for `Action::WriteServiceBackendRow` per
+/// `docs/feature/backend-discovery-bridge-service-reachability/
+/// design/architecture.md` § 4.4. The wrapper writes the row to the
+/// ObservationStore; the bridge's next tick observes its own write
+/// via the dedup fingerprint in [`BackendDiscoveryBridgeView`].
+///
+/// [`BackendDiscoveryBridgeView`]:
+///     overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridgeView
+pub mod write_service_backend_row;
+
+/// Per-arm dispatch for `Action::EnqueueEvaluation` per UI-05 (the
+/// `backend-discovery-bridge-service-reachability` step 02-04
+/// architectural remediation). The wrapper submits an
+/// `Evaluation { reconciler, target }` to the runtime's
+/// [`EvaluationBroker`] so the named downstream reconciler ticks
+/// against `target` on the next convergence cycle.
+pub mod enqueue_evaluation;
+
+/// Per-arm dispatch for `Action::RegisterLocalBackend` per ADR-0053
+/// § 3. Invokes `Dataplane::register_local_backend` so the
+/// cgroup_sock_addr program rewrites subsequent
+/// `connect(vip:vip_port)` calls to the resolved backend address.
+pub mod register_local_backend;
+
+/// Per-arm dispatch for `Action::DeregisterLocalBackend` per ADR-0053
+/// § 3. Invokes `Dataplane::deregister_local_backend` to remove the
+/// LOCAL_BACKEND_MAP entry. Idempotent per the ADR-0053 § 2
+/// trait contract.
+pub mod deregister_local_backend;
+
+/// Reconcile-output invariant validator — rejects post-`reconcile`
+/// `Vec<Action>` returns that contain two or more write-actions
+/// targeting the same service-LB VIP (see the module docstring on
+/// [`validate`] for the full conflict taxonomy and fail-safe
+/// semantics).
+pub mod validate;
 
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
@@ -344,13 +382,23 @@ pub async fn dispatch(
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    broker: &parking_lot::Mutex<EvaluationBroker>,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
-        let result =
-            dispatch_single(action, driver, obs, dataplane, bus, tick, writer_node, &allocator)
-                .await;
+        let result = dispatch_single(
+            action,
+            driver,
+            obs,
+            dataplane,
+            bus,
+            tick,
+            writer_node,
+            &allocator,
+            broker,
+        )
+        .await;
         if let Err(err) = result {
             // Per-variant error isolation: record only the first error
             // and continue draining the rest of the actions.
@@ -379,6 +427,7 @@ async fn dispatch_single(
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    broker: &parking_lot::Mutex<EvaluationBroker>,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
@@ -754,6 +803,53 @@ async fn dispatch_single(
         Action::ReleaseServiceVip { spec_digest, correlation } => {
             release_service_vip::dispatch(&spec_digest, &correlation, allocator).await
         }
+        // backend-discovery-bridge-service-reachability step 01-04 —
+        // GREEN. The per-arm dispatch wrapper in
+        // `crates/overdrive-control-plane/src/action_shim/
+        // write_service_backend_row.rs` writes the row via
+        // `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+        // No correlation-driven follow-up at the shim level — the
+        // bridge's next tick reads the row stream (transitively
+        // through the runtime's hydrate path) and observes its own
+        // write via the dedup fingerprint in
+        // `BackendDiscoveryBridgeView::last_written_fingerprint`. An
+        // `ObservationStore::write` failure surfaces as
+        // `ShimError::Observation` via the typed `#[from]` variant
+        // per `.claude/rules/development.md` § Errors / pass-through.
+        action @ Action::WriteServiceBackendRow { .. } => {
+            write_service_backend_row::dispatch(&action, obs).await.map_err(ShimError::from)
+        }
+        // backend-discovery-bridge-service-reachability UI-05 —
+        // cross-reconciler handoff at the action boundary. The
+        // wrapper takes a brief lock-grab-submit-release on the
+        // broker mutex; per `.claude/rules/development.md`
+        // § Concurrency & async the guard is dropped before any
+        // subsequent `.await` (the wrapper is a sync function and
+        // the per-action loop awaits between iterations).
+        action @ Action::EnqueueEvaluation { .. } => {
+            let mut guard = broker.lock();
+            enqueue_evaluation::dispatch(&action, &mut guard);
+            drop(guard);
+            Ok(())
+        }
+        // ADR-0053 § 3 — same-host backend delivery via
+        // cgroup_sock_addr. The hydrator's classifier emits this
+        // variant for every backend whose IP matches `host_ipv4`
+        // (Phase 1 single-node: every Running alloc). The shim
+        // invokes `Dataplane::register_local_backend` which writes
+        // the LOCAL_BACKEND_MAP entry the cgroup_connect4_service
+        // program reads on every connect(2). No observation row
+        // dispatch — the cgroup hook is not an HTTP-call surface.
+        action @ Action::RegisterLocalBackend { .. } => {
+            register_local_backend::dispatch(&action, dataplane).await.map_err(ShimError::from)?;
+            Ok(())
+        }
+        action @ Action::DeregisterLocalBackend { .. } => {
+            deregister_local_backend::dispatch(&action, dataplane)
+                .await
+                .map_err(ShimError::from)?;
+            Ok(())
+        }
     }
 }
 
@@ -807,4 +903,12 @@ pub enum ShimError {
         #[from]
         source: PersistentAllocatorError,
     },
+    /// `register_local_backend` shim dispatch failed (ADR-0053 § 3).
+    /// Pass-through `#[from]` preserves the typed
+    /// `DataplaneError::LocalBackendInsert` cause.
+    #[error("register_local_backend dispatch failed")]
+    RegisterLocalBackend(#[from] register_local_backend::RegisterLocalBackendDispatchError),
+    /// `deregister_local_backend` shim dispatch failed (ADR-0053 § 3).
+    #[error("deregister_local_backend dispatch failed")]
+    DeregisterLocalBackend(#[from] deregister_local_backend::DeregisterLocalBackendDispatchError),
 }

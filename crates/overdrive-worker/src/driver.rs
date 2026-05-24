@@ -173,6 +173,24 @@ pub struct ExecDriver {
     /// Validates ADR-0026 D9 warn-and-continue under controlled
     /// failure.
     force_limit_write_failure: bool,
+    /// Opt-in target network namespace for every spawned child.
+    /// `None` (the production default) yields bit-identical behaviour
+    /// to the pre-2026-05-21 driver. `Some(path)` causes
+    /// `Driver::start` to open `path` (typically
+    /// `/var/run/netns/<name>`) as an `OwnedFd` and install a
+    /// `pre_exec` hook that calls `setns(fd, CLONE_NEWNET)` in the
+    /// forked child between fork and exec — the spawned binary is
+    /// born already inside the target netns.
+    ///
+    /// Structurally aligned with the CNI spec model: the netns is
+    /// created and managed by the caller (a test fixture today, a
+    /// CNI-runtime-equivalent in future container/microvm driver
+    /// types); the driver only ENTERS an already-existing namespace,
+    /// never creates one. See
+    /// `docs/research/testing/walking-skeleton-xdp-lb-topology.md`
+    /// § Findings 2.4 + 2.5 for the Rust ecosystem precedent
+    /// (`netns-rs`, `netns-exec`) and the CNI cross-reference.
+    netns_path: Option<PathBuf>,
     /// Live allocations indexed by ID. `BTreeMap` for deterministic
     /// iteration per `.claude/rules/development.md` § Ordered
     /// collections.
@@ -222,11 +240,36 @@ impl ExecDriver {
             cgroup_root,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,
+            netns_path: None,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
             clock,
         }
+    }
+
+    /// Target every spawned child at `netns_path` (typically
+    /// `/var/run/netns/<name>`). On `Driver::start`, the driver
+    /// opens the path as an `OwnedFd` and installs a `pre_exec`
+    /// hook calling `setns(fd, CLONE_NEWNET)` in the forked child
+    /// before `execve` — the workload binary is born already inside
+    /// the target netns.
+    ///
+    /// Default = `None` (production behaviour, bit-identical to the
+    /// pre-2026-05-21 driver). The builder is opt-in for test
+    /// fixtures that pre-create per-test netns (and, in future,
+    /// for container / microvm driver types whose runtime owns the
+    /// netns lifecycle — the same shape CNI plugins consume via
+    /// `CNI_NETNS`).
+    ///
+    /// On netns-open / `setns` failure at start time, the start call
+    /// returns `DriverError::NetnsEntry { netns_path, source }` so
+    /// the caller can distinguish a netns-targeting setup error from
+    /// a workload-spec rejection (`StartRejected`).
+    #[must_use]
+    pub fn with_netns_path(mut self, netns_path: PathBuf) -> Self {
+        self.netns_path = Some(netns_path);
+        self
     }
 
     /// Override the grace window between SIGTERM and SIGKILL.
@@ -288,7 +331,18 @@ impl ExecDriver {
     /// `unsafe` because the closure runs between fork and exec where
     /// the contract is to call only async-signal-safe functions;
     /// `setsid(2)` is on the POSIX async-signal-safe list.
-    fn build_command(spec: &AllocationSpec) -> Command {
+    ///
+    /// When `netns_fd` is `Some`, a second `pre_exec` hook calls
+    /// `setns(fd, CLONE_NEWNET)` so the spawned child enters the
+    /// target network namespace before `execve`. `setns(2)` is on
+    /// the kernel's async-signal-safe list for the namespace-FD case
+    /// (it issues no allocation or signal-unsafe library call —
+    /// just a single syscall against an already-open FD). The FD is
+    /// owned by the parent and the closure receives a borrowed
+    /// `RawFd` via move; on success the kernel duplicates the
+    /// reference into the child's `nsproxy`, so closing the parent's
+    /// FD after `spawn()` is safe.
+    fn build_command(spec: &AllocationSpec, netns_fd: Option<std::os::fd::OwnedFd>) -> Command {
         let mut cmd = Command::new(&spec.command);
         cmd.args(&spec.args);
         cmd.kill_on_drop(false);
@@ -313,6 +367,27 @@ impl ExecDriver {
                 libc::setsid();
                 Ok(())
             });
+        }
+
+        // Opt-in netns entry — see `with_netns_path()` rustdoc for
+        // the rationale. The `setns(2)` syscall against a
+        // namespace-FD is async-signal-safe; the closure runs in the
+        // forked child between fork and exec and touches no
+        // allocator / locked state. The FD is moved into the closure
+        // (its `Drop` after `setns` returns drops the parent-side
+        // reference; the kernel retains its own reference via the
+        // child's `nsproxy`, so the netns stays live for the
+        // workload's lifetime). Failure surfaces as `io::Error`
+        // returned by the closure, which `Child::spawn()` converts
+        // to a fatal start error.
+        if let Some(fd) = netns_fd {
+            unsafe {
+                cmd.pre_exec(move || {
+                    nix::sched::setns(&fd, nix::sched::CloneFlags::CLONE_NEWNET)
+                        .map_err(|errno| std::io::Error::from_raw_os_error(errno as i32))?;
+                    Ok(())
+                });
+            }
         }
 
         cmd
@@ -353,14 +428,50 @@ impl Driver for ExecDriver {
             );
         }
 
-        // 3. Spawn the child. Failure here means the binary path is
+        // 3. If `netns_path` is set, open the netns FD up-front so
+        //    failure surfaces as a structured `NetnsEntry` error
+        //    (rather than as a generic `spawn()` failure buried in
+        //    the `pre_exec` closure). Pre-open also fails fast on
+        //    permission / missing-netns errors before the child fork
+        //    happens, which is the cleaner failure mode. On success
+        //    the FD is moved into the `pre_exec` closure for
+        //    `setns()`.
+        let netns_fd = match self.netns_path.as_ref() {
+            None => None,
+            Some(path) => match tokio::fs::File::open(path).await {
+                Ok(f) => Some(std::os::fd::OwnedFd::from(f.into_std().await)),
+                Err(source) => {
+                    let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+                    return Err(DriverError::NetnsEntry {
+                        driver: DriverType::Exec,
+                        netns_path: path.display().to_string(),
+                        source,
+                    });
+                }
+            },
+        };
+
+        // 4. Spawn the child. Failure here means the binary path is
         //    bogus or the kernel refused exec — clean up the scope dir
         //    so we don't orphan it (scenario 2.5).
-        let mut cmd = Self::build_command(spec);
+        let mut cmd = Self::build_command(spec, netns_fd);
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
                 let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+                // A spawn failure when `netns_path` is set most
+                // likely came from the netns-entry `pre_exec` hook
+                // (setns(2) returned EPERM / EINVAL — the open()
+                // pre-flight above already ruled out a missing
+                // path). Surface as `NetnsEntry` so the caller can
+                // distinguish from a workload-spec rejection.
+                if let Some(path) = self.netns_path.as_ref() {
+                    return Err(DriverError::NetnsEntry {
+                        driver: DriverType::Exec,
+                        netns_path: path.display().to_string(),
+                        source: err,
+                    });
+                }
                 return Err(start_rejected(format!("spawn {}: {err}", spec.command)));
             }
         };

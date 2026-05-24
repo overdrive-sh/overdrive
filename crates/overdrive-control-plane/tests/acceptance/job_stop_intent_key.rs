@@ -70,6 +70,9 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         operator_config_dir: operator_config_dir.clone(),
         // `tick_cadence` + `clock` default per
         // `fix-convergence-loop-not-spawned` Step 01-02.
+        dataplane_override: Some(std::sync::Arc::new(
+            overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        )),
         ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");

@@ -47,8 +47,20 @@ pub mod action_shim;
 pub mod api;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
+// backend-discovery-bridge-service-reachability step 02-01 —
+// `[dataplane]` config section parser per architecture.md § 5.1.
+// Section presence + the two required interface bindings; refusal
+// surfaces as `ControlPlaneError::Validation { field:
+// Some("dataplane"), .. }`.
+pub mod dataplane_config;
 pub mod error;
 pub mod handlers;
+// backend-discovery-bridge-service-reachability step 02-01 — host
+// IPv4 resolution via `getifaddrs(3)` for the operator-supplied
+// `[dataplane] client_iface`. Production boot threads the resolved
+// `Ipv4Addr` through `AppState.host_ipv4` to the
+// `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
+pub mod iface;
 pub mod observation_wiring;
 // `cargo openapi-{gen,check}` library — pure deterministic YAML render
 // + drift detection. Paired with the `openapi` binary in `src/bin/`.
@@ -181,6 +193,25 @@ pub struct AppState {
     /// Service-arm `submit_workload` / `alloc_status` consumers land in
     /// 02-03d alongside the six S-VIP acceptance scenarios.
     pub allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    /// Host's IPv4 address for the configured `[dataplane]
+    /// client_iface`. Resolved once at boot by
+    /// [`iface::resolve_iface_ipv4`] and threaded through to the
+    /// `BackendDiscoveryBridge` reconciler — every
+    /// `service_backends` observation row the bridge emits carries
+    /// this address in `endpoint.host` so XDP reverse-NAT translation
+    /// (Phase 2.3) can derive the per-host VIP. Per
+    /// `.claude/rules/development.md` § "Port-trait dependencies" the
+    /// dependency is mandatory at construction so tests cannot
+    /// silently inherit a production loopback by forgetting to
+    /// override.
+    ///
+    /// Step 02-01 of
+    /// `backend-discovery-bridge-service-reachability` lands this
+    /// field; the placeholder `Ipv4Addr::LOCALHOST` previously
+    /// threaded through `run_server_with_obs_and_driver` (introduced
+    /// in 01-04) is removed in the same commit per
+    /// `feedback_single_cut_greenfield_migrations.md`.
+    pub host_ipv4: std::net::Ipv4Addr,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -244,6 +275,7 @@ impl AppState {
         dataplane: Arc<dyn Dataplane>,
         node_id: NodeId,
         allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+        host_ipv4: std::net::Ipv4Addr,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -258,6 +290,7 @@ impl AppState {
             dataplane,
             node_id,
             allocator,
+            host_ipv4,
         }
     }
 }
@@ -314,6 +347,105 @@ pub struct ServerConfig {
     /// [`VipRange::default()`] supplies the Phase 1 pinned default
     /// (`10.96.0.0/16` reserved `[.0, .1, .255.255]`).
     pub vip_range: VipRange,
+
+    /// Required `[dataplane]` section per
+    /// `backend-discovery-bridge-service-reachability` architecture.md
+    /// § 5.1 (step 02-01). Carries the operator-supplied
+    /// `client_iface` + `backend_iface` bindings the production XDP
+    /// programs attach to (Phase 2.3) and from which
+    /// [`iface::resolve_iface_ipv4`] derives `AppState.host_ipv4` at
+    /// boot.
+    ///
+    /// `Option` shape rather than non-optional because production
+    /// reads the value from a TOML file via
+    /// [`dataplane_config::parse_dataplane_section`], whose return
+    /// shape is `Result<DataplaneConfig, ControlPlaneError>`. The
+    /// CLI threads `Some(parsed)` here; test fixtures default to
+    /// `Some(DataplaneConfig::loopback())` via the `Default` impl
+    /// below so existing `..Default::default()` rest-pattern
+    /// construction continues to work without touching every
+    /// fixture's TOML.
+    ///
+    /// `run_server_with_obs_and_driver` refuses to start when this
+    /// field is `None` with
+    /// `ControlPlaneError::Validation { field: Some("dataplane"), .. }`
+    /// — the same shape the parser returns. See architecture.md
+    /// § 5.2.
+    pub dataplane: Option<dataplane_config::DataplaneConfig>,
+
+    /// Optional override for the bpffs directory the `EbpfDataplane`
+    /// pins SERVICE_MAP into. `None` (the production default) means
+    /// `overdrive_dataplane::DEFAULT_PIN_DIR` = `/sys/fs/bpf/overdrive`.
+    /// Tests pass a per-test tempdir under `/sys/fs/bpf/<name>` to
+    /// avoid cross-test SERVICE_MAP pin collisions when many
+    /// integration tests boot the server concurrently inside Lima.
+    /// Per `feedback_single_cut_greenfield_migrations.md`, production
+    /// `serve` always reads `None` (single-cut to EbpfDataplane); the
+    /// field exists only for test isolation.
+    pub dataplane_pin_dir: Option<PathBuf>,
+
+    /// Optional override for the cgroup the `cgroup_connect4_service`
+    /// program attaches to per ADR-0053 § 7. `None` (the production
+    /// default) means
+    /// `overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH` =
+    /// `/sys/fs/cgroup/overdrive.slice` — the slice
+    /// `crates/overdrive-worker/src/cgroup_manager.rs` already
+    /// manages. Tests may inject a per-test tempdir under
+    /// `/sys/fs/cgroup/<name>` to avoid cross-test attachment
+    /// collisions when multiple integration tests boot the server
+    /// concurrently inside Lima.
+    pub dataplane_cgroup_attach_path: Option<PathBuf>,
+
+    /// Optional injected [`Dataplane`] adapter — for tests whose
+    /// subject under test is NOT the dataplane attach path. When
+    /// `Some(_)`, the boot path uses this adapter and SKIPS
+    /// `EbpfDataplane::new`; when `None` (the production default),
+    /// the boot path constructs `EbpfDataplane` from the
+    /// `[dataplane]` config section per architecture.md § 5.2.
+    ///
+    /// Per architecture.md § 4.7, tests inject `SimDataplane` via
+    /// this field; production binaries (the CLI's `serve` subcommand)
+    /// pass `None` so the single-cut `EbpfDataplane` composition
+    /// per `feedback_single_cut_greenfield_migrations.md` is the
+    /// only production-reachable code path.
+    ///
+    /// Excluded from [`Debug`] / [`Default`] — `Arc<dyn Dataplane>`
+    /// is neither `Debug` nor `Default`.
+    ///
+    /// [`Dataplane`]: overdrive_core::traits::dataplane::Dataplane
+    pub dataplane_override: Option<Arc<dyn overdrive_core::traits::dataplane::Dataplane>>,
+
+    /// Test-only failure-injection seam for the `EbpfDataplane::probe`
+    /// Earned-Trust call site. When `Some(msg)`, the boot path
+    /// constructs `DataplaneError::LoadFailed(msg)` and applies it to
+    /// the constructed `EbpfDataplane` via
+    /// [`overdrive_dataplane::EbpfDataplane::set_probe_fault`] BEFORE
+    /// `.probe().await` runs; the probe short-circuits to the
+    /// constructed error so the boot path exercises the
+    /// `DataplaneBootError::Probe` mapping arm and the
+    /// `health.startup.refused` emit per architecture.md § 5.4.
+    ///
+    /// The seam is `String`-shaped (not `DataplaneError`-shaped)
+    /// because `DataplaneError` cannot derive `Clone` — its `Io`
+    /// variant embeds `std::io::Error`. Storing the load-failure
+    /// message and reconstructing `LoadFailed(msg)` at the boot
+    /// boundary keeps the field `Clone` (and therefore `ServerConfig:
+    /// Clone`) without broadening `DataplaneError`'s public surface.
+    /// The S-BDB-14 fixture injects a verbatim "probe: round-trip
+    /// mismatch ..." string per architecture.md § 5.4.
+    ///
+    /// Gated behind `#[cfg(feature = "integration-tests")]` on both
+    /// this field declaration and its use site in the boot path.
+    /// Production builds compile the field out entirely; the
+    /// `..Default::default()` rest-pattern construction in production
+    /// callers never names it. The `cfg(test)` arm is deliberately
+    /// omitted — the boot-path call site forwards the feature into
+    /// `overdrive-dataplane` via the Cargo.toml dep, and using
+    /// `cfg(test)` here would let the control-plane's own `cargo
+    /// test --no-run` enable the call site without enabling
+    /// `set_probe_fault` on the dataplane dep.
+    #[cfg(feature = "integration-tests")]
+    pub dataplane_probe_fault: Option<String>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -321,14 +453,23 @@ impl std::fmt::Debug for ServerConfig {
     /// `ServerConfig` is replaced by a manual impl that elides the
     /// clock field.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServerConfig")
-            .field("bind", &self.bind)
+        let mut dbg = f.debug_struct("ServerConfig");
+        dbg.field("bind", &self.bind)
             .field("data_dir", &self.data_dir)
             .field("operator_config_dir", &self.operator_config_dir)
             .field("tick_cadence", &self.tick_cadence)
             .field("clock", &"<dyn Clock>")
             .field("vip_range", &"<VipRange>")
-            .finish()
+            .field("dataplane", &self.dataplane)
+            .field("dataplane_pin_dir", &self.dataplane_pin_dir)
+            .field("dataplane_cgroup_attach_path", &self.dataplane_cgroup_attach_path)
+            .field(
+                "dataplane_override",
+                &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
+            );
+        #[cfg(feature = "integration-tests")]
+        dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
+        dbg.finish()
     }
 }
 
@@ -357,6 +498,34 @@ impl Default for ServerConfig {
             tick_cadence: DEFAULT_TICK_CADENCE,
             clock: Arc::new(overdrive_host::SystemClock),
             vip_range: VipRange::default(),
+            // Per step 02-01: `Default` populates the loopback
+            // `[dataplane]` shape so existing test fixtures using
+            // `..Default::default()` rest-pattern construction
+            // continue to work. Production callers go through
+            // `parse_dataplane_section` and overwrite this with the
+            // operator-supplied value.
+            dataplane: Some(dataplane_config::DataplaneConfig::loopback()),
+            // Step 02-02: `None` means production default
+            // (`/sys/fs/bpf/overdrive`). Tests override to a per-test
+            // tempdir for SERVICE_MAP pin isolation.
+            dataplane_pin_dir: None,
+            // ADR-0053 § 7: `None` means production default
+            // (`/sys/fs/cgroup/overdrive.slice`). Tests inject a
+            // per-test cgroup path for attachment isolation.
+            dataplane_cgroup_attach_path: None,
+            // Step 02-02: `None` means production default
+            // (construct `EbpfDataplane` from the `[dataplane]`
+            // section). Tests that exercise unrelated subsystems
+            // inject `Some(Arc::new(SimDataplane::new()))` per
+            // architecture.md § 4.7.
+            dataplane_override: None,
+            // Step 02-03: `None` means production default (probe
+            // runs against the real BACKEND_MAP via the typed
+            // `EbpfDataplane` handle). Tests inject
+            // `Some(DataplaneError::...)` to exercise the
+            // `DataplaneBootError::Probe` mapping arm (S-BDB-14).
+            #[cfg(feature = "integration-tests")]
+            dataplane_probe_fault: None,
         }
     }
 }
@@ -502,6 +671,43 @@ impl ServerHandle {
 /// Extracted from `run_server_with_obs_and_driver` to keep that fn
 /// under the clippy `too_many_lines` ceiling — the construction is
 /// otherwise a single logical step.
+/// Validate the `[dataplane]` config section and resolve the host
+/// IPv4 address for the configured `client_iface` per
+/// `backend-discovery-bridge-service-reachability` architecture.md
+/// § 5.1 / § 5.2 (step 02-01).
+///
+/// Two refusal shapes per
+/// `.claude/rules/development.md` § Errors → "Distinct failure
+/// modes get distinct error variants":
+///
+/// - Missing section → [`error::ControlPlaneError::Validation`] with
+///   `field = Some("dataplane")` so the operator's CLI / log
+///   surface can branch on the field without `Display`-grepping.
+/// - `getifaddrs(3)` refusal → [`error::DataplaneBootError::
+///   IfaceAddrResolution`] embedding the underlying `io::Error`
+///   verbatim (NotFound vs Other) for programmatic inspection.
+///
+/// Extracted from `run_server_with_obs_and_driver` to keep that fn
+/// under the clippy `too_many_lines` ceiling — the validation +
+/// resolve sequence is otherwise a single logical step.
+fn resolve_host_ipv4_from_dataplane_config(
+    dataplane: Option<&dataplane_config::DataplaneConfig>,
+) -> Result<std::net::Ipv4Addr, error::ControlPlaneError> {
+    let dataplane_cfg = dataplane.ok_or_else(|| error::ControlPlaneError::Validation {
+        message: "missing required [dataplane] section in overdrive.toml \
+                  (client_iface + backend_iface)"
+            .to_owned(),
+        field: Some("dataplane".to_owned()),
+    })?;
+    let host_ipv4 = iface::resolve_iface_ipv4(&dataplane_cfg.client_iface).map_err(|source| {
+        error::DataplaneBootError::IfaceAddrResolution {
+            iface: dataplane_cfg.client_iface.clone(),
+            source,
+        }
+    })?;
+    Ok(host_ipv4)
+}
+
 async fn bulk_load_service_vip_allocator(
     vip_range: &VipRange,
     store: &Arc<LocalIntentStore>,
@@ -561,7 +767,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
 // may grow real `.await` points as the boot sequence evolves
 // (observation provisioning, lifecycle handshakes). Removing it now
 // would churn every call site for no functional gain.
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
@@ -642,20 +848,123 @@ pub async fn run_server_with_obs_and_driver(
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
     runtime.register(workload_lifecycle()).await?;
-    let runtime = Arc::new(runtime);
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
     // as the convergence-loop spawn. The clock is required at
     // construction per `.claude/rules/development.md` § "Port-trait
     // dependencies"; there is no post-construction injection path.
-    // Phase 2.2: production single-mode boot threads `NoopDataplane`
-    // until the Slice 08-02 hydrator reconciler ships. Until then no
-    // `Action::DataplaneUpdateService` is emitted, so the dataplane
-    // parameter is unreachable at runtime. Slice 08-04 / Phase 2.3
-    // swaps in `EbpfDataplane` here.
+    //
+    // backend-discovery-bridge-service-reachability step 02-02 —
+    // wire `EbpfDataplane` as the single production `Dataplane`
+    // adapter per architecture.md § 5.2. Single-cut migration from
+    // `NoopDataplane` per `feedback_single_cut_greenfield_migrations.md`.
+    // Failure paths route through `DataplaneBootError::Construct`
+    // per architecture.md § 5.3.
+    //
+    // Tests whose subject under test is NOT the dataplane attach path
+    // (CLI HTTPS handshake, trust-triple round-trip, action-shim
+    // dispatch arms, observation-row read handlers) inject
+    // `SimDataplane` via `config.dataplane_override` per architecture.md
+    // § 4.7. Production binaries leave `dataplane_override = None` so
+    // `EbpfDataplane::new` is the only production-reachable adapter.
+    let dataplane_cfg =
+        config.dataplane.as_ref().ok_or_else(|| error::ControlPlaneError::Validation {
+            message: "missing required [dataplane] section in overdrive.toml \
+                      (client_iface + backend_iface)"
+                .to_owned(),
+            field: Some("dataplane".to_owned()),
+        })?;
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_host::NoopDataplane);
+        if let Some(overridden) = config.dataplane_override.clone() {
+            overridden
+        } else {
+            // ADR-0053 § 7: resolve cgroup_attach_path with the
+            // production default when unset.
+            let cgroup_attach_path: std::path::PathBuf =
+                config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
+                    std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
+                });
+            #[allow(unused_mut)] // mut needed only under cfg(test|integration-tests)
+            let mut ebpf_dataplane = config
+                .dataplane_pin_dir
+                .as_deref()
+                .map_or_else(
+                    || {
+                        overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
+                            &dataplane_cfg.client_iface,
+                            &dataplane_cfg.backend_iface,
+                            std::path::Path::new(overdrive_dataplane::DEFAULT_PIN_DIR),
+                            cgroup_attach_path.as_path(),
+                        )
+                    },
+                    |pin_dir| {
+                        overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
+                            &dataplane_cfg.client_iface,
+                            &dataplane_cfg.backend_iface,
+                            pin_dir,
+                            cgroup_attach_path.as_path(),
+                        )
+                    },
+                )
+                .map_err(|source| error::DataplaneBootError::Construct {
+                    client_iface: dataplane_cfg.client_iface.clone(),
+                    backend_iface: dataplane_cfg.backend_iface.clone(),
+                    source,
+                })?;
+
+            // Step 02-03: Apply the test-only probe-fault seam BEFORE
+            // running the probe. Production builds compile both the
+            // field and this branch out entirely. The seam is
+            // `String`-shaped at the `ServerConfig` boundary (see the
+            // field docstring) and reconstructed into
+            // `DataplaneError::LoadFailed` here — the variant
+            // S-BDB-14's assertion (`matches!(... LoadFailed(_))`)
+            // expects.
+            //
+            // Gated on `feature = "integration-tests"` (NOT also
+            // `cfg(test)`) so the gate matches the upstream
+            // `EbpfDataplane::set_probe_fault` symbol's cfg —
+            // `cargo test --no-run -p overdrive-control-plane`
+            // without `--features integration-tests` would otherwise
+            // enable this branch (test-of-control-plane sets
+            // `cfg(test)` for control-plane) while leaving the
+            // dataplane dep compiled without the feature, so the
+            // method would be missing. The integration-tests feature
+            // forwards via the Cargo.toml dep — see this crate's
+            // `[features]` block.
+            #[cfg(feature = "integration-tests")]
+            if let Some(fault_msg) = config.dataplane_probe_fault.clone() {
+                ebpf_dataplane.set_probe_fault(
+                    overdrive_core::traits::dataplane::DataplaneError::LoadFailed(fault_msg),
+                );
+            }
+
+            // Step 02-03: Earned-Trust probe per architecture.md § 5.4
+            // and CLAUDE.md principle 12. Composition-root invariant
+            // "wire then probe then use" — the probe runs AFTER
+            // `new()` succeeds and BEFORE the first dataplane operation.
+            // On failure we emit a structured `health.startup.refused`
+            // event with `reason = "dataplane.probe"` and refuse to
+            // boot. The `?` causes `ebpf_dataplane` to drop, which
+            // detaches XDP and unlinks the SERVICE_MAP pin via the
+            // `EbpfDataplane::Drop` impl.
+            if let Err(source) = ebpf_dataplane.probe().await {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "dataplane.probe",
+                    client_iface = %dataplane_cfg.client_iface,
+                    backend_iface = %dataplane_cfg.backend_iface,
+                    error = %source,
+                    "Earned-Trust probe failed; refusing to boot"
+                );
+                return Err(error::ControlPlaneError::DataplaneBoot(
+                    error::DataplaneBootError::Probe { source },
+                ));
+            }
+
+            Arc::new(ebpf_dataplane)
+        };
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on
@@ -663,6 +972,28 @@ pub async fn run_server_with_obs_and_driver(
     let node_id = overdrive_core::id::NodeId::new("local").map_err(|e| {
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
+
+    // backend-discovery-bridge-service-reachability step 02-01 —
+    // require the `[dataplane]` config section per architecture.md
+    // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
+    // operator-supplied `client_iface`. The `Ipv4Addr::LOCALHOST`
+    // placeholder from 01-04 is removed in the same commit per
+    // `feedback_single_cut_greenfield_migrations.md`.
+    let host_ipv4 = resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?;
+    runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
+    // UI-05 (`backend-discovery-bridge-service-reachability` step
+    // 02-04 architectural remediation) — register the
+    // `service-map-hydrator` at production boot. Prior to UI-05 this
+    // was absent from the production wiring (architecture.md § 4.7
+    // / § 6 carried `// existing` comments that did not reflect any
+    // actual `runtime.register` call site); the bridge → hydrator
+    // handoff failed silently in production. Registration MUST land
+    // AFTER `backend_discovery_bridge` so the bridge's emitted
+    // `Action::EnqueueEvaluation { reconciler: "service-map-hydrator",
+    // .. }` resolves against a registered reconciler when the
+    // broker first drains.
+    runtime.register(service_map_hydrator(host_ipv4)).await?;
+    let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
 
@@ -676,6 +1007,7 @@ pub async fn run_server_with_obs_and_driver(
         dataplane,
         node_id,
         allocator,
+        host_ipv4,
     );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
@@ -883,4 +1215,53 @@ pub fn workload_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
     use overdrive_core::reconciler::{AnyReconciler, WorkloadLifecycle};
 
     AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
+}
+
+/// Construct the `backend-discovery-bridge` reconciler per
+/// `docs/feature/backend-discovery-bridge-service-reachability/
+/// design/architecture.md` § 4.7 (boot composition).
+///
+/// The bridge converges `service_backends` observation rows for the
+/// workload's declared listeners against the actual Running alloc
+/// set, emitting `Action::WriteServiceBackendRow` on fingerprint
+/// drift. Both `host_ipv4` and `writer_node_id` are mandatory per
+/// `.claude/rules/development.md` § "Port-trait dependencies" — the
+/// reconciler is constructed once at boot and the runtime composes
+/// the same instance across every tick.
+///
+/// Phase 01 production boot threads `Ipv4Addr::LOCALHOST` as the
+/// `host_ipv4` placeholder (step 01-04, single-commit transitional
+/// shape); step 02-01 replaces this with the resolved interface
+/// IPv4 from the dataplane config.
+#[must_use]
+pub fn backend_discovery_bridge(
+    host_ipv4: std::net::Ipv4Addr,
+    writer_node_id: overdrive_core::id::NodeId,
+) -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::AnyReconciler;
+    use overdrive_core::reconciler::backend_discovery_bridge::BackendDiscoveryBridge;
+
+    AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
+}
+
+/// Construct the `service-map-hydrator` reconciler.
+///
+/// Activates J-PLAT-004 per ADR-0042 — converges
+/// `service_hydration_results` rows by dispatching
+/// `Action::DataplaneUpdateService` whenever a service's bridge-written
+/// `(vip, backends)` fingerprint drifts from the last
+/// confirmed-applied fingerprint persisted in the hydrator's `View`.
+///
+/// Registered at production boot AFTER `backend-discovery-bridge`
+/// (the bridge re-enqueues this reconciler per UI-05 cross-reconciler
+/// handoff — see `Action::EnqueueEvaluation`). Order matters only
+/// for `cluster_status`'s deterministic registration listing; the
+/// runtime registers idempotently regardless of order.
+#[must_use]
+pub fn service_map_hydrator(
+    host_ipv4: std::net::Ipv4Addr,
+) -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::{AnyReconciler, ServiceMapHydrator};
+
+    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4))
 }

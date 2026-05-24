@@ -24,12 +24,12 @@ use overdrive_sim::{Harness, Invariant, InvariantStatus};
 /// The default harness run includes all three new invariants and they
 /// all pass — the clean-run green-bar assertion.
 ///
-/// Step 08-02 GREEN handed off: the hydrator's RED scaffold is gone,
-/// the evaluators return real `InvariantResult` values, and the
-/// downstream-fallout `#[should_panic]` attribute is removed per
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests" handoff procedure. Test now asserts the green-bar invariant
-/// directly.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
+/// Test now asserts the green-bar invariant directly.
 #[test]
 fn default_harness_run_passes_all_three_reconciler_invariants() {
     let report = Harness::new().run(42).expect("harness must compose");
@@ -173,10 +173,11 @@ fn write_through_ordering_passes_on_default_harness() {
 /// when run as part of the full set. K3 reproducibility: same seed
 /// twice produces identical verdicts.
 ///
-/// Step 08-02 GREEN handed off: see the docstring on
-/// `default_harness_run_passes_all_three_reconciler_invariants` above
-/// for the rationale. The downstream-fallout `#[should_panic]` is
-/// removed; test asserts the green-bar property directly.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed and the
+/// downstream-fallout `#[should_panic]` attribute is removed per
+/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+/// tests" handoff procedure.
 #[test]
 fn full_default_catalogue_includes_three_view_store_invariants_and_passes_them() {
     let report = Harness::new().run(99).expect("harness must compose");

@@ -7,7 +7,7 @@
 //!
 //! See `docs/whitepaper.md` §7 for the dataplane's kernel surface.
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use async_trait::async_trait;
 use thiserror::Error;
@@ -42,6 +42,31 @@ pub enum DataplaneError {
         #[source]
         source: std::io::Error,
     },
+    /// `LOCAL_BACKEND_MAP` insert rejected by the kernel (ADR-0053
+    /// § 6). Surfaces from `register_local_backend` when the BPF
+    /// HASH map update fails (EINVAL on malformed key, ENOMEM on
+    /// kernel allocator exhaustion, EPERM if the map FD was
+    /// invalidated). Distinct variant per `.claude/rules/
+    /// development.md` § "Distinct failure modes get distinct
+    /// error variants".
+    #[error("LOCAL_BACKEND_MAP insert rejected by kernel: {source}")]
+    LocalBackendInsert {
+        #[source]
+        source: std::io::Error,
+    },
+    /// `LOCAL_BACKEND_MAP` delete rejected by the kernel (ADR-0053
+    /// § 6). Surfaces from `deregister_local_backend`. KeyNotFound
+    /// is NOT surfaced here — it's idempotent per the trait contract.
+    #[error("LOCAL_BACKEND_MAP delete rejected by kernel: {source}")]
+    LocalBackendDelete {
+        #[source]
+        source: std::io::Error,
+    },
+    /// `LOCAL_BACKEND_MAP` probe sentinel round-trip failed (ADR-0053
+    /// § 6 Earned-Trust probe extension). The composition root's
+    /// "wire then probe then use" invariant per ADR-0052 § 3.
+    #[error("LOCAL_BACKEND_MAP probe round-trip failed: {message}")]
+    LocalBackendProbe { message: String },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.
@@ -81,6 +106,102 @@ pub trait Dataplane: Send + Sync + 'static {
 
     /// Drain queued flow events (for telemetry consumers).
     async fn drain_flow_events(&self) -> Result<Vec<FlowEvent>, DataplaneError>;
+
+    /// Register or replace the local backend for `(vip, vip_port)`
+    /// per ADR-0053 § 2.
+    ///
+    /// # Preconditions
+    /// - `vip` is an IPv4 service VIP issued by `ServiceVipAllocator`
+    ///   (ADR-0049). The allocator produces values of the
+    ///   `overdrive_core::id::ServiceVip` newtype (validated `Ipv4Addr`
+    ///   range), and `ServiceMapHydrator` extracts the inner
+    ///   `Ipv4Addr` via `ServiceVip::get()` immediately before
+    ///   emitting `Action::RegisterLocalBackend` — so every VIP
+    ///   reaching this method has transited the typed allocator
+    ///   surface. The signature stays `Ipv4Addr` (rather than
+    ///   `ServiceVip`) for parallel with `update_service.vip` and to
+    ///   keep the cgroup-path call shape identical to the XDP path
+    ///   per ADR-0053 § 1; the type-system enforcement lives one
+    ///   call site up the stack.
+    /// - `backend` is a `SocketAddrV4` reachable from the host
+    ///   netns. Phase 1 single-node guarantees this when the
+    ///   backend's allocation is Running on the same host.
+    ///
+    /// # Postconditions on `Ok(())`
+    /// - For every subsequent `connect(vip:vip_port)` from a
+    ///   process inside the dataplane's attach cgroup, the kernel
+    ///   establishes a connection to `backend.ip():backend.port()`
+    ///   instead. **This is the observable postcondition every
+    ///   adapter MUST satisfy** — the
+    ///   `backend-discovery-bridge/walking_skeleton` integration
+    ///   test exercises exactly this: register a backend, perform a
+    ///   real `connect(vip:vip_port)` from inside the attach cgroup,
+    ///   assert the peer is `backend`. Per
+    ///   `.claude/rules/development.md` § "Trait definitions specify
+    ///   behavior, not just signature" — this is the contract clause
+    ///   the DST/integration equivalence harnesses check.
+    /// - The application's `getpeername(2)` returns `backend`, not
+    ///   `(vip, vip_port)`. Per Cilium ClusterIP semantics; see
+    ///   ADR-0053 § "Consequences".
+    ///
+    /// # Edge cases
+    /// - Re-registration with the same `backend` is idempotent; the
+    ///   map update is the same triple.
+    /// - Re-registration with a different `backend` for the same
+    ///   `(vip, vip_port)` atomically replaces the existing entry
+    ///   (single-map point write; no in-flight readers between the
+    ///   syscall returning and the next `connect`).
+    ///
+    /// # Observable invariants
+    /// - After `deregister_local_backend(vip, vip_port)`,
+    ///   subsequent `connect(vip:vip_port)` reaches the kernel
+    ///   without rewrite — the connect either succeeds against
+    ///   whatever the VIP was *originally* routed to (typically
+    ///   nothing in Phase 1, producing `ECONNREFUSED`), or fails
+    ///   with `EHOSTUNREACH`. The cgroup hook does not deny; it
+    ///   only rewrites.
+    /// - `update_service(vip, ...)` and `register_local_backend(vip,
+    ///   port, ...)` for the same VIP are NOT mutually exclusive
+    ///   at the adapter — the XDP path consumes the first, the
+    ///   cgroup path consumes the second. The classifier in
+    ///   `ServiceMapHydrator` (ADR-0053 § 4) is responsible for
+    ///   choosing exactly one per backend.
+    async fn register_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        backend: SocketAddrV4,
+    ) -> Result<(), DataplaneError>;
+
+    /// Remove the local backend registration for `(vip, vip_port)`
+    /// per ADR-0053 § 2.
+    ///
+    /// # Preconditions
+    /// - None. The method is idempotent: removing an entry that
+    ///   does not exist is `Ok(())`, NOT an error.
+    ///
+    /// # Postconditions on `Ok(())`
+    /// - The cgroup hook will no longer rewrite `connect(vip:vip_port)`
+    ///   calls for this `(vip, vip_port)`. The kernel proceeds with
+    ///   the operator-supplied destination, which in Phase 1 typically
+    ///   produces `ECONNREFUSED` (no listener on the VIP itself).
+    ///   This is the observable postcondition every adapter MUST
+    ///   satisfy — verifiable via a real `connect(vip:vip_port)`
+    ///   from inside the attach cgroup after deregistration (the
+    ///   inverse of the `register_local_backend` walking-skeleton
+    ///   check).
+    ///
+    /// # Edge cases
+    /// - Removing a `(vip, vip_port)` that was never registered
+    ///   succeeds with no side effect.
+    /// - Concurrent `register_local_backend(vip, vip_port, b1)` +
+    ///   `deregister_local_backend(vip, vip_port)` is not defined
+    ///   to interleave at the adapter — callers must serialise.
+    async fn deregister_local_backend(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+    ) -> Result<(), DataplaneError>;
 }
 
 /// A single kernel-emitted flow record. See `docs/whitepaper.md` §12.

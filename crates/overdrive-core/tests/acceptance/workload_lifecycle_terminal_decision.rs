@@ -173,7 +173,11 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "at-ceiling must emit one FinalizeFailed action; got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        2,
+        "at-ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::FinalizeFailed { terminal, alloc_id } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
@@ -224,7 +228,11 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "stop branch with one Running alloc emits one StopAllocation");
+    assert_eq!(
+        actions.len(),
+        2,
+        "stop branch with one Running alloc emits StopAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::StopAllocation { alloc_id, terminal } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
@@ -267,7 +275,11 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "fresh schedule must emit one StartAllocation");
+    assert_eq!(
+        actions.len(),
+        2,
+        "fresh schedule must emit StartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         // StartAllocation is non-terminal by construction — it does
         // not carry a `terminal` field. The mere fact the variant
@@ -323,7 +335,11 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "Failed-with-budget must emit one RestartAllocation");
+    assert_eq!(
+        actions.len(),
+        2,
+        "Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+    );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}
         other => panic!("expected RestartAllocation, got {other:?}"),
@@ -524,6 +540,26 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // not a new terminal claim. The reconciler that emits Release
         // is also the writer of the terminal claim via StopAllocation /
         // FinalizeFailed above.
-        | Action::ReleaseServiceVip { .. } => None,
+        | Action::ReleaseServiceVip { .. }
+        // backend-discovery-bridge-service-reachability step 01-01:
+        // WriteServiceBackendRow carries no terminal claim — the
+        // bridge writes an observation row tracking workload-side
+        // backend membership, orthogonal to the alloc-lifecycle
+        // terminal claim that lives on WorkloadLifecycle's
+        // StopAllocation / FinalizeFailed.
+        | Action::WriteServiceBackendRow { .. }
+        // backend-discovery-bridge-service-reachability UI-05:
+        // EnqueueEvaluation is a control-plane re-enqueue (carries
+        // (reconciler, target) for cross-reconciler handoff). It
+        // makes no terminal claim by construction — the emitting
+        // reconciler is the source of terminal claims, not the
+        // broker dispatch surface.
+        | Action::EnqueueEvaluation { .. }
+        // ADR-0053 — RegisterLocalBackend / DeregisterLocalBackend
+        // are same-host LB primitives consumed by the
+        // cgroup_sock_addr program. They make no terminal claim
+        // — same rationale as DataplaneUpdateService above.
+        | Action::RegisterLocalBackend { .. }
+        | Action::DeregisterLocalBackend { .. } => None,
     }
 }

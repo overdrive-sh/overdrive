@@ -8,12 +8,11 @@
 //! best-effort cleanup of leftover state from a prior aborted run
 //! before issuing the `add`.
 //!
-//! Capability gating mirrors [`super::veth::VethPair`]: requires
-//! `CAP_NET_ADMIN`. Unprivileged callers receive
-//! [`NetNsError::CapNetAdminRequired`]; the test caller is expected
-//! to bail with a skip message rather than panic.
+//! Capability gating: requires `CAP_NET_ADMIN`. Unprivileged callers
+//! receive [`NetNsError::CapNetAdminRequired`]; the test caller is
+//! expected to bail with a skip message rather than panic.
 //!
-//! # Two-namespace topology used by `reverse_nat_e2e.rs`
+//! # Two-namespace topology
 //!
 //! ```text
 //!   netns "<host_ns>"                netns "<peer_ns>"
@@ -31,6 +30,7 @@
 //! namespaces (`ip netns exec <ns> ip link set ...`).
 
 #![allow(clippy::missing_panics_doc, clippy::expect_used)]
+#![cfg(target_os = "linux")]
 
 use std::process::Command;
 
@@ -166,8 +166,10 @@ impl Drop for NetNs {
     }
 }
 
-/// Three-iface transit topology for L4LB Tier 3 tests, mirroring
-/// Cilium PR #16338's standalone L4LB integration test shape (per
+/// Three-iface transit topology for L4LB Tier 3 tests.
+///
+/// Mirrors Cilium PR #16338's standalone L4LB integration test
+/// shape (per
 /// `docs/research/dataplane/xdp-l4lb-test-topology-comprehensive-research.md`
 /// § Recommendation 1).
 ///
@@ -344,9 +346,7 @@ impl ThreeIfaceTopology {
 // it). The veth pairs were moved into the namespaces and are no longer
 // referenced from the host ns; their teardown is implicit.
 
-/// Spawn `ip <args>`, classify the result. Mirrors the helper in
-/// [`super::veth`]; kept distinct so the netns helper is usable
-/// stand-alone.
+/// Spawn `ip <args>`, classify the result.
 fn run_ip<I, S>(args: I) -> Result<std::process::Output, NetNsError>
 where
     I: IntoIterator<Item = S> + Clone,

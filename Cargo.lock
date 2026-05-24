@@ -1773,6 +1773,7 @@ dependencies = [
  "futures",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-sim",
  "overdrive-store-local",
  "proptest",
  "reqwest",
@@ -1811,6 +1812,7 @@ dependencies = [
  "ipnet",
  "libc",
  "libsql",
+ "nix",
  "overdrive-core",
  "overdrive-dataplane",
  "overdrive-host",
@@ -1850,6 +1852,7 @@ dependencies = [
  "blake3",
  "bytecheck",
  "bytes",
+ "ciborium",
  "futures",
  "hex",
  "overdrive-sim",
@@ -1885,6 +1888,7 @@ dependencies = [
  "nix",
  "overdrive-core",
  "overdrive-store-local",
+ "overdrive-testing",
  "parking_lot",
  "proptest",
  "rkyv",
@@ -1965,11 +1969,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "overdrive-testing"
+version = "0.0.0"
+
+[[package]]
 name = "overdrive-worker"
 version = "0.0.0"
 dependencies = [
  "async-trait",
  "libc",
+ "nix",
  "overdrive-core",
  "overdrive-sim",
  "parking_lot",

@@ -1,0 +1,514 @@
+//! UI-06 acceptance — `WorkloadLifecycle::reconcile` dual-emits
+//! `Action::EnqueueEvaluation { reconciler: "backend-discovery-bridge",
+//! target: "job/<workload_id>" }` alongside every alloc-mutating
+//! action (`StartAllocation` / `RestartAllocation` / `StopAllocation`
+//! / `FinalizeFailed`) so the `BackendDiscoveryBridge` re-ticks
+//! against the new alloc state on the next convergence cycle.
+//!
+//! Closes the F1 gap surfaced by
+//! `docs/feature/backend-discovery-bridge-service-reachability/deliver/audit-reconciler-handoff-topology.md`.
+//!
+//! Pre-UI-06 the only enqueue site for the bridge was the exit
+//! observer (`exit_observer.rs:253-256`) which fires only on workload
+//! exit. For long-lived Service workloads the bridge never ticked
+//! after Pending → Running, no `ServiceBackendRow` was written, and
+//! the entire downstream hydrator → dataplane chain was structurally
+//! unreachable. This test pins the dual-emission at the reconciler's
+//! surface — the load-bearing structural property the F1 fix
+//! introduces.
+//!
+//! Mirrors the UI-05 pattern test (`bridge_emits_enqueue_evaluation_
+//! for_hydrator.rs`): port-to-port at the domain function (the pure
+//! `Reconciler::reconcile` is its own driving port — calling it
+//! directly IS port-to-port testing per the project's testing
+//! discipline).
+
+#![allow(clippy::expect_used)]
+#![allow(clippy::doc_markdown)]
+
+use std::collections::BTreeMap;
+use std::num::NonZeroU32;
+use std::time::{Duration, Instant};
+
+use overdrive_core::UnixInstant;
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use overdrive_core::id::{AllocationId, ContentHash, NodeId, Region, WorkloadId};
+use overdrive_core::reconciler::{
+    Action, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView,
+};
+use overdrive_core::traits::driver::Resources;
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+
+// -------------------------------------------------------------------
+// fixtures (mirror workload_lifecycle_reconcile_branches.rs shape)
+// -------------------------------------------------------------------
+
+fn nid(s: &str) -> NodeId {
+    NodeId::new(s).expect("valid NodeId")
+}
+fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
+}
+fn aid(s: &str) -> AllocationId {
+    AllocationId::new(s).expect("valid AllocationId")
+}
+fn local_region() -> Region {
+    Region::new("local").expect("valid Region")
+}
+fn make_node(id: &str) -> Node {
+    Node {
+        id: nid(id),
+        region: local_region(),
+        capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+    }
+}
+fn make_job(id: &str) -> Job {
+    Job {
+        id: jid(id),
+        replicas: NonZeroU32::new(1).expect("1 is non-zero"),
+        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+    }
+}
+fn one_node_map(node_id: &str) -> BTreeMap<NodeId, Node> {
+    let n = make_node(node_id);
+    let mut m = BTreeMap::new();
+    m.insert(n.id.clone(), n);
+    m
+}
+fn alloc_with_state(
+    alloc_id: &str,
+    workload_id: &str,
+    node_id: &str,
+    state: AllocState,
+) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: aid(alloc_id),
+        workload_id: jid(workload_id),
+        node_id: nid(node_id),
+        state,
+        updated_at: LogicalTimestamp { counter: 1, writer: nid(node_id) },
+        reason: None,
+        detail: None,
+        terminal: None,
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+    }
+}
+fn fresh_tick() -> TickContext {
+    let now = Instant::now();
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
+}
+
+/// Helper: assert that `actions` contains exactly one
+/// `Action::EnqueueEvaluation` routed at the bridge for the given
+/// workload, and return a reference to its inner fields.
+fn assert_single_bridge_enqueue<'a>(
+    actions: &'a [Action],
+    workload_id: &WorkloadId,
+) -> (&'a overdrive_core::reconciler::ReconcilerName, &'a TargetResource) {
+    let mut found: Option<(&overdrive_core::reconciler::ReconcilerName, &TargetResource)> = None;
+    let mut count = 0;
+    for action in actions {
+        if let Action::EnqueueEvaluation { reconciler, target } = action {
+            if reconciler.as_str() == "backend-discovery-bridge" {
+                count += 1;
+                found = Some((reconciler, target));
+            }
+        }
+    }
+    assert_eq!(
+        count, 1,
+        "UI-06: WorkloadLifecycle MUST emit exactly one EnqueueEvaluation routed at \
+         'backend-discovery-bridge' per tick that mutates the alloc set; got {count} in {actions:?}",
+    );
+    let (reconciler, target) = found.expect("count==1 checked above");
+    assert_eq!(
+        target.as_str(),
+        &format!("job/{workload_id}"),
+        "UI-06: bridge enqueue target MUST be 'job/<workload_id>' (mirrors exit_observer)"
+    );
+    (reconciler, target)
+}
+
+// -------------------------------------------------------------------
+// StartAllocation branch — fresh Service workload, no allocs yet.
+// -------------------------------------------------------------------
+
+#[test]
+fn start_allocation_branch_dual_emits_bridge_enqueue() {
+    let workload_id = jid("payments");
+    let nodes = one_node_map("local");
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // Exactly two actions: one StartAllocation + one EnqueueEvaluation.
+    assert_eq!(actions.len(), 2, "expected StartAllocation + EnqueueEvaluation; got {actions:?}");
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
+        "first action must be StartAllocation; got {actions:?}"
+    );
+    assert_single_bridge_enqueue(&actions, &workload_id);
+}
+
+// -------------------------------------------------------------------
+// StopAllocation branch (operator stop) — desired_to_stop AND job set,
+// a Running alloc present.
+// -------------------------------------------------------------------
+
+#[test]
+fn stop_allocation_branch_dual_emits_bridge_enqueue() {
+    let workload_id = jid("payments");
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        aid("alloc-payments-0"),
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: true,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert_eq!(actions.len(), 2, "expected StopAllocation + EnqueueEvaluation; got {actions:?}");
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "expected StopAllocation among actions; got {actions:?}"
+    );
+    assert_single_bridge_enqueue(&actions, &workload_id);
+}
+
+// -------------------------------------------------------------------
+// GC branch — job=None, Running orphan alloc — emits SystemGc-stamped
+// StopAllocation. Still dual-emits the bridge enqueue.
+// -------------------------------------------------------------------
+
+#[test]
+fn gc_stop_branch_dual_emits_bridge_enqueue() {
+    let workload_id = jid("payments");
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        aid("alloc-payments-0"),
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: None,
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: None,
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert_eq!(actions.len(), 2, "expected StopAllocation + EnqueueEvaluation; got {actions:?}");
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "expected StopAllocation; got {actions:?}"
+    );
+    assert_single_bridge_enqueue(&actions, &workload_id);
+}
+
+// -------------------------------------------------------------------
+// FinalizeFailed branch (backoff exhausted) — Failed alloc whose
+// restart_counts has hit the ceiling.
+// -------------------------------------------------------------------
+
+#[test]
+fn finalize_failed_branch_dual_emits_bridge_enqueue() {
+    let workload_id = jid("payments");
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    let failed_row = AllocStatusRow {
+        state: AllocState::Failed,
+        ..alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Failed)
+    };
+    allocations.insert(aid("alloc-payments-0"), failed_row);
+
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+
+    // View at the ceiling: restart_counts hits RESTART_BACKOFF_CEILING,
+    // so the reconciler emits FinalizeFailed (not RestartAllocation).
+    let mut view = WorkloadLifecycleView::default();
+    view.restart_counts.insert(aid("alloc-payments-0"), RESTART_BACKOFF_CEILING);
+
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert_eq!(actions.len(), 2, "expected FinalizeFailed + EnqueueEvaluation; got {actions:?}");
+    assert!(
+        actions.iter().any(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                ..
+            }
+        )),
+        "expected FinalizeFailed with BackoffExhausted terminal; got {actions:?}"
+    );
+    assert_single_bridge_enqueue(&actions, &workload_id);
+}
+
+// -------------------------------------------------------------------
+// Converged tick — Running alloc already present, reconciler emits
+// NOTHING. The bridge enqueue MUST NOT fire on a noop tick (broker
+// would churn empty re-enqueues).
+// -------------------------------------------------------------------
+
+#[test]
+fn converged_tick_emits_no_bridge_enqueue() {
+    let workload_id = jid("payments");
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        aid("alloc-payments-0"),
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id,
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // Bridge enqueue paired ONLY with alloc-mutating actions; converged
+    // tick produces zero actions including zero enqueue.
+    assert!(
+        actions.is_empty(),
+        "converged tick must emit zero actions (no spurious bridge enqueue); got {actions:?}"
+    );
+}
+
+// -------------------------------------------------------------------
+// Non-alloc-mutating action classifier — `is_alloc_mutating_action`
+// (reconciler.rs:1517) decides whether a given tick should append the
+// bridge enqueue. The four cases above (Start / Stop / GC / Finalize)
+// all return `true` from the predicate. This test pins the inverse
+// case: a tick whose only emitted action is `ReleaseServiceVip` —
+// which is observationally non-mutating to the bridge's alloc set —
+// MUST NOT trigger a spurious bridge enqueue.
+//
+// Mutation kill: `replace body with true` at reconciler.rs:1517 would
+// make every non-empty action vector trigger the bridge enqueue.
+// Without this test, the four positive-case assertions above can't
+// distinguish the real predicate from the always-true mutant, because
+// every case they cover happens to contain an alloc-mutating action
+// already. The Service-VIP release path is the only Phase-1 emission
+// site that produces a non-empty action vector whose contents are
+// strictly outside the alloc-mutating set, so it is the unique killer
+// for this mutation.
+// -------------------------------------------------------------------
+
+fn fake_spec_digest() -> ContentHash {
+    ContentHash::of(b"is-alloc-mutating-action-fixture-digest")
+}
+
+/// Construct an alloc row in the canonical "terminal-Operator-stopped
+/// Service alloc" shape — `state: Terminated` with a
+/// `terminal: Some(Stopped { by: Operator })` claim — used by the
+/// `service_vip_release_emission` path. Mirrors the shape used by
+/// `workload_lifecycle_release_service_vip.rs::alloc_terminal_operator_stopped`.
+fn terminal_operator_stopped_alloc(
+    alloc_id: &str,
+    workload_id: &str,
+    node_id: &str,
+) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: aid(alloc_id),
+        workload_id: jid(workload_id),
+        node_id: nid(node_id),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp { counter: 2, writer: nid(node_id) },
+        reason: Some(TransitionReason::Stopped { by: StoppedBy::Operator }),
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+    }
+}
+
+#[test]
+fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
+    // Build a Service workload that has reached a terminal-state
+    // observation row AND carries a populated `service_spec_digest`
+    // (the hydrator-supplied input the release-emission path
+    // requires). `desired.desired_to_stop = true` short-circuits
+    // `reconcile_inner` into the Stop branch, which — because no
+    // alloc is Running — emits an empty action list. The wrapper
+    // then appends the `Action::ReleaseServiceVip` via
+    // `service_vip_release_emission`.
+    //
+    // Net `actions` after the wrapper: `[ReleaseServiceVip]` — one
+    // entry, NOT in the alloc-mutating set. With the real
+    // predicate, `actions.iter().any(is_alloc_mutating_action)`
+    // returns false and no bridge enqueue is appended. With the
+    // mutated predicate (`body → true`), `any(...)` returns true
+    // (because the vec is non-empty) and a spurious bridge enqueue
+    // would be appended. The assertion below catches the spurious
+    // emission.
+    let workload_id = jid("payments");
+    let digest = fake_spec_digest();
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        aid("alloc-payments-0"),
+        terminal_operator_stopped_alloc("alloc-payments-0", "payments", "local"),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("payments")),
+        desired_to_stop: true,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: Some(digest),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id,
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: Some(digest),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // Exactly one action: the release. Total length pins both the
+    // presence of the release AND the absence of any other emission
+    // (including the would-be-spurious bridge enqueue under the
+    // always-true mutant).
+    assert_eq!(
+        actions.len(),
+        1,
+        "Service terminal-state tick must emit exactly one action (ReleaseServiceVip); \
+         a bridge EnqueueEvaluation here would be spurious since no alloc-set mutation \
+         occurred; got {actions:?}"
+    );
+    assert!(
+        matches!(actions[0], Action::ReleaseServiceVip { .. }),
+        "the single emitted action must be ReleaseServiceVip; got {actions:?}"
+    );
+    // Belt-and-braces: explicitly assert that NO EnqueueEvaluation
+    // routed at the bridge appears, regardless of total count.
+    let bridge_enqueues = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::EnqueueEvaluation { reconciler, .. }
+                    if reconciler.as_str() == "backend-discovery-bridge"
+            )
+        })
+        .count();
+    assert_eq!(
+        bridge_enqueues, 0,
+        "non-alloc-mutating tick (ReleaseServiceVip only) must emit ZERO bridge enqueues; \
+         got {bridge_enqueues} in {actions:?} — `is_alloc_mutating_action` may have been \
+         mutated to always return true"
+    );
+}

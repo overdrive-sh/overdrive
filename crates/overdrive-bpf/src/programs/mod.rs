@@ -18,6 +18,7 @@
 //! See `docs/feature/phase-2-xdp-service-map/design/architecture.md`
 //! § 9 module layout.
 
+pub mod cgroup_connect4_service;
 pub mod sanity;
 pub mod xdp_reverse_nat;
 pub mod xdp_service_map;

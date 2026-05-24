@@ -262,7 +262,10 @@ proptest! {
             let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> = std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
             let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
             let (_alloc_tmp, allocator) = fresh_test_allocator();
-            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node, allocator)
+            let test_broker = parking_lot::Mutex::new(
+                overdrive_core::eval_broker::EvaluationBroker::new(),
+            );
+            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node, allocator, &test_broker)
                 .await
                 .expect("dispatch must succeed");
 
@@ -322,6 +325,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
 
     let (_alloc_tmp, allocator) = fresh_test_allocator();
+    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
         driver.as_ref(),
@@ -331,6 +335,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         &tick,
         &writer_node,
         allocator,
+        &test_broker,
     )
     .await
     .expect("dispatch must succeed even on driver failure (failure is recorded)");
@@ -462,6 +467,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
     let (_alloc_tmp, allocator) = fresh_test_allocator();
+    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
         driver.as_ref(),
@@ -471,6 +477,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         &tick,
         &writer_node,
         allocator,
+        &test_broker,
     )
     .await
     .expect("dispatch must succeed");

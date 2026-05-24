@@ -133,6 +133,21 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // AC §1.3.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
+    // backend-discovery-bridge-service-reachability Slice 1
+    // (closes #174) — three DST invariants land in
+    // `crate::invariants::backend_discovery_bridge`.
+    "bridge-eventually-writes-backend-row",
+    "bridge-idempotent-steady-state",
+    "bridge-recomputes-fingerprint-on-replay",
+    // backend-discovery-bridge-service-reachability Slice 2 step 02-04
+    // — S-BDB-19 Tier 1 DST evidence. Extends the existing
+    // `service_map_hydrator` invariant module to drive the hydrator
+    // against bridge-written `service_backends_rows` under
+    // `SimObservationStore` + `SimDataplane`. The Tier 3 real-kernel
+    // variant against `LocalObservationStore` + `EbpfDataplane` is the
+    // walking-skeleton's `bridge_to_hydrator_handoff_dispatches_*` test
+    // (currently a RED scaffold).
+    "bridge-to-hydrator-handoff",
 ];
 
 // -----------------------------------------------------------------------------
@@ -142,11 +157,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 /// The whole default catalogue runs, every invariant passes, and the
 /// wall-clock budget (<60 s per KPI K1) is met.
 ///
-/// Step 08-02 GREEN handed off: the
-/// `HydratorEventuallyConverges` and `HydratorIdempotentSteadyState`
-/// scaffolds are GREEN, so the downstream-fallout `#[should_panic]`
-/// attribute is removed per `.claude/rules/testing.md` § "Downstream
-/// fallout on pre-existing tests" handoff procedure.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
 #[test]
 fn default_catalogue_is_green_within_wall_clock_budget() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -208,11 +223,11 @@ fn default_catalogue_is_green_within_wall_clock_budget() {
 
 /// Every named invariant in §7.1 scenario 2 appears in the summary.
 ///
-/// Step 08-02 GREEN handed off: the
-/// `HydratorEventuallyConverges` scaffold is GREEN, so the
-/// downstream-fallout `#[should_panic]` attribute is removed per
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests" handoff procedure.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
 #[test]
 fn summary_names_every_expected_invariant() {
     let target = tempfile::tempdir().expect("tempdir");
@@ -273,6 +288,12 @@ fn intent_never_crosses_into_observation_is_evaluated_and_passes() {
 /// Every name in the default catalogue must be independently resolvable
 /// via `--only` and must report pass in isolation. This is the step's
 /// claim that every invariant body is wired and not just stubbed out.
+///
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed and the
+/// downstream-fallout `#[should_panic]` attribute is removed per
+/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+/// tests" handoff procedure.
 #[test]
 fn every_invariant_runs_green_when_selected_individually() {
     for name in EXPECTED_INVARIANTS {

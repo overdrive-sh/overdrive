@@ -85,7 +85,7 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
         Ok(s) => s,
         Err(reason) => return fail(NAME, reason),
     };
-    let reconciler = ServiceMapHydrator::canonical();
+    let reconciler = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let any_reconciler = AnyReconciler::ServiceMapHydrator(reconciler);
 
     let mut state = scenario.state;
@@ -198,7 +198,7 @@ pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
         },
     );
 
-    let reconciler = ServiceMapHydrator::canonical();
+    let reconciler = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let any_reconciler = AnyReconciler::ServiceMapHydrator(reconciler);
 
     let mut view = ServiceMapHydratorView::default();
@@ -311,6 +311,289 @@ fn fail(name: &str, cause: String) -> InvariantResult {
 
 fn cluster_host() -> String {
     NodeId::new("cluster").map_or_else(|_| "cluster".to_owned(), |id| id.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// S-BDB-19 — bridge → hydrator handoff (Tier 1 DST)
+//
+// `backend-discovery-bridge-service-reachability` step 02-04 extends
+// the Tier 1 invariant catalogue to drive the in-process bridge →
+// hydrator handoff against the same `SimObservationStore` the bridge
+// writes into. The Tier 3 walking-skeleton exercises the same property
+// against the real kernel adapter; this Tier 1 invariant exercises it
+// against `SimDataplane` semantics on every PR via `cargo dst`.
+//
+// The chain:
+//
+//   1. Tick `BackendDiscoveryBridge::reconcile` against a Running
+//      alloc + projected listener; assert it emits one
+//      `Action::WriteServiceBackendRow`.
+//   2. Apply that action to `SimObservationStore` (mirrors the
+//      production `action_shim::write_service_backend_row` dispatch).
+//   3. Read `service_backends_rows(&service_id)` back from obs and
+//      project the row into a `ServiceMapHydratorState.desired` entry
+//      (mirrors the runtime `hydrate_desired` arm at
+//      `crates/overdrive-control-plane/src/reconciler_runtime.rs`).
+//   4. Tick `ServiceMapHydrator::reconcile` against that state;
+//      assert it emits exactly one `Action::DataplaneUpdateService`
+//      carrying the bridge-written row's `vip` + `backends`.
+//
+// The structural defense is that fingerprint identity is preserved
+// across the bridge-write / hydrator-read boundary: the bridge
+// computes `fingerprint(&vip, &backends)`; the hydrator's
+// `hydrate_desired` recomputes it from the same inputs; the
+// hydrator's dispatch decision compares against `actual.fingerprint`.
+// If any of those three sites drift in encoding or input set, this
+// invariant fails — exactly the regression class S-BDB-19 is meant
+// to guard against.
+// ---------------------------------------------------------------------------
+
+/// Drive the bridge → hydrator handoff scenario (S-BDB-19).
+///
+/// # Scenario
+///
+/// 1. Single Service workload with one listener `(vip=10.1.0.1, port=8080,
+///    tcp)` and one Running alloc.
+/// 2. Tick `BackendDiscoveryBridge` once → asserts one
+///    `Action::WriteServiceBackendRow` emitted; applied to obs.
+/// 3. Read `service_backends_rows(&service_id)` back → project into
+///    `ServiceMapHydratorState.desired`.
+/// 4. Tick `ServiceMapHydrator` once with empty `actual` → asserts one
+///    `Action::DataplaneUpdateService` emitted with the same VIP +
+///    backend set the bridge wrote.
+///
+/// # Why this is load-bearing
+///
+/// The bridge writes the row at fingerprint `F1`. The hydrator's
+/// `desired` is re-derived from the SAME row's `(vip, backends)`
+/// inputs — `fingerprint(&desired.vip, &desired.backends)` MUST equal
+/// `F1`. If the hydrator silently re-encodes the inputs (e.g., a
+/// future refactor that wraps `vip` in a different newtype, or
+/// re-orders backends), the action's `vip` / `backends` will diverge
+/// from what the bridge wrote and the kernel-side dataplane programs
+/// against a different set than the bridge believes is current. This
+/// invariant pins that property in DST so the regression cannot land.
+//
+// `too_many_lines` allow: the body is a single linear five-step
+// recipe (bridge tick → apply action → read back → project →
+// hydrator tick → assert) where extracting helpers would split the
+// load-bearing sequence across files and obscure the fixture's
+// intent. The sibling `evaluate_hydrator_eventually_converges`
+// carries the same shape.
+#[allow(clippy::too_many_lines)]
+pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
+    use std::collections::BTreeMap as StdBTreeMap;
+    use std::collections::BTreeSet;
+    use std::num::NonZeroU16;
+
+    use overdrive_core::dataplane::backend_key::Proto;
+    use overdrive_core::id::{AllocationId, WorkloadId};
+    use overdrive_core::reconciler::Reconciler;
+    use overdrive_core::reconciler::backend_discovery_bridge::{
+        BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
+        ProjectedListener,
+    };
+    use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+
+    use crate::adapters::observation_store::SimObservationStore;
+
+    const NAME: &str = "bridge-to-hydrator-handoff";
+
+    // ---- Fixture: ids, addresses, listener.
+    let writer_node = match NodeId::new("host-0") {
+        Ok(n) => n,
+        Err(e) => return fail(NAME, format!("NodeId construction: {e}")),
+    };
+    let host_ipv4 = Ipv4Addr::new(10, 0, 0, 5);
+    let workload_id = match WorkloadId::new("payments") {
+        Ok(w) => w,
+        Err(e) => return fail(NAME, format!("WorkloadId construction: {e}")),
+    };
+    let svc_id = match ServiceId::new(1) {
+        Ok(s) => s,
+        Err(e) => return fail(NAME, format!("ServiceId construction: {e}")),
+    };
+    let vip_addr = Ipv4Addr::new(10, 1, 0, 1);
+    let vip = match ServiceVip::new(IpAddr::V4(vip_addr)) {
+        Ok(v) => v,
+        Err(e) => return fail(NAME, format!("ServiceVip construction: {e}")),
+    };
+    let Some(port) = NonZeroU16::new(8080) else {
+        return fail(NAME, "8080 must be NonZeroU16".to_owned());
+    };
+    let alloc = match AllocationId::new("alloc-a") {
+        Ok(a) => a,
+        Err(e) => return fail(NAME, format!("AllocationId construction: {e}")),
+    };
+
+    // ---- Step 1: tick the bridge, assert exactly one
+    //      WriteServiceBackendRow action emitted.
+    let bridge = BackendDiscoveryBridge::new(host_ipv4, writer_node.clone());
+    let mut bridge_state = BackendDiscoveryBridgeState::empty_for_workload(workload_id.clone());
+    bridge_state
+        .desired
+        .listeners
+        .insert(svc_id, ProjectedListener { vip, port, protocol: Proto::Tcp });
+    bridge_state.actual.running.insert(alloc);
+    let bridge_view = BackendDiscoveryBridgeView::default();
+    let tick0 = make_tick(0);
+    let (bridge_actions, _bridge_next_view) =
+        bridge.reconcile(&bridge_state, &bridge_state, &bridge_view, &tick0);
+
+    let Some(written_row) = bridge_actions.iter().find_map(|a| match a {
+        Action::WriteServiceBackendRow { row, .. } => Some(row.clone()),
+        _ => None,
+    }) else {
+        return fail(
+            NAME,
+            format!(
+                "bridge tick 0 emitted no WriteServiceBackendRow action; got {} action(s): {:?}",
+                bridge_actions.len(),
+                bridge_actions,
+            ),
+        );
+    };
+
+    // ---- Step 2: apply the row write to SimObservationStore.
+    let obs = SimObservationStore::single_peer(writer_node.clone(), 0);
+    if let Err(e) = obs.write(ObservationRow::ServiceBackend(written_row.clone())).await {
+        return fail(NAME, format!("SimObservationStore::write rejected bridge row: {e}"));
+    }
+
+    // ---- Step 3: read back; project into ServiceMapHydratorState.desired
+    //      (mirrors the runtime's hydrate_desired arm).
+    let rows = match obs.service_backends_rows(&svc_id).await {
+        Ok(r) => r,
+        Err(e) => return fail(NAME, format!("service_backends_rows: {e}")),
+    };
+    let Some(row) = rows.first().cloned() else {
+        return fail(
+            NAME,
+            "service_backends_rows returned empty after bridge write — \
+             SimObservationStore::write did not surface the row to the read \
+             path; this is a SimObservationStore bug, not a bridge bug."
+                .to_owned(),
+        );
+    };
+
+    // Project ServiceBackendRow → ServiceDesired. The runtime's
+    // hydrate_desired arm performs the same projection — wrap
+    // row.vip in ServiceVip, carry row.backends verbatim, re-compute
+    // the fingerprint from the same inputs.
+    let desired_vip = match ServiceVip::new(IpAddr::V4(row.vip)) {
+        Ok(v) => v,
+        Err(e) => return fail(NAME, format!("ServiceVip projection from row: {e}")),
+    };
+    let desired_backends = row.backends.clone();
+    let desired_fp = fingerprint(&desired_vip, &desired_backends);
+    let mut desired_map = StdBTreeMap::new();
+    desired_map.insert(
+        svc_id,
+        ServiceDesired {
+            vip: desired_vip,
+            backends: desired_backends.clone(),
+            fingerprint: desired_fp,
+        },
+    );
+
+    // ---- Step 4: tick the hydrator against the projected desired
+    //      with empty actual (no prior service_hydration_results row).
+    let hydrator = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+    let any_hydrator = AnyReconciler::ServiceMapHydrator(hydrator);
+    let hydrator_state = ServiceMapHydratorState { desired: desired_map, actual: BTreeMap::new() };
+    let hydrator_view = ServiceMapHydratorView::default();
+    let tick1 = make_tick(1);
+    let (hydrator_actions, _next_view) = any_hydrator.reconcile(
+        &AnyState::ServiceMapHydrator(hydrator_state.clone()),
+        &AnyState::ServiceMapHydrator(hydrator_state),
+        &AnyReconcilerView::ServiceMapHydrator(hydrator_view),
+        &tick1,
+    );
+
+    // Assert exactly one DataplaneUpdateService action emitted, and
+    // that its vip + backends match what the bridge wrote.
+    let mut dispatch_count = 0_usize;
+    let mut matched = false;
+    for action in &hydrator_actions {
+        if let Action::DataplaneUpdateService { service_id, vip, backends, .. } = action {
+            dispatch_count += 1;
+            if *service_id != svc_id {
+                return fail(
+                    NAME,
+                    format!(
+                        "hydrator dispatched DataplaneUpdateService for {service_id} \
+                         which differs from the bridge-written service_id {svc_id}"
+                    ),
+                );
+            }
+            // The hydrator's action carries vip + backends. They MUST
+            // equal what the bridge wrote — drift here means the
+            // bridge → hydrator boundary lost or transformed the
+            // payload.
+            let expected_vip = match ServiceVip::new(IpAddr::V4(row.vip)) {
+                Ok(v) => v,
+                Err(e) => return fail(NAME, format!("expected_vip wrap: {e}")),
+            };
+            if *vip != expected_vip {
+                return fail(
+                    NAME,
+                    format!(
+                        "hydrator action vip ({vip}) differs from bridge-written \
+                         row.vip ({})",
+                        row.vip,
+                    ),
+                );
+            }
+            if *backends != desired_backends {
+                return fail(
+                    NAME,
+                    format!(
+                        "hydrator action backends differ from bridge-written row.backends; \
+                         expected len {}, got len {}",
+                        desired_backends.len(),
+                        backends.len(),
+                    ),
+                );
+            }
+            matched = true;
+        }
+    }
+
+    if dispatch_count == 0 {
+        return fail(
+            NAME,
+            format!(
+                "hydrator emitted no DataplaneUpdateService for the bridge-written \
+                 service; got {} action(s) total: {:?}",
+                hydrator_actions.len(),
+                hydrator_actions,
+            ),
+        );
+    }
+    if dispatch_count > 1 {
+        return fail(
+            NAME,
+            format!(
+                "hydrator emitted {dispatch_count} DataplaneUpdateService actions for \
+                 a single bridge-written row; expected exactly one"
+            ),
+        );
+    }
+    if !matched {
+        return fail(
+            NAME,
+            "hydrator action matched the service_id but the payload mismatch \
+             gate did not flip to matched — control flow regression"
+                .to_owned(),
+        );
+    }
+
+    // Silence unused-binding warnings on items that are load-bearing
+    // for the fixture's shape but unused after the assertion path.
+    let _ = (workload_id, bridge_state);
+    let _ = BTreeSet::<AllocationId>::new();
+
+    pass(NAME)
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +725,7 @@ mod retry_budget_proptest {
             // `now_secs` is strictly BEFORE the backoff deadline.
             now_delta in 0u64..backoff_for_attempt(0).as_secs(),
         ) {
-            let r = ServiceMapHydrator::canonical();
+            let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;
@@ -518,7 +801,7 @@ mod retry_budget_proptest {
             // Additional seconds beyond the deadline (0 = exactly at boundary).
             extra_secs in 0u64..=60u64,
         ) {
-            let r = ServiceMapHydrator::canonical();
+            let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;

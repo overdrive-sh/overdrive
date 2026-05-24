@@ -51,6 +51,12 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
         operator_config_dir: operator_config_dir.clone(),
         // `tick_cadence` + `clock` default per
         // `fix-convergence-loop-not-spawned` Step 01-02.
+        // Step 02-02: inject `SimDataplane` so this test's subject
+        // (HTTPS handshake + trust triple) does not require
+        // CAP_NET_ADMIN / CAP_BPF (architecture.md § 4.7).
+        dataplane_override: Some(std::sync::Arc::new(
+            overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        )),
         ..Default::default()
     };
     let handle: ServerHandle = run_server(config).await.expect("run_server");

@@ -11,10 +11,12 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::traits::dataplane::Dataplane;
 use url::Url;
 
 use crate::http_client::CliError;
@@ -93,6 +95,35 @@ impl ServeHandle {
 /// configuration fails. `endpoint` names the requested bind address so
 /// the operator can act on the error.
 pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
+    run_inner(args, None).await
+}
+
+/// Test-only sibling of [`run`].
+///
+/// Starts the server with an injected [`Dataplane`] adapter. Used by
+/// integration tests whose subject under test is the CLI / HTTPS /
+/// observation-row surface and which therefore inject
+/// `Arc::new(SimDataplane::new())` instead of paying the
+/// `CAP_NET_ADMIN` / `CAP_BPF` cost of constructing the production
+/// `EbpfDataplane`.
+///
+/// Per architecture.md § 4.7 of
+/// `backend-discovery-bridge-service-reachability`. Production
+/// callers MUST use [`run`] — that path leaves
+/// `ServerConfig.dataplane_override = None`, so production composition
+/// goes through the single-cut `EbpfDataplane` per
+/// `feedback_single_cut_greenfield_migrations.md`.
+pub async fn run_with_dataplane(
+    args: ServeArgs,
+    dataplane: Arc<dyn Dataplane>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, Some(dataplane)).await
+}
+
+async fn run_inner(
+    args: ServeArgs,
+    dataplane_override: Option<Arc<dyn Dataplane>>,
+) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
     // `..Default::default()` populates `tick_cadence`
@@ -106,6 +137,7 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
+        dataplane_override,
         ..Default::default()
     };
     let inner = run_server(config).await.map_err(|e| {

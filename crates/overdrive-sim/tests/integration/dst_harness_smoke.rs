@@ -123,6 +123,17 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // comment in `dst_clean_clone_green.rs`.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
+    // backend-discovery-bridge-service-reachability Slice 1
+    // (closes #174) — three DST invariants land in
+    // `crate::invariants::backend_discovery_bridge`.
+    "bridge-eventually-writes-backend-row",
+    "bridge-idempotent-steady-state",
+    "bridge-recomputes-fingerprint-on-replay",
+    // backend-discovery-bridge-service-reachability Slice 2 step 02-04
+    // — S-BDB-19 Tier 1 DST evidence (extension on
+    // `service_map_hydrator`); drives the hydrator against
+    // bridge-written `service_backends_rows` under Sim adapters.
+    "bridge-to-hydrator-handoff",
 ];
 
 // -----------------------------------------------------------------------------
@@ -130,11 +141,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 // adapter" — end-to-end smoke: exits 0, artifacts exist, seed present.
 // -----------------------------------------------------------------------------
 
-/// Step 08-02 GREEN handed off: the
-/// `HydratorEventuallyConverges` scaffold is GREEN, so the
-/// downstream-fallout `#[should_panic]` attribute is removed per
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests" handoff procedure.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
 #[test]
 fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -245,11 +256,11 @@ fn first_line_of_stdout_names_the_seed() {
 // still prints it on line 1. Covered here because the scenario phrasing
 // is "the first line of output names the seed used for THIS run" — a
 // default run must also satisfy it.
-/// Step 08-02 GREEN handed off: the
-/// `HydratorEventuallyConverges` scaffold is GREEN, so the
-/// downstream-fallout `#[should_panic]` attribute is removed per
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests" handoff procedure.
+/// Phase 01-05 (closes #174) GREEN handed off: the three
+/// backend-discovery-bridge evaluators landed alongside the prior
+/// Slice 08 hydrator evaluators, so the downstream-fallout
+/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// § "Downstream fallout on pre-existing tests" handoff procedure.
 #[test]
 fn first_line_of_stdout_names_the_seed_when_random() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");

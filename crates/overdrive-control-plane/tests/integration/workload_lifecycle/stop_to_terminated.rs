@@ -59,6 +59,7 @@ async fn job_stop_drives_running_to_terminated() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     // Background ticker: advances logical time continuously so any

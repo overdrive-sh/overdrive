@@ -1,0 +1,24 @@
+# Verifier-budget baseline — cgroup_connect4_service
+#
+# ADR-0053 § 1 — FIRST baseline for the new
+# `cgroup_connect4_service` BPF_PROG_TYPE_CGROUP_SOCK_ADDR program
+# landed alongside the Phase 1 same-host backend delivery path.
+#
+# Budget gates per the existing `verifier-regress` envelope:
+#   verified_insns ≤ 500,000    ← 50% of CAP_BPF ceiling
+#   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
+#
+# The cgroup_sock_addr program does one map lookup + two field
+# rewrites; verifier complexity is essentially free (≪ 10% of the
+# per-program ceiling per ADR-0053 § "Consequences" → Positive).
+#
+# Recorded value: 26 instructions — 0.005% of the L1-cache-fits
+# target, two orders of magnitude below the XDP companions
+# (xdp_reverse_nat_lookup ~153K, xdp_service_map_lookup ~155K).
+# This matches expectations from ADR-0053: "verifier surface is
+# dramatically simpler than XDP."
+#
+# Format (one line per program, space-separated key=value pairs;
+# the parser keys off `prog=` and `verified_insns=`).
+
+file=target/bpf/overdrive_bpf.o prog=cgroup_connect4_service verdict=success verified_insns=26

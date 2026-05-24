@@ -480,6 +480,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         Arc::new(SimDataplane::new()),
         NodeId::new("writer-1").map_err(|e| format!("writer node id: {e:?}"))?,
         allocator,
+        std::net::Ipv4Addr::LOCALHOST,
     );
 
     exit_observer::spawn(

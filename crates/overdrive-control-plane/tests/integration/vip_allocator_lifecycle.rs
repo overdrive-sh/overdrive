@@ -132,6 +132,7 @@ fn build_state_with_range(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
+        std::net::Ipv4Addr::LOCALHOST,
     );
     (state, allocator)
 }
@@ -228,6 +229,7 @@ async fn dispatch_release(
         deadline: now + Duration::from_secs(1),
     };
 
+    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
         driver.as_ref(),
@@ -237,6 +239,7 @@ async fn dispatch_release(
         &tick,
         &writer_node,
         Arc::clone(&allocator),
+        &test_broker,
     )
     .await
     .expect("dispatch must succeed");
@@ -495,6 +498,7 @@ async fn build_state_with_range_and_reconciler(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
+        std::net::Ipv4Addr::LOCALHOST,
     );
     (state, allocator)
 }

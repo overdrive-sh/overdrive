@@ -72,7 +72,7 @@ fn make_tick(now_secs: u64) -> TickContext {
 
 #[test]
 fn dispatch_when_actual_pending_and_desired_present() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -95,7 +95,7 @@ fn dispatch_when_actual_pending_and_desired_present() {
 
 #[test]
 fn no_dispatch_when_actual_completed_matches_desired_fingerprint() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -125,7 +125,7 @@ fn no_dispatch_when_actual_completed_matches_desired_fingerprint() {
 
 #[test]
 fn dispatch_when_actual_completed_on_different_fingerprint() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -146,7 +146,7 @@ fn dispatch_when_actual_completed_on_different_fingerprint() {
 
 #[test]
 fn no_dispatch_when_failed_same_fingerprint_within_backoff() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -179,7 +179,7 @@ fn no_dispatch_when_failed_same_fingerprint_within_backoff() {
 
 #[test]
 fn dispatch_when_failed_same_fingerprint_after_backoff_elapsed() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -212,7 +212,7 @@ fn dispatch_when_failed_same_fingerprint_after_backoff_elapsed() {
 
 #[test]
 fn dispatch_when_failed_different_fingerprint_ignores_backoff() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -247,7 +247,7 @@ fn dispatch_when_failed_different_fingerprint_ignores_backoff() {
 
 #[test]
 fn gc_drops_retry_memory_for_services_no_longer_in_desired() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let alive_id = make_service_id(1);
     let dead_id = make_service_id(2);
     let mut desired = BTreeMap::new();
@@ -271,7 +271,7 @@ fn gc_drops_retry_memory_for_services_no_longer_in_desired() {
 
 #[test]
 fn iteration_order_is_btreemap_deterministic() {
-    let r = ServiceMapHydrator::canonical();
+    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
     let s1 = make_service_id(1);
     let s2 = make_service_id(2);
     let mut desired = BTreeMap::new();
@@ -290,4 +290,130 @@ fn iteration_order_is_btreemap_deterministic() {
         })
         .collect();
     assert_eq!(ids, vec![s1, s2], "actions must be emitted in BTreeMap key order");
+}
+
+// ---- Phase 16 review D12: backend-address classifier ---------------
+
+use overdrive_core::reconciler::{BackendAddressRejection, classify_backend_address};
+
+#[test]
+fn classify_backend_address_accepts_routable_unicast() {
+    // Sample of legitimate backend addresses across common
+    // workload ranges: RFC 1918 private (10/8, 172.16/12,
+    // 192.168/16) and globally routable.
+    for ip in [
+        Ipv4Addr::new(10, 0, 1, 1),
+        Ipv4Addr::new(172, 16, 0, 5),
+        Ipv4Addr::new(192, 168, 1, 100),
+        Ipv4Addr::new(8, 8, 8, 8),
+        Ipv4Addr::new(203, 0, 113, 42),
+    ] {
+        assert_eq!(
+            classify_backend_address(ip),
+            Ok(()),
+            "address {ip} should be accepted as a backend",
+        );
+    }
+}
+
+#[test]
+fn classify_backend_address_rejects_loopback() {
+    for ip in [Ipv4Addr::LOCALHOST, Ipv4Addr::new(127, 1, 2, 3)] {
+        assert_eq!(
+            classify_backend_address(ip),
+            Err(BackendAddressRejection::Loopback),
+            "loopback {ip} must be rejected",
+        );
+    }
+}
+
+#[test]
+fn classify_backend_address_rejects_link_local() {
+    assert_eq!(
+        classify_backend_address(Ipv4Addr::new(169, 254, 1, 1)),
+        Err(BackendAddressRejection::LinkLocal),
+    );
+}
+
+#[test]
+fn classify_backend_address_rejects_multicast() {
+    assert_eq!(
+        classify_backend_address(Ipv4Addr::new(224, 0, 0, 1)),
+        Err(BackendAddressRejection::Multicast),
+    );
+    assert_eq!(
+        classify_backend_address(Ipv4Addr::new(239, 1, 2, 3)),
+        Err(BackendAddressRejection::Multicast),
+    );
+}
+
+#[test]
+fn classify_backend_address_rejects_broadcast() {
+    assert_eq!(
+        classify_backend_address(Ipv4Addr::BROADCAST),
+        Err(BackendAddressRejection::Broadcast),
+    );
+}
+
+#[test]
+fn classify_backend_address_rejects_reserved_zero_network() {
+    // RFC 1122 "this host on this network" — 0.0.0.0/8.
+    assert_eq!(
+        classify_backend_address(Ipv4Addr::UNSPECIFIED),
+        Err(BackendAddressRejection::Reserved),
+    );
+    assert_eq!(
+        classify_backend_address(Ipv4Addr::new(0, 1, 2, 3)),
+        Err(BackendAddressRejection::Reserved),
+    );
+}
+
+#[test]
+fn rejection_display_form_is_operator_actionable() {
+    // The `tracing::warn!` carries the `Display` form on the
+    // `reason` field; spot-check that each variant produces a
+    // grep-friendly substring.
+    assert!(
+        BackendAddressRejection::Loopback.to_string().contains("127.0"),
+        "loopback Display must name the RFC range",
+    );
+    assert!(BackendAddressRejection::LinkLocal.to_string().contains("169.254"),);
+    assert!(BackendAddressRejection::Multicast.to_string().contains("224.0"));
+    assert!(BackendAddressRejection::Broadcast.to_string().contains("255.255"));
+    assert!(BackendAddressRejection::Reserved.to_string().contains("0.0.0"));
+}
+
+#[test]
+fn hydrator_skips_register_local_backend_for_loopback() {
+    // Hydrator wired so the classifier sees every backend as
+    // "local" (`host_ipv4` matches the backend IP). A loopback
+    // backend address must NOT produce a `RegisterLocalBackend`
+    // action — D12's guard fires before emission.
+    let host_ipv4 = Ipv4Addr::LOCALHOST;
+    let r = ServiceMapHydrator::canonical(host_ipv4);
+    let s_id = make_service_id(1);
+
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let backend = Backend {
+        alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            .expect("valid SpiffeId"),
+        addr: SocketAddr::new(IpAddr::V4(host_ipv4), 8080),
+        weight: 1,
+        healthy: true,
+    };
+    let backends = vec![backend];
+    let fp = fingerprint(&vip, &backends);
+
+    let mut desired = BTreeMap::new();
+    desired.insert(s_id, ServiceDesired { vip, backends, fingerprint: fp });
+    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    let view = ServiceMapHydratorView::default();
+    let (actions, _) = r.reconcile(&state, &state, &view, &make_tick(0));
+
+    let register_count =
+        actions.iter().filter(|a| matches!(a, Action::RegisterLocalBackend { .. })).count();
+    assert_eq!(
+        register_count, 0,
+        "loopback backend must be skipped by the D12 classifier guard; actions: {actions:?}",
+    );
 }

@@ -58,7 +58,7 @@ use overdrive_dataplane::EbpfDataplane;
 use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
-use super::helpers::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
+use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
 
 // Stable IP / port plan shared across tests in this file. Both
 // scenarios (S-2.2-17, S-2.2-18) build a `ThreeIfaceTopology` (per
@@ -346,7 +346,7 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     // `dst=10.0.0.10` returns `RET_NO_NEIGH` and falls to XDP_PASS,
     // relying on kernel-stack forwarding + ARP resolution — a
     // multi-second delay that exceeds nc's timeout.
-    use super::helpers::netns::threeiface_ips::CLIENT_IP;
+    use overdrive_testing::netns::threeiface_ips::CLIENT_IP;
     let neigh_add_client = Command::new("ip")
         .args([
             "netns",
@@ -375,8 +375,13 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     // `lb_veth_a`. The XDP+TC programs live there per the helper
     // docstring's intent and per research Recommendation 1.
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns lb-ns");
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a + lb_veth_b");
+    let dataplane = EbpfDataplane::new_with_pin_dir(
+        &topo.lb_veth_a,
+        &topo.lb_veth_b,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a + lb_veth_b");
 
     let backend_alloc =
         SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/B1").expect("backend SpiffeId");
@@ -618,8 +623,13 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     // map-state queries resolve against the calling thread's netns.
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
 
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir");
+    let dataplane = EbpfDataplane::new_with_pin_dir(
+        &topo.lb_veth_a,
+        &topo.lb_veth_b,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir");
 
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
@@ -845,8 +855,13 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
 
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
 
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir");
+    let dataplane = EbpfDataplane::new_with_pin_dir(
+        &topo.lb_veth_a,
+        &topo.lb_veth_b,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir");
 
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
@@ -951,8 +966,13 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
 
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
 
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir");
+    let dataplane = EbpfDataplane::new_with_pin_dir(
+        &topo.lb_veth_a,
+        &topo.lb_veth_b,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir");
 
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
@@ -1067,8 +1087,13 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
 
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
 
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir");
+    let dataplane = EbpfDataplane::new_with_pin_dir(
+        &topo.lb_veth_a,
+        &topo.lb_veth_b,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir");
 
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
