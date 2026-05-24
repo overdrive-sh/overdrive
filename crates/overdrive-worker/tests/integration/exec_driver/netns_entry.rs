@@ -31,11 +31,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
 use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
 use super::cleanup::AllocCleanup;
@@ -110,7 +111,10 @@ async fn exec_driver_with_netns_path_spawns_child_inside_target_netns() {
     }
 
     let cgroup_root = Path::new("/sys/fs/cgroup");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
     // Two distinct netns — the target the driver enters, and the
@@ -126,12 +130,8 @@ async fn exec_driver_with_netns_path_spawns_child_inside_target_netns() {
     );
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(
-            cgroup_root.to_path_buf(),
-            Arc::new(SimClock::new()),
-            Arc::new(RealCgroupFs::new()),
-        )
-        .with_netns_path(target_ns.path()),
+        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs)
+            .with_netns_path(target_ns.path()),
     );
 
     let alloc = AllocationId::new("alloc-netns-entry").expect("valid alloc id");
@@ -173,7 +173,10 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
     }
 
     let cgroup_root = Path::new("/sys/fs/cgroup");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
     let missing = PathBuf::from(format!("/var/run/netns/ovd-edns-missing-{}", std::process::id()));
@@ -181,12 +184,8 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
     let _ = std::fs::remove_file(&missing);
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(
-            cgroup_root.to_path_buf(),
-            Arc::new(SimClock::new()),
-            Arc::new(RealCgroupFs::new()),
-        )
-        .with_netns_path(missing.clone()),
+        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs)
+            .with_netns_path(missing.clone()),
     );
 
     let alloc = AllocationId::new("alloc-netns-missing").expect("valid alloc id");

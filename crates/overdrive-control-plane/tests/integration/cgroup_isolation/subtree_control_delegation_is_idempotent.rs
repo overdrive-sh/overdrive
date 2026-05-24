@@ -27,9 +27,12 @@
 #![cfg(target_os = "linux")]
 
 use std::path::Path;
+use std::sync::Arc;
 
 use overdrive_control_plane::cgroup_manager::create_and_enrol_control_plane_slice_at;
-use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use overdrive_core::traits::CgroupFs;
+use overdrive_host::RealCgroupFs;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
 /// AC4 — both inits are idempotent under repeated boot. A second call
@@ -37,16 +40,20 @@ use serial_test::serial;
 /// observable side effects beyond the first call's. The kernel-level
 /// contract: re-writing `+cpu +memory +io +pids` to an already-enabled
 /// `cgroup.subtree_control` is a no-op.
-#[test]
+#[tokio::test]
 #[serial(cgroup)]
-fn subtree_control_delegation_is_idempotent_across_boots() {
+async fn subtree_control_delegation_is_idempotent_across_boots() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let pid = std::process::id();
+    let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    let manager = CgroupManager::new(cgroup_root.to_path_buf(), fs);
 
     // First call — establishes the slice + delegates controllers.
     create_and_enrol_control_plane_slice_at(cgroup_root, pid)
         .expect("first control-plane init must succeed");
-    create_workloads_slice_with_controllers(cgroup_root)
+    manager
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("first workloads-slice init must succeed");
 
     // Second call — MUST be a no-op, not a regression. Validates
@@ -54,7 +61,9 @@ fn subtree_control_delegation_is_idempotent_across_boots() {
     // `+cpu +memory +io +pids` re-write is accepted by the kernel.
     create_and_enrol_control_plane_slice_at(cgroup_root, pid)
         .expect("second control-plane init must be idempotent");
-    create_workloads_slice_with_controllers(cgroup_root)
+    manager
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("second workloads-slice init must be idempotent");
 
     // Verify the post-state matches the production-fix contract: the

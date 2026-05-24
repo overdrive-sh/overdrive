@@ -36,10 +36,11 @@ use std::time::Duration;
 
 use overdrive_control_plane::cgroup_manager::create_and_enrol_control_plane_slice_at;
 use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_host::SystemClock;
 use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
@@ -161,14 +162,13 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
 
     create_and_enrol_control_plane_slice_at(cgroup_root, std::process::id())
         .expect("control-plane bootstrap succeeds");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(overdrive_host::RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
-    let driver = Arc::new(ExecDriver::new(
-        cgroup_root.to_path_buf(),
-        Arc::new(SystemClock),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SystemClock), fs));
     let alloc = AllocationId::new("alloc-subtree-control-regression").expect("valid AllocationId");
     let spec = build_spec(&alloc);
     let _cleanup = ScopeCleanup { cgroup_root: cgroup_root.to_path_buf(), alloc: alloc.clone() };
@@ -210,18 +210,17 @@ async fn alloc_start_does_not_emit_resource_limit_warning() {
 
     create_and_enrol_control_plane_slice_at(cgroup_root, std::process::id())
         .expect("control-plane bootstrap succeeds");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(overdrive_host::RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
     let layer = CaptureLayer::default();
     let events = layer.events.clone();
     let _guard = tracing_subscriber::registry().with(layer).set_default();
 
-    let driver = Arc::new(ExecDriver::new(
-        cgroup_root.to_path_buf(),
-        Arc::new(SystemClock),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SystemClock), fs));
     let alloc =
         AllocationId::new("alloc-subtree-control-warn-regression").expect("valid AllocationId");
     let spec = build_spec(&alloc);

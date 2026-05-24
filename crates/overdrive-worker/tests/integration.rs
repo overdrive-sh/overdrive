@@ -14,6 +14,15 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
+    // Step 01-07 (cgroup-fs-port migration): D1 Real/Sim equivalence
+    // proptest. Validates the byte-store contract holds between
+    // `RealCgroupFs` (rooted at a `tempfile::TempDir`) and
+    // `SimCgroupFs`. Kernel-side effects (`cgroup.kill` mass-kill,
+    // `cgroup.subtree_control` EBUSY, pseudo-file synthesis,
+    // `EINVAL`) are EXPLICITLY OUT OF SCOPE per ADR-0054 § D3 and
+    // covered by Class C scenarios in step 01-08.
+    mod cgroup_fs_equivalence;
+
     // Step 01-02 (cgroup-fs-port migration): Tier 3 acceptance tests
     // for `overdrive_host::RealCgroupFs::probe()`.
     mod real_cgroup_fs {

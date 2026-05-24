@@ -208,11 +208,31 @@ impl CgroupFs for SimCgroupFs {
             // mkdir-p: walk each ancestor and insert `Dir` if absent.
             // Iterate over component-prefixes so we synthesise every
             // intermediate directory the way `tokio::fs::create_dir_all`
-            // would on a real filesystem.
+            // would on a real filesystem. Two failure modes mirror
+            // kernel POSIX semantics:
+            //   * strict-ancestor exists as File → `NotADirectory`
+            //     (component used as dir is a file; ENOTDIR).
+            //   * target itself exists as File → `AlreadyExists`
+            //     (matches `tokio::fs::create_dir_all`, which retries
+            //     after EEXIST, stats, finds non-dir, returns
+            //     AlreadyExists).
             let mut acc = PathBuf::new();
             for component in path.components() {
                 acc.push(component);
-                state.entry(acc.clone()).or_insert((SimEntry::Dir, Vec::new()));
+                let is_target = acc == path;
+                match state.get(&acc) {
+                    Some((SimEntry::File, _)) => {
+                        return Err(io::Error::from(if is_target {
+                            io::ErrorKind::AlreadyExists
+                        } else {
+                            io::ErrorKind::NotADirectory
+                        }));
+                    }
+                    Some((SimEntry::Dir, _)) => {}
+                    None => {
+                        state.insert(acc.clone(), (SimEntry::Dir, Vec::new()));
+                    }
+                }
             }
         }
         Ok(())
@@ -224,15 +244,32 @@ impl CgroupFs for SimCgroupFs {
         }
         {
             let mut state = self.state.lock();
+            // Walk strict ancestors. If any exists as a File, the kernel
+            // returns `ENOTDIR` (component used as dir is a file)
+            // BEFORE attempting the open.
+            let mut acc = PathBuf::new();
+            for component in path.components() {
+                acc.push(component);
+                if acc == path {
+                    break;
+                }
+                if let Some((SimEntry::File, _)) = state.get(&acc) {
+                    return Err(io::Error::from(io::ErrorKind::NotADirectory));
+                }
+            }
             // Parent-existence check — matches Real adapter NotFound shape
             // per ADR-0054 § Trait contract (the trait docstring pins
             // `Err(NotFound)` when the parent is absent).
             if let Some(parent) = path.parent() {
-                // Root (`/`) has no parent — skip the check. Otherwise
-                // require parent in state map.
                 if !parent.as_os_str().is_empty() && !state.contains_key(parent) {
                     return Err(io::Error::from(io::ErrorKind::NotFound));
                 }
+            }
+            // Refuse writing to a path that is currently a Dir. Matches
+            // kernel POSIX semantics: `tokio::fs::write` (open + O_WRONLY)
+            // on a directory returns `EISDIR` (`io::ErrorKind::IsADirectory`).
+            if let Some((SimEntry::Dir, _)) = state.get(path) {
+                return Err(io::Error::from(io::ErrorKind::IsADirectory));
             }
             state.insert(path.to_path_buf(), (SimEntry::File, bytes.to_vec()));
         }
@@ -245,8 +282,28 @@ impl CgroupFs for SimCgroupFs {
         }
         {
             let mut state = self.state.lock();
-            if !state.contains_key(path) {
-                return Err(io::Error::from(io::ErrorKind::NotFound));
+            // Walk ancestors. If any strict ancestor exists as a File,
+            // the kernel returns `ENOTDIR` (component used as dir is a
+            // file) BEFORE attempting the target removal.
+            let mut acc = PathBuf::new();
+            for component in path.components() {
+                acc.push(component);
+                if acc == path {
+                    break;
+                }
+                if let Some((SimEntry::File, _)) = state.get(&acc) {
+                    return Err(io::Error::from(io::ErrorKind::NotADirectory));
+                }
+            }
+            let entry = match state.get(path) {
+                Some(e) => e.clone(),
+                None => return Err(io::Error::from(io::ErrorKind::NotFound)),
+            };
+            // `tokio::fs::remove_dir` against a regular file returns
+            // `ENOTDIR` (`io::ErrorKind::NotADirectory`) per kernel
+            // POSIX semantics. Mirror that here.
+            if matches!(entry.0, SimEntry::File) {
+                return Err(io::Error::from(io::ErrorKind::NotADirectory));
             }
             // DirectoryNotEmpty if any other path is a direct or transitive
             // child of `path`.
@@ -297,18 +354,26 @@ impl CgroupFs for SimCgroupFs {
         // observed bytes to simulate substrate dishonesty.
         let observed = if mismatch_injected { b"corrupted".to_vec() } else { read_back };
         if observed != payload {
-            // Best-effort teardown.
-            let _ = self.remove_dir(&probe_file).await;
+            // Best-effort teardown — drop the File entry directly
+            // since `remove_dir` on a File now returns NotADirectory
+            // to match real-kernel POSIX semantics.
+            {
+                let mut state = self.state.lock();
+                state.remove(&probe_file);
+            }
             let _ = self.remove_dir(&probe_root).await;
             return Err(ProbeError::RoundTripMismatch { wrote: payload, read: observed });
         }
 
-        // (5) teardown — probe_file first, then probe_root.
-        // remove_dir on a File entry IS allowed in Sim (the state map
-        // does not distinguish "rmdir on file" from "rmdir on dir" at
-        // the trait-contract surface — the sim is byte-honest, not
-        // kernel-shape-honest).
-        self.remove_dir(&probe_file).await.map_err(|source| ProbeError::Substrate { source })?;
+        // (5) teardown — remove the probe_file File entry directly
+        // from state (the trait surface does NOT expose `remove_file`;
+        // the kernel-side cgroupfs probe relies on the pseudo-file
+        // being reaped automatically by `rmdir` on the parent). Then
+        // `remove_dir` the probe_root, which now contains no children.
+        {
+            let mut state = self.state.lock();
+            state.remove(&probe_file);
+        }
         self.remove_dir(&probe_root).await.map_err(|source| ProbeError::Substrate { source })?;
         Ok(())
     }

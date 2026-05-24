@@ -232,6 +232,48 @@
       "s": "EXECUTED",
       "d": "PASS - fix-up: removed new_with_default_fs factory anti-pattern per user review; threaded Arc<dyn CgroupFs> through run_server signature",
       "t": "2026-05-24T15:08:21Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:10:38Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:11:06Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:15:17Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: AT-level + proptest structural defense is sufficient; no PBT-worthy unit logic separate from D1 + F1",
+      "t": "2026-05-24T15:15:17Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:17:29Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T15:37:26Z"
     }
   ]
 }

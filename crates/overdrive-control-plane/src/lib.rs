@@ -770,8 +770,33 @@ pub async fn run_server(
     let obs: Arc<dyn ObservationStore> =
         Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
 
+    // Per ADR-0028 (as superseded in part by ADR-0034), run the cgroup
+    // v2 delegation pre-flight at the start of the boot path — BEFORE
+    // any on-disk side effects (no CA mint, no IntentStore open, no
+    // listener bind). The pre-flight stays in `_with_obs_and_driver`
+    // so tests that compose directly into the inner entrypoint still
+    // run it; the WORKLOADS-slice bootstrap below moves UP to here
+    // because it routes through the `Arc<dyn CgroupFs>` the driver
+    // owns, and `fs` is only in scope at this composition boundary.
+    //
+    // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
+    // § "Production fix #2": delegate `+cpu +memory +io +pids` to
+    // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
+    // the convergence loop accepts any allocations. Without this, the
+    // per-alloc `cpu.weight` / `memory.max` writes return EACCES on
+    // real cgroupfs (the resource interface files do not exist on
+    // children of a slice whose subtree_control is empty), silently
+    // absorbed by the ADR-0026 D9 warn-and-continue disposition.
+    let cgroup_root_path = std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT);
+    let bootstrap_manager =
+        overdrive_worker::cgroup_manager::CgroupManager::new(cgroup_root_path.clone(), fs.clone());
+    bootstrap_manager
+        .create_workloads_slice_with_controllers()
+        .await
+        .map_err(error::ControlPlaneError::from)?;
+
     let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
+        cgroup_root_path,
         Arc::new(overdrive_host::SystemClock),
         fs,
     ));
@@ -809,20 +834,14 @@ pub async fn run_server_with_obs_and_driver(
     cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
     cgroup_manager::create_and_enrol_control_plane_slice()
         .map_err(error::ControlPlaneError::from)?;
-    // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
-    // § "Production fix #2": delegate `+cpu +memory +io +pids` to
-    // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
-    // the convergence loop accepts any allocations. Without this, the
-    // per-alloc `cpu.weight` / `memory.max` writes return EACCES on
-    // real cgroupfs (the resource interface files do not exist on
-    // children of a slice whose subtree_control is empty), silently
-    // absorbed by the ADR-0026 D9 warn-and-continue disposition.
-    // Order vs the control-plane init above does not matter — the two
-    // touch disjoint slice paths.
-    overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers(
-        std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
-    )
-    .map_err(error::ControlPlaneError::from)?;
+    // Step 01-07 (cgroup-fs-port migration): the workloads-slice
+    // bootstrap moved UP to `run_server` (the binary-composition
+    // boundary), where the `Arc<dyn CgroupFs>` adapter is in scope.
+    // Tests that compose `run_server_with_obs_and_driver` directly are
+    // responsible for their own cgroup bootstrap (typically a real-
+    // cgroupfs prelude — see the integration suite under
+    // `crates/overdrive-control-plane/tests/integration/cgroup_isolation/`
+    // and `crates/overdrive-worker/tests/integration/exec_driver/`).
 
     // Per ADR-0025 step 5 (amended by ADR-0029): the worker subsystem
     // writes the local node's `NodeHealthRow` to the ObservationStore
