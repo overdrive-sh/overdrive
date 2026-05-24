@@ -162,4 +162,12 @@ mod acceptance {
     // alongside every `StartAllocation` / `RestartAllocation` /
     // `StopAllocation` / `FinalizeFailed`. Mirrors UI-05.
     mod workload_lifecycle_enqueues_bridge_on_alloc_transitions;
+
+    // service-health-check-probes — Tier 1 acceptance for the
+    // `[[health_check.*]]` TOML parser surface per ADR-0057 + ADR-
+    // 0058 default-inference rule + the `ProbeResultRowEnvelope`
+    // V1 roundtrip + discriminant pinning per ADR-0054 §5 QR1.
+    // Slices 01 / 02 / 03 / 07. RED scaffolds.
+    mod health_check_toml_parse;
+    mod probe_result_row_envelope;
 }

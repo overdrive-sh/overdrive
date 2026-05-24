@@ -66,6 +66,15 @@ mod integration {
         mod write_to_readonly_cgroup_file;
     }
 
+    // service-health-check-probes — Tier 3 integration tests for
+    // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
+    // RED scaffolds — production bodies land in DELIVER.
+    mod probe_runner {
+        mod real_exec_probe_cgroup;
+        mod real_http_probe;
+        mod real_tcp_probe;
+    }
+
     mod exec_driver {
         mod cgroup_procs;
         // Per-alloc RAII cleanup helper used by every real-cgroupfs test

@@ -160,4 +160,18 @@ mod acceptance {
     // execute before the workloads-slice bootstrap in `run_server`.
     // See `docs/feature/fix-preflight-ordering/bugfix-rca.md`.
     mod preflight_before_workloads_bootstrap;
+
+    // service-health-check-probes — Tier 1 acceptance for the
+    // `ServiceLifecycleReconciler` per ADR-0055 + wire shape
+    // evolution per ADR-0056. RED scaffolds.
+    //   * Slice 01 (US-01 / US-08): Stable / EarlyExit / StartupProbeFailed
+    //   * Slice 04 (US-04 / K2): readiness → Backend.healthy
+    //   * Slice 05 (US-05 / K3): liveness → RestartAllocation
+    //   * Cross-cutting: reconcile-fn purity + View-no-derived-state
+    //   * Wire shape: ServiceSubmitEvent::Stable / Failed serde roundtrip
+    mod service_lifecycle_liveness;
+    mod service_lifecycle_purity;
+    mod service_lifecycle_readiness;
+    mod service_lifecycle_stable;
+    mod service_submit_event_v2;
 }

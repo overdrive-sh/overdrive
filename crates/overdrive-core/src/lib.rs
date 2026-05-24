@@ -73,7 +73,16 @@ pub mod id;
 // compile chain. See § "xtask is build / test / dev orchestration"
 // in `.claude/rules/development.md` for the layering rule.
 pub mod maglev;
+// SCAFFOLD: true — service-health-check-probes feature.
+// `ProbeResultRow` observation row + envelope per ADR-0054 §5.
+// Lands GREEN in slice 01.
+pub mod observation;
 pub mod reconcilers;
+// SCAFFOLD: true — service-health-check-probes feature.
+// `ServiceFailureReason`, `ProbeWitness`, `ServiceLifecycleState`,
+// `ServiceLifecycleView` per ADR-0055. Lands GREEN across slices
+// 01 / 04 / 05 / 08.
+pub mod service_lifecycle;
 pub mod traits;
 // `UnixInstant` — portable wall-clock instant for persistable
 // deadlines. See `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`

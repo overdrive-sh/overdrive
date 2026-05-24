@@ -69,4 +69,16 @@ mod integration {
     // failure emits `health.startup.refused` event and returns
     // `CliError::ProbeRefused`. Per ADR-0054 § Composition root wiring.
     mod serve_probe_refusal;
+
+    // service-health-check-probes — Tier 3 integration test that
+    // closes the K1 north-star contract:
+    //   * Fixture A: coinflip-as-Service (RCA-A regression guard) →
+    //     99/100 deterministic seeds emit `Failed { EarlyExit }`.
+    //   * Fixture B: quick-bind Service → Stable with settled_in
+    //     ∈ [500ms, 2000ms].
+    //   * Fixture C: never-binds Service → Failed StartupProbeFailed.
+    //   * Fixture D: snapshot/streaming terminal byte-equality.
+    //   * Cross-fixture regression: NEVER "(took live)" for Service.
+    // RED scaffold — production bodies land in slice 01 + slice 08.
+    mod service_honest_stable;
 }

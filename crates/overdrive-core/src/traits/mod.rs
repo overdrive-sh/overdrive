@@ -21,6 +21,10 @@ pub mod entropy;
 pub mod intent_store;
 pub mod llm;
 pub mod observation_store;
+// SCAFFOLD: true — service-health-check-probes feature.
+// Three port traits (`TcpProber` / `HttpProber` / `ExecProber`) per
+// ADR-0054 §3. Lands GREEN across slices 01-03.
+pub mod prober;
 pub mod transport;
 
 pub use cgroup_fs::{CgroupFs, ProbeError};

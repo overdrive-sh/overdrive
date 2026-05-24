@@ -41,6 +41,11 @@ pub use self::workload_spec::{
 
 mod workload_spec;
 
+// SCAFFOLD: true — service-health-check-probes feature.
+// `ProbeDescriptor` aggregate type per ADR-0057. Lands in slices
+// 01 / 02 / 03 + 04 / 05 / 07.
+pub mod probe_descriptor;
+
 // ---------------------------------------------------------------------------
 // Aggregate error
 // ---------------------------------------------------------------------------

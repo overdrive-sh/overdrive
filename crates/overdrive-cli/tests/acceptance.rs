@@ -57,4 +57,14 @@ mod acceptance {
     // Pure render helpers — format_human_duration, derive_job_verdict,
     // alloc_status_kind_aware spec-digest branches.
     mod render_pure_fns;
+
+    // service-health-check-probes — Tier 1 acceptance for the CLI
+    // render surface per US-06 / US-07 / US-08. RED scaffolds.
+    //   * Slice 06 (US-06 / K4): Probes section in alloc-status render
+    //   * Slice 07 (US-07 / K5): ProbesNotAllowedOnKind CLI surface
+    //   * Slice 08 (US-08 / K1): EarlyExit multi-line render +
+    //     RCA-A "(took live)" regression guard
+    mod probes_kind_rejection_cli;
+    mod probes_section_render;
+    mod service_early_exit_render;
 }

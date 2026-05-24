@@ -27,5 +27,10 @@ pub mod transport;
 // reconciler-memory-redb step 01-03 — `SimViewStore` impl of
 // `overdrive_control_plane::view_store::ViewStore` per ADR-0035 §2.
 pub mod view_store;
+// SCAFFOLD: true — service-health-check-probes feature.
+// Sim bindings for `TcpProber` / `HttpProber` / `ExecProber` per
+// ADR-0054 §2. Queue-driven outcome injection. Lands GREEN across
+// slices 01-03.
+pub mod probers;
 
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};

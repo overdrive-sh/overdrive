@@ -20,6 +20,10 @@
 pub mod cgroup_manager;
 pub mod driver;
 pub mod node_health;
+// SCAFFOLD: true — service-health-check-probes feature.
+// ProbeRunner subsystem per ADR-0054 §2. Lands GREEN across slices
+// 01 (TCP / Earned Trust), 02 (HTTP), 03 (Exec).
+pub mod probe_runner;
 
 pub use cgroup_manager::{CgroupManager, CgroupPath};
 pub use driver::ExecDriver;
