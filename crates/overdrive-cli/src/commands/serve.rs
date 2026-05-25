@@ -16,10 +16,25 @@ use std::time::Duration;
 
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::dataplane::Dataplane;
+use overdrive_host::RealCgroupFs;
 use url::Url;
 
 use crate::http_client::CliError;
+
+/// Test-only env var honoured by [`run_inner`] to override the
+/// `RealCgroupFs` probe root. When unset (the production default),
+/// the probe runs against `/sys/fs/cgroup` via
+/// [`RealCgroupFs::new`]. When set, the probe runs under the supplied
+/// path so integration tests can force probe-failure without
+/// requiring privileged FS mutations on the real cgroup hierarchy.
+///
+/// TEST-HOOK-ONLY: this env var has NO documented use outside the
+/// CLI integration test suite. It does NOT appear in `--help` and
+/// the binary honours it without flagging — same convention as the
+/// `OPENTELEMETRY_*` / `OVERDRIVE_CONFIG_DIR` env vars.
+const PROBE_ROOT_ENV_VAR: &str = "OVERDRIVE_TEST_PROBE_ROOT";
 
 /// Default drain deadline for `ServeHandle::shutdown`. In-flight
 /// requests complete within this window; new connections are refused
@@ -126,6 +141,54 @@ async fn run_inner(
 ) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
+    // ADR-0054 § Composition root wiring — Earned-Trust probe.
+    //
+    // Construct the production cgroupfs adapter and round-trip on the
+    // kernel-managed `cgroup.subtree_control` pseudo-file BEFORE the
+    // worker subsystem starts. On failure, emit a structured
+    // `health.startup.refused` event whose `cause` field carries the
+    // typed `ProbeError` Display rendering (NOT collapsed to
+    // `Internal(String)` per `.claude/rules/development.md` § "Never
+    // flatten a typed error to `Internal(String)` at a composition
+    // boundary"), and return `CliError::ProbeRefused { cause }`.
+    //
+    // The probe runs BEFORE `run_server`, so it executes before
+    // `cgroup_preflight` (ADR-0028) AND before any FS write the
+    // worker subsystem would issue. When the probe fails, the
+    // listener never binds, the convergence loop never spawns, and
+    // no on-disk artefacts are created — operators see the typed
+    // refusal rather than a downstream Transport failure that would
+    // mask the substrate problem.
+    //
+    // The test-only `OVERDRIVE_TEST_PROBE_ROOT` env var swaps the
+    // probe root from `/sys/fs/cgroup` to a caller-supplied path so
+    // integration tests can force probe-failure deterministically.
+    // Production callers never set the variable; the binary honours
+    // it without --help advertisement (same convention as
+    // `$OVERDRIVE_CONFIG_DIR`).
+    let fs: Arc<dyn CgroupFs> = Arc::new(build_probe_adapter());
+    if let Err(probe_err) = fs.probe().await {
+        let cause = probe_err.to_string();
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "cgroup_fs.probe",
+            cause = %cause,
+            adapter = fs.kind(),
+            "CgroupFs probe refused; composition root will not start worker subsystem"
+        );
+        return Err(CliError::ProbeRefused { cause });
+    }
+    // Same Arc cloned into run_server → ExecDriver::new — probed
+    // substrate IS used substrate (Earned Trust per ADR-0054 §
+    // Composition root). The CLI constructs `fs` ONCE; the probe
+    // succeeded against THIS exact handle, and the worker subsystem
+    // downstream calls methods on a clone of THIS same Arc. Threading
+    // a different RealCgroupFs instance — even one that happens to
+    // share `/sys/fs/cgroup` substrate semantics — would break the
+    // invariant: probe-success is a property of the handle that was
+    // probed, not of "some handle to the same substrate".
+
     // `..Default::default()` populates `tick_cadence`
     // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
     // (`Arc::new(SystemClock)` from `overdrive-host`). Per CLAUDE.md
@@ -140,7 +203,7 @@ async fn run_inner(
         dataplane_override,
         ..Default::default()
     };
-    let inner = run_server(config).await.map_err(|e| {
+    let inner = run_server(config, fs.clone()).await.map_err(|e| {
         // ADR-0035 §5 + reconciler-memory-redb step 01-06: any
         // `ViewStore` boot-time failure (open RedbViewStore, probe,
         // bulk_load) surfaces as the typed
@@ -175,6 +238,18 @@ async fn run_inner(
     })?;
 
     Ok(ServeHandle { inner, endpoint })
+}
+
+/// Construct the production [`RealCgroupFs`] for the Earned-Trust
+/// probe, honouring the test-only [`PROBE_ROOT_ENV_VAR`] override.
+/// Production callers leave the env var unset and the probe runs
+/// against `/sys/fs/cgroup`.
+fn build_probe_adapter() -> RealCgroupFs {
+    match std::env::var(PROBE_ROOT_ENV_VAR) {
+        // mutants: skip — crate-level #![forbid(unsafe_code)] prevents unit-testing env var mutation; integration tests cover the set-path case
+        Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
+        _ => RealCgroupFs::new(),
+    }
 }
 
 /// Condense a `ControlPlaneError::Internal(...)` rendering into an

@@ -31,6 +31,7 @@ use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_trip
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_host::RealCgroupFs;
 use tempfile::TempDir;
 
 /// Spawn a server on an ephemeral port and return (handle, bound addr,
@@ -59,7 +60,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
         )),
         ..Default::default()
     };
-    let handle: ServerHandle = run_server(config).await.expect("run_server");
+    let handle: ServerHandle =
+        run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");
     let config_path = operator_config_dir.join(".overdrive").join("config");
     (handle, bound, tmp, config_path)

@@ -47,10 +47,30 @@ nix.workspace = true
 
 [dev-dependencies]
 overdrive-sim.path  = "../overdrive-sim"
+# `overdrive-host` — production adapter crate (`adapter-host`). Used
+# by the Tier 3 integration suite under
+# `tests/integration/real_cgroup_fs/` (step 01-02 of the cgroup-fs-port
+# migration) to exercise `RealCgroupFs::probe()` against real
+# `/sys/fs/cgroup` and against a tempdir-scoped probe root. Dev-dep
+# only — production composition of `RealCgroupFs` into the worker
+# subsystem happens at the binary boundary (`overdrive-cli`'s `serve`
+# subcommand, per ADR-0054 § Composition root wiring); the worker
+# crate itself does NOT name the concrete production binding.
+overdrive-host.path = "../overdrive-host"
 proptest.workspace  = true
 tempfile.workspace  = true
 serial_test.workspace = true
 tracing-subscriber.workspace = true
+# `trybuild` — compile-fail fixture harness per ADR-0054 § migration
+# step 01-01. Used to pin the post-01-05 `ExecDriver::new` arity at
+# compile time (a constructor missing the mandatory
+# `fs: Arc<dyn CgroupFs>` parameter must fail to compile, not at
+# runtime). The fixture itself lands as a RED scaffold at 01-01 and
+# goes GREEN at 01-05 when the arity change ships. Workspace-pinned
+# at `=1.0.101` per `.claude/rules/testing.md` § "Compile-fail testing
+# (trybuild)" — pin exactly to keep `.stderr` fixtures stable across
+# rustc upgrades.
+trybuild.workspace  = true
 
 [lints]
 workspace = true

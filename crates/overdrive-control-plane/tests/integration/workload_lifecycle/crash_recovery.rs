@@ -59,6 +59,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
         std::path::PathBuf::from("/sys/fs/cgroup"),
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_host::RealCgroupFs::new()),
     ));
 
     let allocator = overdrive_control_plane::test_default_allocator(

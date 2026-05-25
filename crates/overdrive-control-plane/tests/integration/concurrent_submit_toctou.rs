@@ -43,6 +43,7 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_host::RealCgroupFs;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
@@ -103,7 +104,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         )),
         ..Default::default()
     };
-    let handle = run_server(config).await.expect("run_server");
+    let handle =
+        run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem)

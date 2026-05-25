@@ -13,6 +13,7 @@
 //! direct `aya-rs` / kernel calls from anywhere that is not a wiring
 //! crate.
 
+pub mod cgroup_fs;
 pub mod clock;
 pub mod dataplane;
 pub mod driver;
@@ -22,6 +23,7 @@ pub mod llm;
 pub mod observation_store;
 pub mod transport;
 
+pub use cgroup_fs::{CgroupFs, ProbeError};
 pub use clock::Clock;
 pub use dataplane::Dataplane;
 pub use driver::{Driver, DriverType};

@@ -28,16 +28,14 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources, STDERR_TAIL_LINES,
 };
 
-use crate::cgroup_manager::{
-    self, CgroupPath, cgroup_kill, create_workload_scope, place_pid_in_scope,
-    remove_workload_scope, write_resource_limits,
-};
+use crate::cgroup_manager::{CgroupManager, CgroupPath};
 
 /// Default grace window between SIGTERM and SIGKILL during stop.
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(5);
@@ -166,7 +164,14 @@ struct LiveAllocation {
 /// `Driver::start` returns `DriverError::StartRejected`.
 #[derive(Clone)]
 pub struct ExecDriver {
-    cgroup_root: PathBuf,
+    /// Port-routed cgroupfs surface, constructed once at
+    /// [`ExecDriver::new`] from the injected `fs: Arc<dyn CgroupFs>`
+    /// and the shared `cgroup_root`. Every filesystem mutation in
+    /// `Driver::{start,stop,resize}` flows through this manager;
+    /// no direct `tokio::fs::*` calls from `driver.rs`. Production
+    /// wires `overdrive_host::RealCgroupFs`; tests wire
+    /// `overdrive_sim::SimCgroupFs`. Per ADR-0054 § D5 step 5.
+    cgroup_manager: CgroupManager,
     stop_grace: Duration,
     /// Test-only injection: when `true`, force `write_resource_limits`
     /// to fail synthetically. Always `false` in production wiring.
@@ -216,7 +221,7 @@ pub struct ExecDriver {
 impl std::fmt::Debug for ExecDriver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecDriver")
-            .field("cgroup_root", &self.cgroup_root)
+            .field("cgroup_root", &self.cgroup_manager.cgroup_root())
             .field("stop_grace", &self.stop_grace)
             .field("force_limit_write_failure", &self.force_limit_write_failure)
             .finish_non_exhaustive()
@@ -224,20 +229,34 @@ impl std::fmt::Debug for ExecDriver {
 }
 
 impl ExecDriver {
-    /// Construct a fresh `ExecDriver` rooted at `cgroup_root` with an
-    /// explicit `Clock` dependency. Production and integration tests
-    /// alike wire `/sys/fs/cgroup` and either
-    /// `Arc::new(overdrive_host::SystemClock)` or
-    /// `Arc::new(SimClock::new())` so the SIGTERM/SIGKILL grace window
-    /// in `Driver::stop` advances on logical time under simulation /
-    /// DST. The clock is a required parameter, never defaulted, so
-    /// tests cannot accidentally inherit wall-clock behaviour by
-    /// omission.
+    /// Construct a fresh `ExecDriver` rooted at `cgroup_root` with
+    /// explicit `Clock` and `CgroupFs` dependencies. Production and
+    /// integration tests alike wire `/sys/fs/cgroup` and either:
+    ///   * production — `Arc::new(overdrive_host::SystemClock)` +
+    ///     `Arc::new(overdrive_host::RealCgroupFs::new())`
+    ///   * Tier 3 real-IO tests — same as production (the Tier 3 suite
+    ///     exercises real cgroupfs; only the clock varies between
+    ///     `TokioWallClock` and `SimClock` depending on whether
+    ///     wall-clock progression is needed)
+    ///   * DST / sim — `Arc::new(SimClock::new())` +
+    ///     `Arc::new(overdrive_sim::SimCgroupFs::new())`
+    ///
+    /// Both `clock` and `fs` are REQUIRED, positional parameters per
+    /// `.claude/rules/development.md` § "Port-trait dependencies":
+    /// neither has a default, and there is no builder shape that makes
+    /// them optional. A test that forgets to inject them fails to
+    /// compile (see `tests/compile_fail/exec_driver_missing_fs.rs`
+    /// for the structural defense). Internally the driver constructs
+    /// a single [`CgroupManager`] from `cgroup_root.clone()` + `fs`
+    /// and routes every filesystem mutation through it; the legacy
+    /// transitional free-fn shims (`cgroup_manager_legacy_*`) from
+    /// step 01-04 are gone as of step 01-05.
     #[must_use]
-    pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
+        let cgroup_manager = CgroupManager::new(cgroup_root, fs);
         Self {
-            cgroup_root,
+            cgroup_manager,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,
             netns_path: None,
@@ -405,7 +424,7 @@ impl Driver for ExecDriver {
 
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
-        if let Err(err) = create_workload_scope(&self.cgroup_root, &scope).await {
+        if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
             return Err(start_rejected(format!("create workload scope: {err}")));
         }
 
@@ -417,7 +436,7 @@ impl Driver for ExecDriver {
                 "force_limit_write_failure injected",
             ))
         } else {
-            write_resource_limits(&self.cgroup_root, &scope, &spec.resources).await
+            self.cgroup_manager.write_resource_limits(&scope, &spec.resources).await
         };
         if let Err(err) = limit_result {
             warn!(
@@ -441,7 +460,7 @@ impl Driver for ExecDriver {
             Some(path) => match tokio::fs::File::open(path).await {
                 Ok(f) => Some(std::os::fd::OwnedFd::from(f.into_std().await)),
                 Err(source) => {
-                    let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+                    let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
                     return Err(DriverError::NetnsEntry {
                         driver: DriverType::Exec,
                         netns_path: path.display().to_string(),
@@ -458,7 +477,7 @@ impl Driver for ExecDriver {
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
-                let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+                let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
                 // A spawn failure when `netns_path` is set most
                 // likely came from the netns-entry `pre_exec` hook
                 // (setns(2) returned EPERM / EINVAL — the open()
@@ -483,10 +502,10 @@ impl Driver for ExecDriver {
             // child.id() returns None only after wait() — should not
             // happen here since we just spawned. Treat as fatal start
             // failure for safety.
-            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+            let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
             return Err(start_rejected("tokio Child returned no pid (already reaped?)"));
         };
-        if let Err(err) = place_pid_in_scope(&self.cgroup_root, &scope, pid).await {
+        if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, pid).await {
             // Best-effort kill + cleanup. We don't await here —
             // the tokio Child's drop handler does not reap, but the
             // OS will reap orphans. For defence-in-depth we send
@@ -501,7 +520,7 @@ impl Driver for ExecDriver {
                     libc::kill(raw, libc::SIGKILL);
                 }
             }
-            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+            let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
             return Err(start_rejected(format!("place pid in scope: {err}")));
         }
 
@@ -648,9 +667,9 @@ impl Driver for ExecDriver {
         //       every member of that group regardless of cgroup
         //       residency.
         send_sigkill_pgrp(pid_for_pgrp_kill);
-        let _ = cgroup_kill(&self.cgroup_root, &scope).await;
+        let _ = self.cgroup_manager.cgroup_kill(&scope).await;
         // 5. Tear down the cgroup scope. NotFound is benign.
-        let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
+        let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
 
         // If the grace window elapsed, the watcher is still running;
         // it will resolve once SIGKILL finishes reaping the child.
@@ -692,8 +711,7 @@ impl Driver for ExecDriver {
                 None => return Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
             }
         };
-        cgroup_manager::write_resource_limits_warn_on_error(&self.cgroup_root, &scope, &resources)
-            .await;
+        self.cgroup_manager.write_resource_limits_warn_on_error(&scope, &resources).await;
         Ok(())
     }
 

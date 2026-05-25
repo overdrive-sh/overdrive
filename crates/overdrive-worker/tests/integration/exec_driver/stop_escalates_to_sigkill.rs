@@ -21,10 +21,12 @@ use std::time::{Duration, Instant as StdInstant};
 
 use async_trait::async_trait;
 use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
+use overdrive_host::RealCgroupFs;
 use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 use tokio::time::Instant;
 
@@ -138,7 +140,10 @@ async fn await_sleep_grandchild_reaped(pid: u32, deadline: Duration) -> bool {
 #[serial(cgroup)]
 async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
     // Real-IO test: the SUT runs a real `/bin/sh` and the grace window
@@ -146,7 +151,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     // SIGKILL escalation path to fire. `SimClock` would park
     // indefinitely waiting for `tick()`. See `TokioWallClock` above.
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(TokioWallClock))
+        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(TokioWallClock), fs)
             .with_stop_grace(Duration::from_millis(250)),
     );
 

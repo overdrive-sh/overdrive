@@ -47,7 +47,17 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use overdrive_control_plane::{ServerConfig, ServerHandle, dataplane_config::DataplaneConfig};
+use overdrive_host::RealCgroupFs;
 use tempfile::TempDir;
+
+/// Builds the standard test-time `Arc<dyn CgroupFs>` adapter — real
+/// `tokio::fs::*` against `/sys/fs/cgroup` per step 01-06 of the
+/// `cgroup-fs-port` migration. Wraps a `RealCgroupFs::new()` in `Arc`
+/// at the call site so each test that boots a server has its own
+/// `Arc<dyn CgroupFs>` instance.
+fn test_cgroup_fs() -> std::sync::Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs> {
+    std::sync::Arc::new(RealCgroupFs::new())
+}
 
 // ----------------------------------------------------------------------------
 // Test-managed interface fixture (RAII)
@@ -294,7 +304,7 @@ async fn boot_composes_ebpf_dataplane_and_attaches_xdp_to_both_ifaces() {
     let pin_path = fx.pin_dir.join("SERVICE_MAP");
 
     let handle: ServerHandle =
-        overdrive_control_plane::run_server(config).await.expect("run_server");
+        overdrive_control_plane::run_server(config, test_cgroup_fs()).await.expect("run_server");
 
     // Both ifaces must carry an XDP attachment.
     assert!(
@@ -355,7 +365,7 @@ async fn boot_resolves_host_ipv4_via_getifaddrs_on_client_iface() {
     );
 
     // Production-path: boot must succeed end-to-end with this iface.
-    let handle: ServerHandle = overdrive_control_plane::run_server(config)
+    let handle: ServerHandle = overdrive_control_plane::run_server(config, test_cgroup_fs())
         .await
         .expect("run_server with IPv4-bearing client_iface");
     handle.shutdown(std::time::Duration::from_secs(2)).await;
@@ -390,7 +400,7 @@ async fn graceful_shutdown_detaches_xdp_and_removes_bpffs_pin() {
     let backend_name = fx.backend_iface.clone();
 
     let handle: ServerHandle =
-        overdrive_control_plane::run_server(config).await.expect("run_server");
+        overdrive_control_plane::run_server(config, test_cgroup_fs()).await.expect("run_server");
 
     // Pre-condition: both ifaces have XDP + pin exists. If this fails
     // we are testing the wrong property (the happy path didn't run);
@@ -530,7 +540,7 @@ async fn boot_refuses_when_client_iface_does_not_exist() {
         ..Default::default()
     };
 
-    let result = overdrive_control_plane::run_server(config).await;
+    let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
 
     use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
     let err = result.expect_err("expected boot refusal for nonexistent iface");
@@ -585,7 +595,7 @@ async fn boot_refuses_when_iface_has_no_ipv4_address() {
     let config = server_config_with(&fx, &data_dir, &cfg_dir);
     let client_name = fx.client_iface.clone();
 
-    let result = overdrive_control_plane::run_server(config).await;
+    let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
 
     use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
     let err = result.expect_err("expected boot refusal for IPv4-less iface");
@@ -745,7 +755,7 @@ async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
 
     let client_name = fx.client_iface.clone();
     let backend_name = fx.backend_iface.clone();
-    let boot_result = overdrive_control_plane::run_server(config).await;
+    let boot_result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
 
     // Boot must succeed — fallback should have retried successfully.
     let handle = boot_result.expect("expected boot to succeed via SKB fallback on dummy iface");
@@ -835,7 +845,7 @@ async fn boot_refuses_when_earned_trust_probe_fails() {
     let subscriber = tracing_subscriber::registry().with(collector.clone());
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let result = overdrive_control_plane::run_server(config).await;
+    let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
 
     use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
     let err = result.expect_err("expected boot refusal when probe fault is injected");
@@ -906,8 +916,9 @@ async fn boot_succeeds_when_earned_trust_probe_round_trips_backend_map() {
     let config = server_config_with(&fx, &data_dir, &cfg_dir);
 
     // No probe-fault injected → production probe path runs end-to-end.
-    let handle: ServerHandle =
-        overdrive_control_plane::run_server(config).await.expect("run_server with probe success");
+    let handle: ServerHandle = overdrive_control_plane::run_server(config, test_cgroup_fs())
+        .await
+        .expect("run_server with probe success");
 
     handle.shutdown(std::time::Duration::from_secs(2)).await;
 }

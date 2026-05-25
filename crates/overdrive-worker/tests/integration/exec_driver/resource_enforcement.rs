@@ -16,10 +16,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
+use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
 use super::cleanup::AllocCleanup;
@@ -28,11 +30,14 @@ use super::cleanup::AllocCleanup;
 #[serial(cgroup)]
 async fn cpu_weight_and_memory_max_are_written_from_spec() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
     let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new())));
+        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs));
 
     // cpu_milli=2000 -> cpu.weight=200; memory_bytes=128MiB.
     let alloc = AllocationId::new("alloc-resource-enforcement").expect("valid alloc id");

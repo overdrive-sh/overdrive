@@ -109,7 +109,8 @@ pub use id::{
     PolicyId, Region, SchematicId, SpiffeId, WorkloadId,
 };
 pub use traits::{
-    Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore, Transport,
+    CgroupFs, Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore,
+    ProbeError, Transport,
 };
 pub use wall_clock::UnixInstant;
 // Re-exported from `transition_reason` for convenience; the snapshot

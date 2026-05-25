@@ -33,6 +33,16 @@ integration-tests = []
 
 [dependencies]
 overdrive-core.workspace           = true
+# `overdrive-host` — production adapter crate (`adapter-host`).
+# Added at step 01-06 of the cgroup-fs-port migration: the `serve`
+# subcommand constructs `Arc::new(RealCgroupFs::new())` (with a
+# test-only `OVERDRIVE_TEST_PROBE_ROOT` override) and calls
+# `.probe().await` at the composition root BEFORE `run_server`
+# starts the worker subsystem. Per ADR-0054 § Composition root
+# wiring. The binary IS the composition root per `.claude/rules/
+# development.md` § "Port-trait dependencies" — naming the
+# production binding here is the intended shape.
+overdrive-host.path                = "../overdrive-host"
 overdrive-control-plane.path       = "../overdrive-control-plane"
 eyre.workspace                     = true
 color-eyre.workspace               = true

@@ -85,6 +85,38 @@ pub enum CliError {
     /// client-side path never reaches the server.
     #[error("invalid job spec: field `{field}`: {message}")]
     InvalidSpec { field: String, message: String },
+
+    /// The composition-root `CgroupFs` probe (per ADR-0054 § Composition
+    /// root wiring) refused to validate the cgroupfs substrate the
+    /// worker subsystem is about to use. The `cause` field carries
+    /// the underlying `ProbeError` Display rendering — typically a
+    /// `ProbeError::Substrate { source }` whose `source` is an
+    /// `io::Error` (`PermissionDenied`, `NotFound`,
+    /// `ReadOnlyFilesystem`, …). The binary refuses to start without
+    /// touching the convergence loop, the listener bind, or
+    /// `cgroup_preflight`; operators see this variant in lieu of a
+    /// downstream `Transport` failure that would mask the substrate
+    /// problem.
+    ///
+    /// Per `.claude/rules/development.md` § "Never flatten a typed
+    /// error to `Internal(String)` at a composition boundary": the
+    /// variant is dedicated rather than `CliError::Transport`
+    /// wrapping a stringified probe message — the structured field
+    /// `cause` carries the substrate-level details without losing
+    /// the typed branch.
+    #[error(
+        "CgroupFs probe refused at composition root: {cause}\n\
+         hint: verify cgroup v2 delegation under the configured probe root \
+         (default `/sys/fs/cgroup`); operator may need to run as root \
+         or fix the cgroup hierarchy mount"
+    )]
+    ProbeRefused {
+        /// The `ProbeError` Display rendering. Carries the underlying
+        /// `io::Error` for `ProbeError::Substrate`, the wrote/read
+        /// bytes for `ProbeError::RoundTripMismatch`, or the corrupt
+        /// read bytes for `ProbeError::SubstrateCorrupt`.
+        cause: String,
+    },
 }
 
 /// Hand-rolled typed REST client for the Phase 1 control-plane. One

@@ -102,6 +102,11 @@ fn main() {
     let artifact = std::env::var_os("OVERDRIVE_BPF_OBJECT")
         .filter(|v| !v.is_empty())
         .map_or_else(|| workspace_root.join("target/bpf/overdrive_bpf.o"), PathBuf::from);
+    // Emit unconditionally — before the existence check — so Cargo
+    // knows to re-run this script when the artifact appears, disappears,
+    // or is rebuilt. Without this, deleting the artifact leaves Cargo's
+    // cached "success" output in place and `cargo check` silently passes.
+    println!("cargo:rerun-if-changed={}", artifact.display());
     if !artifact.exists() {
         // Build scripts surface diagnostics via stderr; cargo
         // captures and renders the `--- stderr` block on failure.
@@ -115,7 +120,6 @@ fn main() {
         }
         std::process::exit(1);
     }
-    println!("cargo:rerun-if-changed={}", artifact.display());
 
     // Freshness check — fail fast when `crates/overdrive-bpf/src/`
     // has files newer than the artifact. Without this, edits to

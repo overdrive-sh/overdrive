@@ -63,4 +63,10 @@ mod integration {
     // and persisted exit_code (S-03-08 proptest 1024 cases). Per
     // step 02-02 acceptance criteria + ADR-0047 §1 / §4.
     mod alloc_status;
+
+    // cgroup-fs-port step 01-06 — E2 walking-skeleton: composition root
+    // probes RealCgroupFs BEFORE worker subsystem startup; on probe
+    // failure emits `health.startup.refused` event and returns
+    // `CliError::ProbeRefused`. Per ADR-0054 § Composition root wiring.
+    mod serve_probe_refusal;
 }

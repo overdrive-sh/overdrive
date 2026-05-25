@@ -32,5 +32,6 @@ pub mod adapters;
 pub mod harness;
 pub mod invariants;
 
+pub use adapters::{SimCgroupFs, SimEntry, SimOp};
 pub use harness::{Failure, Harness, InvariantResult, InvariantStatus, RunReport};
 pub use invariants::Invariant;

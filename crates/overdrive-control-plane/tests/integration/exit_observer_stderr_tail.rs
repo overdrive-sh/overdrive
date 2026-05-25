@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
@@ -27,7 +28,7 @@ use overdrive_core::traits::observation_store::{
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 use tokio::sync::broadcast;
 
@@ -104,11 +105,14 @@ async fn seed_running_row(
 #[serial(cgroup)]
 async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(overdrive_host::RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
 
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), clock.clone()));
+    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), clock.clone(), fs));
     let driver_dyn: Arc<dyn Driver> = driver.clone();
 
     let node_id = NodeId::new("test-node").expect("valid node id");
