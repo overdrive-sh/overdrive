@@ -211,6 +211,83 @@
       "s": "EXECUTED",
       "d": "PASS \u2014 mutation-gate tightening (test-only additions; kills 5/6 missed mutants for overdrive-worker probe_runner)",
       "t": "2026-05-25T14:38:44Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:50:30Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:06:25Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:19:22Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:22:40Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:25:34Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:31:05Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 mutation-gate tightening (kills 2/2 lifecycle-hook mutants for overdrive-worker driver.rs)",
+      "t": "2026-05-25T15:39:28Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:00:10Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:02:36Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test reaches GREEN via direct minimal implementation of api.rs/streaming.rs variant edits; no separate unit-level decomposition needed",
+      "t": "2026-05-25T16:04:52Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:09:30Z"
     }
   ]
 }

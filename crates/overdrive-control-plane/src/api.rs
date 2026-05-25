@@ -740,3 +740,110 @@ pub struct TransitionRecord {
     /// the wire — see struct-level docs.
     pub at: String,
 }
+
+// ---------------------------------------------------------------------------
+// Service-health-check-probes wire types — step 01-03e (ADR-0056 / DDD-11).
+// ---------------------------------------------------------------------------
+//
+// `ProbeWitnessWire` / `ServiceFailureReasonWire` are typed aliases to the
+// typed `overdrive-core::transition_reason::{ProbeWitness,
+// ServiceFailureReason}`. The aliases are the load-bearing structural
+// guarantee: every typed variant has a wire projection by construction —
+// adding a new variant to either typed enum/struct without updating the
+// wire is a compile-time impossibility (the alias forces exhaustive
+// coverage). Property-tested at byte-equality in
+// `tests/acceptance/service_submit_event_v2.rs` (S-SHCP-WIRE-03,
+// S-SHCP-PURITY-03).
+//
+// `ProbeResultRowJson` is a wire-only mirror of
+// `overdrive-core::observation::probe_result_row::ProbeResultRow` (which
+// is rkyv-persisted and therefore carries `rkyv::*` derives the wire
+// types must NOT inherit). Operator-facing surfaces (HTTP snapshot,
+// streaming probe-observation lane in future slices) project from the
+// typed row into this struct via `From<&ProbeResultRow>`.
+
+/// Wire projection of `overdrive-core::ProbeWitness` — typed alias.
+///
+/// `ProbeWitness` already carries `Serialize + Deserialize + ToSchema`
+/// (declared in `overdrive-core::transition_reason`). The wire alias
+/// pins the structural invariant per ADR-0056 / DDD-10: every typed
+/// variant has a wire projection by construction. Renaming /
+/// re-shaping the typed `ProbeWitness` updates the wire shape in
+/// lockstep — no manual sync required.
+pub type ProbeWitnessWire = overdrive_core::transition_reason::ProbeWitness;
+
+/// Wire projection of `overdrive-core::ServiceFailureReason` — typed
+/// alias.
+///
+/// Same shape as `ProbeWitnessWire`: the typed enum already serialises
+/// to the wire shape (`tag = "reason", content = "data", rename_all =
+/// "snake_case"`); the alias preserves the lockstep guarantee per
+/// ADR-0056 §4 / DDD-10. Adding a new variant to `ServiceFailureReason`
+/// without adding the wire projection is a compile-time impossibility.
+pub type ServiceFailureReasonWire = overdrive_core::transition_reason::ServiceFailureReason;
+
+/// Wire-only mirror of
+/// `overdrive-core::observation::probe_result_row::ProbeResultRow`.
+///
+/// `ProbeResultRow` is rkyv-persisted (carries `rkyv::Archive` /
+/// `rkyv::Serialize` / `rkyv::Deserialize`); this wire struct carries
+/// only the JSON-shape derives (`Serialize` / `Deserialize` /
+/// `ToSchema`) and projects from the typed row via
+/// [`From<&ProbeResultRow>`].
+///
+/// Per ADR-0048: rkyv-persisted types follow the per-type versioned
+/// envelope discipline; wire-only types use serde directly. This
+/// separation keeps storage and wire concerns decoupled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ProbeResultRowJson {
+    /// Allocation this probe targets.
+    pub alloc_id: String,
+    /// 0-indexed position within the role array.
+    pub probe_idx: u32,
+    /// Which role this probe is (`startup` / `readiness` / `liveness`).
+    pub role: String,
+    /// Latest observed outcome — `pass` or `fail` with last_fail_reason.
+    pub status: ProbeStatusJson,
+    /// Wall-clock at which the probe attempt completed. UNIX-epoch
+    /// milliseconds; sourced from the ProbeRunner's injected clock.
+    pub last_observed_at_unix_ms: u64,
+    /// Whether this probe was inferred by the platform per ADR-0058.
+    pub inferred: bool,
+}
+
+/// Wire projection of `overdrive-core::observation::probe_result_row::
+/// ProbeStatus` — `pass` / `fail { last_fail_reason }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "data")]
+pub enum ProbeStatusJson {
+    Pass,
+    Fail { last_fail_reason: String },
+}
+
+impl From<&overdrive_core::observation::probe_result_row::ProbeResultRow> for ProbeResultRowJson {
+    fn from(row: &overdrive_core::observation::probe_result_row::ProbeResultRow) -> Self {
+        use overdrive_core::observation::probe_result_row::{ProbeRole, ProbeStatus};
+        let status = match &row.status {
+            ProbeStatus::Pass => ProbeStatusJson::Pass,
+            ProbeStatus::Fail { last_fail_reason } => {
+                ProbeStatusJson::Fail { last_fail_reason: last_fail_reason.clone() }
+            }
+        };
+        // Role projection — matches the `#[serde(rename_all = "snake_case")]`
+        // shape declared on `ProbeRole`.
+        let role = match row.role {
+            ProbeRole::Startup => "startup",
+            ProbeRole::Readiness => "readiness",
+            ProbeRole::Liveness => "liveness",
+        }
+        .to_string();
+        Self {
+            alloc_id: row.alloc_id.to_string(),
+            probe_idx: row.probe_idx.get(),
+            role,
+            status,
+            last_observed_at_unix_ms: row.last_observed_at_unix_ms,
+            inferred: row.inferred,
+        }
+    }
+}

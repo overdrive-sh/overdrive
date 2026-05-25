@@ -1099,30 +1099,54 @@ pub enum JobSubmitEvent {
 // Service streaming sub-path — slice 02 of `workload-kind-discriminator`.
 // ---------------------------------------------------------------------------
 //
-// Per ADR-0047 §3 [D2] / [D7]: Service-kind retains the existing
-// `ConvergedRunning` shape — long-running workloads converge on
-// "running" and stream remains observable. The legacy flat
-// `SubmitEvent` continues to serve Service-kind for backward
-// compatibility with existing consumers (this slice introduces the
-// per-kind enum surface; later slices may collapse the flat shape).
+// Per ADR-0056 / DDD-11 (single-cut V1→V2 wire migration, step 01-03e):
+// Service-kind's terminal events project the typed `TerminalCondition::
+// {Stable, ServiceFailed}` variants directly. `ServiceSubmitEvent::Stable`
+// carries the typed `ProbeWitness` naming the last-to-Pass startup probe;
+// `ServiceSubmitEvent::Failed` carries the typed `ServiceFailureReason`
+// (StartupTimeout / StartupProbeFailed / EarlyExit / LivenessProbeFailed)
+// per ADR-0055 §4. The wire shape preserves byte-equality with the row's
+// `terminal` field per ADR-0037 §4 K2 trace-equivalence.
 
 /// Streaming events emitted by the Service submit sub-path.
 ///
-/// Per ADR-0047 §3 [D7]: Service-kind retains `ConvergedRunning`
-/// (long-running workloads converge on the live state).
+/// Per ADR-0056 / DDD-11: V2 wire shape. Terminal events:
+/// * `Stable { settled_in_ms, witness }` — convergence reached the
+///   `TerminalCondition::Stable` shape (all declared startup probes
+///   passed within `startup_deadline`).
+/// * `Failed { reason, stderr_tail }` — convergence failed with a
+///   typed `ServiceFailureReason` cause (startup-timeout, startup-
+///   probe-failed, early-exit, liveness-probe-failed).
+///
+/// The wire projection is byte-equal with the row's typed
+/// `TerminalCondition` carried in `AllocStatusRow.terminal` — both
+/// surfaces project from the same `Action.terminal` value in the
+/// same action-shim call frame per ADR-0037 §4.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ServiceSubmitEvent {
     /// Submit was accepted. Mirrors `SubmitEvent::Accepted`.
     Accepted { spec_digest: String, intent_key: String, outcome: crate::api::IdempotencyOutcome },
-    /// Terminal — convergence reached `Running` with replicas met.
-    ConvergedRunning { alloc_id: String, started_at: String },
-    /// Terminal — convergence failed.
-    ConvergedFailed {
+    /// Terminal — service reached the Stable state per ADR-0055
+    /// (all declared startup probes passed within `startup_deadline`).
+    /// `settled_in_ms` is the wall-clock interval (in milliseconds)
+    /// from alloc start to the deciding tick that observed the
+    /// last-to-Pass startup probe. `witness` names which probe's
+    /// Pass moved the reconciler to Stable.
+    Stable { alloc_id: String, settled_in_ms: u64, witness: crate::api::ProbeWitnessWire },
+    /// Terminal — service convergence failed. `reason` carries the
+    /// typed `ServiceFailureReasonWire` cause discriminator per
+    /// ADR-0055 §4 / ADR-0056. `stderr_tail` is the last-N lines of
+    /// the workload's stderr (populated by ExitObserver in slice
+    /// 03-02; Option<String> here so the wire shape is stable
+    /// against the future plumbing).
+    Failed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         alloc_id: Option<String>,
-        terminal_reason: crate::api::TerminalReason,
-        error: Option<String>,
+        reason: crate::api::ServiceFailureReasonWire,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stderr_tail: Option<String>,
     },
 }
 
