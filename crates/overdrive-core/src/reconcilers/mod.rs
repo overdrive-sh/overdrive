@@ -184,6 +184,15 @@ pub use workload_lifecycle::{
     WorkloadLifecycleView, backoff_for_attempt,
 };
 
+// `ServiceLifecycleReconciler` lives in `overdrive_core::service_lifecycle`
+// (NOT under this module) for cycle-breaking reasons documented at the
+// `crate::service_lifecycle` module header. Re-import here so the
+// dispatch enums (`AnyState`, `AnyReconciler`, `AnyReconcilerView`) can
+// reference it without forcing every dispatcher to spell the full path.
+use crate::service_lifecycle::{
+    ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
+
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
 // ---------------------------------------------------------------------------
@@ -327,6 +336,10 @@ pub enum AnyState {
     /// `BackendDiscoveryBridge` reconciler's typed projection — see
     /// [`backend_discovery_bridge::BackendDiscoveryBridgeState`].
     BackendDiscoveryBridge(BackendDiscoveryBridgeState),
+    /// `ServiceLifecycle` reconciler's typed projection — see
+    /// [`crate::service_lifecycle::ServiceLifecycleState`]. Per
+    /// ADR-0055; landed by the `service-health-check-probes` feature.
+    ServiceLifecycle(ServiceLifecycleState),
 }
 
 // ---------------------------------------------------------------------------
@@ -638,6 +651,9 @@ pub enum AnyReconciler {
     ServiceMapHydrator(ServiceMapHydrator),
     /// Phase 2.2 — `backend-discovery-bridge`.
     BackendDiscoveryBridge(BackendDiscoveryBridge),
+    /// Service-health-check-probes — `service-lifecycle` per
+    /// ADR-0055. See [`crate::service_lifecycle::ServiceLifecycleReconciler`].
+    ServiceLifecycle(ServiceLifecycleReconciler),
 }
 
 impl AnyReconciler {
@@ -649,6 +665,7 @@ impl AnyReconciler {
             Self::WorkloadLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
             Self::BackendDiscoveryBridge(r) => r.name(),
+            Self::ServiceLifecycle(r) => r.name(),
         }
     }
 
@@ -661,6 +678,7 @@ impl AnyReconciler {
             Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
             Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
+            Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
         }
     }
 
@@ -706,6 +724,15 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::BackendDiscoveryBridge(next_view))
             }
+            (
+                Self::ServiceLifecycle(r),
+                AnyState::ServiceLifecycle(desired),
+                AnyState::ServiceLifecycle(actual),
+                AnyReconcilerView::ServiceLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::ServiceLifecycle(next_view))
+            }
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
@@ -728,4 +755,9 @@ pub enum AnyReconcilerView {
     ServiceMapHydrator(ServiceMapHydratorView),
     /// `BackendDiscoveryBridge` reconciler's view.
     BackendDiscoveryBridge(BackendDiscoveryBridgeView),
+    /// `ServiceLifecycle` reconciler's view per ADR-0055 § 3 / DDD-5.
+    /// Carries inputs only (counters / once-only Stable-announcement
+    /// set) — derived state (`Stable` predicate, deadlines) is
+    /// recomputed every tick.
+    ServiceLifecycle(ServiceLifecycleView),
 }

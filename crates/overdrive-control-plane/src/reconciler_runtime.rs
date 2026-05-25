@@ -50,6 +50,7 @@ use overdrive_core::reconcilers::{
     ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
     WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
+use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
 
@@ -86,6 +87,12 @@ enum AnyViewMap {
     /// views per ADR-0035 §5. Phase 2.2
     /// (`backend-discovery-bridge-service-reachability` step 01-01).
     BackendDiscoveryBridge(BTreeMap<TargetResource, BackendDiscoveryBridgeView>),
+    /// `ServiceLifecycle` carries `View = ServiceLifecycleView`;
+    /// the map holds per-target persisted views per ADR-0035 §5 /
+    /// ADR-0055. Service-health-check-probes step 01-03b (dispatch
+    /// wiring); the runtime-registration call site lands in a
+    /// later slice.
+    ServiceLifecycle(BTreeMap<TargetResource, ServiceLifecycleView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -269,6 +276,20 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::BackendDiscoveryBridge(loaded)
             }
+            // service-health-check-probes step 01-03b — bulk-load the
+            // persisted `ServiceLifecycleView` map. Shape mirrors
+            // `WorkloadLifecycle` exactly; the registration call site
+            // is wired in a later slice.
+            AnyReconciler::ServiceLifecycle(_) => {
+                let loaded: BTreeMap<TargetResource, ServiceLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::ServiceLifecycle(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -350,7 +371,8 @@ impl ReconcilerRuntime {
             AnyViewMap::WorkloadLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
             AnyViewMap::Unit
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => WorkloadLifecycleView::default(),
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -404,6 +426,11 @@ impl ReconcilerRuntime {
             AnyViewMap::BackendDiscoveryBridge(map) => AnyReconcilerView::BackendDiscoveryBridge(
                 map.get(target).cloned().unwrap_or_default(),
             ),
+            // service-health-check-probes step 01-03b — same shape as
+            // the WorkloadLifecycle / ServiceMapHydrator arms.
+            AnyViewMap::ServiceLifecycle(map) => {
+                AnyReconcilerView::ServiceLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
         })
     }
 
@@ -486,7 +513,8 @@ impl ReconcilerRuntime {
                         }
                         AnyViewMap::Unit
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_) => WorkloadLifecycleView::default(),
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -530,9 +558,8 @@ impl ReconcilerRuntime {
                         }
                         AnyViewMap::Unit
                         | AnyViewMap::WorkloadLifecycle(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_) => {
-                            ServiceMapHydratorView::default()
-                        }
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => ServiceMapHydratorView::default(),
                     }
                 };
                 if current == view {
@@ -574,9 +601,8 @@ impl ReconcilerRuntime {
                         }
                         AnyViewMap::Unit
                         | AnyViewMap::WorkloadLifecycle(_)
-                        | AnyViewMap::ServiceMapHydrator(_) => {
-                            BackendDiscoveryBridgeView::default()
-                        }
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::ServiceLifecycle(_) => BackendDiscoveryBridgeView::default(),
                     }
                 };
                 if current == view {
@@ -599,6 +625,47 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::BackendDiscoveryBridge(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            // service-health-check-probes step 01-03b — Eq-diff skip
+            // + fsync-then-memory write-through, mirrors the
+            // BackendDiscoveryBridge arm above. ADR-0055 / ADR-0035 §5.
+            AnyReconcilerView::ServiceLifecycle(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::ServiceLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_) => ServiceLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::ServiceLifecycle(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -654,7 +721,8 @@ impl ReconcilerRuntime {
             AnyViewMap::WorkloadLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
         }
     }
 
@@ -728,7 +796,8 @@ impl ReconcilerRuntime {
             AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
             AnyViewMap::Unit
             | AnyViewMap::WorkloadLifecycle(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
         }
     }
 
@@ -781,7 +850,8 @@ impl ReconcilerRuntime {
             AnyViewMap::BackendDiscoveryBridge(map) => Some(map.clone()),
             AnyViewMap::Unit
             | AnyViewMap::WorkloadLifecycle(_)
-            | AnyViewMap::ServiceMapHydrator(_) => None,
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
         }
     }
 
@@ -1104,7 +1174,13 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // ADR-0035 / Persist inputs); it does not carry a
         // backoff-pending signal, so this arm returns false. A future
         // bridge-side retry policy would extend this match.
-        | AnyReconcilerView::BackendDiscoveryBridge(_) => false,
+        | AnyReconcilerView::BackendDiscoveryBridge(_)
+        // service-health-check-probes step 01-03b — the
+        // ServiceLifecycle view carries probe-counter inputs only;
+        // restart-backoff arithmetic for the Service kind is recomputed
+        // per tick against the live spec policy, not signalled at the
+        // runtime-tick layer.
+        | AnyReconcilerView::ServiceLifecycle(_) => false,
         AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
@@ -1210,6 +1286,15 @@ async fn hydrate_desired(
                     },
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
+        }
+        // service-health-check-probes step 01-03b — dispatch wiring
+        // only. Production hydrate (reading `ServiceSpec` for the
+        // intent side + `alloc_status_rows` + `probe_result` LWW
+        // projection) lands in a later slice when the reconciler is
+        // wired into the runtime registration call path. The
+        // dispatch-enum arm IS the slice 01-03b deliverable.
+        AnyReconciler::ServiceLifecycle(_) => {
+            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState::default()))
         }
     }
 }
@@ -1578,6 +1663,11 @@ async fn hydrate_actual(
                     },
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
+        }
+        // service-health-check-probes step 01-03b — dispatch wiring
+        // only (see the `hydrate_desired` arm above for the rationale).
+        AnyReconciler::ServiceLifecycle(_) => {
+            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState::default()))
         }
     }
 }
