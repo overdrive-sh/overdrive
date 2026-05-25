@@ -56,6 +56,7 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
@@ -107,6 +108,11 @@ struct PeerState {
     /// One row per service carrying the full current backend set.
     /// GH #160.
     by_service_backends: Mutex<BTreeMap<ServiceId, ServiceBackendRow>>,
+    /// `probe_results` LWW index — keyed on `(alloc_id, probe_idx)`
+    /// per ADR-0054 §5. One row per `(alloc_id, probe_idx)` carrying
+    /// the latest observed outcome; LWW resolution on
+    /// `last_observed_at_unix_ms`.
+    by_probe_results: Mutex<BTreeMap<(AllocationId, ProbeIdx), ProbeResultRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Test-only FIFO of write failures to inject. Each call to
     /// [`SimObservationStore::write`] pops the front entry; when the
@@ -125,6 +131,7 @@ impl PeerState {
             by_node: Mutex::new(HashMap::new()),
             by_service_hydration: Mutex::new(BTreeMap::new()),
             by_service_backends: Mutex::new(BTreeMap::new()),
+            by_probe_results: Mutex::new(BTreeMap::new()),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
         })
@@ -227,6 +234,36 @@ impl PeerState {
 
     fn latest_alloc_status(&self, alloc_id: &AllocationId) -> Option<AllocStatusRow> {
         self.by_alloc.lock().get(alloc_id).cloned()
+    }
+
+    /// LWW merge for `probe_results`. Keyed on `(alloc_id, probe_idx)`
+    /// per ADR-0054 §5. Strictly-dominate on
+    /// `last_observed_at_unix_ms` — equal timestamps are no-ops
+    /// (idempotent re-write).
+    fn apply_probe_result(&self, incoming: &ProbeResultRow) -> bool {
+        let key = (incoming.alloc_id.clone(), incoming.probe_idx);
+        let mut by_pr = self.by_probe_results.lock();
+        match by_pr.get(&key) {
+            None => {
+                by_pr.insert(key, incoming.clone());
+                true
+            }
+            Some(existing)
+                if incoming.last_observed_at_unix_ms > existing.last_observed_at_unix_ms =>
+            {
+                by_pr.insert(key, incoming.clone());
+                true
+            }
+            Some(_) => false,
+        }
+    }
+
+    /// Snapshot every probe-result row for a single allocation,
+    /// sorted ascending by `probe_idx`. Deterministic iteration via
+    /// the `BTreeMap` key ordering.
+    fn probe_results_for_alloc(&self, alloc_id: &AllocationId) -> Vec<ProbeResultRow> {
+        let by_pr = self.by_probe_results.lock();
+        by_pr.iter().filter(|((aid, _), _)| aid == alloc_id).map(|(_, row)| row.clone()).collect()
     }
 
     /// Snapshot every alloc-status row this peer holds as LWW winner,
@@ -401,6 +438,28 @@ impl ObservationStore for SimObservationStore {
         // row per service — keyed by `ServiceId` alone.
         let by_sb = self.inner.by_service_backends.lock();
         Ok(by_sb.get(service_id).cloned().into_iter().collect())
+    }
+
+    async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
+        // Honour the same injected-write-failure FIFO that `write`
+        // honours — probe-result writes are observation writes; the
+        // injection surface must be uniform across all observation
+        // write paths.
+        let injected = self.inner.pending_write_failures.lock().pop_front();
+        if let Some(injected) = injected {
+            return Err(injected);
+        }
+        // LWW merge — see `PeerState::apply_probe_result` for the
+        // strict-dominate rule.
+        let _accepted = self.inner.apply_probe_result(&row);
+        Ok(())
+    }
+
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<ProbeResultRow>, ObservationStoreError> {
+        Ok(self.inner.probe_results_for_alloc(alloc_id))
     }
 }
 

@@ -34,6 +34,7 @@ use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
+use crate::observation::ProbeResultRow;
 use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
@@ -988,4 +989,85 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
+    /// Write a single [`ProbeResultRow`] — the latest observed
+    /// outcome of one probe for one allocation.
+    ///
+    /// # Preconditions
+    /// - `row.alloc_id` identifies a live or terminated allocation
+    ///   this peer observes. The store does not validate referential
+    ///   integrity against the intent surface; an alloc that never
+    ///   existed produces an unreachable orphan row (acceptable —
+    ///   readers filter by alloc_id at read time).
+    /// - `row.probe_idx` matches the spec's 0-indexed probe position
+    ///   at the time of observation. The probe-runner is the only
+    ///   sanctioned writer; it never invents indices.
+    ///
+    /// # Postconditions
+    /// - On `Ok(())`, the row is durable: a subsequent
+    ///   [`Self::list_probe_results_for_alloc`] call MUST include the
+    ///   written row IFF its `last_observed_at_unix_ms` dominates the
+    ///   prior row at the composite primary key
+    ///   `(alloc_id, probe_idx)`.
+    /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
+    ///   timestamp does NOT strictly exceed the existing row's
+    ///   timestamp at the same `(alloc_id, probe_idx)` MUST NOT
+    ///   mutate state.
+    /// - The probe-result surface is per-alloc-per-probe LATEST only;
+    ///   per-tick history is NOT persisted. Per
+    ///   `.claude/rules/development.md` § "Persist inputs, not derived
+    ///   state" the renderer recomputes history from the row + the
+    ///   live spec policy.
+    ///
+    /// # Edge cases
+    /// - Concurrent writes for the same `(alloc_id, probe_idx)` with
+    ///   identical `last_observed_at_unix_ms`: the second write loses
+    ///   (strict-dominate rule). Idempotent.
+    /// - `row.status == ProbeStatus::Fail { reason }` where `reason`
+    ///   is empty: accepted as-is. The trait does not validate the
+    ///   reason string shape — the renderer handles empty strings.
+    ///
+    /// # Observable invariants
+    /// - For any `(alloc_id, probe_idx)`,
+    ///   `list_probe_results_for_alloc(alloc_id)` returns exactly one
+    ///   row per distinct `probe_idx` — the LWW winner.
+    /// - `write_probe_result` is the ONLY mutator of the probe-result
+    ///   table; no other trait method writes probe rows.
+    async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError>;
+
+    /// List every LWW-winner [`ProbeResultRow`] for the given
+    /// allocation, one row per distinct `probe_idx`.
+    ///
+    /// # Preconditions
+    /// - `alloc_id` is well-formed. The store does not validate
+    ///   existence; an allocation that has never been observed
+    ///   returns `Ok(vec![])`.
+    ///
+    /// # Postconditions
+    /// - Iteration order is deterministic — sorted ascending by
+    ///   `probe_idx` (per
+    ///   `.claude/rules/development.md` § "Ordered-collection choice"
+    ///   — `BTreeMap`-shape semantics on the underlying store).
+    /// - At most one row per distinct `probe_idx` is returned (the
+    ///   LWW winner; see [`Self::write_probe_result`]).
+    /// - The returned rows have `row.alloc_id == *alloc_id` for every
+    ///   element. The store filters at read time; the caller does
+    ///   not need to re-filter.
+    ///
+    /// # Edge cases
+    /// - No rows for `alloc_id`: returns `Ok(vec![])`, not an error.
+    /// - Malformed envelope bytes for one row: the row is skipped
+    ///   with a `tracing::warn!` event per ADR-0048 § 3
+    ///   observation-layer policy (log + skip). Convergence proceeds
+    ///   on surviving rows.
+    ///
+    /// # Observable invariants
+    /// - Calling this method has no side effects beyond an optional
+    ///   `tracing::warn!` on envelope-decode failure.
+    /// - The result reflects every write that happens-before this
+    ///   call — single-node read-after-write is strict.
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<ProbeResultRow>, ObservationStoreError>;
 }

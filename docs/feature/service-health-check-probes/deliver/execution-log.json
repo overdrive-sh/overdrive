@@ -113,6 +113,97 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-24T18:54:02Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 checkpoint commit 2fabf259; ProbeRunner + wire migration + walking-skeleton deferred to follow-up sub-steps per CLAUDE.md \u00a7 'No effort/time budget cuts' \u2014 body documents remaining work",
+      "t": "2026-05-24T19:00:30Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "RETRACTED \u2014 prior COMMIT 2fabf259 (logged 2026-05-24T19:00:30Z as PASS) covered reconciler-core only; per user directive 2026-05-25, step 01-03 is being re-sliced into 01-03a/b/c/d via nw-solution-architect; this entry retracts the 'step complete' claim \u2014 see roadmap.json post-architect-dispatch for canonical sub-step IDs",
+      "t": "2026-05-24T19:06:44Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:05:28Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:07:49Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test alone drives all dispatch-enum edits; no additional PBT unit test needed inside core/reconcilers/mod.rs",
+      "t": "2026-05-25T08:07:49Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:14:53Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:16:45Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T13:56:05Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:13:08Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:13:08Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:13:08Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:18:34Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:18:58Z"
     }
   ]
 }

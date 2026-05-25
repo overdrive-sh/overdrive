@@ -1593,6 +1593,83 @@ fn inspect_reconciler_body(source: &str, self_name: &str) -> Result<Vec<Reconcil
     Ok(violations)
 }
 
+/// Inspect a Rust source file for the Earned-Trust gate on
+/// `ProbeRunner`.
+///
+/// Confirms that `impl ProbeRunner { ... }` declares an
+/// `async fn probe(&self) -> ...` method (the sacrificial-loopback
+/// probe per ADR-0054 §7).
+///
+/// Returns `Ok(())` when the method is present; returns
+/// `Err(eyre::eyre!(...))` when the impl block exists but the
+/// method is missing, OR when no `impl ProbeRunner` block is found
+/// at all. The composition-root invocation lands in step 01-03d;
+/// THIS scanner clause is the structural defense against the
+/// method being removed.
+///
+/// Purely syntactic — no `overdrive-*` import. Per
+/// `.claude/rules/development.md` § "xtask is build / test / dev
+/// orchestration" the scanner walks `syn::parse_file` output and
+/// never compiles against the worker crate.
+///
+/// # Errors
+///
+/// Propagates any `syn::parse_file` failure as `Err`. Returns
+/// `Err` when the `impl ProbeRunner` block is missing OR present
+/// but missing the `probe` method.
+pub fn inspect_probe_runner_earned_trust_method(source: &str) -> Result<()> {
+    let parsed = syn::parse_file(source).context("parse source")?;
+    let mut found_impl = false;
+    let mut found_method = false;
+
+    for item in &parsed.items {
+        let syn::Item::Impl(item_impl) = item else { continue };
+        // Inherent impl only (no trait). `impl ProbeRunner { ... }`.
+        if item_impl.trait_.is_some() {
+            continue;
+        }
+        let syn::Type::Path(type_path) = &*item_impl.self_ty else { continue };
+        let impl_self_name =
+            type_path.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+        if impl_self_name != "ProbeRunner" {
+            continue;
+        }
+        found_impl = true;
+        for impl_item in &item_impl.items {
+            let syn::ImplItem::Fn(fn_item) = impl_item else { continue };
+            if fn_item.sig.ident == "probe" && fn_item.sig.asyncness.is_some() {
+                // Confirm the signature shape — `&self` receiver,
+                // zero non-receiver params, returns `Result<...>`.
+                let has_self_receiver = fn_item
+                    .sig
+                    .inputs
+                    .first()
+                    .is_some_and(|arg| matches!(arg, syn::FnArg::Receiver(_)));
+                let non_receiver_args = fn_item.sig.inputs.len().saturating_sub(1);
+                if has_self_receiver && non_receiver_args == 0 {
+                    found_method = true;
+                    break;
+                }
+            }
+        }
+        if found_method {
+            break;
+        }
+    }
+
+    if !found_impl {
+        bail!("could not locate `impl ProbeRunner {{ ... }}` in source");
+    }
+    if !found_method {
+        bail!(
+            "Earned-Trust gate per ADR-0054 §7 is missing: `impl ProbeRunner` \
+             must declare `async fn probe(&self) -> Result<(), ProbeRunnerError>` \
+             (no non-receiver parameters)"
+        );
+    }
+    Ok(())
+}
+
 // -----------------------------------------------------------------------------
 // Unit tests — path-matching logic
 // -----------------------------------------------------------------------------
@@ -2165,6 +2242,116 @@ mod tests {
              found {} violation(s): {:#?}",
             violations.len(),
             violations
+        );
+    }
+
+    // -------------------------------------------------------------
+    // ProbeRunner Earned-Trust gate — ADR-0054 §7 / AC #4
+    // -------------------------------------------------------------
+
+    /// Path to the real production `ProbeRunner` impl block.
+    fn probe_runner_source_path() -> std::path::PathBuf {
+        let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        crate_dir
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .join("crates/overdrive-worker/src/probe_runner/mod.rs")
+    }
+
+    /// AC #4 (a) — the scanner clause MUST pass against the real
+    /// `crates/overdrive-worker/src/probe_runner/mod.rs` source.
+    /// Failure means the Earned-Trust gate has been removed from the
+    /// runtime path; refuse to merge.
+    #[test]
+    fn earned_trust_gate_present_on_real_probe_runner_impl() {
+        let path = probe_runner_source_path();
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        inspect_probe_runner_earned_trust_method(&source)
+            .expect("real ProbeRunner impl block must declare `async fn probe(&self) -> ...`");
+    }
+
+    /// AC #4 (b) — synthetic source with `impl ProbeRunner { ... }`
+    /// but no `probe` method MUST fire the lint.
+    #[test]
+    fn earned_trust_gate_fires_when_probe_method_missing() {
+        let source = r"
+            pub struct ProbeRunner;
+            impl ProbeRunner {
+                pub fn new() -> Self { Self }
+                pub fn other_method(&self) {}
+            }
+        ";
+        let err = inspect_probe_runner_earned_trust_method(source)
+            .expect_err("missing `probe` method must fire the lint");
+        let msg = format!("{err}");
+        assert!(msg.contains("Earned-Trust"), "error names the missing gate; got {msg:?}");
+    }
+
+    /// Synthetic source with a fully-formed `impl ProbeRunner { async
+    /// fn probe(&self) -> ... }` block MUST pass.
+    #[test]
+    fn earned_trust_gate_passes_on_synthetic_clean_impl() {
+        let source = r"
+            pub struct ProbeRunner;
+            pub struct ProbeRunnerError;
+            impl ProbeRunner {
+                pub async fn probe(&self) -> Result<(), ProbeRunnerError> { Ok(()) }
+            }
+        ";
+        inspect_probe_runner_earned_trust_method(source).expect("clean synthetic impl must pass");
+    }
+
+    /// A sync (non-`async`) `probe` method on `impl ProbeRunner`
+    /// MUST NOT count as the Earned-Trust gate. The runtime invokes
+    /// `.await` on the result; a sync stub would silently bypass the
+    /// real adapter call.
+    #[test]
+    fn earned_trust_gate_rejects_sync_probe_method() {
+        let source = r"
+            pub struct ProbeRunner;
+            impl ProbeRunner {
+                pub fn probe(&self) {}  // not async — rejected
+            }
+        ";
+        let _err = inspect_probe_runner_earned_trust_method(source)
+            .expect_err("sync `probe` method must NOT satisfy the gate");
+    }
+
+    /// A `probe` method that takes extra arguments MUST NOT count as
+    /// the Earned-Trust gate. The composition-root invocation per
+    /// ADR-0054 §7 calls `runner.probe().await` with no arguments;
+    /// a parameterised signature is a different method (the
+    /// per-tick `probe_once_and_record`).
+    #[test]
+    fn earned_trust_gate_rejects_parameterised_probe_method() {
+        let source = r"
+            pub struct ProbeRunner;
+            impl ProbeRunner {
+                pub async fn probe(&self, host: &str) {}
+            }
+        ";
+        let _err = inspect_probe_runner_earned_trust_method(source)
+            .expect_err("parameterised `probe` method must NOT satisfy the gate");
+    }
+
+    /// Source with no `impl ProbeRunner` block at all surfaces an
+    /// `Err` rather than silently passing — defends against the
+    /// "renamed the type" failure mode.
+    #[test]
+    fn earned_trust_gate_errors_when_impl_block_absent() {
+        let source = r"
+            pub struct SomeOtherType;
+            impl SomeOtherType {
+                pub async fn probe(&self) {}
+            }
+        ";
+        let err = inspect_probe_runner_earned_trust_method(source)
+            .expect_err("missing impl ProbeRunner block must fire the lint");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("impl ProbeRunner"),
+            "error names the missing impl block; got {msg:?}"
         );
     }
 }

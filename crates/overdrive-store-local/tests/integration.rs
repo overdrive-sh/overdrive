@@ -33,5 +33,6 @@ mod integration {
     mod envelope_walking_skeleton;
     mod lww_conformance;
     mod observation_backend_proptest;
+    mod probe_result_roundtrip;
     mod snapshot_proptest;
 }
