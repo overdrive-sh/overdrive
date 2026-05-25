@@ -164,7 +164,6 @@ struct LiveAllocation {
 /// `Driver::start` returns `DriverError::StartRejected`.
 #[derive(Clone)]
 pub struct ExecDriver {
-    cgroup_root: PathBuf,
     /// Port-routed cgroupfs surface, constructed once at
     /// [`ExecDriver::new`] from the injected `fs: Arc<dyn CgroupFs>`
     /// and the shared `cgroup_root`. Every filesystem mutation in
@@ -222,7 +221,7 @@ pub struct ExecDriver {
 impl std::fmt::Debug for ExecDriver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecDriver")
-            .field("cgroup_root", &self.cgroup_root)
+            .field("cgroup_root", &self.cgroup_manager.cgroup_root())
             .field("stop_grace", &self.stop_grace)
             .field("force_limit_write_failure", &self.force_limit_write_failure)
             .finish_non_exhaustive()
@@ -255,9 +254,8 @@ impl ExecDriver {
     #[must_use]
     pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
-        let cgroup_manager = CgroupManager::new(cgroup_root.clone(), fs);
+        let cgroup_manager = CgroupManager::new(cgroup_root, fs);
         Self {
-            cgroup_root,
             cgroup_manager,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,

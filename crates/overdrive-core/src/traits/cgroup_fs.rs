@@ -220,10 +220,14 @@ pub trait CgroupFs: Send + Sync + 'static {
     /// - [`ProbeError::Substrate`] — the substrate itself returned an
     ///   [`std::io::Error`] at one of the four probe steps.
     /// - [`ProbeError::RoundTripMismatch`] — the substrate completed
-    ///   the write but the read-back yielded different bytes. This is
-    ///   the failure mode Earned Trust specifically defends against
-    ///   (Docker overlayfs `fsync` no-op, WSL2 DrvFs caching, tmpfs
-    ///   eviction).
+    ///   the write but the read-back yielded different bytes. Only
+    ///   produced by `SimCgroupFs` fault-injection (see
+    ///   [`inject_round_trip_mismatch()`]); the production adapter
+    ///   cannot produce this variant because `cgroup.subtree_control`
+    ///   read-back is kernel-canonicalised. Substrate dishonesty that
+    ///   produces valid-UTF-8 read-backs (e.g. Docker overlayfs with
+    ///   a no-op `fsync`) is outside the production probe's detection
+    ///   envelope.
     /// - [`ProbeError::SubstrateCorrupt`] — the substrate returned
     ///   bytes that are not valid UTF-8. cgroupfs pseudo-files are
     ///   kernel-generated text; non-UTF-8 indicates corruption,
@@ -264,10 +268,19 @@ pub enum ProbeError {
     },
 
     /// Probe succeeded structurally but the round-trip assertion
-    /// failed (bytes written did not match bytes read back). Indicates
-    /// the substrate is lying about the write — the failure mode
-    /// Earned Trust specifically defends against (Docker overlayfs
-    /// `fsync` no-op, WSL2 DrvFs caching, tmpfs eviction).
+    /// failed (bytes written did not match bytes read back).
+    ///
+    /// **Only reachable from `SimCgroupFs`** via
+    /// [`inject_round_trip_mismatch()`]. The production adapter
+    /// (`RealCgroupFs`) probes `cgroup.subtree_control`, where the
+    /// kernel canonicalises the read-back to the current controller
+    /// list — byte-equality with the written payload is structurally
+    /// impossible to assert, so the production probe checks UTF-8
+    /// validity only and never produces this variant.
+    ///
+    /// The variant exists so that DST can exercise the composition
+    /// root's "refuse to start on dishonest substrate" path without
+    /// requiring a real misbehaving filesystem.
     #[error("CgroupFs probe round-trip mismatch: wrote {wrote:?}, read {read:?}")]
     RoundTripMismatch { wrote: Vec<u8>, read: Vec<u8> },
 
