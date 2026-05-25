@@ -164,4 +164,24 @@ mod tests {
         let rendered = connect_error_to_reason(&err, Duration::from_secs(5));
         assert!(rendered.starts_with("dns: "), "expected DNS-shaped reason, got: {rendered:?}");
     }
+
+    /// Kill the match-guard mutant on line 100: an `ErrorKind::Other`
+    /// whose message does NOT contain "failed to lookup address" must
+    /// fall through to the catch-all arm and render as
+    /// `"connect failed: ..."` — not as the DNS arm. When the match
+    /// guard is replaced with `true` (cargo-mutants), every `Other`
+    /// error routes to the DNS arm and this assertion flips red.
+    #[test]
+    fn other_io_error_without_dns_message_does_not_map_to_dns_reason() {
+        let err = io::Error::other("some other failure");
+        let rendered = connect_error_to_reason(&err, Duration::from_secs(5));
+        assert!(
+            !rendered.starts_with("dns: "),
+            "expected non-DNS reason for generic Other error, got: {rendered:?}"
+        );
+        assert!(
+            rendered.starts_with("connect failed: "),
+            "expected catch-all `connect failed:` prefix, got: {rendered:?}"
+        );
+    }
 }
