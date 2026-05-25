@@ -13,6 +13,7 @@ use std::time::Duration;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{ProbeOutcome, TcpProber};
 use overdrive_sim::adapters::clock::SimClock;
@@ -186,5 +187,151 @@ async fn given_sim_tcp_prober_fail_when_earned_trust_then_returns_typed_error() 
     assert!(
         msg.contains("earned-trust-injected"),
         "underlying reason propagates into the typed error; got: {msg:?}"
+    );
+}
+
+/// Mutation-kill (01-03c follow-on): `ProbeRunner::stop_alloc` must
+/// remove the supervisor entry AND cooperatively cancel any tasks
+/// derived from its `CancellationToken`. Replacing the body with
+/// `()` (mutant `stop_alloc` body deleted) leaves the supervisor map
+/// populated AND leaves the child token uncancelled — both
+/// observable through `active_alloc_count` and through the token's
+/// `is_cancelled` surface.
+///
+/// Also pins the `active_alloc_count` exact-count contract across
+/// a 0→1→2→1→0 sequence, killing mutants that replace the body with
+/// the constant `0` or `1` (both of which fail at distinct points in
+/// the sequence).
+#[tokio::test]
+async fn register_and_stop_alloc_lifecycle_drives_active_count_and_cancels_children() {
+    let tcp = Arc::new(SimTcpProber::new());
+    let runner =
+        ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
+
+    // Universe slot: active_alloc_count starts at 0.
+    // Mutant `active_alloc_count -> 1` fails here.
+    assert_eq!(runner.active_alloc_count(), 0, "no allocs registered yet");
+
+    let alloc_a = alloc_id("alloc-lifecycle-a");
+    let alloc_b = alloc_id("alloc-lifecycle-b");
+
+    // Register first alloc. Capture the child token so we can
+    // observe the cooperative-shutdown propagation later.
+    let token_a = runner.register_alloc(&alloc_a);
+    assert!(!token_a.is_cancelled(), "freshly-registered alloc's token is live");
+    // Mutant `active_alloc_count -> 0` fails here.
+    assert_eq!(runner.active_alloc_count(), 1, "one supervisor live after first register");
+
+    // Register a second, distinct alloc.
+    let token_b = runner.register_alloc(&alloc_b);
+    assert!(!token_b.is_cancelled(), "second alloc's token is live");
+    // Mutants `active_alloc_count -> 0` AND `active_alloc_count -> 1`
+    // both fail here — the count must be exactly 2.
+    assert_eq!(runner.active_alloc_count(), 2, "two distinct supervisors live");
+
+    // Re-registering an existing alloc is idempotent (per the
+    // production docstring). Count must not advance.
+    let token_a_again = runner.register_alloc(&alloc_a);
+    assert!(!token_a_again.is_cancelled(), "re-registered token is the same live token");
+    assert_eq!(runner.active_alloc_count(), 2, "re-register does not double-count");
+
+    // Stop the first alloc. Mutant `stop_alloc` body deleted (`()`)
+    // would leave the supervisor in the map AND leave token_a
+    // uncancelled — both assertions below fail under that mutant.
+    runner.stop_alloc(&alloc_a);
+    assert_eq!(runner.active_alloc_count(), 1, "stop_alloc removed alloc-a from the map");
+    assert!(
+        token_a.is_cancelled(),
+        "stop_alloc cooperatively cancels the alloc's root token (and every child clone)"
+    );
+    assert!(!token_b.is_cancelled(), "stop_alloc must not affect a sibling alloc's token");
+
+    // Stop is idempotent — calling on an absent alloc is a no-op.
+    runner.stop_alloc(&alloc_a);
+    assert_eq!(runner.active_alloc_count(), 1, "idempotent stop on already-stopped alloc");
+
+    // After stop_alloc, re-registering the same id must yield a
+    // FRESH (live) token — the prior entry must have been removed.
+    // The mutant `stop_alloc -> ()` leaves the old entry in place,
+    // so `register_alloc` would return the OLD (already-cancelled)
+    // token, failing the assertion below.
+    let token_a_fresh = runner.register_alloc(&alloc_a);
+    assert!(
+        !token_a_fresh.is_cancelled(),
+        "re-registering after stop_alloc returns a fresh, uncancelled token"
+    );
+    assert_eq!(runner.active_alloc_count(), 2, "re-register after stop reinstates the supervisor");
+
+    // Tear down both. Mutant `active_alloc_count -> 1` fails at the
+    // final assertion (count must reach exactly 0).
+    runner.stop_alloc(&alloc_a);
+    runner.stop_alloc(&alloc_b);
+    assert!(token_b.is_cancelled(), "second alloc's token cancelled by its stop_alloc");
+    assert_eq!(runner.active_alloc_count(), 0, "all supervisors removed");
+}
+
+/// Mutation-kill (01-03c follow-on): `unix_ms_from_clock` reads the
+/// injected `Clock::unix_now()` and converts to `u64` milliseconds.
+/// Mutants that replace the body with the constant `0` or `1` corrupt
+/// the `ProbeResultRow.last_observed_at_unix_ms` field that operators
+/// and downstream reconcilers consume.
+///
+/// Universe slot: returned `row.last_observed_at_unix_ms` MUST equal
+/// the clock's `unix_now().as_millis() as u64`. Pinning against the
+/// clock-derived value (not just `> 0`) kills BOTH constant-body
+/// mutants — the real value at runtime is the current UNIX epoch in
+/// ms (≈ 1.78×10^12), which is neither 0 nor 1.
+#[tokio::test]
+async fn observed_at_unix_ms_pins_to_injected_clock_value() {
+    let tcp = Arc::new(SimTcpProber::new());
+    tcp.enqueue_outcome(ProbeOutcome::Pass);
+    let runner =
+        ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
+
+    // Clone the SimClock so the test and the SUT share the same
+    // logical-time counter. SimClock returns `unix_epoch + elapsed()`;
+    // elapsed only advances via `tick`. Neither side calls `tick`
+    // during the probe, so the value is stable across the read in
+    // the test and the read inside `probe_once_and_record`.
+    let clock = SimClock::default();
+    let expected_ms = u64::try_from(clock.unix_now().as_millis())
+        .expect("unix_now in ms fits in u64 for the next 580M years");
+    // Defence in depth: assert the test fixture itself produces a
+    // value that distinguishes the {0,1} mutants from the real one.
+    // If this ever fires, the SimClock semantics changed and the
+    // test needs to advance the clock explicitly.
+    assert!(
+        expected_ms > 1,
+        "test precondition: SimClock unix_now must exceed the 0/1 mutant constants; got {expected_ms}"
+    );
+
+    let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);
+    let alloc = alloc_id("alloc-clock-pin");
+    let descriptor = descriptor_tcp("127.0.0.1", 8080);
+
+    let row = runner
+        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, &clock, &obs)
+        .await
+        .expect("probe succeeds");
+
+    // Returned row carries the clock-derived timestamp byte-equal.
+    // Mutant `unix_ms_from_clock -> 0` fails (row.last_observed = 0
+    // ≠ expected_ms).
+    // Mutant `unix_ms_from_clock -> 1` fails (row.last_observed = 1
+    // ≠ expected_ms).
+    assert_eq!(
+        row.last_observed_at_unix_ms, expected_ms,
+        "row.last_observed_at_unix_ms must equal clock.unix_now().as_millis() (byte-equal, not just > 0)"
+    );
+
+    // STATE-DELTA: the stored row carries the same clock-pinned
+    // value (no silent transformation between in-memory return and
+    // observation-store write).
+    let stored =
+        obs.list_probe_results_for_alloc(&alloc).await.expect("list probe results after probe");
+    assert_eq!(stored.len(), 1, "exactly one probe-result row written");
+    assert_eq!(
+        stored[0].last_observed_at_unix_ms, expected_ms,
+        "stored row's last_observed_at_unix_ms is the clock-derived value, unchanged"
     );
 }
