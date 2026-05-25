@@ -309,6 +309,7 @@ fn sample_spec() -> AllocationSpec {
         command: "registry/payments:1.0".to_owned(),
         args: vec![],
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     }
 }
 

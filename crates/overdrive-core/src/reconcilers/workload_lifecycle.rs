@@ -558,6 +558,10 @@ impl WorkloadLifecycle {
                             command: command.clone(),
                             args: args.clone(),
                             resources: job.resources,
+                            // Per ADR-0054 §3: Job-kind workloads
+                            // carry no probes; ProbeRunner subsystem
+                            // is a Service-kind concern. Empty Vec.
+                            probe_descriptors: Vec::new(),
                         },
                         kind: desired.workload_kind,
                     };
@@ -626,6 +630,9 @@ impl WorkloadLifecycle {
                                 command: command.clone(),
                                 args: args.clone(),
                                 resources: job.resources,
+                                // Per ADR-0054 §3: Job-kind workloads
+                                // carry no probes; empty Vec.
+                                probe_descriptors: Vec::new(),
                             },
                             kind: desired.workload_kind,
                         };

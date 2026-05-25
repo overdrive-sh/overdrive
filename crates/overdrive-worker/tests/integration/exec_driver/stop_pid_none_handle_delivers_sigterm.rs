@@ -58,6 +58,7 @@ async fn stop_with_pid_none_handle_still_delivers_sigterm() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     // Start the allocation but intentionally discard the returned handle,

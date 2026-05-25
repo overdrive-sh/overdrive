@@ -88,6 +88,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
             "for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait".to_string(),
         ],
         resources: Resources { cpu_milli: 1000, memory_bytes: 256 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
     let handle = driver.start(&spec).await.expect("driver.start cpu-burner");
 

@@ -516,6 +516,13 @@ async fn dispatch_single(
                 prior_row.kind,
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+            // Service-health-check-probes step 01-03d / ADR-0054 § 2:
+            // FinalizeFailed is a terminal claim (BackoffExhausted /
+            // Completed / Failed) — fire the terminal lifecycle hook
+            // so any probe supervisor spawned earlier in the alloc's
+            // lifetime is cleaned up. Default no-op when no
+            // ProbeRunner is wired.
+            driver.on_alloc_terminal(&row.alloc_id);
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -603,6 +610,12 @@ async fn dispatch_single(
                 if let Some(handle) = &handle_opt {
                     driver.release_for_exit_emission(handle);
                 }
+                // Service-health-check-probes step 01-03d / ADR-0054
+                // § 2: fire the lifecycle hook so the driver can
+                // dispatch to its configured `ProbeRunner`. Default
+                // no-op for SimDriver and any driver wired without
+                // a probe runner.
+                driver.on_alloc_running(&spec);
             }
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
@@ -697,6 +710,9 @@ async fn dispatch_single(
                 if let Some(handle) = &handle_opt {
                     driver.release_for_exit_emission(handle);
                 }
+                // Service-health-check-probes step 01-03d / ADR-0054
+                // § 2: symmetric with the StartAllocation arm above.
+                driver.on_alloc_running(&spec);
             }
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
@@ -755,6 +771,14 @@ async fn dispatch_single(
                 prior_row.kind,
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+            // Service-health-check-probes step 01-03d / ADR-0054 § 2:
+            // fire the terminal lifecycle hook so the driver can
+            // cancel every per-probe task spawned under this
+            // alloc's supervisor. Default no-op for drivers wired
+            // without a `ProbeRunner`. We use `row.alloc_id` rather
+            // than the moved `alloc_id` binding because the latter
+            // was consumed by `build_alloc_status_row` above.
+            driver.on_alloc_terminal(&row.alloc_id);
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }

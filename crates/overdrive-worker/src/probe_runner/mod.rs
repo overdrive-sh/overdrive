@@ -241,6 +241,43 @@ impl ProbeRunner {
         supervisors.entry(alloc_id.clone()).or_default().token()
     }
 
+    /// Lifecycle hook called by the worker driver's
+    /// `on_alloc_running` callback when an allocation reaches the
+    /// `Running` state. Hands the validated probe descriptors to
+    /// the per-alloc supervisor.
+    ///
+    /// Per ADR-0054 § 3: the descriptors are carried on
+    /// [`overdrive_core::traits::driver::AllocationSpec`] and
+    /// projected from the reconciler-emitted action through the
+    /// action shim into the driver's
+    /// `on_alloc_running` hook. Phase-1 Job-kind workloads pass an
+    /// empty `Vec`; Service-kind workloads project from
+    /// `ServiceSpec.health_check` per ADR-0057.
+    ///
+    /// Idempotent: re-calling against the same `alloc_id` returns
+    /// the existing supervisor's token without restarting tasks.
+    /// The per-probe task spawn body lands in slice 02 / 03 — Phase
+    /// 1 only wires the lifecycle plumbing; the descriptors are
+    /// retained on the supervisor for future per-tick loop bodies.
+    ///
+    /// `_probe_descriptors` is the descriptor list the supervisor
+    /// will eventually iterate; today (Phase 1 Job-kind workloads)
+    /// it is always empty. The parameter shape is load-bearing for
+    /// the [`overdrive_core::traits::driver::Driver::on_alloc_running`]
+    /// trait surface even when the body is structurally a wire-
+    /// through to [`Self::register_alloc`].
+    pub fn start_alloc(
+        &self,
+        alloc_id: &AllocationId,
+        _probe_descriptors: Vec<ProbeDescriptor>,
+    ) -> CancellationToken {
+        // Phase 1 wiring: register a supervisor and return its
+        // token. The per-probe task spawn body (which would iterate
+        // `_probe_descriptors` and spawn one task per descriptor)
+        // lands in slice 02 / 03 per the roadmap.
+        self.register_alloc(alloc_id)
+    }
+
     /// Cancel every probe task spawned under `alloc_id` and drop the
     /// per-alloc supervisor. Cooperative shutdown only — task bodies
     /// observe the cancellation on their next `select!` round and

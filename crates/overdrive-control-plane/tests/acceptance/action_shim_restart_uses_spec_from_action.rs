@@ -128,6 +128,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         command: "/opt/x/y".to_string(),
         args: vec!["--mode=fast".to_string()],
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
     let action = Action::RestartAllocation {
         alloc_id,

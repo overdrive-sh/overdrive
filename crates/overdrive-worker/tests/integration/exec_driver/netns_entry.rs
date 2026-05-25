@@ -143,6 +143,7 @@ async fn exec_driver_with_netns_path_spawns_child_inside_target_netns() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     let handle = driver
@@ -197,6 +198,7 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     let err = driver.start(&spec).await.expect_err("start must fail for missing netns_path");

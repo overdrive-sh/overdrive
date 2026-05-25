@@ -175,6 +175,7 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         command: "/bin/true".to_owned(),
         args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     }
 }
 

@@ -142,6 +142,7 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
             "for i in 1 2 3 4 5 6 7; do echo \"ERR $i\" >&2; done; exit 1".to_owned(),
         ],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     let handle = driver_dyn.start(&spec).await.expect("ExecDriver::start succeeds");

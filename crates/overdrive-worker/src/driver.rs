@@ -216,6 +216,14 @@ pub struct ExecDriver {
     /// production code per `.claude/rules/testing.md` § Sources of
     /// Nondeterminism.
     clock: Arc<dyn Clock>,
+    /// Optional `ProbeRunner` reference. Production composition
+    /// root threads this in via [`Self::with_probe_runner`] so the
+    /// driver's [`Driver::on_alloc_running`] / [`Driver::on_alloc_terminal`]
+    /// hooks can dispatch to `probe_runner.start_alloc` /
+    /// `probe_runner.stop_alloc` per ADR-0054 § 2. `None` (the
+    /// default) yields a no-op hook — used by acceptance tests that
+    /// do not exercise the probe path.
+    probe_runner: Option<Arc<crate::probe_runner::ProbeRunner>>,
 }
 
 impl std::fmt::Debug for ExecDriver {
@@ -264,7 +272,27 @@ impl ExecDriver {
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
             clock,
+            probe_runner: None,
         }
+    }
+
+    /// Thread a `ProbeRunner` reference into the driver so the
+    /// `Driver::on_alloc_running` / `Driver::on_alloc_terminal`
+    /// lifecycle hooks dispatch to it. Production composition root
+    /// wires this in via the builder; tests that don't exercise
+    /// probes leave the field as `None` (default no-op hooks).
+    ///
+    /// Per ADR-0054 § 2 + § 3: the hooks are the structural seam
+    /// between the action-shim's `obs.write(Running)` /
+    /// `obs.write(Terminated)` writes and the `ProbeRunner` per-alloc
+    /// supervisor lifecycle.
+    #[must_use]
+    pub fn with_probe_runner(
+        mut self,
+        probe_runner: Arc<crate::probe_runner::ProbeRunner>,
+    ) -> Self {
+        self.probe_runner = Some(probe_runner);
+        self
     }
 
     /// Target every spawned child at `netns_path` (typically
@@ -741,6 +769,34 @@ impl Driver for ExecDriver {
         }
         // Unknown alloc OR gate already fired: no-op per the
         // idempotent-fire contract.
+    }
+
+    /// Per ADR-0054 § 2 / § 3: when the action shim observes a
+    /// successful `Driver::start` and writes the
+    /// `AllocStatusRow { state: Running, .. }` row, it fires this
+    /// hook with the same `AllocationSpec` it handed to `start`.
+    /// The driver projects `spec.probe_descriptors` (validated
+    /// upstream per ADR-0057) into a `start_alloc` call on the
+    /// configured `ProbeRunner`. Drivers wired without a
+    /// `ProbeRunner` (acceptance tests, sim wiring) inherit the
+    /// trait's default no-op via the `None` arm below.
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        if let Some(ref runner) = self.probe_runner {
+            let _token = runner.start_alloc(&spec.alloc, spec.probe_descriptors.clone());
+        }
+    }
+
+    /// Symmetric companion to [`Self::on_alloc_running`]. Fired by
+    /// the action shim immediately after the terminal
+    /// `AllocStatusRow` write commits. Dispatches to
+    /// `probe_runner.stop_alloc(alloc_id)` so every per-probe task
+    /// spawned under this allocation's supervisor is cooperatively
+    /// shut down — no `JoinHandle::abort()` per
+    /// `.claude/rules/testing.md` § cooperative-shutdown discipline.
+    fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
+        if let Some(ref runner) = self.probe_runner {
+            runner.stop_alloc(alloc_id);
+        }
     }
 }
 

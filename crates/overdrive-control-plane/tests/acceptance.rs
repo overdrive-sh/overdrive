@@ -169,6 +169,9 @@ mod acceptance {
     //   * Slice 05 (US-05 / K3): liveness → RestartAllocation
     //   * Cross-cutting: reconcile-fn purity + View-no-derived-state
     //   * Wire shape: ServiceSubmitEvent::Stable / Failed serde roundtrip
+    /// Service-health-check-probes step 01-03d — composition-root
+    /// `ProbeRunner` Earned-Trust gate per ADR-0054 § 7.
+    mod probe_runner_boot_gate;
     mod service_lifecycle_liveness;
     mod service_lifecycle_purity;
     mod service_lifecycle_readiness;

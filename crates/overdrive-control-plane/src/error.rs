@@ -435,8 +435,61 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     VipAllocator(#[from] overdrive_dataplane::allocators::PersistentAllocatorError),
 
+    /// Service-health-check-probes ProbeRunner Earned-Trust gate
+    /// failure per ADR-0054 § 7. Pass-through embedding so the
+    /// composition root / CLI can branch on
+    /// `matches!(e, ControlPlaneError::ProbeRunnerBoot(_))` for
+    /// structured startup diagnostics — and so the typed inner
+    /// `ProbeRunnerError` is preserved through to `to_response`
+    /// rather than stringified through
+    /// [`ControlPlaneError::Internal`]. Same boot-path shape as
+    /// `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the
+    /// listener binds; the structured `health.startup.refused`
+    /// event fires at the call site that converts the typed error
+    /// into this variant.
+    #[error(transparent)]
+    ProbeRunnerBoot(#[from] ProbeRunnerBootError),
+
     #[error("internal: {0}")]
     Internal(String),
+}
+
+/// Service-health-check-probes ProbeRunner Earned-Trust boot
+/// failure per ADR-0054 § 7. Wraps the typed `ProbeRunnerError`
+/// surfaced by [`overdrive_worker::probe_runner::ProbeRunner::probe`]
+/// so the composition root can convert via `#[from]` rather than
+/// stringifying through [`ControlPlaneError::Internal`] (which
+/// would destroy the structured variant fidelity per
+/// `.claude/rules/development.md` § "Distinct failure modes get
+/// distinct error variants").
+#[derive(Debug, Error)]
+pub enum ProbeRunnerBootError {
+    /// The sacrificial-loopback probe configured on the
+    /// `ProbeRunner` did not return Pass. Indicates the TCP
+    /// adapter is wired but unable to complete a basic round-trip
+    /// against `127.0.0.1` — typically because (a) the loopback
+    /// interface is down, (b) the sim adapter was given a
+    /// pre-enqueued Fail outcome (acceptance-test injection), or
+    /// (c) a probe-adapter regression has broken the connect path.
+    #[error(
+        "ProbeRunner Earned-Trust probe failed — the sacrificial \
+         loopback probe configured at composition root did not \
+         return Pass. The TCP probe adapter is wired but cannot \
+         complete a round-trip against 127.0.0.1; subsequent probe \
+         dispatches would silently misclassify every workload.\n\
+         \n\
+         Try:\n\
+           - `ip link show lo` to verify the loopback interface is up.\n\
+           - `ss -tlnp` to inspect listening sockets on this host.\n\
+         \n\
+         Underlying: {source}"
+    )]
+    Probe {
+        /// Underlying `ProbeRunnerError` from
+        /// `ProbeRunner::probe`.
+        #[source]
+        source: overdrive_worker::probe_runner::ProbeRunnerError,
+    },
 }
 
 impl ControlPlaneError {
@@ -599,6 +652,16 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
                 ),
             }
         }
+        ControlPlaneError::ProbeRunnerBoot(e) => (
+            // Same shape as `DataplaneBoot` above: probe-gate
+            // failures happen BEFORE the listener binds. The
+            // composition root branches on the typed variant
+            // (`matches!(e, ProbeRunnerBoot(_))`) to emit
+            // `health.startup.refused` per ADR-0054 § 7; this arm
+            // exists only for enum exhaustiveness.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: msg, field: None },
