@@ -1094,3 +1094,172 @@ mod classify_exit_tests {
         assert_eq!(kind, ExitKind::CleanExit);
     }
 }
+
+/// Service-health-check-probes step 01-03d — observable-outcome
+/// unit tests for the new `on_alloc_running` / `on_alloc_terminal`
+/// lifecycle hooks per ADR-0054 § 2 / § 3.
+///
+/// Asserts: when an [`ExecDriver`] is constructed with a
+/// `ProbeRunner` via [`ExecDriver::with_probe_runner`], the
+/// lifecycle hooks dispatch through to
+/// `probe_runner.start_alloc` / `probe_runner.stop_alloc`. The
+/// observable effect is `ProbeRunner::active_alloc_count` —
+/// before the hooks fire it is 0; after `on_alloc_running` it is
+/// 1; after `on_alloc_terminal` it is back to 0.
+///
+/// Mutation kill: these tests kill the per-method mutants
+/// `<impl Driver for ExecDriver>::on_alloc_running → ()` and
+/// `<impl Driver for ExecDriver>::on_alloc_terminal → ()` —
+/// without the dispatch the supervisor-count delta would not
+/// appear.
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod lifecycle_hook_tests {
+    use std::path::PathBuf;
+    use std::str::FromStr as _;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use overdrive_core::SpiffeId;
+    use overdrive_core::aggregate::probe_descriptor::ProbeDescriptor;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::driver::{AllocationSpec, Driver as _, Resources};
+    use overdrive_core::traits::prober::{
+        ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
+    };
+
+    use super::ExecDriver;
+    use crate::probe_runner::ProbeRunner;
+
+    // Minimal sim TCP prober that returns Pass for everything.
+    // (We don't use overdrive_sim here to avoid the dev-dep cycle.)
+    struct AlwaysPassTcpProber;
+
+    #[async_trait]
+    impl TcpProber for AlwaysPassTcpProber {
+        async fn probe(
+            &self,
+            _host: &str,
+            _port: u16,
+            _timeout: Duration,
+        ) -> Result<ProbeOutcome, ProbeFailure> {
+            Ok(ProbeOutcome::Pass)
+        }
+    }
+
+    struct UnusedHttpProber;
+
+    #[async_trait]
+    impl HttpProber for UnusedHttpProber {
+        async fn probe(
+            &self,
+            _url: &str,
+            _timeout: Duration,
+        ) -> Result<ProbeOutcome, ProbeFailure> {
+            Ok(ProbeOutcome::Pass)
+        }
+    }
+
+    struct UnusedExecProber;
+
+    #[async_trait]
+    impl ExecProber for UnusedExecProber {
+        async fn probe(
+            &self,
+            _command: &[String],
+            _cgroup_path: &str,
+            _timeout: Duration,
+        ) -> Result<ProbeOutcome, ProbeFailure> {
+            Ok(ProbeOutcome::Pass)
+        }
+    }
+
+    // Stub clock — never called for hook dispatch tests but
+    // required by ExecDriver::new. Wall-clock methods return
+    // synthetic zeroes; `sleep` is unreachable on this path.
+    struct ZeroClock;
+
+    #[async_trait]
+    impl Clock for ZeroClock {
+        fn now(&self) -> std::time::Instant {
+            std::time::Instant::now()
+        }
+        fn unix_now(&self) -> Duration {
+            Duration::ZERO
+        }
+        async fn sleep(&self, _: Duration) {
+            // Not exercised by the lifecycle-hook dispatch path.
+        }
+    }
+
+    fn build_driver_with_runner() -> (ExecDriver, Arc<ProbeRunner>) {
+        let runner = Arc::new(ProbeRunner::new(
+            Arc::new(AlwaysPassTcpProber),
+            Arc::new(UnusedHttpProber),
+            Arc::new(UnusedExecProber),
+        ));
+        let driver = ExecDriver::new(PathBuf::from("/tmp/overdrive-test"), Arc::new(ZeroClock))
+            .with_probe_runner(Arc::clone(&runner));
+        (driver, runner)
+    }
+
+    fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
+        AllocationSpec {
+            alloc: alloc_id.clone(),
+            identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
+                .expect("valid SpiffeId"),
+            command: "/bin/true".to_owned(),
+            args: vec![],
+            resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+            probe_descriptors: Vec::<ProbeDescriptor>::new(),
+        }
+    }
+
+    #[test]
+    fn on_alloc_running_registers_supervisor_on_probe_runner() {
+        let (driver, runner) = build_driver_with_runner();
+        let alloc_id = AllocationId::new("alloc-run-1").expect("valid AllocationId");
+        let spec = sample_spec(&alloc_id);
+
+        assert_eq!(runner.active_alloc_count(), 0);
+        driver.on_alloc_running(&spec);
+        assert_eq!(
+            runner.active_alloc_count(),
+            1,
+            "on_alloc_running must register an alloc supervisor on the wired ProbeRunner"
+        );
+    }
+
+    #[test]
+    fn on_alloc_terminal_cancels_supervisor_on_probe_runner() {
+        let (driver, runner) = build_driver_with_runner();
+        let alloc_id = AllocationId::new("alloc-term-1").expect("valid AllocationId");
+        let spec = sample_spec(&alloc_id);
+
+        driver.on_alloc_running(&spec);
+        assert_eq!(runner.active_alloc_count(), 1);
+
+        driver.on_alloc_terminal(&alloc_id);
+        assert_eq!(
+            runner.active_alloc_count(),
+            0,
+            "on_alloc_terminal must cancel the alloc's supervisor on the wired ProbeRunner"
+        );
+    }
+
+    #[test]
+    fn on_alloc_running_without_probe_runner_is_a_noop() {
+        // Driver constructed WITHOUT `with_probe_runner` — the field
+        // is `None`; the trait default no-op path fires. Observable
+        // outcome: no panic, no state change, no side effect.
+        let driver = ExecDriver::new(PathBuf::from("/tmp/overdrive-test"), Arc::new(ZeroClock));
+        let alloc_id = AllocationId::new("alloc-noop-1").expect("valid AllocationId");
+        let spec = sample_spec(&alloc_id);
+
+        // No panic — the None branch returns immediately.
+        driver.on_alloc_running(&spec);
+        driver.on_alloc_terminal(&alloc_id);
+    }
+}
