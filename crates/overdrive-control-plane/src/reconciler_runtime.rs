@@ -889,6 +889,61 @@ impl ReconcilerRuntime {
             map.insert(target.clone(), view);
         }
     }
+
+    /// Snapshot of the in-memory `ServiceLifecycleView` map for
+    /// `name`. Mirrors the BackendDiscoveryBridge variant for the
+    /// ServiceLifecycle reconciler. **Test-only.** Per
+    /// service-health-check-probes step 01-03b mutation-tightening
+    /// pass — exposes the in-memory state so the Eq-diff write-skip
+    /// gate can be asserted directly.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_service_lifecycle_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, ServiceLifecycleView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::ServiceLifecycle(map) => Some(map.clone()),
+            AnyViewMap::Unit
+            | AnyViewMap::WorkloadLifecycle(_)
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path with a typed
+    /// `ServiceLifecycleView`. Mirrors the BackendDiscoveryBridge
+    /// variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_service_lifecycle_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: ServiceLifecycleView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::ServiceLifecycle(next)).await
+    }
+
+    /// Seed the in-memory view for `(service-lifecycle, target)`
+    /// directly, bypassing the `ViewStore`. Mirrors the
+    /// BackendDiscoveryBridge variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_service_lifecycle_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: ServiceLifecycleView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&service_lifecycle_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::ServiceLifecycle(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
 }
 
 /// Build the canonical [`ReconcilerName`] for the [`WorkloadLifecycle`]
@@ -923,6 +978,15 @@ fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
             as Reconciler>::NAME,
     )
     .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn service_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(
+        <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
+    )
+    .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------

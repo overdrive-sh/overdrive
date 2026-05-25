@@ -102,6 +102,35 @@ fn service_spec_v2_decodes_through_current_envelope() {
     assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(FIXTURE_V2, &expected);
 }
 
+/// Pin `<ServiceSpecEnvelope as VersionedEnvelope>::known_discriminants`
+/// to exactly `&[0, 1]`. Kills mutations that replace the body with
+/// `Vec::leak(Vec::new())` (empty slice) or `Vec::leak(vec![1])`
+/// (missing V1 tag). Per service-health-check-probes step 01-03b
+/// mutation-tightening pass.
+#[test]
+fn service_spec_envelope_known_discriminants_is_exactly_v1_and_v2() {
+    let discriminants = ServiceSpecEnvelope::known_discriminants();
+    assert_eq!(
+        discriminants,
+        &[0u8, 1u8],
+        "ServiceSpecEnvelope::known_discriminants() must equal &[0, 1] — V1=0, V2=1 (rkyv assigns in declaration order). Got {discriminants:?}"
+    );
+}
+
+/// Pin `<ServiceSpecEnvelope as VersionedEnvelope>::type_name` to
+/// exactly `"ServiceSpecEnvelope"`. Kills mutations that replace
+/// the body with `""` or `"xyzzy"`. The string feeds the
+/// `EnvelopeError::UnknownVersion.type_name` operator-facing
+/// diagnostic; an incorrect value silently relabels the error.
+#[test]
+fn service_spec_envelope_type_name_is_exact_string() {
+    let name = ServiceSpecEnvelope::type_name();
+    assert_eq!(
+        name, "ServiceSpecEnvelope",
+        "ServiceSpecEnvelope::type_name() must equal \"ServiceSpecEnvelope\" verbatim; got {name:?}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // Bootstrap helper — emits canonical hex on demand.
 // ---------------------------------------------------------------------

@@ -171,4 +171,11 @@ mod acceptance {
     mod health_check_toml_parse;
     mod probe_descriptor_roundtrip;
     mod probe_result_row_envelope;
+
+    // service-health-check-probes step 01-03b mutation-tightening —
+    // branch + boundary coverage for `ServiceLifecycleReconciler::reconcile`
+    // (Stable / EarlyExit / StartupProbeFailed). Pins every boolean
+    // operator and comparison in the reconcile body so cargo-mutants
+    // can kill flipped operators and dropped match arms.
+    mod service_lifecycle_reconcile_branches;
 }

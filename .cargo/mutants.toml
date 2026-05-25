@@ -340,6 +340,23 @@ exclude_re = [
     # removed in the same commit.
     "ServiceVip::try_as_ipv4 -> Option<std::net::Ipv4Addr> with None",
 
+    # `ProbeRunner::probe` is a RED scaffold whose body is `todo!()`
+    # awaiting GREEN landing in slice 01-03c per ADR-0054 §7. The
+    # function returns `Result<(), ProbeRunnerError>`; cargo-mutants
+    # synthesises an `Ok(())` replacement that is semantically
+    # equivalent to the scaffold panic NOT firing — but the scaffold
+    # IS the spec for the unimplemented work, and no test can
+    # distinguish a "succeeded vacuously" Ok(()) from a "panicked
+    # because not yet implemented" todo!() until the GREEN body
+    # lands. The source-level `// mutants: skip` comment above the
+    # function does not suffice because cargo-mutants matches it
+    # case-sensitively on a single line above the fn, and an em-dash
+    # continuation in the existing comment ate the parser's
+    # `mutants: skip` token. Add an exclude_re entry instead — when
+    # the GREEN body lands in slice 01-03c, this exclusion is
+    # removed in the same commit and a real test kills the mutant.
+    "replace ProbeRunner::probe -> Result<\\(\\), ProbeRunnerError> with Ok\\(\\(\\)\\)",
+
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement
     # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,
