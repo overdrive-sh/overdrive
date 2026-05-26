@@ -62,6 +62,7 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
+        startup_probes_empty: false,
     }
 }
 
@@ -80,6 +81,7 @@ fn fact_failed_within_deadline(
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
+        startup_probes_empty: false,
     }
 }
 

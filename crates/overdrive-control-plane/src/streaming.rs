@@ -1148,6 +1148,144 @@ pub enum ServiceSubmitEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stderr_tail: Option<String>,
     },
+    /// Terminal — service stopped (by operator or by reconciler-
+    /// observed process exit / system gc). Per ADR-0059 Q1 this is
+    /// a sibling variant of `Failed`, NOT folded into it — CLI
+    /// exit-code semantics diverge (Stopped exits 0 / 130; Failed
+    /// exits with the failure-specific code). Mirrors the
+    /// `JobSubmitEvent::Stopped` sibling convention.
+    Stopped { alloc_id: String, by: overdrive_core::transition_reason::StoppedBy },
+}
+
+// ---------------------------------------------------------------------------
+// Service-kind projection — `TerminalCondition` → `ServiceSubmitEvent`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0059: single write site for Service-kind wire projections.
+// Lands the new variants from ADR-0059 Q1 (Stopped), Q2 (BackoffExhausted
+// with BackoffCause + last_exit_code), Q3 (Custom → Other with UTF-8-or-
+// hex render), and Q4 (Timeout / StreamInterrupted — synthesised, not
+// projected).
+//
+// These functions are NOT yet wired into the production `handlers.rs:498`
+// dispatch path — that wiring is the next step's concern per ADR-0059 Q6.
+// They land here as the taxonomy infrastructure the dispatch will consume.
+
+/// Project a [`TerminalCondition`] into the matching
+/// [`ServiceSubmitEvent`] variant.
+///
+/// Per ADR-0037 §3/§4 — single-write-site discipline: the same
+/// `Action.terminal` value the action_shim writes onto
+/// `AllocStatusRow.terminal` MUST project to the corresponding wire
+/// event byte-equal. The projection lives here so future wiring sites
+/// (handlers.rs:498 dispatch — next step) reuse one canonical mapping.
+///
+/// Returns `None` for `TerminalCondition` variants without a Service-
+/// kind wire projection (e.g. `Completed { exit_code }` — Job-kind
+/// natural exit, not reachable on the Service-kind broadcast lane).
+///
+/// `stderr_tail` is read by the caller from the row's `stderr_tail`
+/// field (typically via `obs.alloc_status_row(...).stderr_tail`).
+/// `last_exit_code` is read by the caller from the row's `exit_code`
+/// observation field — required for `BackoffExhausted` per ADR-0059
+/// Q2. `None` for projections that do not consult exit code.
+#[must_use]
+pub fn service_event_from_terminal(
+    alloc_id: &str,
+    terminal: &overdrive_core::transition_reason::TerminalCondition,
+    stderr_tail: Option<String>,
+    last_exit_code: Option<i32>,
+) -> Option<ServiceSubmitEvent> {
+    use overdrive_core::transition_reason::{
+        BackoffCause, ServiceFailureReason, TerminalCondition,
+    };
+    match terminal {
+        TerminalCondition::Stable { settled_in_ms, witness } => Some(ServiceSubmitEvent::Stable {
+            alloc_id: alloc_id.to_string(),
+            settled_in_ms: *settled_in_ms,
+            witness: witness.clone(),
+        }),
+        TerminalCondition::ServiceFailed { reason } => Some(ServiceSubmitEvent::Failed {
+            alloc_id: Some(alloc_id.to_string()),
+            reason: reason.clone(),
+            stderr_tail,
+        }),
+        TerminalCondition::Stopped { by } => {
+            Some(ServiceSubmitEvent::Stopped { alloc_id: alloc_id.to_string(), by: *by })
+        }
+        TerminalCondition::BackoffExhausted { attempts } => Some(ServiceSubmitEvent::Failed {
+            alloc_id: Some(alloc_id.to_string()),
+            reason: ServiceFailureReason::BackoffExhausted {
+                attempts: *attempts,
+                cause: BackoffCause::AttemptBudget,
+                last_exit_code,
+            },
+            stderr_tail,
+        }),
+        TerminalCondition::Custom { type_name, detail } => {
+            let message = render_custom_detail(detail.as_deref());
+            Some(ServiceSubmitEvent::Failed {
+                alloc_id: Some(alloc_id.to_string()),
+                reason: ServiceFailureReason::Other { source: type_name.clone(), message },
+                stderr_tail,
+            })
+        }
+        // Job-kind natural exit terminals have no Service-kind wire
+        // projection. The Service-kind broadcast lane is not reached
+        // for these in production; this match arm exists for
+        // exhaustiveness against the `#[non_exhaustive]` enum.
+        TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. } => None,
+        // Forward-compat for future `#[non_exhaustive]` additions to
+        // `TerminalCondition`. Unknown variants do not project to a
+        // Service-kind wire event; callers fall back to the
+        // streaming-loop's cap-timer / channel-closed synthesis.
+        _ => None,
+    }
+}
+
+/// Render `TerminalCondition::Custom.detail` bytes into the wire
+/// `ServiceFailureReason::Other.message` string per ADR-0059 Q3:
+/// best-effort UTF-8-or-lowercase-hex. `None` / empty → empty string.
+fn render_custom_detail(detail: Option<&[u8]>) -> String {
+    use std::fmt::Write as _;
+    let Some(bytes) = detail else { return String::new() };
+    if bytes.is_empty() {
+        return String::new();
+    }
+    std::str::from_utf8(bytes).map_or_else(
+        |_| {
+            let mut hex = String::with_capacity(bytes.len() * 2);
+            for b in bytes {
+                let _ = write!(&mut hex, "{b:02x}");
+            }
+            hex
+        },
+        ToString::to_string,
+    )
+}
+
+/// Synthesise the streaming wall-clock cap-timer terminal per
+/// ADR-0059 Q4. Streaming-loop-only — the reconciler MUST NOT emit
+/// this variant.
+#[must_use]
+pub fn service_stream_synth_cap_timeout(after_seconds: u32) -> ServiceSubmitEvent {
+    ServiceSubmitEvent::Failed {
+        alloc_id: None,
+        reason: overdrive_core::transition_reason::ServiceFailureReason::Timeout { after_seconds },
+        stderr_tail: None,
+    }
+}
+
+/// Synthesise the streaming broadcast-channel-closed terminal per
+/// ADR-0059 Q4. Streaming-loop-only — the reconciler MUST NOT emit
+/// this variant.
+#[must_use]
+pub fn service_stream_synth_closed() -> ServiceSubmitEvent {
+    ServiceSubmitEvent::Failed {
+        alloc_id: None,
+        reason: overdrive_core::transition_reason::ServiceFailureReason::StreamInterrupted,
+        stderr_tail: None,
+    }
 }
 
 // ---------------------------------------------------------------------------

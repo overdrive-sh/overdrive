@@ -176,5 +176,6 @@ mod acceptance {
     mod service_lifecycle_purity;
     mod service_lifecycle_readiness;
     mod service_lifecycle_stable;
+    mod service_submit_event_taxonomy;
     mod service_submit_event_v2;
 }

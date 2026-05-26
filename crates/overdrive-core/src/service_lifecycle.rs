@@ -90,6 +90,13 @@ pub struct ServiceAllocFact {
     /// per ADR-0058 default-TCP-startup rule. Surfaces on
     /// `ProbeWitness.inferred`.
     pub inferred: bool,
+    /// `true` IFF the operator's `ServiceSpec.startup_probes` is the
+    /// empty array (`[[health_check.startup]] = []`) — the
+    /// deliberate first-Running-IS-Stable opt-out per ADR-0058 §4 /
+    /// ADR-0059 Q5. The reconciler's pre-Stable opt-out branch
+    /// fires on this flag + `state == Running`, emitting `Stable`
+    /// immediately with `mechanic_summary == "none (opted out)"`.
+    pub startup_probes_empty: bool,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -249,6 +256,28 @@ impl Reconciler for ServiceLifecycleReconciler {
                 // S-SHCP-RECON-02: dedup — Stable already announced
                 // for this alloc; emit nothing further. Falls
                 // through to no-action.
+                continue;
+            }
+
+            // Branch (a'): Empty-probes opt-out — operator declared
+            // `[[health_check.startup]] = []` per ADR-0058 §4 /
+            // ADR-0059 Q5. Operator's deliberate first-Running-IS-Stable
+            // semantics. MUST precede branch (a) so the AND-of-all-
+            // probes Pass branch never fires for opt-out specs (which
+            // would otherwise hang the stream until the cap timer).
+            if fact.startup_probes_empty && fact.state == AllocState::Running {
+                let settled_in_ms = settled_in_ms_from(tick.now_unix, fact.started_at_unix_ms);
+                let witness = ProbeWitness {
+                    probe_idx: 0,
+                    role: "startup".to_string(),
+                    mechanic_summary: "none (opted out)".to_string(),
+                    inferred: false,
+                };
+                actions.push(Action::FinalizeFailed {
+                    alloc_id: alloc_id.clone(),
+                    terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
+                });
+                next_view.stable_announced.insert(alloc_id.clone());
                 continue;
             }
 

@@ -65,6 +65,7 @@ fn fact(
         startup_deadline,
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,
+        startup_probes_empty: false,
     }
 }
 

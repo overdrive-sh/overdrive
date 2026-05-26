@@ -516,6 +516,66 @@ pub enum ServiceFailureReason {
     /// `BackoffExhausted` JobLifecycle pathway for Service-kind
     /// liveness-driven restart attempts.
     LivenessProbeFailed { probe_idx: u32, attempts: u32 },
+    /// Service-kind workload exhausted the general restart-attempt
+    /// budget (`WorkloadLifecycleView::restart_counts >=
+    /// RESTART_BACKOFF_CEILING`). Distinct from
+    /// [`Self::LivenessProbeFailed`] (which fires when liveness
+    /// consecutive-failures + restart-budget jointly exhaust).
+    ///
+    /// `attempts` is the count at the deciding tick. `cause`
+    /// disambiguates the budget that ran out; `last_exit_code` is
+    /// read from the latest `AllocStatusRow.exit_code` observation
+    /// at projection time. Per ADR-0059 Q2.
+    BackoffExhausted { attempts: u32, cause: BackoffCause, last_exit_code: Option<i32> },
+    /// Fallback projection for third-party WASM reconciler terminals
+    /// (`TerminalCondition::Custom`). `source` carries the
+    /// reconciler's canonical name (`type_name`); `message` carries
+    /// the rendered detail bytes (UTF-8 if valid, lowercase-hex
+    /// otherwise). Per ADR-0059 Q3.
+    Other { source: String, message: String },
+    /// Streaming-loop wall-clock cap timer expired before any
+    /// terminal arrived. Synthesised by `build_stream`; the
+    /// reconciler MUST NOT emit this variant. Per ADR-0059 Q4.
+    Timeout { after_seconds: u32 },
+    /// Broadcast channel closed mid-stream (server shutdown / action
+    /// shim teardown). Synthesised by `build_stream`; the reconciler
+    /// MUST NOT emit this variant. Per ADR-0059 Q4.
+    StreamInterrupted,
+}
+
+/// Disambiguator on [`ServiceFailureReason::BackoffExhausted`]
+/// naming the budget that ran out. Per ADR-0059 Q2.
+///
+/// Phase 1 emits only [`Self::AttemptBudget`].
+/// [`Self::LivenessBudget`] is defined for forward-compat with
+/// the future `LivenessRestartGovernor` (ADR-0055 §7) — Phase 2+.
+/// Including the discriminator now keeps the wire shape additive
+/// without splitting the variant later.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BackoffCause {
+    /// General post-spawn crash loop — driver exit + WorkloadLifecycle
+    /// restart budget ran out. Phase 1 emit site.
+    AttemptBudget,
+    /// Liveness-probe-driven restart budget ran out. Reserved for
+    /// Phase 2+ when the `LivenessRestartGovernor` (ADR-0055 §7)
+    /// lands; today the `LivenessProbeFailed` variant covers this
+    /// case end-to-end.
+    LivenessBudget,
 }
 
 /// Names which probe's Pass moved the reconciler to Stable.
