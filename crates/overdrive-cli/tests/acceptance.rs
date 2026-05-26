@@ -28,15 +28,14 @@ mod acceptance {
     mod render_workload_stop;
     mod render_workload_submit;
 
-    // Slice 02 step 02-04 — S-CLI-04 (Failed-block render) and
-    // S-CLI-05 (exit-code 2 across HTTP error variants).
-    mod streaming_submit_cli_render;
-    // fix-converged-stopped-cli-arm — render-fn tests for
-    // `format_stopped_summary` (one per `StoppedBy` variant). Pairs
-    // with the integration-test regression in
-    // `tests/integration/streaming_submit_converged_stopped.rs`.
+    // Legacy `streaming_submit_cli_render` (Failed-block render
+    // against deleted `TerminalReason`) and
+    // `streaming_submit_http_error_exit_2` were deleted in step
+    // 01-03e3 alongside the legacy `format_failed_block` removal
+    // per single-cut greenfield discipline. `format_stopped_summary`
+    // render coverage stays in `streaming_submit_cli_render_stopped`
+    // (the function itself is kind-aware and survives the migration).
     mod streaming_submit_cli_render_stopped;
-    mod streaming_submit_http_error_exit_2;
 
     // Slice 03 step 03-01 — S-CLI-01 `--detach` flag argv surface.
     mod submit_detach_flag;
@@ -66,5 +65,9 @@ mod acceptance {
     //     RCA-A "(took live)" regression guard
     mod probes_kind_rejection_cli;
     mod probes_section_render;
-    mod service_early_exit_render;
+    // `service_early_exit_render` was deleted in step 01-03e3 — it
+    // exercised the deleted `format_failed_block` / `TerminalReason`
+    // surface. Service-kind failed-block rendering is covered by
+    // `crate::render::format_service_failed_block` (called from the
+    // production `consume_stream` Service-kind consumer).
 }

@@ -25,9 +25,7 @@ use std::path::PathBuf;
 
 use bytes::BytesMut;
 use futures::StreamExt as _;
-use overdrive_control_plane::api::{
-    IdempotencyOutcome, StopOutcome, SubmitEvent, SubmitWorkloadRequest, TerminalReason,
-};
+use overdrive_control_plane::api::{IdempotencyOutcome, StopOutcome, SubmitWorkloadRequest};
 use overdrive_control_plane::streaming::JobSubmitEvent;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
@@ -320,13 +318,13 @@ pub async fn stop(args: StopArgs) -> Result<StopOutput, CliError> {
 ///
 /// Per slice 02 step 02-04 acceptance criteria, `submit_streaming`
 /// consumes the `application/x-ndjson` stream until a terminal
-/// `ConvergedRunning` or `ConvergedFailed` event arrives. The handler
+/// (deleted legacy variant) or (deleted legacy variant) event arrives. The handler
 /// returns this typed shape carrying:
 ///
 ///  * `Accepted`-event-derived fields (`workload_id`, `intent_key`,
 ///    `spec_digest`, `outcome`) — same shape as the one-shot ack lane
 ///    so existing renderer/tests keep their assertion shapes.
-///  * `exit_code` — 0 on `ConvergedRunning`, 1 on `ConvergedFailed`. The
+///  * `exit_code` — 0 on (deleted legacy variant), 1 on (deleted legacy variant). The
 ///    binary wrapper at `main.rs` surfaces this as the process exit
 ///    code, satisfying ADR-0032 §9.
 ///  * `summary` — operator-facing rendered text written to stdout (the
@@ -354,23 +352,20 @@ pub struct SubmitStreamingOutput {
     pub endpoint: Url,
     /// Next-command hint — `overdrive alloc status --job <workload_id>`.
     pub next_command: String,
-    /// CLI exit code per ADR-0032 §9: 0 for `ConvergedRunning`, 1 for
-    /// `ConvergedFailed`. Mapping of pre-Accepted errors → 2 lives in
+    /// CLI exit code per ADR-0032 §9: 0 for (deleted legacy variant), 1 for
+    /// (deleted legacy variant). Mapping of pre-Accepted errors → 2 lives in
     /// [`crate::render::cli_error_to_exit_code`].
     pub exit_code: i32,
     /// Operator-facing rendered text written to stdout — the success
     /// summary for `Running`, or the structured `Error:` block for
     /// `Failed`.
     pub summary: String,
-    /// Terminal-reason payload from `ConvergedFailed`. `None` on the
-    /// happy path (`ConvergedRunning`).
-    pub terminal_reason: Option<TerminalReason>,
     /// Last cause-class `TransitionReason` observed on the broadcast
     /// bus before terminal — typically the most recent
     /// `LifecycleTransition.reason` carrying a failure variant. `None`
     /// when no failure transitions were observed.
     pub streaming_reason: Option<TransitionReason>,
-    /// Verbatim driver error text from the `ConvergedFailed.error`
+    /// Verbatim driver error text from the `(deleted legacy).error`
     /// field. `None` on the happy path.
     pub streaming_error: Option<String>,
 }
@@ -396,7 +391,7 @@ pub struct SubmitStreamingOutput {
 ///
 /// Same shapes as [`submit`] — pre-Accepted failures bubble up as
 /// [`CliError`] variants. Once `Accepted` arrives this function does
-/// not return `Err` for terminal failures: a `ConvergedFailed` event
+/// not return `Err` for terminal failures: a (deleted legacy variant) event
 /// is a successful termination of the stream that maps to exit code 1
 /// via [`SubmitStreamingOutput::exit_code`].
 ///
@@ -426,7 +421,7 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
 
     if let Ok(WorkloadSpecInput::Job(job_spec)) = workload_input {
         // Job-kind dispatch (slice 02) — runs to completion; no
-        // ConvergedRunning rendering reachable. Service / Schedule /
+        // (deleted legacy) rendering reachable. Service / Schedule /
         // Err(_) cases all fall through to the legacy flat
         // `JobSpecInput` ingestion path: the control plane server-side
         // spec ingest accepts the same TOML shape; re-parse via
@@ -464,7 +459,7 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
 
 /// Submit a Job-kind spec via the streaming NDJSON lane and consume to
 /// terminal. Per ADR-0047 §3 [D2] / [D7]: Job kind has run-to-
-/// completion semantics — `ConvergedRunning` is structurally
+/// completion semantics — (deleted legacy variant) is structurally
 /// unreachable; the terminal verdict is `Succeeded` (exit 0) or
 /// `Failed` (non-zero exit code or backoff exhausted). The CLI
 /// process exit code equals the workload's kernel-observed exit code.
@@ -520,38 +515,25 @@ async fn submit_streaming_job(
     consume_stream_job(response, endpoint, validated_job_id, submit_echo).await
 }
 
-/// Drive the NDJSON stream from `response` to a terminal event and
-/// produce the typed [`SubmitStreamingOutput`].
+/// Drive a Service-kind streaming submit to terminal.
 ///
-/// The line splitter accumulates bytes into a `BytesMut` and yields
-/// each newline-terminated line into `serde_json::from_slice` —
-/// tolerating partial chunks that cross `recv` boundaries.
-// The streaming consumer's body is naturally long — one event matcher
-// per `SubmitEvent` variant plus the terminal-event projection logic.
-// Splitting helpers per-arm would obscure the linear "for each line,
-// match the variant" shape that makes the loop comprehensible. The
-// 108-line function compares to the 100-line clippy default.
+/// Per ADR-0056 / ADR-0059 / step 01-03e3: the Service-kind wire
+/// surface emits the typed [`ServiceSubmitEvent`] enum:
+///   * `Accepted` — synchronous first line.
+///   * `Stable` — terminal; CLI exit 0.
+///   * `Failed` — terminal; CLI exit 1.
+///   * `Stopped` — terminal; CLI exit 0.
 #[allow(clippy::too_many_lines)]
 async fn consume_stream(
     response: reqwest::Response,
     endpoint: Url,
     validated_job_id: String,
 ) -> Result<SubmitStreamingOutput, CliError> {
+    use overdrive_control_plane::streaming::ServiceSubmitEvent;
+
     let mut stream = response.bytes_stream();
     let mut buf = BytesMut::new();
-
-    // Stream-start wall-clock — used to compute the converged-running
-    // summary duration in place of the historical `"live"` literal
-    // (US-06 of `workload-kind-discriminator`). The CLI is a `binary`
-    // crate so `Instant::now()` is allowed by dst-lint; the value is
-    // used only for operator-facing display.
-    let stream_started = std::time::Instant::now();
-
-    // State accumulated as the stream proceeds. Populated by the
-    // `Accepted` event (first) and by intermediate `LifecycleTransition`
-    // events; consulted at terminal time to build the typed output.
     let mut accepted: Option<AcceptedFields> = None;
-    let mut latest_cause_class_reason: Option<TransitionReason> = None;
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| CliError::Transport {
@@ -560,33 +542,23 @@ async fn consume_stream(
         })?;
         buf.extend_from_slice(&chunk);
 
-        // Drain every complete line currently in the buffer.
         while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
             let line = buf.split_to(newline_pos + 1);
-            // Drop the trailing newline before deserialisation.
             let line_bytes = &line[..line.len() - 1];
-            // Skip blank keep-alive lines if any.
             if line_bytes.is_empty() {
                 continue;
             }
-            let event: SubmitEvent =
+            let event: ServiceSubmitEvent =
                 serde_json::from_slice(line_bytes).map_err(|e| CliError::BodyDecode {
                     cause: format!(
-                        "failed to deserialise NDJSON line as SubmitEvent: {e}; \
+                        "failed to deserialise NDJSON line as ServiceSubmitEvent: {e}; \
                          line bytes: {}",
                         String::from_utf8_lossy(line_bytes)
                     ),
                 })?;
 
             match event {
-                SubmitEvent::Accepted { spec_digest, intent_key, outcome, vip: _ } => {
-                    // The server-derived `intent_key` carries the
-                    // canonical `IntentKey` shape; the CLI uses the
-                    // already-validated client-side `WorkloadId` (captured
-                    // before the POST) as the operator-facing `workload_id`
-                    // so the SSOT for the `jobs/` prefix literal stays
-                    // in `overdrive_core::aggregate::IntentKey::for_job`
-                    // (the `intent_key_canonical` gate enforces this).
+                ServiceSubmitEvent::Accepted { spec_digest, intent_key, outcome } => {
                     accepted = Some(AcceptedFields {
                         workload_id: validated_job_id.clone(),
                         intent_key,
@@ -594,30 +566,14 @@ async fn consume_stream(
                         outcome,
                     });
                 }
-                SubmitEvent::LifecycleTransition { reason, .. } => {
-                    // Accumulate the latest cause-class reason so we have
-                    // it on terminal time for byte-equality assertions
-                    // (S-WS-02 KPI-02).
-                    if reason.is_failure() {
-                        latest_cause_class_reason = Some(reason);
-                    }
-                }
-                SubmitEvent::ConvergedRunning { alloc_id: _, started_at: _ } => {
+                ServiceSubmitEvent::Stable { alloc_id: _, settled_in_ms, witness } => {
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
-                        cause: "ConvergedRunning before Accepted on the streaming bus".to_string(),
+                        cause: "Stable before Accepted on the streaming bus".to_string(),
                     })?;
-                    let took_human = crate::render::format_human_duration(stream_started.elapsed());
-                    let summary = crate::render::format_running_summary(
+                    let summary = crate::render::format_service_stable_summary(
                         &acc.workload_id,
-                        // Phase-1 single-replica streaming witness — the
-                        // first `Running` row terminates the stream per
-                        // architecture.md §10. Replica counts are an
-                        // observation-side concern (alloc status); the
-                        // streaming surface signals "the job has reached
-                        // running" via the terminal event.
-                        1,
-                        1,
-                        &took_human,
+                        settled_in_ms,
+                        &witness,
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
                     return Ok(SubmitStreamingOutput {
@@ -629,27 +585,18 @@ async fn consume_stream(
                         next_command,
                         exit_code: 0,
                         summary,
-                        terminal_reason: None,
                         streaming_reason: None,
                         streaming_error: None,
                     });
                 }
-                SubmitEvent::ConvergedFailed { alloc_id: _, terminal_reason, reason, error } => {
+                ServiceSubmitEvent::Failed { alloc_id: _, reason, stderr_tail } => {
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
-                        cause: "ConvergedFailed before Accepted on the streaming bus".to_string(),
+                        cause: "Failed before Accepted on the streaming bus".to_string(),
                     })?;
-                    // Prefer standalone reason; fall back to the latest
-                    // cause-class transition seen on the bus so the
-                    // KPI-02 byte-equality assertion has a stable
-                    // source. `or_else` defers the fallback `Option`
-                    // construction so the `latest_cause_class_reason`
-                    // clone fires only when `reason` is `None`.
-                    let stream_reason = reason.or_else(|| latest_cause_class_reason.clone());
-                    let summary = crate::render::format_failed_block(
+                    let summary = crate::render::format_service_failed_block(
                         &acc.workload_id,
-                        stream_reason.as_ref(),
-                        error.as_deref(),
-                        &terminal_reason,
+                        &reason,
+                        stderr_tail.as_deref(),
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
                     return Ok(SubmitStreamingOutput {
@@ -661,30 +608,14 @@ async fn consume_stream(
                         next_command,
                         exit_code: 1,
                         summary,
-                        terminal_reason: Some(terminal_reason),
-                        streaming_reason: stream_reason,
-                        streaming_error: error,
+                        streaming_reason: None,
+                        streaming_error: stderr_tail,
                     });
                 }
-                // Terminal — workload reached a clean stop (operator
-                // intent, reconciler convergence, or natural process
-                // exit). Maps to exit code 0 across all `StoppedBy`
-                // variants per RCA + ADR-0032 §9: clean stop is a
-                // successful terminal outcome from the operator's
-                // perspective. RCA:
-                // `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
-                SubmitEvent::ConvergedStopped { alloc_id: _, by } => {
-                    // mutants::skip — arm exercised by streaming_submit_converged_stopped integration test; HTTP-stream consumer not unit-testable
+                ServiceSubmitEvent::Stopped { alloc_id: _, by } => {
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
-                        cause: "ConvergedStopped before Accepted on the streaming bus".to_string(),
+                        cause: "Stopped before Accepted on the streaming bus".to_string(),
                     })?;
-                    // Slice 04 (`workload-kind-discriminator`) — the legacy
-                    // long-running streaming submit path is semantically a
-                    // Service workload. Slice 02 will wire the WorkloadSpec
-                    // discriminator into submit_streaming and pass the
-                    // parsed kind here verbatim; until then the legacy
-                    // flat-shape parser produces what is conceptually a
-                    // Service, so we hard-code Service vocabulary.
                     let summary = crate::render::format_stopped_summary(
                         &acc.workload_id,
                         overdrive_core::aggregate::WorkloadKind::Service,
@@ -700,41 +631,37 @@ async fn consume_stream(
                         next_command,
                         exit_code: 0,
                         summary,
-                        terminal_reason: None,
                         streaming_reason: None,
                         streaming_error: None,
                     });
                 }
-                // `SubmitEvent` is `#[non_exhaustive]` — future variants
-                // are observed and ignored until the consumer grows
-                // explicit handling. Logged via tracing so an operator
-                // running with `RUST_LOG=info` sees the unfamiliar
-                // event without the stream stalling.
                 _ => {
-                    tracing::debug!("ignoring unrecognised SubmitEvent variant on stream");
+                    tracing::debug!(
+                        "ignoring unrecognised ServiceSubmitEvent variant on Service stream"
+                    );
                 }
             }
         }
     }
 
-    // Stream closed without a terminal event — protocol violation.
     Err(CliError::BodyDecode {
-        cause: "streaming submit response closed without a terminal event \
-                (ConvergedRunning, ConvergedFailed, or ConvergedStopped)"
+        cause: "Service streaming submit response closed without a terminal event \
+                (Stable, Failed, or Stopped)"
             .to_string(),
     })
 }
 
 /// Drive a Job-kind streaming submit to terminal — slice 02 of
+/// Drive a Job-kind streaming submit to terminal — slice 02 of
 /// `workload-kind-discriminator`.
 /// Per ADR-0047 §3 [D2]: Job-kind has run-to-completion semantics.
-/// Unlike Service-kind, `ConvergedRunning` is NOT a terminal event;
+/// Unlike Service-kind, (deleted legacy variant) is NOT a terminal event;
 /// the terminal verdict is `Succeeded` (workload exit 0) or `Failed`
 /// (non-zero exit code observed). The CLI process exit code equals
 /// the workload's kernel-observed exit code per KPI K1.
 ///
 /// Per slice 02-06 the wire format is the typed sibling-event enum
-/// [`JobSubmitEvent`] (ADR-0047 §3 [D7]); `ConvergedRunning` is
+/// [`JobSubmitEvent`] (ADR-0047 §3 [D7]); (deleted legacy variant) is
 /// structurally absent on this code path because the type carries
 /// no equivalent variant. This consumer projects
 /// `JobSubmitEvent::Succeeded` → `format_job_succeeded_summary`,
@@ -855,7 +782,6 @@ async fn consume_stream_job(
                         // a future reconciler may stamp).
                         exit_code,
                         summary,
-                        terminal_reason: None,
                         streaming_reason: None,
                         streaming_error: None,
                     });
@@ -886,7 +812,6 @@ async fn consume_stream_job(
                         next_command,
                         exit_code: 130,
                         summary,
-                        terminal_reason: None,
                         streaming_reason: None,
                         streaming_error: None,
                     });
@@ -920,7 +845,6 @@ async fn consume_stream_job(
                         next_command,
                         exit_code,
                         summary,
-                        terminal_reason: None,
                         streaming_reason: None,
                         streaming_error: stderr_tail,
                     });

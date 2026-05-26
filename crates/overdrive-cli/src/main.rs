@@ -98,7 +98,7 @@ async fn run(cli: Cli) -> Result<()> {
                             Ok(())
                         } else {
                             // Convergence failed — exit with the typed
-                            // code (1 for `ConvergedFailed`). Emit a
+                            // code (1 for (deleted legacy variant)). Emit a
                             // discrete exit so the `eyre::Report` path
                             // does not collapse 1 and 2 into the same
                             // shell signal.

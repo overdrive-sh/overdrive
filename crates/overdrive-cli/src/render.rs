@@ -12,10 +12,8 @@
 //! 100ms target on localhost per US-05 AC.
 
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, StopOutcome, TerminalReason,
-    TransitionSource,
+    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, StopOutcome, TransitionSource,
 };
-use overdrive_core::TransitionReason;
 
 // workload-kind-discriminator slice 05 — Schedule submit/alloc-status
 // render functions and the SCHEDULE_EXECUTION_TRACKING_URL SSOT
@@ -314,12 +312,12 @@ pub fn cli_error(err: &CliError) -> String {
 /// Per slice 02 step 02-04 acceptance criteria S-CLI-05: every
 /// pre-Accepted failure shape (`HttpStatus`, `Transport`, `BodyDecode`,
 /// `InvalidSpec`, `ConfigLoad`) maps to exit code **2**. Convergence
-/// outcomes (`ConvergedRunning` / `ConvergedFailed`) are emitted on the
+/// outcomes ((deleted legacy variant) / (deleted legacy variant)) are emitted on the
 /// streaming success path and map to 0 / 1 respectively (see
 /// [`crate::commands::job::submit_streaming`]); they never flow through
 /// this function.
 ///
-/// Exit code 1 is reserved for `ConvergedFailed` only — the workload
+/// Exit code 1 is reserved for (deleted legacy variant) only — the workload
 /// reached the server but did not converge to running. Exit code 2 is
 /// "the CLI never got past pre-Accepted plumbing" — the operator
 /// distinguishes this from "the workload itself failed" via the exit
@@ -331,173 +329,15 @@ pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
     // parametrised expectation is exit 2 across the board.
     2
 }
-
-/// Render the operator-facing `Error:` block emitted on
-/// `SubmitEvent::ConvergedFailed`. Pure function — no I/O.
-///
-/// Per `docs/feature/cli-submit-vs-deploy-and-alloc-status/deliver/02-04`
-/// step 02-04 acceptance criteria S-CLI-04 and the journey TUI mockup
-/// in `docs/.../journey/walking-skeleton.md`. Five labelled sections:
-///
-/// ```text
-/// Error: workload '<name>' did not converge to running.
-///   reason: <human_readable rendering>
-///   last-event: <verbatim driver text>
-///   reproducer: overdrive alloc status --job <name>
-///
-/// Hint: <variant-specific hint>
-/// ```
-///
-/// `reason` argument is the standalone `SubmitEvent::ConvergedFailed.reason`
-/// field. When present it carries the most-recent cause-class
-/// `TransitionReason`. When absent the renderer falls back to the
-/// `terminal_reason`'s inner cause (`BackoffExhausted` / `DriverError` carry
-/// one); for `Timeout` the reason line cites the configured cap.
-///
-/// `last_event_detail` is the verbatim driver text (typically the same
-/// source as `SubmitEvent::ConvergedFailed.error`). Optional — Phase-2
-/// terminal causes may not carry verbatim text.
-///
-/// `terminal_reason` controls the `Hint:` line mapping per the criteria's
-/// cause-class table.
-#[must_use]
-pub fn format_failed_block(
-    workload_name: &str,
-    reason: Option<&TransitionReason>,
-    last_event_detail: Option<&str>,
-    terminal_reason: &TerminalReason,
-) -> String {
-    use std::fmt::Write as _;
-    let mut s = String::new();
-    let _ = writeln!(s, "Error: workload '{workload_name}' did not converge to running.");
-
-    // `reason:` line — standalone reason wins; otherwise derive from
-    // terminal_reason. The streaming `ConvergedFailed.reason` carries
-    // the most recent cause-class TransitionReason; for cap-fired
-    // timeouts that field is None and the terminal_reason is the only
-    // signal.
-    let reason_text = reason
-        .map(TransitionReason::human_readable)
-        .or_else(|| derive_reason_from_terminal(terminal_reason));
-    if let Some(text) = reason_text {
-        let _ = writeln!(s, "  reason: {text}");
-    }
-
-    if let Some(detail) = last_event_detail {
-        let _ = writeln!(s, "  last-event: {detail}");
-    }
-
-    // Reproducer line — points the operator at `alloc status --job <name>`
-    // for the structured snapshot. Per US-02 walking-skeleton transcript.
-    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
-
-    // Blank line separates the structured block from the variant-specific
-    // Hint line.
-    let _ = writeln!(s);
-
-    let hint = derive_hint(reason, terminal_reason);
-    let _ = writeln!(s, "Hint: {hint}");
-    s
-}
-
-/// Compute the `reason:` line text when no standalone reason was carried
-/// on the streaming `ConvergedFailed` event. Falls back to the inner
-/// cause of `BackoffExhausted` / `DriverError`, or the cap-cited
-/// rendering for `Timeout`.
-fn derive_reason_from_terminal(terminal: &TerminalReason) -> Option<String> {
-    match terminal {
-        TerminalReason::BackoffExhausted { cause, .. } | TerminalReason::DriverError { cause } => {
-            Some(cause.human_readable())
-        }
-        TerminalReason::Timeout { after_seconds } => {
-            Some(format!("workload did not converge within {after_seconds}s"))
-        }
-        TerminalReason::StreamInterrupted => {
-            Some("server-side stream interrupted before convergence".to_owned())
-        }
-        // `TerminalReason` is `#[non_exhaustive]` for forward-compat.
-        // Future variants get a generic rendering until the renderer
-        // grows a specific arm.
-        _ => None,
-    }
-}
-
-/// Map a `(reason, terminal_reason)` pair to the operator-facing `Hint:`
-/// text per the criteria's cause-class table. The mapping consults the
-/// inner cause when reason is None — the operator still gets variant-
-/// specific guidance.
-fn derive_hint(reason: Option<&TransitionReason>, terminal_reason: &TerminalReason) -> String {
-    // Resolve the cause-class TransitionReason to consult, preferring
-    // the standalone `reason` field over the terminal_reason's inner
-    // cause. Either source flows through the same hint table.
-    let cause: Option<&TransitionReason> = reason.map_or_else(
-        || match terminal_reason {
-            TerminalReason::BackoffExhausted { cause, .. }
-            | TerminalReason::DriverError { cause } => Some(cause),
-            _ => None,
-        },
-        Some,
-    );
-
-    if let Some(cause) = cause {
-        return hint_for_transition_reason(cause).to_owned();
-    }
-
-    // No cause-class reason → consult the terminal_reason for the
-    // outer-shape hint (Timeout is the canonical example).
-    match terminal_reason {
-        TerminalReason::Timeout { .. } => {
-            "workload did not converge within the server cap; consider --detach for \
-             long-running submits"
-                .to_owned()
-        }
-        TerminalReason::StreamInterrupted => {
-            "server-side stream was interrupted; re-run `overdrive job submit` or \
-             consult `overdrive alloc status --job <id>` for the current state"
-                .to_owned()
-        }
-        _ => "see alloc status for full context".to_owned(),
-    }
-}
-
-/// Hint text for a cause-class `TransitionReason` per the step 02-04
-/// criteria mapping table.
-const fn hint_for_transition_reason(reason: &TransitionReason) -> &'static str {
-    match reason {
-        TransitionReason::ExecBinaryNotFound { .. }
-        | TransitionReason::ExecPermissionDenied { .. } => {
-            "fix the spec's exec.command path and re-run"
-        }
-        TransitionReason::ExecBinaryInvalid { .. } => {
-            "the file at exec.command is not a valid executable; verify the build artefact"
-        }
-        TransitionReason::CgroupSetupFailed { .. } => {
-            "check cgroup v2 delegation; see overdrive cluster doctor"
-        }
-        TransitionReason::RestartBudgetExhausted { .. } => {
-            "the workload failed repeatedly; address the root cause and re-submit"
-        }
-        TransitionReason::NoCapacity { .. } => "reduce resource requests or scale the cluster",
-        // Every other variant — including progress markers (which
-        // should never reach the failed-block renderer in practice but
-        // are matched for forward-compat) and the generic
-        // `DriverInternalError` — falls back to the neutral hint.
-        // `TransitionReason` is `#[non_exhaustive]` so the catch-all
-        // arm here ALSO covers any Phase 2+ variant added without
-        // updating the mapping table.
-        _ => "see alloc status for full context",
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Job-kind render fns — slice 02 of `workload-kind-discriminator`.
 // ---------------------------------------------------------------------------
 //
 // Per ADR-0047 §3 [D2] / [D7]: Job kind workloads are run-to-completion;
-// they have no `ConvergedRunning` shape. The structural fix closing the
+// they have no (deleted legacy variant) shape. The structural fix closing the
 // bug under audit (RCA: B+C+D conjunction) renders Job-kind submits via
 // these dedicated functions whose output cannot contain the historical
-// `"is running with"` / `"(took live)"` substrings.
+// `"is running with"` substring patterns.
 
 /// Render the operator-facing submit echo for a Job-kind workload.
 ///
@@ -618,14 +458,14 @@ pub fn format_job_attempt_failed(
     )
 }
 
-/// Render the streaming `ConvergedRunning` summary line — the
+/// Render the streaming (deleted legacy variant) summary line — the
 /// operator-facing exit-0 success render. Pure function.
 ///
 /// Per slice 04 of `workload-kind-discriminator`: the function's sole
 /// caller is the Service code path (post-WorkloadSpec discriminator),
 /// so the rendered vocabulary names "Service". The legacy "Job"
 /// vocabulary was renamed in a single-cut greenfield migration —
-/// `JobSubmitEvent` carries no `ConvergedRunning` variant in the
+/// `JobSubmitEvent` carries no (deleted legacy variant) variant in the
 /// post-slice-02 tagged-event design. The literal `"live"` (RCA root
 /// cause D) is gone; the `took_human` argument carries a measured
 /// Clock-derived value rendered by `format_human_duration`.
@@ -647,7 +487,7 @@ pub fn format_running_summary(
 ///
 /// Replaces the historical `"live"` literal (US-06 of
 /// `workload-kind-discriminator`) used as a duration placeholder in
-/// the streaming `ConvergedRunning` summary. The output format is
+/// the streaming (deleted legacy variant) summary. The output format is
 /// chosen for human readability at typical convergence latencies
 /// (single-digit ms to a few seconds):
 ///
@@ -900,7 +740,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
     }
 }
 
-/// Render the streaming `ConvergedStopped` summary line — the
+/// Render the streaming (deleted legacy variant) summary line — the
 /// operator-facing exit-0 success render fired when a workload
 /// reaches a clean terminal stop. Pure function.
 ///
@@ -946,4 +786,100 @@ pub fn format_stopped_summary(
             format!("Schedule '{workload_name}' was deregistered by {initiator}.\n")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Service-kind streaming render fns — step 01-03e3 (ADR-0056 / ADR-0059).
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0056: the Service-kind streaming wire surface emits the
+// typed `ServiceSubmitEvent` enum. The CLI render layer projects each
+// terminal variant into operator-facing text. The `format_stopped_summary`
+// (kind-aware) function above already renders the `Stopped` variant —
+// these two functions cover the `Stable` and `Failed` shapes.
+
+/// Render the operator-facing `Stable` terminal summary for a Service
+/// workload per ADR-0055. Pure function.
+///
+/// Form: `Service '<name>' is stable (settled in <ms>; witness: <role> probe[<idx>] (<mech>))`.
+#[must_use]
+pub fn format_service_stable_summary(
+    workload_name: &str,
+    settled_in_ms: u64,
+    witness: &overdrive_core::transition_reason::ProbeWitness,
+) -> String {
+    let inferred = if witness.inferred { " inferred" } else { "" };
+    format!(
+        "Service '{workload_name}' is stable (settled in {settled_in_ms}ms; \
+         witness:{inferred} {role} probe[{idx}] ({mech}))\n",
+        role = witness.role,
+        idx = witness.probe_idx,
+        mech = witness.mechanic_summary,
+    )
+}
+
+/// Render the operator-facing `Failed` block for a Service workload
+/// per ADR-0056 / ADR-0059. Pure function.
+///
+/// Mirror of the deleted legacy `format_failed_block` adapted to the
+/// typed `ServiceFailureReason` discriminator. The five-section shape
+/// (header / reason / last-event / reproducer / hint) is preserved
+/// for renderer continuity.
+#[must_use]
+pub fn format_service_failed_block(
+    workload_name: &str,
+    reason: &overdrive_core::transition_reason::ServiceFailureReason,
+    stderr_tail: Option<&str>,
+) -> String {
+    use overdrive_core::transition_reason::{BackoffCause, ServiceFailureReason};
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "Error: workload '{workload_name}' did not converge to stable.");
+
+    let reason_text = match reason {
+        ServiceFailureReason::StartupTimeout { probe_idx, attempts } => {
+            format!("startup probe[{probe_idx}] timed out after {attempts} attempts")
+        }
+        ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts } => {
+            format!("startup probe[{probe_idx}] failed after {attempts} attempts: {last_fail}")
+        }
+        ServiceFailureReason::EarlyExit { exit_code } => {
+            format!("workload exited early with code {exit_code}")
+        }
+        ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts } => {
+            format!("liveness probe[{probe_idx}] failed after {attempts} attempts")
+        }
+        ServiceFailureReason::BackoffExhausted { attempts, cause, last_exit_code } => {
+            let cause_label = match cause {
+                BackoffCause::AttemptBudget => "attempt budget",
+                BackoffCause::LivenessBudget => "liveness budget",
+                _ => "unknown cause",
+            };
+            let exit_suffix =
+                last_exit_code.map(|c| format!(" (last exit code {c})")).unwrap_or_default();
+            format!("backoff exhausted after {attempts} attempts ({cause_label}){exit_suffix}")
+        }
+        ServiceFailureReason::Other { source, message } => {
+            format!("custom failure '{source}': {message}")
+        }
+        ServiceFailureReason::Timeout { after_seconds } => {
+            format!("workload did not converge within {after_seconds}s")
+        }
+        ServiceFailureReason::StreamInterrupted => {
+            "server-side stream interrupted before convergence".to_string()
+        }
+        _ => "unknown failure reason".to_string(),
+    };
+    let _ = writeln!(s, "  reason: {reason_text}");
+
+    if let Some(detail) = stderr_tail {
+        if !detail.is_empty() {
+            let _ = writeln!(s, "  last-event: {detail}");
+        }
+    }
+
+    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
+    let _ = writeln!(s);
+    let _ = writeln!(s, "Hint: see alloc status for full context");
+    s
 }

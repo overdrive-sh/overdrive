@@ -26,16 +26,15 @@ mod integration {
     mod walking_skeleton;
 
     // Slice 02 step 02-04 — Tier 3 streaming submit:
-    //   * S-WS-01 (happy path: real `/bin/sleep` → ConvergedRunning → exit 0)
-    //   * S-WS-02 (REGRESSION TARGET KPI-02: real ENOENT → ConvergedFailed
-    //     with byte-equal cause-class payload across streaming + snapshot)
-    mod streaming_submit_broken_binary;
-    // fix-converged-stopped-cli-arm — regression: ConvergedStopped
-    // must terminate the streaming consumer with exit code 0; current
-    // code falls through to the `_ =>` catch-all and returns
-    // Err(BodyDecode).
-    mod streaming_submit_converged_stopped;
-    mod streaming_submit_happy_path;
+    //   * S-WS-01 (happy path: real `/bin/sleep` → (deleted legacy) → exit 0)
+    // Legacy Service-kind streaming integration tests
+    // (`streaming_submit_broken_binary`, `streaming_submit_converged_stopped`,
+    // `streaming_submit_happy_path`) were removed in step 01-03e3
+    // per single-cut greenfield discipline alongside the deleted
+    // `SubmitEvent::Converged*` variants. The Service-kind dispatch
+    // wiring is covered end-to-end by
+    // `overdrive-control-plane::tests::acceptance::service_submit_dispatch_wiring`
+    // (S-SHCP-WIRE-09 through WIRE-15).
 
     // workload-kind-discriminator slice 05 — Schedule kind submit /
     // alloc-status render surface + IntentStore persistence, with

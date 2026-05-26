@@ -219,7 +219,7 @@ impl ApiClient {
         // Override the client-wide 30s `.timeout(...)` for the streaming
         // lane. The server-side `streaming_cap` (60s default per
         // `lib.rs::DEFAULT_STREAMING_CAP`) is the authoritative wall-
-        // clock guarantee — it always fires `ConvergedFailed { Timeout }`
+        // clock guarantee — it always fires `(deleted legacy) { Timeout }`
         // before the connection stalls. A client-side timeout shorter
         // than the cap aborts the body read mid-stream, surfaces as
         // `CliError::Transport { cause: "request timed out" }`, and

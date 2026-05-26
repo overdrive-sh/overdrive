@@ -94,7 +94,7 @@ async fn wait_for_alloc_running(config_path: &Path, job_id: &str) {
 /// `[job]+[exec]+[resources]` TOML — the kind-discriminator triggers
 /// `WorkloadSpec::Job` per slice 01. `/bin/sleep 300` is long-running
 /// so the test can issue an explicit `stop` to trigger the
-/// `ConvergedStopped` terminal event (mirrors the
+/// (deleted legacy variant) terminal event (mirrors the
 /// `streaming_submit_converged_stopped` test pattern).
 ///
 /// The natural-exit path (workload terminates with exit code 0
@@ -129,7 +129,7 @@ memory_bytes = 67108864
 ///
 /// Slice 02 (this step) wires `WorkloadSpec` into `submit_streaming`
 /// so a `[job]`-shape spec dispatches via `JobSubmitEvent` (no
-/// `ConvergedRunning` variant) and renders via the new
+/// (deleted legacy variant) variant) and renders via the new
 /// `format_job_succeeded_summary` whose output names exit code +
 /// duration, never the substring `"is running with"`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -141,7 +141,7 @@ async fn s_02_05_anti_scenario_no_is_running_with() {
     let spec_path = write_toml(tmp.path(), "happy-job.toml", job_long_sleep_spec());
 
     // Drive submit_streaming and trigger a stop concurrently so the
-    // streaming consumer observes ConvergedStopped (the Job-kind
+    // streaming consumer observes (deleted legacy) (the Job-kind
     // success-path terminal event in this slice). A future sub-slice
     // wires natural-exit through `TerminalCondition::Completed` per
     // ADR-0037 Amendment 2026-05-10; until then the explicit stop is

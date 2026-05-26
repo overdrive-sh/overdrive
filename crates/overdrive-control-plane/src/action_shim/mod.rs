@@ -472,7 +472,7 @@ async fn dispatch_single(
         // the variants — the explicit Job-kind mapping
         // (`Completed → Succeeded`, `Failed → Failed`) lands in slice
         // 02-06; until then both variants flow through the wildcard
-        // `_ => ConvergedFailed` arm so the stream still terminates.
+        // `_ => (deleted legacy)` arm so the stream still terminates.
         Action::FinalizeFailed { alloc_id, terminal } => {
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 // No prior row — nothing to finalize against. This is
@@ -505,7 +505,7 @@ async fn dispatch_single(
                 // last failed Start/RestartAllocation populates `detail`
                 // with the `DriverError::StartRejected.reason_text`
                 // (per the StartAllocation arm above); the streaming
-                // surface's `ConvergedFailed.error` field reads this
+                // surface's `(deleted legacy).error` field reads this
                 // through `event.detail`. Hardcoding `None` here would
                 // drop the operator-visible cause text on the
                 // budget-exhausted terminal, even though the prior
