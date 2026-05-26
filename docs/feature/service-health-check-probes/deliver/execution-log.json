@@ -379,6 +379,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-26T08:20:22Z"
+    },
+    {
+      "sid": "01-03e3",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T08:22:26Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T11:43:09Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T11:43:28Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface (service_lifecycle_stable.rs + service_submit_event_v2.rs + service_submit_event_taxonomy.rs + service_submit_dispatch_wiring.rs)",
+      "t": "2026-05-26T11:43:34Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: scope-vs-budget mismatch; CLI Service-kind dispatch path does not exist (submit_streaming only dispatches Job; legacy fall-through wraps Service TOML in SubmitSpecInput::Job which is wrong). Full GREEN requires: (1) new submit_streaming_service() in CLI with ServiceSpec\u2192ServiceSpecInput conversion, (2) three TOML fixtures, (3) coinflip-exit-1-30ms fixture binary or bash wrapper, (4) 100-seed Lima orchestration against real ProbeRunner+ExecDriver+ServiceLifecycleReconciler, (5) rkyv byte-equality fixture between snapshot AllocStatusRow.terminal and streaming LifecycleEvent.terminal. Conservatively 2-3 days of focused work; not a 30-turn single-dispatch task. RED scaffolds remain intact (5 sub-scenarios in service_honest_stable.rs with #[should_panic(expected=RED scaffold)]). Tier-1 + dispatch-wiring acceptance tests landed in 01-03e/e2/e3 cover the underlying contract; this step composes them end-to-end at Tier 3.",
+      "t": "2026-05-26T11:45:07Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN not executed (scope-vs-budget mismatch surfaced as P0 blocker); no production code changes to commit. RED scaffolds remain intact at #[should_panic(expected=RED scaffold)]. Working tree contains only DES log entries (this file + .develop-progress.json). Awaiting user direction on Option A (split step), Option B (re-scope to SimDriver), or Option C (multi-checkpoint budget) per return message.",
+      "t": "2026-05-26T11:46:02Z"
     }
   ]
 }
