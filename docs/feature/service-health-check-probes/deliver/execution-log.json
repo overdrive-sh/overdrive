@@ -421,6 +421,83 @@
       "s": "SKIPPED",
       "d": "CHECKPOINT_PENDING: GREEN not executed (scope-vs-budget mismatch surfaced as P0 blocker); no production code changes to commit. RED scaffolds remain intact at #[should_panic(expected=RED scaffold)]. Working tree contains only DES log entries (this file + .develop-progress.json). Awaiting user direction on Option A (split step), Option B (re-scope to SimDriver), or Option C (multi-checkpoint budget) per return message.",
       "t": "2026-05-26T11:46:02Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:09:18Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:13:15Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface (PBT lockstep guards from 01-03e2 cover the projection dimension)",
+      "t": "2026-05-26T12:13:15Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:16:29Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:19:59Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:42:07Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: structural gap \u2014 ServiceLifecycleReconciler hydrate_actual returns default() (reconciler_runtime.rs:1360); probe_runner constructed but NOT wired into ExecDriver (lib.rs:1007-1015 comment explicitly defers to slices 02-01 + 02-02); end-to-end Service-kind Stable/Failed/StartupProbeFailed cannot fire on Lima today",
+      "t": "2026-05-26T12:42:15Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface from 01-03b + 01-03e2 + 01-03e2 taxonomy property tests",
+      "t": "2026-05-26T12:42:18Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: see RED_ACCEPTANCE blocker \u2014 Service-kind reconciler hydrate_actual + probe_runner-to-ExecDriver wiring deferred to slices 02-01 + 02-02",
+      "t": "2026-05-26T12:42:20Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: see RED_ACCEPTANCE/GREEN blockers \u2014 no commit since no activation",
+      "t": "2026-05-26T12:42:22Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PARTIAL: fixtures+helper landed; sub-scenarios S-SHCP-INT-CLI-02/03/04/05 stay RED \u2014 blocked on upstream gaps in reconciler_runtime.rs:1360 (ServiceLifecycle hydrate_actual returns default()) and lib.rs:1007-1015 (ProbeRunner not wired into ExecDriver, deferred to slices 02-01+02-02); see commit body",
+      "t": "2026-05-26T12:49:22Z"
     }
   ]
 }

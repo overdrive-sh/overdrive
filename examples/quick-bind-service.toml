@@ -1,0 +1,49 @@
+# Walking-skeleton Fixture B (S-SHCP-INT-CLI-02) — quick-bind happy path.
+#
+# A Service whose listener binds 127.0.0.1:8080 within ~600ms. The
+# `ServiceLifecycleReconciler` Stable path requires:
+#   1. The alloc reaches `Running`.
+#   2. The startup probe `tcp 0.0.0.0:8080` returns Pass.
+#
+# Per ADR-0058 the absence of an explicit `[[health_check.startup]]`
+# block on a Service WITH a `[[listener]]` infers a default TCP
+# startup probe (`tcp 0.0.0.0:8080`, interval 2s, timeout 5s,
+# max_attempts 30, deadline = 60s).
+#
+# Once upstream wiring closes (slice 02-01 + 02-02), this fixture
+# drives S-SHCP-INT-CLI-02:
+#   * The CLI's `submit_streaming` routes the Service-kind TOML to
+#     `submit_streaming_service`.
+#   * The reconciler observes `Running + ProbeStatus::Pass` and emits
+#     `Action::FinalizeFailed { terminal: Some(Stable { settled_in_ms,
+#     witness }) }`.
+#   * `settled_in_ms ∈ [500ms, 2000ms]`.
+#
+# Pre-wiring state (today): the fixture parses cleanly via
+# `WorkloadSpecInput::from_toml_str`; the integration test's
+# `#[should_panic(expected = "RED scaffold")]` marker remains in
+# place until the upstream gap closes.
+
+[service]
+id = "quick-bind"
+replicas = 1
+
+[[listener]]
+port = 8080
+protocol = "tcp"
+
+[exec]
+# A 1s `bash -c` window that opens TCP/8080 with `nc -l`, allowing
+# the probe runner to observe a successful TCP connect within the
+# 600ms quick-bind window. The trailing `sleep 60` keeps the alloc
+# Running long enough that the reconciler can observe the Pass
+# transition and emit Stable before the workload exits.
+command = "/bin/bash"
+args = [
+    "-c",
+    "sleep 0.5 && (nc -l 127.0.0.1 8080 &) && sleep 60",
+]
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864

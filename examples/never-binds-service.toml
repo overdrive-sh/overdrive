@@ -1,0 +1,60 @@
+# Walking-skeleton Fixture C (S-SHCP-INT-CLI-03) — startup-probe
+# timeout sad path.
+#
+# A Service that never opens its listener port — the exec runs but
+# does not bind anything. Across `max_attempts` TCP probe attempts,
+# every connect attempt returns `connection refused`; the reconciler
+# emits `Failed { reason: StartupProbeFailed { last_fail:
+# "connection refused", probe_idx: 0, attempts } }` once the
+# startup_deadline elapses.
+#
+# Per ADR-0058: omitting `[[health_check.startup]]` on a Service with
+# a `[[listener]]` infers the default TCP probe — interval 2s, timeout
+# 5s, max_attempts 30, startup_deadline 60s. The fixture overrides
+# the deadline to a shorter 5s window so the test does not block on
+# the 60s default.
+#
+# Once upstream wiring closes (slice 02-01 + 02-02), this fixture
+# drives S-SHCP-INT-CLI-03:
+#   * The CLI's `submit_streaming` routes the Service-kind TOML to
+#     `submit_streaming_service`.
+#   * The probe runner attempts TCP connects to 127.0.0.1:9090 across
+#     the deadline window; every attempt returns `connection refused`.
+#   * The reconciler emits `Action::FinalizeFailed { terminal:
+#     Some(ServiceFailed { reason: StartupProbeFailed {
+#     last_fail: contains "connection refused", attempts: max_attempts,
+#     probe_idx: 0 } }) }`.
+#
+# Pre-wiring state (today): the fixture parses cleanly; the
+# integration test's `#[should_panic(expected = "RED scaffold")]`
+# marker remains in place until the upstream gap closes.
+
+[service]
+id = "never-binds"
+replicas = 1
+
+[[listener]]
+port = 9090
+protocol = "tcp"
+
+[exec]
+# `sleep 30` keeps the alloc Running but never opens port 9090. The
+# probe runner observes only `connection refused` until the deadline
+# elapses.
+command = "/bin/sleep"
+args = ["30"]
+
+# Override the default 60s deadline to a 5s window. The startup
+# probe attempts (interval 2s, max_attempts 3) span ~6s — the
+# reconciler's StartupProbeFailed branch fires when
+# `attempts >= max_attempts && elapsed >= startup_deadline`.
+[[health_check.startup]]
+type = "tcp"
+port = 9090
+interval_seconds = 2
+timeout_seconds = 1
+max_attempts = 3
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
