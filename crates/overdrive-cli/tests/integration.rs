@@ -80,4 +80,11 @@ mod integration {
     //   * Cross-fixture regression: NEVER "(took live)" for Service.
     // RED scaffold — production bodies land in slice 01 + slice 08.
     mod service_honest_stable;
+
+    // service-health-check-probes step 01-03e3-fix — CLI submit-side
+    // dispatch routing. Closes the gap 01-03e3 missed: a Service-kind
+    // TOML through `submit_streaming` must route to the new
+    // `submit_streaming_service` (the `ServiceSubmitEvent` consumer),
+    // not fall through to the legacy `JobSpecInput` path.
+    mod service_submit_streaming_cli_dispatch;
 }

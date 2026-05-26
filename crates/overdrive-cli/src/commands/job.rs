@@ -30,9 +30,10 @@ use overdrive_control_plane::streaming::JobSubmitEvent;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
-    JobSpecInput, ResourcesInput as LegacyResourcesInput, WorkloadSpecInput,
+    JobSpecInput, ResourcesInput as LegacyResourcesInput, ServiceSpec, ServiceV1,
+    WorkloadSpecInput,
 };
-use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
 use url::Url;
 
@@ -408,53 +409,32 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
         message: format!("failed to read `{}`: {e}", args.spec.display()),
     })?;
 
-    // 2. Slice 02 of `workload-kind-discriminator`: parse via the
-    //    kind-discriminating `WorkloadSpecInput::from_toml_str` driving
-    //    port (ADR-0047 §2). Section presence in the TOML body
-    //    (`[service]` / `[job]` / `[schedule]`) selects the variant.
-    //    The legacy flat `JobSpecInput` parser is retained as the
-    //    fallback for back-compat fixtures that don't yet carry a
-    //    discriminator section — slice 02 wires the discriminator
-    //    into production while preserving the legacy ingestion path
-    //    for unmigrated tests until they are converted.
-    let workload_input = WorkloadSpecInput::from_toml_str(&toml_str);
-
-    if let Ok(WorkloadSpecInput::Job(job_spec)) = workload_input {
-        // Job-kind dispatch (slice 02) — runs to completion; no
-        // (deleted legacy) rendering reachable. Service / Schedule /
-        // Err(_) cases all fall through to the legacy flat
-        // `JobSpecInput` ingestion path: the control plane server-side
-        // spec ingest accepts the same TOML shape; re-parse via
-        // `JobSpecInput` to construct the legacy wire payload. This
-        // bridge dies when slices 03+ migrate the wire format
-        // end-to-end.
-        return submit_streaming_job(args, job_spec).await;
-    }
-
-    // 3. Legacy path: flat `JobSpecInput` parser.
-    let spec_input: JobSpecInput =
-        toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+    // 2. Parse via the kind-discriminating `WorkloadSpecInput::from_toml_str`
+    //    driving port (ADR-0047 §2). Section presence in the TOML body
+    //    (`[service]` / `[job]` / `[schedule]`) selects the variant. Per
+    //    step 01-03e3-fix the dispatch is per-kind: each arm wraps its
+    //    own typed payload into the matching `SubmitSpecInput::*` variant
+    //    and routes to a per-kind streaming consumer (Job →
+    //    `submit_streaming_job` → `JobSubmitEvent` arms; Service →
+    //    `submit_streaming_service` → `ServiceSubmitEvent` arms). The
+    //    legacy "fall through to flat `JobSpecInput` + wrap in
+    //    `SubmitSpecInput::Job`" path was the gap that produced the
+    //    cross-routing bug 01-03e3-fix closes: Service-kind TOML must
+    //    NEVER be wrapped in `SubmitSpecInput::Job(_)`.
+    match WorkloadSpecInput::from_toml_str(&toml_str) {
+        Ok(WorkloadSpecInput::Job(job_spec)) => submit_streaming_job(args, job_spec).await,
+        Ok(WorkloadSpecInput::Service(service_spec)) => {
+            submit_streaming_service(args, service_spec).await
+        }
+        Ok(WorkloadSpecInput::Schedule(_)) => Err(CliError::InvalidSpec {
+            field: "spec.kind".to_string(),
+            message: "schedule submission is not yet implemented (ADR-0051 OQ-5)".to_string(),
+        }),
+        Err(parse_err) => Err(CliError::InvalidSpec {
             field: "toml".to_string(),
-            message: format!("failed to parse TOML: {e}"),
-        })?;
-
-    // 4. Client-side validation (ADR-0011 SSOT). Capture the validated
-    //    `WorkloadId` so the streaming consumer can carry the canonical
-    //    workload_id without re-parsing the server's `intent_key`.
-    let validated: Job = Job::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
-    let validated_job_id = validated.id.to_string();
-
-    // 5. Build the typed API client and POST with `Accept: application/x-ndjson`.
-    let client = ApiClient::from_config(&args.config_path)?;
-    let endpoint = client.base_url().clone();
-    // Legacy lane — wrapped in `SubmitSpecInput::Job(_)` per ADR-0051.
-    // The wire-side discriminator now lives inside `SubmitSpecInput`'s
-    // `kind` tag; the outer `workload_kind` field has been deleted.
-    let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_input) };
-    let response = client.submit_workload_streaming(request).await?;
-
-    // 6. Consume the stream line-by-line.
-    consume_stream(response, endpoint, validated_job_id).await
+            message: format!("failed to parse workload spec: {parse_err}"),
+        }),
+    }
 }
 
 /// Submit a Job-kind spec via the streaming NDJSON lane and consume to
@@ -513,6 +493,63 @@ async fn submit_streaming_job(
     let response = client.submit_workload_streaming(request).await?;
 
     consume_stream_job(response, endpoint, validated_job_id, submit_echo).await
+}
+
+/// Submit a Service-kind spec via the streaming NDJSON lane and consume
+/// to terminal. Mirrors [`submit_streaming_job`] for the Service kind
+/// per ADR-0047 §3 [D2] / [D7] and step 01-03e3-fix: routes to the
+/// `ServiceSubmitEvent` consumer surface (`Accepted / Stable / Failed /
+/// Stopped`), NOT the `JobSubmitEvent` surface.
+///
+/// Projects the parser-side [`ServiceSpec`] (carries `Listener` with
+/// `NonZeroU16` port and `Proto` enum) to the wire-side
+/// [`ServiceSpecInput`] (carries `ListenerInput` with `u16` port and
+/// `String` protocol) and POSTs as `SubmitSpecInput::Service(_)`.
+async fn submit_streaming_service(
+    args: SubmitArgs,
+    service_spec: ServiceSpec,
+) -> Result<SubmitStreamingOutput, CliError> {
+    // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`.
+    // The parser-side `Listener` carries `(NonZeroU16, Proto)`; the
+    // wire-side `ListenerInput` carries `(u16, String)` for JSON
+    // tolerance. Both sides go through `ServiceV1::from_submit` server-
+    // side; the client-side fast-fail validation below also exercises
+    // the same constructor for symmetry with the Job-kind lane.
+    let listeners: Vec<ListenerInput> = service_spec
+        .listeners
+        .iter()
+        .map(|l| ListenerInput { port: l.port.get(), protocol: l.protocol.as_str().to_owned() })
+        .collect();
+    let spec_input = ServiceSpecInput {
+        id: service_spec.id,
+        replicas: service_spec.replicas,
+        resources: LegacyResourcesInput {
+            cpu_milli: service_spec.resources.cpu_milli,
+            memory_bytes: service_spec.resources.memory_bytes,
+        },
+        driver: DriverInput::Exec(LegacyExecInput {
+            command: service_spec.exec.command,
+            args: service_spec.exec.args,
+        }),
+        listeners,
+    };
+
+    // Client-side validation via the shared ADR-0011 constructor — same
+    // discipline as the Job-kind lane's `Job::from_submit` fast-fail.
+    let validated: ServiceV1 =
+        ServiceV1::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated_workload_id = validated.id.to_string();
+
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
+    // Per ADR-0047 §3 / ADR-0051 the Service-kind wire-side payload is
+    // `SubmitSpecInput::Service(_)`. The handler dispatches to
+    // `streaming::build_service_stream` (typed `ServiceSubmitEvent`
+    // lane per step 01-03e3) based on the persisted discriminator.
+    let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec_input) };
+    let response = client.submit_workload_streaming(request).await?;
+
+    consume_stream(response, endpoint, validated_workload_id).await
 }
 
 /// Drive a Service-kind streaming submit to terminal.
