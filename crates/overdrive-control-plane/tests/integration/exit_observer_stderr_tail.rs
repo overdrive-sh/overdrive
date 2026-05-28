@@ -97,6 +97,8 @@ async fn seed_running_row(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
 }

@@ -100,6 +100,8 @@ fn alloc_clean_exit(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocSt
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated state was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 
@@ -129,6 +131,8 @@ fn alloc_crashed_with_exit(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Failed-after-crash state was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 

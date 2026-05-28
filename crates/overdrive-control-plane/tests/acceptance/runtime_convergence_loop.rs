@@ -123,6 +123,8 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     state
         .obs
@@ -294,6 +296,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     state
         .obs
@@ -1050,6 +1054,8 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Failed-after-running carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     state
         .obs

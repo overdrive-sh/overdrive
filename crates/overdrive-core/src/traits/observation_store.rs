@@ -591,6 +591,53 @@ pub struct AllocStatusRowV1 {
     pub stderr_tail: Option<String>,
     pub kind: WorkloadKind,
     pub listeners: Vec<ListenerRow>,
+    /// Wall-clock instant (ms since UNIX epoch) at which this
+    /// allocation first transitioned Pending → Running, as observed
+    /// by the owning node via the injected [`crate::traits::clock::Clock`]
+    /// port.
+    ///
+    /// # Semantics
+    ///
+    /// - `None`: the allocation has not yet been observed Running
+    ///   (Pending only, or driver-rejected start). This is the honest
+    ///   shape — no Running observation exists yet, so there is no
+    ///   wall-clock to record.
+    /// - `Some(ts)`: the allocation reached Running at wall-clock
+    ///   `ts` (ms since UNIX epoch). The value is captured ONCE at
+    ///   the Pending → Running transition via
+    ///   `tick.now_unix.as_unix_duration().as_millis() as u64` —
+    ///   the same `Clock` port DST already controls (`SystemClock`
+    ///   in production, `SimClock` under simulation).
+    ///
+    /// Once `Some(ts)`, the field is preserved verbatim on every
+    /// subsequent state transition (Failed, Stopped, Terminated) by
+    /// reading the LWW-winner prior row and copying the field forward.
+    /// This is the load-bearing invariant that lets the
+    /// `ServiceLifecycleReconciler`'s deadline gates (Stable
+    /// `settled_in_ms`, EarlyExit `elapsed < startup_deadline`,
+    /// StartupProbeFailed `elapsed >= deadline_ms`) read a stable
+    /// "started at" wall-clock from any post-Running row.
+    ///
+    /// # Discipline
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this field is the INPUT (the observed
+    /// wall-clock of the Pending → Running transition). Derived
+    /// values — `elapsed_ms` (computed as `tick.now_unix` minus
+    /// `started_at_unix_ms`), `settled_in_ms`, and deadline gates —
+    /// are recomputed on every reconcile tick from this input plus
+    /// the live policy (deadline thresholds in the spec). The field
+    /// is never a cache of today's policy.
+    ///
+    /// Per `.claude/rules/development.md` § "Distinct failure modes
+    /// get distinct error variants": consumers MUST match on
+    /// `Some(ts)` explicitly. Do NOT collapse to `unwrap_or(0)` —
+    /// that re-creates the silent-zero bug this field exists to
+    /// avoid (elapsed becomes huge → EarlyExit never fires,
+    /// StartupProbeFailed always fires). `None` is the explicit
+    /// "no Running observation yet" signal; reconcilers branch on
+    /// it rather than treating it as zero.
+    pub started_at_unix_ms: Option<u64>,
 }
 
 impl VersionedEnvelope for AllocStatusRowEnvelope {
@@ -612,8 +659,8 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// Empirically determined against canonical V1 payloads of
     /// varying `listeners: Vec<ListenerRow>` / `detail` / `stderr_tail`
     /// / `terminal` shapes: rkyv 0.8 places the outer enum's
-    /// discriminant byte 192 bytes from the END of the archive,
-    /// stable across all payload sizes (the trailing "root"
+    /// discriminant byte at a fixed offset from the END of the
+    /// archive, stable across all payload sizes (the trailing "root"
     /// structure has a fixed footprint; only the leading slab grows
     /// with variable-length data).
     ///
@@ -630,19 +677,28 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// `invalid discriminant '254' for enum
     /// 'ArchivedAllocStatusRowEnvelope'`.
     ///
+    /// **Repinned 2026-05-29** (greenfield extension per the
+    /// subsidiary GAP-1 fix): added `started_at_unix_ms: Option<u64>`
+    /// inline to `AllocStatusRowV1`. The 16-byte growth (8 for the
+    /// Option discriminant + 8 for the u64 payload) extends the
+    /// trailing root structure by 16 bytes; the outer enum's
+    /// discriminant byte therefore moved from 192 → 208 bytes from
+    /// the END of the archive. Empirically verified via the
+    /// schema-evolution fixture's triangulation test.
+    ///
     /// Re-pin alongside the schema-evolution fixture at every
     /// version-bump per
     /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
     /// docstring.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(192)
+        Some(208)
     }
 
     fn known_discriminants() -> &'static [u8] {
         // V1 carries rkyv discriminant 0 (declaration order — first
         // variant). Empirically verified by archiving a canonical
         // `AllocStatusRowEnvelope::latest(...)` and inspecting the
-        // byte at `bytes.len() - 192`.
+        // byte at `bytes.len() - 208`.
         &[0]
     }
 

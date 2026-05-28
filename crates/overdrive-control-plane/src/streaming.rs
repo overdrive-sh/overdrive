@@ -1109,6 +1109,8 @@ mod tests {
             stderr_tail: None,
             kind: WorkloadKind::Job,
             listeners: vec![],
+            // GAP-1 subsidiary: Terminated state was Running first.
+            started_at_unix_ms: Some(1_700_000_000_000),
         }
     }
 

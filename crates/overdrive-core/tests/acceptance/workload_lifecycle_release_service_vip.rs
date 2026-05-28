@@ -106,6 +106,8 @@ fn alloc_terminal_operator_stopped(
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated state was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 

@@ -95,6 +95,14 @@ fn region() -> Region {
 }
 
 fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -> AllocStatusRow {
+    // Subsidiary GAP-1 fix: trait-conformance harness rows model
+    // generic LWW shapes. `None` on Pending (no Running observation
+    // yet); `Some(_)` on Running-or-later states to match the
+    // production invariant. Value is fixed for test determinism.
+    let started_at_unix_ms = match state {
+        AllocState::Pending => None,
+        _ => Some(1_700_000_000_000),
+    };
     AllocStatusRow {
         alloc_id: alloc_id(scope, idx),
         workload_id: WorkloadId::from_str("payments").expect("job id is valid"),
@@ -107,6 +115,7 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         stderr_tail: None,
         kind: crate::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        started_at_unix_ms,
     }
 }
 

@@ -2041,6 +2041,11 @@ mod tests {
                 stderr_tail: None,
                 kind: WorkloadKind::Service,
                 listeners: vec![],
+                // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+                started_at_unix_ms: match alloc_state {
+                    AllocState::Pending => None,
+                    _ => Some(1_700_000_000_000),
+                },
             };
             state
                 .obs

@@ -96,6 +96,8 @@ async fn operator_restart_observes_yesterday_alloc_status_without_subtree_overru
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
 
     let _guard = set_default(subscriber);

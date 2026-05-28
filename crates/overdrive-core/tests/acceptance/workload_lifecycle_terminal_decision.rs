@@ -102,6 +102,13 @@ fn alloc_with_state(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending (no Running yet); fixed
+        // wall-clock on Running-or-later states. Value arbitrary;
+        // this test does not assert on it directly.
+        started_at_unix_ms: match state {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     }
 }
 

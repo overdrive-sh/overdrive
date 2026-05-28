@@ -36,7 +36,13 @@ use super::harness::{
 /// `feedback_single_cut_greenfield_migrations.md` — pre-shipment the
 /// V1 fixture is the canonical spec, regenerated when the spec
 /// changes).
-const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 192;
+///
+/// Re-pinned 2026-05-29 from 192 → 208 — greenfield extension of
+/// `AllocStatusRowV1` with `started_at_unix_ms: Option<u64>` per the
+/// subsidiary GAP-1 fix (see commit message). The 16-byte growth
+/// (Option discriminant + u64 payload, inline) shifts the outer
+/// enum's discriminant byte 16 bytes further from the end.
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 208;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -57,6 +63,11 @@ fn canonical_v1_payload() -> AllocStatusRowLatest {
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // Subsidiary GAP-1 fix: canonical payload carries the
+        // wall-clock at the Pending → Running transition. Pinned
+        // value is arbitrary but stable — re-pin on every
+        // FIXTURE_V<N+1> bump.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 
@@ -79,7 +90,7 @@ fn canonical_v1_payload() -> AllocStatusRowLatest {
 /// shipped to a deployed consumer, this constant becomes immutable
 /// per `.claude/rules/development.md` § "rkyv schema evolution" —
 /// future variants would need a `V2` envelope.
-const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000";
+const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff0000000001000000000000000068e5cf8b010000";
 
 #[test]
 fn alloc_status_row_v1_decodes_through_current_envelope() {
@@ -155,6 +166,11 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // Subsidiary GAP-1 fix: this test exercises a Terminated row
+        // (SystemGc), which by lifecycle ordering must have reached
+        // Running first — the field is `Some(_)` to reflect that.
+        // Value is arbitrary; the test asserts round-trip equality.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     let envelope = AllocStatusRowEnvelope::latest(payload.clone());
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");

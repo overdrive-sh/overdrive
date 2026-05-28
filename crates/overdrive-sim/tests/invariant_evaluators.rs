@@ -176,6 +176,8 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
             stderr_tail: None,
             kind: overdrive_core::aggregate::WorkloadKind::Service,
             listeners: Vec::new(),
+            // GAP-1 subsidiary: Running state carries fixed wall-clock.
+            started_at_unix_ms: Some(1_700_000_000_000),
         })))
         .await
         .expect("write");

@@ -88,6 +88,8 @@ pub fn make_alloc_running(alloc_id: &str, workload_id: &str, target_node: &str) 
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 
@@ -109,6 +111,8 @@ pub fn make_alloc_terminated(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated state was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 
@@ -220,6 +224,10 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                         },
                         updated_at: LogicalTimestamp { counter: 1, writer: target },
                         listeners: Vec::new(),
+                        // GAP-1 subsidiary: Running/Terminated both
+                        // carry the fixed wall-clock (Terminated was
+                        // Running first).
+                        started_at_unix_ms: Some(1_700_000_000_000),
                     }
                 })
                 .collect()

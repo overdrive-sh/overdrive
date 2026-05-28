@@ -44,6 +44,11 @@ fn row_at(writer: &NodeId, counter: u64, state: AllocState) -> AllocStatusRow {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at_unix_ms: match state {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     }
 }
 
@@ -176,6 +181,8 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     // Identical timestamp, but a different payload — represents the
     // same logical row being re-delivered via gossip. Under LWW, this

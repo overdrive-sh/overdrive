@@ -173,6 +173,11 @@ async fn write_row(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at_unix_ms: match state {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
@@ -1050,6 +1055,8 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Job,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 

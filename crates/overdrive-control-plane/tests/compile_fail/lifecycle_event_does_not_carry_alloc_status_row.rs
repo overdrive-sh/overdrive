@@ -37,6 +37,7 @@ fn main() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

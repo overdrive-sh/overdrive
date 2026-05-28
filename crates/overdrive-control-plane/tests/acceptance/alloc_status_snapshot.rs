@@ -135,6 +135,11 @@ async fn write_row(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at_unix_ms: match state_value {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
@@ -350,6 +355,11 @@ async fn write_terminal_row(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at_unix_ms: match state_value {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }

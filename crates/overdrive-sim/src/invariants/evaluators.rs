@@ -523,6 +523,12 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 stderr_tail: None,
                 kind: overdrive_core::aggregate::WorkloadKind::Service,
                 listeners: Vec::new(),
+                // GAP-1 subsidiary: None on Pending; fixed wall-clock
+                // on Running. Value arbitrary for this invariant.
+                started_at_unix_ms: match state {
+                    AllocState::Pending => None,
+                    _ => Some(1_700_000_000_000),
+                },
             };
             let peer = cluster.peer(writer);
             if let Err(err) = peer.write(ObservationRow::AllocStatus(Box::new(row))).await {
@@ -2211,6 +2217,11 @@ mod tests {
             stderr_tail: None,
             kind: overdrive_core::aggregate::WorkloadKind::Service,
             listeners: Vec::new(),
+            // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+            started_at_unix_ms: match state {
+                AllocState::Pending => None,
+                _ => Some(1_700_000_000_000),
+            },
         }
     }
 

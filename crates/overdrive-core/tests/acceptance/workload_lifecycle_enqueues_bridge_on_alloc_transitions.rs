@@ -96,6 +96,11 @@ fn alloc_with_state(
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at_unix_ms: match state {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     }
 }
 fn fresh_tick() -> TickContext {
@@ -424,6 +429,8 @@ fn terminal_operator_stopped_alloc(
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated state was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     }
 }
 

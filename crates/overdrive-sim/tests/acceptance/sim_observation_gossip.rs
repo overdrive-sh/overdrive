@@ -68,6 +68,11 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at_unix_ms: match state {
+            AllocState::Pending => None,
+            _ => Some(1_700_000_000_000),
+        },
     }
 }
 
@@ -239,6 +244,8 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Draining state was Running first.
+        started_at_unix_ms: Some(1_700_000_000_000),
     };
     peer_c
         .write(ObservationRow::AllocStatus(Box::new(t1_row.clone())))
