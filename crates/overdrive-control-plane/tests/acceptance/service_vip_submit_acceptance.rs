@@ -140,6 +140,9 @@ fn service_spec(id: &str, listeners: Vec<(u16, &str)>) -> ServiceSpecInput {
             .into_iter()
             .map(|(port, protocol)| ListenerInput { port, protocol: protocol.to_owned() })
             .collect(),
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 

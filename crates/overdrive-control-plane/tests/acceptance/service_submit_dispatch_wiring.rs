@@ -65,6 +65,9 @@ fn payments_service_spec() -> ServiceSpecInput {
             args: vec![],
         }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 

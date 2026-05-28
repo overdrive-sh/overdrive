@@ -102,6 +102,9 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     })
     .expect("valid service spec");
 

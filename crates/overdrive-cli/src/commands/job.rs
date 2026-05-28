@@ -520,6 +520,13 @@ async fn submit_streaming_service(
         .iter()
         .map(|l| ListenerInput { port: l.port.get(), protocol: l.protocol.as_str().to_owned() })
         .collect();
+    // Probe descriptors project through unchanged — the parser
+    // populates `service_spec.startup_probes` from the TOML
+    // `[[health_check.startup]]` blocks (plus default-TCP inference
+    // per ADR-0058); the wire envelope carries them through to
+    // `ServiceV1::from_submit` server-side. Readiness / liveness
+    // probe vecs are reserved for future slices (02-01 / 02-02)
+    // and pass through as the empty vecs the parser populates.
     let spec_input = ServiceSpecInput {
         id: service_spec.id,
         replicas: service_spec.replicas,
@@ -532,6 +539,9 @@ async fn submit_streaming_service(
             args: service_spec.exec.args,
         }),
         listeners,
+        startup_probes: service_spec.startup_probes,
+        readiness_probes: service_spec.readiness_probes,
+        liveness_probes: service_spec.liveness_probes,
     };
 
     // Client-side validation via the shared ADR-0011 constructor — same

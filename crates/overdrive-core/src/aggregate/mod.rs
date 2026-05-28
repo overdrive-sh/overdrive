@@ -389,12 +389,37 @@ pub enum WorkloadIntentV1 {
     Schedule(ScheduleV1),
 }
 
-/// Phase 1 minimal `Service` payload per ADR-0050 § 2 + OQ-3.
+/// Phase 1 minimal `Service` payload per ADR-0050 § 2 + OQ-3,
+/// extended with health-check probe descriptors per ADR-0057.
 ///
 /// Mirrors [`JobV1`]'s `(id, replicas, resources, driver)` shape and
-/// adds `listeners`. Listener health-check policy, TLS-termination
-/// config, and backend weights are deferred per OQ-3 (additive
-/// envelope evolution).
+/// adds `listeners` plus three `Vec<ProbeDescriptor>` slots (startup
+/// / readiness / liveness). The probe vecs carry the parsed-and-
+/// validated descriptors the operator declared under
+/// `[[health_check.startup]]` / `[[health_check.readiness]]` /
+/// `[[health_check.liveness]]` (plus any platform-synthesised
+/// default-TCP probe per ADR-0058). Persisting the descriptors
+/// themselves is correct per § "Persist inputs, not derived state":
+/// the reconciler recomputes derived values (startup deadline,
+/// inferred-flag rendering, mechanic summary) every tick from the
+/// descriptors + the live policy, never persisting them as cached
+/// outputs.
+///
+/// # rkyv schema-evolution note
+///
+/// Per `.claude/rules/development.md` § "rkyv schema evolution" the
+/// archived layout of this struct is positional — appending the
+/// three probe vecs in this commit shifts trailing offsets relative
+/// to the pre-GAP-6 layout. The `WorkloadIntentEnvelope` only ships
+/// `V1` today; under the Phase-1 greenfield single-cut migration
+/// policy ("delete the on-disk redb file" is the official upgrade
+/// path, per `feedback_single_cut_greenfield_migrations.md`), the
+/// new field set is admitted in-place rather than minting
+/// `WorkloadIntentV2`. The historical golden-bytes fixtures under
+/// `tests/schema_evolution/workload_intent.rs` are regenerated in
+/// this same commit to pin the new V1 layout — the structural
+/// defense (every persisted layout has a pinned golden-bytes
+/// fixture) is preserved.
 ///
 /// Carries no VIP — VIPs are platform-issued via
 /// `ServiceVipAllocator` per ADR-0049 § 5. The aggregate carries
@@ -420,6 +445,19 @@ pub struct ServiceV1 {
     /// Operator-declared listeners in declaration order. Reuses the
     /// parser-layer [`Listener`] newtype — `(port, protocol)` only.
     pub listeners: Vec<Listener>,
+    /// Operator-declared startup probes plus any platform-synthesised
+    /// default per ADR-0058. Empty IFF the operator wrote
+    /// `[[health_check.startup]] = []` (explicit opt-out, preserves
+    /// Phase-1 first-Running semantics). The reconciler reads these
+    /// descriptors and recomputes `max_attempts × interval` →
+    /// startup-deadline on every tick (NOT a cached value).
+    pub startup_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared readiness probes. Populated by future
+    /// slices (02-01); reserved here for ServiceV1 layout stability.
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared liveness probes. Populated by future
+    /// slices (02-02); reserved here for ServiceV1 layout stability.
+    pub liveness_probes: Vec<ProbeDescriptor>,
 }
 
 /// Phase 1 `Schedule` payload per ADR-0050 § 2 + OQ-4 (embedded
@@ -472,8 +510,16 @@ impl ServiceV1 {
 
         use crate::dataplane::backend_key::Proto;
 
-        let crate::api::submit::ServiceSpecInput { id, replicas, resources, driver, listeners } =
-            input;
+        let crate::api::submit::ServiceSpecInput {
+            id,
+            replicas,
+            resources,
+            driver,
+            listeners,
+            startup_probes,
+            readiness_probes,
+            liveness_probes,
+        } = input;
 
         // Identity + scalar field validation — mirrors `JobV1::from_submit`.
         let id = WorkloadId::new(&id)?;
@@ -538,6 +584,16 @@ impl ServiceV1 {
             validated.push(Listener { port, protocol });
         }
 
+        // Probe descriptors flow through unchanged — validation
+        // happens at parse time (parser-side `parse_startup_probes`
+        // in `workload_spec.rs`) and at wire-serde admission via
+        // `#[serde(deny_unknown_fields)]` on `ProbeDescriptor`. Per
+        // § "Persist inputs, not derived state": the descriptors are
+        // inputs the reconciler consumes every tick — `max_attempts`,
+        // `timeout_seconds`, `interval_seconds`, `mechanic` are all
+        // policy inputs, NOT derived values. The reconciler
+        // recomputes startup deadline / inferred-flag rendering /
+        // mechanic summary on every tick from these fields.
         Ok(Self {
             id,
             replicas,
@@ -550,6 +606,9 @@ impl ServiceV1 {
                 args: exec_input.args,
             }),
             listeners: validated,
+            startup_probes,
+            readiness_probes,
+            liveness_probes,
         })
     }
 }

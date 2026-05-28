@@ -158,6 +158,9 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 

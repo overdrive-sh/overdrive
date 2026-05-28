@@ -1949,6 +1949,9 @@ mod tests {
                     args: vec![],
                 }),
                 listeners,
+                startup_probes: vec![],
+                readiness_probes: vec![],
+                liveness_probes: vec![],
             })
             .expect("valid service spec");
             WorkloadIntent::Service(svc)

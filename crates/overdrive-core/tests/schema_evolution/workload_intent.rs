@@ -57,8 +57,14 @@ fn canonical_v1_job_payload() -> WorkloadIntent {
     })
 }
 
-/// Canonical V1 `Service`-variant payload (ADR-0050 OQ-3 minimal
-/// shape — `(port, protocol)` listeners only).
+/// Canonical V1 `Service`-variant payload — ADR-0050 OQ-3 minimal
+/// shape plus the three `Vec<ProbeDescriptor>` slots added by
+/// GAP-6 (probe descriptors persisted in `WorkloadIntent::Service`).
+/// The canonical fixture uses empty probe vecs — exercises the
+/// most common Phase-1 shape (no operator-declared probes; the
+/// parser's default-TCP inference flows through `startup_probes`
+/// when listeners exist; an explicit empty vec is the explicit
+/// opt-out per ADR-0058).
 fn canonical_v1_service_payload() -> WorkloadIntent {
     WorkloadIntent::Service(ServiceV1 {
         id: WorkloadId::new("svc-frontends").expect("valid workload id"),
@@ -72,6 +78,9 @@ fn canonical_v1_service_payload() -> WorkloadIntent {
             port: NonZeroU16::new(8080).expect("non-zero port"),
             protocol: Proto::Tcp,
         }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     })
 }
 
@@ -114,17 +123,44 @@ const FIXTURE_V1: &str = FIXTURE_V1_JOB;
     dead_code,
     reason = "fixture constant retained for explicit job-arm naming; aliased from FIXTURE_V1"
 )]
-const FIXTURE_V1_JOB: &str = "7376632d7061796d656e74732f62696e2f736c656570000033363030ffffffff000000000000000000000000000000008c000000d0ffffff0300000000000000fa000000000000000000001000000000000000008a000000b8ffffffbcffffff010000000000000000000000000000000000000000000000";
+// Regenerated in the GAP-6 corrective patch (2026-05-28) — the outer
+// `WorkloadIntentEnvelope`'s archive offsets are positional. Changing
+// `ServiceV1`'s archived layout (one inner variant) shifts the
+// trailing root region pointers across every variant of the outer
+// envelope; the JOB and SCHEDULE fixtures regenerate alongside the
+// SERVICE fixture even though their inner payloads (JobV1) did not
+// change. Phase-1 greenfield single-cut policy.
+const FIXTURE_V1_JOB: &str = "7376632d7061796d656e74732f62696e2f736c656570000033363030ffffffff000000000000000000000000000000008c000000d0ffffff0300000000000000fa000000000000000000001000000000000000008a000000b8ffffffbcffffff01000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkloadIntentEnvelope::V1(canonical_v1_service_payload())`.
-/// Generated once at the GREEN landing of step 02-03a.
-const FIXTURE_V1_SERVICE: &str = "7376632d66726f6e74656e64732f7573722f62696e2f66726f6e74656e6400002d2d706f7274ffff38303830ffffffff901f000000000000000000000000000001000000000000008d000000b8ffffff0200000000000000f40100000000000000000008000000000000000091000000a1ffffffacffffff02000000b4ffffff01000000000000000000000000000000";
+///
+/// Regenerated in the GAP-6 corrective patch (2026-05-28) — the
+/// addition of three `Vec<ProbeDescriptor>` slots to `ServiceV1`
+/// shifted positional offsets in the rkyv archive. The historical
+/// V1 bytes do not survive the layout change under the Phase-1
+/// greenfield single-cut migration policy (per
+/// `feedback_single_cut_greenfield_migrations.md`: "delete the on-
+/// disk redb file" is the official upgrade path). The fixture
+/// continues to pin the canonical V1 archived layout — the
+/// structural defense (every persisted layout has a pinned
+/// golden-bytes fixture) is preserved across the bump.
+const FIXTURE_V1_SERVICE: &str = "7376632d66726f6e74656e64732f7573722f62696e2f66726f6e74656e6400002d2d706f7274ffff38303830ffffffff901f000000000000000000000000000001000000000000008d000000b8ffffff0200000000000000f40100000000000000000008000000000000000091000000a1ffffffacffffff02000000b4ffffff01000000b0ffffff00000000a8ffffff00000000a0ffffff0000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkloadIntentEnvelope::V1(canonical_v1_schedule_payload())`.
-/// Generated once at the GREEN landing of step 02-03a.
-const FIXTURE_V1_SCHEDULE: &str = "7376632d6e696768746c792d636c65616e75707376632d6e696768746c792d636c65616e75702f7573722f6c6f63616c2f62696e2f636c65616e75702d2d6d6f6465ffff6e696768746c79ff302032202a202a202a000000000000000000000002000000000000009300000098ffffff93000000a3ffffff010000000000000064000000000000000000000400000000000000009600000092ffffffa0ffffff020000000000000089000000a4ffffff";
+///
+/// Regenerated in the GAP-6 corrective patch (2026-05-28) — the
+/// outer envelope's archived layout shifted because the
+/// `WorkloadIntentV1::Service(ServiceV1)` variant's archived
+/// payload size changed (probe-vec slots), which moved the
+/// trailing root region pointers. The historical V1 bytes do not
+/// survive the layout change under the Phase-1 greenfield single-
+/// cut migration policy. The Schedule fixture itself does NOT
+/// embed `ServiceV1` (Schedule embeds `JobV1`), but the SHARED
+/// `WorkloadIntentEnvelope` archive offsets are positional —
+/// changing one variant shifts archive metadata across all three.
+const FIXTURE_V1_SCHEDULE: &str = "7376632d6e696768746c792d636c65616e75707376632d6e696768746c792d636c65616e75702f7573722f6c6f63616c2f62696e2f636c65616e75702d2d6d6f6465ffff6e696768746c79ff302032202a202a202a000000000000000000000002000000000000009300000098ffffff93000000a3ffffff010000000000000064000000000000000000000400000000000000009600000092ffffffa0ffffff020000000000000089000000a4ffffff00000000000000000000000000000000";
 
 #[test]
 fn workload_intent_v1_job_decodes_through_current_envelope() {

@@ -428,6 +428,9 @@ fn canonical_service_spec() -> ServiceSpecInput {
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 

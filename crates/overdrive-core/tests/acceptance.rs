@@ -178,4 +178,15 @@ mod acceptance {
     // operator and comparison in the reconcile body so cargo-mutants
     // can kill flipped operators and dropped match arms.
     mod service_lifecycle_reconcile_branches;
+
+    // service-health-check-probes — GAP-6 corrective patch.
+    // Probe descriptors persist end-to-end through the parser →
+    // wire (ServiceSpecInput) → intent (WorkloadIntent::Service /
+    // ServiceV1) → IntentStore rkyv-archived bytes round-trip.
+    // Pre-corrective state: ServiceV1::from_submit had zero
+    // probe-related code and silently dropped operator-declared
+    // probes between admission and IntentStore. Surfaced when the
+    // GAP-1 corrective crafter found hydrate_desired had no probe
+    // data to read. Five sub-scenarios pin the contract end-to-end.
+    mod intent_persists_probe_descriptors;
 }

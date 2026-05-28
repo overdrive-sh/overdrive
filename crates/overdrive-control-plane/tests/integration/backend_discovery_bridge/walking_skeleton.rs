@@ -190,6 +190,9 @@ while True:
             args: vec!["-u".to_owned(), "-c".to_owned(), echo_script],
         }),
         listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 

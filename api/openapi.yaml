@@ -760,6 +760,153 @@ components:
           type: string
         region:
           type: string
+    ProbeDescriptor:
+      type: object
+      description: |-
+        Validated probe declaration after TOML parse + defaults applied.
+
+        Per ADR-0057 §2 (TOML defaults table):
+        - `timeout_seconds`: default 5 (diverges from K8s 1s; justified
+          by 5s being the operational sweet spot per research).
+        - `interval_seconds`: startup=2, readiness=2, liveness=10.
+        - `max_attempts`: 30 (yields `startup_deadline = 60s` for
+          startup probes per US-01 Technical Notes).
+        - `failure_threshold` (liveness only): 3.
+        - `success_threshold` (readiness only): 1 (per ADR-0055 §6 /
+          P2-Q8); configurable upward.
+
+        `inferred` distinguishes platform-synthesised default probes
+        (per ADR-0058) from operator-declared probes. Renderer surfaces
+        as `(inferred)` suffix per US-06 AC.
+      required:
+      - role
+      - mechanic
+      - timeout_seconds
+      - interval_seconds
+      - max_attempts
+      - inferred
+      properties:
+        failure_threshold:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Liveness only. `None` for startup / readiness.
+          minimum: 0
+        inferred:
+          type: boolean
+          description: |-
+            `true` IFF this descriptor was synthesised by the platform's
+            default-TCP inference rule per ADR-0058. `false` for every
+            operator-declared probe.
+        interval_seconds:
+          type: integer
+          format: int32
+          minimum: 0
+        max_attempts:
+          type: integer
+          format: int32
+          minimum: 0
+        mechanic:
+          $ref: '#/components/schemas/ProbeMechanic'
+        role:
+          $ref: '#/components/schemas/ProbeRole'
+        success_threshold:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Readiness only. `None` for startup / liveness. Default 1.
+          minimum: 0
+        timeout_seconds:
+          type: integer
+          format: int32
+          minimum: 0
+    ProbeMechanic:
+      oneOf:
+      - type: object
+        description: |-
+          TCP-connect against `host:port`. Default for inferred probes
+          per ADR-0058 (host defaults to bind-side wildcard
+          translated to loopback at probe time).
+        required:
+        - host
+        - port
+        - type
+        properties:
+          host:
+            type: string
+          port:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - tcp
+      - type: object
+        description: |-
+          HTTP GET against `http://host:port<path>`. Phase 1 = plain
+          HTTP only per C6. Method = GET only per US-02. 3xx → Fail
+          per US-02 AC (no redirect-follow).
+        required:
+        - path
+        - port
+        - type
+        properties:
+          host:
+            type:
+            - string
+            - 'null'
+          path:
+            type: string
+          port:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - http
+      - type: object
+        description: |-
+          Spawn `command[0]` with `command[1..]` as args, inside the
+          workload's cgroup per ADR-0059 / C7. Exit 0 = Pass.
+        required:
+        - command
+        - type
+        properties:
+          command:
+            type: array
+            items:
+              type: string
+          type:
+            type: string
+            enum:
+            - exec
+      description: |-
+        Concrete mechanic for a probe attempt.
+
+        Per ADR-0054: three mechanics, each backed by a distinct port
+        trait (`TcpProber` / `HttpProber` / `ExecProber`). Step 01-02
+        lands the `Tcp` variant; `Http` lands in step 02-01 and `Exec`
+        in step 02-02 — all three are part of the enum so the
+        `ServiceSpec` envelope shape is stable across slices.
+    ProbeRole:
+      type: string
+      description: |-
+        Role of a probe within the per-Service lifecycle.
+
+        Per ADR-0057: three roles `startup`, `readiness`, `liveness`,
+        matching k8s vocabulary. Role determines:
+        - When the probe runs (startup: bounded by `startup_deadline`;
+          readiness/liveness: continuous post-Stable).
+        - What the probe gates (startup: `Stable` predicate; readiness:
+          `Backend.healthy`; liveness: `RestartAllocation`).
+      enum:
+      - startup
+      - readiness
+      - liveness
     ProbeWitness:
       type: object
       description: |-
@@ -1218,12 +1365,45 @@ components:
               admission inside [`crate::aggregate::ServiceV1::from_submit`]:
               at least one element; no two share `(port, protocol)`; protocol
               is `tcp` / `udp` only.
+          liveness_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared liveness probes. Same defaulting policy as
+              [`Self::startup_probes`]. Reserved field; populated by future
+              slices (02-02).
+          readiness_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared readiness probes. Same defaulting policy as
+              [`Self::startup_probes`]. Reserved field; populated by future
+              slices (02-01).
           replicas:
             type: integer
             format: int32
             minimum: 0
           resources:
             $ref: '#/components/schemas/ResourcesInput'
+          startup_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared startup probes, projected from the parser-
+              side `[[health_check.startup]]` blocks. Per ADR-0057. May
+              include a platform-synthesised default-TCP probe per ADR-0058
+              when zero startup probes were declared and at least one
+              listener is present.
+
+              Defaults to an empty `Vec` on the wire when the client omits
+              the field — `#[serde(default)]` preserves the legacy
+              `ServiceSpecInput { id, replicas, resources, driver, listeners
+              }` shape for callers that have not yet been updated to thread
+              probes. Once an operator declares probes in TOML, the CLI's
+              `submit_streaming_service` populates this field.
       description: |-
         HTTP/JSON wire-shape for a Service submission per ADR-0051 § 3.
 
