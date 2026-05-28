@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
@@ -124,7 +125,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     state
         .obs
@@ -297,7 +298,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     state
         .obs
@@ -1055,7 +1056,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Failed-after-running carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     state
         .obs

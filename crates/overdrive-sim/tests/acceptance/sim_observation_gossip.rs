@@ -29,6 +29,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -69,9 +70,9 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
-        started_at_unix_ms: match state {
+        started_at: match state {
             AllocState::Pending => None,
-            _ => Some(1_700_000_000_000),
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
     }
 }
@@ -245,7 +246,7 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Draining state was Running first.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     peer_c
         .write(ObservationRow::AllocStatus(Box::new(t1_row.clone())))

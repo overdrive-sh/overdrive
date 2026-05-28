@@ -1056,8 +1056,10 @@ mod tests {
 
     use std::str::FromStr;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use overdrive_core::TransitionReason;
+    use overdrive_core::UnixInstant;
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::reconcilers::WorkloadLifecycleView;
@@ -1110,7 +1112,7 @@ mod tests {
             kind: WorkloadKind::Job,
             listeners: vec![],
             // GAP-1 subsidiary: Terminated state was Running first.
-            started_at_unix_ms: Some(1_700_000_000_000),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         }
     }
 

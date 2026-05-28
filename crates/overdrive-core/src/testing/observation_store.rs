@@ -60,6 +60,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use tokio::time::timeout;
 
+use crate::UnixInstant;
 use crate::id::{AllocationId, NodeId, Region, WorkloadId};
 use crate::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
@@ -99,9 +100,9 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
     // generic LWW shapes. `None` on Pending (no Running observation
     // yet); `Some(_)` on Running-or-later states to match the
     // production invariant. Value is fixed for test determinism.
-    let started_at_unix_ms = match state {
+    let started_at = match state {
         AllocState::Pending => None,
-        _ => Some(1_700_000_000_000),
+        _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     AllocStatusRow {
         alloc_id: alloc_id(scope, idx),
@@ -115,7 +116,7 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         stderr_tail: None,
         kind: crate::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
-        started_at_unix_ms,
+        started_at,
     }
 }
 

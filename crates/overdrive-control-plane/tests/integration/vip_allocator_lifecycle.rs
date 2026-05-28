@@ -569,7 +569,7 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: vec![],
         // GAP-1 subsidiary: Terminated was Running first.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     state
         .obs

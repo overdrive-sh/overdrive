@@ -16,8 +16,11 @@
 //! break this fixture, surfacing the architectural violation at PR
 //! time.
 
+use std::time::Duration;
+
 use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_core::TransitionReason;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 
@@ -37,7 +40,7 @@ fn main() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

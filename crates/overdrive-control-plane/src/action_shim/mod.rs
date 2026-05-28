@@ -256,13 +256,14 @@ fn build_alloc_status_row(
     stderr_tail: Option<String>,
     kind: overdrive_core::aggregate::WorkloadKind,
     // Per the subsidiary fix to GAP-1: wall-clock at the
-    // Pending → Running transition, ms since UNIX epoch. Captured
-    // ONCE when this row records a `state == AllocState::Running`
-    // for the first time; preserved verbatim by every subsequent
-    // arm by reading the prior row and forwarding the value. See
-    // the `AllocStatusRowV1::started_at_unix_ms` docstring on the
+    // Pending → Running transition. Captured ONCE when this row
+    // records a `state == AllocState::Running` for the first time;
+    // preserved verbatim by every subsequent arm by reading the
+    // prior row and forwarding the value. Typed `UnixInstant` —
+    // unit + origin are encoded in the type. See the
+    // `AllocStatusRowV1::started_at` docstring on the
     // input-vs-derived discipline.
-    started_at_unix_ms: Option<u64>,
+    started_at: Option<overdrive_core::UnixInstant>,
 ) -> AllocStatusRow {
     let writer = node_id.clone();
     AllocStatusRow {
@@ -287,23 +288,8 @@ fn build_alloc_status_row(
         stderr_tail,
         kind,
         listeners: Vec::new(),
-        started_at_unix_ms,
+        started_at,
     }
-}
-
-/// Snapshot the per-tick wall-clock as ms since UNIX epoch, saturating
-/// to `u64::MAX` if the underlying `u128` ms count somehow exceeds the
-/// u64 range. In practice the `u128 → u64` cast cannot truncate before
-/// approximately year 584,554,051 AD, so the saturation is purely a
-/// clippy-pacification belt-and-braces — but the typed conversion is
-/// the right shape per `.claude/rules/development.md` § "Distinct
-/// failure modes get distinct error variants" (no silent truncation).
-///
-/// Used by the StartAllocation / RestartAllocation arms to capture the
-/// `Pending → Running` wall-clock onto the `AllocStatusRow` per the
-/// subsidiary GAP-1 fix.
-fn unix_now_ms(tick: &TickContext) -> u64 {
-    u64::try_from(tick.now_unix.as_unix_duration().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// Build a `LifecycleEvent` for the broadcast channel from a freshly
@@ -519,11 +505,11 @@ async fn dispatch_single(
             // S-02-02's stderr-tail rendering assertion.
             let prior_stderr_tail = prior_row.stderr_tail.clone();
             // FinalizeFailed is a terminal claim — preserve the prior
-            // row's `started_at_unix_ms` verbatim. If the prior row
-            // never reached Running (Pending only), `started_at_unix_ms`
-            // is `None` and stays `None` here. Same forward-carry
-            // pattern as `stderr_tail` / `detail` / `kind`.
-            let prior_started_at_unix_ms = prior_row.started_at_unix_ms;
+            // row's `started_at` verbatim. If the prior row never
+            // reached Running (Pending only), `started_at` is `None`
+            // and stays `None` here. Same forward-carry pattern as
+            // `stderr_tail` / `detail` / `kind`.
+            let prior_started_at = prior_row.started_at;
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
@@ -544,7 +530,7 @@ async fn dispatch_single(
                 terminal,
                 prior_stderr_tail,
                 prior_row.kind,
-                prior_started_at_unix_ms,
+                prior_started_at,
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:
@@ -611,16 +597,15 @@ async fn dispatch_single(
             //
             // Subsidiary GAP-1 fix: capture the wall-clock at the
             // Pending → Running transition. On a successful start
-            // (`state == AllocState::Running`) the row carries a
-            // `Some(u64-ms-since-epoch)` from `tick.now_unix` — the
-            // same `Clock` port DST already controls. On a failed
-            // start (`state == AllocState::Failed`) the alloc never
+            // (`state == AllocState::Running`) the row carries
+            // `Some(tick.now_unix)` — the same `Clock` port DST
+            // already controls. On a failed start
+            // (`state == AllocState::Failed`) the alloc never
             // reached Running and there is no "started at"
             // wall-clock; the row carries `None`. The reconciler's
             // EarlyExit / StartupProbeFailed / Stable gates branch
             // on `None` explicitly (no silent-zero collapse).
-            let started_at_unix_ms =
-                if state == AllocState::Running { Some(unix_now_ms(tick)) } else { None };
+            let started_at = if state == AllocState::Running { Some(tick.now_unix) } else { None };
             let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
@@ -632,7 +617,7 @@ async fn dispatch_single(
                 None,
                 None,
                 kind,
-                started_at_unix_ms,
+                started_at,
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -737,15 +722,15 @@ async fn dispatch_single(
             // reached; carry `None` forward — and a Phase-1
             // restart-rejected row that does not observe Running is
             // semantically equivalent to "never started."
-            let started_at_unix_ms = if state == AllocState::Running {
-                Some(unix_now_ms(tick))
+            let started_at = if state == AllocState::Running {
+                Some(tick.now_unix)
             } else {
                 // Restart was rejected — never observed Running on
                 // this attempt. Preserve the prior row's value (if
                 // any) so a downstream FinalizeFailed terminal still
                 // carries the prior generation's "started at" if it
                 // ever reached Running.
-                prior_row.started_at_unix_ms
+                prior_row.started_at
             };
             let row = build_alloc_status_row(
                 alloc_id,
@@ -758,7 +743,7 @@ async fn dispatch_single(
                 None,
                 None,
                 kind,
-                started_at_unix_ms,
+                started_at,
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -825,12 +810,12 @@ async fn dispatch_single(
             // exclusively on `terminal`.
             // Subsidiary GAP-1 fix: StopAllocation is a terminal
             // operator-initiated stop — preserve the prior row's
-            // `started_at_unix_ms` verbatim so downstream consumers
+            // `started_at` verbatim so downstream consumers
             // (e.g. settled-in / uptime renderers) still see when
             // the alloc reached Running. If it never reached Running
             // (Pending → Stopped), the prior value is `None` and
             // stays `None`.
-            let prior_started_at_unix_ms = prior_row.started_at_unix_ms;
+            let prior_started_at = prior_row.started_at;
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
@@ -844,7 +829,7 @@ async fn dispatch_single(
                 terminal,
                 None,
                 prior_row.kind,
-                prior_started_at_unix_ms,
+                prior_started_at,
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:

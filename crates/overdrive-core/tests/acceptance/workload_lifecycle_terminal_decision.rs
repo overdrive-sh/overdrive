@@ -105,9 +105,9 @@ fn alloc_with_state(
         // GAP-1 subsidiary: None on Pending (no Running yet); fixed
         // wall-clock on Running-or-later states. Value arbitrary;
         // this test does not assert on it directly.
-        started_at_unix_ms: match state {
+        started_at: match state {
             AllocState::Pending => None,
-            _ => Some(1_700_000_000_000),
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
     }
 }

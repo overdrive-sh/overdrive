@@ -15,8 +15,10 @@
 //! component of the source row must appear verbatim in the wire body.
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody, NodeRowBody};
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow,
@@ -39,7 +41,7 @@ fn sample_alloc_status_row() -> AllocStatusRow {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 

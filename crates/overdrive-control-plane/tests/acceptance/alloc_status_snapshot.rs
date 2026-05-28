@@ -21,6 +21,7 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Query, State};
 use overdrive_control_plane::AppState;
@@ -30,6 +31,7 @@ use overdrive_control_plane::handlers::{AllocStatusQuery, alloc_status};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TerminalCondition;
 use overdrive_core::TransitionReason;
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -136,9 +138,9 @@ async fn write_row(
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
-        started_at_unix_ms: match state_value {
+        started_at: match state_value {
             AllocState::Pending => None,
-            _ => Some(1_700_000_000_000),
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
@@ -356,9 +358,9 @@ async fn write_terminal_row(
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
-        started_at_unix_ms: match state_value {
+        started_at: match state_value {
             AllocState::Pending => None,
-            _ => Some(1_700_000_000_000),
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");

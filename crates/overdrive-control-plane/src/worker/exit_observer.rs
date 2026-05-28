@@ -521,9 +521,9 @@ async fn handle_exit_event(
         // the alloc MUST have reached Running at some point (the
         // exit-observer watcher is only ever armed after the action
         // shim records Pending → Running). Preserve the prior row's
-        // `started_at_unix_ms` verbatim. Same forward-carry pattern
-        // as `stderr_tail` / `kind` / `workload_id` / `node_id`.
-        started_at_unix_ms: prior.started_at_unix_ms,
+        // `started_at` verbatim. Same forward-carry pattern as
+        // `stderr_tail` / `kind` / `workload_id` / `node_id`.
+        started_at: prior.started_at,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
     Ok(Some((row, prior_state)))

@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{noop_heartbeat, workload_lifecycle};
 use overdrive_core::SpiffeId;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
@@ -109,7 +110,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
 

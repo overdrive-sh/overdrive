@@ -591,10 +591,13 @@ pub struct AllocStatusRowV1 {
     pub stderr_tail: Option<String>,
     pub kind: WorkloadKind,
     pub listeners: Vec<ListenerRow>,
-    /// Wall-clock instant (ms since UNIX epoch) at which this
-    /// allocation first transitioned Pending → Running, as observed
-    /// by the owning node via the injected [`crate::traits::clock::Clock`]
-    /// port.
+    /// Wall-clock instant at which this allocation first transitioned
+    /// Pending → Running, as observed by the owning node via the
+    /// injected [`crate::traits::clock::Clock`] port.
+    ///
+    /// Typed [`UnixInstant`] — the unit (since-UNIX-epoch) and origin
+    /// are encoded in the type itself, per the canonical wall-clock
+    /// newtype defined in [`crate::wall_clock`].
     ///
     /// # Semantics
     ///
@@ -603,11 +606,10 @@ pub struct AllocStatusRowV1 {
     ///   shape — no Running observation exists yet, so there is no
     ///   wall-clock to record.
     /// - `Some(ts)`: the allocation reached Running at wall-clock
-    ///   `ts` (ms since UNIX epoch). The value is captured ONCE at
-    ///   the Pending → Running transition via
-    ///   `tick.now_unix.as_unix_duration().as_millis() as u64` —
-    ///   the same `Clock` port DST already controls (`SystemClock`
-    ///   in production, `SimClock` under simulation).
+    ///   `ts`. The value is captured ONCE at the Pending → Running
+    ///   transition from `tick.now_unix` — the same `Clock` port DST
+    ///   already controls (`SystemClock` in production, `SimClock`
+    ///   under simulation).
     ///
     /// Once `Some(ts)`, the field is preserved verbatim on every
     /// subsequent state transition (Failed, Stopped, Terminated) by
@@ -623,21 +625,21 @@ pub struct AllocStatusRowV1 {
     /// Per `.claude/rules/development.md` § "Persist inputs, not
     /// derived state": this field is the INPUT (the observed
     /// wall-clock of the Pending → Running transition). Derived
-    /// values — `elapsed_ms` (computed as `tick.now_unix` minus
-    /// `started_at_unix_ms`), `settled_in_ms`, and deadline gates —
+    /// values — `elapsed` (computed as `tick.now_unix` minus
+    /// `started_at`), `settled_in_ms`, and deadline gates —
     /// are recomputed on every reconcile tick from this input plus
     /// the live policy (deadline thresholds in the spec). The field
     /// is never a cache of today's policy.
     ///
     /// Per `.claude/rules/development.md` § "Distinct failure modes
     /// get distinct error variants": consumers MUST match on
-    /// `Some(ts)` explicitly. Do NOT collapse to `unwrap_or(0)` —
+    /// `Some(ts)` explicitly. Do NOT collapse to an unwrap-to-zero —
     /// that re-creates the silent-zero bug this field exists to
     /// avoid (elapsed becomes huge → EarlyExit never fires,
     /// StartupProbeFailed always fires). `None` is the explicit
     /// "no Running observation yet" signal; reconcilers branch on
     /// it rather than treating it as zero.
-    pub started_at_unix_ms: Option<u64>,
+    pub started_at: Option<UnixInstant>,
 }
 
 impl VersionedEnvelope for AllocStatusRowEnvelope {
@@ -678,20 +680,23 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// 'ArchivedAllocStatusRowEnvelope'`.
     ///
     /// **Repinned 2026-05-29** (greenfield extension per the
-    /// subsidiary GAP-1 fix): added `started_at_unix_ms: Option<u64>`
-    /// inline to `AllocStatusRowV1`. The 16-byte growth (8 for the
-    /// Option discriminant + 8 for the u64 payload) extends the
-    /// trailing root structure by 16 bytes; the outer enum's
-    /// discriminant byte therefore moved from 192 → 208 bytes from
-    /// the END of the archive. Empirically verified via the
-    /// schema-evolution fixture's triangulation test.
+    /// subsidiary GAP-1 fix): added an `Option<UnixInstant>`
+    /// `started_at` field inline to `AllocStatusRowV1`. `UnixInstant`
+    /// wraps `Duration` (12 bytes — 8 for seconds + 4 for nanos),
+    /// inlined behind the `Option` discriminant; this extends the
+    /// trailing root structure beyond the prior 192-byte pin. The
+    /// new offset is determined empirically by the schema-evolution
+    /// fixture's triangulation test (`alloc_status_row_discriminant
+    /// _offset_triangulation`); update this constant and
+    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant
+    /// or layout change.
     ///
     /// Re-pin alongside the schema-evolution fixture at every
     /// version-bump per
     /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
     /// docstring.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(208)
+        Some(212)
     }
 
     fn known_discriminants() -> &'static [u8] {

@@ -88,7 +88,7 @@ fn make_alloc_row(alloc_id_str: &str) -> AllocStatusRow {
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 

@@ -2042,9 +2042,9 @@ mod tests {
                 kind: WorkloadKind::Service,
                 listeners: vec![],
                 // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
-                started_at_unix_ms: match alloc_state {
+                started_at: match alloc_state {
                     AllocState::Pending => None,
-                    _ => Some(1_700_000_000_000),
+                    _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
                 },
             };
             state

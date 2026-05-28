@@ -14,7 +14,9 @@
 //! or `observation.envelope.decode_failed` entries on the happy path.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
@@ -97,7 +99,7 @@ async fn operator_restart_observes_yesterday_alloc_status_without_subtree_overru
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
-        started_at_unix_ms: Some(1_700_000_000_000),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
 
     let _guard = set_default(subscriber);

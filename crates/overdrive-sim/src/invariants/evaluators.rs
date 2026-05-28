@@ -525,9 +525,9 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 listeners: Vec::new(),
                 // GAP-1 subsidiary: None on Pending; fixed wall-clock
                 // on Running. Value arbitrary for this invariant.
-                started_at_unix_ms: match state {
+                started_at: match state {
                     AllocState::Pending => None,
-                    _ => Some(1_700_000_000_000),
+                    _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
                 },
             };
             let peer = cluster.peer(writer);
@@ -2218,9 +2218,9 @@ mod tests {
             kind: overdrive_core::aggregate::WorkloadKind::Service,
             listeners: Vec::new(),
             // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
-            started_at_unix_ms: match state {
+            started_at: match state {
                 AllocState::Pending => None,
-                _ => Some(1_700_000_000_000),
+                _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
             },
         }
     }
