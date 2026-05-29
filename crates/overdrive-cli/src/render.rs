@@ -818,6 +818,186 @@ pub fn format_service_stable_summary(
     )
 }
 
+// ---------------------------------------------------------------------------
+// Probes-section render fns — slice 06 step 02-03 (ADR-0033 enrichment /
+// US-06 / K4).
+// ---------------------------------------------------------------------------
+//
+// The Probes section is rendered IFF `kind == Service AND
+// probes_present`; it is ABSENT for Job / Schedule per US-06. The
+// kind-guard is the load-bearing render contract — property-tested by
+// `ProbeRenderIsKindGuarded` in
+// `tests/acceptance/probes_section_render.rs`.
+//
+// `ProbeRenderRow` is the typed render-input (newtype/typed discipline
+// per `.claude/rules/development.md` § "Newtypes"). It is composed by
+// the caller from the spec-side `ProbeDescriptor` (mechanic, role,
+// inferred, failure_threshold) and the observation-side
+// `ProbeResultRow` (status, last_observed_at_unix_ms,
+// consecutive_failures). The render layer is pure over this input — it
+// performs no hydration of its own.
+
+/// Typed render-input for a single probe row in the Probes section.
+///
+/// Composed by the caller from the spec-side `ProbeDescriptor` and the
+/// observation-side `ProbeResultRow`. `status == None` materialises the
+/// `last=pending` rendering per US-06 (row absence IS pending).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeRenderRow {
+    /// Role of this probe (`startup` / `readiness` / `liveness`).
+    pub role: overdrive_core::observation::probe_result_row::ProbeRole,
+    /// 0-indexed position within the role array.
+    pub probe_idx: overdrive_core::observation::probe_result_row::ProbeIdx,
+    /// Concrete mechanic — drives the per-mechanic summary line shape.
+    pub mechanic: overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+    /// Latest observed outcome; `None` for a declared-but-not-yet-ticked
+    /// probe (renders `last=pending`).
+    pub status: Option<overdrive_core::observation::probe_result_row::ProbeStatus>,
+    /// Wall-clock (UNIX-epoch ms) of the latest observation; `None`
+    /// when no row exists yet.
+    pub last_observed_at_unix_ms: Option<u64>,
+    /// `true` IFF the platform synthesised this probe per ADR-0058
+    /// (renders an `(inferred)` suffix).
+    pub inferred: bool,
+    /// Consecutive failures observed for this probe. Drives the
+    /// `(<consecutive_failures>/<threshold>)` ratio suffix when the
+    /// probe is currently failing under a declared threshold.
+    pub consecutive_failures: u32,
+    /// Failure threshold for this probe (liveness `failure_threshold`,
+    /// readiness `success_threshold`); `None` for startup probes (no
+    /// ratio suffix).
+    pub failure_threshold: Option<u32>,
+}
+
+/// Render the operator-facing per-mechanic summary for a probe, per the
+/// US-06 AC shapes.
+///
+/// - `Tcp` renders `tcp <host>:<port>`.
+/// - `Http` renders `http GET http://<host>:<port><path>`; the host
+///   defaults to the bind-side wildcard `0.0.0.0` when the descriptor
+///   omits it.
+/// - `Exec` renders `exec <command>` (space-joined argv).
+///
+/// Distinct from the reconciler's compact `ProbeWitness.mechanic_summary`
+/// surface (`http <host>:<port><path>`) — this is the operator-facing
+/// alloc-status render shape.
+#[must_use]
+pub fn format_probe_mechanic_summary(
+    mechanic: &overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+) -> String {
+    use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
+    match mechanic {
+        ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
+        ProbeMechanic::Http { path, port, host } => {
+            let host = host.as_deref().unwrap_or("0.0.0.0");
+            format!("http GET http://{host}:{port}{path}")
+        }
+        ProbeMechanic::Exec { command } => format!("exec {}", command.join(" ")),
+    }
+}
+
+/// Render the operator-facing `last=...` status fragment for a probe
+/// row. `None` → `last=pending`; `Pass` → `last=pass`; `Fail` →
+/// `last=fail (<reason>)`.
+fn format_probe_last_status(
+    status: Option<&overdrive_core::observation::probe_result_row::ProbeStatus>,
+) -> String {
+    use overdrive_core::observation::probe_result_row::ProbeStatus;
+    match status {
+        None => "last=pending".to_string(),
+        Some(ProbeStatus::Pass) => "last=pass".to_string(),
+        Some(ProbeStatus::Fail { last_fail_reason }) => {
+            format!("last=fail ({last_fail_reason})")
+        }
+    }
+}
+
+/// Lowercase role label for the Probes-section row.
+const fn probe_role_label(
+    role: overdrive_core::observation::probe_result_row::ProbeRole,
+) -> &'static str {
+    use overdrive_core::observation::probe_result_row::ProbeRole;
+    match role {
+        ProbeRole::Startup => "startup",
+        ProbeRole::Readiness => "readiness",
+        ProbeRole::Liveness => "liveness",
+    }
+}
+
+/// Render the `Probes:` section of an alloc-status output.
+///
+/// Per US-06 / K4 the section is emitted IFF `kind` is
+/// `WorkloadKind::Service` and the probe set is non-empty. For Job /
+/// Schedule allocs (or an empty probe set) the function returns an
+/// empty string — the kind-guard is the load-bearing render contract
+/// (`ProbeRenderIsKindGuarded` property test).
+///
+/// Each row carries `role`, `probe_idx`, mechanic summary, last
+/// status, and `last_observed_at`. An `(inferred)` suffix marks
+/// synthesised default probes, `last=pending` marks
+/// declared-but-unobserved probes, and a
+/// `(<consecutive_failures>/<threshold>)` ratio suffix marks a probe
+/// currently failing under a declared threshold.
+///
+/// `no_color` is honoured per the `NO_COLOR` env-var AC: when `true`
+/// the output carries zero ANSI escape sequences. Phase 1 emits no
+/// colour on either branch (the render is plain text), so the flag is
+/// observed-and-respected rather than toggling a colour path that does
+/// not yet exist — the structural guarantee is that no ANSI escape can
+/// appear in the output regardless of the flag, which the `NO_COLOR`
+/// proptest pins.
+#[must_use]
+pub fn probes_section(
+    kind: overdrive_core::aggregate::WorkloadKind,
+    probes: &[ProbeRenderRow],
+    no_color: bool,
+) -> String {
+    use overdrive_core::aggregate::WorkloadKind;
+    use std::fmt::Write as _;
+
+    // Kind-guard: Service-only, and only when probes are present.
+    if !matches!(kind, WorkloadKind::Service) || probes.is_empty() {
+        return String::new();
+    }
+    // `no_color` is respected by construction — Phase 1 render is plain
+    // text with no ANSI sequences on either branch. Bind it so a future
+    // colourised branch must thread the flag rather than ignore it.
+    let _ = no_color;
+
+    let mut s = String::new();
+    let _ = writeln!(s, "Probes:");
+    for probe in probes {
+        let role = probe_role_label(probe.role);
+        let mechanic = format_probe_mechanic_summary(&probe.mechanic);
+        let last = format_probe_last_status(probe.status.as_ref());
+        let observed = probe.last_observed_at_unix_ms.map_or_else(
+            || "last_observed_at=\u{2014}".to_string(),
+            |ms| format!("last_observed_at={ms}"),
+        );
+        let inferred_suffix = if probe.inferred { " (inferred)" } else { "" };
+
+        // Failure-ratio suffix: rendered only when the probe is
+        // currently failing AND a threshold is declared.
+        let failing = matches!(
+            probe.status,
+            Some(overdrive_core::observation::probe_result_row::ProbeStatus::Fail { .. })
+        );
+        let ratio_suffix = match (failing, probe.failure_threshold) {
+            (true, Some(threshold)) => {
+                format!(" ({}/{threshold})", probe.consecutive_failures)
+            }
+            _ => String::new(),
+        };
+
+        let _ = writeln!(
+            s,
+            "  {role} probe[{idx}] {mechanic} {last} {observed}{ratio_suffix}{inferred_suffix}",
+            idx = probe.probe_idx.get(),
+        );
+    }
+    s
+}
+
 /// Render the operator-facing `Failed` block for a Service workload
 /// per ADR-0056 / ADR-0059. Pure function.
 ///

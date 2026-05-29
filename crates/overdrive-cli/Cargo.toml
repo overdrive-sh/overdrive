@@ -133,3 +133,9 @@ serial_test.workspace        = true
 # wall-clock budget; the render fns are pure-function-shaped and
 # 1024 cases run in well under the slow-test budget.
 proptest.workspace           = true
+# Slice 06 step 02-03 — `insta` pins the per-mechanic Probes-section
+# line shapes as golden-output snapshots (the PBT-paradigm EXEMPT
+# golden-file case; the `ProbeRenderIsKindGuarded` proptest on the
+# adjacent kind-guard slot compensates). Inline snapshots keep the
+# golden in the test source for same-diff review.
+insta.workspace              = true

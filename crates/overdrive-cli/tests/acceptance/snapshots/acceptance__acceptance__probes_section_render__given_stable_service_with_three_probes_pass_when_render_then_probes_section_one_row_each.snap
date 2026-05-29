@@ -1,0 +1,8 @@
+---
+source: crates/overdrive-cli/tests/acceptance/probes_section_render.rs
+expression: rendered
+---
+Probes:
+  startup probe[0] tcp 127.0.0.1:8080 last=pass last_observed_at=1000
+  readiness probe[0] http GET http://127.0.0.1:8080/healthz last=pass last_observed_at=2000
+  liveness probe[0] exec /usr/local/bin/check.sh last=pass last_observed_at=3000
