@@ -58,7 +58,13 @@ fn fact(
     ServiceAllocFact {
         alloc_id: aid(alloc_id),
         state,
-        started_at_unix_ms,
+        // Per GAP-1: every fact in this branch-coverage suite represents
+        // an alloc that HAS reached Running (or Failed-after-Running) —
+        // the inputs assume a concrete `started_at` value. Wrap in
+        // `Some(_)` at the helper boundary.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
+            started_at_unix_ms,
+        ))),
         exit_code,
         latest_startup_probe,
         max_attempts,

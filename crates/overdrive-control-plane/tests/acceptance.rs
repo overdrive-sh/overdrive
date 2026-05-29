@@ -170,6 +170,11 @@ mod acceptance {
     /// Service-health-check-probes step 01-03d — composition-root
     /// `ProbeRunner` Earned-Trust gate per ADR-0054 § 7.
     mod probe_runner_boot_gate;
+    // GAP-1 corrective patch — real ServiceLifecycle hydrate impls
+    // (`hydrate_desired` / `hydrate_actual` join intent + observation
+    // + LWW probe projection per the Phase 01 structural gap audit).
+    // See `.context/01-03-structural-gap-audit.md`.
+    mod service_lifecycle_hydrate;
     mod service_lifecycle_liveness;
     mod service_lifecycle_purity;
     mod service_lifecycle_readiness;

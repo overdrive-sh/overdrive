@@ -48,7 +48,7 @@ pub use crate::transition_reason::{ProbeWitness, ServiceFailureReason};
 /// `Stable` / `Failed` / no-op for a single Service-kind allocation.
 ///
 /// Sourced by the runtime's hydrate-actual / hydrate-desired pass:
-/// `state` + `started_at_unix_ms` + `exit_code` come from the
+/// `state` + `started_at` + `exit_code` come from the
 /// alloc-status row; `latest_startup_probe` is the LWW projection
 /// of the per-`(alloc, probe_idx)` `ProbeResultRow`s for the
 /// startup role.
@@ -63,11 +63,40 @@ pub struct ServiceAllocFact {
     pub alloc_id: AllocationId,
     /// Lifecycle state observed on the alloc-status row.
     pub state: AllocState,
-    /// Wall-clock (UNIX-epoch ms) at which the alloc transitioned
-    /// to Running. Required even for `Failed` allocs — used by
-    /// EarlyExit's `elapsed_since_started_at < startup_deadline`
-    /// gate per US-08.
-    pub started_at_unix_ms: u64,
+    /// Wall-clock at which the alloc transitioned Pending → Running,
+    /// as observed by the owning node via the injected
+    /// [`crate::traits::clock::Clock`] port. Sourced verbatim from
+    /// the alloc-status row's `started_at` field (no translation;
+    /// just projection).
+    ///
+    /// # Semantics
+    ///
+    /// - `None`: the alloc has not been observed Running yet
+    ///   (Pending only, or driver-rejected start). The branches
+    ///   that need a started-at timestamp (Stable, EarlyExit-elapsed,
+    ///   StartupProbeFailed-elapsed) handle `None` explicitly per
+    ///   the per-branch contract:
+    ///   - Stable / opt-out Stable: `unreachable!()` — hydrate
+    ///     invariant says a `Running` alloc carries
+    ///     `Some(started_at)`.
+    ///   - EarlyExit / StartupProbeFailed: skip the branch — the
+    ///     alloc never reached Running, so the elapsed-vs-deadline
+    ///     classification doesn't apply. The row's typed `terminal`
+    ///     flows through other projections (e.g., Custom → Other).
+    /// - `Some(ts)`: the alloc reached Running at wall-clock `ts`;
+    ///   used by EarlyExit's `elapsed < startup_deadline` gate and
+    ///   Stable's `settled_in_ms = tick.now_unix - ts` arithmetic.
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this is INPUT, not derived. `elapsed_ms` and
+    /// `settled_in_ms` are recomputed at reconcile time.
+    ///
+    /// Per `.claude/rules/development.md` § "Distinct failure modes
+    /// get distinct error variants": consumers MUST match on
+    /// `Some(ts)` explicitly. Do NOT collapse with
+    /// `unwrap_or(Duration::ZERO)` — the `None` and `Some` cases
+    /// mean different things.
+    pub started_at: Option<UnixInstant>,
     /// Exit code observed on Failed transition. `None` for Running
     /// / Pending allocs.
     pub exit_code: Option<i32>,
@@ -265,8 +294,17 @@ impl Reconciler for ServiceLifecycleReconciler {
             // semantics. MUST precede branch (a) so the AND-of-all-
             // probes Pass branch never fires for opt-out specs (which
             // would otherwise hang the stream until the cap timer).
+            //
+            // `started_at == None` here is a hydrate invariant violation
+            // (the alloc IS Running, so hydrate must have copied
+            // `Some(ts)` from the row). The `unreachable!()` is the
+            // structural defense per `.claude/rules/development.md`
+            // § "Logically unreachable None / Err — use `unreachable!()`".
             if fact.startup_probes_empty && fact.state == AllocState::Running {
-                let settled_in_ms = settled_in_ms_from(tick.now_unix, fact.started_at_unix_ms);
+                let started = fact.started_at.unwrap_or_else(|| {
+                    unreachable!("hydrate invariant: AllocStatusRow with state==Running carries Some(started_at)")
+                });
+                let settled_in_ms = settled_in_ms_from(tick.now_unix, started);
                 let witness = ProbeWitness {
                     probe_idx: 0,
                     role: "startup".to_string(),
@@ -282,10 +320,15 @@ impl Reconciler for ServiceLifecycleReconciler {
             }
 
             // Branch (a): Stable — Running + any startup probe Pass.
+            // Same hydrate invariant as branch (a'): a Running alloc
+            // carries `Some(started_at)`.
             if fact.state == AllocState::Running
                 && matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass))
             {
-                let settled_in_ms = settled_in_ms_from(tick.now_unix, fact.started_at_unix_ms);
+                let started = fact.started_at.unwrap_or_else(|| {
+                    unreachable!("hydrate invariant: AllocStatusRow with state==Running carries Some(started_at)")
+                });
+                let settled_in_ms = settled_in_ms_from(tick.now_unix, started);
                 let witness = ProbeWitness {
                     probe_idx: 0,
                     role: "startup".to_string(),
@@ -302,10 +345,18 @@ impl Reconciler for ServiceLifecycleReconciler {
 
             // Branch (c): EarlyExit — alloc Failed within startup_deadline,
             // no Pass observed. Closes RCA-A per US-08.
+            //
+            // `started_at == None` on a Failed alloc means the alloc
+            // never reached Running — the elapsed-vs-deadline
+            // classification doesn't apply. Skip the EarlyExit
+            // branch; the row's typed `terminal` flows through other
+            // projections (Custom → Other) per the audit's branch
+            // semantics table.
             if fact.state == AllocState::Failed {
-                let elapsed_ms = u64::try_from(tick.now_unix.as_unix_duration().as_millis())
-                    .unwrap_or(u64::MAX)
-                    .saturating_sub(fact.started_at_unix_ms);
+                let Some(started) = fact.started_at else {
+                    continue;
+                };
+                let elapsed_ms = elapsed_ms_from(tick.now_unix, started);
                 let deadline_ms =
                     u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
                 let within_deadline = elapsed_ms < deadline_ms;
@@ -325,10 +376,14 @@ impl Reconciler for ServiceLifecycleReconciler {
 
             // Branch (b): StartupProbeFailed — attempts exhausted AND
             // deadline elapsed AND no Pass observed.
+            //
+            // `started_at == None` here means the alloc never reached
+            // Running — no probes ran to fail. Skip the branch.
+            let Some(started) = fact.started_at else {
+                continue;
+            };
             let attempts = next_view.startup_attempts_per_alloc.get(alloc_id).copied().unwrap_or(0);
-            let elapsed_ms = u64::try_from(tick.now_unix.as_unix_duration().as_millis())
-                .unwrap_or(u64::MAX)
-                .saturating_sub(fact.started_at_unix_ms);
+            let elapsed_ms = elapsed_ms_from(tick.now_unix, started);
             let deadline_ms = u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
             let no_pass = !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
             if attempts >= fact.max_attempts && elapsed_ms >= deadline_ms && no_pass {
@@ -353,9 +408,26 @@ impl Reconciler for ServiceLifecycleReconciler {
     }
 }
 
+/// Compute `now - started_at` as milliseconds, saturating to `u64::MAX`
+/// at the conversion boundary and to `Duration::ZERO` (= `0u64`) at the
+/// underflow boundary per `UnixInstant`'s `Sub` semantics (see
+/// `wall_clock.rs` `impl Sub<Self> for UnixInstant`).
+///
+/// Typed-`Duration` arithmetic: callers pass typed `UnixInstant`s; the
+/// `u64` ms cast happens at the function boundary, not at the call site.
 #[inline]
 #[must_use]
-fn settled_in_ms_from(now: UnixInstant, started_at_unix_ms: u64) -> u64 {
-    let now_ms = u64::try_from(now.as_unix_duration().as_millis()).unwrap_or(u64::MAX);
-    now_ms.saturating_sub(started_at_unix_ms)
+fn settled_in_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
+    u64::try_from((now - started_at).as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Compute `now - started_at` as milliseconds, mirroring
+/// [`settled_in_ms_from`] but named for the EarlyExit /
+/// StartupProbeFailed branches that read it as `elapsed_ms`. Inlined
+/// so the two call sites read the same shape; the two functions exist
+/// to keep call-site intent (settled vs elapsed) legible.
+#[inline]
+#[must_use]
+fn elapsed_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
+    u64::try_from((now - started_at).as_millis()).unwrap_or(u64::MAX)
 }

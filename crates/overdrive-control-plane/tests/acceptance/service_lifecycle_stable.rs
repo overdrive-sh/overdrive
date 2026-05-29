@@ -55,7 +55,9 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
     ServiceAllocFact {
         alloc_id,
         state: AllocState::Running,
-        started_at_unix_ms,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
+            started_at_unix_ms,
+        ))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
         max_attempts: 30,
@@ -74,7 +76,9 @@ fn fact_failed_within_deadline(
     ServiceAllocFact {
         alloc_id,
         state: AllocState::Failed,
-        started_at_unix_ms,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
+            started_at_unix_ms,
+        ))),
         exit_code: Some(exit_code),
         latest_startup_probe: None,
         max_attempts: 30,
