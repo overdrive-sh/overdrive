@@ -435,7 +435,11 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
     );
     let actual = one_alloc_state(f);
     let mut attempts_map = BTreeMap::new();
-    attempts_map.insert(aid("alloc-svc-2"), 30u32); // attempts == max
+    // GAP-10: seed the PRIOR consecutive-fail count (29). This tick
+    // observes one more Fail, so the body increments to 30 == max_attempts
+    // BEFORE the gate reads it. The reported `attempts` is the
+    // post-increment streak length (30).
+    attempts_map.insert(aid("alloc-svc-2"), 29u32);
     let view =
         ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
     // elapsed = 61_000 - 1_000 = 60_000 >= 60_000 (deadline).
@@ -477,14 +481,19 @@ fn startup_probe_failed_does_not_fire_when_attempts_below_max() {
         Duration::from_secs(60),
     );
     let mut attempts_map = BTreeMap::new();
-    attempts_map.insert(aid("alloc-svc-2"), 29u32);
+    // GAP-10: seed PRIOR count 28; this tick's Fail increments to 29,
+    // which is still < max(30), so StartupProbeFailed must NOT fire.
+    attempts_map.insert(aid("alloc-svc-2"), 28u32);
     let view =
         ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
     let tick = tick_at_ms(61_000);
     let r = ServiceLifecycleReconciler::new();
     let (actions, _) =
         r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(f), &view, &tick);
-    assert!(actions.is_empty(), "attempts(29) < max(30) => no StartupProbeFailed; got {actions:?}");
+    assert!(
+        actions.is_empty(),
+        "post-increment attempts(29) < max(30) => no StartupProbeFailed; got {actions:?}"
+    );
 }
 
 /// StartupProbeFailed does NOT fire when elapsed_ms < deadline.
@@ -610,6 +619,365 @@ fn startup_probe_failed_last_fail_empty_when_probe_is_none() {
 // =====================================================================
 // Line 330 - kills `replace settled_in_ms_from with 0` and `with 1`.
 // The settled_in_ms surfaces inside Stable's TerminalCondition.
+
+// =====================================================================
+// Category E — GAP-9 Shape B: has_alloc_mid_startup_window predicate
+// =====================================================================
+//
+// The runtime's `view_has_backoff_pending` ServiceLifecycle arm
+// delegates to `ServiceLifecycleView::has_alloc_mid_startup_window`.
+// The load-bearing contract: TRUE while an observed alloc is
+// mid-startup-window (observed, not yet terminal); FALSE the instant
+// the alloc reaches ANY terminal (Stable OR ServiceFailed). Get this
+// wrong and GAP-9's fix trades a dead reconciler for a spinning one.
+//
+// This is a pure predicate over the View — the canonical port-to-port
+// shape for a domain function (the method signature IS its driving
+// port).
+
+/// Empty view (no observed allocs) is NOT mid-startup-window — the
+/// busy-loop-avoidance baseline: a default view (e.g. a Job-kind
+/// enqueue that hydrated an empty Service state) must return false so
+/// the runtime does not re-enqueue.
+#[test]
+fn mid_startup_window_false_for_empty_view() {
+    let view = ServiceLifecycleView::default();
+    assert!(
+        !view.has_alloc_mid_startup_window(),
+        "default/empty view must NOT be mid-startup-window (no observed alloc)"
+    );
+}
+
+/// Observed-but-not-terminal alloc IS mid-startup-window → predicate
+/// true → runtime self-re-enqueues. This is the active startup window:
+/// the reconciler has recorded the alloc in `observed` but has not yet
+/// announced Stable or a failure terminal.
+#[test]
+fn mid_startup_window_true_when_observed_not_terminal() {
+    let mut view = ServiceLifecycleView::default();
+    view.observed.insert(aid("alloc-svc-0"));
+    assert!(
+        view.has_alloc_mid_startup_window(),
+        "observed alloc not in any terminal set must be mid-startup-window (true)"
+    );
+}
+
+/// The instant the alloc reaches Stable (recorded in
+/// `stable_announced`), the predicate flips to false — the runtime
+/// stops re-enqueueing. Kills a mutant that ignores `stable_announced`
+/// in the subtraction.
+#[test]
+fn mid_startup_window_false_when_observed_and_stable() {
+    let mut view = ServiceLifecycleView::default();
+    view.observed.insert(aid("alloc-svc-0"));
+    view.stable_announced.insert(aid("alloc-svc-0"));
+    assert!(
+        !view.has_alloc_mid_startup_window(),
+        "alloc in stable_announced is terminal → NOT mid-startup-window (no busy-loop)"
+    );
+}
+
+/// The instant the alloc reaches a non-Stable terminal (recorded in
+/// `terminal_announced`), the predicate flips to false. Kills a mutant
+/// that ignores `terminal_announced` in the subtraction — without it a
+/// dead (EarlyExit / StartupProbeFailed) alloc would spin the runtime
+/// forever, which is worse than the GAP-9 gap.
+#[test]
+fn mid_startup_window_false_when_observed_and_terminal_failed() {
+    let mut view = ServiceLifecycleView::default();
+    view.observed.insert(aid("alloc-svc-0"));
+    view.terminal_announced.insert(aid("alloc-svc-0"));
+    assert!(
+        !view.has_alloc_mid_startup_window(),
+        "alloc in terminal_announced is terminal → NOT mid-startup-window (no busy-loop)"
+    );
+}
+
+/// Mixed populations: one alloc still mid-flight, one terminal → the
+/// predicate is true (the ANY semantics: as long as ONE observed alloc
+/// is non-terminal, the runtime must keep re-enqueueing). Kills a
+/// mutant that flips `any` → `all`.
+#[test]
+fn mid_startup_window_true_when_any_observed_alloc_still_mid_flight() {
+    let mut view = ServiceLifecycleView::default();
+    view.observed.insert(aid("alloc-svc-0"));
+    view.observed.insert(aid("alloc-svc-1"));
+    // alloc-0 reached Stable; alloc-1 still mid-flight.
+    view.stable_announced.insert(aid("alloc-svc-0"));
+    assert!(
+        view.has_alloc_mid_startup_window(),
+        "ANY mid-flight observed alloc keeps the predicate true (kills any→all mutant)"
+    );
+}
+
+/// Reconcile populates `observed` for a mid-window alloc (Running, no
+/// Pass yet — none of the terminal branches fire), and the resulting
+/// next_view IS mid-startup-window. This is the integration point
+/// between the reconcile body (Shape B producer) and the predicate
+/// (Shape B consumer): the runtime would re-enqueue from this view.
+#[test]
+fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
+    // Running, probe not yet observed → no branch fires, alloc is
+    // recorded as observed (mid-flight).
+    let f =
+        fact("alloc-svc-9", AllocState::Running, 1_000, None, None, 30, Duration::from_secs(60));
+    let actual = one_alloc_state(f);
+    let view = ServiceLifecycleView::default();
+    let tick = tick_at_ms(2_000);
+
+    let r = ServiceLifecycleReconciler::new();
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+
+    assert!(actions.is_empty(), "mid-startup-window tick emits no actions; got {actions:?}");
+    assert!(
+        next_view.observed.contains(&aid("alloc-svc-9")),
+        "reconcile must record the observed alloc so Shape B can keep it alive"
+    );
+    assert!(
+        next_view.has_alloc_mid_startup_window(),
+        "next_view from a mid-window tick must be mid-startup-window (runtime re-enqueues)"
+    );
+}
+
+/// Reconcile inserts the alloc into `terminal_announced` on a
+/// StartupProbeFailed terminal, and the resulting next_view is NOT
+/// mid-startup-window — the runtime stops re-enqueueing the dead alloc.
+/// Also pins the dedup: a second reconcile against the SAME next_view
+/// emits zero actions (no terminal re-emission busy-loop).
+#[test]
+fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
+    let f = fact(
+        "alloc-svc-8",
+        AllocState::Pending,
+        1_000,
+        None,
+        Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
+        5,
+        Duration::from_secs(60),
+    );
+    let actual = one_alloc_state(f);
+    let mut attempts_map = BTreeMap::new();
+    // GAP-10: seed PRIOR count 4; this tick's Fail increments to 5 == max.
+    attempts_map.insert(aid("alloc-svc-8"), 4u32);
+    let view =
+        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+    let tick = tick_at_ms(61_000); // elapsed 60_000 >= deadline 60_000
+
+    let r = ServiceLifecycleReconciler::new();
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+
+    assert_eq!(actions.len(), 1, "StartupProbeFailed must fire once; got {actions:?}");
+    assert!(
+        next_view.terminal_announced.contains(&aid("alloc-svc-8")),
+        "terminal verdict must be recorded in terminal_announced"
+    );
+    assert!(
+        !next_view.has_alloc_mid_startup_window(),
+        "a terminal-failed alloc must NOT keep the runtime spinning (predicate false)"
+    );
+
+    // Dedup: a second reconcile against the same (now-terminal) view
+    // emits ZERO actions — no terminal re-emission busy-loop.
+    let (actions2, _next2) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &next_view, &tick);
+    assert!(
+        actions2.is_empty(),
+        "terminal_announced dedup must skip re-emission on the next tick; got {actions2:?}"
+    );
+}
+
+// =====================================================================
+// Category F — GAP-10: startup_attempts_per_alloc increment/reset
+// =====================================================================
+//
+// Before GAP-10 the counter was READ by the StartupProbeFailed gate but
+// NEVER WRITTEN, so `attempts` stayed 0 and the terminal was unreachable
+// for any real spec (max_attempts >= 1) — a failure-path busy-loop. The
+// fix increments by exactly 1 per observed startup-probe Fail and resets
+// to 0 on the first Pass. These tests pin the four mutation-surface
+// behaviours per the GAP-10 correctness checklist:
+//   (a) +1 per observed Fail (no over/under-count)
+//   (b) reset to 0 on Pass
+//   (c) StartupProbeFailed fires at exactly attempts == max_attempts
+//   (d) a Pass before max_attempts prevents StartupProbeFailed
+//
+// Observable surface: the counter is port-exposed via the returned
+// `next_view.startup_attempts_per_alloc` (state-delta over a View slot)
+// and via the emitted `StartupProbeFailed { attempts }` action.
+
+/// (a) Each observed startup-probe Fail increments the per-alloc counter
+/// by exactly 1. Kills `saturating_add(1)` → `saturating_add(0)` (no
+/// movement → busy-loop returns) and `→ saturating_add(2)`/`* 2`
+/// (over-count). State-delta: only the target alloc's slot moves, by +1.
+#[test]
+fn startup_attempt_counter_increments_by_one_per_observed_fail() {
+    // Pending so no terminal branch fires; max high so StartupProbeFailed
+    // does not consume the alloc — we observe the raw counter delta.
+    let f = fact(
+        "alloc-svc-f",
+        AllocState::Pending,
+        1_000,
+        None,
+        Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
+        u32::MAX,
+        Duration::from_secs(60),
+    );
+    let actual = one_alloc_state(f);
+    let r = ServiceLifecycleReconciler::new();
+    let tick = tick_at_ms(2_000);
+
+    // Tick 1: absent entry (0) + one Fail → 1.
+    let (actions1, view1) = r.reconcile(
+        &ServiceLifecycleState::default(),
+        &actual,
+        &ServiceLifecycleView::default(),
+        &tick,
+    );
+    assert!(actions1.is_empty(), "mid-window Fail emits no action; got {actions1:?}");
+    assert_eq!(
+        view1.startup_attempts_per_alloc.get(&aid("alloc-svc-f")).copied(),
+        Some(1),
+        "first observed Fail must set the counter to exactly 1"
+    );
+
+    // Tick 2: 1 + one Fail → 2 (exactly +1, no over-count).
+    let (_actions2, view2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view1, &tick);
+    assert_eq!(
+        view2.startup_attempts_per_alloc.get(&aid("alloc-svc-f")).copied(),
+        Some(2),
+        "second observed Fail must increment to exactly 2 (kills +0 and +2 mutants)"
+    );
+}
+
+/// (b) A Pass resets the per-alloc counter to 0. Kills a mutant that
+/// drops the reset arm (counter would stay at its prior streak value,
+/// letting a recovered-then-flapping alloc fire StartupProbeFailed
+/// prematurely). The alloc here is Pending (not Running) so branch (a)
+/// Stable does NOT consume it — we observe the reset directly.
+#[test]
+fn startup_attempt_counter_resets_to_zero_on_pass() {
+    let f = fact(
+        "alloc-svc-g",
+        AllocState::Pending,
+        1_000,
+        None,
+        Some(ProbeStatus::Pass),
+        30,
+        Duration::from_secs(60),
+    );
+    let actual = one_alloc_state(f);
+    // Seed a prior streak of 17 fails.
+    let mut seeded = BTreeMap::new();
+    seeded.insert(aid("alloc-svc-g"), 17u32);
+    let view = ServiceLifecycleView { startup_attempts_per_alloc: seeded, ..Default::default() };
+    let tick = tick_at_ms(2_000);
+    let r = ServiceLifecycleReconciler::new();
+    let (_actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+    assert_eq!(
+        next_view.startup_attempts_per_alloc.get(&aid("alloc-svc-g")).copied(),
+        None,
+        "an observed Pass must clear the consecutive-fail streak to 0 (entry removed)"
+    );
+}
+
+/// (c)+(d) Boundary: with max_attempts = 3, three consecutive observed
+/// Fails (past the deadline) reach the terminal at exactly the 3rd Fail
+/// — and a Pass on the 2nd tick prevents it. This is the real never-binds
+/// shape (max_attempts = 3) the GAP-10 busy-loop manifested on: the
+/// terminal becomes reachable, flipping Shape B's predicate false.
+#[test]
+fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
+    let failing = fact(
+        "alloc-svc-h",
+        AllocState::Running,
+        1_000,
+        None,
+        Some(ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() }),
+        3,
+        Duration::from_secs(10),
+    );
+    // Past the deadline so the wall-clock gate is satisfied throughout.
+    let tick = tick_at_ms(20_000); // elapsed 19_000 >= 10_000 deadline
+    let r = ServiceLifecycleReconciler::new();
+    let actual = one_alloc_state(failing.clone());
+
+    // Fail 1 → attempts 1 < 3: no terminal.
+    let (a1, v1) = r.reconcile(
+        &ServiceLifecycleState::default(),
+        &actual,
+        &ServiceLifecycleView::default(),
+        &tick,
+    );
+    assert!(a1.is_empty(), "1st Fail (attempts=1 < max=3) must not fire; got {a1:?}");
+
+    // Fail 2 → attempts 2 < 3: no terminal.
+    let (a2, v2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v1, &tick);
+    assert!(a2.is_empty(), "2nd Fail (attempts=2 < max=3) must not fire; got {a2:?}");
+
+    // Fail 3 → attempts 3 == 3: terminal fires at EXACTLY max, reports 3.
+    let (a3, v3) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v2, &tick);
+    assert_eq!(a3.len(), 1, "3rd Fail (attempts == max) must fire StartupProbeFailed; got {a3:?}");
+    match &a3[0] {
+        Action::FinalizeFailed {
+            terminal:
+                Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::StartupProbeFailed { attempts, last_fail, .. },
+                }),
+            ..
+        } => {
+            assert_eq!(*attempts, 3, "reported attempts is the post-increment streak == max");
+            assert_eq!(last_fail, "connection refused");
+        }
+        other => panic!("expected StartupProbeFailed at max, got {other:?}"),
+    }
+    // No-busy-loop proof: the alloc is now terminal, so the Shape B
+    // predicate flips false — the runtime stops re-enqueueing.
+    assert!(
+        v3.terminal_announced.contains(&aid("alloc-svc-h")),
+        "terminal must be recorded so view_has_backoff_pending returns false"
+    );
+    assert!(
+        !v3.has_alloc_mid_startup_window(),
+        "reachable terminal closes the busy-loop (predicate false)"
+    );
+
+    // (d) Prevention: a Pass on the 2nd tick clears the streak, so the
+    // 3rd-tick Fail only reaches attempts == 1 — no terminal, alloc
+    // recovers (Stable on the Pass tick because state == Running).
+    let passing = fact(
+        "alloc-svc-h",
+        AllocState::Running,
+        1_000,
+        None,
+        Some(ProbeStatus::Pass),
+        3,
+        Duration::from_secs(10),
+    );
+    let (_pa1, pv1) = r.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(failing),
+        &ServiceLifecycleView::default(),
+        &tick,
+    );
+    // Pass tick: counter reset to 0 AND state == Running + Pass ⇒ Stable.
+    let (pa2, pv2) =
+        r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(passing), &pv1, &tick);
+    assert_eq!(pa2.len(), 1, "Pass on a Running alloc fires Stable; got {pa2:?}");
+    assert!(
+        matches!(
+            &pa2[0],
+            Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
+        ),
+        "Pass after one Fail recovers to Stable, NOT StartupProbeFailed; got {pa2:?}"
+    );
+    assert!(
+        pv2.startup_attempts_per_alloc.get(&aid("alloc-svc-h")).copied().unwrap_or(0) == 0,
+        "Pass cleared the streak so StartupProbeFailed is prevented"
+    );
+}
 
 proptest! {
     /// Property: settled_in_ms (observable via Stable's TerminalCondition)

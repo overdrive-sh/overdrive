@@ -189,6 +189,13 @@ mod acceptance {
     mod service_lifecycle_probe_to_stable;
     mod service_lifecycle_purity;
     mod service_lifecycle_readiness;
+    // GAP-9 — runtime self-re-enqueue witness (Shape B). Uses the
+    // `loaded_service_lifecycle_views_for_test` runtime accessor, which is
+    // `#[cfg(any(test, feature = "integration-tests"))]`; cfg(test) does
+    // not propagate to dependencies from an integration-test binary, so
+    // gate the module behind the feature (mirrors `runtime_convergence_loop`).
+    #[cfg(feature = "integration-tests")]
+    mod service_lifecycle_runtime_reenqueue;
     mod service_lifecycle_stable;
     mod service_submit_event_taxonomy;
     mod service_submit_event_v2;

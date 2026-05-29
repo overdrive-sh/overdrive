@@ -193,6 +193,71 @@ pub struct ServiceLifecycleView {
     /// the deadline IS derived state per the rule). Stored as
     /// UNIX-epoch milliseconds.
     pub startup_last_fail_seen_at: BTreeMap<AllocationId, u64>,
+
+    /// GAP-9 — per-alloc set of allocs the reconciler has OBSERVED in
+    /// a non-terminal state (i.e. it has begun watching the alloc's
+    /// startup window but has not yet announced a terminal verdict).
+    ///
+    /// This is the load-bearing input for the runtime's
+    /// `view_has_backoff_pending` self-re-enqueue predicate (Shape B
+    /// of GAP-9): during the active startup window the reconciler
+    /// emits ZERO actions (no Pass yet, not failed, deadline not
+    /// elapsed), so the §18 *action-emitted* re-enqueue signal is
+    /// absent and the broker would drain empty after the FIRST tick,
+    /// leaving the reconciler never re-ticked. Recording the
+    /// observed-alloc membership lets the predicate keep the
+    /// reconciler alive across cadences until it observes the
+    /// `ProbeRunner`'s Pass row (→ Stable) or a terminal.
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this records an OBSERVED FACT ("the reconciler
+    /// is watching alloc X"), not a derived "needs re-enqueue now"
+    /// boolean — the predicate recomputes that from the set
+    /// difference against the two terminal sets every read.
+    pub observed: BTreeSet<AllocationId>,
+
+    /// GAP-9 — per-alloc set of allocs that reached a NON-Stable
+    /// terminal verdict (`EarlyExit` / `StartupProbeFailed`). The
+    /// Stable terminal continues to use [`Self::stable_announced`];
+    /// this set is its non-Stable sibling.
+    ///
+    /// Two jointly load-bearing roles:
+    ///
+    /// 1. **Dedup** — without it the `EarlyExit` / `StartupProbeFailed`
+    ///    branches re-emit their terminal `FinalizeFailed` action on
+    ///    EVERY subsequent tick (a latent re-emission bug independent
+    ///    of GAP-9), which would also keep the §18 action-emitted
+    ///    re-enqueue alive forever — a busy-loop on a dead alloc.
+    /// 2. **Predicate falseness at terminal** — the
+    ///    `view_has_backoff_pending` predicate subtracts BOTH terminal
+    ///    sets from [`Self::observed`]; once an alloc lands here the
+    ///    predicate returns false for it, so a terminal-failed alloc
+    ///    stops the runtime re-enqueue (no spinning reconciler).
+    ///
+    /// Per the same persist-inputs rule: records the observed fact
+    /// "this alloc reached a non-Stable terminal," never a derived
+    /// flag.
+    pub terminal_announced: BTreeSet<AllocationId>,
+}
+
+impl ServiceLifecycleView {
+    /// GAP-9 Shape B predicate — does any observed alloc remain
+    /// mid-startup-window (observed but not yet terminal)?
+    ///
+    /// An alloc is mid-startup-window iff the reconciler has recorded
+    /// it in [`Self::observed`] AND it has not landed in EITHER
+    /// terminal set ([`Self::stable_announced`] or
+    /// [`Self::terminal_announced`]). The runtime's
+    /// `view_has_backoff_pending` arm delegates here so the
+    /// busy-loop-avoidance contract (true during the window, false the
+    /// instant ANY terminal is reached) is pinned by a unit-testable
+    /// pure predicate co-located with the view it reasons over.
+    #[must_use]
+    pub fn has_alloc_mid_startup_window(&self) -> bool {
+        self.observed.iter().any(|alloc| {
+            !self.stable_announced.contains(alloc) && !self.terminal_announced.contains(alloc)
+        })
+    }
 }
 
 /// Default startup deadline used by the reconciler when computing
@@ -288,6 +353,43 @@ impl Reconciler for ServiceLifecycleReconciler {
                 continue;
             }
 
+            // GAP-9 dedup — a non-Stable terminal verdict (EarlyExit /
+            // StartupProbeFailed) was already announced for this alloc.
+            // Without this guard those two branches re-emit their
+            // terminal `FinalizeFailed` on EVERY tick (latent
+            // re-emission bug) AND keep the runtime's §18
+            // action-emitted re-enqueue alive forever — a busy-loop on
+            // a dead alloc. Mirrors the `stable_announced` dedup above.
+            if next_view.terminal_announced.contains(alloc_id) {
+                continue;
+            }
+
+            // GAP-9 Shape B — record that the reconciler is watching
+            // this alloc's startup window. This is the load-bearing
+            // input for `ServiceLifecycleView::has_alloc_mid_startup_window`
+            // (consulted by the runtime's `view_has_backoff_pending`
+            // self-re-enqueue gate). During the active window the
+            // branches below emit no action, so without this membership
+            // the broker drains empty after the first tick and the
+            // reconciler is never re-ticked (the GAP-9 defect). The
+            // alloc is removed from the "still mid-flight" set the
+            // instant it lands in either terminal set (the predicate
+            // subtracts both), so a terminal alloc does NOT keep the
+            // runtime spinning.
+            next_view.observed.insert(alloc_id.clone());
+
+            // GAP-10 — maintain the consecutive-startup-probe-fail
+            // counter that the StartupProbeFailed gate below reads (it was
+            // read-but-never-written, making the terminal unreachable and
+            // Shape B a failure-path busy-loop). See `update_startup_attempts`
+            // for the ADR-0057 §2 semantics; the terminal CONDITION is
+            // unchanged — only the `attempts` INPUT now moves.
+            update_startup_attempts(
+                &mut next_view.startup_attempts_per_alloc,
+                alloc_id,
+                fact.latest_startup_probe.as_ref(),
+            );
+
             // Branch (a'): Empty-probes opt-out — operator declared
             // `[[health_check.startup]] = []` per ADR-0058 §4 /
             // ADR-0059 Q5. Operator's deliberate first-Running-IS-Stable
@@ -370,41 +472,106 @@ impl Reconciler for ServiceLifecycleReconciler {
                             },
                         }),
                     });
+                    // GAP-9 — record the non-Stable terminal so the
+                    // dedup guard above skips this alloc next tick and
+                    // the Shape B predicate returns false for it.
+                    next_view.terminal_announced.insert(alloc_id.clone());
                     continue;
                 } // fall-through to StartupProbeFailed branch
             }
 
             // Branch (b): StartupProbeFailed — attempts exhausted AND
-            // deadline elapsed AND no Pass observed.
-            //
-            // `started_at == None` here means the alloc never reached
-            // Running — no probes ran to fail. Skip the branch.
-            let Some(started) = fact.started_at else {
-                continue;
-            };
+            // deadline elapsed AND no Pass observed. Extracted into
+            // `startup_probe_failed_action` (terminal CONDITION verbatim);
+            // the `attempts` it reads is the post-`update_startup_attempts`
+            // value recorded above.
             let attempts = next_view.startup_attempts_per_alloc.get(alloc_id).copied().unwrap_or(0);
-            let elapsed_ms = elapsed_ms_from(tick.now_unix, started);
-            let deadline_ms = u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
-            let no_pass = !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
-            if attempts >= fact.max_attempts && elapsed_ms >= deadline_ms && no_pass {
-                let last_fail = match &fact.latest_startup_probe {
-                    Some(ProbeStatus::Fail { last_fail_reason }) => last_fail_reason.clone(),
-                    _ => String::new(),
-                };
-                actions.push(Action::FinalizeFailed {
-                    alloc_id: alloc_id.clone(),
-                    terminal: Some(TerminalCondition::ServiceFailed {
-                        reason: ServiceFailureReason::StartupProbeFailed {
-                            probe_idx: 0,
-                            last_fail,
-                            attempts,
-                        },
-                    }),
-                });
+            if let Some(action) =
+                startup_probe_failed_action(alloc_id, fact, attempts, tick.now_unix)
+            {
+                actions.push(action);
+                // GAP-9 — record the non-Stable terminal (see EarlyExit
+                // branch for the dedup + predicate-falseness rationale).
+                next_view.terminal_announced.insert(alloc_id.clone());
             }
         }
 
         (actions, next_view)
+    }
+}
+
+/// GAP-10 — maintain the per-alloc consecutive-startup-probe-fail
+/// counter that the `StartupProbeFailed` gate reads.
+///
+/// Semantics per ADR-0057 §2 (`attempts` = CONSECUTIVE startup-probe
+/// failures):
+///
+/// - `Some(Fail)` → increment by exactly 1 (saturating at `u32::MAX`).
+/// - `Some(Pass)` → reset to 0 by removing the entry (recovery clears
+///   the streak; the alloc proceeds to Stable in branch (a)).
+/// - `None` → leave the map untouched (no probe observed this tick:
+///   neither a failure nor a recovery).
+///
+/// Extracted from `reconcile` so the per-alloc body stays under the
+/// `too_many_lines` budget and the increment/reset logic is unit-pinned
+/// indirectly through the reconcile branch tests.
+#[inline]
+fn update_startup_attempts(
+    counters: &mut BTreeMap<AllocationId, u32>,
+    alloc_id: &AllocationId,
+    latest_startup_probe: Option<&ProbeStatus>,
+) {
+    match latest_startup_probe {
+        Some(ProbeStatus::Fail { .. }) => {
+            let counter = counters.entry(alloc_id.clone()).or_insert(0);
+            *counter = counter.saturating_add(1);
+        }
+        Some(ProbeStatus::Pass) => {
+            counters.remove(alloc_id);
+        }
+        None => {}
+    }
+}
+
+/// Branch (b) — StartupProbeFailed terminal action, or `None` when the
+/// three-gate condition is not met.
+///
+/// The terminal CONDITION is unchanged from the inline branch it was
+/// extracted from: `attempts >= max_attempts && elapsed_ms >=
+/// deadline_ms && no_pass`. The `attempts` argument is the
+/// post-[`update_startup_attempts`] consecutive-fail count the caller
+/// recorded for this tick.
+///
+/// `started_at == None` means the alloc never reached Running — no
+/// probes ran to fail — so the branch is skipped (returns `None`).
+#[inline]
+fn startup_probe_failed_action(
+    alloc_id: &AllocationId,
+    fact: &ServiceAllocFact,
+    attempts: u32,
+    now_unix: UnixInstant,
+) -> Option<Action> {
+    let started = fact.started_at?;
+    let elapsed_ms = elapsed_ms_from(now_unix, started);
+    let deadline_ms = u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
+    let no_pass = !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
+    if attempts >= fact.max_attempts && elapsed_ms >= deadline_ms && no_pass {
+        let last_fail = match &fact.latest_startup_probe {
+            Some(ProbeStatus::Fail { last_fail_reason }) => last_fail_reason.clone(),
+            _ => String::new(),
+        };
+        Some(Action::FinalizeFailed {
+            alloc_id: alloc_id.clone(),
+            terminal: Some(TerminalCondition::ServiceFailed {
+                reason: ServiceFailureReason::StartupProbeFailed {
+                    probe_idx: 0,
+                    last_fail,
+                    attempts,
+                },
+            }),
+        })
+    } else {
+        None
     }
 }
 

@@ -144,6 +144,51 @@ fn assert_single_bridge_enqueue<'a>(
     (reconciler, target)
 }
 
+/// GAP-9 helper — assert that `actions` contains exactly one
+/// `Action::EnqueueEvaluation` routed at `service-lifecycle` for the
+/// given workload, keyed `job/<workload_id>`. Pins the Shape C dual-emit.
+fn assert_single_service_enqueue(actions: &[Action], workload_id: &WorkloadId) {
+    let mut count = 0;
+    let mut found_target: Option<&TargetResource> = None;
+    for action in actions {
+        if let Action::EnqueueEvaluation { reconciler, target } = action {
+            if reconciler.as_str() == "service-lifecycle" {
+                count += 1;
+                found_target = Some(target);
+            }
+        }
+    }
+    assert_eq!(
+        count, 1,
+        "GAP-9: a Service-kind alloc-mutating tick MUST emit exactly one EnqueueEvaluation \
+         routed at 'service-lifecycle'; got {count} in {actions:?}",
+    );
+    let target = found_target.expect("count==1 checked above");
+    assert_eq!(
+        target.as_str(),
+        &format!("job/{workload_id}"),
+        "GAP-9: service-lifecycle enqueue target MUST be 'job/<workload_id>'"
+    );
+}
+
+/// GAP-9 helper — assert NO `service-lifecycle` enqueue appears.
+fn assert_no_service_enqueue(actions: &[Action]) {
+    let count = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::EnqueueEvaluation { reconciler, .. }
+                    if reconciler.as_str() == "service-lifecycle"
+            )
+        })
+        .count();
+    assert_eq!(
+        count, 0,
+        "GAP-9: this tick must emit ZERO service-lifecycle enqueues; got {count} in {actions:?}",
+    );
+}
+
 // -------------------------------------------------------------------
 // StartAllocation branch — fresh Service workload, no allocs yet.
 // -------------------------------------------------------------------
@@ -178,13 +223,20 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // Exactly two actions: one StartAllocation + one EnqueueEvaluation.
-    assert_eq!(actions.len(), 2, "expected StartAllocation + EnqueueEvaluation; got {actions:?}");
+    // GAP-9: Service-kind StartAllocation now emits THREE actions —
+    // StartAllocation + bridge EnqueueEvaluation + service-lifecycle
+    // EnqueueEvaluation.
+    assert_eq!(
+        actions.len(),
+        3,
+        "expected StartAllocation + bridge enqueue + service-lifecycle enqueue; got {actions:?}"
+    );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
         "first action must be StartAllocation; got {actions:?}"
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
+    assert_single_service_enqueue(&actions, &workload_id);
 }
 
 // -------------------------------------------------------------------
@@ -227,12 +279,21 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 2, "expected StopAllocation + EnqueueEvaluation; got {actions:?}");
+    // GAP-9: StopAllocation is a terminal-REMOVAL transition — NOT an
+    // alloc-starting one — so it dual-emits the bridge enqueue (the
+    // bridge cares about removals) but NOT the service-lifecycle
+    // enqueue (no new startup window). Stays at 2 actions.
+    assert_eq!(
+        actions.len(),
+        2,
+        "expected StopAllocation + bridge enqueue (no service enqueue on Stop); got {actions:?}"
+    );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
         "expected StopAllocation among actions; got {actions:?}"
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
+    assert_no_service_enqueue(&actions);
 }
 
 // -------------------------------------------------------------------
@@ -275,12 +336,19 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 2, "expected StopAllocation + EnqueueEvaluation; got {actions:?}");
+    // GAP-9: GC StopAllocation is a removal — bridge enqueue only, no
+    // service-lifecycle enqueue (no new startup window). Stays at 2.
+    assert_eq!(
+        actions.len(),
+        2,
+        "expected StopAllocation + bridge enqueue (no service enqueue on GC stop); got {actions:?}"
+    );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
         "expected StopAllocation; got {actions:?}"
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
+    assert_no_service_enqueue(&actions);
 }
 
 // -------------------------------------------------------------------
@@ -330,7 +398,13 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 2, "expected FinalizeFailed + EnqueueEvaluation; got {actions:?}");
+    // GAP-9: FinalizeFailed is a terminal-removal transition — bridge
+    // enqueue only, no service-lifecycle enqueue. Stays at 2.
+    assert_eq!(
+        actions.len(),
+        2,
+        "expected FinalizeFailed + bridge enqueue (no service enqueue on Finalize); got {actions:?}"
+    );
     assert!(
         actions.iter().any(|a| matches!(
             a,
@@ -342,6 +416,7 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
         "expected FinalizeFailed with BackoffExhausted terminal; got {actions:?}"
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
+    assert_no_service_enqueue(&actions);
 }
 
 // -------------------------------------------------------------------
@@ -530,4 +605,63 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
          got {bridge_enqueues} in {actions:?} — `is_alloc_mutating_action` may have been \
          mutated to always return true"
     );
+    // GAP-9: a non-alloc-mutating tick must ALSO emit zero
+    // service-lifecycle enqueues (the Shape C dual-emit is gated on the
+    // same `is_alloc_mutating_action` predicate as the bridge enqueue).
+    assert_no_service_enqueue(&actions);
+}
+
+// -------------------------------------------------------------------
+// GAP-9 — Job-kind StartAllocation MUST NOT emit a service-lifecycle
+// enqueue (the bridge enqueue still fires — it is kind-agnostic).
+// Pins the `desired.workload_kind == Service` gate on the Shape C
+// dual-emit: mutating the gate to always-true would spuriously
+// enqueue the service-lifecycle reconciler for every Job workload,
+// hydrating an empty Service state and churning the broker.
+// -------------------------------------------------------------------
+
+#[test]
+fn job_kind_start_allocation_emits_no_service_enqueue() {
+    let workload_id = jid("batch");
+    let nodes = one_node_map("local");
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("batch")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(make_job("batch")),
+        desired_to_stop: false,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // Job-kind StartAllocation: StartAllocation + bridge enqueue only
+    // (the bridge is kind-agnostic). NO service-lifecycle enqueue.
+    assert_eq!(
+        actions.len(),
+        2,
+        "Job-kind StartAllocation: StartAllocation + bridge enqueue only (no service-lifecycle); \
+         got {actions:?}"
+    );
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
+        "expected StartAllocation; got {actions:?}"
+    );
+    assert_single_bridge_enqueue(&actions, &workload_id);
+    assert_no_service_enqueue(&actions);
 }

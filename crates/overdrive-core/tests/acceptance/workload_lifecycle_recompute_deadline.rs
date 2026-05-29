@@ -228,9 +228,10 @@ fn recomputes_deadline_at_window_boundary() {
     let (actions_at, _next_at) = r.reconcile(&desired, &actual, &view, &tick_at_boundary);
     assert_eq!(
         actions_at.len(),
-        2,
+        3,
         "tick.now_unix == seen_at + backoff_for_attempt(restart_count) must \
-         emit RestartAllocation + bridge EnqueueEvaluation per UI-06 \
+         emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + \
+         service-lifecycle EnqueueEvaluation per GAP-9 \
          (backoff window elapsed under `<`); got {actions_at:?}",
     );
     assert!(
@@ -308,8 +309,8 @@ fn restart_survival_idempotence() {
     // vacuous.
     assert_eq!(
         actions_a.len(),
-        2,
-        "test fixture must exercise the RestartAllocation path (now paired with bridge EnqueueEvaluation per UI-06); got {actions_a:?}",
+        3,
+        "test fixture must exercise the RestartAllocation path (now paired with bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9); got {actions_a:?}",
     );
 
     // Simulate libSQL persistence + rehydration: move view_a into

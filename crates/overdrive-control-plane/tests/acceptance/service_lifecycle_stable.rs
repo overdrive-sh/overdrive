@@ -251,7 +251,11 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
     let actual = state_with(vec![fact]);
     let desired = actual.clone();
     let mut view = ServiceLifecycleView::default();
-    view.startup_attempts_per_alloc.insert(alloc_id.clone(), 3);
+    // GAP-10: seed the PRIOR consecutive-fail count (2). This tick's
+    // observed Fail increments it to 3 == max_attempts BEFORE the gate
+    // reads it, so the reported `attempts` is the post-increment streak
+    // length (3) — the Nth consecutive fail per ADR-0057 §2.
+    view.startup_attempts_per_alloc.insert(alloc_id.clone(), 2);
     // 200ms after start — past 100ms deadline
     let tick = tick_at(1200);
 

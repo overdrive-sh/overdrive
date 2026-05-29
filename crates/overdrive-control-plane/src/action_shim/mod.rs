@@ -510,11 +510,35 @@ async fn dispatch_single(
             // and stays `None` here. Same forward-carry pattern as
             // `stderr_tail` / `detail` / `kind`.
             let prior_started_at = prior_row.started_at;
+            // GAP-9 — a `Stable` terminal is a SUCCESS claim, not a
+            // failure: the Service alloc has passed its startup probes
+            // and is healthily serving. It MUST remain `Running` so the
+            // BackendDiscoveryBridge (which renders backends from the
+            // `state == Running` set) keeps the backend registered.
+            // Every other `TerminalCondition` (ServiceFailed /
+            // BackoffExhausted / Completed / Stopped …) is a genuine
+            // terminal and lands `Failed`.
+            //
+            // Pre-GAP-9 the `service-lifecycle` reconciler never ran in
+            // production, so `FinalizeFailed { Stable }` was never
+            // emitted and this arm only ever saw real failures — the
+            // unconditional `AllocState::Failed` was latently wrong but
+            // unreachable. GAP-9 makes the Stable path live, surfacing
+            // the bug as a walking-skeleton backend-drop; this guard
+            // closes it. The terminal CLAIM (`terminal`) is still
+            // written verbatim onto the row + lifecycle event, so the
+            // streaming layer's `ServiceSubmitEvent::Stable` projection
+            // (which reads `event.terminal`, not the state) is unchanged.
+            let finalized_state = if matches!(terminal, Some(TerminalCondition::Stable { .. })) {
+                prior_row.state
+            } else {
+                AllocState::Failed
+            };
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
-                AllocState::Failed,
+                finalized_state,
                 tick,
                 prior_row.reason.clone(),
                 // Propagate the prior row's verbatim driver text. The

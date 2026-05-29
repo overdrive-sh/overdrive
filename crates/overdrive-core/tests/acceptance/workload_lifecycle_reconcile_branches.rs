@@ -437,8 +437,9 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "must emit StartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "must emit StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle \
+         EnqueueEvaluation per GAP-9 (Service-kind start); got {actions:?}"
     );
     assert!(
         matches!(
@@ -465,8 +466,8 @@ fn restart_emitted_when_attempts_below_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(attempts_when_below_ceiling);
     assert_eq!(
         actions.len(),
-        2,
-        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+        3,
+        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions:?}",
     );
     assert!(
         matches!(
@@ -608,9 +609,10 @@ fn restart_emitted_when_now_equals_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        2,
+        3,
         "now_unix == seen_at + backoff must emit RestartAllocation + bridge \
-         EnqueueEvaluation per UI-06 (backoff elapsed); got {actions:?}",
+         EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 \
+         (Service-kind restart, backoff elapsed); got {actions:?}",
     );
     assert!(
         matches!(
@@ -636,9 +638,10 @@ fn restart_emitted_when_now_strictly_after_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        2,
+        3,
         "now_unix > seen_at + backoff must emit RestartAllocation + bridge \
-         EnqueueEvaluation per UI-06 (backoff elapsed); got {actions:?}",
+         EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 \
+         (Service-kind restart, backoff elapsed); got {actions:?}",
     );
 }
 
@@ -748,8 +751,9 @@ fn fresh_failure_writes_seen_at_into_next_view() {
     // RestartAllocation emitted for the failed alloc.
     assert_eq!(
         actions.len(),
-        2,
-        "fresh failure must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "fresh failure must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + \
+         service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, .. } => {
@@ -908,8 +912,8 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
 
     assert_eq!(
         actions_2.len(),
-        2,
-        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions_2:?}",
+        3,
+        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions_2:?}",
     );
     assert!(
         matches!(
@@ -1514,11 +1518,16 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
         let r = WorkloadLifecycle::canonical();
         let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
+        // GAP-9: Service-kind emits an extra service-lifecycle
+        // EnqueueEvaluation on the StartAllocation (a starting
+        // transition); Job / Schedule do not (the gate is `== Service`).
+        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
         assert_eq!(
             actions.len(),
-            2,
+            expected_len,
             "kind={kind:?}: SystemGc-Terminated row + intent present must emit \
-             exactly one fresh placement + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             exactly one fresh placement + bridge EnqueueEvaluation per UI-06 \
+             (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         match &actions[0] {
             Action::StartAllocation { alloc_id, .. } => {
@@ -1693,11 +1702,18 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         // Both shapes prove the asymmetry: the SystemGc row is NEVER
         // the action target (no Stop or other action emitted against
         // alloc-payments-0).
+        // GAP-9: Service-kind emits RestartAllocation (a starting
+        // transition) → +1 service-lifecycle EnqueueEvaluation.
+        // Schedule emits RestartAllocation too but the `== Service`
+        // gate excludes it; Job emits FinalizeFailed (not a starting
+        // transition). So only Service hits 3.
+        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
         assert_eq!(
             actions.len(),
-            2,
+            expected_len,
             "kind={kind:?}: SystemGc row + Failed row must emit exactly one action \
-             (against the Failed row, not the SystemGc row) + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             (against the Failed row, not the SystemGc row) + bridge EnqueueEvaluation per UI-06 \
+             (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         let action_alloc_id = match &actions[0] {
             Action::RestartAllocation { alloc_id, .. }
@@ -1862,11 +1878,15 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         // row → exactly one fresh `Action::StartAllocation` with a
         // NEW alloc_id (architecture.md § 5 promise). Same assertion
         // shape across kinds — the placement path is kind-agnostic.
+        // GAP-9: Service-kind StartAllocation → +1 service-lifecycle
+        // EnqueueEvaluation; Job / Schedule stay at 2.
+        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
         assert_eq!(
             actions.len(),
-            2,
+            expected_len,
             "kind={kind:?}: filtered SystemGc-via-reason row + intent present must \
-             emit exactly one fresh placement + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             emit exactly one fresh placement + bridge EnqueueEvaluation per UI-06 \
+             (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         match &actions[0] {
             Action::StartAllocation { alloc_id, .. } => {

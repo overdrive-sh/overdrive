@@ -290,8 +290,8 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "fresh schedule must emit StartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "fresh schedule (Service kind) must emit StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
     );
     match &actions[0] {
         // StartAllocation is non-terminal by construction — it does
@@ -352,8 +352,8 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}

@@ -301,8 +301,8 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}

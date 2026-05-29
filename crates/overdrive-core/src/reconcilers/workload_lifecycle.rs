@@ -193,6 +193,57 @@ impl Reconciler for WorkloadLifecycle {
                     target: bridge_target,
                 });
             }
+
+            // GAP-9 (Shape C) — dual-emit `Action::EnqueueEvaluation`
+            // routed at the `service-lifecycle` reconciler for
+            // Service-kind workloads, on alloc-STARTING transitions only
+            // (`StartAllocation` / `RestartAllocation`). This gives the
+            // service-lifecycle reconciler its FIRST tick: a fresh
+            // Service alloc starting or restarting is the moment its
+            // startup probes become relevant. Without this enqueue the
+            // reconciler — registered at boot — was never submitted by
+            // any production path, so after the initial broker drain it
+            // was never re-ticked and its terminal branches were
+            // structurally unreachable.
+            //
+            // Narrower than the bridge predicate above: the bridge
+            // re-renders its backend set on ADD *and* REMOVE
+            // (Start/Restart/Stop/Finalize), but the service-lifecycle
+            // reconciler only cares when an alloc starts probing —
+            // Stop / FinalizeFailed are terminal-removal events that
+            // bring no new startup window. The exit observer (Shape C
+            // part 2) is the on-exit nudge for the failure path; this
+            // site is the on-start nudge. Restricting to the starting
+            // pair also keeps Stop/GC/Finalize tick shapes unchanged.
+            //
+            // Job-kind / Schedule workloads do NOT emit this — the
+            // service-lifecycle reconciler is a Service-kind concern.
+            // The `desired.workload_kind` gate is what keeps a Job-kind
+            // StartAllocation from spuriously enqueueing it (which would
+            // hydrate an empty Service state → 0 actions → broker churn).
+            //
+            // Same `job/<workload_id>` target keying as the bridge
+            // dual-emit, same single-emission-per-tick discipline (the
+            // broker is LWW at `(ReconcilerName, TargetResource)`),
+            // reuses the existing `Action::EnqueueEvaluation` variant.
+            if desired.workload_kind == WorkloadKind::Service
+                && actions.iter().any(is_service_alloc_starting_action)
+            {
+                #[allow(clippy::expect_used)]
+                {
+                    let service_name = ReconcilerName::new(SERVICE_LIFECYCLE_NAME)
+                        .expect("'service-lifecycle' is a valid ReconcilerName by construction");
+                    let service_target =
+                        TargetResource::new(&format!("job/{}", desired.workload_id)).expect(
+                            "'job/<workload_id>' is a valid TargetResource by construction \
+                         (WorkloadId is constructor-validated, prefix is canonical)",
+                        );
+                    actions.push(Action::EnqueueEvaluation {
+                        reconciler: service_name,
+                        target: service_target,
+                    });
+                }
+            }
         }
 
         (actions, next_view)
@@ -205,6 +256,16 @@ impl Reconciler for WorkloadLifecycle {
 /// — a rename of the bridge's `NAME` constant without updating this
 /// reference is a compile error, not a silent handoff failure.
 const BACKEND_DISCOVERY_BRIDGE_NAME: &str = <BackendDiscoveryBridge as Reconciler>::NAME;
+
+/// GAP-9 — name of the `ServiceLifecycleReconciler`.
+///
+/// Compile-time alias to
+/// `<ServiceLifecycleReconciler as Reconciler>::NAME` — same anti-drift
+/// discipline as [`BACKEND_DISCOVERY_BRIDGE_NAME`]: renaming the
+/// reconciler's `NAME` const without updating this reference is a
+/// compile error, not a silent GAP-9-style dead handoff.
+const SERVICE_LIFECYCLE_NAME: &str =
+    <crate::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME;
 
 /// UI-06 — predicate: is `action` one of the four alloc-mutating
 /// variants the `BackendDiscoveryBridge` cares about?
@@ -223,6 +284,21 @@ const fn is_alloc_mutating_action(action: &Action) -> bool {
             | Action::StopAllocation { .. }
             | Action::FinalizeFailed { .. }
     )
+}
+
+/// GAP-9 — predicate: is `action` an alloc-STARTING transition the
+/// `service-lifecycle` reconciler cares about?
+///
+/// Strictly narrower than [`is_alloc_mutating_action`]: only
+/// `StartAllocation` / `RestartAllocation` open a fresh startup window
+/// in which the Service's startup probes become relevant. `Stop` /
+/// `FinalizeFailed` are terminal-removal events — the service-lifecycle
+/// reconciler has nothing new to converge on them, and the failure
+/// path is nudged separately by the exit observer (Shape C part 2). The
+/// wildcard arm therefore covers `StopAllocation`, `FinalizeFailed`,
+/// `Noop`, and every non-alloc action.
+const fn is_service_alloc_starting_action(action: &Action) -> bool {
+    matches!(action, Action::StartAllocation { .. } | Action::RestartAllocation { .. })
 }
 
 impl WorkloadLifecycle {

@@ -1238,13 +1238,27 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // ADR-0035 / Persist inputs); it does not carry a
         // backoff-pending signal, so this arm returns false. A future
         // bridge-side retry policy would extend this match.
-        | AnyReconcilerView::BackendDiscoveryBridge(_)
-        // service-health-check-probes step 01-03b — the
-        // ServiceLifecycle view carries probe-counter inputs only;
-        // restart-backoff arithmetic for the Service kind is recomputed
-        // per tick against the live spec policy, not signalled at the
-        // runtime-tick layer.
-        | AnyReconcilerView::ServiceLifecycle(_) => false,
+        | AnyReconcilerView::BackendDiscoveryBridge(_) => false,
+        // GAP-9 Shape B — keep the service-lifecycle reconciler alive
+        // across cadences while any observed alloc is mid-startup-window.
+        //
+        // During the active startup window the reconciler emits ZERO
+        // actions (Running, no Pass yet, deadline not elapsed), so the
+        // §18 *action-emitted* self-re-enqueue gate (`has_work`) is
+        // false and the broker would drain empty after the FIRST tick —
+        // leaving the reconciler never re-ticked and its Stable /
+        // EarlyExit / StartupProbeFailed branches structurally
+        // unreachable in production (the GAP-9 defect).
+        //
+        // The predicate is true IFF the view records an observed alloc
+        // that has NOT yet reached a terminal (`stable_announced` ∪
+        // `terminal_announced`). It flips to false the instant the alloc
+        // reaches ANY terminal — Stable OR ServiceFailed — so a
+        // terminal alloc does NOT keep the runtime spinning (the
+        // busy-loop GAP-9's fix must avoid). The decision is derivable
+        // from `next_view` alone, as `view_has_backoff_pending`
+        // requires.
+        AnyReconcilerView::ServiceLifecycle(view) => view.has_alloc_mid_startup_window(),
         AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
