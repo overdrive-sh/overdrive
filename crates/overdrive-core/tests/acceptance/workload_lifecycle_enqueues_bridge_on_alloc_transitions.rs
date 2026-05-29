@@ -160,6 +160,7 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -169,6 +170,7 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -207,6 +209,7 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -216,6 +219,7 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -253,6 +257,7 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -262,6 +267,7 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -301,6 +307,7 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -310,6 +317,7 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
 
     // View at the ceiling: restart_counts hits RESTART_BACKOFF_CEILING,
@@ -359,6 +367,7 @@ fn converged_tick_emits_no_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -368,6 +377,7 @@ fn converged_tick_emits_no_bridge_enqueue() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -469,6 +479,7 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -478,6 +489,7 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();

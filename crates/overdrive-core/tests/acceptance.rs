@@ -189,4 +189,14 @@ mod acceptance {
     // GAP-1 corrective crafter found hydrate_desired had no probe
     // data to read. Five sub-scenarios pin the contract end-to-end.
     mod intent_persists_probe_descriptors;
+
+    // service-health-check-probes — GAP-8 corrective patch.
+    // `WorkloadLifecycle::reconcile` projects `desired.probe_descriptors`
+    // into both `Action::StartAllocation` and `Action::RestartAllocation`
+    // alloc specs. Closes the silent-drop between GAP-6 (admission)
+    // and GAP-7 (per-descriptor probe-task spawn loop) — pre-patch the
+    // reconciler hardcoded `probe_descriptors: Vec::new()` at both
+    // action arms, defeating both prior gap closures for Service-kind
+    // workloads. Per ADR-0054 §3 + Phase 01 structural audit close-out.
+    mod workload_lifecycle_projects_service_probes_into_alloc_spec;
 }

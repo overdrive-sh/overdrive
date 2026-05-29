@@ -181,7 +181,7 @@ pub use service_map_hydrator::{
 };
 pub use workload_lifecycle::{
     RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView, backoff_for_attempt,
+    WorkloadLifecycleView, backoff_for_attempt, project_probe_descriptors,
 };
 
 // `ServiceLifecycleReconciler` lives in `overdrive_core::service_lifecycle`

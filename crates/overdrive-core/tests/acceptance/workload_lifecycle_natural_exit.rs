@@ -159,6 +159,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -168,6 +169,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         allocations,
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -213,6 +215,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -222,6 +225,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         allocations,
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -270,6 +274,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -279,6 +284,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     // Budget remaining: attempts == 0 < ceiling.
     let mut restart_counts = BTreeMap::new();

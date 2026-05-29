@@ -130,6 +130,7 @@ fn placement_actions(
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: wid,
@@ -139,6 +140,7 @@ fn placement_actions(
         allocations: current_allocs,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

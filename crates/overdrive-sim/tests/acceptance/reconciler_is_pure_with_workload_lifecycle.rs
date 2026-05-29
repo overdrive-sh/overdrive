@@ -69,6 +69,7 @@ fn happy_path_state() -> WorkloadLifecycleState {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     }
 }
 
@@ -94,6 +95,7 @@ fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let desired = AnyState::WorkloadLifecycle(desired_inner);
     let actual = AnyState::WorkloadLifecycle(actual_inner);
@@ -135,6 +137,7 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let desired = AnyState::WorkloadLifecycle(desired_inner);
     let actual = AnyState::WorkloadLifecycle(actual_inner);

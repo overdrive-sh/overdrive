@@ -40,7 +40,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
+use overdrive_core::aggregate::{IntentKey, Job, Node, ProbeDescriptor, WorkloadKind};
 use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconcilers::ServiceMapHydrator;
@@ -1269,7 +1269,7 @@ async fn hydrate_desired(
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            let (job, intent_digest) = read_job(state, &workload_id).await?;
+            let (job, intent_digest, probe_descriptors) = read_job(state, &workload_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
@@ -1298,6 +1298,10 @@ async fn hydrate_desired(
                 allocations: BTreeMap::new(),
                 workload_kind,
                 service_spec_digest,
+                // GAP-8 close-out — Service-kind probes projected at the
+                // hydrate-desired boundary via `project_probe_descriptors`.
+                // Job-kind / Schedule / absent intent → empty vec.
+                probe_descriptors,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }
@@ -1618,33 +1622,46 @@ async fn hydrate_bridge_desired_listeners(
 async fn read_job(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<(Option<Job>, Option<ContentHash>), ConvergenceError> {
+) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>), ConvergenceError> {
     let key = IntentKey::for_workload(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let Some(b) = bytes else { return Ok((None, None)) };
+    let Some(b) = bytes else { return Ok((None, None, Vec::new())) };
     let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
         b.as_ref(),
         &state.intent_redb_path,
         Some(key.as_str()),
     )
     .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    // GAP-8 close-out (Phase 01 structural audit): project the live
+    // intent's probe descriptors here at hydrate-desired time and
+    // thread them through `WorkloadLifecycleState::probe_descriptors`.
+    // Pre-patch the projection step did not exist and the reconciler
+    // hardcoded `probe_descriptors: Vec::new()` in both action arms;
+    // Service-kind workloads silently lost their declared probes even
+    // after GAP-6 (admission) + GAP-7 (per-descriptor spawn loop)
+    // landed. The helper is canonical-order (startup → readiness →
+    // liveness); Job / Schedule yield empty per ADR-0054 §3.
+    let probe_descriptors = overdrive_core::reconcilers::project_probe_descriptors(&intent);
     match &intent {
-        overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok((Some(job.clone()), None)),
+        overdrive_core::aggregate::WorkloadIntent::Job(job) => {
+            Ok((Some(job.clone()), None, probe_descriptors))
+        }
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
             // Project Service onto a kind-agnostic Job shape. JobV1
             // and ServiceV1 are field-for-field equivalent over
             // (id, replicas, resources, driver) — the reconciler's
             // `Some(job) =>` arm reads only these four fields, so the
             // projection is lossless from its perspective. Service-
-            // only fields (listeners) are consumed elsewhere via
-            // ServiceV1-typed reads. The `WorkloadKind::Service`
-            // discriminator is threaded separately via
-            // `desired.workload_kind` so emitted actions and rows
-            // correctly record their Service origin.
+            // only fields (listeners, *_probes) are consumed elsewhere:
+            // listeners via ServiceV1-typed reads; probe descriptors
+            // via `probe_descriptors` returned alongside `job`. The
+            // `WorkloadKind::Service` discriminator is threaded
+            // separately via `desired.workload_kind` so emitted actions
+            // and rows correctly record their Service origin.
             let job = Job {
                 id: svc.id.clone(),
                 replicas: svc.replicas,
@@ -1653,9 +1670,11 @@ async fn read_job(
             };
             let digest =
                 intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            Ok((Some(job), Some(digest)))
+            Ok((Some(job), Some(digest), probe_descriptors))
         }
-        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok((None, None)),
+        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
+            Ok((None, None, probe_descriptors))
+        }
     }
 }
 
@@ -1716,23 +1735,15 @@ async fn hydrate_actual(
                 allocations.insert(row.alloc_id.clone(), row);
             }
             let nodes = baseline_nodes_phase1();
-            // `actual.job` is unused — the reconciler reads desired.job.
-            // `actual.desired_to_stop` is also unused (only the desired
-            // side carries it); set false unconditionally.
-            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
-            // persisted workload-kind discriminator at
-            // `IntentKey::for_workload_kind` so the `actual` side carries
-            // the same kind as `desired`. Only the `desired` side
-            // drives `reconcile`'s kind-branching logic today, but
-            // populating both with the same value keeps the field
-            // semantically uniform across the State pair so future
-            // `actual`-side branching has a non-default value to work
-            // with.
+            // `actual.job` / `actual.desired_to_stop` are unused (only
+            // the desired side carries them). Per ADR-0037 Amendment
+            // 2026-05-10 / ADR-0047 §1: read the persisted workload-kind
+            // discriminator so the State pair stays semantically uniform.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
-            let (_, intent_digest) = read_job(state, &workload_id).await?;
+            let (_, intent_digest, _) = read_job(state, &workload_id).await?;
             let service_spec_digest =
                 if workload_kind == WorkloadKind::Service { intent_digest } else { None };
-            let s = WorkloadLifecycleState {
+            Ok(AnyState::WorkloadLifecycle(WorkloadLifecycleState {
                 workload_id,
                 job: None,
                 desired_to_stop: false,
@@ -1740,8 +1751,8 @@ async fn hydrate_actual(
                 allocations,
                 workload_kind,
                 service_spec_digest,
-            };
-            Ok(AnyState::WorkloadLifecycle(s))
+                probe_descriptors: Vec::new(), // GAP-8: actual side unused; desired side drives action arms
+            }))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             // 08-02 hydrate-actual reads from

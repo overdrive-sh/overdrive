@@ -134,6 +134,7 @@ fn service_state_with_terminal_alloc(
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: spec_digest,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid(workload_id),
@@ -143,6 +144,7 @@ fn service_state_with_terminal_alloc(
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: spec_digest,
+        probe_descriptors: Vec::new(),
     };
     (desired, actual)
 }
@@ -242,6 +244,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("web-api"),
@@ -251,6 +254,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

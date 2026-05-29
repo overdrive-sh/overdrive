@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, WorkloadDriver, WorkloadKind};
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
@@ -558,10 +558,15 @@ impl WorkloadLifecycle {
                             command: command.clone(),
                             args: args.clone(),
                             resources: job.resources,
-                            // Per ADR-0054 §3: Job-kind workloads
-                            // carry no probes; ProbeRunner subsystem
-                            // is a Service-kind concern. Empty Vec.
-                            probe_descriptors: Vec::new(),
+                            // Per ADR-0054 §3 + GAP-8 close-out: the
+                            // descriptor vec is projected from the live
+                            // intent at hydrate-desired time. Job-kind
+                            // workloads carry an empty vec (no probe
+                            // surface); Service-kind workloads carry
+                            // startup → readiness → liveness in
+                            // canonical role order. See
+                            // `WorkloadLifecycleState::probe_descriptors`.
+                            probe_descriptors: desired.probe_descriptors.clone(),
                         },
                         kind: desired.workload_kind,
                     };
@@ -630,9 +635,13 @@ impl WorkloadLifecycle {
                                 command: command.clone(),
                                 args: args.clone(),
                                 resources: job.resources,
-                                // Per ADR-0054 §3: Job-kind workloads
-                                // carry no probes; empty Vec.
-                                probe_descriptors: Vec::new(),
+                                // Per ADR-0054 §3 + GAP-8 close-out:
+                                // projected from the live intent at
+                                // hydrate-desired time. Job-kind = empty
+                                // vec; Service-kind = startup → readiness
+                                // → liveness in canonical order. See
+                                // `WorkloadLifecycleState::probe_descriptors`.
+                                probe_descriptors: desired.probe_descriptors.clone(),
                             },
                             kind: desired.workload_kind,
                         };
@@ -890,6 +899,80 @@ pub struct WorkloadLifecycleState {
     pub workload_kind: WorkloadKind,
     /// Content-addressed `spec_digest` for the workload.
     pub service_spec_digest: Option<crate::id::ContentHash>,
+    /// Probe descriptors projected from the live intent at
+    /// hydrate-desired time. Per ADR-0054 §3 + closes GAP-8 from the
+    /// Phase 01 structural audit: for Service-kind workloads this
+    /// carries the concatenation of `startup_probes`, `readiness_probes`,
+    /// and `liveness_probes` in canonical role order (startup →
+    /// readiness → liveness) so `ProbeRunner::start_alloc`'s
+    /// `iter().enumerate()` assigns deterministic `probe_idx` values.
+    /// For Job-kind workloads this is always empty — Job-kind has no
+    /// probe surface (`ProbeRunner` is a Service-kind concern).
+    ///
+    /// The reconciler clones this vec into every emitted
+    /// `Action::StartAllocation { spec, .. }` and
+    /// `Action::RestartAllocation { spec, .. }` so the runtime's
+    /// per-descriptor probe-task spawn loop (GAP-7) receives the live
+    /// descriptor set the operator declared. Pre-GAP-8 the reconciler
+    /// hardcoded `probe_descriptors: Vec::new()` at both sites,
+    /// silently dropping Service-kind probes even after GAP-6 admission
+    /// + GAP-7 spawn-loop wiring landed.
+    pub probe_descriptors: Vec<ProbeDescriptor>,
+}
+
+/// Project the operator-declared probe descriptors of a
+/// [`crate::aggregate::WorkloadIntent`] into the flat vector consumed
+/// by `Action::StartAllocation { spec, .. }` /
+/// `Action::RestartAllocation { spec, .. }` (via
+/// [`WorkloadLifecycleState::probe_descriptors`]) and downstream by
+/// `ProbeRunner::start_alloc`'s per-descriptor spawn loop.
+///
+/// Closes GAP-8 from the Phase 01 structural audit. Pre-patch the
+/// reconciler hardcoded an empty `Vec` at both action arms with a
+/// comment justifying it for Job-kind; Service-kind silently inherited
+/// the empty vec even though `ServiceV1` carries three probe vectors
+/// (GAP-6 admission close-out). The runtime now calls this helper at
+/// hydrate-desired time and stamps the result onto
+/// [`WorkloadLifecycleState::probe_descriptors`]; the reconciler
+/// clones it into both action arms.
+///
+/// **Projection order is canonical**: `startup → readiness → liveness`.
+/// This matches [`crate::observation::ProbeRole`]'s declared order
+/// (`Startup`, `Readiness`, `Liveness`) and is the order
+/// `ProbeRunner::start_alloc` consumes the vec via `iter().enumerate()`,
+/// so `probe_idx` lands at a deterministic position per role. Reordering
+/// the concatenation would break the downstream
+/// `(alloc_id, probe_idx) → ProbeResultRow` slot mapping that the
+/// `ServiceLifecycleReconciler` hydrate path reads.
+///
+/// Per-variant projection:
+///
+/// - `WorkloadIntent::Job(_)` → empty vec (Job-kind has no probe
+///   surface per ADR-0054 §3; `ProbeRunner` is a Service-kind concern).
+/// - `WorkloadIntent::Service(svc)` → `svc.startup_probes ++
+///   svc.readiness_probes ++ svc.liveness_probes` (clones, since the
+///   helper is `pub fn(&WorkloadIntent)` and the projection escapes
+///   the borrow).
+/// - `WorkloadIntent::Schedule(_)` → empty vec (the schedule's per-fire
+///   instance is a Job, not a Service; probes on a Schedule's inner
+///   Job make no semantic sense in Phase 1).
+#[must_use]
+pub fn project_probe_descriptors(
+    intent: &crate::aggregate::WorkloadIntent,
+) -> Vec<ProbeDescriptor> {
+    match intent {
+        crate::aggregate::WorkloadIntent::Job(_)
+        | crate::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
+        crate::aggregate::WorkloadIntent::Service(svc) => {
+            let mut out = Vec::with_capacity(
+                svc.startup_probes.len() + svc.readiness_probes.len() + svc.liveness_probes.len(),
+            );
+            out.extend(svc.startup_probes.iter().cloned());
+            out.extend(svc.readiness_probes.iter().cloned());
+            out.extend(svc.liveness_probes.iter().cloned());
+            out
+        }
+    }
 }
 
 /// `WorkloadLifecycle` reconciler's typed view — the runtime-persisted

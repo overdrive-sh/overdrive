@@ -164,6 +164,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -173,6 +174,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -237,6 +239,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -246,6 +249,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     // attempts=0, no deadline → restart fires immediately.
     let view = WorkloadLifecycleView::default();
@@ -310,6 +314,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -319,6 +324,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
 
