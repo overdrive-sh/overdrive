@@ -221,6 +221,23 @@ pub enum ParseError {
         /// 0-indexed position within the per-role array.
         probe_idx: usize,
     },
+
+    // -----------------------------------------------------------------
+    // Step 02-02 — Exec probe variant per ADR-0057 §2 / US-03.
+    // -----------------------------------------------------------------
+    /// `[[health_check.startup]]` with `type = "exec"` carries an empty
+    /// `command` array (or omits it entirely). An exec probe MUST name
+    /// the binary to spawn; `command[0]` is the binary and
+    /// `command[1..]` (plus any `args`) are the argv tail per the
+    /// `ExecProber` trait contract. `probe_idx` is the 0-indexed
+    /// position within the per-role array.
+    #[error(
+        "[[health_check.startup]][{probe_idx}]: exec probe is missing required field `command` — add a non-empty array like `command = [\"/usr/bin/healthcheck\"]`"
+    )]
+    ExecProbeMissingCommand {
+        /// 0-indexed position within the per-role array.
+        probe_idx: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,6 +1072,7 @@ fn parse_one_startup_probe(
             ProbeMechanic::Tcp { host, port: port_u16 }
         }
         "http" => parse_http_mechanic(entry, probe_idx)?,
+        "exec" => parse_exec_mechanic(entry, probe_idx)?,
         other => {
             return Err(ParseError::UnknownProbeType { probe_idx, found: other.to_string() });
         }
@@ -1135,6 +1153,72 @@ fn parse_http_mechanic(
 
     let host = entry.get("host").and_then(toml::Value::as_str).map(str::to_owned);
     Ok(ProbeMechanic::Http { path: path.to_owned(), port, host })
+}
+
+/// Parse the `type = "exec"` mechanic body per ADR-0057 §2 / US-03.
+///
+/// Required field: `command` (a non-empty array of strings; `command[0]`
+/// is the binary, `command[1..]` are argv). Optional `args` (an array of
+/// strings) is appended to the argv tail — the operator may split the
+/// binary and its arguments across the two fields or inline everything
+/// in `command`; the parser concatenates them into the single
+/// `ProbeMechanic::Exec { command }` vector the `ExecProber` trait
+/// consumes (binary at index 0, every other token an argv tail).
+///
+/// Edge cases:
+/// - `command` absent OR an empty array →
+///   [`ParseError::ExecProbeMissingCommand`]. An exec probe with no
+///   binary to spawn is meaningless.
+/// - `command` present but not an array of strings, or `args` not an
+///   array of strings → [`ParseError::Field`] with a diagnostic naming
+///   the offending field.
+fn parse_exec_mechanic(
+    entry: &toml::value::Table,
+    probe_idx: usize,
+) -> Result<ProbeMechanic, ParseError> {
+    // `command` is required and must be a non-empty array of strings.
+    let command = match entry.get("command") {
+        None => return Err(ParseError::ExecProbeMissingCommand { probe_idx }),
+        Some(value) => parse_string_array(value, "command", probe_idx)?,
+    };
+    if command.is_empty() {
+        return Err(ParseError::ExecProbeMissingCommand { probe_idx });
+    }
+
+    // `args` is optional; absent → empty. Appended to the argv tail of
+    // the binary so the final `command` vector is
+    // `[binary, command_tail.., args..]`.
+    let mut command_line = command;
+    if let Some(value) = entry.get("args") {
+        let extra = parse_string_array(value, "args", probe_idx)?;
+        command_line.extend(extra);
+    }
+
+    Ok(ProbeMechanic::Exec { command: command_line })
+}
+
+/// Parse a TOML value expected to be an array of strings into a
+/// `Vec<String>`. Surfaces a [`ParseError::Field`] naming `field` when
+/// the value is not an array, or contains a non-string element.
+fn parse_string_array(
+    value: &toml::Value,
+    field: &str,
+    probe_idx: usize,
+) -> Result<Vec<String>, ParseError> {
+    let arr = value.as_array().ok_or_else(|| ParseError::Field {
+        section: "[[health_check.startup]]",
+        message: format!("entry [{probe_idx}]: field `{field}` must be an array of strings"),
+    })?;
+    arr.iter()
+        .map(|element| {
+            element.as_str().map(str::to_owned).ok_or_else(|| ParseError::Field {
+                section: "[[health_check.startup]]",
+                message: format!(
+                    "entry [{probe_idx}]: every element of `{field}` must be a string"
+                ),
+            })
+        })
+        .collect()
 }
 
 /// Local intermediate-error variant for the zero-field rejection

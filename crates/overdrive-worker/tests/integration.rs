@@ -75,7 +75,7 @@ mod integration {
         mod real_tcp_probe;
     }
 
-    mod exec_driver {
+    pub mod exec_driver {
         mod cgroup_procs;
         // Per-alloc RAII cleanup helper used by every real-cgroupfs test
         // below. Phase 02 of `fix-cgroup-subtree-control-delegation`
@@ -84,10 +84,13 @@ mod integration {
         // panic / SIGKILL so the next test's mkdir does not hit EEXIST.
         //
         // Re-used cross-sibling by the Class C real_cgroup_fs tests
-        // (step 01-08) and the cgroup_manager
-        // write_to_readonly_cgroup_file test — `pub` so siblings under
-        // the `integration` mod can import it via
-        // `super::super::exec_driver::cleanup::AllocCleanup`.
+        // (step 01-08), the cgroup_manager
+        // write_to_readonly_cgroup_file test, and the probe_runner
+        // Tier-3 suite (`real_exec_probe_cgroup.rs`, step 02-02) —
+        // `pub` so siblings under the `integration` mod can import it
+        // via `super::super::exec_driver::cleanup::AllocCleanup`. The
+        // AllocCleanup shape is the canonical cgroup-leak-hygiene
+        // primitive for the crate's real-cgroupfs tests.
         pub mod cleanup;
         mod limit_write_failure_warns;
         mod live_map_bounded;
