@@ -30,7 +30,7 @@ use overdrive_control_plane::streaming::JobSubmitEvent;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
-    JobSpecInput, ResourcesInput as LegacyResourcesInput, ServiceSpec, ServiceV1,
+    JobSpecInput, ParseError, ResourcesInput as LegacyResourcesInput, ServiceSpec, ServiceV1,
     WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
@@ -192,26 +192,33 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     //    ADR-0051 the wire-side discriminator now lives inside
     //    `SubmitSpecInput`'s `kind` tag; the outer
     //    `SubmitWorkloadRequest.workload_kind` field has been deleted.
-    let spec_input: JobSpecInput =
-        if let Ok(WorkloadSpecInput::Job(job_spec)) = WorkloadSpecInput::from_toml_str(&toml_str) {
-            JobSpecInput {
-                id: job_spec.id,
-                replicas: 1,
-                driver: DriverInput::Exec(LegacyExecInput {
-                    command: job_spec.exec.command,
-                    args: job_spec.exec.args,
-                }),
-                resources: LegacyResourcesInput {
-                    cpu_milli: job_spec.resources.cpu_milli,
-                    memory_bytes: job_spec.resources.memory_bytes,
-                },
-            }
-        } else {
-            toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
-                field: "toml".to_string(),
-                message: format!("failed to parse TOML: {e}"),
-            })?
-        };
+    let spec_input: JobSpecInput = match WorkloadSpecInput::from_toml_str(&toml_str) {
+        Ok(WorkloadSpecInput::Job(job_spec)) => JobSpecInput {
+            id: job_spec.id,
+            replicas: 1,
+            driver: DriverInput::Exec(LegacyExecInput {
+                command: job_spec.exec.command,
+                args: job_spec.exec.args,
+            }),
+            resources: LegacyResourcesInput {
+                cpu_milli: job_spec.resources.cpu_milli,
+                memory_bytes: job_spec.resources.memory_bytes,
+            },
+        },
+        // Slice 07 / US-07 — surface the kind-rejection verbatim with
+        // its per-kind guidance. Without this explicit arm the error
+        // would be swallowed by the legacy `toml::from_str` fall-through
+        // below, hiding the teaching message from the operator.
+        Err(parse_err @ ParseError::ProbesNotAllowedOnKind { .. }) => {
+            return Err(CliError::ParseError(parse_err));
+        }
+        // Service / Schedule kinds and other parse failures fall through
+        // to the legacy flat `JobSpecInput` parser — unchanged behaviour.
+        Ok(_) | Err(_) => toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+            field: "toml".to_string(),
+            message: format!("failed to parse TOML: {e}"),
+        })?,
+    };
 
     // 3. Client-side validation via the shared ADR-0011 constructor.
     //    Fast-fail BEFORE any HTTP call — operators see the offending

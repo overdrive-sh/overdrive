@@ -65,6 +65,12 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
         startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     }
 }
 
@@ -86,6 +92,12 @@ fn fact_failed_within_deadline(
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
         startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     }
 }
 
@@ -94,7 +106,7 @@ fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     for fact in facts {
         allocs.insert(fact.alloc_id.clone(), fact);
     }
-    ServiceLifecycleState { allocs }
+    ServiceLifecycleState { allocs, service_dataplane: None }
 }
 
 /// S-SHCP-RECON-01 (US-01 / K1 / DDD-7 AND-of-all) — Service alloc

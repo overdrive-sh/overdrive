@@ -117,6 +117,19 @@ pub enum CliError {
         /// read bytes for `ProbeError::SubstrateCorrupt`.
         cause: String,
     },
+
+    /// The workload spec failed the kind-discriminated
+    /// `WorkloadSpecInput` parser with a typed
+    /// [`overdrive_core::aggregate::ParseError`]. Surfaced verbatim so
+    /// the operator sees the multi-line guidance the core parser
+    /// composes — most notably
+    /// [`overdrive_core::aggregate::ParseError::ProbesNotAllowedOnKind`]
+    /// (Slice 07 / US-07: probes declared on a non-Service workload).
+    /// Distinct from [`Self::InvalidSpec`] so the CLI maps it to exit
+    /// code 1 (spec rejected) rather than 2 (plumbing failure) — see
+    /// [`crate::render::cli_error_to_exit_code`].
+    #[error("{0}")]
+    ParseError(#[from] overdrive_core::aggregate::ParseError),
 }
 
 /// Hand-rolled typed REST client for the Phase 1 control-plane. One

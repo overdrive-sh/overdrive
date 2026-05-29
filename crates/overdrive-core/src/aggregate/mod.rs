@@ -34,7 +34,9 @@ use crate::traits::intent_store::IntentStoreError;
 // and `JobSpecInput` remain in this module as the production path until
 // downstream slices (02–06) migrate every reader.
 // ---------------------------------------------------------------------------
-pub use self::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+pub use self::probe_descriptor::{
+    JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
+};
 pub use self::service_spec::{
     ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
 };

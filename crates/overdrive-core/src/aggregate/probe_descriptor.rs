@@ -18,6 +18,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::observation::ProbeRole;
 
+/// Per-kind guidance text surfaced on
+/// [`crate::aggregate::workload_spec::ParseError::ProbesNotAllowedOnKind`]
+/// when an operator declares a `[[health_check.*]]` array on a
+/// non-Service workload (Slice 07 / US-07 / K5).
+///
+/// The guidance explains *why* the kind has no probe surface, so the
+/// rejection reads as a teaching moment rather than an opaque "not
+/// allowed". The text is a per-kind constant (not a format string)
+/// so the operator-facing message is stable and greppable.
+///
+/// Job: a run-to-completion workload's success criterion IS its exit
+/// code — there is no "is it ready to serve?" question to answer, so
+/// readiness/liveness/startup probes are meaningless.
+pub const JOB_PROBES_GUIDANCE: &str = "Job has no readiness question; on completion is enough.";
+
+/// Schedule guidance — see [`JOB_PROBES_GUIDANCE`].
+///
+/// Schedule: a cron-scheduled job composes a fresh per-fire workload
+/// each tick; the durable thing a probe would gate is the Service the
+/// Schedule fires against, not the Schedule envelope itself.
+pub const SCHEDULE_PROBES_GUIDANCE: &str =
+    "Schedule composes per-fire; declare probes on the Service the Schedule fires.";
+
 /// Concrete mechanic for a probe attempt.
 ///
 /// Per ADR-0054: three mechanics, each backed by a distinct port

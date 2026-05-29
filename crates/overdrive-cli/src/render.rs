@@ -323,11 +323,19 @@ pub fn cli_error(err: &CliError) -> String {
 /// distinguishes this from "the workload itself failed" via the exit
 /// code alone.
 #[must_use]
-pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
-    // Every CliError variant is pre-Accepted — the CLI never got an
-    // `Accepted` line on the streaming bus. Per S-CLI-05 the
-    // parametrised expectation is exit 2 across the board.
-    2
+pub const fn cli_error_to_exit_code(err: &CliError) -> i32 {
+    match err {
+        // Slice 07 / US-07 — a spec-rejection (e.g. probes on a
+        // non-Service workload) is a clean "your spec is wrong" exit,
+        // distinct from a plumbing failure. The operator gets exit 1
+        // (spec rejected) so scripts can distinguish "fix the spec"
+        // from "the CLI never reached the server" (exit 2).
+        CliError::ParseError(_) => 1,
+        // Every other CliError variant is pre-Accepted plumbing — the
+        // CLI never got an `Accepted` line on the streaming bus. Per
+        // S-CLI-05 the parametrised expectation is exit 2.
+        _ => 2,
+    }
 }
 // ---------------------------------------------------------------------------
 // Job-kind render fns — slice 02 of `workload-kind-discriminator`.

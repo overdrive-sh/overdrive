@@ -238,6 +238,29 @@ pub enum ParseError {
         /// 0-indexed position within the per-role array.
         probe_idx: usize,
     },
+
+    // -----------------------------------------------------------------
+    // Step 03-01 — Slice 07 kind rejection per US-07 / K5.
+    // -----------------------------------------------------------------
+    /// A `[[health_check.*]]` array (startup / readiness / liveness)
+    /// was declared on a non-Service workload (`[job]` or
+    /// `[job]+[schedule]`). Per ADR-0054 / ADR-0055 only Service-kind
+    /// workloads carry a probe surface — a Job's success criterion IS
+    /// its exit code, and a Schedule composes per-fire workloads whose
+    /// probes belong on the Service the Schedule fires.
+    ///
+    /// `kind` is the offending workload kind in canonical lowercase
+    /// (`"job"` / `"schedule"`). `guidance` is the per-kind teaching
+    /// text from [`crate::aggregate::probe_descriptor`]
+    /// (`JOB_PROBES_GUIDANCE` / `SCHEDULE_PROBES_GUIDANCE`) so the
+    /// rejection explains *why* rather than merely forbidding.
+    #[error("[[health_check.*]] is not allowed on a {kind} workload — {guidance}")]
+    ProbesNotAllowedOnKind {
+        /// Offending workload kind in canonical lowercase.
+        kind: &'static str,
+        /// Per-kind guidance text explaining the rejection.
+        guidance: &'static str,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -717,10 +740,22 @@ impl WorkloadSpecInput {
             // vs populated) and either parse declared probes or
             // synthesise the default TCP probe against `listeners[0]`.
             let (startup_probes, startup_was_explicit) = parse_startup_probes(table, &listeners)?;
-            // Readiness/liveness population is owned by later slices
-            // (02-01 / 02-02). For this step they remain empty —
-            // ServiceSpecV2 envelope shape is stable across slices.
             let _ = startup_was_explicit;
+
+            // Step 03-01 / Slice 04 — readiness probe section. Reuses
+            // the 02-01 (HTTP) / 02-02 (Exec) / 01-02 (TCP) mechanic
+            // parse path via `parse_one_role_probe`; sets
+            // `role = Readiness` and applies the ADR-0057 §2 /
+            // ADR-0055 §6 `success_threshold` default of 1. Absent
+            // section → no readiness probes (the backward-compat
+            // default: every backend healthy post-Stable, per
+            // S-SHCP-RECON-08b). NO default inference for readiness —
+            // unlike startup, an omitted readiness section means "no
+            // readiness gate", not "synthesise one".
+            let readiness_probes = parse_readiness_probes(table)?;
+            // Liveness population is owned by step 03-02. For this
+            // step it remains empty — ServiceSpecV2 envelope shape is
+            // stable across slices.
 
             return Ok(Self::Service(ServiceSpec {
                 id,
@@ -729,9 +764,27 @@ impl WorkloadSpecInput {
                 resources,
                 listeners,
                 startup_probes,
-                readiness_probes: vec![],
+                readiness_probes,
                 liveness_probes: vec![],
             }));
+        }
+
+        // Step 03-01 / Slice 07 — kind rejection (US-07 / K5). A
+        // `[[health_check.*]]` array on a non-Service workload is a
+        // category error: a Job's success criterion IS its exit code,
+        // and a Schedule composes per-fire workloads whose probes
+        // belong on the Service the Schedule fires. Reject with the
+        // per-kind guidance from `probe_descriptor` so the operator
+        // learns *why*. The Service path above never reaches here, so
+        // Service-kind probes parse normally (regression guard
+        // S-SHCP-PARSE-07 / S-SHCP-CLI-14).
+        if table.contains_key("health_check") {
+            let (kind, guidance) = if has_schedule {
+                ("schedule", crate::aggregate::probe_descriptor::SCHEDULE_PROBES_GUIDANCE)
+            } else {
+                ("job", crate::aggregate::probe_descriptor::JOB_PROBES_GUIDANCE)
+            };
+            return Err(ParseError::ProbesNotAllowedOnKind { kind, guidance });
         }
 
         // Job-shaped path (with or without [schedule]).
@@ -1042,41 +1095,7 @@ fn parse_one_startup_probe(
     entry: &toml::value::Table,
     probe_idx: usize,
 ) -> Result<ProbeDescriptor, ParseError> {
-    // type field — case-insensitive per § Newtype completeness.
-    let type_raw = entry.get("type").ok_or_else(|| ParseError::Field {
-        section: "[[health_check.startup]]",
-        message: format!("entry [{probe_idx}]: required field `type` is missing"),
-    })?;
-    let type_str = type_raw.as_str().ok_or_else(|| ParseError::Field {
-        section: "[[health_check.startup]]",
-        message: format!("entry [{probe_idx}]: field `type` must be a string"),
-    })?;
-
-    let mechanic = match type_str.to_ascii_lowercase().as_str() {
-        "tcp" => {
-            let port_raw =
-                entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
-            let port_int = port_raw.as_integer().ok_or_else(|| ParseError::Field {
-                section: "[[health_check.startup]]",
-                message: format!("entry [{probe_idx}]: field `port` must be an integer"),
-            })?;
-            let port_u16 = u16::try_from(port_int).map_err(|_| ParseError::Field {
-                section: "[[health_check.startup]]",
-                message: format!("entry [{probe_idx}]: field `port` must be in 1..=65535"),
-            })?;
-            if port_u16 == 0 {
-                return Err(ParseError::TcpProbeMissingPort { probe_idx });
-            }
-            let host =
-                entry.get("host").and_then(toml::Value::as_str).unwrap_or("0.0.0.0").to_string();
-            ProbeMechanic::Tcp { host, port: port_u16 }
-        }
-        "http" => parse_http_mechanic(entry, probe_idx)?,
-        "exec" => parse_exec_mechanic(entry, probe_idx)?,
-        other => {
-            return Err(ParseError::UnknownProbeType { probe_idx, found: other.to_string() });
-        }
-    };
+    let mechanic = parse_probe_mechanic(entry, probe_idx)?;
 
     let timeout_seconds =
         parse_optional_positive_u32(entry, "timeout_seconds", STARTUP_TIMEOUT_DEFAULT_S, probe_idx)
@@ -1102,6 +1121,142 @@ fn parse_one_startup_probe(
         success_threshold: None,
         inferred: false,
     })
+}
+
+/// Parse the `type`-discriminated mechanic body shared by every role's
+/// probe entries (startup / readiness / liveness). Extracted from
+/// `parse_one_startup_probe` so the readiness parser (step 03-01 /
+/// Slice 04) reuses the exact 01-02 (TCP) / 02-01 (HTTP) / 02-02 (Exec)
+/// mechanic parse paths verbatim rather than forking them.
+fn parse_probe_mechanic(
+    entry: &toml::value::Table,
+    probe_idx: usize,
+) -> Result<ProbeMechanic, ParseError> {
+    // type field — case-insensitive per § Newtype completeness.
+    let type_raw = entry.get("type").ok_or_else(|| ParseError::Field {
+        section: "[[health_check.*]]",
+        message: format!("entry [{probe_idx}]: required field `type` is missing"),
+    })?;
+    let type_str = type_raw.as_str().ok_or_else(|| ParseError::Field {
+        section: "[[health_check.*]]",
+        message: format!("entry [{probe_idx}]: field `type` must be a string"),
+    })?;
+
+    match type_str.to_ascii_lowercase().as_str() {
+        "tcp" => {
+            let port_raw =
+                entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
+            let port_int = port_raw.as_integer().ok_or_else(|| ParseError::Field {
+                section: "[[health_check.*]]",
+                message: format!("entry [{probe_idx}]: field `port` must be an integer"),
+            })?;
+            let port_u16 = u16::try_from(port_int).map_err(|_| ParseError::Field {
+                section: "[[health_check.*]]",
+                message: format!("entry [{probe_idx}]: field `port` must be in 1..=65535"),
+            })?;
+            if port_u16 == 0 {
+                return Err(ParseError::TcpProbeMissingPort { probe_idx });
+            }
+            let host =
+                entry.get("host").and_then(toml::Value::as_str).unwrap_or("0.0.0.0").to_string();
+            Ok(ProbeMechanic::Tcp { host, port: port_u16 })
+        }
+        "http" => parse_http_mechanic(entry, probe_idx),
+        "exec" => parse_exec_mechanic(entry, probe_idx),
+        other => Err(ParseError::UnknownProbeType { probe_idx, found: other.to_string() }),
+    }
+}
+
+/// Readiness probe `success_threshold` default per ADR-0057 §2 /
+/// ADR-0055 §6 / DDD-8 — one consecutive Pass flips `Backend.healthy`
+/// true. Operator-configurable upward.
+const READINESS_SUCCESS_THRESHOLD_DEFAULT: u32 = 1;
+/// Readiness probe `interval_seconds` default per ADR-0057 §2.
+const READINESS_INTERVAL_DEFAULT_S: u32 = 2;
+
+/// Discover and parse `[[health_check.readiness]]` per ADR-0057 §2 /
+/// Slice 04. Reuses the role-agnostic [`parse_probe_mechanic`] for the
+/// TCP/HTTP/Exec body (no fork of the 01-02/02-01/02-02 paths).
+///
+/// Unlike startup (which synthesises a default TCP probe per ADR-0058
+/// when absent), readiness has NO default-inference: an omitted
+/// `[[health_check.readiness]]` section means "no readiness gate", so
+/// every backend is `healthy = true` post-Stable (S-SHCP-RECON-08b).
+/// Sets `role = Readiness`, `success_threshold = Some(1)` default
+/// (configurable upward), and `max_attempts` carried as the parsed /
+/// default value (readiness is continuous; `max_attempts` is not a
+/// readiness gate but the field is shared on `ProbeDescriptor`).
+fn parse_readiness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescriptor>, ParseError> {
+    let readiness_value_opt = table
+        .get("health_check")
+        .and_then(toml::Value::as_table)
+        .and_then(|hc| hc.get("readiness"))
+        .cloned();
+
+    let entries: Vec<&toml::value::Table> = match readiness_value_opt.as_ref() {
+        None => Vec::new(),
+        Some(v) => v.as_array().map_or_else(
+            || {
+                Err(ParseError::Field {
+                    section: "[[health_check.readiness]]",
+                    message:
+                        "must be an array of tables (or omit the section for no readiness gate)"
+                            .to_string(),
+                })
+            },
+            |arr| {
+                arr.iter()
+                    .map(|entry| {
+                        entry.as_table().ok_or_else(|| ParseError::Field {
+                            section: "[[health_check.readiness]]",
+                            message: "each entry must be a table".to_string(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            },
+        )?,
+    };
+
+    let mut out = Vec::with_capacity(entries.len());
+    for (probe_idx, entry) in entries.iter().enumerate() {
+        let mechanic = parse_probe_mechanic(entry, probe_idx)?;
+        let timeout_seconds = parse_optional_positive_u32(
+            entry,
+            "timeout_seconds",
+            STARTUP_TIMEOUT_DEFAULT_S,
+            probe_idx,
+        )
+        .map_err(|err| map_zero_to_named_error(err, "timeout_seconds", probe_idx))?;
+        let interval_seconds = parse_optional_positive_u32(
+            entry,
+            "interval_seconds",
+            READINESS_INTERVAL_DEFAULT_S,
+            probe_idx,
+        )
+        .map_err(|err| map_zero_to_named_error(err, "interval_seconds", probe_idx))?;
+        let success_threshold = parse_optional_positive_u32(
+            entry,
+            "success_threshold",
+            READINESS_SUCCESS_THRESHOLD_DEFAULT,
+            probe_idx,
+        )
+        .map_err(|err| map_zero_to_named_error(err, "success_threshold", probe_idx))?;
+
+        out.push(ProbeDescriptor {
+            role: ProbeRole::Readiness,
+            mechanic,
+            timeout_seconds,
+            interval_seconds,
+            // Readiness is continuous; `max_attempts` is not a readiness
+            // gate. Carry the startup default so the shared field has a
+            // sane value (the readiness reconcile branch never reads it).
+            max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
+            failure_threshold: None,
+            success_threshold: Some(success_threshold),
+            inferred: false,
+        });
+    }
+    Ok(out)
 }
 
 /// Parse the `type = "http"` mechanic body per ADR-0057 §2 / US-02.

@@ -1396,7 +1396,13 @@ async fn hydrate_desired(
             let allocs = service_spec_from_intent(state, &workload_id)
                 .await?
                 .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
-            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState { allocs }))
+            // Desired side carries no dataplane identity — the readiness
+            // branch reads it from `actual` only (the observed backend
+            // set is the actual-side projection).
+            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
+                allocs,
+                service_dataplane: None,
+            }))
         }
     }
 }
@@ -1480,6 +1486,73 @@ fn spec_facts_for_service(
         interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
     let mechanic_summary = format_mechanic_summary(&probe.mechanic);
     (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
+}
+
+/// Slice 04 — project the readiness facts uniform across every alloc:
+/// `(has_readiness_probe, success_threshold)`. `has_readiness_probe`
+/// is `ServiceV1.readiness_probes` non-empty; `success_threshold` is
+/// the first readiness probe's declared threshold (default 1 per
+/// ADR-0055 §6 / ADR-0057 §2), or 1 when absent. Per persist-inputs,
+/// these are re-derived from the live spec every tick.
+fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+    let has_readiness_probe = !svc.readiness_probes.is_empty();
+    let success_threshold =
+        svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
+    (has_readiness_probe, success_threshold)
+}
+
+/// Slice 04 — resolve the service's dataplane identity (service_id +
+/// allocator-issued VIP + local writer node) for the readiness
+/// branch's `ServiceBackendRow` composition. Mirrors
+/// [`hydrate_bridge_desired_listeners`]'s VIP resolution: compute the
+/// spec digest, consult the allocator memo, derive the `ServiceId`
+/// from the first listener's `(vip, port)` per ADR-0052 § 1.
+///
+/// Returns `None` when the Service has no listener (no VIP surface) or
+/// the allocator memo is absent (VIP not yet issued) — in either case
+/// the readiness branch is a no-op for this tick.
+async fn service_dataplane_identity(
+    state: &AppState,
+    workload_id: &WorkloadId,
+    svc: &overdrive_core::aggregate::ServiceV1,
+) -> Result<Option<overdrive_core::service_lifecycle::ServiceDataplaneIdentity>, ConvergenceError> {
+    let Some(listener) = svc.listeners.first() else {
+        return Ok(None);
+    };
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = state
+        .store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+        bytes.as_ref(),
+        &state.intent_redb_path,
+        Some(key.as_str()),
+    )
+    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    let spec_digest_hash =
+        intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+    let assigned_vip_opt = {
+        let guard = state.allocator.lock().await;
+        let vip = guard.get(&digest_bytes);
+        drop(guard);
+        vip
+    };
+    let Some(assigned_vip) = assigned_vip_opt else {
+        return Ok(None);
+    };
+    let service_id =
+        overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
+    Ok(Some(overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
+        service_id,
+        vip: assigned_vip,
+        writer: state.node_id.clone(),
+    }))
 }
 
 /// Test-only public wrapper for [`hydrate_desired`]. Used by
@@ -1878,22 +1951,54 @@ async fn hydrate_actual(
         // tick from the live spec; never persisted onto a row.
         AnyReconciler::ServiceLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            // Spec-derived facts — uniform across allocs of this workload.
-            let Some(spec) = service_spec_from_intent(state, &workload_id).await? else {
-                // Intent absent — empty actual. Next tick retries after submit.
-                // (Explicit `allocs: BTreeMap::new()` rather than
-                // `ServiceLifecycleState::default()` to keep the GAP-1
-                // structural defense — the audit's acceptance gate
-                // forbids the `default()` call site in this file.)
-                return Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
-                    allocs: BTreeMap::new(),
-                }));
-            };
-            let spec_facts = spec_facts_for_service(&spec);
-            let allocs = hydrate_service_alloc_facts(state, &workload_id, &spec_facts).await?;
-            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState { allocs }))
+            hydrate_service_lifecycle_actual(state, &workload_id).await
         }
     }
+}
+
+/// Actual-side projection for the `ServiceLifecycle` reconciler.
+///
+/// Extracted from [`hydrate_actual`]'s arm to keep that dispatcher
+/// within the project's `clippy::too_many_lines` budget per
+/// `.claude/rules/development.md` § Object Calisthenics. Joins the
+/// per-alloc fact projection ([`hydrate_service_alloc_facts`]) with the
+/// service-level dataplane identity ([`service_dataplane_identity`])
+/// the Slice 04 readiness branch consumes.
+async fn hydrate_service_lifecycle_actual(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<AnyState, ConvergenceError> {
+    // Spec-derived facts — uniform across allocs of this workload.
+    let Some(spec) = service_spec_from_intent(state, workload_id).await? else {
+        // Intent absent — empty actual. Next tick retries after submit.
+        // (Explicit `allocs: BTreeMap::new()` rather than
+        // `ServiceLifecycleState::default()` to keep the GAP-1
+        // structural defense — the audit's acceptance gate forbids the
+        // `default()` call site in this file.)
+        return Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
+            allocs: BTreeMap::new(),
+            service_dataplane: None,
+        }));
+    };
+    let spec_facts = spec_facts_for_service(&spec);
+    let readiness_facts = readiness_facts_for_service(&spec);
+    // Slice 04 — the readiness branch needs the service's dataplane
+    // identity (service_id + VIP) and the backend port to compose the
+    // `ServiceBackendRow` it writes. Both derive from the first listener
+    // + the allocator-issued VIP (same path the BackendDiscoveryBridge
+    // uses). `None` when the Service has no VIP yet — the readiness
+    // branch is a no-op until the VIP lands.
+    let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
+    let service_dataplane = service_dataplane_identity(state, workload_id, &spec).await?;
+    let allocs = hydrate_service_alloc_facts(
+        state,
+        workload_id,
+        &spec_facts,
+        &readiness_facts,
+        backend_port,
+    )
+    .await?;
+    Ok(AnyState::ServiceLifecycle(ServiceLifecycleState { allocs, service_dataplane }))
 }
 
 /// Per-workload projection of every `AllocStatusRow` belonging to
@@ -1909,12 +2014,15 @@ async fn hydrate_service_alloc_facts(
     state: &AppState,
     workload_id: &WorkloadId,
     spec_facts: &(u32, Duration, String, bool, bool),
+    readiness_facts: &(bool, u32),
+    backend_port: u16,
 ) -> Result<
     BTreeMap<AllocationId, overdrive_core::service_lifecycle::ServiceAllocFact>,
     ConvergenceError,
 > {
     let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
         spec_facts;
+    let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
     let rows = state
         .obs
         .alloc_status_rows()
@@ -1931,13 +2039,38 @@ async fn hydrate_service_alloc_facts(
         // startup-role probe_idx 0 (the only probe the Slice-01
         // reconciler branches consult).
         let latest_startup_probe = probe_rows
-            .into_iter()
+            .iter()
             .filter(|p| {
                 p.role == overdrive_core::observation::ProbeRole::Startup
                     && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
             })
             .max_by_key(|p| p.last_observed_at_unix_ms)
-            .map(|p| p.status);
+            .map(|p| p.status.clone());
+        // Slice 04 — per-alloc LWW projection of the readiness-role
+        // probe at idx 0. `None` (no row yet) is the load-bearing
+        // initial state: `Backend.healthy = false` until first Pass
+        // (S-SHCP-RECON-08c, avoids the inverse race).
+        let latest_readiness_probe = probe_rows
+            .iter()
+            .filter(|p| {
+                p.role == overdrive_core::observation::ProbeRole::Readiness
+                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+            })
+            .max_by_key(|p| p.last_observed_at_unix_ms)
+            .map(|p| p.status.clone());
+
+        // Backend identity for the dataplane backend set this alloc
+        // contributes to. SPIFFE shape matches the project-wide
+        // `mint_alloc_identity` used by the BackendDiscoveryBridge; the
+        // addr is `(host_ipv4, listener_port)` per the bridge precedent.
+        let backend_spiffe = overdrive_core::SpiffeId::new(&format!(
+            "spiffe://overdrive.local/job/{}/alloc/{}",
+            workload_id.as_str(),
+            row.alloc_id.as_str()
+        ))
+        .map_err(|e| ConvergenceError::TargetShape(e.to_string()))?;
+        let backend_addr =
+            std::net::SocketAddr::new(std::net::IpAddr::V4(state.host_ipv4), backend_port);
 
         // `exit_code` is sourced from the row's `reason:
         // Option<TransitionReason>` — the `WorkloadCrashedImmediately`
@@ -1966,6 +2099,11 @@ async fn hydrate_service_alloc_facts(
             mechanic_summary: mechanic_summary.clone(),
             inferred: *inferred,
             startup_probes_empty: *startup_probes_empty,
+            latest_readiness_probe,
+            has_readiness_probe,
+            readiness_success_threshold,
+            backend_spiffe,
+            backend_addr,
         };
         allocs.insert(row.alloc_id, fact);
     }

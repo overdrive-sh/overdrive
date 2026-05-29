@@ -36,7 +36,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::AllocationId;
+use crate::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
 use crate::observation::{ProbeIdx, ProbeStatus};
 use crate::traits::observation_store::AllocState;
 
@@ -126,6 +126,37 @@ pub struct ServiceAllocFact {
     /// fires on this flag + `state == Running`, emitting `Stable`
     /// immediately with `mechanic_summary == "none (opted out)"`.
     pub startup_probes_empty: bool,
+
+    // ---- Step 03-01 / Slice 04 — readiness facts ----
+    /// Latest-observed readiness probe outcome at index 0. `None`
+    /// when no readiness `ProbeResultRow` has yet been written for
+    /// this alloc (the avoid-inverse-race initial state per Slice 04
+    /// § Initial state: `Backend.healthy = false` until first Pass).
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this is the OBSERVED INPUT; `Backend.healthy`
+    /// is RECOMPUTED every tick from this status + the live
+    /// `success_threshold` + the consecutive-Pass counter in the
+    /// View. It is never a cached `healthy: bool`.
+    pub latest_readiness_probe: Option<ProbeStatus>,
+    /// `true` IFF this alloc declares at least one readiness probe.
+    /// `false` → the backend is unconditionally `healthy = true`
+    /// post-Stable (the backward-compat no-readiness default per
+    /// S-SHCP-RECON-08b). Sourced from `ServiceSpec.readiness_probes`
+    /// non-empty (intent side) — re-evaluated every tick.
+    pub has_readiness_probe: bool,
+    /// Operator-spec-declared readiness `success_threshold` per
+    /// ADR-0055 §6 / ADR-0057 §2 / DDD-8. Default 1 (one consecutive
+    /// Pass flips `healthy = true`); configurable upward. Sourced
+    /// from the live `ServiceSpec` — re-evaluated every tick, never
+    /// persisted.
+    pub readiness_success_threshold: u32,
+    /// SPIFFE identity of this alloc as a dataplane backend. Used to
+    /// construct the [`crate::traits::dataplane::Backend`] this alloc
+    /// contributes to the service's backend set.
+    pub backend_spiffe: SpiffeId,
+    /// Socket address this alloc serves on as a dataplane backend.
+    pub backend_addr: std::net::SocketAddr,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -147,6 +178,34 @@ pub struct ServiceLifecycleState {
     /// `desired == actual == empty` no-alloc case (e.g. a freshly
     /// submitted Service before any allocation has been scheduled).
     pub allocs: BTreeMap<AllocationId, ServiceAllocFact>,
+
+    /// Service-level dataplane identity used by the Slice 04 readiness
+    /// branch to compose the [`crate::traits::observation_store::ServiceBackendRow`]
+    /// it writes when backend health changes. `None` for Services that
+    /// have no VIP yet (no readiness write is possible — the branch
+    /// is a no-op) or for the pre-Slice-04 no-alloc case.
+    ///
+    /// Sourced from the service's `ServiceVipAllocator` assignment +
+    /// `ServiceSpec` identity (intent side); projected by the runtime's
+    /// hydrate pass. Carries no derived state.
+    pub service_dataplane: Option<ServiceDataplaneIdentity>,
+}
+
+/// Service-level dataplane identity for the readiness branch's
+/// `ServiceBackendRow` composition. Separated from the per-alloc
+/// [`ServiceAllocFact`] because it is one-per-Service, not
+/// one-per-alloc.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceDataplaneIdentity {
+    /// Identity of the service (LWW primary key for the backend row).
+    pub service_id: ServiceId,
+    /// Virtual IP the service's backends serve behind.
+    pub vip: ServiceVip,
+    /// Owner-writer node id stamped on the LWW `ServiceBackendRow`.
+    /// Sourced from the local node identity (the runtime composes it
+    /// at hydrate time, same as `BackendDiscoveryBridge`'s mandatory
+    /// `writer_node_id`).
+    pub writer: NodeId,
 }
 
 /// `ServiceLifecycleView` — runtime-persisted typed memory per
@@ -279,7 +338,10 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // `AnyState`, `AnyReconcilerView`) in one place without forcing a
 // cyclic `control-plane → core → control-plane` dependency.
 
+use crate::id::{ContentHash, CorrelationKey, NodeId};
 use crate::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+use crate::traits::dataplane::Backend;
+use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 use crate::transition_reason::TerminalCondition;
 use crate::wall_clock::UnixInstant;
 
@@ -496,8 +558,118 @@ impl Reconciler for ServiceLifecycleReconciler {
             }
         }
 
+        // ---- Step 03-01 / Slice 04 — readiness → Backend.healthy ----
+        //
+        // For every alloc that contributes to the service's backend
+        // set, recompute `Backend.healthy` THIS TICK from the OBSERVED
+        // readiness input + the live `success_threshold` + the
+        // consecutive-Pass counter (the View INPUT). Never reads a
+        // cached `healthy: bool` — there is none, per persist-inputs.
+        //
+        // The branch flips `healthy = false` when readiness fails
+        // (drains the backend) — it NEVER emits `RestartAllocation`.
+        // Restart is liveness (step 03-02); a readiness Fail only
+        // removes the backend from rotation. The K3 no-restart-under-
+        // readiness-flapping invariant rides on this branch emitting
+        // nothing but `WriteServiceBackendRow`.
+        if let Some(action) = readiness_backend_row_action(actual, &mut next_view, tick) {
+            actions.push(action);
+        }
+
         (actions, next_view)
     }
+}
+
+/// Step 03-01 / Slice 04 — recompute every backend's `healthy` flag
+/// for the service THIS TICK and, when the service has a dataplane
+/// identity AND at least one backend, emit a single
+/// [`Action::WriteServiceBackendRow`] carrying the full backend set.
+///
+/// `healthy` derivation per backend, in priority order:
+/// - alloc has NO readiness probe → `healthy = true` (backward-compat
+///   default — the service serves traffic the instant it is Stable,
+///   S-SHCP-RECON-08b).
+/// - alloc HAS a readiness probe → `healthy = (latest_readiness == Pass
+///   AND consecutive_successes >= success_threshold)`. The
+///   consecutive-Pass counter is the View INPUT, incremented on Pass
+///   and reset to 0 on Fail (or no observation yet). Initial state
+///   (no Pass row yet) → counter 0 → `healthy = false`
+///   (S-SHCP-RECON-08c — avoids the inverse race).
+///
+/// Mutates `next_view.readiness_consecutive_successes` in place (the
+/// persisted INPUT). Returns `None` when the service has no dataplane
+/// identity (no VIP → no row can be written) or no allocs.
+fn readiness_backend_row_action(
+    actual: &ServiceLifecycleState,
+    next_view: &mut ServiceLifecycleView,
+    tick: &TickContext,
+) -> Option<Action> {
+    let dataplane = actual.service_dataplane.as_ref()?;
+    if actual.allocs.is_empty() {
+        return None;
+    }
+
+    let mut backends: Vec<Backend> = Vec::with_capacity(actual.allocs.len());
+    for (alloc_id, fact) in &actual.allocs {
+        let healthy = compute_backend_healthy(alloc_id, fact, next_view);
+        backends.push(Backend {
+            alloc: fact.backend_spiffe.clone(),
+            addr: fact.backend_addr,
+            weight: 1,
+            healthy,
+        });
+    }
+
+    let target = format!("service-lifecycle/readiness/{}", dataplane.service_id);
+    let spec_hash = ContentHash::of(target.as_bytes());
+    let correlation = CorrelationKey::derive(&target, &spec_hash, "readiness-backend-row");
+    let vip = dataplane.vip.try_as_ipv4()?;
+
+    Some(Action::WriteServiceBackendRow {
+        row: ServiceBackendRow {
+            service_id: dataplane.service_id,
+            vip,
+            backends,
+            updated_at: LogicalTimestamp {
+                counter: tick.tick.saturating_add(1),
+                writer: dataplane.writer.clone(),
+            },
+        },
+        correlation,
+    })
+}
+
+/// Recompute one backend's `healthy` flag for the current tick and
+/// update the persisted consecutive-Pass counter INPUT in
+/// `next_view`. See [`readiness_backend_row_action`] for the contract.
+fn compute_backend_healthy(
+    alloc_id: &AllocationId,
+    fact: &ServiceAllocFact,
+    next_view: &mut ServiceLifecycleView,
+) -> bool {
+    if !fact.has_readiness_probe {
+        // Backward-compat default: no readiness gate → always healthy.
+        return true;
+    }
+
+    let key = (alloc_id.clone(), ProbeIdx::new(0));
+    let counter = match &fact.latest_readiness_probe {
+        Some(ProbeStatus::Pass) => {
+            // Consecutive-Pass streak grows by one this tick.
+            let entry = next_view.readiness_consecutive_successes.entry(key).or_insert(0);
+            *entry = entry.saturating_add(1);
+            *entry
+        }
+        // Fail OR no observation yet → streak resets to 0. Removing the
+        // entry keeps the persisted map minimal (absence == 0).
+        Some(ProbeStatus::Fail { .. }) | None => {
+            next_view.readiness_consecutive_successes.remove(&key);
+            0
+        }
+    };
+
+    matches!(fact.latest_readiness_probe, Some(ProbeStatus::Pass))
+        && counter >= fact.readiness_success_threshold
 }
 
 /// GAP-10 — maintain the per-alloc consecutive-startup-probe-fail

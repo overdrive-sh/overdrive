@@ -378,6 +378,12 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
         mechanic_summary: String::new(),
         inferred: false,
         startup_probes_empty: true,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     }
 }
 
@@ -395,6 +401,12 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: true,
         startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     }
 }
 
@@ -416,7 +428,7 @@ proptest! {
         let aid = alloc(&alloc_id_seed);
         let mut allocs = BTreeMap::new();
         allocs.insert(aid.clone(), opt_out_fact(aid.clone(), started_at_ms));
-        let state = ServiceLifecycleState { allocs };
+        let state = ServiceLifecycleState { allocs, service_dataplane: None };
         let view = ServiceLifecycleView::default();
         let reconciler = ServiceLifecycleReconciler::new();
         let tick = tick_at(started_at_ms.saturating_add(now_offset_ms));
@@ -449,7 +461,7 @@ fn opt_out_branch_does_not_fire_when_probes_present() {
     let aid = alloc("svc-1");
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact_with_probes(aid.clone(), 0));
-    let state = ServiceLifecycleState { allocs };
+    let state = ServiceLifecycleState { allocs, service_dataplane: None };
     let view = ServiceLifecycleView::default();
     let reconciler = ServiceLifecycleReconciler::new();
     let tick = tick_at(100);
@@ -476,7 +488,7 @@ fn opt_out_idempotent_no_double_emit() {
     let aid = alloc("svc-2");
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), opt_out_fact(aid.clone(), 0));
-    let state = ServiceLifecycleState { allocs };
+    let state = ServiceLifecycleState { allocs, service_dataplane: None };
     let mut view = ServiceLifecycleView::default();
     view.stable_announced.insert(aid.clone());
     let reconciler = ServiceLifecycleReconciler::new();

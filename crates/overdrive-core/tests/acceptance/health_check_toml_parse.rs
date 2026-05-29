@@ -217,27 +217,113 @@ proptest! {
     }
 }
 
-/// S-SHCP-PARSE-05 (US-07 / K5) — probes under [job] rejected.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn probes_under_job_kind_yields_named_parse_error_with_guidance() {
-    panic!("Not yet implemented -- RED scaffold (S-SHCP-PARSE-05 / probes under job rejected)");
+/// Arbitrary `[[health_check.<role>]]` TOML fragment naming any of the
+/// three roles with a minimal valid TCP body. Used by the kind-
+/// rejection proptests so the rejection is shown invariant across
+/// every probe role (startup / readiness / liveness), not just one.
+fn health_check_role_strategy() -> impl Strategy<Value = String> {
+    (prop::sample::select(vec!["startup", "readiness", "liveness"]), port_strategy()).prop_map(
+        |(role, port)| format!("[[health_check.{role}]]\ntype = \"tcp\"\nport = {port}\n"),
+    )
 }
 
-/// S-SHCP-PARSE-06 (US-07 / K5) — probes under [schedule] rejected.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn probes_under_schedule_kind_yields_named_parse_error_with_guidance() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-SHCP-PARSE-06 / probes under schedule rejected)"
-    );
+// S-SHCP-PARSE-05 (US-07 / K5) — a `[[health_check.*]]` array of ANY
+// role declared on a `[job]` workload is rejected with
+// `ParseError::ProbesNotAllowedOnKind { kind: "job", guidance: <job
+// guidance> }`. Universe = (probe role ∈ {startup, readiness,
+// liveness}) × (arbitrary port). The observable surface is the parser's
+// returned `ParseError` variant + its `kind` + `guidance` fields; both
+// are asserted, neither drifts.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+    #[test]
+    fn probes_under_job_kind_yields_named_parse_error_with_guidance(
+        health_check in health_check_role_strategy(),
+    ) {
+        let toml = format!(
+            "[job]\nid = \"j\"\n\n\
+             [exec]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
+             [resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n\n\
+             {health_check}"
+        );
+        match parse_err(&toml) {
+            ParseError::ProbesNotAllowedOnKind { kind, guidance } => {
+                prop_assert_eq!(kind, "job");
+                prop_assert_eq!(
+                    guidance,
+                    overdrive_core::aggregate::JOB_PROBES_GUIDANCE
+                );
+            }
+            other => prop_assert!(false, "expected ProbesNotAllowedOnKind(job), got {:?}", other),
+        }
+    }
 }
 
-/// S-SHCP-PARSE-07 (US-07 regression guard) — probes under [service] parses.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn probes_under_service_kind_parses_successfully() {
-    panic!("Not yet implemented -- RED scaffold (S-SHCP-PARSE-07 / probes under service parses)");
+// S-SHCP-PARSE-06 (US-07 / K5) — same as PARSE-05 but for a
+// `[job]+[schedule]` workload → `ProbesNotAllowedOnKind { kind:
+// "schedule", guidance: <schedule guidance> }`. Universe = (probe role)
+// × (arbitrary port).
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+    #[test]
+    fn probes_under_schedule_kind_yields_named_parse_error_with_guidance(
+        health_check in health_check_role_strategy(),
+    ) {
+        let toml = format!(
+            "[job]\nid = \"j\"\n\n\
+             [schedule]\ncron = \"* * * * *\"\n\n\
+             [exec]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
+             [resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n\n\
+             {health_check}"
+        );
+        match parse_err(&toml) {
+            ParseError::ProbesNotAllowedOnKind { kind, guidance } => {
+                prop_assert_eq!(kind, "schedule");
+                prop_assert_eq!(
+                    guidance,
+                    overdrive_core::aggregate::SCHEDULE_PROBES_GUIDANCE
+                );
+            }
+            other => prop_assert!(
+                false,
+                "expected ProbesNotAllowedOnKind(schedule), got {:?}",
+                other
+            ),
+        }
+    }
+}
+
+// S-SHCP-PARSE-07 (US-07 regression guard) — a Service-kind workload
+// with a `[[health_check.readiness]]` section parses successfully and
+// the readiness probe survives into `ServiceSpec.readiness_probes` with
+// the ADR-0057 §2 / ADR-0055 §6 `success_threshold` default of 1.
+// Universe = (arbitrary readiness port). Observable surface: the parsed
+// `ServiceSpec`'s readiness_probes vec (len, role, success_threshold).
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+    #[test]
+    fn probes_under_service_kind_parses_successfully(
+        readiness_port in port_strategy(),
+    ) {
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n\
+             [[health_check.readiness]]\n\
+             type = \"tcp\"\n\
+             port = {readiness_port}\n"
+        );
+        let spec = unwrap_service(
+            WorkloadSpecInput::from_toml_str(&toml).expect("service+readiness parses"),
+        );
+        prop_assert_eq!(spec.readiness_probes.len(), 1, "one readiness probe survives");
+        let probe = &spec.readiness_probes[0];
+        prop_assert_eq!(probe.role, ProbeRole::Readiness);
+        prop_assert_eq!(
+            probe.success_threshold,
+            Some(1),
+            "ADR-0057 §2 / ADR-0055 §6 success_threshold default is 1"
+        );
+        prop_assert_eq!(probe.inferred, false, "operator-declared probe is not inferred");
+    }
 }
 
 // S-SHCP-PARSE-08 (US-02 AC / ADR-0057 C6) — any `https://` URL in an

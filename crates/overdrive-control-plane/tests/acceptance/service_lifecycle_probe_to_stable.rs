@@ -136,6 +136,12 @@ fn fact_from_row_and_intent(
         mechanic_summary,
         inferred: descriptor.inferred,
         startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     }
 }
 
@@ -238,7 +244,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let actual = {
         let mut allocs = BTreeMap::new();
         allocs.insert(fact.alloc_id.clone(), fact.clone());
-        ServiceLifecycleState { allocs }
+        ServiceLifecycleState { allocs, service_dataplane: None }
     };
     let desired = actual.clone();
     let view = ServiceLifecycleView::default();

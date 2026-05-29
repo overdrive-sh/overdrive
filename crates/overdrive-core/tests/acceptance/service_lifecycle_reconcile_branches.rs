@@ -72,13 +72,21 @@ fn fact(
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,
         startup_probes_empty: false,
+        // Step 03-01 — this startup-branch suite carries no readiness
+        // probe; the readiness branch is a no-op (no service_dataplane).
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     }
 }
 
 fn one_alloc_state(f: ServiceAllocFact) -> ServiceLifecycleState {
     let mut allocs = BTreeMap::new();
     allocs.insert(f.alloc_id.clone(), f);
-    ServiceLifecycleState { allocs }
+    ServiceLifecycleState { allocs, service_dataplane: None }
 }
 
 fn tick_at_ms(now_unix_ms: u64) -> TickContext {
@@ -1106,4 +1114,193 @@ proptest! {
             other => panic!("expected Stable, got {other:?}"),
         }
     }
+}
+
+// -------------------------------------------------------------------
+// E. Readiness branch (Slice 04 / step 03-01) — Backend.healthy is
+//    recomputed every tick from the readiness input + the live
+//    success_threshold + the View consecutive-Pass counter. These
+//    tests are CO-LOCATED in overdrive-core (not just the control-plane
+//    acceptance suite) so cargo-mutants `--package overdrive-core` kills
+//    the `compute_backend_healthy` / `readiness_backend_row_action`
+//    mutants — the killing tests must live in the mutated crate.
+//
+//    Port-to-port: driven through `Reconciler::reconcile`, asserting on
+//    the emitted `Action::WriteServiceBackendRow` row's per-backend
+//    `healthy` flags (the observable surface), never internal fields.
+// -------------------------------------------------------------------
+
+fn readiness_fact(
+    index: usize,
+    latest_readiness: Option<ProbeStatus>,
+    has_readiness_probe: bool,
+    success_threshold: u32,
+) -> ServiceAllocFact {
+    ServiceAllocFact {
+        alloc_id: aid(&format!("svc-{index}")),
+        state: AllocState::Running,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+        exit_code: None,
+        latest_startup_probe: Some(ProbeStatus::Pass),
+        max_attempts: 30,
+        startup_deadline: Duration::from_secs(60),
+        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
+        inferred: false,
+        startup_probes_empty: false,
+        latest_readiness_probe: latest_readiness,
+        has_readiness_probe,
+        readiness_success_threshold: success_threshold,
+        backend_spiffe: overdrive_core::SpiffeId::new(&format!(
+            "spiffe://overdrive.local/job/svc/alloc/a{index}"
+        ))
+        .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((
+            std::net::Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
+            8080,
+        )),
+    }
+}
+
+fn readiness_dataplane() -> overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
+    overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
+        service_id: overdrive_core::id::ServiceId::new(7).expect("valid service id"),
+        vip: overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+            10, 96, 0, 9,
+        )))
+        .expect("valid vip"),
+        writer: overdrive_core::id::NodeId::new("node-r").expect("valid node id"),
+    }
+}
+
+fn readiness_state(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
+    let mut allocs = BTreeMap::new();
+    for f in facts {
+        allocs.insert(f.alloc_id.clone(), f);
+    }
+    ServiceLifecycleState { allocs, service_dataplane: Some(readiness_dataplane()) }
+}
+
+fn readiness_tick(now_ms: u64) -> TickContext {
+    let now = Instant::now();
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_millis(now_ms)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
+}
+
+fn single_backend_row_healthy(actions: &[Action]) -> bool {
+    let rows: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WriteServiceBackendRow { row, .. } => Some(row.backends.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rows.len(), 1, "exactly one WriteServiceBackendRow expected, got {actions:?}");
+    let backends = &rows[0];
+    assert_eq!(backends.len(), 1, "single-alloc state yields one backend");
+    backends[0].healthy
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(96))]
+    // E1 — readiness Pass with success_threshold=1 ⇒ healthy true;
+    // Fail ⇒ healthy false. Pins `compute_backend_healthy -> {true,
+    // false}` and the `!`-deletion mutant. Universe = (latest ∈
+    // {Pass, Fail}) — the emitted backend's `healthy` flag.
+    #[test]
+    fn readiness_pass_threshold_one_is_healthy_fail_is_not(passes in any::<bool>()) {
+        let reconciler = ServiceLifecycleReconciler::new();
+        let status = if passes {
+            ProbeStatus::Pass
+        } else {
+            ProbeStatus::Fail { last_fail_reason: "x".to_string() }
+        };
+        let state = readiness_state(vec![readiness_fact(0, Some(status), true, 1)]);
+        let (actions, _v) =
+            reconciler.reconcile(&state, &state, &ServiceLifecycleView::default(), &readiness_tick(100));
+        prop_assert_eq!(single_backend_row_healthy(&actions), passes);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(96))]
+    // E2 — readiness Pass with success_threshold>1 ⇒ healthy iff the
+    // post-increment count reaches threshold. Pins the `>= threshold`
+    // comparison AND the `(latest==Pass) && (counter>=threshold)`
+    // conjunction (both operands vary independently). Kills `&&→||`
+    // and `>=→<`.
+    #[test]
+    fn readiness_pass_below_threshold_is_unhealthy(
+        seed in 0u32..=8,
+        threshold in 2u32..=6,
+    ) {
+        let reconciler = ServiceLifecycleReconciler::new();
+        let fact = readiness_fact(0, Some(ProbeStatus::Pass), true, threshold);
+        let key = (fact.alloc_id.clone(), overdrive_core::observation::ProbeIdx::new(0));
+        let mut view = ServiceLifecycleView::default();
+        view.readiness_consecutive_successes.insert(key, seed);
+        let state = readiness_state(vec![fact]);
+        let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(100));
+        let expected = seed.saturating_add(1) >= threshold;
+        prop_assert_eq!(single_backend_row_healthy(&actions), expected);
+    }
+}
+
+#[test]
+fn readiness_branch_emits_write_service_backend_row() {
+    // Kills `readiness_backend_row_action -> None`: a Service with a
+    // dataplane identity and at least one alloc MUST emit exactly one
+    // WriteServiceBackendRow.
+    let reconciler = ServiceLifecycleReconciler::new();
+    let state = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
+    let (actions, _v) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    let row_count =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count();
+    assert_eq!(
+        row_count, 1,
+        "readiness branch must emit one WriteServiceBackendRow, got {actions:?}"
+    );
+}
+
+#[test]
+fn readiness_no_probe_backend_is_healthy() {
+    // The `has_readiness_probe == false` early-return path: a backend
+    // with no readiness probe is always healthy (backward-compat).
+    let reconciler = ServiceLifecycleReconciler::new();
+    let state = readiness_state(vec![readiness_fact(0, None, false, 1)]);
+    let (actions, _v) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    assert!(single_backend_row_healthy(&actions), "no-readiness backend is healthy");
+}
+
+#[test]
+fn readiness_no_dataplane_identity_emits_no_row() {
+    // The `service_dataplane: None` guard: without a VIP, the readiness
+    // branch is a no-op (no WriteServiceBackendRow).
+    let reconciler = ServiceLifecycleReconciler::new();
+    let mut allocs = BTreeMap::new();
+    let f = readiness_fact(0, Some(ProbeStatus::Pass), true, 1);
+    allocs.insert(f.alloc_id.clone(), f);
+    let state = ServiceLifecycleState { allocs, service_dataplane: None };
+    let (actions, _v) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    let row_count =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count();
+    assert_eq!(row_count, 0, "no dataplane identity ⇒ no row emitted");
 }

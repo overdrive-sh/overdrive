@@ -526,10 +526,16 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,
         startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
-    let actual = ServiceLifecycleState { allocs };
+    let actual = ServiceLifecycleState { allocs, service_dataplane: None };
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -600,10 +606,16 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,
         startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
-    let actual = ServiceLifecycleState { allocs };
+    let actual = ServiceLifecycleState { allocs, service_dataplane: None };
     let now = Instant::now();
     let tick = TickContext {
         now,
