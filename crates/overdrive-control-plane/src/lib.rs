@@ -842,6 +842,7 @@ pub async fn run_server(
         cgroup_root_path,
         Arc::new(overdrive_host::SystemClock),
         fs,
+        Arc::clone(&obs),
     )
     .await?;
 
@@ -881,13 +882,19 @@ pub async fn compose_production_driver(
     cgroup_root: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+    observation_store: Arc<dyn ObservationStore>,
 ) -> Result<
     (Arc<dyn Driver>, Arc<overdrive_worker::probe_runner::ProbeRunner>),
     error::ControlPlaneError,
 > {
-    let probe_runner =
-        probe_runner_boot::compose_and_probe_runner_gate(tcp_prober, http_prober, exec_prober)
-            .await?;
+    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
+        tcp_prober,
+        http_prober,
+        exec_prober,
+        Arc::clone(&clock),
+        observation_store,
+    )
+    .await?;
 
     let driver: Arc<dyn Driver> = Arc::new(
         overdrive_worker::ExecDriver::new(cgroup_root, clock, fs)

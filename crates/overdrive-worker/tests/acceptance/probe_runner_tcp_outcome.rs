@@ -60,10 +60,15 @@ async fn given_sim_tcp_prober_with_pass_outcome_when_probe_then_returns_pass() {
     tcp.enqueue_outcome(ProbeOutcome::Pass);
     let http: Arc<dyn overdrive_core::traits::prober::HttpProber> = Arc::new(SimHttpProber::new());
     let exec: Arc<dyn overdrive_core::traits::prober::ExecProber> = Arc::new(SimExecProber::new());
-    let runner = ProbeRunner::new(tcp.clone(), http, exec);
-
-    let clock = SimClock::default();
-    let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);
+    let clock = Arc::new(SimClock::default());
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+    let runner = ProbeRunner::new(
+        tcp.clone(),
+        http,
+        exec,
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
 
     let alloc = alloc_id("alloc-pass-1");
     let descriptor = descriptor_tcp("127.0.0.1", 8080);
@@ -74,7 +79,7 @@ async fn given_sim_tcp_prober_with_pass_outcome_when_probe_then_returns_pass() {
 
     // ACT: probe once + record.
     let returned_row = runner
-        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, &clock, &obs)
+        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, clock.as_ref(), obs.as_ref())
         .await
         .expect("probe_once_and_record succeeds for Pass outcome");
 
@@ -101,16 +106,21 @@ async fn given_sim_tcp_prober_with_fail_outcome_when_probe_then_returns_fail_wit
     tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "connection refused".to_owned() });
     let http: Arc<dyn overdrive_core::traits::prober::HttpProber> = Arc::new(SimHttpProber::new());
     let exec: Arc<dyn overdrive_core::traits::prober::ExecProber> = Arc::new(SimExecProber::new());
-    let runner = ProbeRunner::new(tcp.clone(), http, exec);
-
-    let clock = SimClock::default();
-    let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);
+    let clock = Arc::new(SimClock::default());
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+    let runner = ProbeRunner::new(
+        tcp.clone(),
+        http,
+        exec,
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
 
     let alloc = alloc_id("alloc-fail-1");
     let descriptor = descriptor_tcp("127.0.0.1", 8080);
 
     let returned_row = runner
-        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, &clock, &obs)
+        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, clock.as_ref(), obs.as_ref())
         .await
         .expect("probe_once_and_record succeeds for Fail outcome");
 
@@ -146,8 +156,14 @@ async fn given_sim_tcp_prober_when_used_as_dyn_tcp_prober_then_compiles_and_call
 
     // ProbeRunner accepts the dyn trait at constructor (the witness
     // is compilation).
-    let _runner =
-        ProbeRunner::new(prober, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
+    let _runner = ProbeRunner::new(
+        prober,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::default()) as Arc<dyn Clock>,
+        Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
+            as Arc<dyn ObservationStore>,
+    );
 }
 
 /// Earned Trust gate — `ProbeRunner::probe` against a Sim adapter
@@ -159,8 +175,14 @@ async fn given_sim_tcp_prober_pass_when_earned_trust_then_returns_ok() {
     let tcp = Arc::new(SimTcpProber::new());
     // Default SimTcpProber returns Pass on empty queue per its
     // contract; no enqueue needed.
-    let runner =
-        ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
+    let runner = ProbeRunner::new(
+        tcp,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::default()) as Arc<dyn Clock>,
+        Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
+            as Arc<dyn ObservationStore>,
+    );
     runner.probe().await.expect("Earned Trust gate passes against a Pass-shaped Sim adapter");
 }
 
@@ -173,8 +195,14 @@ async fn given_sim_tcp_prober_pass_when_earned_trust_then_returns_ok() {
 async fn given_sim_tcp_prober_fail_when_earned_trust_then_returns_typed_error() {
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "earned-trust-injected".to_owned() });
-    let runner =
-        ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
+    let runner = ProbeRunner::new(
+        tcp,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::default()) as Arc<dyn Clock>,
+        Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
+            as Arc<dyn ObservationStore>,
+    );
     let err = runner
         .probe()
         .await
@@ -205,8 +233,14 @@ async fn given_sim_tcp_prober_fail_when_earned_trust_then_returns_typed_error() 
 #[tokio::test]
 async fn register_and_stop_alloc_lifecycle_drives_active_count_and_cancels_children() {
     let tcp = Arc::new(SimTcpProber::new());
-    let runner =
-        ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
+    let runner = ProbeRunner::new(
+        tcp,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::default()) as Arc<dyn Clock>,
+        Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
+            as Arc<dyn ObservationStore>,
+    );
 
     // Universe slot: active_alloc_count starts at 0.
     // Mutant `active_alloc_count -> 1` fails here.
@@ -285,15 +319,13 @@ async fn register_and_stop_alloc_lifecycle_drives_active_count_and_cancels_child
 async fn observed_at_unix_ms_pins_to_injected_clock_value() {
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Pass);
-    let runner =
-        ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), Arc::new(SimExecProber::new()));
 
     // Clone the SimClock so the test and the SUT share the same
     // logical-time counter. SimClock returns `unix_epoch + elapsed()`;
     // elapsed only advances via `tick`. Neither side calls `tick`
     // during the probe, so the value is stable across the read in
     // the test and the read inside `probe_once_and_record`.
-    let clock = SimClock::default();
+    let clock = Arc::new(SimClock::default());
     let expected_ms = u64::try_from(clock.unix_now().as_millis())
         .expect("unix_now in ms fits in u64 for the next 580M years");
     // Defence in depth: assert the test fixture itself produces a
@@ -305,12 +337,19 @@ async fn observed_at_unix_ms_pins_to_injected_clock_value() {
         "test precondition: SimClock unix_now must exceed the 0/1 mutant constants; got {expected_ms}"
     );
 
-    let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+    let runner = ProbeRunner::new(
+        tcp,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
     let alloc = alloc_id("alloc-clock-pin");
     let descriptor = descriptor_tcp("127.0.0.1", 8080);
 
     let row = runner
-        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, &clock, &obs)
+        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, clock.as_ref(), obs.as_ref())
         .await
         .expect("probe succeeds");
 

@@ -42,9 +42,12 @@ use overdrive_control_plane::compose_production_driver;
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::probe_descriptor::ProbeDescriptor;
 use overdrive_core::id::AllocationId;
+use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Resources};
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::SimCgroupFs;
+use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
 
 /// Stub clock — `compose_production_driver` plumbs the clock into
@@ -100,6 +103,10 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
     let tcp = Arc::new(SimTcpProber::new()); // empty queue → Pass
     let http = Arc::new(SimHttpProber::new());
     let exec = Arc::new(SimExecProber::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("composition-test").expect("valid NodeId"),
+        0,
+    ));
 
     let (driver, runner) = compose_production_driver(
         tcp,
@@ -114,6 +121,7 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
         // hooks, not start, so the Sim adapter satisfies the mandatory
         // port-trait dependency without affecting the assertion.
         Arc::new(SimCgroupFs::new()),
+        obs,
     )
     .await
     .expect("Earned-Trust gate passes with default Sim probers");

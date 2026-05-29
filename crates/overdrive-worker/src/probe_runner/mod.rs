@@ -70,12 +70,27 @@ use tokio_util::sync::CancellationToken;
 pub struct ProbeRunner {
     tcp_prober: Arc<dyn TcpProber>,
     // SCAFFOLD: true — http_prober + exec_prober remain wired but
-    // unused at slice 01; lifecycle hooks land in slice 01-03d, HTTP
-    // body in 02-01, Exec body in 02-02.
+    // unused at slice 01; HTTP body in 02-01, Exec body in 02-02.
+    // Per-descriptor task spawn for Http / Exec mechanics logs +
+    // returns; the production loop does NOT panic on them.
     #[allow(dead_code)]
     http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
     #[allow(dead_code)]
     exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
+    /// Injected clock. Required by `start_alloc`'s spawned tick
+    /// tasks (`clock.sleep(interval)` in the supervised loop) and by
+    /// `probe_once_and_record` (timestamps the `ProbeResultRow`).
+    /// Mandatory constructor parameter per
+    /// `.claude/rules/development.md` § "Port-trait dependencies"
+    /// — no builder, no default-to-production. Under simulation, tests
+    /// inject `SimClock` so `tick(interval)` deterministically wakes
+    /// the spawned probe tasks.
+    clock: Arc<dyn Clock>,
+    /// Injected observation store. Required by `start_alloc`'s
+    /// spawned tick tasks (every probe outcome lands as a
+    /// `ProbeResultRow` write). Mandatory constructor parameter per
+    /// `.claude/rules/development.md` § "Port-trait dependencies".
+    observation_store: Arc<dyn ObservationStore>,
     /// Per-alloc supervisors. `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice"
     /// — the supervisor map is drained on `stop_alloc` and iterated
@@ -94,8 +109,17 @@ impl ProbeRunner {
         tcp_prober: Arc<dyn TcpProber>,
         http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
         exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
+        clock: Arc<dyn Clock>,
+        observation_store: Arc<dyn ObservationStore>,
     ) -> Self {
-        Self { tcp_prober, http_prober, exec_prober, supervisors: Mutex::new(BTreeMap::new()) }
+        Self {
+            tcp_prober,
+            http_prober,
+            exec_prober,
+            clock,
+            observation_store,
+            supervisors: Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// Earned Trust gate per DDD-21 + ADR-0054 §7. Runs after
@@ -188,41 +212,22 @@ impl ProbeRunner {
         clock: &dyn Clock,
         observation_store: &dyn ObservationStore,
     ) -> Result<ProbeResultRow, ProbeRunnerError> {
-        let timeout = Duration::from_secs(u64::from(descriptor.timeout_seconds));
-        let status = match &descriptor.mechanic {
-            ProbeMechanic::Tcp { host, port } => {
-                match self.tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
-                    ProbeRunnerError::ProbeAdapterFailed {
-                        alloc_id: alloc_id.clone(),
-                        probe_idx,
-                        source: err,
-                    }
-                })? {
-                    ProbeOutcome::Pass => ProbeStatus::Pass,
-                    ProbeOutcome::Fail { reason } => ProbeStatus::Fail { last_fail_reason: reason },
-                }
-            }
-            ProbeMechanic::Http { .. } | ProbeMechanic::Exec { .. } => {
-                return Err(ProbeRunnerError::MechanicNotYetImplemented { role: descriptor.role });
-            }
-        };
-        let last_observed_at_unix_ms = unix_ms_from_clock(clock);
-        let row = ProbeResultRow {
-            alloc_id: alloc_id.clone(),
+        // Delegate to the free-standing `probe_tick` body so the
+        // public single-tick surface and the spawned supervised
+        // loop share one source of truth. The `clock` and
+        // `observation_store` call-site parameters are honoured
+        // verbatim (the public API contract); the spawned loop in
+        // `start_alloc` instead uses the stored `Arc<dyn Clock>` /
+        // `Arc<dyn ObservationStore>`.
+        probe_tick(
+            self.tcp_prober.as_ref(),
+            clock,
+            observation_store,
+            alloc_id,
             probe_idx,
-            role: descriptor.role,
-            status,
-            last_observed_at_unix_ms,
-            inferred: descriptor.inferred,
-        };
-        observation_store.write_probe_result(row.clone()).await.map_err(|err| {
-            ProbeRunnerError::ObservationWriteFailed {
-                alloc_id: alloc_id.clone(),
-                probe_idx,
-                source: err,
-            }
-        })?;
-        Ok(row)
+            descriptor,
+        )
+        .await
     }
 
     /// Register an allocation supervisor — owns its
@@ -243,39 +248,100 @@ impl ProbeRunner {
 
     /// Lifecycle hook called by the worker driver's
     /// `on_alloc_running` callback when an allocation reaches the
-    /// `Running` state. Hands the validated probe descriptors to
-    /// the per-alloc supervisor.
+    /// `Running` state. Spawns one tokio task per declared/inferred
+    /// `ProbeDescriptor` under the per-alloc supervisor.
+    ///
+    /// Per ADR-0054 § 2: every spawned task ticks its descriptor on
+    /// the descriptor-declared interval, invokes the adapter, and
+    /// writes the resulting `ProbeResultRow` to the
+    /// `ObservationStore`. Cooperative shutdown via the supervisor's
+    /// child [`CancellationToken`] — task bodies observe the token
+    /// in a `select!` arm and exit on the next async yield. No
+    /// `JoinHandle::abort()` per `.claude/rules/testing.md`
+    /// § cooperative-shutdown discipline.
+    ///
+    /// Tick ordering: **tick-then-sleep** (K8s `prober.Manager`
+    /// precedent). The first probe attempt fires after the FIRST
+    /// `clock.sleep(interval)` resolves, NOT before — this matches
+    /// the existing TCP-prober + `last_observed_at_unix_ms` contract
+    /// (every row carries a clock-derived timestamp; firing
+    /// pre-sleep would emit a row at the moment of registration
+    /// regardless of the descriptor's declared interval). Tests that
+    /// need to observe the first row drive `clock.tick(interval)`
+    /// explicitly.
     ///
     /// Per ADR-0054 § 3: the descriptors are carried on
     /// [`overdrive_core::traits::driver::AllocationSpec`] and
     /// projected from the reconciler-emitted action through the
-    /// action shim into the driver's
-    /// `on_alloc_running` hook. Phase-1 Job-kind workloads pass an
-    /// empty `Vec`; Service-kind workloads project from
+    /// action shim into the driver's `on_alloc_running` hook.
+    /// Phase-1 Job-kind workloads pass an empty `Vec` — the loop
+    /// body is structurally a no-op for them (zero descriptors,
+    /// zero spawned tasks). Service-kind workloads project from
     /// `ServiceSpec.health_check` per ADR-0057.
     ///
     /// Idempotent: re-calling against the same `alloc_id` returns
-    /// the existing supervisor's token without restarting tasks.
-    /// The per-probe task spawn body lands in slice 02 / 03 — Phase
-    /// 1 only wires the lifecycle plumbing; the descriptors are
-    /// retained on the supervisor for future per-tick loop bodies.
+    /// the existing supervisor's token. The current implementation
+    /// **does not re-spawn tasks on re-register** — the action-shim
+    /// invariant is that `on_alloc_running` fires exactly once per
+    /// allocation reaching `Running`, so re-spawning would
+    /// duplicate the supervised loops.
     ///
-    /// `_probe_descriptors` is the descriptor list the supervisor
-    /// will eventually iterate; today (Phase 1 Job-kind workloads)
-    /// it is always empty. The parameter shape is load-bearing for
-    /// the [`overdrive_core::traits::driver::Driver::on_alloc_running`]
-    /// trait surface even when the body is structurally a wire-
-    /// through to [`Self::register_alloc`].
+    /// HTTP / Exec mechanic bodies for the per-tick probe call land
+    /// in slice 02 / 03; spawned tasks for those mechanics today
+    /// log + return on the first iteration via
+    /// [`Self::probe_once_and_record`]'s
+    /// [`ProbeRunnerError::MechanicNotYetImplemented`] surface (no
+    /// panic, no retry storm — the structural plumbing accepts
+    /// them gracefully).
     pub fn start_alloc(
         &self,
         alloc_id: &AllocationId,
-        _probe_descriptors: Vec<ProbeDescriptor>,
+        probe_descriptors: Vec<ProbeDescriptor>,
     ) -> CancellationToken {
-        // Phase 1 wiring: register a supervisor and return its
-        // token. The per-probe task spawn body (which would iterate
-        // `_probe_descriptors` and spawn one task per descriptor)
-        // lands in slice 02 / 03 per the roadmap.
-        self.register_alloc(alloc_id)
+        let root_token = self.register_alloc(alloc_id);
+
+        // Per-descriptor task spawn. Each task carries cloned Arcs
+        // for its prober adapter, the injected clock, and the
+        // observation store — no `&self` borrow escapes into the
+        // spawned future. The supervisor's child token is the
+        // cooperative-shutdown handle observed by the `select!`
+        // arm.
+        let supervisors = self.supervisors.lock();
+        let Some(supervisor) = supervisors.get(alloc_id) else {
+            // Logically unreachable — `register_alloc` above just
+            // inserted the entry. The match shape keeps the lint
+            // surface honest per `.claude/rules/development.md`
+            // § "Logically unreachable `None` / `Err`".
+            return root_token;
+        };
+        for (idx, descriptor) in probe_descriptors.into_iter().enumerate() {
+            let handle = supervisor.spawn_probe_task();
+            let child_token = handle.cancellation_token();
+            let tcp_prober = Arc::clone(&self.tcp_prober);
+            let clock = Arc::clone(&self.clock);
+            let observation_store = Arc::clone(&self.observation_store);
+            let alloc_id_for_task = alloc_id.clone();
+            // ProbeIdx is 0-indexed across the descriptor vector
+            // per the `discuss/shared-artifacts-registry.md`
+            // contract — saturating cast keeps this safe past
+            // u32::MAX descriptors (operationally impossible; the
+            // max-attempts ceiling is 30).
+            let probe_idx = ProbeIdx::new(u32::try_from(idx).unwrap_or(u32::MAX));
+            tokio::spawn(async move {
+                supervised_probe_loop(
+                    tcp_prober,
+                    clock,
+                    observation_store,
+                    alloc_id_for_task,
+                    probe_idx,
+                    descriptor,
+                    child_token,
+                )
+                .await;
+            });
+        }
+        drop(supervisors);
+        root_token
     }
 
     /// Cancel every probe task spawned under `alloc_id` and drop the
@@ -343,4 +409,107 @@ fn unix_ms_from_clock(clock: &dyn Clock) -> u64 {
     // Saturating cast — overflow happens past year 584,942,417 AD,
     // outside the platform's lifetime.
     u64::try_from(clock.unix_now().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Pure per-tick probe logic — invoke the adapter, build the row,
+/// write to the store. Free-standing so the spawned per-descriptor
+/// task body and the public `probe_once_and_record` surface
+/// delegate to the same function — no `&self` borrow escapes into
+/// the supervised loop, and the public/loop paths cannot diverge
+/// silently.
+async fn probe_tick(
+    tcp_prober: &dyn TcpProber,
+    clock: &dyn Clock,
+    observation_store: &dyn ObservationStore,
+    alloc_id: &AllocationId,
+    probe_idx: ProbeIdx,
+    descriptor: &ProbeDescriptor,
+) -> Result<ProbeResultRow, ProbeRunnerError> {
+    let timeout = Duration::from_secs(u64::from(descriptor.timeout_seconds));
+    let status = match &descriptor.mechanic {
+        ProbeMechanic::Tcp { host, port } => {
+            match tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
+                ProbeRunnerError::ProbeAdapterFailed {
+                    alloc_id: alloc_id.clone(),
+                    probe_idx,
+                    source: err,
+                }
+            })? {
+                ProbeOutcome::Pass => ProbeStatus::Pass,
+                ProbeOutcome::Fail { reason } => ProbeStatus::Fail { last_fail_reason: reason },
+            }
+        }
+        ProbeMechanic::Http { .. } | ProbeMechanic::Exec { .. } => {
+            return Err(ProbeRunnerError::MechanicNotYetImplemented { role: descriptor.role });
+        }
+    };
+    let last_observed_at_unix_ms = unix_ms_from_clock(clock);
+    let row = ProbeResultRow {
+        alloc_id: alloc_id.clone(),
+        probe_idx,
+        role: descriptor.role,
+        status,
+        last_observed_at_unix_ms,
+        inferred: descriptor.inferred,
+    };
+    observation_store.write_probe_result(row.clone()).await.map_err(|err| {
+        ProbeRunnerError::ObservationWriteFailed {
+            alloc_id: alloc_id.clone(),
+            probe_idx,
+            source: err,
+        }
+    })?;
+    Ok(row)
+}
+
+/// Per-descriptor supervised tick loop body — runs as a `tokio::spawn`
+/// task under the per-alloc supervisor. Tick-then-sleep ordering: the
+/// loop parks on `clock.sleep(interval)` BEFORE each probe attempt
+/// (the first row lands after the first interval elapses) racing
+/// against `child_token.cancelled()` in a `select!`.
+///
+/// On `clock.sleep` resolve the loop calls
+/// [`probe_tick`] and emits a `tracing::warn!` on every adapter or
+/// store error — no panic, no retry storm. The failure row itself
+/// IS the observable: the `ServiceLifecycleReconciler` consumes
+/// the LWW projection and decides the next action. A
+/// [`ProbeRunnerError::MechanicNotYetImplemented`] (Http / Exec
+/// today) is logged once per tick at warn level; the loop continues
+/// so the supervisor's lifecycle stays tied to the cancellation
+/// token, not to the first error.
+async fn supervised_probe_loop(
+    tcp_prober: Arc<dyn TcpProber>,
+    clock: Arc<dyn Clock>,
+    observation_store: Arc<dyn ObservationStore>,
+    alloc_id: AllocationId,
+    probe_idx: ProbeIdx,
+    descriptor: ProbeDescriptor,
+    child_token: CancellationToken,
+) {
+    let interval = Duration::from_secs(u64::from(descriptor.interval_seconds));
+    loop {
+        tokio::select! {
+            biased;
+            () = child_token.cancelled() => return,
+            () = clock.sleep(interval) => {
+                if let Err(err) = probe_tick(
+                    tcp_prober.as_ref(),
+                    clock.as_ref(),
+                    observation_store.as_ref(),
+                    &alloc_id,
+                    probe_idx,
+                    &descriptor,
+                ).await {
+                    tracing::warn!(
+                        name: "probe_tick.error",
+                        alloc_id = %alloc_id,
+                        probe_idx = probe_idx.0,
+                        role = ?descriptor.role,
+                        error = %err,
+                        "supervised probe tick failed; loop continues until cancelled",
+                    );
+                }
+            }
+        }
+    }
 }

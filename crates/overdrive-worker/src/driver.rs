@@ -1195,10 +1195,27 @@ mod lifecycle_hook_tests {
     }
 
     fn build_driver_with_runner() -> (ExecDriver, Arc<ProbeRunner>) {
+        // GAP-7 closure: ProbeRunner::new now takes `Arc<dyn Clock>` +
+        // `Arc<dyn ObservationStore>` as mandatory constructor
+        // parameters so `start_alloc` can spawn supervised
+        // per-descriptor tick tasks. These tests exercise only the
+        // lifecycle-hook dispatch path with an empty
+        // `probe_descriptors` Vec — no tick task is actually spawned,
+        // so the injected clock + obs are never observed.
+        // `overdrive_sim` is a dev-dep (also used by `node_health`
+        // tests in this crate); the AlwaysPassTcpProber comment
+        // above predates the dev-dep addition.
+        let obs: Arc<dyn overdrive_core::traits::observation_store::ObservationStore> =
+            Arc::new(overdrive_sim::adapters::observation_store::SimObservationStore::single_peer(
+                overdrive_core::id::NodeId::new("driver-test-node").expect("static NodeId parses"),
+                0,
+            ));
         let runner = Arc::new(ProbeRunner::new(
             Arc::new(AlwaysPassTcpProber),
             Arc::new(UnusedHttpProber),
             Arc::new(UnusedExecProber),
+            Arc::new(ZeroClock),
+            obs,
         ));
         let driver = ExecDriver::new(PathBuf::from("/tmp/overdrive-test"), Arc::new(ZeroClock))
             .with_probe_runner(Arc::clone(&runner));

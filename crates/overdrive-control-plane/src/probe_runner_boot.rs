@@ -22,6 +22,8 @@
 
 use std::sync::Arc;
 
+use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{ExecProber, HttpProber, TcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
@@ -53,8 +55,11 @@ pub async fn compose_and_probe_runner_gate(
     tcp_prober: Arc<dyn TcpProber>,
     http_prober: Arc<dyn HttpProber>,
     exec_prober: Arc<dyn ExecProber>,
+    clock: Arc<dyn Clock>,
+    observation_store: Arc<dyn ObservationStore>,
 ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
-    let runner = Arc::new(ProbeRunner::new(tcp_prober, http_prober, exec_prober));
+    let runner =
+        Arc::new(ProbeRunner::new(tcp_prober, http_prober, exec_prober, clock, observation_store));
     match runner.probe().await {
         Ok(()) => Ok(runner),
         Err(source) => {

@@ -20,5 +20,9 @@ mod acceptance {
     // RED scaffolds — production bodies land in DELIVER.
     mod probe_runner_exec_outcome;
     mod probe_runner_http_outcome;
+    // GAP-7 closure — `ProbeRunner::start_alloc` spawns per-descriptor
+    // supervised tick tasks. See
+    // `.context/01-03-structural-gap-audit.md` GAP-7.
+    mod probe_runner_supervised_tick;
     mod probe_runner_tcp_outcome;
 }

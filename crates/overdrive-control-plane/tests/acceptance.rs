@@ -183,6 +183,10 @@ mod acceptance {
     // See `.context/01-03-structural-gap-audit.md`.
     mod service_lifecycle_hydrate;
     mod service_lifecycle_liveness;
+    // GAP-7 closure — end-to-end witness that ProbeRunner → row →
+    // hydrate → ServiceLifecycleReconciler emits Stable. See
+    // `.context/01-03-structural-gap-audit.md` GAP-7.
+    mod service_lifecycle_probe_to_stable;
     mod service_lifecycle_purity;
     mod service_lifecycle_readiness;
     mod service_lifecycle_stable;
