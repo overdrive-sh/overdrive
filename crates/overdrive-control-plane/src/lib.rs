@@ -813,13 +813,88 @@ pub async fn run_server(
         .await
         .map_err(error::ControlPlaneError::from)?;
 
-    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
+    // Service-health-check-probes step 01-03d / ADR-0054 § 7 — the
+    // probe-runner Earned-Trust gate runs here, at the binary
+    // composition root, and the resulting `Arc<ProbeRunner>` is
+    // threaded into the production `ExecDriver` via the
+    // `compose_production_driver` helper below. Acceptance test
+    // `probe_runner_composition` drives the helper with `SimProber`
+    // adapters to assert the threading structurally — closes
+    // GAP-4 + GAP-5 from `.context/01-03-structural-gap-audit.md`.
+    // The `ProbeRunner` half of the composed pair is intentionally
+    // discarded here: the driver retains a clone of the `Arc` inside
+    // its `with_probe_runner(...)` field, so the supervisor map stays
+    // alive for the driver's lifetime. Destructuring the second
+    // tuple slot with `_` (NOT `_probe_runner`) makes the discard
+    // local + intentional and keeps the binary structurally distinct
+    // from the pre-patch shape that the dst-lint
+    // `underscore-binding-probe-runner` clause guards against.
+    //
+    // The driver shares the SAME cgroup root + probed `Arc<dyn CgroupFs>`
+    // substrate the workloads-slice bootstrap above used (Earned Trust
+    // invariant per ADR-0054 § Composition root wiring): `cgroup_root_path`
+    // and `fs` are threaded through rather than re-deriving the literal
+    // `/sys/fs/cgroup`.
+    let (driver, _) = compose_production_driver(
+        Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
+        Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
+        Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new()),
         cgroup_root_path,
         Arc::new(overdrive_host::SystemClock),
         fs,
-    ));
+    )
+    .await?;
 
     run_server_with_obs_and_driver(config, obs, driver).await
+}
+
+/// Compose the production `ExecDriver` with its Earned-Trust-vetted
+/// `Arc<ProbeRunner>` already threaded via `with_probe_runner(...)`.
+///
+/// This is the single composition site for the production driver +
+/// probe-runner threading per service-health-check-probes
+/// step 01-03d / ADR-0054 § 7 + § 2. The Earned-Trust gate
+/// (`probe_runner_boot::compose_and_probe_runner_gate`) runs FIRST;
+/// on success the returned `Arc<ProbeRunner>` is cloned into the
+/// driver builder so `ExecDriver::on_alloc_running` /
+/// `on_alloc_terminal` fire the per-alloc supervisor lifecycle in
+/// production. Without this threading the driver's lifecycle hooks
+/// fall through to the trait-default no-op and the probe subsystem
+/// is structurally dead — the failure mode `.context/01-03-structural-
+/// gap-audit.md` GAP-4 + GAP-5 documents.
+///
+/// Returns `(Arc<dyn Driver>, Arc<ProbeRunner>)` so acceptance tests
+/// can capture both halves of the composition and assert on
+/// observable state (`runner.active_alloc_count()` before and after
+/// `driver.on_alloc_running(...)` fires).
+///
+/// # Errors
+///
+/// Propagates `ControlPlaneError::ProbeRunnerBoot` from the
+/// Earned-Trust gate — the helper emits the canonical
+/// `health.startup.refused` tracing event before returning so the
+/// CLI binary boundary surfaces a structured refusal.
+pub async fn compose_production_driver(
+    tcp_prober: Arc<dyn overdrive_core::traits::prober::TcpProber>,
+    http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
+    exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
+    cgroup_root: std::path::PathBuf,
+    clock: Arc<dyn Clock>,
+    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+) -> Result<
+    (Arc<dyn Driver>, Arc<overdrive_worker::probe_runner::ProbeRunner>),
+    error::ControlPlaneError,
+> {
+    let probe_runner =
+        probe_runner_boot::compose_and_probe_runner_gate(tcp_prober, http_prober, exec_prober)
+            .await?;
+
+    let driver: Arc<dyn Driver> = Arc::new(
+        overdrive_worker::ExecDriver::new(cgroup_root, clock, fs)
+            .with_probe_runner(Arc::clone(&probe_runner)),
+    );
+
+    Ok((driver, probe_runner))
 }
 
 /// Start the control-plane server with caller-supplied observation
@@ -1051,36 +1126,20 @@ pub async fn run_server_with_obs_and_driver(
     // placeholder from 01-04 is removed in the same commit per
     // `feedback_single_cut_greenfield_migrations.md`.
     let host_ipv4 = resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?;
-    // Service-health-check-probes step 01-03d / ADR-0054 § 7:
-    // run the `ProbeRunner` Earned-Trust gate at composition root,
-    // BEFORE the listener binds. Wires the three production
-    // probe adapters (TCP via `TokioTcpProber`, HTTP via
-    // `HyperHttpProber`, Exec via `CgroupExecProber`) and probes
-    // the sacrificial loopback path; failure emits
-    // `health.startup.refused` + returns
-    // `ControlPlaneError::ProbeRunnerBoot`.
-    //
-    // The `probe_runner` arc is then threaded into the production
-    // `ExecDriver` so the driver's `on_alloc_running` /
-    // `on_alloc_terminal` hooks dispatch to
-    // `probe_runner.start_alloc` / `probe_runner.stop_alloc`. Tests
-    // that inject a non-`ExecDriver` (SimDriver / etc.) leave the
-    // hook as the trait default no-op.
-    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
-        std::sync::Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
-        std::sync::Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
-        std::sync::Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new()),
-    )
-    .await?;
-    // `probe_runner` is held to keep the supervisors alive across
-    // ticks. Future slices (02-01 + 02-02) will thread it into the
-    // production `ExecDriver` constructor + the `AppState`. Phase 1
-    // wires it through `_probe_runner` to document the live
-    // reference without forcing a downstream consumer; mutating
-    // the `ExecDriver` constructor signature here would cascade
-    // into every test fixture that builds an `ExecDriver` directly,
-    // which is out of scope for 01-03d.
-    let _probe_runner = probe_runner;
+    // Service-health-check-probes — the `ProbeRunner` Earned-Trust
+    // gate and the threading of `Arc<ProbeRunner>` into the
+    // production `ExecDriver` now live at the binary composition
+    // root (`run_server`) per ADR-0054 § 7. This split function
+    // accepts a caller-supplied driver and intentionally bypasses
+    // the gate: production drivers come in already-wired (the
+    // composition-root threaded the runner via
+    // `ExecDriver::with_probe_runner(...)` before delegating here);
+    // test callers that pass a non-`ExecDriver` (`SimDriver` etc.)
+    // are not exercising the probe path. A test caller that
+    // genuinely needs the gate's behaviour with a custom driver
+    // calls `probe_runner_boot::compose_and_probe_runner_gate(...)`
+    // itself and applies `.with_probe_runner(...)` before passing
+    // the driver in.
 
     runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
     // UI-05 (`backend-discovery-bridge-service-reachability` step

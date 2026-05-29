@@ -143,6 +143,26 @@ pub enum BannedKind {
     /// source files under `crates/overdrive-cli/src/render.rs` or
     /// `crates/overdrive-cli/src/commands/`.
     LiveLiteralBanned,
+    /// `let _probe_runner = ...` or `let _ = probe_runner` patterns
+    /// inside `crates/overdrive-control-plane/src/` — banned per
+    /// GAP-5 from `.context/01-03-structural-gap-audit.md`. The
+    /// pre-patch binary composition root constructed an
+    /// `Arc<ProbeRunner>` from the Earned-Trust gate, then discarded
+    /// it via `let _probe_runner = probe_runner;` — net effect: every
+    /// production `ExecDriver::on_alloc_running` /
+    /// `on_alloc_terminal` call took the trait-default no-op path
+    /// because the driver was constructed *before* the runner and
+    /// never threaded it via `.with_probe_runner(...)`. This clause
+    /// is the structural defense against re-introducing the discard
+    /// shape; the production composition must go through
+    /// `compose_production_driver(...)`, which threads the runner
+    /// via `ExecDriver::new(...).with_probe_runner(Arc::clone(&runner))`
+    /// and returns `(Arc<dyn Driver>, Arc<ProbeRunner>)` so the
+    /// destructure `let (driver, _) = compose_production_driver(...)`
+    /// at the binary boundary discards a positional tuple slot (a
+    /// structurally distinct pattern) rather than naming a bound
+    /// variable. See GAP-4 + GAP-5 closure commit for the patch.
+    UnderscoreBindingProbeRunner,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -645,6 +665,11 @@ pub fn scan_source_async_fs(source: &str, file: impl AsRef<Path>) -> Result<Vec<
 /// as a grep target so reviewers can find every reference.
 const LIVE_LITERAL_RULE_LABEL: &str = "live-literal-banned: replace with a measured duration";
 
+/// Rule label for the underscore-binding-probe-runner gate. The rule
+/// name doubles as a grep target so reviewers can find every reference.
+const UNDERSCORE_BINDING_PROBE_RUNNER_RULE_LABEL: &str = "underscore-binding-probe-runner: thread Arc<ProbeRunner> via \
+     ExecDriver::new(...).with_probe_runner(Arc::clone(&runner))";
+
 /// Tokenizer state for [`scan_source_live_literal`]. Module-scoped so
 /// the function body stays free of item-after-statement clippy
 /// complaints; the enum is implementation-private to the live-literal
@@ -784,6 +809,289 @@ fn live_literal_path_in_scope(rel_path: &Path) -> bool {
         return true;
     }
     false
+}
+
+// -----------------------------------------------------------------------------
+// Underscore-binding-probe-runner scanner — GAP-5 closure
+// -----------------------------------------------------------------------------
+//
+// Pre-patch the binary composition root at `crates/overdrive-control-plane/
+// src/lib.rs::run_server_with_obs_and_driver` built `ExecDriver` BEFORE the
+// `ProbeRunner` Earned-Trust gate ran, then discarded the resulting
+// `Arc<ProbeRunner>` into `let _probe_runner = probe_runner;`. Net effect:
+// every production `ExecDriver::on_alloc_running` / `on_alloc_terminal`
+// invocation took the trait-default no-op path — the probe subsystem was
+// structurally dead despite shipping green tests against the
+// `with_probe_runner`-equipped fixture path.
+//
+// This scanner is the structural defense: any line under
+// `crates/overdrive-control-plane/src/` matching either pattern
+//
+//   - `let _probe_runner` (bare or with type annotation or `=` continuation)
+//   - `let _ = probe_runner`
+//
+// fails the gate. The legitimate destructure shape used inside
+// `compose_production_driver`'s caller (`let (driver, _) = compose_production_driver(...)`)
+// does NOT match either pattern: it discards a positional tuple slot, not a
+// bound variable, and the helper's `Arc<dyn Driver>` retains the runner Arc
+// via `.with_probe_runner(...)`. See GAP-4 + GAP-5 closure commit.
+//
+// Purely syntactic line scan with comment-aware tokenization (so a
+// docstring or `//`-comment that names the literal pattern does not
+// trigger). No `overdrive-*` import — keeps the xtask boundary intact
+// per `.claude/rules/development.md` § "xtask is build / test / dev
+// orchestration, NOT a runtime entry point".
+
+/// Walk `source` line-by-line and flag any `let _probe_runner` or
+/// `let _ = probe_runner` pattern outside `//`-line, `///`-doc, and
+/// `/* */`-block comments.
+///
+/// Match shape (after comment stripping and whitespace normalisation):
+///
+/// - `let _probe_runner` — followed by anything (`;`, `:` for a type
+///   annotation, `=` for an initialiser, end-of-line). Anchored on
+///   the literal `_probe_runner` identifier; a `let _probe_runner_x`
+///   distinct binding does NOT match.
+/// - `let _ = probe_runner` — followed by `;`, `,`, `.method(...)`,
+///   `?`, or end-of-line. Anchored on the literal `probe_runner`
+///   identifier on the right-hand side.
+///
+/// The match is whole-token: `_probe_runner` matches but
+/// `__probe_runner` and `_probe_runner_clone` do NOT (next char after
+/// the match must be a non-identifier char).
+///
+/// # Errors
+///
+/// Currently infallible — kept as `Result` for parity with the other
+/// `scan_source_*` entry points in this module.
+pub fn scan_source_underscore_binding_probe_runner(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let mut violations = Vec::new();
+
+    // Comment-strip pass: produce a per-line copy of `source` with
+    // `//` line comments and `/* */` block comments replaced by spaces
+    // (preserving line numbers and column offsets). String literals
+    // are preserved as-is — neither pattern can legitimately appear
+    // inside a string in production code, and false positives there
+    // are acceptable.
+    let stripped = strip_comments_preserving_layout(source);
+
+    for (idx, line) in stripped.lines().enumerate() {
+        let line_no = idx + 1;
+        // Pattern 1: `let _probe_runner` as a whole-identifier match.
+        if let Some(col) = find_whole_token(line, "let _probe_runner") {
+            violations.push(Violation {
+                file: file.clone(),
+                line: line_no,
+                column: col + 1,
+                banned_path: "let _probe_runner".to_string(),
+                replacement_trait: UNDERSCORE_BINDING_PROBE_RUNNER_RULE_LABEL.to_string(),
+                kind: BannedKind::UnderscoreBindingProbeRunner,
+            });
+            continue;
+        }
+        // Pattern 2: `let _ = probe_runner` (whitespace flexible).
+        if let Some(col) = find_let_underscore_equals_probe_runner(line) {
+            violations.push(Violation {
+                file: file.clone(),
+                line: line_no,
+                column: col + 1,
+                banned_path: "let _ = probe_runner".to_string(),
+                replacement_trait: UNDERSCORE_BINDING_PROBE_RUNNER_RULE_LABEL.to_string(),
+                kind: BannedKind::UnderscoreBindingProbeRunner,
+            });
+        }
+    }
+
+    Ok(violations)
+}
+
+/// Tokenizer state for [`strip_comments_preserving_layout`]. Module-
+/// scoped to satisfy `clippy::items_after_statements` — the enum cannot
+/// live inside the function body.
+enum StripCommentsState {
+    Code,
+    LineComment,
+    BlockComment,
+    StringLit,
+}
+
+/// Replace `//`-line and `/* */`-block comments in `source` with spaces,
+/// preserving every newline so line and column numbers stay aligned with
+/// the original source.
+fn strip_comments_preserving_layout(source: &str) -> String {
+    use StripCommentsState as State;
+    let bytes = source.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    let mut state = State::Code;
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Code => {
+                if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::LineComment;
+                    out.push(b' ');
+                    out.push(b' ');
+                    i += 2;
+                    continue;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    state = State::BlockComment;
+                    out.push(b' ');
+                    out.push(b' ');
+                    i += 2;
+                    continue;
+                } else if c == b'"' {
+                    state = State::StringLit;
+                    out.push(c);
+                } else {
+                    out.push(c);
+                }
+            }
+            State::LineComment => {
+                if c == b'\n' {
+                    state = State::Code;
+                    out.push(b'\n');
+                } else {
+                    out.push(b' ');
+                }
+            }
+            State::BlockComment => {
+                if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::Code;
+                    out.push(b' ');
+                    out.push(b' ');
+                    i += 2;
+                    continue;
+                }
+                out.push(if c == b'\n' { b'\n' } else { b' ' });
+            }
+            State::StringLit => {
+                if c == b'\\' && i + 1 < bytes.len() {
+                    out.push(c);
+                    out.push(bytes[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                if c == b'"' {
+                    state = State::Code;
+                }
+                out.push(c);
+            }
+        }
+        i += 1;
+    }
+
+    String::from_utf8(out).unwrap_or_else(|_| source.to_string())
+}
+
+/// Find the first byte offset of `needle` in `line` such that the byte
+/// immediately following the match is NOT an identifier-continuation
+/// character (letter, digit, or `_`). Returns `None` if no whole-token
+/// match exists.
+///
+/// This guards against `_probe_runner_x` / `let _probe_runner_2` style
+/// distinct identifiers being flagged when the rule targets exactly the
+/// `_probe_runner` binding.
+fn find_whole_token(line: &str, needle: &str) -> Option<usize> {
+    let mut start = 0usize;
+    while let Some(rel) = line[start..].find(needle) {
+        let abs = start + rel;
+        let end = abs + needle.len();
+        let next_is_ident =
+            line.as_bytes().get(end).is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+        if !next_is_ident {
+            return Some(abs);
+        }
+        start = abs + needle.len();
+    }
+    None
+}
+
+/// Find the first column of `let _ = probe_runner` on `line`, with
+/// flexible whitespace around `_`, `=`, and `probe_runner`. The match
+/// is whole-token on `probe_runner` (the byte after must not be an
+/// identifier-continuation character).
+fn find_let_underscore_equals_probe_runner(line: &str) -> Option<usize> {
+    // Cheap pre-filter — if the line doesn't even contain `let` and
+    // `probe_runner`, skip the regex-ish scan.
+    if !line.contains("let") || !line.contains("probe_runner") {
+        return None;
+    }
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    while i + 3 <= bytes.len() {
+        if &bytes[i..i + 3] == b"let" {
+            // Anchor: `let` must be preceded by start-of-line or
+            // non-identifier char (so `width_let` doesn't trigger).
+            let prev_ok = if i == 0 {
+                true
+            } else {
+                let p = bytes[i - 1];
+                !(p.is_ascii_alphanumeric() || p == b'_')
+            };
+            // Followed by whitespace (otherwise `letchar` etc. could match).
+            let after = bytes.get(i + 3).copied();
+            let after_ok = after.is_some_and(|b| b == b' ' || b == b'\t');
+            if prev_ok && after_ok {
+                // Scan past `let` + WS, expect `_`, then `=`, then
+                // `probe_runner`.
+                let mut j = i + 3;
+                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b'_' {
+                    // The `_` must be a whole token: next char NOT
+                    // an identifier continuation.
+                    let after_us = bytes.get(j + 1).copied();
+                    let lone_underscore =
+                        after_us.is_none_or(|b| !(b.is_ascii_alphanumeric() || b == b'_'));
+                    if lone_underscore {
+                        j += 1;
+                        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                            j += 1;
+                        }
+                        if j < bytes.len() && bytes[j] == b'=' {
+                            j += 1;
+                            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                                j += 1;
+                            }
+                            // Now expect literal `probe_runner` as
+                            // whole token.
+                            let rest = &line[j..];
+                            if rest.starts_with("probe_runner") {
+                                let end = j + "probe_runner".len();
+                                let after_id = bytes.get(end).copied();
+                                let whole = after_id
+                                    .is_none_or(|b| !(b.is_ascii_alphanumeric() || b == b'_'));
+                                if whole {
+                                    return Some(i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Decide whether `rel_path` is under
+/// `crates/overdrive-control-plane/src/` — the scope of the
+/// underscore-binding-probe-runner gate.
+fn underscore_binding_probe_runner_path_in_scope(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    let is_rs = rel_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rs"));
+    if !is_rs {
+        return false;
+    }
+    s.contains("crates/overdrive-control-plane/src/") || s.contains("overdrive-control-plane/src/")
 }
 
 // -----------------------------------------------------------------------------
@@ -1308,6 +1616,50 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
         }
     }
 
+    // Scan `crates/overdrive-control-plane/src/` for the
+    // underscore-binding-probe-runner regression guard (GAP-5 closure
+    // from `.context/01-03-structural-gap-audit.md`).
+    violations.extend(scan_underscore_binding_probe_runner(&classes, &metadata)?);
+
+    Ok(violations)
+}
+
+/// Dispatch the underscore-binding-probe-runner gate across the
+/// workspace. Path-scoped so the gate only fires on the binary
+/// composition-root crate (`crates/overdrive-control-plane/src/`),
+/// where the pre-patch shape lived; any non-control-plane source file
+/// with a similarly-named `probe_runner` binding is out of scope.
+fn scan_underscore_binding_probe_runner(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel_to_workspace = rs
+                .strip_prefix(
+                    Path::new(&metadata.workspace_root.as_str())
+                        .canonicalize()
+                        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf()),
+                )
+                .unwrap_or(&rs)
+                .to_path_buf();
+            if !underscore_binding_probe_runner_path_in_scope(&rel_to_workspace) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) =
+                scan_source_underscore_binding_probe_runner(&source, &rel_to_workspace)
+            {
+                violations.extend(found);
+            }
+        }
+    }
     Ok(violations)
 }
 
@@ -1362,6 +1714,18 @@ pub fn render_violation(v: &Violation) -> String {
                 v.replacement_trait,
             ),
             "see docs/feature/workload-kind-discriminator/slices/slice-01-parser-kind-discriminator.md",
+        ),
+        BannedKind::UnderscoreBindingProbeRunner => (
+            "error: underscore-bound or discarded `probe_runner` in control-plane source",
+            format!(
+                "{} — thread the runner via \
+                 `ExecDriver::new(...).with_probe_runner(Arc::clone(&runner))` \
+                 (use the `compose_production_driver(...)` helper at the \
+                 binary boundary). The discard shape silently disables every \
+                 production probe-supervisor lifecycle hook.",
+                v.replacement_trait,
+            ),
+            "see GAP-5 from .context/01-03-structural-gap-audit.md",
         ),
     };
     format!(
@@ -2353,5 +2717,219 @@ mod tests {
             msg.contains("impl ProbeRunner"),
             "error names the missing impl block; got {msg:?}"
         );
+    }
+
+    // -------------------------------------------------------------
+    // Underscore-binding-probe-runner scanner — GAP-5 closure
+    // -------------------------------------------------------------
+
+    /// Pattern 1: `let _probe_runner = foo;` MUST be flagged.
+    #[test]
+    fn underscore_binding_probe_runner_let_bare_form_flagged() {
+        let source = r"
+            pub fn boot() {
+                let probe_runner = make_runner();
+                let _probe_runner = probe_runner;
+            }
+        ";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "let _probe_runner = ... must trigger exactly one violation; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::UnderscoreBindingProbeRunner);
+        assert_eq!(violations[0].banned_path, "let _probe_runner");
+    }
+
+    /// Pattern 1 with a type annotation: `let _probe_runner: Arc<...> = ...;`
+    #[test]
+    fn underscore_binding_probe_runner_let_with_type_annotation_flagged() {
+        let source = r"
+            pub fn boot() {
+                let _probe_runner: Arc<ProbeRunner> = make_runner();
+            }
+        ";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "let _probe_runner: T = ... must trigger; got {violations:?}"
+        );
+    }
+
+    /// Pattern 2: `let _ = probe_runner;` (destructure-discard escape
+    /// hatch) MUST be flagged.
+    #[test]
+    fn underscore_binding_probe_runner_let_underscore_equals_flagged() {
+        let source = r"
+            pub fn boot() {
+                let probe_runner = make_runner();
+                let _ = probe_runner;
+            }
+        ";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "let _ = probe_runner must trigger exactly one violation; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::UnderscoreBindingProbeRunner);
+        assert_eq!(violations[0].banned_path, "let _ = probe_runner");
+    }
+
+    /// Pattern 2 with flexible whitespace: `let  _   =  probe_runner ;`
+    #[test]
+    fn underscore_binding_probe_runner_let_underscore_equals_whitespace_flexible() {
+        let source = "pub fn boot() { let   _    =    probe_runner; }";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "whitespace-flexible `let _ = probe_runner` must trigger; got {violations:?}"
+        );
+    }
+
+    /// Production destructure shape: `let (driver, _) = compose_production_driver(...).await?;`
+    /// MUST NOT be flagged. The discard is a positional tuple slot, not
+    /// a bound `_probe_runner` variable, and the helper retains the
+    /// runner Arc via `.with_probe_runner(...)` on the driver.
+    #[test]
+    fn underscore_binding_probe_runner_destructure_tuple_slot_not_flagged() {
+        let source = r"
+            pub async fn run_server() -> Result<()> {
+                let (driver, _) = compose_production_driver(
+                    tcp_prober,
+                    http_prober,
+                    exec_prober,
+                    cgroup_root,
+                    clock,
+                )
+                .await?;
+                run_server_with_obs_and_driver(config, obs, driver).await
+            }
+        ";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "tuple-slot discard `let (driver, _) = ...` must NOT trigger; got {violations:?}"
+        );
+    }
+
+    /// Comments naming the literal pattern MUST NOT trigger the gate.
+    /// The structural defense is against actual code, not documentation
+    /// that describes the failure mode.
+    #[test]
+    fn underscore_binding_probe_runner_comments_not_flagged() {
+        let source = r"
+            pub fn boot() {
+                // Pre-patch we wrote: let _probe_runner = probe_runner;
+                /* Now we write: let _ = probe_runner; */
+                /// Docstring: let _probe_runner = foo;
+                let probe_runner = make_runner();
+                run_with(probe_runner);
+            }
+        ";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "comments naming the literal pattern must NOT trigger; got {violations:?}"
+        );
+    }
+
+    /// Whole-token matching: `_probe_runner_x` and similar distinct
+    /// identifiers MUST NOT match the `_probe_runner` token. Same for
+    /// `probe_runner_clone` on the RHS of `let _ = ...`.
+    #[test]
+    fn underscore_binding_probe_runner_distinct_identifiers_not_flagged() {
+        let source = r"
+            pub fn boot() {
+                let _probe_runner_x = make_runner();
+                let _ = probe_runner_clone;
+                let _ = probe_runner_handle.spawn();
+            }
+        ";
+        let violations = scan_source_underscore_binding_probe_runner(
+            source,
+            std::path::Path::new("synthetic.rs"),
+        )
+        .expect("source must scan");
+        assert!(violations.is_empty(), "distinct identifiers must NOT trigger; got {violations:?}");
+    }
+
+    /// The actual current `crates/overdrive-control-plane/src/lib.rs`
+    /// MUST scan clean — the production composition root uses
+    /// `compose_production_driver(...)` + the tuple-slot discard
+    /// pattern that does not match either banned shape.
+    #[test]
+    fn underscore_binding_probe_runner_real_control_plane_lib_clean() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask/.. is workspace root")
+            .join("crates/overdrive-control-plane/src/lib.rs");
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!("read {}: {e}", path.display());
+        });
+        let violations = scan_source_underscore_binding_probe_runner(
+            &source,
+            std::path::Path::new("crates/overdrive-control-plane/src/lib.rs"),
+        )
+        .expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "real control-plane lib.rs must be clean post-GAP-4+5 patch; got {violations:?}"
+        );
+    }
+
+    /// Path-scoping: source outside `crates/overdrive-control-plane/src/`
+    /// is not gated by `scan_workspace`'s dispatch loop. Verify the
+    /// scope predicate directly.
+    #[test]
+    fn underscore_binding_probe_runner_path_scope_in_crate() {
+        assert!(underscore_binding_probe_runner_path_in_scope(std::path::Path::new(
+            "crates/overdrive-control-plane/src/lib.rs"
+        )));
+        assert!(underscore_binding_probe_runner_path_in_scope(std::path::Path::new(
+            "crates/overdrive-control-plane/src/worker/mod.rs"
+        )));
+    }
+
+    /// Path-scoping: source outside the control-plane crate's `src/`
+    /// is OUT of scope.
+    #[test]
+    fn underscore_binding_probe_runner_path_scope_out_of_crate() {
+        assert!(!underscore_binding_probe_runner_path_in_scope(std::path::Path::new(
+            "crates/overdrive-worker/src/probe_runner/mod.rs"
+        )));
+        assert!(!underscore_binding_probe_runner_path_in_scope(std::path::Path::new(
+            "crates/overdrive-control-plane/tests/acceptance/probe_runner_composition.rs"
+        )));
+        assert!(!underscore_binding_probe_runner_path_in_scope(std::path::Path::new(
+            "crates/overdrive-cli/src/main.rs"
+        )));
     }
 }
