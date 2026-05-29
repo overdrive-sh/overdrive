@@ -1939,19 +1939,27 @@ async fn hydrate_service_alloc_facts(
             .max_by_key(|p| p.last_observed_at_unix_ms)
             .map(|p| p.status);
 
-        // `exit_code` is not carried on `AllocStatusRowV1` directly —
-        // the row's `terminal: Option<TerminalCondition>` surface
-        // carries failure detail. EarlyExit's exit-code projection
-        // from the row's terminal lives in a downstream slice; Phase 1
-        // sources `exit_code` as `None` and lets the reconciler's
-        // EarlyExit branch fall back to `0` via `.unwrap_or(0)`. The
-        // `started_at` invariant (Some on Running) is load-bearing
-        // per the GAP-1 contract.
+        // `exit_code` is sourced from the row's `reason:
+        // Option<TransitionReason>` — the `WorkloadCrashedImmediately`
+        // variant carries the observed process exit code (written by
+        // `worker/exit_observer.rs`). Mirrors the Job-kind precedent
+        // at `workload_lifecycle.rs::classify_natural_exit_terminal`
+        // (line ~944). The `started_at` invariant (Some on Running) is
+        // load-bearing per the GAP-1 contract.
+        let exit_code = match row.reason {
+            Some(
+                overdrive_core::transition_reason::TransitionReason::WorkloadCrashedImmediately {
+                    exit_code,
+                    ..
+                },
+            ) => exit_code,
+            _ => None,
+        };
         let fact = overdrive_core::service_lifecycle::ServiceAllocFact {
             alloc_id: row.alloc_id.clone(),
             state: row.state,
             started_at: row.started_at,
-            exit_code: None,
+            exit_code,
             latest_startup_probe,
             max_attempts: *max_attempts,
             startup_deadline: *startup_deadline,

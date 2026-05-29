@@ -190,6 +190,25 @@ fn make_alloc_status_row(
     }
 }
 
+/// Like [`make_alloc_status_row`] but carries an explicit
+/// `reason: Option<TransitionReason>` so the `exit_code` projection
+/// (GAP-11) can be exercised. The Service-kind hydration sources
+/// `exit_code` from the row's `WorkloadCrashedImmediately` variant,
+/// mirroring the Job-kind precedent at
+/// `workload_lifecycle.rs::classify_natural_exit_terminal`.
+fn make_alloc_status_row_with_reason(
+    wid: &WorkloadId,
+    aid: &AllocationId,
+    state: AllocState,
+    started_at: Option<UnixInstant>,
+    counter: u64,
+    reason: Option<overdrive_core::transition_reason::TransitionReason>,
+) -> AllocStatusRow {
+    let mut row = make_alloc_status_row(wid, aid, state, started_at, counter);
+    row.reason = reason;
+    row
+}
+
 async fn write_alloc_status(state: &AppState, row: AllocStatusRow) {
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
 }
@@ -601,6 +620,93 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         &ServiceLifecycleView::default(),
         &tick,
     );
+}
+
+// ===========================================================================
+// GAP-11 — hydrate_actual projects exit_code from row.reason
+//          (WorkloadCrashedImmediately) for the Service kind.
+// ===========================================================================
+
+/// The Service-kind hydration MUST source the alloc's `exit_code` from
+/// the row's `reason: Option<TransitionReason>` — specifically the
+/// `WorkloadCrashedImmediately { exit_code, .. }` variant — and project
+/// `None` for any other reason shape. This mirrors the Job-kind
+/// precedent at `workload_lifecycle.rs::classify_natural_exit_terminal`
+/// (line ~944) and closes GAP-11: before the fix the projection
+/// hardcoded `exit_code: None`, so every EarlyExit wire surface
+/// reported `exit_code: 0`.
+///
+/// Three cases pin both the match arm AND the `_ => None` fallback as
+/// mutation targets:
+///   1. crashed with `exit_code: Some(1)` → fact carries `Some(1)`
+///   2. crashed with `exit_code: None` (signal-only) → fact carries `None`
+///   3. a non-crash reason → fact carries `None` (the `_` fallback)
+#[tokio::test]
+async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
+    use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
+
+    let cases: Vec<(&str, Option<TransitionReason>, Option<i32>)> = vec![
+        (
+            "crash-exit-1",
+            Some(TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(1),
+                signal: None,
+                stderr_tail: None,
+            }),
+            Some(1),
+        ),
+        (
+            "crash-signal-only",
+            Some(TransitionReason::WorkloadCrashedImmediately {
+                exit_code: None,
+                signal: Some(9),
+                stderr_tail: None,
+            }),
+            None,
+        ),
+        ("non-crash-reason", Some(TransitionReason::Stopped { by: StoppedBy::Process }), None),
+    ];
+
+    for (suffix, reason, expected_exit_code) in cases {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
+            as Arc<dyn ObservationStore>;
+        let state = build_app_state(&tmp, Arc::clone(&obs)).await;
+
+        let wid = workload_id(&format!("svc-exit-{suffix}"));
+        let svc = build_service_spec(&wid, vec![declared_tcp_probe(8080, 30, 2)]);
+        persist_service_intent(&state, &svc).await;
+
+        let aid = alloc_id(&format!("svc-exit-{suffix}-0"));
+        let started = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+        // Failed row with a started_at so the fact projects without the
+        // Running-invariant unreachable; the exit_code projection is the
+        // assertion under test.
+        write_alloc_status(
+            &state,
+            make_alloc_status_row_with_reason(
+                &wid,
+                &aid,
+                AllocState::Failed,
+                Some(started),
+                1,
+                reason,
+            ),
+        )
+        .await;
+
+        let actual = extract_lifecycle(
+            hydrate_actual_for_test(&service_lifecycle_reconciler(), &target_for(&wid), &state)
+                .await
+                .expect("hydrate_actual"),
+        );
+        let fact = actual.allocs.get(&aid).expect("fact present");
+        assert_eq!(
+            fact.exit_code, expected_exit_code,
+            "exit_code must project from row.reason for case {suffix:?}: expected {expected_exit_code:?}, got {:?}",
+            fact.exit_code,
+        );
+    }
 }
 
 // ===========================================================================
