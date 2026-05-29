@@ -1,0 +1,278 @@
+schema_version: 1
+
+journey:
+  name: "Submit a Service and trust the stable / failed signal"
+  goal: >
+    An operator submits a Service-kind workload through
+    `overdrive job submit <spec>` and receives a streaming wire signal
+    that reflects the Service's operator-meaningful liveness (probe-
+    derived Stable / Failed), not the kernel's bare-fork acceptance.
+    Closes RCA root cause A
+    (docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md)
+    for the Service workload kind.
+  persona: >
+    Ana, Overdrive platform engineer on a single-node dev host. Has
+    been bitten by the coinflip exit-1 RCA. Wants the CLI to tell
+    her the truth about whether her Service is actually serving.
+    Secondary: Omar, operator who will use the same CLI once auth
+    lands in Phase 5.
+  job_id: J-OPS-004  # Service-honesty sub-job (new; see jobs.yaml patch)
+  extends_job: J-OPS-003
+
+  emotional_arc:
+    start: >
+      Anxious — "last time the CLI said 'is running' for a coinflip
+      that exited 1; I cannot trust the stream yet."
+    middle: >
+      Skeptical → focused. The Accepted line lands, the probing
+      progress is visible, work is happening.
+    end: >
+      Trusting (happy) — Stable carries a real `settled_in` Duration
+      and names the witnessing probe. OR Relieved (sad) — Failed
+      arrives with an actionable reason (StartupProbeFailed |
+      EarlyExit { exit_code }), the operator can fix the spec.
+
+steps:
+  - id: 1
+    name: "Submit Service spec"
+    command: "overdrive job submit payments.toml"
+    summary: >
+      CLI reads TOML containing `[service]` block (per ADR-0047).
+      Spec MAY carry `[[health_check.startup]]` / `[[health_check.readiness]]`
+      / `[[health_check.liveness]]` arrays. If absent, the platform
+      infers a default TCP-connect startup probe against the first
+      `[[listener]].port`. Server validates, commits via IntentStore,
+      dispatches StartAllocation.
+    shared_artifacts:
+      - name: probe_idx
+        source: "TOML array position; 0 for inferred default"
+        displayed_as: "${probe_idx}"
+        consumers: [ProbeResultRow, CLI render, streaming progress line]
+    emotional_state:
+      entry: "Anxious — will it lie again?"
+      exit: "Skeptical — Accepted line landed, but stream not yet trusted."
+    integration_checkpoint: |
+      `intent_key` + `commit_index` byte-equal between CLI line and
+      server's IntentStore write (reuses existing checkpoint).
+    failure_modes:
+      - "TOML has [[health_check.*]] under [job] → ParseError::ProbesNotAllowedOnKind { kind: 'job' }"
+      - "TOML has [[health_check.*]] under [schedule] → ParseError::ProbesNotAllowedOnKind { kind: 'schedule' }"
+      - "HTTP probe missing path → ParseError::HttpProbeMissingPath { probe_idx }"
+      - "Exec probe missing command → ParseError::ExecProbeMissingCommand { probe_idx }"
+      - "Service spec has zero listeners AND no explicit probes → ParseError::NoListeners (existing per ADR-0047)"
+    gherkin: |
+      Scenario: Service spec with explicit HTTP startup probe is accepted
+        Given Ana has authored payments.toml with a [service] block,
+        And one [[listener]] on port 8080,
+        And one [[health_check.startup]] with path "/healthz" port 8080 timeout 5s max_attempts 30
+        When Ana runs `overdrive job submit payments.toml`
+        Then the CLI prints "Accepted: service 'payments' (intent_key=service/payments, commit=<N>)"
+        And the exit code is not yet determined (stream continues)
+
+      Scenario: Service spec without probes infers a TCP-connect startup probe
+        Given Ana has authored payments-minimal.toml with a [service] block,
+        And one [[listener]] on port 8080,
+        And zero [[health_check.*]] sections
+        When Ana runs `overdrive job submit payments-minimal.toml`
+        Then the CLI prints "Accepted: service 'payments-minimal' (...)"
+        And the inferred probe is "tcp 0.0.0.0:8080" (visible in subsequent progress line and `alloc status`)
+
+      Scenario: Probes on a Job kind are rejected with named guidance
+        Given Ana has authored a TOML file with a [job] block AND a [[health_check.startup]] section
+        When Ana runs `overdrive job submit bad.toml`
+        Then the CLI prints "Error: probes not allowed on workload kind 'job': Job has no readiness question; on completion is enough."
+        And the exit code is 1
+
+  - id: 2
+    name: "Probes execute, results land in observation store"
+    command: "(internal — observable via streaming progress)"
+    summary: >
+      Worker's ProbeRunner schedules each declared/inferred probe on its
+      configured interval. Each tick writes a ProbeResultRow
+      (alloc_id, probe_idx, role, status: Pass|Fail, last_observed_at,
+      last_fail_reason: Option<String>) to the ObservationStore (LWW per
+      `(alloc_id, probe_idx)`). HTTP probes do plain GET against the
+      configured path:port within timeout. TCP probes do connect() within
+      timeout. Exec probes run inside the workload's cgroup; exit 0 = pass.
+    shared_artifacts:
+      - name: last_observed_at
+        source: ProbeResultRow
+        displayed_as: "${last_observed_at}"
+        consumers: [CLI alloc status Probes section]
+      - name: last_fail_reason
+        source: "ProbeResultRow (captured by ProbeRunner on each failure)"
+        displayed_as: "${last_fail_reason}"
+        consumers: [CLI Probes section, ServiceSubmitEvent::Failed payload]
+    emotional_state:
+      entry: "Skeptical"
+      exit: "Focused — work is visible, results are landing."
+    integration_checkpoint: |
+      Each progress line's `probe_idx` MUST resolve to a declared probe
+      in the spec, or `0` for inferred default.
+    failure_modes:
+      - "Worker ProbeRunner offline → ProbeResultRow absent → reconciler treats as Pending within startup_deadline → emits Failed { ProbeRunnerUnreachable }"
+      - "HTTP probe target binds but returns 5xx persistently → each tick = Fail; eventual StartupProbeFailed"
+      - "Exec probe binary not found → Fail with last_fail: 'exec: command not found'"
+    gherkin: |
+      Scenario: HTTP probe pass produces a ProbeResultRow with status Pass
+        Given a Service alloc 'alloc-payments-0' is Running
+        And probe #0 is HTTP GET /healthz port 8080
+        And the workload responds 200 OK within 50ms
+        When the ProbeRunner ticks
+        Then a ProbeResultRow exists with (alloc_id: alloc-payments-0, probe_idx: 0, role: startup, status: Pass)
+        And last_observed_at is within 1 second of the tick
+
+      Scenario: HTTP probe fail captures the failure reason for operator visibility
+        Given probe #0 is HTTP GET /healthz port 8080
+        And the workload returns HTTP 503 for the probe request
+        When the ProbeRunner ticks
+        Then the ProbeResultRow status is Fail
+        And last_fail_reason is "HTTP 503"
+
+      Scenario: Exec probe runs inside the workload cgroup
+        Given probe #0 is exec ["/bin/healthcheck.sh"]
+        And the workload's cgroup is /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-payments-0.scope
+        When the ProbeRunner runs the exec probe
+        Then the probe process is a member of the workload's cgroup
+        And exit 0 maps to status Pass; non-zero exit maps to Fail
+
+  - id: 3
+    name: "Service reconciler decides Stable or Failed"
+    command: "(internal — observable via streaming terminal event)"
+    summary: >
+      ServiceLifecycleReconciler ticks. Reads AllocStatusRow +
+      ProbeResultRows for each alloc. Pure decision: if startup probe(s)
+      have status Pass for K consecutive ticks AND alloc is Running →
+      emit Action::SetTerminalCondition { Stable }. If alloc is Failed
+      (ExitObserver wrote terminal row) within startup_deadline → emit
+      Action::SetTerminalCondition { Failed { reason: EarlyExit
+      { exit_code } } }. If startup probe(s) never pass within
+      startup_deadline → emit Action::SetTerminalCondition { Failed
+      { reason: StartupProbeFailed } }. Action shim writes
+      AllocStatusRow.terminal AND broadcasts LifecycleEvent.terminal
+      (ADR-0037 byte-equality guarantee). Streaming subscriber forwards
+      onto ServiceSubmitEvent::Stable | ServiceSubmitEvent::Failed.
+    shared_artifacts:
+      - name: settled_in
+        source: "Service reconciler's deciding tick (`now - AllocStatusRow.started_at`)"
+        displayed_as: "${settled_in}"
+        consumers: [ServiceSubmitEvent::Stable wire variant, CLI render]
+      - name: witness
+        source: "Service reconciler's deciding tick (probe_idx + role)"
+        displayed_as: "${witness}"
+        consumers: [ServiceSubmitEvent::Stable.witness, CLI render]
+    emotional_state:
+      entry: "Focused"
+      exit: >
+        Trusting (Stable path) — real Duration, named witness. OR
+        Relieved (Failed path) — honest reason, actionable.
+    integration_checkpoint: |
+      `settled_in` is a real `Duration::from_millis(N)` where N > 0.
+      `witness.probe_idx` resolves to a declared/inferred probe. The
+      `terminal` field on AllocStatusRow and on LifecycleEvent are
+      byte-equal (ADR-0037 §3).
+    failure_modes:
+      - "Workload exits 0 within startup_deadline → Failed { EarlyExit { exit_code: 0 } } (Service-kind treats early exit as failure regardless of exit code; long-lived expectation)"
+      - "streaming_cap (60s) fires before startup probe completes → existing Timeout reason; not extended by this feature"
+      - "Operator declared `[[health_check.startup]] = []` (empty array, explicit opt-out) → reconciler treats as 'no startup probe; Stable on first Running row' (preserves Phase-1 semantics for operators who want them)"
+    gherkin: |
+      Scenario: Stable emitted when startup probe passes within deadline
+        Given a Service alloc 'alloc-payments-0' is Running with started_at = T0
+        And probe #0 has K consecutive Pass results, the latest at T0 + 1.2s
+        When the ServiceLifecycleReconciler ticks at T0 + 1.3s
+        Then it emits Action::SetTerminalCondition { Stable }
+        And the LifecycleEvent.terminal carries TerminalCondition::Stable
+        And the operator sees ServiceSubmitEvent::Stable { settled_in: 1.2s, witness: StartupProbe { probe_idx: 0 } }
+
+      Scenario: Failed (EarlyExit) emitted when workload exits before any probe pass
+        Given a Service alloc is Running
+        And the workload exits with code 1 within 50ms of started_at
+        And no startup probe has yet recorded a Pass
+        When the ServiceLifecycleReconciler ticks after the ExitObserver writes terminal Failed row
+        Then it emits Action::SetTerminalCondition { Failed { reason: EarlyExit { exit_code: 1 } } }
+        And the operator sees ServiceSubmitEvent::Failed { reason: EarlyExit { exit_code: 1 }, stderr_tail: "..." }
+        And the CLI exit code is 1
+
+      Scenario: Failed (StartupProbeFailed) emitted when probe never passes within deadline
+        Given a Service alloc is Running
+        And probe #0 is HTTP GET /healthz with timeout 5s and max_attempts 12 (startup_deadline = 60s)
+        And every probe attempt returns HTTP 503
+        When 60 seconds elapse from started_at
+        Then the ServiceLifecycleReconciler emits Action::SetTerminalCondition { Failed { reason: StartupProbeFailed { probe_idx: 0, last_fail: "HTTP 503", attempts: 12 } } }
+        And the operator sees ServiceSubmitEvent::Failed with a renderable reason
+
+  - id: 4
+    name: "Operator inspects probe state via `alloc status`"
+    command: "overdrive alloc status --job payments"
+    summary: >
+      CLI calls DescribeJob + AllocStatus. For Service-kind allocs with
+      probes declared/inferred, the render gains a Probes section
+      (ADR-0033 enrichment). Each probe renders one row: `${role}
+      #${probe_idx} ${mechanic_summary} last=${status} at
+      ${last_observed_at}`. If last status is Fail, the row also shows
+      `${last_fail_reason}`. The section is ABSENT for Job-kind and
+      Schedule-kind allocs.
+    shared_artifacts:
+      - name: probe_render_format
+        source: "crates/overdrive-cli/src/render.rs probes_section function (NEW; defined this feature)"
+        displayed_as: "(Probes section table)"
+        consumers: [`alloc status` for Service kind]
+    emotional_state:
+      entry: "Curious — what is the current probe state?"
+      exit: "Informed — all probes, their last status, their last failure if any."
+    integration_checkpoint: |
+      Probes section iff `kind == Service AND probes_present`.
+      For `kind in {Job, Schedule}`, the section MUST be absent.
+    failure_modes:
+      - "Probes section requested for Job/Schedule alloc → render guard rejects (test asserts absence)"
+      - "Alloc has no ProbeResultRow yet (just-started) → render shows 'last=pending' rather than blank"
+    gherkin: |
+      Scenario: Service alloc renders a Probes section in alloc status
+        Given a stable Service 'payments' has one alloc 'alloc-payments-0'
+        And the alloc has three probes (startup #0 tcp, readiness #0 http, liveness #0 http)
+        And each probe's most recent ProbeResultRow has status Pass
+        When Ana runs `overdrive alloc status --job payments`
+        Then the output includes a "Probes:" section
+        And the section has three rows, one per probe, with `last=ok` and a timestamp
+
+      Scenario: Job alloc does NOT render a Probes section
+        Given a Job 'cron-cleanup' has run to completion
+        When Ana runs `overdrive alloc status --job cron-cleanup`
+        Then the output does NOT include a "Probes:" section
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: probe_idx
+      must_match_across: [1, 2, 4]
+      failure_message: >
+        probe_idx assigned at parse time (TOML array position OR 0 for
+        inferred default) MUST be the same value used by ProbeResultRow
+        PK, by streaming progress lines, by `alloc status` render, and
+        by Failed reason payloads. Mismatches break operator's ability
+        to correlate.
+
+    - artifact: settled_in
+      must_match_across: [3]
+      failure_message: >
+        `settled_in` is a single Duration value computed at the reconciler's
+        deciding tick. It MUST be a real measurement (`now -
+        AllocStatusRow.started_at`), never a sentinel literal like the
+        old "live" string (per RCA-A solution D).
+
+    - artifact: terminal_byte_equality
+      must_match_across: [3]
+      failure_message: >
+        ADR-0037 §3 guarantee: AllocStatusRow.terminal and
+        LifecycleEvent.terminal are populated by the same action shim
+        call with the same TerminalCondition value. Stable / Failed
+        bytes MUST be identical across the snapshot surface (alloc
+        status HTTP handler) and the streaming surface (NDJSON wire).
+
+changelog:
+  - date: 2026-05-24
+    feature: service-health-check-probes
+    change: >
+      Initial journey for service-health-check-probes DISCUSS wave.
+      Extends submit-a-job to add probe-derived Stable / Failed
+      semantics for Service kind. Walking skeleton = Slice 01 (default
+      TCP-connect startup probe end-to-end).
