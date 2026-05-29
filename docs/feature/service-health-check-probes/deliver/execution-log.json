@@ -498,6 +498,41 @@
       "s": "EXECUTED",
       "d": "PARTIAL: fixtures+helper landed; sub-scenarios S-SHCP-INT-CLI-02/03/04/05 stay RED \u2014 blocked on upstream gaps in reconciler_runtime.rs:1360 (ServiceLifecycle hydrate_actual returns default()) and lib.rs:1007-1015 (ProbeRunner not wired into ExecDriver, deferred to slices 02-01+02-02); see commit body",
       "t": "2026-05-26T12:49:22Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 upstream GAP-1..10 cascade now complete (HEAD a84a1b5a); ServiceLifecycleReconciler hydrate_actual returns real probe rows (GAP-1), reconciler enqueued + self-sustaining through startup window (GAP-9/10), ProbeRunner threaded into ExecDriver (GAP-4/5); the BLOCKED_BY_DEPENDENCY blockers logged 2026-05-26 are resolved. Verified exactly one #[should_panic(expected=RED scaffold)] marker remains (CLI-01) in service_honest_stable.rs",
+      "t": "2026-05-29T13:46:03Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 four sub-scenario AT scaffolds (S-SHCP-INT-CLI-02/03/04/05) unskipped (#[should_panic] removed, real bodies authored); they failed for the correct business-logic reason against the pre-cascade composition root (Service-kind reconciler never reached terminal). After the GAP-1..10 cascade landed they fail-no-more \u2014 fail-for-right-reason gate satisfied historically, now GREEN. CLI-01 retains #[should_panic(expected=RED scaffold)] for 01-03f-2",
+      "t": "2026-05-29T13:46:12Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface from 01-03b (dispatch enum) + 01-03e2 (variant + projection taxonomy property tests) + 01-03c/d (probe_runner + driver-hook mutation gates); no new unit-level decomposition needed to reach GREEN",
+      "t": "2026-05-29T13:46:17Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 all five service_honest_stable sub-scenarios pass under Lima at HEAD a84a1b5a: CLI-02 quick-bind Stable settled-in-window PASS, CLI-03 never-binds StartupProbeFailed PASS, CLI-04 snapshot+streaming terminal byte-equality PASS, CLI-05 composition-root probe gate PASS; CLI-01 should_panic-green (stays RED for 01-03f-2). Full workspace suite 1621/1621 passed (4 leaky, 16 skipped) \u2014 no regressions",
+      "t": "2026-05-29T13:46:24Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 commit c2d99561 activates S-SHCP-INT-CLI-02/03/04/05 (#[should_panic] removed, GREEN end-to-end through real CLI handler \u2192 in-process server \u2192 reconciler \u2192 driver \u2192 ProbeRunner \u2192 obs-store); CLI-01 stays RED (#[should_panic(expected=RED scaffold)]) for 01-03f-2. Supersedes the 2026-05-26 PARTIAL COMMIT \u2014 the upstream GAP-1..10 blockers it cited are now closed. Gates: check/clippy/dst-lint clean; full suite 1621/1621. Umbrella 01-03f NOT logged (reserved for 01-03f-2 + user approval)",
+      "t": "2026-05-29T13:47:29Z"
     }
   ]
 }

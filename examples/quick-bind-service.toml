@@ -38,10 +38,18 @@ protocol = "tcp"
 # 600ms quick-bind window. The trailing `sleep 60` keeps the alloc
 # Running long enough that the reconciler can observe the Pass
 # transition and emit Stable before the workload exits.
+#
+# `nc -l 0.0.0.0 8080` — bind to the wildcard address so the
+# ADR-0058-inferred default-TCP startup probe (which connects to
+# `tcp 0.0.0.0:8080`) reaches the listener. Binding to
+# `127.0.0.1` instead causes the probe to fail with
+# `connection refused` because Linux does not route a `connect(2)`
+# to `0.0.0.0:N` onto a listener bound only to the loopback
+# address — verified empirically inside the Lima dev VM.
 command = "/bin/bash"
 args = [
     "-c",
-    "sleep 0.5 && (nc -l 127.0.0.1 8080 &) && sleep 60",
+    "sleep 0.5 && (nc -l 0.0.0.0 8080 &) && sleep 60",
 ]
 
 [resources]
