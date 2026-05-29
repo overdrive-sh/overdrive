@@ -46,7 +46,7 @@ use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::traits::prober::{ProbeFailure, ProbeOutcome, TcpProber};
+use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome, TcpProber};
 use parking_lot::Mutex;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -69,11 +69,11 @@ use tokio_util::sync::CancellationToken;
 )]
 pub struct ProbeRunner {
     tcp_prober: Arc<dyn TcpProber>,
-    // SCAFFOLD: true — http_prober + exec_prober remain wired but
-    // unused at slice 01; HTTP body in 02-01, Exec body in 02-02.
-    // Per-descriptor task spawn for Http / Exec mechanics logs +
-    // returns; the production loop does NOT panic on them.
-    #[allow(dead_code)]
+    // `http_prober` is wired into `probe_tick`'s `ProbeMechanic::Http`
+    // dispatch arm as of slice 02-01. `exec_prober` remains wired but
+    // unused until the Exec body lands in 02-02; the per-descriptor
+    // task spawn for the Exec mechanic logs + returns via
+    // `MechanicNotYetImplemented` (the production loop does NOT panic).
     http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
     #[allow(dead_code)]
     exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
@@ -221,6 +221,7 @@ impl ProbeRunner {
         // `Arc<dyn ObservationStore>`.
         probe_tick(
             self.tcp_prober.as_ref(),
+            self.http_prober.as_ref(),
             clock,
             observation_store,
             alloc_id,
@@ -318,6 +319,7 @@ impl ProbeRunner {
             let handle = supervisor.spawn_probe_task();
             let child_token = handle.cancellation_token();
             let tcp_prober = Arc::clone(&self.tcp_prober);
+            let http_prober = Arc::clone(&self.http_prober);
             let clock = Arc::clone(&self.clock);
             let observation_store = Arc::clone(&self.observation_store);
             let alloc_id_for_task = alloc_id.clone();
@@ -330,6 +332,7 @@ impl ProbeRunner {
             tokio::spawn(async move {
                 supervised_probe_loop(
                     tcp_prober,
+                    http_prober,
                     clock,
                     observation_store,
                     alloc_id_for_task,
@@ -400,6 +403,19 @@ pub enum ProbeRunnerError {
     MechanicNotYetImplemented { role: ProbeRole },
 }
 
+/// Resolve the HTTP probe target host. `None` (host omitted at parse
+/// time) and the bind-side wildcard `"0.0.0.0"` both translate to the
+/// reachable loopback address for single-node Phase 1 — mirroring the
+/// TCP-probe host contract (per `TcpProber` docstring: `0.0.0.0` is a
+/// bind-side wildcard, never a client-side target). Any other host is
+/// honoured verbatim.
+fn http_probe_host(host: Option<&str>) -> &str {
+    match host {
+        None | Some("0.0.0.0") => "127.0.0.1",
+        Some(other) => other,
+    }
+}
+
 /// Wall-clock to UNIX-epoch milliseconds, sourced from the injected
 /// [`Clock::unix_now`]. Per ADR-0013 / ADR-0054 §5 every wall-clock
 /// read goes through the trait surface — never `Instant::now` /
@@ -417,8 +433,13 @@ fn unix_ms_from_clock(clock: &dyn Clock) -> u64 {
 /// delegate to the same function — no `&self` borrow escapes into
 /// the supervised loop, and the public/loop paths cannot diverge
 /// silently.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "per-mechanic prober dispatch needs each injected adapter (tcp + http) plus the clock, store, and per-tick identity; bundling them into a struct would hide the explicit-injection contract the call sites rely on"
+)]
 async fn probe_tick(
     tcp_prober: &dyn TcpProber,
+    http_prober: &dyn HttpProber,
     clock: &dyn Clock,
     observation_store: &dyn ObservationStore,
     alloc_id: &AllocationId,
@@ -426,22 +447,38 @@ async fn probe_tick(
     descriptor: &ProbeDescriptor,
 ) -> Result<ProbeResultRow, ProbeRunnerError> {
     let timeout = Duration::from_secs(u64::from(descriptor.timeout_seconds));
-    let status = match &descriptor.mechanic {
+    let outcome = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, port } => {
-            match tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
+            tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
                 ProbeRunnerError::ProbeAdapterFailed {
                     alloc_id: alloc_id.clone(),
                     probe_idx,
                     source: err,
                 }
-            })? {
-                ProbeOutcome::Pass => ProbeStatus::Pass,
-                ProbeOutcome::Fail { reason } => ProbeStatus::Fail { last_fail_reason: reason },
-            }
+            })?
         }
-        ProbeMechanic::Http { .. } | ProbeMechanic::Exec { .. } => {
+        ProbeMechanic::Http { path, port, host } => {
+            // Host defaults to loopback for single-node Phase 1 when
+            // omitted at parse time (carried as `None`). The bind-side
+            // wildcard `0.0.0.0` is translated to the reachable
+            // loopback address, mirroring the TCP-probe host contract.
+            let host = http_probe_host(host.as_deref());
+            let url = format!("http://{host}:{port}{path}");
+            http_prober.probe(&url, timeout).await.map_err(|err| {
+                ProbeRunnerError::ProbeAdapterFailed {
+                    alloc_id: alloc_id.clone(),
+                    probe_idx,
+                    source: err,
+                }
+            })?
+        }
+        ProbeMechanic::Exec { .. } => {
             return Err(ProbeRunnerError::MechanicNotYetImplemented { role: descriptor.role });
         }
+    };
+    let status = match outcome {
+        ProbeOutcome::Pass => ProbeStatus::Pass,
+        ProbeOutcome::Fail { reason } => ProbeStatus::Fail { last_fail_reason: reason },
     };
     let last_observed_at_unix_ms = unix_ms_from_clock(clock);
     let row = ProbeResultRow {
@@ -477,8 +514,13 @@ async fn probe_tick(
 /// today) is logged once per tick at warn level; the loop continues
 /// so the supervisor's lifecycle stays tied to the cancellation
 /// token, not to the first error.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the spawned task owns cloned Arcs for each injected adapter (tcp + http) plus the clock, store, per-tick identity, and cancellation token; the explicit list keeps the spawn site's ownership transfer auditable"
+)]
 async fn supervised_probe_loop(
     tcp_prober: Arc<dyn TcpProber>,
+    http_prober: Arc<dyn HttpProber>,
     clock: Arc<dyn Clock>,
     observation_store: Arc<dyn ObservationStore>,
     alloc_id: AllocationId,
@@ -494,6 +536,7 @@ async fn supervised_probe_loop(
             () = clock.sleep(interval) => {
                 if let Err(err) = probe_tick(
                     tcp_prober.as_ref(),
+                    http_prober.as_ref(),
                     clock.as_ref(),
                     observation_store.as_ref(),
                     &alloc_id,

@@ -1999,6 +1999,8 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "hostname",
+ "http-body-util",
+ "hyper",
  "hyper-util",
  "libc",
  "nix",

@@ -27,20 +27,93 @@ use proptest::prelude::*;
 // RED scaffolds — owned by later slices (02 / 03 / 07).
 // ---------------------------------------------------------------------
 
-/// S-SHCP-PARSE-01 (US-02 / K1 / ADR-0057 §1) — HTTP probe parse + defaults.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn health_check_startup_http_parses_with_defaults() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-SHCP-PARSE-01 / [[health_check.startup]] HTTP parses with defaults)"
-    );
+// S-SHCP-PARSE-01 (US-02 / K1 / ADR-0057 §1) — HTTP probe parse +
+// defaults. Proptest over arbitrary valid (path, port) tuples: a
+// `type = "http"` startup probe parses into
+// `ProbeMechanic::Http { path, port, host: None }` with the ADR-0057
+// §2 defaults (timeout 5, interval 2, max_attempts 30).
+// Universe (port-exposed observable surface of the parsed descriptor):
+// mechanic (path / port / host), timeout_seconds, interval_seconds,
+// max_attempts, inferred. Every slot is asserted; none silently drifts.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+    #[test]
+    fn health_check_startup_http_parses_with_defaults(
+        id in service_id_strategy(),
+        port in port_strategy(),
+        path in http_path_strategy(),
+    ) {
+        let toml = format!(
+            r#"
+[service]
+id = "{id}"
+replicas = 1
+
+[[listener]]
+port = {port}
+protocol = "tcp"
+
+[exec]
+command = "/usr/bin/server"
+args = []
+
+[resources]
+cpu_milli = 100
+memory_bytes = 134217728
+
+[[health_check.startup]]
+type = "http"
+path = "{path}"
+port = {port}
+"#
+        );
+        let input = WorkloadSpecInput::from_toml_str(&toml)
+            .expect("HTTP probe parse must succeed");
+        let svc = unwrap_service(input);
+        prop_assert_eq!(svc.startup_probes.len(), 1, "exactly one declared http probe");
+        let p: &ProbeDescriptor = &svc.startup_probes[0];
+        prop_assert_eq!(p.role, ProbeRole::Startup);
+        match &p.mechanic {
+            ProbeMechanic::Http { path: parsed_path, port: parsed_port, host } => {
+                prop_assert_eq!(parsed_path.as_str(), path.as_str());
+                prop_assert_eq!(*parsed_port, port);
+                prop_assert_eq!(host.as_ref(), None::<&String>,
+                    "host omitted in TOML → None (defaulted at probe time, not parse time)");
+            }
+            other => prop_assert!(false, "expected Http mechanic, got {:?}", other),
+        }
+        prop_assert_eq!(p.timeout_seconds, 5);
+        prop_assert_eq!(p.interval_seconds, 2);
+        prop_assert_eq!(p.max_attempts, 30);
+        prop_assert!(!p.inferred, "operator-declared probe carries inferred=false");
+    }
 }
 
-/// S-SHCP-PARSE-02 (US-02 / K5 / ADR-0057 §3) — HTTP missing path.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn health_check_http_missing_path_yields_named_parse_error() {
-    panic!("Not yet implemented -- RED scaffold (S-SHCP-PARSE-02 / HTTP probe missing path)");
+// S-SHCP-PARSE-02 (US-02 / K5 / ADR-0057 §3) — HTTP probe with `port`
+// present and `path` absent yields
+// `ParseError::HttpProbeMissingPath { probe_idx }`. Proptest over
+// arbitrary ports — the missing-path verdict is invariant in the port
+// value, and the reported probe_idx is the observed position (0 for the
+// single-probe TOML).
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+    #[test]
+    fn health_check_http_missing_path_yields_named_parse_error(
+        port in port_strategy(),
+    ) {
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n\
+             [[health_check.startup]]\n\
+             type = \"http\"\n\
+             port = {port}\n"
+        );
+        match parse_err(&toml) {
+            ParseError::HttpProbeMissingPath { probe_idx } => {
+                prop_assert_eq!(probe_idx, 0, "single-probe TOML reports probe_idx 0");
+            }
+            other => prop_assert!(false, "expected HttpProbeMissingPath, got {:?}", other),
+        }
+    }
 }
 
 /// S-SHCP-PARSE-03 (US-03 / K1 / ADR-0057 §1) — Exec probe parse.
@@ -80,11 +153,36 @@ fn probes_under_service_kind_parses_successfully() {
     panic!("Not yet implemented -- RED scaffold (S-SHCP-PARSE-07 / probes under service parses)");
 }
 
-/// S-SHCP-PARSE-08 (US-02 AC) — https:// scheme rejected.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn health_check_http_https_scheme_yields_named_parse_error() {
-    panic!("Not yet implemented -- RED scaffold (S-SHCP-PARSE-08 / https:// scheme rejected)");
+// S-SHCP-PARSE-08 (US-02 AC / ADR-0057 C6) — any `https://` URL in an
+// HTTP probe is rejected at parse time with
+// `ParseError::HttpsNotSupported { probe_idx }`. Phase 1 is plain HTTP
+// only. Proptest over arbitrary host/path tails after the `https://`
+// scheme prefix — the rejection is invariant in the URL body; the
+// scheme is the trigger.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+    #[test]
+    fn health_check_http_https_scheme_yields_named_parse_error(
+        port in port_strategy(),
+        tail in "[a-z0-9./]{1,24}",
+    ) {
+        // `https://` can appear either as the `path` value (the
+        // operator pasting a full URL) — the parser rejects the
+        // scheme wherever it appears in the probe's path.
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n\
+             [[health_check.startup]]\n\
+             type = \"http\"\n\
+             path = \"https://{tail}\"\n\
+             port = {port}\n"
+        );
+        match parse_err(&toml) {
+            ParseError::HttpsNotSupported { probe_idx } => {
+                prop_assert_eq!(probe_idx, 0, "single-probe TOML reports probe_idx 0");
+            }
+            other => prop_assert!(false, "expected HttpsNotSupported, got {:?}", other),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -99,6 +197,13 @@ fn port_strategy() -> impl Strategy<Value = u16> {
 fn service_id_strategy() -> impl Strategy<Value = String> {
     proptest::collection::vec(proptest::char::range('a', 'z'), 1..=16)
         .prop_map(|chars| chars.into_iter().collect())
+}
+
+/// Arbitrary absolute HTTP probe path — always leads with `/`, never
+/// contains a scheme. Used by the S-SHCP-PARSE-01 happy-path proptest.
+fn http_path_strategy() -> impl Strategy<Value = String> {
+    proptest::collection::vec(proptest::char::range('a', 'z'), 1..=12)
+        .prop_map(|chars| format!("/{}", chars.into_iter().collect::<String>()))
 }
 
 fn unwrap_service(input: WorkloadSpecInput) -> ServiceSpec {

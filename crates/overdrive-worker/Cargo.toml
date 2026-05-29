@@ -45,14 +45,17 @@ libc = { workspace = true }
 # § Dependencies.
 nix.workspace = true
 
-# `hyper-util` + `tokio-util` — required by the service-health-check
-# probes Phase 1 implementation per ADR-0054 §3 (production
-# `TokioHttpProber` binding uses `hyper-util`'s `Client` + tokio
-# timeouts). Wired here at slice 01-01 alongside the trait surface
-# so subsequent slices land the production binding without re-touching
-# the Cargo manifest. Both are pure-Rust HTTP/IO utilities with no
-# build.rs surface; MIT-licensed (verified).
+# `hyper` + `hyper-util` + `http-body-util` + `tokio-util` — required
+# by the service-health-check probes Phase 1 implementation per
+# ADR-0054 §3 (production `HyperHttpProber` binding uses `hyper-util`'s
+# legacy `Client` + `hyper::Request` + `http_body_util::Empty` request
+# body + tokio timeouts). `hyper-util` + `tokio-util` were wired at
+# 01-01; `hyper` + `http-body-util` land here at 02-01 alongside the
+# HTTP-prober body. All pure-Rust HTTP/IO utilities with no build.rs
+# surface; MIT-licensed (verified).
+hyper.workspace = true
 hyper-util.workspace = true
+http-body-util.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]

@@ -195,6 +195,32 @@ pub enum ParseError {
         /// Verbatim operator-supplied `type` token.
         found: String,
     },
+
+    // -----------------------------------------------------------------
+    // Step 02-01 — HTTP probe variant per ADR-0057 §2 / US-02.
+    // -----------------------------------------------------------------
+    /// `[[health_check.startup]]` with `type = "http"` is missing the
+    /// required `path` field. `probe_idx` is the 0-indexed position
+    /// within the per-role array.
+    #[error(
+        "[[health_check.startup]][{probe_idx}]: http probe is missing required field `path` — add `path = \"/healthz\"`"
+    )]
+    HttpProbeMissingPath {
+        /// 0-indexed position within the per-role array.
+        probe_idx: usize,
+    },
+
+    /// An HTTP probe carries an `https://` URL. Phase 1 supports plain
+    /// HTTP only per ADR-0057 C6; HTTPS / mTLS / gRPC are deferred to
+    /// Phase 3+. `probe_idx` is the 0-indexed position within the
+    /// per-role array.
+    #[error(
+        "[[health_check.startup]][{probe_idx}]: https:// URLs are not supported in Phase 1 (plain HTTP only per ADR-0057 C6) — use a plain `path` like `/healthz`"
+    )]
+    HttpsNotSupported {
+        /// 0-indexed position within the per-role array.
+        probe_idx: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,6 +1054,7 @@ fn parse_one_startup_probe(
                 entry.get("host").and_then(toml::Value::as_str).unwrap_or("0.0.0.0").to_string();
             ProbeMechanic::Tcp { host, port: port_u16 }
         }
+        "http" => parse_http_mechanic(entry, probe_idx)?,
         other => {
             return Err(ParseError::UnknownProbeType { probe_idx, found: other.to_string() });
         }
@@ -1057,6 +1084,57 @@ fn parse_one_startup_probe(
         success_threshold: None,
         inferred: false,
     })
+}
+
+/// Parse the `type = "http"` mechanic body per ADR-0057 §2 / US-02.
+///
+/// Required fields: `path` (absolute request path) and `port`.
+/// Optional: `host` (defaults to `0.0.0.0` at probe time, carried as
+/// `None` through parse). Phase 1 is plain HTTP only — any `https://`
+/// scheme in `path` is rejected with
+/// [`ParseError::HttpsNotSupported`] per ADR-0057 C6.
+///
+/// Edge cases:
+/// - `path` absent → [`ParseError::HttpProbeMissingPath`].
+/// - `path` containing `https://` → [`ParseError::HttpsNotSupported`]
+///   (checked BEFORE the plain-`http://` strip so an `https://` URL
+///   pasted as the path is never silently accepted).
+/// - `port` absent / out of `1..=65535` → reuses the TCP `port`
+///   diagnostics shape via [`ParseError::TcpProbeMissingPort`] — the
+///   port precondition is identical across mechanics.
+fn parse_http_mechanic(
+    entry: &toml::value::Table,
+    probe_idx: usize,
+) -> Result<ProbeMechanic, ParseError> {
+    let path_raw = entry.get("path").ok_or(ParseError::HttpProbeMissingPath { probe_idx })?;
+    let path = path_raw.as_str().ok_or_else(|| ParseError::Field {
+        section: "[[health_check.startup]]",
+        message: format!("entry [{probe_idx}]: field `path` must be a string"),
+    })?;
+    // Phase 1 plain-HTTP-only gate per ADR-0057 C6. Reject any
+    // `https://` URL pasted into `path` BEFORE any other path handling.
+    if path.contains("https://") {
+        return Err(ParseError::HttpsNotSupported { probe_idx });
+    }
+    if path.is_empty() {
+        return Err(ParseError::HttpProbeMissingPath { probe_idx });
+    }
+
+    let port_raw = entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
+    let port_int = port_raw.as_integer().ok_or_else(|| ParseError::Field {
+        section: "[[health_check.startup]]",
+        message: format!("entry [{probe_idx}]: field `port` must be an integer"),
+    })?;
+    let port = u16::try_from(port_int).map_err(|_| ParseError::Field {
+        section: "[[health_check.startup]]",
+        message: format!("entry [{probe_idx}]: field `port` must be in 1..=65535"),
+    })?;
+    if port == 0 {
+        return Err(ParseError::TcpProbeMissingPort { probe_idx });
+    }
+
+    let host = entry.get("host").and_then(toml::Value::as_str).map(str::to_owned);
+    Ok(ProbeMechanic::Http { path: path.to_owned(), port, host })
 }
 
 /// Local intermediate-error variant for the zero-field rejection
