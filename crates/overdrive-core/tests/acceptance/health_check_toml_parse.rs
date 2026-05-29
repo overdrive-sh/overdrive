@@ -326,6 +326,62 @@ proptest! {
     }
 }
 
+// S-SHCP-PARSE-09 (US-05 / step 03-02) — a Service-kind workload with a
+// `[[health_check.liveness]]` section parses successfully and the
+// liveness probe survives into `ServiceSpec.liveness_probes` with the
+// ADR-0057 §2 / DDD-14 `failure_threshold` default of 3. Universe =
+// (arbitrary liveness port). Observable surface: the parsed
+// `ServiceSpec`'s liveness_probes vec (len, role, failure_threshold).
+// Kills the `parse_liveness_probes -> Ok(vec![])` mutant — the
+// non-empty assertion fails if the parser drops the declared probe.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+    #[test]
+    fn liveness_under_service_kind_parses_with_failure_threshold_default(
+        liveness_port in port_strategy(),
+    ) {
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n\
+             [[health_check.liveness]]\n\
+             type = \"tcp\"\n\
+             port = {liveness_port}\n"
+        );
+        let spec = unwrap_service(
+            WorkloadSpecInput::from_toml_str(&toml).expect("service+liveness parses"),
+        );
+        prop_assert_eq!(spec.liveness_probes.len(), 1, "one liveness probe survives");
+        let probe = &spec.liveness_probes[0];
+        prop_assert_eq!(probe.role, ProbeRole::Liveness);
+        prop_assert_eq!(
+            probe.failure_threshold,
+            Some(3),
+            "ADR-0057 §2 / DDD-14 failure_threshold default is 3"
+        );
+        prop_assert_eq!(probe.inferred, false, "operator-declared probe is not inferred");
+    }
+
+    /// Operator-supplied `failure_threshold` overrides the default —
+    /// pins that the parser reads the field (kills a mutant that hard-
+    /// codes the default and ignores the operator value).
+    #[test]
+    fn liveness_failure_threshold_is_operator_configurable(
+        liveness_port in port_strategy(),
+        threshold in 1u32..=10,
+    ) {
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n\
+             [[health_check.liveness]]\n\
+             type = \"tcp\"\n\
+             port = {liveness_port}\n\
+             failure_threshold = {threshold}\n"
+        );
+        let spec = unwrap_service(
+            WorkloadSpecInput::from_toml_str(&toml).expect("service+liveness parses"),
+        );
+        prop_assert_eq!(spec.liveness_probes[0].failure_threshold, Some(threshold));
+    }
+}
+
 // S-SHCP-PARSE-08 (US-02 AC / ADR-0057 C6) — any `https://` URL in an
 // HTTP probe is rejected at parse time with
 // `ParseError::HttpsNotSupported { probe_idx }`. Phase 1 is plain HTTP

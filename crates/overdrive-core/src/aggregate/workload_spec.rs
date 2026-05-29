@@ -753,9 +753,13 @@ impl WorkloadSpecInput {
             // unlike startup, an omitted readiness section means "no
             // readiness gate", not "synthesise one".
             let readiness_probes = parse_readiness_probes(table)?;
-            // Liveness population is owned by step 03-02. For this
-            // step it remains empty — ServiceSpecV2 envelope shape is
-            // stable across slices.
+            // Step 03-02 / Slice 05 — liveness probe section. Reuses the
+            // same `type`-discriminated mechanic parse path as startup /
+            // readiness; sets `role = Liveness` and applies the ADR-0057
+            // §2 / DDD-14 `failure_threshold` default of 3. Absent
+            // section → no liveness probes (no liveness gate; the
+            // reconciler's liveness branch is a no-op for this Service).
+            let liveness_probes = parse_liveness_probes(table)?;
 
             return Ok(Self::Service(ServiceSpec {
                 id,
@@ -765,7 +769,7 @@ impl WorkloadSpecInput {
                 listeners,
                 startup_probes,
                 readiness_probes,
-                liveness_probes: vec![],
+                liveness_probes,
             }));
         }
 
@@ -1253,6 +1257,104 @@ fn parse_readiness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescrip
             max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
             failure_threshold: None,
             success_threshold: Some(success_threshold),
+            inferred: false,
+        });
+    }
+    Ok(out)
+}
+
+/// Liveness probe `failure_threshold` default per ADR-0057 §2 /
+/// ADR-0055 §7 / DDD-14 — three consecutive Fails on a Running alloc
+/// trigger `Action::RestartAllocation`. Operator-configurable.
+const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
+/// Liveness probe `interval_seconds` default per ADR-0057 §2.
+const LIVENESS_INTERVAL_DEFAULT_S: u32 = 2;
+
+/// Discover and parse `[[health_check.liveness]]` per ADR-0057 §2 /
+/// Slice 05 (step 03-02). Reuses the role-agnostic
+/// [`parse_probe_mechanic`] for the TCP/HTTP/Exec body (no fork of the
+/// 01-02 / 02-01 / 02-02 paths).
+///
+/// Like readiness (and unlike startup), liveness has NO
+/// default-inference: an omitted `[[health_check.liveness]]` section
+/// means "no liveness gate", so the reconciler never restarts on
+/// liveness for this Service. Sets `role = Liveness`,
+/// `failure_threshold = Some(3)` default (configurable), and carries
+/// the startup default for `max_attempts` (liveness is continuous;
+/// `max_attempts` is not a liveness gate but the field is shared on
+/// `ProbeDescriptor`).
+///
+/// Liveness probes are app-internal only per research §6.2 best
+/// practice 1 / C11 — the parser reuses the same `type`-discriminated
+/// mechanic body as every other role (no dependency-checking external
+/// service surface).
+fn parse_liveness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescriptor>, ParseError> {
+    let liveness_value_opt = table
+        .get("health_check")
+        .and_then(toml::Value::as_table)
+        .and_then(|hc| hc.get("liveness"))
+        .cloned();
+
+    let entries: Vec<&toml::value::Table> = match liveness_value_opt.as_ref() {
+        None => Vec::new(),
+        Some(v) => v.as_array().map_or_else(
+            || {
+                Err(ParseError::Field {
+                    section: "[[health_check.liveness]]",
+                    message:
+                        "must be an array of tables (or omit the section for no liveness gate)"
+                            .to_string(),
+                })
+            },
+            |arr| {
+                arr.iter()
+                    .map(|entry| {
+                        entry.as_table().ok_or_else(|| ParseError::Field {
+                            section: "[[health_check.liveness]]",
+                            message: "each entry must be a table".to_string(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            },
+        )?,
+    };
+
+    let mut out = Vec::with_capacity(entries.len());
+    for (probe_idx, entry) in entries.iter().enumerate() {
+        let mechanic = parse_probe_mechanic(entry, probe_idx)?;
+        let timeout_seconds = parse_optional_positive_u32(
+            entry,
+            "timeout_seconds",
+            STARTUP_TIMEOUT_DEFAULT_S,
+            probe_idx,
+        )
+        .map_err(|err| map_zero_to_named_error(err, "timeout_seconds", probe_idx))?;
+        let interval_seconds = parse_optional_positive_u32(
+            entry,
+            "interval_seconds",
+            LIVENESS_INTERVAL_DEFAULT_S,
+            probe_idx,
+        )
+        .map_err(|err| map_zero_to_named_error(err, "interval_seconds", probe_idx))?;
+        let failure_threshold = parse_optional_positive_u32(
+            entry,
+            "failure_threshold",
+            LIVENESS_FAILURE_THRESHOLD_DEFAULT,
+            probe_idx,
+        )
+        .map_err(|err| map_zero_to_named_error(err, "failure_threshold", probe_idx))?;
+
+        out.push(ProbeDescriptor {
+            role: ProbeRole::Liveness,
+            mechanic,
+            timeout_seconds,
+            interval_seconds,
+            // Liveness is continuous; `max_attempts` is not a liveness
+            // gate. Carry the startup default so the shared field has a
+            // sane value (the liveness reconcile branch never reads it).
+            max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
+            failure_threshold: Some(failure_threshold),
+            success_threshold: None,
             inferred: false,
         });
     }

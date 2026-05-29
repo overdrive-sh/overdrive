@@ -532,6 +532,22 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
             .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe: None,
+        has_liveness_probe: false,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: overdrive_core::traits::driver::AllocationSpec {
+            alloc: aid.clone(),
+            identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+                .expect("valid spiffe"),
+            command: "/bin/svc".to_string(),
+            args: vec![],
+            resources: overdrive_core::traits::driver::Resources {
+                cpu_milli: 100,
+                memory_bytes: 64 * 1024 * 1024,
+            },
+            probe_descriptors: vec![],
+        },
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
@@ -612,6 +628,22 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
             .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe: None,
+        has_liveness_probe: false,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: overdrive_core::traits::driver::AllocationSpec {
+            alloc: aid.clone(),
+            identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+                .expect("valid spiffe"),
+            command: "/bin/svc".to_string(),
+            args: vec![],
+            resources: overdrive_core::traits::driver::Resources {
+                cpu_milli: 100,
+                memory_bytes: 64 * 1024 * 1024,
+            },
+            probe_descriptors: vec![],
+        },
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);

@@ -65,9 +65,12 @@ mod acceptance {
     //     RCA-A "(took live)" regression guard
     mod probes_kind_rejection_cli;
     mod probes_section_render;
-    // `service_early_exit_render` was deleted in step 01-03e3 — it
-    // exercised the deleted `format_failed_block` / `TerminalReason`
-    // surface. Service-kind failed-block rendering is covered by
-    // `crate::render::format_service_failed_block` (called from the
-    // production `consume_stream` Service-kind consumer).
+    // Step 03-02 / Slice 08 — EarlyExit multi-line render
+    // (S-SHCP-CLI-07/08) + the cross-cutting RCA-A
+    // `ServiceKindRenderNeverContainsTookLive` regression guard
+    // (S-SHCP-CLI-09..11). Re-created against the current
+    // `format_service_failed_block` surface (the 01-03e3 deletion
+    // removed the legacy `format_failed_block` variant; this file
+    // targets the typed `ServiceFailureReason` renderer).
+    mod service_early_exit_render;
 }

@@ -58,6 +58,14 @@ pub use crate::transition_reason::{ProbeWitness, ServiceFailureReason};
 /// tick per `.claude/rules/development.md` § "Persist inputs, not
 /// derived state".
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "hydrate-boundary fact-bundle projection (one row's observed + spec-derived inputs), \
+              not a domain entity — Object Calisthenics applies to the hexagonal core, not to \
+              the runtime's per-alloc observation projection. Each bool names an independent \
+              observed/spec fact (inferred / startup_probes_empty / has_readiness_probe / \
+              has_liveness_probe); collapsing them into enums would obscure the projection."
+)]
 pub struct ServiceAllocFact {
     /// Allocation identifier.
     pub alloc_id: AllocationId,
@@ -157,6 +165,52 @@ pub struct ServiceAllocFact {
     pub backend_spiffe: SpiffeId,
     /// Socket address this alloc serves on as a dataplane backend.
     pub backend_addr: std::net::SocketAddr,
+
+    // ---- Step 03-02 / Slice 05 — liveness facts ----
+    /// Latest-observed liveness probe outcome at index 0. `None` when
+    /// no liveness `ProbeResultRow` has yet been written for this alloc
+    /// (no liveness observation this tick — neither a failure nor a
+    /// recovery; the consecutive-failure counter is left untouched).
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this is the OBSERVED INPUT. The restart-trigger
+    /// predicate is RECOMPUTED every tick from this status + the live
+    /// `liveness_failure_threshold` + the consecutive-failure counter
+    /// in the View. It is never a cached `should_restart: bool`.
+    pub latest_liveness_probe: Option<ProbeStatus>,
+    /// `true` IFF this alloc declares at least one liveness probe.
+    /// `false` → the liveness branch is a no-op for this alloc (no
+    /// liveness gate → never restart on liveness). Sourced from
+    /// `ServiceSpec.liveness_probes` non-empty (intent side) —
+    /// re-evaluated every tick.
+    pub has_liveness_probe: bool,
+    /// Operator-spec-declared liveness `failure_threshold` per
+    /// ADR-0057 §2 / DDD-14. Default 3 (three consecutive Fails on a
+    /// Running alloc trigger `RestartAllocation`); configurable.
+    /// Sourced from the live `ServiceSpec` — re-evaluated every tick,
+    /// never persisted.
+    pub liveness_failure_threshold: u32,
+    /// How many times the SHARED `WorkloadLifecycle` restart budget has
+    /// already restarted this alloc (`WorkloadLifecycleView::
+    /// restart_counts`). The liveness branch composes with — does NOT
+    /// duplicate — the shared `RESTART_BACKOFF_CEILING` budget per
+    /// ADR-0055 §7: once `restart_count >= RESTART_BACKOFF_CEILING` the
+    /// liveness branch stops emitting `RestartAllocation` and finalises
+    /// the alloc with the same `TerminalCondition::BackoffExhausted`
+    /// the crash-loop pathway uses. Sourced from the runtime's
+    /// per-alloc restart-status projection (intent/observation join) —
+    /// an INPUT, recomputed each tick, never a cached verdict.
+    pub restart_count: u32,
+    /// Fully-populated `AllocationSpec` the liveness branch clones into
+    /// the emitted `Action::RestartAllocation { spec, .. }` so the
+    /// action_shim's stop+start replays the workload with its live
+    /// command / args / identity / resources / probe descriptors.
+    /// Hydrated from the live `Job` (intent side) — the SAME source the
+    /// `WorkloadLifecycle` crash-loop restart pathway uses
+    /// (`workload_lifecycle.rs` Run branch). Carrying it on the fact
+    /// keeps the reconciler pure: the spec is an input projected by the
+    /// runtime's hydrate pass, not re-derived inside `reconcile`.
+    pub restart_spec: crate::traits::driver::AllocationSpec,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -339,7 +393,8 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // cyclic `control-plane → core → control-plane` dependency.
 
 use crate::id::{ContentHash, CorrelationKey, NodeId};
-use crate::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+use crate::reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
+use crate::reconcilers::{Action, Reconciler, ReconcilerName, RestartReason, TickContext};
 use crate::traits::dataplane::Backend;
 use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 use crate::transition_reason::TerminalCondition;
@@ -576,8 +631,123 @@ impl Reconciler for ServiceLifecycleReconciler {
             actions.push(action);
         }
 
+        // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
+        //
+        // For every alloc declaring a liveness probe, maintain the
+        // per-(alloc, probe_idx) consecutive-failure counter (the View
+        // INPUT) and recompute the restart-trigger predicate THIS TICK
+        // against the live `liveness_failure_threshold`. Per
+        // `.claude/rules/development.md` § "Persist inputs, not derived
+        // state": the View persists ONLY the counter; the predicate
+        // (`Running AND consecutive >= threshold AND restart_count <
+        // RESTART_BACKOFF_CEILING`) is never persisted as a
+        // `should_restart` bool.
+        //
+        // Composition with the SHARED restart budget (ADR-0055 §7 /
+        // DDD-9 / P3-Q11): the Phase-1 reconciler emits
+        // `RestartAllocation` UNCONDITIONALLY while the budget remains
+        // (no cascading-restart governor). Once `restart_count` reaches
+        // `RESTART_BACKOFF_CEILING` (5, shared with `WorkloadLifecycle`)
+        // the liveness branch finalises the alloc with the same
+        // `TerminalCondition::BackoffExhausted { attempts }` the
+        // crash-loop pathway uses — composing with, not duplicating, the
+        // shared budget.
+        for (alloc_id, fact) in &actual.allocs {
+            if let Some(action) = liveness_restart_action(alloc_id, fact, &mut next_view) {
+                actions.push(action);
+            }
+        }
+
         (actions, next_view)
     }
+}
+
+/// Step 03-02 / Slice 05 — maintain the per-(alloc, probe_idx)
+/// liveness consecutive-failure counter (the View INPUT) and, when the
+/// recomputed restart-trigger predicate holds this tick, emit the
+/// matching terminal action.
+///
+/// Counter maintenance (mirrors the readiness consecutive-Pass shape,
+/// inverted for failures):
+/// - `Some(Fail)` → streak grows by one (saturating at `u32::MAX`).
+/// - `Some(Pass)` → recovery: streak resets to 0 (entry removed;
+///   absence == 0). Per S-SHCP-RECON-10 a Pass below threshold clears
+///   the counter and emits NO restart.
+/// - `None` → no liveness observation this tick; leave the counter
+///   untouched.
+///
+/// Trigger predicate (recomputed every tick from the post-update
+/// counter + the live `failure_threshold`, never persisted):
+/// `state == Running AND consecutive_failures >= failure_threshold`.
+/// When it holds, compose with the shared `RESTART_BACKOFF_CEILING`
+/// budget:
+/// - `restart_count < RESTART_BACKOFF_CEILING` → emit ONE
+///   `RestartAllocation { reason: LivenessExhausted { .. } }`
+///   (S-SHCP-RECON-09).
+/// - `restart_count >= RESTART_BACKOFF_CEILING` → emit
+///   `FinalizeFailed { BackoffExhausted { attempts:
+///   RESTART_BACKOFF_CEILING } }` via the shared terminal type
+///   (S-SHCP-RECON-11).
+///
+/// Returns `None` when the alloc declares no liveness probe, or when
+/// the predicate does not hold (Running-but-below-threshold, recovery,
+/// non-Running state).
+fn liveness_restart_action(
+    alloc_id: &AllocationId,
+    fact: &ServiceAllocFact,
+    next_view: &mut ServiceLifecycleView,
+) -> Option<Action> {
+    if !fact.has_liveness_probe {
+        return None;
+    }
+
+    let key = (alloc_id.clone(), ProbeIdx::new(0));
+    let consecutive_failures = match &fact.latest_liveness_probe {
+        Some(ProbeStatus::Fail { .. }) => {
+            let entry = next_view.liveness_consecutive_failures.entry(key).or_insert(0);
+            *entry = entry.saturating_add(1);
+            *entry
+        }
+        // Recovery (Pass) OR no observation yet → streak resets to 0.
+        // Removing the entry keeps the persisted map minimal
+        // (absence == 0) — per S-SHCP-RECON-10.
+        Some(ProbeStatus::Pass) => {
+            next_view.liveness_consecutive_failures.remove(&key);
+            0
+        }
+        None => next_view.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
+    };
+
+    // Predicate recomputed this tick from the counter INPUT + the live
+    // policy threshold. Below threshold OR not Running → no action.
+    let triggered = fact.state == AllocState::Running
+        && consecutive_failures >= fact.liveness_failure_threshold;
+    if !triggered {
+        return None;
+    }
+
+    // Compose with the shared restart budget. Once the budget is spent
+    // the liveness branch finalises with the same terminal the
+    // crash-loop pathway uses, rather than restarting forever.
+    if fact.restart_count >= RESTART_BACKOFF_CEILING {
+        return Some(Action::FinalizeFailed {
+            alloc_id: alloc_id.clone(),
+            terminal: Some(TerminalCondition::BackoffExhausted {
+                attempts: RESTART_BACKOFF_CEILING,
+            }),
+        });
+    }
+
+    Some(Action::RestartAllocation {
+        alloc_id: alloc_id.clone(),
+        spec: fact.restart_spec.clone(),
+        kind: crate::aggregate::WorkloadKind::Service,
+        reason: Some(RestartReason::LivenessExhausted {
+            probe_idx: 0,
+            consecutive_failures,
+            threshold: fact.liveness_failure_threshold,
+        }),
+    })
 }
 
 /// Step 03-01 / Slice 04 — recompute every backend's `healthy` flag

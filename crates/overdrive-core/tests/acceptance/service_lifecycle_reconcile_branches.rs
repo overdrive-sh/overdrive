@@ -80,6 +80,28 @@ fn fact(
         backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
             .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe: None,
+        has_liveness_probe: false,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: liveness_restart_spec_default(),
+    }
+}
+
+/// Minimal `AllocationSpec` for `ServiceAllocFact.restart_spec` in
+/// builders that never exercise the liveness restart branch.
+fn liveness_restart_spec_default() -> overdrive_core::traits::driver::AllocationSpec {
+    overdrive_core::traits::driver::AllocationSpec {
+        alloc: aid("alloc-x"),
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        command: "/bin/svc".to_string(),
+        args: vec![],
+        resources: overdrive_core::traits::driver::Resources {
+            cpu_milli: 100,
+            memory_bytes: 64 * 1024 * 1024,
+        },
+        probe_descriptors: vec![],
     }
 }
 
@@ -1158,6 +1180,11 @@ fn readiness_fact(
             std::net::Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
             8080,
         )),
+        latest_liveness_probe: None,
+        has_liveness_probe: false,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: liveness_restart_spec_default(),
     }
 }
 
@@ -1303,4 +1330,303 @@ fn readiness_no_dataplane_identity_emits_no_row() {
     let row_count =
         actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count();
     assert_eq!(row_count, 0, "no dataplane identity ⇒ no row emitted");
+}
+
+// ===================================================================
+// Step 03-02 / Slice 05 — liveness → RestartAllocation (US-05 / K3)
+// ===================================================================
+//
+// These property-based tests drive the real
+// `ServiceLifecycleReconciler::reconcile` (port-to-port at domain
+// scope — the reconcile fn signature IS the driving port) and assert
+// on the emitted `Action`s + the next-View counter slot (the
+// port-exposed observable surface). Co-located in overdrive-core where
+// the reconcile logic lives so cargo-mutants kills mutations in the
+// liveness branch (per the 03-01 cross-crate lesson).
+
+/// Liveness fact builder. Universe knobs: alloc `state`, the
+/// `latest_liveness_probe` observation, the live `failure_threshold`,
+/// and the shared `restart_count`. Every other field is a fixed
+/// non-liveness default so the liveness branch is the sole variable
+/// under test.
+#[allow(clippy::too_many_arguments)]
+fn liveness_fact(
+    alloc_id: &str,
+    state: AllocState,
+    latest_liveness_probe: Option<ProbeStatus>,
+    failure_threshold: u32,
+    restart_count: u32,
+) -> ServiceAllocFact {
+    ServiceAllocFact {
+        alloc_id: aid(alloc_id),
+        state,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+        exit_code: None,
+        // No startup-probe observation — keeps the Stable / EarlyExit /
+        // StartupProbeFailed branches inert so the liveness branch is
+        // the only emitter under test (startup branches require a Pass
+        // or a Failed state we do not set here for the Running cases).
+        latest_startup_probe: None,
+        max_attempts: u32::MAX, // never trips StartupProbeFailed
+        startup_deadline: Duration::from_secs(60),
+        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
+        inferred: false,
+        startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe,
+        has_liveness_probe: true,
+        liveness_failure_threshold: failure_threshold,
+        restart_count,
+        restart_spec: liveness_restart_spec_default(),
+    }
+}
+
+/// Pre-seed the next-View's liveness counter so the post-update streak
+/// reaches the desired value WITHOUT requiring N separate Fail ticks
+/// (the reconciler increments once per tick on a Fail observation).
+/// `seed` is the counter BEFORE this tick's Fail observation, so a
+/// seed of `k` followed by one Fail observation yields `k + 1`.
+fn view_with_liveness_counter(alloc_id: &str, seed: u32) -> ServiceLifecycleView {
+    let mut v = ServiceLifecycleView::default();
+    if seed > 0 {
+        v.liveness_consecutive_failures
+            .insert((aid(alloc_id), overdrive_core::observation::ProbeIdx::new(0)), seed);
+    }
+    v
+}
+
+proptest! {
+    /// S-SHCP-RECON-09 — `LivenessExhaustionTriggersRestartAllocation`.
+    ///
+    /// Universe: (alloc state ∈ {Running, others}) × (observed
+    /// consecutive_failures 1..=10) × (failure_threshold 1..=10) ×
+    /// (restart_count 0..=RESTART_BACKOFF_CEILING). Invariant: when
+    /// `state == Running AND consecutive_failures >= failure_threshold
+    /// AND restart_count < RESTART_BACKOFF_CEILING`, reconcile emits
+    /// EXACTLY ONE `RestartAllocation { reason: LivenessExhausted {
+    /// probe_idx: 0, consecutive_failures: <observed>, threshold:
+    /// <observed> } }`; otherwise zero RestartAllocation.
+    #[test]
+    fn liveness_exhaustion_triggers_restart_allocation(
+        running in any::<bool>(),
+        observed_failures in 1u32..=10,
+        failure_threshold in 1u32..=10,
+        restart_count in 0u32..=overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
+    ) {
+        let state = if running { AllocState::Running } else { AllocState::Pending };
+        // Seed counter to `observed_failures - 1`; this tick's Fail
+        // observation increments to exactly `observed_failures`.
+        let view = view_with_liveness_counter("svc-live-0", observed_failures - 1);
+        let fact = liveness_fact(
+            "svc-live-0",
+            state,
+            Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
+            failure_threshold,
+            restart_count,
+        );
+        let recon = ServiceLifecycleReconciler::new();
+        let (actions, _next) = recon.reconcile(
+            &ServiceLifecycleState::default(),
+            &one_alloc_state(fact),
+            &view,
+            &tick_at_ms(10_000),
+        );
+
+        let restarts: Vec<_> = actions
+            .iter()
+            .filter(|a| matches!(a, Action::RestartAllocation { .. }))
+            .collect();
+
+        let should_restart = running
+            && observed_failures >= failure_threshold
+            && restart_count < overdrive_core::reconcilers::RESTART_BACKOFF_CEILING;
+
+        if should_restart {
+            prop_assert_eq!(restarts.len(), 1, "exactly one RestartAllocation when triggered");
+            match restarts[0] {
+                Action::RestartAllocation { reason: Some(r), .. } => {
+                    prop_assert_eq!(
+                        r,
+                        &overdrive_core::reconcilers::RestartReason::LivenessExhausted {
+                            probe_idx: 0,
+                            consecutive_failures: observed_failures,
+                            threshold: failure_threshold,
+                        },
+                    );
+                }
+                other => prop_assert!(false, "expected LivenessExhausted reason, got {other:?}"),
+            }
+        } else {
+            prop_assert_eq!(restarts.len(), 0, "no RestartAllocation when predicate false");
+        }
+    }
+
+    /// S-SHCP-RECON-10 — `LivenessRecoveryResetsCounter`. A Pass
+    /// observation (recovery) resets the next-View counter to 0 (the
+    /// entry is removed; absence == 0) AND emits zero RestartAllocation,
+    /// regardless of how high the prior streak was (Fail/Fail/Pass).
+    #[test]
+    fn liveness_recovery_resets_counter(
+        prior_streak in 0u32..=10,
+        failure_threshold in 1u32..=10,
+    ) {
+        let view = view_with_liveness_counter("svc-rec-0", prior_streak);
+        let fact = liveness_fact(
+            "svc-rec-0",
+            AllocState::Running,
+            Some(ProbeStatus::Pass),
+            failure_threshold,
+            0,
+        );
+        let recon = ServiceLifecycleReconciler::new();
+        let (actions, next) = recon.reconcile(
+            &ServiceLifecycleState::default(),
+            &one_alloc_state(fact),
+            &view,
+            &tick_at_ms(10_000),
+        );
+
+        let key = (aid("svc-rec-0"), overdrive_core::observation::ProbeIdx::new(0));
+        prop_assert_eq!(
+            next.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
+            0,
+            "a Pass resets the consecutive-failure counter to 0",
+        );
+        let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
+        prop_assert_eq!(restarts, 0, "recovery emits no RestartAllocation");
+    }
+
+    /// S-SHCP-RECON-11 — `BackoffExhaustionAfterRestartCeiling`. When
+    /// `restart_count == RESTART_BACKOFF_CEILING` AND liveness
+    /// re-triggers (Running + streak >= threshold), reconcile emits
+    /// `FinalizeFailed { BackoffExhausted { attempts:
+    /// RESTART_BACKOFF_CEILING } }` via the shared terminal type — and
+    /// NO further RestartAllocation.
+    #[test]
+    fn backoff_exhaustion_after_restart_ceiling(
+        observed_failures in 3u32..=10,
+        failure_threshold in 1u32..=3,
+    ) {
+        let view = view_with_liveness_counter("svc-ceil-0", observed_failures - 1);
+        let fact = liveness_fact(
+            "svc-ceil-0",
+            AllocState::Running,
+            Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
+            failure_threshold,
+            overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
+        );
+        let recon = ServiceLifecycleReconciler::new();
+        let (actions, _next) = recon.reconcile(
+            &ServiceLifecycleState::default(),
+            &one_alloc_state(fact),
+            &view,
+            &tick_at_ms(10_000),
+        );
+
+        let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
+        prop_assert_eq!(restarts, 0, "at ceiling, no further RestartAllocation");
+
+        let backoff = actions.iter().any(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::BackoffExhausted { attempts }),
+                ..
+            } if *attempts == overdrive_core::reconcilers::RESTART_BACKOFF_CEILING
+        ));
+        prop_assert!(backoff, "at ceiling, liveness re-trigger finalises BackoffExhausted; got {actions:?}");
+    }
+}
+
+// ===================================================================
+// Step 03-02 / Slice 08 — EarlyExit branch correctness (US-08 / K1)
+// ===================================================================
+
+proptest! {
+    /// S-SHCP-RECON-05 — `ExitAfterStableIsNotEarlyExit`. When an alloc
+    /// was previously announced Stable (it sits in
+    /// `view.stable_announced`), a later Failed transition does NOT
+    /// re-classify as `EarlyExit` — the Stable-dedup guard short-
+    /// circuits the per-alloc body before the EarlyExit branch. Zero
+    /// `ServiceFailed { EarlyExit }` actions for ANY exit_code /
+    /// elapsed combination.
+    #[test]
+    fn exit_after_stable_is_not_early_exit(
+        exit_code in any::<i32>(),
+        elapsed_ms in 0u64..=120_000,
+    ) {
+        let started_ms = 1_000u64;
+        let mut view = ServiceLifecycleView::default();
+        view.stable_announced.insert(aid("svc-poststable-0"));
+        let f = fact(
+            "svc-poststable-0",
+            AllocState::Failed,
+            started_ms,
+            Some(exit_code),
+            None,
+            u32::MAX,
+            Duration::from_secs(60),
+        );
+        let recon = ServiceLifecycleReconciler::new();
+        let (actions, _next) = recon.reconcile(
+            &ServiceLifecycleState::default(),
+            &one_alloc_state(f),
+            &view,
+            &tick_at_ms(started_ms + elapsed_ms),
+        );
+        let early_exits = actions.iter().filter(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::EarlyExit { .. },
+                }),
+                ..
+            }
+        )).count();
+        prop_assert_eq!(early_exits, 0, "an alloc already Stable never re-emits EarlyExit");
+    }
+
+    /// S-SHCP-RECON-06 — `ExitZeroWithinDeadlineIsStillEarlyExit`. A
+    /// Service alloc that Failed with exit_code 0, within the startup
+    /// deadline, with no startup Pass observed, IS classified
+    /// `EarlyExit { exit_code: 0 }` — a Service expects to stay
+    /// long-lived, so even a clean exit before any probe passes is an
+    /// early-exit failure (the RCA-A coinflip case). Pinned across
+    /// every within-deadline elapsed value.
+    #[test]
+    fn exit_zero_within_deadline_is_still_early_exit(
+        elapsed_ms in 0u64..59_000,
+    ) {
+        let started_ms = 1_000u64;
+        let f = fact(
+            "svc-exit0-0",
+            AllocState::Failed,
+            started_ms,
+            Some(0),  // clean exit
+            None,     // no startup Pass observed
+            u32::MAX, // never trips StartupProbeFailed
+            Duration::from_secs(60),
+        );
+        let recon = ServiceLifecycleReconciler::new();
+        let (actions, _next) = recon.reconcile(
+            &ServiceLifecycleState::default(),
+            &one_alloc_state(f),
+            &ServiceLifecycleView::default(),
+            &tick_at_ms(started_ms + elapsed_ms),
+        );
+        let early_exit_zero = actions.iter().any(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::EarlyExit { exit_code: 0 },
+                }),
+                ..
+            }
+        ));
+        prop_assert!(early_exit_zero, "exit-0-within-deadline IS EarlyExit{{exit_code:0}}; got {actions:?}");
+    }
 }

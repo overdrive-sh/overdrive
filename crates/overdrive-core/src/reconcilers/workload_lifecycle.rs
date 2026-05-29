@@ -645,6 +645,14 @@ impl WorkloadLifecycle {
                             probe_descriptors: desired.probe_descriptors.clone(),
                         },
                         kind: desired.workload_kind,
+                        // Crash-loop restart pathway — the restart cause is
+                        // implicit in the prior alloc's terminal. The typed
+                        // liveness cause (`RestartReason::LivenessExhausted`)
+                        // is stamped only by the `service-lifecycle`
+                        // reconciler (step 03-02 / Slice 05); this site
+                        // keeps `None` per the additive-`Option` contract on
+                        // `Action::RestartAllocation`.
+                        reason: None,
                     };
                     let mut next_view = view.clone();
                     let count =

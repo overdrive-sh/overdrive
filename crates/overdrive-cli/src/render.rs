@@ -1013,11 +1013,21 @@ pub fn probes_section(
 /// typed `ServiceFailureReason` discriminator. The five-section shape
 /// (header / reason / last-event / reproducer / hint) is preserved
 /// for renderer continuity.
+/// `early_exit_timing` carries `(elapsed_secs, startup_deadline_secs)`
+/// for the Slice 08 `EarlyExit` multi-line block (S-SHCP-CLI-07). It is
+/// rendered ONLY for the `EarlyExit` reason; `None` (or any non-
+/// `EarlyExit` reason) omits the `elapsed:` line. The values are
+/// supplied by the caller from the stream-side elapsed measurement +
+/// the live `startup_deadline` policy — they are NOT carried on the
+/// `EarlyExit { exit_code }` wire variant (extending that variant would
+/// bump the rkyv `AllocStatusRowEnvelope`; per the persist-inputs rule
+/// the elapsed/deadline are recomputed render-side, not persisted).
 #[must_use]
 pub fn format_service_failed_block(
     workload_name: &str,
     reason: &overdrive_core::transition_reason::ServiceFailureReason,
     stderr_tail: Option<&str>,
+    early_exit_timing: Option<(u64, u64)>,
 ) -> String {
     use overdrive_core::transition_reason::{BackoffCause, ServiceFailureReason};
     use std::fmt::Write as _;
@@ -1060,9 +1070,34 @@ pub fn format_service_failed_block(
     };
     let _ = writeln!(s, "  reason: {reason_text}");
 
+    // S-SHCP-CLI-07 / 08 (Slice 08, RCA-A render hardening) — the
+    // `EarlyExit` failure on a Service-kind alloc renders a multi-line
+    // diagnostic block: the exit code on its own line, the Service-kind
+    // guidance explaining why an early exit IS a failure (a Service is
+    // expected to stay up; exiting before any startup probe could pass
+    // is the RCA-A coinflip case), and the stderr tail. This is the
+    // operator-facing surface that the RCA-A guard
+    // (`ServiceKindRenderNeverContainsTookLive`) defends — a Service
+    // must NEVER render the misleading `(took live)` success phrasing
+    // for an early exit.
+    if let ServiceFailureReason::EarlyExit { exit_code } = reason {
+        let _ = writeln!(s, "  exit_code: {exit_code}");
+        if let Some((elapsed_secs, startup_deadline_secs)) = early_exit_timing {
+            let _ = writeln!(
+                s,
+                "  elapsed: {elapsed_secs}s (startup_deadline={startup_deadline_secs}s)"
+            );
+        }
+        let _ = writeln!(
+            s,
+            "  The workload exited before any startup probe could pass; a Service is expected to stay running."
+        );
+    }
+
     if let Some(detail) = stderr_tail {
         if !detail.is_empty() {
             let _ = writeln!(s, "  last-event: {detail}");
+            let _ = writeln!(s, "  stderr_tail: \"{detail}\"");
         }
     }
 

@@ -1501,6 +1501,28 @@ fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (b
     (has_readiness_probe, success_threshold)
 }
 
+/// Step 03-02 / Slice 05 — project the liveness facts uniform across
+/// every alloc: `(has_liveness_probe, failure_threshold)`.
+/// `has_liveness_probe` is `ServiceV1.liveness_probes` non-empty;
+/// `failure_threshold` is the first liveness probe's declared
+/// threshold (default 3 per ADR-0057 §2 / DDD-14), or 3 when absent.
+/// Per persist-inputs, these are re-derived from the live spec every
+/// tick — never persisted as a `should_restart` flag.
+fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+    let has_liveness_probe = !svc.liveness_probes.is_empty();
+    let failure_threshold = svc
+        .liveness_probes
+        .first()
+        .and_then(|p| p.failure_threshold)
+        .unwrap_or(LIVENESS_FAILURE_THRESHOLD_DEFAULT);
+    (has_liveness_probe, failure_threshold)
+}
+
+/// Liveness probe `failure_threshold` default per ADR-0057 §2 /
+/// DDD-14 — three consecutive Fails on a Running alloc trigger
+/// `RestartAllocation`. Operator-configurable.
+const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
+
 /// Slice 04 — resolve the service's dataplane identity (service_id +
 /// allocator-issued VIP + local writer node) for the readiness
 /// branch's `ServiceBackendRow` composition. Mirrors
@@ -1982,6 +2004,12 @@ async fn hydrate_service_lifecycle_actual(
     };
     let spec_facts = spec_facts_for_service(&spec);
     let readiness_facts = readiness_facts_for_service(&spec);
+    // Slice 05 — liveness facts uniform across allocs:
+    // `(has_liveness_probe, failure_threshold)`. The per-alloc
+    // restart_count + restart_spec are joined per-alloc inside
+    // `hydrate_service_alloc_facts` (the count is observation-derived,
+    // the spec is intent-derived from `spec.driver`).
+    let liveness_facts = liveness_facts_for_service(&spec);
     // Slice 04 — the readiness branch needs the service's dataplane
     // identity (service_id + VIP) and the backend port to compose the
     // `ServiceBackendRow` it writes. Both derive from the first listener
@@ -1993,8 +2021,10 @@ async fn hydrate_service_lifecycle_actual(
     let allocs = hydrate_service_alloc_facts(
         state,
         workload_id,
+        &spec,
         &spec_facts,
         &readiness_facts,
+        &liveness_facts,
         backend_port,
     )
     .await?;
@@ -2013,8 +2043,10 @@ async fn hydrate_service_lifecycle_actual(
 async fn hydrate_service_alloc_facts(
     state: &AppState,
     workload_id: &WorkloadId,
+    spec: &overdrive_core::aggregate::ServiceV1,
     spec_facts: &(u32, Duration, String, bool, bool),
     readiness_facts: &(bool, u32),
+    liveness_facts: &(bool, u32),
     backend_port: u16,
 ) -> Result<
     BTreeMap<AllocationId, overdrive_core::service_lifecycle::ServiceAllocFact>,
@@ -2023,6 +2055,20 @@ async fn hydrate_service_alloc_facts(
     let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
         spec_facts;
     let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
+    let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
+    // Slice 05 — the `service-lifecycle` target the runtime keys the
+    // shared WorkloadLifecycle restart-count view by is `job/<id>`
+    // (mirrors `service_event_from_terminal`'s target shape). Used per
+    // alloc below to read `restart_count` — the input the liveness
+    // branch composes with the shared `RESTART_BACKOFF_CEILING` budget.
+    let restart_target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    // Slice 05 — the live driver command/args the liveness restart
+    // replays. Same projection the WorkloadLifecycle Run branch uses
+    // (`workload_lifecycle.rs`): single Phase-1 Exec variant.
+    let overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
+        command: live_command,
+        args: live_args,
+    }) = &spec.driver;
     let rows = state
         .obs
         .alloc_status_rows()
@@ -2058,6 +2104,17 @@ async fn hydrate_service_alloc_facts(
             })
             .max_by_key(|p| p.last_observed_at_unix_ms)
             .map(|p| p.status.clone());
+        // Slice 05 — per-alloc LWW projection of the liveness-role probe
+        // at idx 0. `None` (no row yet) leaves the consecutive-failure
+        // counter untouched in the reconciler (no observation this tick).
+        let latest_liveness_probe = probe_rows
+            .iter()
+            .filter(|p| {
+                p.role == overdrive_core::observation::ProbeRole::Liveness
+                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+            })
+            .max_by_key(|p| p.last_observed_at_unix_ms)
+            .map(|p| p.status.clone());
 
         // Backend identity for the dataplane backend set this alloc
         // contributes to. SPIFFE shape matches the project-wide
@@ -2088,6 +2145,21 @@ async fn hydrate_service_alloc_facts(
             ) => exit_code,
             _ => None,
         };
+        // Slice 05 — restart_count: how many times the SHARED
+        // WorkloadLifecycle budget already restarted this alloc.
+        // `restart_status_for_alloc` returns `(attempt_index,
+        // will_restart)` where `attempt_index = restart_counts + 1`; the
+        // liveness predicate composes against the raw restart_counts, so
+        // subtract the +1 the attempt-index carries. Falls back to 0 when
+        // the target shape is malformed (defensive; never in practice).
+        let restart_count = restart_target.as_ref().map_or(0, |t| {
+            state.runtime.restart_status_for_alloc(t, &row.alloc_id).0.saturating_sub(1)
+        });
+        // Slice 05 — restart_spec: the live workload spec the liveness
+        // restart replays (extracted into `liveness_restart_spec` to keep
+        // this fn within the `too_many_lines` budget).
+        let restart_spec =
+            liveness_restart_spec(spec, &row.alloc_id, &backend_spiffe, live_command, live_args);
         let fact = overdrive_core::service_lifecycle::ServiceAllocFact {
             alloc_id: row.alloc_id.clone(),
             state: row.state,
@@ -2104,10 +2176,44 @@ async fn hydrate_service_alloc_facts(
             readiness_success_threshold,
             backend_spiffe,
             backend_addr,
+            latest_liveness_probe,
+            has_liveness_probe,
+            liveness_failure_threshold,
+            restart_count,
+            restart_spec,
         };
         allocs.insert(row.alloc_id, fact);
     }
     Ok(allocs)
+}
+
+/// Build the `AllocationSpec` a Slice 05 liveness restart replays for
+/// one alloc. Same projection the `WorkloadLifecycle` Run branch uses
+/// (single Phase-1 Exec variant); the identity reuses the per-alloc
+/// `backend_spiffe`. Extracted from [`hydrate_service_alloc_facts`] to
+/// keep that fn within the `clippy::too_many_lines` budget per
+/// `.claude/rules/development.md` § Object Calisthenics.
+fn liveness_restart_spec(
+    spec: &overdrive_core::aggregate::ServiceV1,
+    alloc_id: &AllocationId,
+    identity: &overdrive_core::SpiffeId,
+    command: &str,
+    args: &[String],
+) -> overdrive_core::traits::driver::AllocationSpec {
+    overdrive_core::traits::driver::AllocationSpec {
+        alloc: alloc_id.clone(),
+        identity: identity.clone(),
+        command: command.to_owned(),
+        args: args.to_vec(),
+        resources: spec.resources,
+        probe_descriptors: spec
+            .startup_probes
+            .iter()
+            .chain(spec.readiness_probes.iter())
+            .chain(spec.liveness_probes.iter())
+            .cloned()
+            .collect(),
+    }
 }
 
 /// Phase 1 single-node baseline. Returns one `local` node with

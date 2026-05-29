@@ -588,6 +588,12 @@ async fn consume_stream(
     let mut stream = response.bytes_stream();
     let mut buf = BytesMut::new();
     let mut accepted: Option<AcceptedFields> = None;
+    // Stream-side elapsed measurement for the Slice 08 EarlyExit
+    // `elapsed:` render line (S-SHCP-CLI-07). Best-effort from the CLI's
+    // own clock — the EarlyExit wire variant carries only `exit_code`,
+    // so the elapsed/deadline are recomputed render-side per the
+    // persist-inputs rule (never persisted on the variant).
+    let stream_started = std::time::Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| CliError::Transport {
@@ -647,10 +653,23 @@ async fn consume_stream(
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "Failed before Accepted on the streaming bus".to_string(),
                     })?;
+                    // EarlyExit renders the `elapsed:` line from the
+                    // stream-side measurement + the default startup
+                    // deadline (the variant carries only `exit_code`).
+                    let early_exit_timing = matches!(
+                        reason,
+                        overdrive_core::transition_reason::ServiceFailureReason::EarlyExit { .. }
+                    )
+                    .then(|| {
+                        let deadline_secs =
+                            overdrive_core::service_lifecycle::DEFAULT_STARTUP_DEADLINE.as_secs();
+                        (stream_started.elapsed().as_secs(), deadline_secs)
+                    });
                     let summary = crate::render::format_service_failed_block(
                         &acc.workload_id,
                         &reason,
                         stderr_tail.as_deref(),
+                        early_exit_timing,
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
                     return Ok(SubmitStreamingOutput {

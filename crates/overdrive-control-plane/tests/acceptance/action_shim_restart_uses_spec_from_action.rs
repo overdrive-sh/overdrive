@@ -83,6 +83,10 @@ impl Driver for RecordingDriver {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "step 03-02 added the mandatory `reason` field to Action::RestartAllocation, pushing this pre-existing test one line over the 100-line budget; the field is required, not bloat"
+)]
 async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged() {
     let driver = Arc::new(RecordingDriver::new());
     let captured = driver.captured_specs();
@@ -136,6 +140,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         alloc_id,
         spec: restart_spec.clone(),
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        reason: None, // shim ignores cause (ADR-0023 §2)
     };
 
     let now = Instant::now();

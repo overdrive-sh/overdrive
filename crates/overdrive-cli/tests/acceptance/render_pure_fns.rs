@@ -269,6 +269,7 @@ fn failed_block_renders_header_reproducer_and_hint() {
         "payments",
         &ServiceFailureReason::EarlyExit { exit_code: 7 },
         None,
+        None,
     );
     assert!(
         rendered.contains("workload 'payments' did not converge to stable"),
@@ -287,6 +288,7 @@ fn failed_block_includes_last_event_when_stderr_tail_present() {
         "payments",
         &ServiceFailureReason::EarlyExit { exit_code: 7 },
         Some("segfault at 0xdead"),
+        None,
     );
     assert!(
         rendered.contains("last-event: segfault at 0xdead"),
@@ -300,6 +302,7 @@ fn failed_block_omits_last_event_when_stderr_tail_empty() {
         "payments",
         &ServiceFailureReason::EarlyExit { exit_code: 7 },
         Some(""),
+        None,
     );
     assert!(
         !rendered.contains("last-event:"),
@@ -365,7 +368,7 @@ fn failed_block_reason_text_is_variant_specific() {
     ];
 
     for (reason, expected) in cases {
-        let rendered = format_service_failed_block("svc", &reason, None);
+        let rendered = format_service_failed_block("svc", &reason, None, None);
         assert!(
             rendered.contains(expected),
             "reason {reason:?} must render '{expected}'; got:\n{rendered}",

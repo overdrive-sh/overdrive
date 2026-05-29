@@ -101,6 +101,21 @@ fn fact_with_readiness(
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX))),
             8080,
         ),
+        latest_liveness_probe: None,
+        has_liveness_probe: false,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: overdrive_core::traits::driver::AllocationSpec {
+            alloc: alloc(&format!("svc-{index}")),
+            identity: spiffe(index),
+            command: "/bin/svc".to_string(),
+            args: vec![],
+            resources: overdrive_core::traits::driver::Resources {
+                cpu_milli: 100,
+                memory_bytes: 64 * 1024 * 1024,
+            },
+            probe_descriptors: vec![],
+        },
     }
 }
 
@@ -126,6 +141,21 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX))),
             8080,
         ),
+        latest_liveness_probe: None,
+        has_liveness_probe: false,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: overdrive_core::traits::driver::AllocationSpec {
+            alloc: alloc(&format!("svc-{index}")),
+            identity: spiffe(index),
+            command: "/bin/svc".to_string(),
+            args: vec![],
+            resources: overdrive_core::traits::driver::Resources {
+                cpu_milli: 100,
+                memory_bytes: 64 * 1024 * 1024,
+            },
+            probe_descriptors: vec![],
+        },
     }
 }
 
