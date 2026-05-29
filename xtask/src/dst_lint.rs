@@ -163,6 +163,34 @@ pub enum BannedKind {
     /// structurally distinct pattern) rather than naming a bound
     /// variable. See GAP-4 + GAP-5 closure commit for the patch.
     UnderscoreBindingProbeRunner,
+    /// The Earned-Trust gate helper at
+    /// `crates/overdrive-control-plane/src/probe_runner_boot.rs`
+    /// does not invoke `runner.probe().await` outside `#[cfg(test)]`
+    /// context — the gate is structurally a no-op. Banned per GAP-3
+    /// from `.context/01-03-structural-gap-audit.md` + ADR-0054 § 7.
+    ///
+    /// The pre-existing ProbeRunner-declaration scanner clause
+    /// enforces that `impl ProbeRunner` declares `async fn probe`,
+    /// but says nothing about whether the production composition
+    /// root actually CALLS that method. Without this absence-check,
+    /// someone deleting the `runner.probe().await` line from
+    /// [`probe_runner_boot::compose_and_probe_runner_gate`] leaves
+    /// the function still typechecking — it returns
+    /// `Ok(Arc::new(ProbeRunner::new(...)))` and the Earned-Trust
+    /// gate silently becomes a lie.
+    ProbeGateInvocationMissing,
+    /// The binary composition root at
+    /// `crates/overdrive-control-plane/src/lib.rs` does not invoke
+    /// [`probe_runner_boot::compose_and_probe_runner_gate`] outside
+    /// `#[cfg(test)]` context — the gate helper is shipped but never
+    /// reached from production. Banned per GAP-3 from
+    /// `.context/01-03-structural-gap-audit.md` + ADR-0054 § 7.
+    ///
+    /// Belt-and-suspenders with [`Self::ProbeGateInvocationMissing`]:
+    /// the inner scanner defends the helper's body, this one defends
+    /// the helper's call site. Either failure means production boots
+    /// without exercising the Earned-Trust gate.
+    ProbeGateHelperUnused,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -1095,6 +1123,328 @@ fn underscore_binding_probe_runner_path_in_scope(rel_path: &Path) -> bool {
 }
 
 // -----------------------------------------------------------------------------
+// ProbeRunner Earned-Trust gate absence scanners — GAP-3 closure
+// -----------------------------------------------------------------------------
+//
+// The existing `inspect_probe_runner_earned_trust_method` scanner clause
+// enforces that `impl ProbeRunner` declares `async fn probe(&self) -> ...`
+// (the method *declaration*). GAP-3 from
+// `.context/01-03-structural-gap-audit.md` documents the structural gap:
+// declaring the method is not enough — the call sites that exercise the
+// production probe path are equally load-bearing and equally easy to
+// silently delete.
+//
+// Two structurally-distinct absence checks close the gap, both pure-syn
+// walks (no `overdrive-*` import) per the xtask boundary in
+// `.claude/rules/development.md` § "xtask is build / test / dev
+// orchestration, NOT a runtime entry point":
+//
+//   - [`scan_source_probe_gate_invocation_present`] — walks
+//     `crates/overdrive-control-plane/src/probe_runner_boot.rs` and
+//     asserts that at least one `.probe()` method call exists outside
+//     `#[cfg(test)]` context. Defends against someone deleting
+//     `runner.probe().await` from
+//     [`compose_and_probe_runner_gate`] (the gate body that runs the
+//     Earned-Trust probe), which would render the gate a no-op
+//     returning `Ok(Arc::new(ProbeRunner::new(...)))` without
+//     actually probing the sacrificial adapter.
+//
+//   - [`scan_source_probe_gate_helper_invoked`] — walks
+//     `crates/overdrive-control-plane/src/lib.rs` and asserts that
+//     at least one call expression (function or method) names
+//     `compose_and_probe_runner_gate` outside `#[cfg(test)]` context.
+//     Defends against someone deleting the helper's call site from
+//     the binary composition root, which would mean the binary
+//     never reaches the gate at all — even if the helper body
+//     remained correct.
+//
+// Belt-and-suspenders: either invariant being broken means production
+// boots without the probe gate. Both are workspace-level invariants
+// (each fires at most once per workspace); both are dispatched from
+// [`scan_workspace`].
+
+/// Visitor that walks an AST and records whether a `.probe()` method
+/// call appears outside `#[cfg(test)]` context.
+///
+/// `found_in_production` flips to `true` on the first `expr.probe()`
+/// method call encountered while `cfg_test_depth == 0`. Subsequent
+/// hits do not change state — the scanner answers a single yes/no
+/// question.
+struct ProbeMethodCallCollector {
+    /// Did we find at least one `.probe()` method call outside
+    /// `#[cfg(test)]`?
+    found_in_production: bool,
+    /// Depth of `#[cfg(test)]` items currently open. Same shape as
+    /// [`Collector::cfg_test_depth`].
+    cfg_test_depth: usize,
+}
+
+impl<'ast> Visit<'ast> for ProbeMethodCallCollector {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_impl_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_mod(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_mod(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        // Match the literal method name `probe` — `probe_async`,
+        // `probe_v2`, `probes`, etc. do NOT satisfy the contract. The
+        // ADR-0054 § 7 surface is specifically `runner.probe().await`.
+        if self.cfg_test_depth == 0 && node.method == "probe" {
+            self.found_in_production = true;
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+}
+
+/// Walk `source` and produce a violation iff no `.probe()` method
+/// call exists outside `#[cfg(test)]` context.
+///
+/// The contract is "at least one production call site exists" — the
+/// scanner does not care WHICH expression receives the call; the
+/// presence of `runner.probe().await` (or any other `<receiver>.probe()`
+/// shape) outside `#[cfg(test)]` is sufficient. This is intentional:
+/// the structural defense is against the call's disappearance, not
+/// against alternative shapes that exercise the same probe path.
+///
+/// Returns at most one [`Violation`] (the absence check is
+/// workspace-level, not per-call-site). Source files that cannot be
+/// parsed by `syn::parse_file` produce an `Err` — callers may choose
+/// to surface the parse failure or treat it as a soft skip.
+///
+/// # Errors
+///
+/// Propagates `syn::parse_file` failures so callers can distinguish
+/// "file didn't parse" from "file was clean".
+pub fn scan_source_probe_gate_invocation_present(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = ProbeMethodCallCollector { found_in_production: false, cfg_test_depth: 0 };
+    collector.visit_file(&parsed);
+    if collector.found_in_production {
+        return Ok(Vec::new());
+    }
+    Ok(vec![Violation {
+        file,
+        line: 1,
+        column: 1,
+        banned_path: "missing call: runner.probe()".to_string(),
+        replacement_trait: "ADR-0054 § 7 — Earned-Trust gate must invoke `.probe()`".to_string(),
+        kind: BannedKind::ProbeGateInvocationMissing,
+    }])
+}
+
+/// Visitor that walks an AST and records whether a call expression
+/// (function-call or method-call) resolves to a path whose last
+/// segment is the literal `compose_and_probe_runner_gate`, outside
+/// `#[cfg(test)]` context.
+///
+/// `found_in_production` flips to `true` on the first such match.
+/// Matching is by trailing-segment identity: both
+/// `compose_and_probe_runner_gate(...)` (after `use ...::*;`) and
+/// `probe_runner_boot::compose_and_probe_runner_gate(...)` qualify.
+struct ProbeGateHelperCallCollector {
+    found_in_production: bool,
+    cfg_test_depth: usize,
+}
+
+impl<'ast> Visit<'ast> for ProbeGateHelperCallCollector {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_impl_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_mod(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_mod(self, node);
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if self.cfg_test_depth == 0 {
+            if let syn::Expr::Path(path_expr) = &*node.func {
+                if path_expr
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|seg| seg.ident == "compose_and_probe_runner_gate")
+                {
+                    self.found_in_production = true;
+                }
+            }
+        }
+        visit::visit_expr_call(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        // Defensive: someone could conceivably write this as a method
+        // call (`self.compose_and_probe_runner_gate(...)`) in the
+        // future. Accept that shape too — the rule is "the literal
+        // identifier appears as the called function name outside
+        // `#[cfg(test)]`".
+        if self.cfg_test_depth == 0 && node.method == "compose_and_probe_runner_gate" {
+            self.found_in_production = true;
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+}
+
+/// Walk `source` and produce a violation iff no call to
+/// `compose_and_probe_runner_gate` exists outside `#[cfg(test)]`
+/// context.
+///
+/// Matches both unqualified (`compose_and_probe_runner_gate(...)`)
+/// and qualified (`probe_runner_boot::compose_and_probe_runner_gate(...)`)
+/// shapes — the contract is "the binary composition root reaches the
+/// helper from production." A test-only call inside `#[cfg(test)]`
+/// does not count.
+///
+/// Returns at most one [`Violation`]. Source files that cannot be
+/// parsed by `syn::parse_file` produce an `Err`.
+///
+/// # Errors
+///
+/// Propagates `syn::parse_file` failures so callers can distinguish
+/// "file didn't parse" from "file was clean".
+pub fn scan_source_probe_gate_helper_invoked(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector =
+        ProbeGateHelperCallCollector { found_in_production: false, cfg_test_depth: 0 };
+    collector.visit_file(&parsed);
+    if collector.found_in_production {
+        return Ok(Vec::new());
+    }
+    Ok(vec![Violation {
+        file,
+        line: 1,
+        column: 1,
+        banned_path: "missing call: compose_and_probe_runner_gate".to_string(),
+        replacement_trait:
+            "ADR-0054 § 7 — binary composition root must invoke the Earned-Trust gate helper"
+                .to_string(),
+        kind: BannedKind::ProbeGateHelperUnused,
+    }])
+}
+
+/// Workspace-level dispatch for the GAP-3 absence checks. Resolves
+/// the two structural points by absolute path under the
+/// `overdrive-control-plane` crate root and runs the matching
+/// scanner over each. Each call returns at most one violation; the
+/// composite return surface is at most two.
+///
+/// When either file is missing entirely, emits a single violation
+/// at the file's expected parent directory naming the missing
+/// file — that shape catches an accidental file deletion (e.g.
+/// during a misguided refactor) before the deeper scanner can fail
+/// to find content.
+fn scan_probe_gate_absence_checks(
+    classes: &[(String, PathBuf, Option<String>)],
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+
+    // Locate the overdrive-control-plane crate root. The workspace
+    // shape guarantees at most one such crate; if it's missing the
+    // GAP-3 invariants cannot apply and we emit nothing.
+    let Some((_, root, _)) = classes.iter().find(|(name, _, _)| name == "overdrive-control-plane")
+    else {
+        return Ok(violations);
+    };
+
+    // Inner: probe_runner_boot.rs MUST exist and MUST contain at
+    // least one `.probe()` method call outside `#[cfg(test)]`.
+    let inner_path = root.join("src").join("probe_runner_boot.rs");
+    if inner_path.is_file() {
+        let source = std::fs::read_to_string(&inner_path)
+            .with_context(|| format!("read {}", inner_path.display()))?;
+        if let Ok(found) = scan_source_probe_gate_invocation_present(&source, &inner_path) {
+            violations.extend(found);
+        }
+    } else {
+        violations.push(Violation {
+            file: inner_path,
+            line: 1,
+            column: 1,
+            banned_path: "missing file: probe_runner_boot.rs".to_string(),
+            replacement_trait: "ADR-0054 § 7 — Earned-Trust gate helper file must exist"
+                .to_string(),
+            kind: BannedKind::ProbeGateInvocationMissing,
+        });
+    }
+
+    // Outer: lib.rs MUST contain at least one call to
+    // `compose_and_probe_runner_gate` outside `#[cfg(test)]`.
+    let outer_path = root.join("src").join("lib.rs");
+    if outer_path.is_file() {
+        let source = std::fs::read_to_string(&outer_path)
+            .with_context(|| format!("read {}", outer_path.display()))?;
+        if let Ok(found) = scan_source_probe_gate_helper_invoked(&source, &outer_path) {
+            violations.extend(found);
+        }
+    } else {
+        violations.push(Violation {
+            file: outer_path,
+            line: 1,
+            column: 1,
+            banned_path: "missing file: lib.rs".to_string(),
+            replacement_trait: "ADR-0054 § 7 — binary composition root file must exist".to_string(),
+            kind: BannedKind::ProbeGateHelperUnused,
+        });
+    }
+
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
 // Envelope scaffolding scanners — RED scaffolds per ADR-0048
 // -----------------------------------------------------------------------------
 
@@ -1588,10 +1938,28 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
 
     // Scan the CLI crate's render / command source for the `"live"`
     // literal regression-guard rule (Slice 01 of
-    // `workload-kind-discriminator`, US-06). Path-based scoping picks
-    // out only `crates/overdrive-cli/src/render.rs` and any file
-    // under `crates/overdrive-cli/src/commands/**/*.rs`.
-    for (_name, root, _class) in &classes {
+    // `workload-kind-discriminator`, US-06).
+    violations.extend(scan_live_literal_workspace(&classes, &metadata)?);
+
+    // GAP-3 + GAP-5 closures from `.context/01-03-structural-gap-audit.md`.
+    violations.extend(scan_underscore_binding_probe_runner(&classes, &metadata)?);
+    violations.extend(scan_probe_gate_absence_checks(&classes)?);
+    Ok(violations)
+}
+
+/// Dispatch the `"live"` literal regression-guard rule across the
+/// workspace. Path-based scoping picks out only
+/// `crates/overdrive-cli/src/render.rs` and any file under
+/// `crates/overdrive-cli/src/commands/**/*.rs`.
+///
+/// Extracted from [`scan_workspace`] to keep that function under the
+/// `clippy::too_many_lines` threshold; the mechanics are unchanged.
+fn scan_live_literal_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    for (_name, root, _class) in classes {
         let src = root.join("src");
         if !src.exists() {
             continue;
@@ -1615,12 +1983,6 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
             }
         }
     }
-
-    // Scan `crates/overdrive-control-plane/src/` for the
-    // underscore-binding-probe-runner regression guard (GAP-5 closure
-    // from `.context/01-03-structural-gap-audit.md`).
-    violations.extend(scan_underscore_binding_probe_runner(&classes, &metadata)?);
-
     Ok(violations)
 }
 
@@ -1726,6 +2088,30 @@ pub fn render_violation(v: &Violation) -> String {
                 v.replacement_trait,
             ),
             "see GAP-5 from .context/01-03-structural-gap-audit.md",
+        ),
+        BannedKind::ProbeGateInvocationMissing => (
+            "error: ProbeRunner Earned-Trust gate is structurally absent",
+            format!(
+                "{} — `compose_and_probe_runner_gate` must call \
+                 `runner.probe().await` outside `#[cfg(test)]` context. \
+                 Without that call the gate returns `Ok(Arc::new(...))` \
+                 unconditionally and the production boot path never \
+                 exercises the sacrificial-loopback probe per ADR-0054 § 7.",
+                v.replacement_trait,
+            ),
+            "see GAP-3 from .context/01-03-structural-gap-audit.md and ADR-0054 § 7",
+        ),
+        BannedKind::ProbeGateHelperUnused => (
+            "error: ProbeRunner Earned-Trust gate helper is unreachable from production",
+            format!(
+                "{} — `compose_production_driver` (or another non-test \
+                 composition site) must call \
+                 `probe_runner_boot::compose_and_probe_runner_gate(...)`. \
+                 Without that call the binary boots without running the \
+                 Earned-Trust probe even if the helper itself is correct.",
+                v.replacement_trait,
+            ),
+            "see GAP-3 from .context/01-03-structural-gap-audit.md and ADR-0054 § 7",
         ),
     };
     format!(
@@ -2931,5 +3317,222 @@ mod tests {
         assert!(!underscore_binding_probe_runner_path_in_scope(std::path::Path::new(
             "crates/overdrive-cli/src/main.rs"
         )));
+    }
+
+    // -------------------------------------------------------------
+    // GAP-3 closure — ProbeRunner Earned-Trust gate absence scanners
+    // -------------------------------------------------------------
+
+    /// Path to the real `crates/overdrive-control-plane/src/probe_runner_boot.rs`.
+    fn probe_runner_boot_source_path() -> std::path::PathBuf {
+        let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        crate_dir
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .join("crates/overdrive-control-plane/src/probe_runner_boot.rs")
+    }
+
+    /// Path to the real `crates/overdrive-control-plane/src/lib.rs`.
+    fn control_plane_lib_rs_source_path() -> std::path::PathBuf {
+        let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        crate_dir
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .join("crates/overdrive-control-plane/src/lib.rs")
+    }
+
+    // ---------------- ProbeGateInvocationMissing tests ----------------
+
+    /// (a) The real `probe_runner_boot.rs` contains `runner.probe().await`
+    /// outside `#[cfg(test)]` — the scanner MUST produce zero violations.
+    #[test]
+    fn probe_gate_invocation_real_source_is_clean() {
+        let path = probe_runner_boot_source_path();
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations =
+            scan_source_probe_gate_invocation_present(&source, &path).expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "real probe_runner_boot.rs must contain `.probe()` outside #[cfg(test)]; \
+             got {violations:?}"
+        );
+    }
+
+    /// (b) Synthetic source with the `.probe()` call REMOVED (replaced
+    /// with `Ok(Arc::new(...))`) — scanner MUST emit a violation.
+    #[test]
+    fn probe_gate_invocation_missing_is_flagged() {
+        let source = r"
+            use std::sync::Arc;
+            pub async fn compose_and_probe_runner_gate(
+                tcp_prober: Arc<dyn TcpProber>,
+                http_prober: Arc<dyn HttpProber>,
+                exec_prober: Arc<dyn ExecProber>,
+            ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
+                let runner = Arc::new(ProbeRunner::new(tcp_prober, http_prober, exec_prober));
+                Ok(runner)
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_invocation_present(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "removed `.probe()` call must trigger exactly one violation; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ProbeGateInvocationMissing);
+    }
+
+    /// (c) Synthetic source with `.probe()` only inside `#[cfg(test)]` —
+    /// the production path is still unguarded; scanner MUST flag.
+    #[test]
+    fn probe_gate_invocation_only_in_cfg_test_is_flagged() {
+        let source = r"
+            use std::sync::Arc;
+            pub async fn compose_and_probe_runner_gate(
+                tcp_prober: Arc<dyn TcpProber>,
+            ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
+                let runner = Arc::new(ProbeRunner::new(tcp_prober));
+                Ok(runner)
+            }
+
+            #[cfg(test)]
+            mod tests {
+                #[tokio::test]
+                async fn probe_is_invoked_under_test() {
+                    let runner = make_runner();
+                    let _ = runner.probe().await;
+                }
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_invocation_present(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            ".probe() inside #[cfg(test)] only must STILL trigger; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ProbeGateInvocationMissing);
+    }
+
+    /// (d) Synthetic source with a similarly-named method (`probe_async`
+    /// or `probe_v2`) — the contract is `.probe()` specifically; the
+    /// scanner MUST flag.
+    #[test]
+    fn probe_gate_invocation_distinct_method_name_is_flagged() {
+        let source = r"
+            use std::sync::Arc;
+            pub async fn compose_and_probe_runner_gate(
+                tcp_prober: Arc<dyn TcpProber>,
+            ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
+                let runner = Arc::new(ProbeRunner::new(tcp_prober));
+                let _ = runner.probe_async().await;
+                let _ = runner.probe_v2().await;
+                Ok(runner)
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_invocation_present(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "similar-but-distinct method names must NOT satisfy the contract; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ProbeGateInvocationMissing);
+    }
+
+    // ---------------- ProbeGateHelperUnused tests ----------------
+
+    /// (e) The real `lib.rs` contains a production call to
+    /// `compose_and_probe_runner_gate(...)` — scanner MUST produce zero
+    /// violations.
+    #[test]
+    fn probe_gate_helper_real_lib_rs_is_clean() {
+        let path = control_plane_lib_rs_source_path();
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations =
+            scan_source_probe_gate_helper_invoked(&source, &path).expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "real lib.rs must invoke `compose_and_probe_runner_gate` outside #[cfg(test)]; \
+             got {violations:?}"
+        );
+    }
+
+    /// (f) Synthetic `lib.rs` with the `compose_and_probe_runner_gate(...)`
+    /// call removed — scanner MUST emit a violation.
+    #[test]
+    fn probe_gate_helper_missing_call_is_flagged() {
+        let source = r"
+            pub async fn compose_production_driver() -> Result<Driver, Error> {
+                let driver = ExecDriver::new();
+                Ok(driver)
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_helper_invoked(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "missing `compose_and_probe_runner_gate` call must trigger; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ProbeGateHelperUnused);
+    }
+
+    /// (g) Synthetic `lib.rs` where the call exists only inside
+    /// `#[cfg(test)]` — production path still doesn't reach it;
+    /// scanner MUST flag.
+    #[test]
+    fn probe_gate_helper_only_in_cfg_test_is_flagged() {
+        let source = r"
+            pub async fn compose_production_driver() -> Result<Driver, Error> {
+                let driver = ExecDriver::new();
+                Ok(driver)
+            }
+
+            #[cfg(test)]
+            mod tests {
+                #[tokio::test]
+                async fn helper_called_under_test() {
+                    let _ = compose_and_probe_runner_gate(tcp, http, exec).await;
+                }
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_helper_invoked(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "helper call inside #[cfg(test)] only must STILL trigger; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ProbeGateHelperUnused);
+    }
+
+    /// Qualified-path call (`probe_runner_boot::compose_and_probe_runner_gate`)
+    /// MUST satisfy the contract — the trailing segment is what matters.
+    #[test]
+    fn probe_gate_helper_qualified_path_satisfies_contract() {
+        let source = r"
+            pub async fn compose_production_driver() -> Result<Driver, Error> {
+                let _runner = probe_runner_boot::compose_and_probe_runner_gate(
+                    tcp_prober, http_prober, exec_prober,
+                ).await?;
+                Ok(driver)
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_helper_invoked(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "qualified path call must satisfy the contract; got {violations:?}"
+        );
     }
 }
