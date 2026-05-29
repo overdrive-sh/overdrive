@@ -765,6 +765,9 @@ pub fn service_event_from_terminal(
         // projection. The Service-kind broadcast lane is not reached
         // for these in production; this match arm exists for
         // exhaustiveness against the `#[non_exhaustive]` enum.
+        // mutants: skip — equivalent mutant: deleting this explicit arm
+        // folds it into the `_ => None` catch-all below; both return the
+        // identical `None`, so no test can observe the difference.
         TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. } => None,
         // Forward-compat for future `#[non_exhaustive]` additions to
         // `TerminalCondition`. Unknown variants do not project to a

@@ -533,6 +533,55 @@
       "s": "EXECUTED",
       "d": "PASS \u2014 commit c2d99561 activates S-SHCP-INT-CLI-02/03/04/05 (#[should_panic] removed, GREEN end-to-end through real CLI handler \u2192 in-process server \u2192 reconciler \u2192 driver \u2192 ProbeRunner \u2192 obs-store); CLI-01 stays RED (#[should_panic(expected=RED scaffold)]) for 01-03f-2. Supersedes the 2026-05-26 PARTIAL COMMIT \u2014 the upstream GAP-1..10 blockers it cited are now closed. Gates: check/clippy/dst-lint clean; full suite 1621/1621. Umbrella 01-03f NOT logged (reserved for 01-03f-2 + user approval)",
       "t": "2026-05-29T13:47:29Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T13:56:51Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: S-SHCP-INT-CLI-01 activated (should_panic removed, 100-seed K1 loop authored); ran under Lima against real composition root. AT fails for a business-logic reason (valid RED): terminal is Failed{EarlyExit{exit_code:0}} not exit_code:1 \u2014 kernel exit 1 lives in row.reason=WorkloadCrashedImmediately{exit_code:Some(1)} but hydrate_service_alloc_facts (reconciler_runtime.rs:1949) hardcodes exit_code:None. Zero Stable, zero (took live) \u2014 RCA-A branch fires correctly; only exit-code projection is missing.",
+      "t": "2026-05-29T14:00:37Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 S-SHCP-INT-CLI-01 activated (RED-scaffold marker removed, 100-seed K1 loop authored, compiles + runs under Lima against the real composition root). Valid RED: the AT fails for a business-logic reason \u2014 terminal is Failed EarlyExit exit_code=0 not exit_code=1; zero Stable, zero (took live), so the RCA-A branch fires correctly. Root cause is a production gap surfaced for approval (see report).",
+      "t": "2026-05-29T14:01:41Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: K1 is a Tier-3 walking-skeleton over already-complete production; no new unit surface authored by this step. The exit-code-projection gap (if its fix is approved) has Tier-1 precedent coverage at workload_lifecycle.rs:944; no new unit test is in-scope here.",
+      "t": "2026-05-29T14:01:54Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN unreachable within the declared files_to_modify set. The K1 north-star AC requires Failed{EarlyExit{exit_code:1}} but production delivers exit_code:0 \u2014 hydrate_service_alloc_facts (overdrive-control-plane/src/reconciler_runtime.rs:1949) hardcodes exit_code:None instead of sourcing it from row.reason=WorkloadCrashedImmediately{exit_code} (canonical Job-kind precedent: reconcilers/workload_lifecycle.rs:944). The one-line fix is outside this step's declared scope; per CLAUDE.md No-budget-cuts + BOUNDARY_RULES, surfaced for user approval to expand scope rather than ship a partial or weaken the AC.",
+      "t": "2026-05-29T14:02:06Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: no commit \u2014 GREEN not reached (see GREEN entry). Committing a non-GREEN state would violate the 100%-green discipline and the Iron Rule (never weaken a failing AT). PART B mutation gate and PART C umbrella-01-03f DES-log close are both blocked behind the same user decision. Working tree carries only the two in-scope files (service_honest_stable.rs with K1 loop + scaffold removed; append-only execution-log.json); no out-of-scope production file touched, no GH issue created.",
+      "t": "2026-05-29T14:02:14Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:25:59Z"
     }
   ]
 }

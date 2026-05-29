@@ -244,6 +244,97 @@ fn stable_dedup_skips_already_announced_alloc() {
 }
 
 // =====================================================================
+// Category A' — Empty-probes opt-out Stable branch (branch (a'))
+// =====================================================================
+// ADR-0058 §4 / ADR-0059 Q5: when the operator declares
+// `[[health_check.startup]] = []`, the first Running IS Stable. The
+// gate is `fact.startup_probes_empty && fact.state == AllocState::Running`
+// at service_lifecycle.rs:405. The Category-A tests above always carry
+// `startup_probes_empty: false`, so they never enter branch (a') and do
+// NOT discriminate the `== AllocState::Running` operator at line 405.
+// These two tests pin it.
+
+/// Build an empty-startup-probes fact (branch (a') opt-out shape). The
+/// `fact()` helper hardcodes `startup_probes_empty: false`; this flips
+/// it and clears the probe + witness shape that the opt-out path uses.
+fn empty_probes_fact(
+    alloc_id: &str,
+    state: AllocState,
+    started_at_unix_ms: u64,
+) -> ServiceAllocFact {
+    ServiceAllocFact {
+        startup_probes_empty: true,
+        latest_startup_probe: None,
+        ..fact(alloc_id, state, started_at_unix_ms, None, None, 30, Duration::from_secs(60))
+    }
+}
+
+/// Branch (a') fires when `startup_probes_empty == true` AND
+/// `state == Running` ⇒ one `Stable { witness.mechanic_summary ==
+/// "none (opted out)" }` AND alloc inserted into `stable_announced`.
+#[test]
+fn empty_probes_opt_out_fires_stable_when_running() {
+    let f = empty_probes_fact("alloc-svc-optout", AllocState::Running, 1_000);
+    let actual = one_alloc_state(f);
+    let view = ServiceLifecycleView::default();
+    let tick = tick_at_ms(5_000);
+
+    let r = ServiceLifecycleReconciler::new();
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+
+    assert_eq!(actions.len(), 1, "opt-out branch must emit exactly one action; got {actions:?}");
+    match &actions[0] {
+        Action::FinalizeFailed {
+            alloc_id,
+            terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
+        } => {
+            assert_eq!(alloc_id.as_str(), "alloc-svc-optout");
+            assert_eq!(*settled_in_ms, 4_000, "settled = now (5000) - started_at (1000)");
+            assert_eq!(witness.probe_idx, 0);
+            assert_eq!(witness.role, "startup");
+            assert_eq!(
+                witness.mechanic_summary, "none (opted out)",
+                "branch (a') witness names the opt-out mechanic"
+            );
+            assert!(!witness.inferred);
+        }
+        other => panic!("expected opt-out Stable, got {other:?}"),
+    }
+    assert!(
+        next_view.stable_announced.contains(&aid("alloc-svc-optout")),
+        "opt-out alloc must be inserted into stable_announced after emission"
+    );
+}
+
+/// Branch (a') does NOT fire when `startup_probes_empty == true` but
+/// `state != Running` (Pending). Kills `== AllocState::Running` →
+/// `!= AllocState::Running` at service_lifecycle.rs:405 — under the
+/// mutation a Pending+empty-probes alloc would wrongly enter the
+/// opt-out Stable path.
+#[test]
+fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
+    let f = empty_probes_fact("alloc-svc-optout", AllocState::Pending, 1_000);
+    let actual = one_alloc_state(f);
+    let view = ServiceLifecycleView::default();
+    let tick = tick_at_ms(2_000);
+
+    let r = ServiceLifecycleReconciler::new();
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+
+    assert!(
+        actions.is_empty(),
+        "opt-out Stable must NOT fire for non-Running state (kills == Running → != Running \
+         mutant at line 405); got {actions:?}"
+    );
+    assert!(
+        !next_view.stable_announced.contains(&aid("alloc-svc-optout")),
+        "alloc must NOT be inserted into stable_announced when branch (a') did not fire"
+    );
+}
+
+// =====================================================================
 // Category B — EarlyExit branch
 // =====================================================================
 // elapsed_ms < deadline_ms gate at line 282

@@ -2132,8 +2132,11 @@ mod tests {
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::dataplane::backend_key::Proto;
         use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
+        use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
         use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+        use overdrive_core::reconcilers::workload_lifecycle::WorkloadLifecycle;
         use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource};
+        use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
@@ -2485,6 +2488,135 @@ mod tests {
             assert!(s.actual.running.contains(&AllocationId::new("payments-0").expect("alloc id")));
             assert!(s.actual.running.contains(&AllocationId::new("payments-2").expect("alloc id")));
             assert_eq!(s.actual.workload_id, workload_id());
+        }
+
+        // -------------------------------------------------------------
+        // Mutation-gate killing tests (step 01-03f-2 Part B)
+        // -------------------------------------------------------------
+
+        fn workload_lifecycle_reconciler() -> AnyReconciler {
+            AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
+        }
+
+        fn service_lifecycle_reconciler() -> AnyReconciler {
+            AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new())
+        }
+
+        /// Kills `reconciler_runtime.rs:1759 == → !=` in `hydrate_actual`:
+        /// `workload_kind == WorkloadKind::Service` gates whether
+        /// `service_spec_digest` is populated from the persisted intent
+        /// digest or forced to `None`. For a persisted Service intent the
+        /// digest MUST be `Some(_)`; the `!=` mutant flips it to `None`.
+        #[tokio::test]
+        async fn hydrate_actual_service_kind_populates_service_spec_digest() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let intent = service_intent(&[8080]);
+            let state = build_state(&tmp, Some(intent)).await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &workload_lifecycle_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::WorkloadLifecycle(s) = result else {
+                panic!("expected AnyState::WorkloadLifecycle variant");
+            };
+            assert_eq!(
+                s.workload_kind,
+                WorkloadKind::Service,
+                "persisted Service intent must hydrate kind == Service"
+            );
+            assert!(
+                s.service_spec_digest.is_some(),
+                "Service-kind workload MUST carry the intent spec_digest \
+                 (kills == → != mutant at reconciler_runtime.rs:1759); got None"
+            );
+        }
+
+        /// Write a single startup-role probe-result row for `alloc`.
+        async fn write_probe(
+            state: &AppState,
+            alloc: &str,
+            role: ProbeRole,
+            probe_idx: u32,
+            status: ProbeStatus,
+            last_observed_at_unix_ms: u64,
+        ) {
+            let row = ProbeResultRow {
+                alloc_id: AllocationId::new(alloc).expect("alloc id"),
+                probe_idx: ProbeIdx::new(probe_idx),
+                role,
+                status,
+                last_observed_at_unix_ms,
+                inferred: false,
+            };
+            state.obs.write_probe_result(row).await.expect("write probe row");
+        }
+
+        /// Kills `reconciler_runtime.rs:1937 && → ||` in
+        /// `hydrate_service_alloc_facts`: the per-alloc LWW probe
+        /// projection filters `role == Startup && probe_idx == 0`.
+        ///
+        /// The SimObservationStore LWW index is keyed on
+        /// `(alloc_id, probe_idx)`, so the two rows MUST carry distinct
+        /// `probe_idx` values to coexist. The discriminating row is
+        /// `Startup / idx 1 / Fail` at a LATER timestamp: it satisfies
+        /// exactly ONE clause of the filter (`role == Startup`, but
+        /// `probe_idx != 0`). Under the correct `&&` it is excluded and
+        /// only the `Startup / idx 0 / Pass` row survives →
+        /// `Some(Pass)`. Under the `||` mutant the idx-1 Fail row is
+        /// wrongly admitted (role clause alone suffices) and, being
+        /// later, wins `max_by_key(last_observed_at)` → `Some(Fail)`.
+        #[tokio::test]
+        async fn hydrate_service_alloc_facts_probe_filter_requires_both_role_and_idx() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let intent = service_intent(&[8080]);
+            let state = build_state(&tmp, Some(intent)).await;
+
+            write_alloc_status(&state, "payments-0", AllocState::Running, 1).await;
+            // Matching row: Startup / idx 0 / Pass at t=100 (both clauses).
+            write_probe(&state, "payments-0", ProbeRole::Startup, 0, ProbeStatus::Pass, 100).await;
+            // Discriminating row: Startup / idx 1 / Fail at LATER t=200.
+            // `role == Startup` true but `probe_idx == 0` false — under
+            // `&&` excluded; under `||` admitted (and winning by ts).
+            // Distinct probe_idx keeps it from colliding with the idx-0
+            // row under the store's `(alloc_id, probe_idx)` PK.
+            write_probe(
+                &state,
+                "payments-0",
+                ProbeRole::Startup,
+                1,
+                ProbeStatus::Fail { last_fail_reason: "mutant-bait".to_string() },
+                200,
+            )
+            .await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &service_lifecycle_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected AnyState::ServiceLifecycle variant");
+            };
+            let fact = s
+                .allocs
+                .get(&AllocationId::new("payments-0").expect("alloc id"))
+                .expect("payments-0 fact present");
+            assert_eq!(
+                fact.latest_startup_probe,
+                Some(ProbeStatus::Pass),
+                "only the Startup/idx-0 Pass row may project as latest_startup_probe; the \
+                 later Startup/idx-1 Fail row must be excluded because BOTH role AND probe_idx \
+                 must match (kills && → || mutant at reconciler_runtime.rs:1937); got {:?}",
+                fact.latest_startup_probe
+            );
         }
     }
 }

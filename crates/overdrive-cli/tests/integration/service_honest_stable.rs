@@ -1,8 +1,9 @@
 //! Tier 3 integration — Service-submit honesty regression guard.
 //!
 //! Step 01-03f-1 — activates S-SHCP-INT-CLI-02 / 03 / 04 / 05 against
-//! the corrected composition root. S-SHCP-INT-CLI-01 (the 100-seed K1
-//! coinflip loop) remains RED pending step 01-03f-2.
+//! the corrected composition root. Step 01-03f-2 — activates
+//! S-SHCP-INT-CLI-01 (the 100-seed K1 coinflip-as-Service north star);
+//! all five sub-scenarios are now GREEN.
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md`: each test starts a real
 //! in-process control-plane server on an ephemeral port and drives
@@ -462,22 +463,222 @@ async fn given_stable_decision_when_snapshot_and_streaming_terminal_then_byte_eq
 }
 
 // ===========================================================================
-// S-SHCP-INT-CLI-01 — STAYS RED for 01-03f-2
+// S-SHCP-INT-CLI-01 — K1 north-star: coinflip-as-Service 99/100 EarlyExit
 // ===========================================================================
 
-/// S-SHCP-INT-CLI-01 (US-01 WS Fixture A — RCA-A regression guard /
-/// K1) — Service with exec that exits 1 within 30ms (the coinflip-
-/// reshaped-as-Service fixture). Across 100 deterministic seeds:
-/// ≥99 emit `Failed { reason: EarlyExit { exit_code: 1 } }` AND
-/// zero emit `Stable`.
+/// Number of K1 trials. Contractual per AC step 01-03f-2 / RCA-A K1
+/// north star; do NOT lower to mask flakiness. K1 below threshold
+/// means the `EarlyExit` chain is wrong, not the test.
+const TRIAL_COUNT: usize = 100;
+
+/// Honesty threshold. Contractual per AC step 01-03f-2 / RCA-A K1.
+/// Do NOT lower to mask flakiness.
+const HONESTY_THRESHOLD: usize = 99;
+
+/// Path the `examples/coinflip-as-service.toml` fixture exec's.
+const HELPER_INSTALL_PATH: &str = "/tmp/coinflip-helper";
+
+/// Materialise the `coinflip_helper` `[[bin]]` artifact into
+/// `/tmp/coinflip-helper` so the fixture's `command =
+/// "/tmp/coinflip-helper"` resolves. The artifact is the cargo-built
+/// binary registered in `crates/overdrive-cli/Cargo.toml`
+/// (`name = "coinflip_helper"`); under nextest it is already compiled
+/// into `CARGO_TARGET_DIR/{debug,release}/coinflip_helper` before the
+/// test binary runs. Copy it to the fixed `/tmp` path the TOML names.
 ///
-/// Per the 01-03f-1 step scope: this sub-scenario STAYS RED and is
-/// activated by 01-03f-2. The `#[should_panic(expected = "RED
-/// scaffold")]` marker is preserved verbatim.
-#[tokio::test]
-#[should_panic(expected = "RED scaffold")]
+/// Resolution: `CARGO_BIN_EXE_coinflip_helper` is set by cargo at
+/// compile time to the absolute path of the built artifact for the
+/// `coinflip_helper` `[[bin]]` (the canonical, profile-agnostic way to
+/// locate a sibling binary from an integration test). Copying — rather
+/// than symlinking — keeps the fixture exec-target self-contained
+/// against later `cargo clean`.
+fn materialise_coinflip_helper() {
+    let built = env!("CARGO_BIN_EXE_coinflip_helper");
+    std::fs::copy(built, HELPER_INSTALL_PATH).unwrap_or_else(|e| {
+        panic!(
+            "S-SHCP-INT-CLI-01: copy coinflip_helper artifact {built} -> {HELPER_INSTALL_PATH}: {e}"
+        )
+    });
+    // Ensure the copy is executable (cargo artifacts already are, but
+    // `fs::copy` preserves mode on Unix — belt-and-braces against an
+    // umask surprise in the Lima VM).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut perms =
+            std::fs::metadata(HELPER_INSTALL_PATH).expect("stat installed helper").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(HELPER_INSTALL_PATH, perms).expect("chmod installed helper");
+    }
+}
+
+/// Per-trial coinflip-as-Service TOML. Body comes from
+/// `examples/coinflip-as-service.toml` (the AC-named SSOT) except
+/// `id = "coinflip-svc-<NNN>"` and a per-trial listener port — both
+/// defeat `IntentStore` idempotency (each trial is structurally a
+/// distinct submit) AND avoid cross-trial port collisions on the
+/// sacrificial listener within the serial cgroup section.
+///
+/// Determinism: a fixed per-trial enumeration (the trial index), NOT
+/// an RNG draw. Per `.claude/rules/testing.md` § "Property-based
+/// testing" this Tier-3 walking-skeleton is EXEMPT from the proptest
+/// paradigm — the 100-seed sweep is a deterministic enumeration of
+/// the K1 universe, and trial-to-trial the workload behaviour is
+/// IDENTICAL (the helper always exits 1). The "100 seeds" is the
+/// honesty-under-repetition guard against an observer/race flake, not
+/// an input-space exploration.
+fn coinflip_service_spec_for_trial(trial: usize) -> String {
+    // Listener ports start at the fixture's 18080 and step per trial
+    // so no two concurrent (cleanup-lagging) allocs collide. The exec
+    // never actually binds — the workload exits before any bind — so
+    // the port is purely the descriptor the default-TCP startup probe
+    // would target; uniqueness is hygiene, not correctness.
+    let port = 18080u16 + u16::try_from(trial).expect("trial index fits u16");
+    format!(
+        r#"
+[service]
+id = "coinflip-svc-{trial:03}"
+replicas = 1
+
+[[listener]]
+port = {port}
+protocol = "tcp"
+
+[exec]
+command = "{HELPER_INSTALL_PATH}"
+args = []
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
+"#
+    )
+}
+
+/// Drive a per-trial coinflip-as-Service spec (string body, not the
+/// shared `examples/` file) through the streaming submit surface and
+/// collect every `ServiceSubmitEvent`. Mirrors
+/// `submit_service_and_collect_events` but takes the trial-specific
+/// TOML body directly.
+async fn submit_trial_and_collect_events(
+    toml: &str,
+    config_path: &Path,
+) -> Vec<ServiceSubmitEvent> {
+    submit_service_and_collect_events(toml, config_path).await
+}
+
+/// S-SHCP-INT-CLI-01 (US-01 WS Fixture A — RCA-A regression guard /
+/// K1 north star) — Service whose exec exits 1 within ~30ms (the
+/// coinflip-reshaped-as-Service fixture). Across 100 deterministic
+/// trials the aggregate properties:
+///   1. ≥99/100 terminal events are `Failed { reason:
+///      ServiceFailureReason::EarlyExit { exit_code: 1 } }`.
+///   2. ZERO trials emit a `Stable` terminal — a Service that exits 1
+///      within `startup_deadline` must NEVER be inferred Stable (the
+///      RCA-A structural defense).
+///   3. ZERO captured-output substrings contain the literal
+///      `(took live)` — the historical false-positive render that
+///      RCA-A eliminated.
+///
+/// The RED-scaffold marker preserved through 01-03f-1 is REMOVED in
+/// 01-03f-2; the loop runs against the real composition root
+/// (in-process server, real `ExecDriver`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(workload_cgroup)]
 async fn given_coinflip_as_service_fixture_when_submit_100_seeds_then_99_emit_failed_early_exit() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-SHCP-INT-CLI-01 / K1 north star: coinflip-as-Service 99/100 emit Failed ( EarlyExit ))"
+    use overdrive_core::transition_reason::ServiceFailureReason;
+
+    materialise_coinflip_helper();
+
+    let (handle, tmp) = spawn_server().await;
+    let cfg = config_path(tmp.path());
+
+    let mut early_exit_failed = 0usize;
+    let mut stable_violations: Vec<usize> = Vec::new();
+    let mut took_live_violations: Vec<(usize, String)> = Vec::new();
+    // Non-EarlyExit terminals (diagnostic — counts against the
+    // honesty threshold but is NOT itself a hard zero-tolerance gate;
+    // the threshold absorbs ≤1 such trial).
+    let mut other_terminals: Vec<(usize, String)> = Vec::new();
+
+    for trial in 0..TRIAL_COUNT {
+        let body = coinflip_service_spec_for_trial(trial);
+        let events = submit_trial_and_collect_events(&body, &cfg).await;
+
+        // ZERO-tolerance gate 3: the literal `(took live)` must not
+        // appear in ANY event's rendered form across ANY trial. Render
+        // every collected event to its Debug + JSON form and scan both
+        // — the substring is the RCA-A false-positive signature that
+        // the EarlyExit branch is supposed to make structurally
+        // unreachable for the coinflip-as-Service shape.
+        for event in &events {
+            let debug_render = format!("{event:?}");
+            let json_render = serde_json::to_string(event).unwrap_or_default();
+            if debug_render.contains("(took live)") || json_render.contains("(took live)") {
+                took_live_violations.push((trial, debug_render.clone()));
+            }
+        }
+
+        let terminal = events
+            .last()
+            .unwrap_or_else(|| panic!("S-SHCP-INT-CLI-01 trial {trial}: stream produced no event"));
+
+        match terminal {
+            ServiceSubmitEvent::Failed { reason, .. } => match reason {
+                ServiceFailureReason::EarlyExit { exit_code: 1 } => {
+                    early_exit_failed += 1;
+                }
+                other => {
+                    other_terminals.push((trial, format!("Failed({other:?})")));
+                }
+            },
+            ServiceSubmitEvent::Stable { .. } => {
+                stable_violations.push(trial);
+            }
+            other => {
+                other_terminals.push((trial, format!("{other:?}")));
+            }
+        }
+
+        // Clean the alloc up before the next trial so cgroup scopes do
+        // not accumulate. The helper has already exited, so this is a
+        // no-op converge on a Failed alloc in the common case.
+        let _ = overdrive_cli::commands::job::stop(StopArgs {
+            id: format!("coinflip-svc-{trial:03}"),
+            config_path: cfg.clone(),
+        })
+        .await;
+    }
+
+    handle.shutdown().await.expect("clean shutdown");
+
+    // ── Assertions ─────────────────────────────────────────────────
+    // Gate 3 (zero-tolerance): no `(took live)` substring anywhere.
+    assert!(
+        took_live_violations.is_empty(),
+        "S-SHCP-INT-CLI-01 RCA-A violation — the literal `(took live)` MUST NEVER appear in \
+         any coinflip-as-Service event. The EarlyExit branch is supposed to make this render \
+         structurally unreachable. Violations: {took_live_violations:#?}"
+    );
+
+    // Gate 2 (zero-tolerance): no `Stable` terminal. A Service that
+    // exits 1 within startup_deadline must NEVER be inferred Stable.
+    assert!(
+        stable_violations.is_empty(),
+        "S-SHCP-INT-CLI-01 RCA-A violation — coinflip-as-Service emitted Stable on trials \
+         {stable_violations:?}. A deterministic-failure Service (exits 1 within \
+         startup_deadline) MUST NEVER reach Stable; this is the exact honesty gap RCA-A / \
+         US-08 closes. Diagnose the EarlyExit branch; do NOT relax the gate."
+    );
+
+    // Gate 1 (threshold): ≥99/100 EarlyExit{exit_code:1}.
+    assert!(
+        early_exit_failed >= HONESTY_THRESHOLD,
+        "S-SHCP-INT-CLI-01 K1 honesty contract violated: only {early_exit_failed}/{TRIAL_COUNT} \
+         trials emitted Failed {{ reason: EarlyExit {{ exit_code: 1 }} }} (threshold = \
+         {HONESTY_THRESHOLD}). Non-EarlyExit terminals: {other_terminals:#?}. Diagnose root \
+         cause (likely: Running-confirmed-gate happens-before regression, or a probe-tick \
+         observing the exit as StartupProbeFailed instead of EarlyExit); do NOT lower the \
+         threshold."
     );
 }
