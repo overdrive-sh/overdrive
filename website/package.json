@@ -10,19 +10,22 @@
 		"typecheck": "fumadocs-mdx && tsc --noEmit",
 		"lint": "eslint .",
 		"assert:one-index": "next build && bun run scripts/verify-one-index-gate.ts",
+		"test:mcp": "opennextjs-cloudflare build && bun run scripts/test-mcp.ts",
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
 		"upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
 		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
 		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts"
 	},
 	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@opennextjs/cloudflare": "^1.19.9",
 		"fumadocs-core": "^16.9.3",
 		"fumadocs-mdx": "^15.0.10",
 		"fumadocs-ui": "^16.9.3",
 		"next": "16.2.6",
 		"react": "^19.1.7",
-		"react-dom": "^19.1.7"
+		"react-dom": "^19.1.7",
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
 		"@eslint/eslintrc": "^3",
