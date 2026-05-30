@@ -59,7 +59,19 @@ jobs:
         run: bun run lint
 
       - name: Next production build
+        # `next build` prerenders the force-static `app/one-index-check` route,
+        # which runs the C-4 one-index assertion (ADR-0058) INSIDE the build —
+        # a violation throws there and fails this step outright.
         run: bun run build
+
+      - name: One-index assertion gate (C-4 / ADR-0058)
+        # Belt-and-braces: confirms the assertion actually RAN and PASSED in the
+        # build step above by checking the prerendered gate artifact, rather than
+        # rebuilding. Guards against the gate route silently vanishing (e.g. a
+        # `_`-prefixed rename that Next would drop from routing). Verifies every
+        # source.getPages() page is reachable from all three consumers (.md
+        # export, llms.txt, search index).
+        run: bun run scripts/verify-one-index-gate.ts
 
       - name: OpenNext (Cloudflare) build
         run: bunx opennextjs-cloudflare build

@@ -9,6 +9,7 @@
 		"start": "next start",
 		"typecheck": "fumadocs-mdx && tsc --noEmit",
 		"lint": "eslint .",
+		"assert:one-index": "next build && bun run scripts/verify-one-index-gate.ts",
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
 		"upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
 		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
