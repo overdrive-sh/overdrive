@@ -35,6 +35,41 @@ enum Placement {
 This compounds with the newtype rules below: once a concept has a
 dedicated type, its states should be a dedicated sum type.
 
+### Label enums own their string representation
+
+When an enum's variants have a canonical lowercase string form (for
+display, serialization keys, metric labels, CLI output), the
+`as_str(&self) -> &'static str` method lives on the enum itself — not
+as a free function at the call site. The enum is the SSOT for its own
+vocabulary; scattering `match` arms across consumer crates duplicates
+the mapping and drifts the moment a variant is added.
+
+```rust
+// Bad — free function in a consumer crate
+const fn probe_role_label(role: ProbeRole) -> &'static str {
+    match role {
+        ProbeRole::Startup => "startup",
+        ProbeRole::Readiness => "readiness",
+        ProbeRole::Liveness => "liveness",
+    }
+}
+
+// Good — method on the enum
+impl ProbeRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Startup => "startup",
+            Self::Readiness => "readiness",
+            Self::Liveness => "liveness",
+        }
+    }
+}
+```
+
+This applies to every enum whose variants map 1:1 to static string
+labels — `ProbeRole`, `WorkloadKind`, `DropClass`, status enums, etc.
+`Display` may delegate to `as_str`; `as_str` is the primitive.
+
 ---
 
 ## Allocation strategy

@@ -101,6 +101,17 @@ pub enum ProbeRole {
     Liveness,
 }
 
+impl ProbeRole {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Startup => "startup",
+            Self::Readiness => "readiness",
+            Self::Liveness => "liveness",
+        }
+    }
+}
+
 /// Observed outcome of a probe attempt as durable observation.
 ///
 /// `Pending` is the synthetic Sentinel for "probe declared but not

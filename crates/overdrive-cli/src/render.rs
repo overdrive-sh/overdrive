@@ -920,18 +920,6 @@ fn format_probe_last_status(
     }
 }
 
-/// Lowercase role label for the Probes-section row.
-const fn probe_role_label(
-    role: overdrive_core::observation::probe_result_row::ProbeRole,
-) -> &'static str {
-    use overdrive_core::observation::probe_result_row::ProbeRole;
-    match role {
-        ProbeRole::Startup => "startup",
-        ProbeRole::Readiness => "readiness",
-        ProbeRole::Liveness => "liveness",
-    }
-}
-
 /// Render the `Probes:` section of an alloc-status output.
 ///
 /// Per US-06 / K4 the section is emitted IFF `kind` is
@@ -975,7 +963,7 @@ pub fn probes_section(
     let mut s = String::new();
     let _ = writeln!(s, "Probes:");
     for probe in probes {
-        let role = probe_role_label(probe.role);
+        let role = probe.role.as_str();
         let mechanic = format_probe_mechanic_summary(&probe.mechanic);
         let last = format_probe_last_status(probe.status.as_ref());
         let observed = probe.last_observed_at_unix_ms.map_or_else(
