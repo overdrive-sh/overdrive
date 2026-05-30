@@ -1,0 +1,55 @@
+schema_version: 1
+
+# Persona for the docs-platform feature (overdrive.sh).
+# The human evaluator/adopter arc. Pairs with maya-agent-developer.yaml.
+# Origin: docs-platform DISCUSS wave (2026-05-30).
+
+persona:
+  id: priya-evaluator
+  name: "Priya Nair"
+  role: "Staff platform engineer evaluating Overdrive for her team"
+  one_liner: >
+    Owns her company's internal developer platform; currently runs
+    self-managed Kubernetes and is tired of the etcd/CNI/Envoy/SPIRE
+    operational surface. Heard about Overdrive collapsing that stack into
+    one Rust binary and wants to decide — in an afternoon, not a sprint —
+    whether it is real or vapour.
+
+  characteristics:
+    - "8+ years platform/SRE; reads source when docs fail her, but resents having to"
+    - "Decision-maker AND hands-on: she will both green-light adoption and write the first job spec"
+    - "Skeptical of new infra by default — has been burned by 'Kubernetes-killer' claims before"
+    - "Time-boxed: gives a new platform one focused evaluation session before moving on"
+    - "Trusts documentation density as a proxy for project seriousness"
+
+  context:
+    device: "Laptop, multiple monitors, terminal always open alongside the browser"
+    entry_points:
+      - "Lands on overdrive.sh/ from a Hacker News / Lobsters link or a colleague's Slack message"
+      - "Googles a specific term ('overdrive intent observation boundary') and lands deep in /docs"
+    triggers:
+      - "Her team's next platform-migration planning cycle"
+      - "A specific question while spiking Overdrive locally ('how do I submit a job?')"
+
+  motivations:
+    functional: "Get an authoritative answer (concept / how-to / API) without reading source or asking in Slack"
+    emotional: "Feel confident the project is serious and that she will not be stranded mid-adoption"
+    social: "Be able to tell her team 'I evaluated it, here is what it does' with evidence, not vibes"
+
+  emotional_arc:
+    start: "Skeptical, slightly impatient — 'prove to me this is real and not a landing page with no substance.'"
+    middle: "Engaged then reassured — search returns a real answer fast; the concept doc actually explains the intent/observation boundary; the how-to has a runnable command."
+    end: "Confident and quietly impressed — 'this is well-documented, I can take this to my team; I found everything myself in one sitting.'"
+
+  frustrations_to_avoid:
+    - "Search box that returns nothing or returns marketing fluff for a technical query"
+    - "Docs that describe aspirational features that do not exist yet (erodes all trust instantly)"
+    - "Dead ends: a concept page that never links to the how-to that uses the concept"
+    - "Having to clone the repo and grep to answer a question the docs should have answered"
+
+  success_signals:
+    - "Time-to-first-answer measured in seconds, not minutes"
+    - "She never has to leave the site to answer her evaluation questions"
+    - "She bookmarks a docs page to share with her team"
+
+  related_jobs: [J-DOCS-001]
