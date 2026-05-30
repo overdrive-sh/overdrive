@@ -414,6 +414,44 @@ proptest! {
     }
 }
 
+// S-SHCP-PARSE-09 (US-02 / ADR-0057 §2 regression) — an HTTP probe
+// `path` that is non-empty but lacks a leading `/` is rejected at parse
+// time with `ParseError::HttpProbePathNotAbsolute { probe_idx, path }`.
+//
+// Regression for the silent-startup-hang defect: a relative path like
+// `health` is concatenated into `http://<host>:<port>health` at probe
+// time, which hyper rejects as an invalid target. The supervised probe
+// loop swallows that adapter error (warn + continue) and never writes a
+// `ProbeResultRow`, so `startup_attempts` stays at 0, the
+// `StartupProbeFailed` branch never fires, and the startup window never
+// closes. Rejecting at parse time turns the indefinite hang into an
+// actionable config error. Proptest over arbitrary relative paths — the
+// generator never leads with `/` and (lacking any `:`) never forms a
+// `https://` scheme, so the leading-`/` guard is the sole trigger.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+    #[test]
+    fn health_check_http_relative_path_yields_named_parse_error(
+        port in port_strategy(),
+        relative_path in "[a-z][a-z0-9./]{0,20}",
+    ) {
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n\
+             [[health_check.startup]]\n\
+             type = \"http\"\n\
+             path = \"{relative_path}\"\n\
+             port = {port}\n"
+        );
+        match parse_err(&toml) {
+            ParseError::HttpProbePathNotAbsolute { probe_idx, path } => {
+                prop_assert_eq!(probe_idx, 0, "single-probe TOML reports probe_idx 0");
+                prop_assert_eq!(path, relative_path, "variant carries the offending path verbatim");
+            }
+            other => prop_assert!(false, "expected HttpProbePathNotAbsolute, got {:?}", other),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------
 // Step 01-02 active scenarios — ADR-0057 TCP + ADR-0058 default-inference.
 // PBT per the standing paradigm mandate.

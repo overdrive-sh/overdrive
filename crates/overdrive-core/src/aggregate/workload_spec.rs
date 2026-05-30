@@ -222,6 +222,27 @@ pub enum ParseError {
         probe_idx: usize,
     },
 
+    /// An HTTP probe's `path` is non-empty but does not begin with `/`.
+    /// At probe time the path is concatenated into
+    /// `http://<host>:<port><path>`; without the leading `/` the URL
+    /// collapses to e.g. `http://127.0.0.1:8080health`, which hyper
+    /// rejects as an invalid target. That adapter error is swallowed by
+    /// the supervised probe loop (warn + continue, no `ProbeResultRow`),
+    /// so `startup_attempts` never advances and the startup window never
+    /// closes — the service hangs indefinitely. Rejecting at parse time
+    /// turns the silent hang into an actionable config error. `probe_idx`
+    /// is the 0-indexed position within the per-role array; `path` is the
+    /// offending value, verbatim from the operator input.
+    #[error(
+        "[[health_check.startup]][{probe_idx}]: http probe `path` must be absolute (start with `/`) — got {path:?}; use e.g. `/healthz`"
+    )]
+    HttpProbePathNotAbsolute {
+        /// 0-indexed position within the per-role array.
+        probe_idx: usize,
+        /// The offending `path` value, verbatim from the operator input.
+        path: String,
+    },
+
     // -----------------------------------------------------------------
     // Step 02-02 — Exec probe variant per ADR-0057 §2 / US-03.
     // -----------------------------------------------------------------
@@ -1374,6 +1395,11 @@ fn parse_liveness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescript
 /// - `path` containing `https://` → [`ParseError::HttpsNotSupported`]
 ///   (checked BEFORE the plain-`http://` strip so an `https://` URL
 ///   pasted as the path is never silently accepted).
+/// - `path` non-empty but not starting with `/` →
+///   [`ParseError::HttpProbePathNotAbsolute`]. The path is concatenated
+///   into `http://<host>:<port><path>` at probe time; a relative path
+///   produces a URL the prober cannot build, which the probe loop
+///   silently swallows — so it is rejected at parse time instead.
 /// - `port` absent / out of `1..=65535` → reuses the TCP `port`
 ///   diagnostics shape via [`ParseError::TcpProbeMissingPort`] — the
 ///   port precondition is identical across mechanics.
@@ -1393,6 +1419,16 @@ fn parse_http_mechanic(
     }
     if path.is_empty() {
         return Err(ParseError::HttpProbeMissingPath { probe_idx });
+    }
+    // Path must be absolute. At probe time the runner builds
+    // `http://<host>:<port><path>`; a path without a leading `/` yields a
+    // malformed URL (`http://127.0.0.1:8080health`) that hyper rejects
+    // *after* parse — the supervised probe loop then swallows the adapter
+    // error (warn + continue, no `ProbeResultRow`), the startup window
+    // never closes, and the service hangs. Reject here so the malformed
+    // config never reaches the runtime.
+    if !path.starts_with('/') {
+        return Err(ParseError::HttpProbePathNotAbsolute { probe_idx, path: path.to_owned() });
     }
 
     let port_raw = entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
