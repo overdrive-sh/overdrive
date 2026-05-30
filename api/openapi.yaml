@@ -1170,11 +1170,11 @@ components:
               Workload exited before any startup probe could pass AND
               within `startup_deadline` window. Closes RCA-A coinflip
               case per US-08.
-            required:
-            - exit_code
             properties:
               exit_code:
-                type: integer
+                type:
+                - integer
+                - 'null'
                 format: int32
           reason:
             type: string
@@ -1418,14 +1418,14 @@ components:
     ServiceSubmitEvent:
       oneOf:
       - type: object
-        description: Submit was accepted. Mirrors `SubmitEvent::Accepted`.
+        description: Submit was accepted. First NDJSON line on the wire.
         required:
         - data
         - kind
         properties:
           data:
             type: object
-            description: Submit was accepted. Mirrors `SubmitEvent::Accepted`.
+            description: Submit was accepted. First NDJSON line on the wire.
             required:
             - spec_digest
             - intent_key
@@ -2200,7 +2200,7 @@ components:
       description: |-
         Lifecycle-transition record carried inside the snapshot's
         `last_transition` block per ADR-0033 §1 and on the streaming
-        `SubmitEvent::LifecycleTransition` event per ADR-0032 §3.
+        `LifecycleEvent` broadcast payload per ADR-0032 §3.
 
         Both surfaces share the SAME `TransitionRecord` shape — the
         type-identity assertion in
@@ -2240,7 +2240,7 @@ components:
           $ref: '#/components/schemas/TransitionReason'
           description: |-
             Structured cause for this transition. SAME enum as the streaming
-            `SubmitEvent::LifecycleTransition.reason` — pinned by
+            `LifecycleEvent.reason` — pinned by
             S-AS-02's compile-time witness.
         source:
           $ref: '#/components/schemas/TransitionSource'
