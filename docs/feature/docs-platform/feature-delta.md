@@ -1017,8 +1017,125 @@ Per CLAUDE.md deferral discipline: surfaced here for the orchestrator to relay.
 
 ---
 
+## Wave: DESIGN / [REF] Wave Decisions
+
+**Wave**: DESIGN (Morgan, nw-solution-architect). **Mode**: GUIDE, pass 2 of 2
+(decisions locked in pass 1; this pass writes the SSOT). **Date**: 2026-05-30.
+**Rigor**: lean / Tier-1. **Outcome Collision Check**: N/A — no
+`docs/product/outcomes/registry.yaml` exists.
+
+The authoritative DESIGN prose, C4 diagrams (System Context L1 + Container L2 +
+Component L3), full component decomposition, technology stack with versions, and
+quality-attribute mapping live in
+`docs/product/architecture/brief.md` § `## docs-platform website (overdrive.sh)`.
+This feature-delta section is the lean DESIGN record; it references the brief
+rather than duplicating it.
+
+**Non-contested choices carried from pass 1** (pinned, not re-litigated):
+modular monolith = one Next app / one OpenNext Worker; ports-and-adapters-
+equivalent via the `source` / `lib/search.ts` / `lib/get-llm-text.ts` /
+`lib/site.ts` seams; Node runtime everywhere (never `runtime = 'edge'`, C-2);
+SSG build-time content (no runtime `fs`, C-3); `getLLMText` is ONE primitive
+shared by MCP `get_doc`, per-page `.md`, and `llms-full.txt` (`get_doc`
+byte-identical to `.md`, US-05 AC); OSS-first (Fumadocs/Next/MCP-SDK MIT, Orama
+Apache-2.0); TypeScript/React/Next.js paradigm — NOT written to CLAUDE.md (the
+OOP line governs Rust only).
+
+## Wave: DESIGN / [REF] DDD — Design Decisions (verdicts)
+
+| ID | Decision | Verdict | Rationale | ADR |
+|---|---|---|---|---|
+| D-A | MCP transport = same-Worker Next route handler (`app/mcp/route.ts`, Node) | ACCEPT | one in-process index = strongest C-4 no-divergence guarantee; `createMcpHandler()` allowed inside (latitude) | ADR-0055 |
+| D-B | Analytics binding = D1; logging best-effort (`ctx.waitUntil` + catch-swallow) | ACCEPT | top-zero-result = one `SELECT … WHERE result_count=0 GROUP BY query`; C-7 — never alters/delays the response | ADR-0056 |
+| D-C | Search = in-Worker Orama now, behind `lib/search.ts` seam; benchmarked migration trigger | ACCEPT | simplest viable for launch corpus; one query path; single-file external swap; trigger >~5k pages OR ~60–70 MB of 128 MB isolate (inference, benchmark) | ADR-0057 |
+| D-D | Browser KPIs = page-view funnel approximation (CF Web Analytics) | ACCEPT | KPI-2 (search→click) + KPI-6 (landing→proceed) explicitly approximated; no custom-event beacon; no 9th slice | (this doc) |
+| D-E | OpenAPI playground (`fumadocs-openapi`) | OUT OF SCOPE | user non-goal; Next/RSC path keeps it addable later with zero rework — a property, not a promise | (none) |
+| D-F | Single `SITE_ORIGIN` config constant (`lib/site.ts`) | ACCEPT | feeds llms.txt absolute URLs, MCP `get_doc` resolution, canonical/OG; skeleton `workers.dev` → prod flips one constant; DNS/binding is DEVOPS | (brief) |
+| D-G | `website/` App Router layout; content in `content/docs|blog/` (not repo-root `docs/`) | ACCEPT | repo-root `docs/` holds whitepaper/ADR/nWave tree; C-6 — site ≠ internal-design mirror; one `baseOptions()`; no R2 ISR; `next/image` unoptimized | (brief) |
+| D-H | Build-time one-index enforcement assertion (Node step in `website/`, NOT Rust gate) | ACCEPT | every page → reachable `.md` + in `llms.txt` + in search index; blog in same index — C-4 made structural (nWave principle 11/12) | ADR-0058 |
+
+## Wave: DESIGN / [REF] Component Decomposition
+
+One container: the OpenNext Cloudflare Worker (modular monolith). Full table in
+brief § Component decomposition. CREATE-NEW glue only: MCP route handler + tool
+schemas; D1 logging wrapper; `lib/search.ts` / `lib/get-llm-text.ts` /
+`lib/site.ts` seams; blog list/post components; landing content port; the
+one-index assertion script. Everything else is library-primitive USE.
+
+| Component | Path (`website/`) | Change |
+|---|---|---|
+| MDX plugin / source / shell | `next.config.*`, `lib/source.ts`, `lib/layout.shared.tsx` | USE |
+| Docs / search API / llms exports | `app/docs/[[...slug]]`, `app/api/search/route.ts`, `app/llms*`, `*.md` | USE (call seams) |
+| Search seam | `lib/search.ts` | CREATE-NEW |
+| LLM-text seam | `lib/get-llm-text.ts` | CREATE-NEW |
+| Site-origin config | `lib/site.ts` | CREATE-NEW |
+| Landing | `app/(home)/page.tsx` | CREATE-NEW |
+| Blog list + post | `app/(home)/blog/page.tsx`, `app/(home)/blog/[slug]/page.tsx` | CREATE-NEW |
+| MCP endpoint + logging wrapper | `app/mcp/route.ts` | CREATE-NEW |
+| One-index assertion | `scripts/assert-one-index.ts` | CREATE-NEW |
+| Content | `content/docs/`, `content/blog/` | content |
+
+## Wave: DESIGN / [REF] Driving Ports
+
+`GET /` (US-08) · `GET /docs/[[...slug]]` (US-01/02) · `GET /blog`,
+`GET /blog/[slug]` (US-07) · `GET /api/search` (US-03) · `POST/GET /mcp`
+(US-05/06) · `GET /llms.txt`, `GET /llms-full.txt`, `GET /docs/<page>.md`
+(US-04).
+
+## Wave: DESIGN / [REF] Driven Ports + Adapters
+
+| Driven port / seam | Adapter | ADR |
+|---|---|---|
+| `source` (one build-time index) | `lib/source.ts` over Fumadocs `loader()` | (C-4) |
+| `searchIndex(query)` | `lib/search.ts` over in-Worker Orama | ADR-0057 |
+| `getLLMText(page)` | `lib/get-llm-text.ts` over `getText('processed')` | (US-05) |
+| `SITE_ORIGIN` | `lib/site.ts` | (D-F) |
+| analytics sink | D1 `tool_calls` (best-effort) | ADR-0056 |
+| RUM funnels | Cloudflare Web Analytics | (D-D) |
+
+## Wave: DESIGN / [REF] Technology Choices (pinned)
+
+Next 15 (latest minor) or 16 (MIT) · Fumadocs v16 + `fumadocs-mdx` (MIT) ·
+Orama (Apache-2.0, Fumadocs-bundled) · `@opennextjs/cloudflare` (MIT) · MCP TS
+SDK `@modelcontextprotocol/sdk` (MIT) + optional CF Agents `createMcpHandler()`
+· `zod` (MIT) · React 19 / TypeScript 5.x. Platform bindings: Cloudflare
+Workers (Node runtime, 128 MB isolate, 3/10 MiB bundle), D1, Web Analytics. Full
+table in brief § Technology stack.
+
+## Wave: DESIGN / [REF] Reuse Analysis (HARD GATE)
+
+Full table in brief § Reuse Analysis. Summary: 9 library-primitive USE rows
+(MDX pipeline, source/one-index, docs layout + nav + TOC, `baseOptions()`,
+Orama `/api/search`, llms exports, Cmd+K dialog, MCP transport, OpenNext deploy)
+vs 8 CREATE-NEW glue rows (MCP handler + schemas, D1 logging wrapper, the three
+`lib/*` seams, blog components, landing content port, one-index assertion). No
+CREATE-NEW row re-implements a library primitive; each encodes an application
+invariant (C-4, C-7) or our content. No proprietary library dependency.
+
+## Wave: DESIGN / [REF] Open Questions (carried to DEVOPS/DISTILL)
+
+- Custom-domain DNS + Workers binding (`overdrive.sh`) — **DEVOPS**; one
+  `SITE_ORIGIN` flip from `workers.dev` (D-F). Not a deferral-with-forward-
+  pointer.
+- External-search migration trigger numbers (>~5k pages / ~60–70 MB) —
+  **inference to be benchmarked** against the real corpus (ADR-0057). A
+  measurement task, not a committed limit.
+- KPI-2 / KPI-6 — **approximated from page-view funnels** at baseline (D-D); no
+  custom-event instrumentation in scope.
+- DISTILL remediation (carried from DISCUSS DoR): US-07 add a third UAT scenario
+  (draft/unpublished post excluded from list + index); US-08 add a third
+  (cold-load of `/` returns the value prop). Both flagged in DISCUSS; not
+  blocking at slice granularity.
+
+## Wave: DESIGN / [REF] Changed Assumptions
+
+None. The stack and all eight decisions were locked in pass 1; pass 2 wrote the
+SSOT artifacts without altering any DISCUSS assumption, story, or AC. No
+`design/upstream-changes.md` was required.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
 | 2026-05-30 | Initial DISCUSS wave for docs-platform: JTBD (J-DOCS-001/002/003), scope split into 8 slices (walking skeleton = slice 01), two-arc journey, 8 LeanUX stories with embedded AC + KPIs, DoR validation, wave decisions, deferrals surfaced. |
+| 2026-05-30 | DESIGN wave (GUIDE mode, pass 2): appended DESIGN sections (Wave Decisions, DDD verdicts D-A..D-H, component decomposition, driving/driven ports, technology choices, Reuse Analysis, open questions, Changed Assumptions=none). Authoritative prose + C4 (L1/L2/L3) in `docs/product/architecture/brief.md` § docs-platform website. ADRs 0055 (MCP same-Worker), 0056 (D1 + best-effort logging), 0057 (in-Worker Orama + seam + benchmarked trigger), 0058 (one-index assertion). D-2 resolved (D1). D-1 recast as benchmarked threshold. D-5 (`fumadocs-openapi`) confirmed OUT OF SCOPE (non-goal). — Morgan. |
