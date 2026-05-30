@@ -67,12 +67,53 @@ export default function HomePage() {
 	return (
 		<main className="flex flex-1 flex-col">
 			{/* Hero */}
-			<section className="border-b border-fd-border">
-				<div className="container mx-auto max-w-5xl px-4 py-20 md:py-28">
+			<section className="relative overflow-hidden border-b border-fd-border">
+				{/* Warm radial glow at the top of the hero (index.html .hero::after). */}
+				<div
+					aria-hidden
+					className="pointer-events-none absolute left-1/2 top-[-180px] z-0 h-[700px] w-[900px] max-w-none -translate-x-1/2"
+					style={{
+						background:
+							"radial-gradient(ellipse, rgba(255,92,40,0.10) 0%, transparent 60%)",
+					}}
+				/>
+				{/* Floating pixel cubes (index.html .pixel-accent), hidden on narrow viewports. */}
+				<svg
+					aria-hidden
+					className="pointer-events-none absolute left-[4%] top-[18%] z-0 hidden opacity-55 xl:block"
+					width="120"
+					height="160"
+					viewBox="0 0 120 160"
+					fill="none"
+				>
+					<rect x="0" y="0" width="22" height="22" fill="#ff5c28" opacity="0.7" />
+					<rect x="24" y="0" width="22" height="22" fill="#ff8b5f" opacity="0.35" />
+					<rect x="0" y="24" width="22" height="22" fill="#3a3a44" />
+					<rect x="24" y="48" width="22" height="22" fill="#ff5c28" opacity="0.45" />
+					<rect x="48" y="72" width="22" height="22" fill="#2a2a31" />
+					<rect x="24" y="96" width="22" height="22" fill="#ff5c28" opacity="0.6" />
+					<rect x="0" y="120" width="22" height="22" fill="#3a3a44" />
+				</svg>
+				<svg
+					aria-hidden
+					className="pointer-events-none absolute right-[4%] top-[32%] z-0 hidden opacity-55 xl:block"
+					width="140"
+					height="160"
+					viewBox="0 0 140 160"
+					fill="none"
+				>
+					<rect x="118" y="0" width="22" height="22" fill="#ff5c28" opacity="0.5" />
+					<rect x="94" y="24" width="22" height="22" fill="#2a2a31" />
+					<rect x="118" y="48" width="22" height="22" fill="#ff8b5f" opacity="0.4" />
+					<rect x="70" y="72" width="22" height="22" fill="#ff5c28" opacity="0.7" />
+					<rect x="94" y="96" width="22" height="22" fill="#3a3a44" />
+					<rect x="118" y="120" width="22" height="22" fill="#ff5c28" opacity="0.45" />
+				</svg>
+				<div className="container relative z-10 mx-auto max-w-5xl px-4 py-20 md:py-28">
 					<p className="mb-4 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
 						Source-available · FSL-1.1-ALv2 · Apache 2.0 after 2 years
 					</p>
-					<h1 className="max-w-3xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+					<h1 className="max-w-3xl font-serif text-5xl font-normal leading-[1.05] tracking-tight md:text-7xl">
 						Redefining how compute runs.
 					</h1>
 					<p className="mt-6 max-w-2xl text-lg text-fd-muted-foreground md:text-xl">
@@ -83,7 +124,7 @@ export default function HomePage() {
 					<div className="mt-8 flex flex-wrap gap-4">
 						<Link
 							href="/docs"
-							className="rounded-md bg-fd-primary px-6 py-3 font-medium text-fd-primary-foreground transition-opacity hover:opacity-90"
+							className="rounded-md bg-fd-primary px-6 py-3 font-semibold text-fd-primary-foreground transition-all hover:bg-[var(--color-brand-2)] hover:shadow-[0_0_32px_rgba(255,92,40,0.35)]"
 						>
 							Read the docs
 						</Link>
@@ -129,7 +170,7 @@ export default function HomePage() {
 			{/* By the numbers */}
 			<section className="border-b border-fd-border">
 				<div className="container mx-auto max-w-5xl px-4 py-16">
-					<h2 className="mb-2 text-2xl font-bold md:text-3xl">
+					<h2 className="mb-2 font-serif text-3xl font-normal md:text-4xl">
 						Architecture decisions, measured at fleet scale.
 					</h2>
 					<p className="mb-10 max-w-2xl text-fd-muted-foreground">
@@ -152,7 +193,7 @@ export default function HomePage() {
 			{/* Why now */}
 			<section className="border-b border-fd-border">
 				<div className="container mx-auto max-w-5xl px-4 py-16">
-					<h2 className="mb-2 text-2xl font-bold md:text-3xl">
+					<h2 className="mb-2 font-serif text-3xl font-normal md:text-4xl">
 						Kubernetes was right for 2014. It is not right for 2026.
 					</h2>
 					<p className="mb-10 max-w-2xl text-fd-muted-foreground">
@@ -188,7 +229,7 @@ export default function HomePage() {
 					<div className="mt-8 flex flex-wrap justify-center gap-4">
 						<Link
 							href="/docs"
-							className="rounded-md bg-fd-primary px-6 py-3 font-medium text-fd-primary-foreground transition-opacity hover:opacity-90"
+							className="rounded-md bg-fd-primary px-6 py-3 font-semibold text-fd-primary-foreground transition-all hover:bg-[var(--color-brand-2)] hover:shadow-[0_0_32px_rgba(255,92,40,0.35)]"
 						>
 							Get started in the docs
 						</Link>

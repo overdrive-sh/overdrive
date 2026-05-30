@@ -1,6 +1,6 @@
 ---
-title: Overdrive docs
-description: Documentation for Overdrive — a single-binary workload orchestration platform written in Rust.
+title: Introduction
+description: A single-binary workload orchestration platform written in Rust
 ---
 
 Overdrive is a workload orchestration platform written entirely in Rust. Its
@@ -18,12 +18,19 @@ retrofitted onto the primitives that existed in 2014.
 
 ## Where to start
 
+- **[Deploy a workload](/docs/how-to/deploy-a-workload)** — the fastest path to
+  something running: start a single-node control plane, write a TOML spec, and
+  deploy it. Everything in this guide runs today.
 - **[Concepts](/docs/concepts)** — the ideas the platform is built around. Start
   with [the intent / observation boundary](/docs/concepts/intent-observation),
   the consistency split that the whole control plane rests on, then read about
   [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
 - **[How-to](/docs/how-to)** — task-oriented guides grounded in workflows that
-  exist today, such as [running the DST harness](/docs/how-to/run-the-dst-harness).
+  exist today, from [deploying a workload](/docs/how-to/deploy-a-workload) to
+  [running the DST harness](/docs/how-to/run-the-dst-harness).
+- **[Reference](/docs/reference)** — exact surfaces. The
+  [CLI reference](/docs/reference/cli) documents every `overdrive` command, flag,
+  and exit code that ships in Phase 1.
 
 ## Design principles
 

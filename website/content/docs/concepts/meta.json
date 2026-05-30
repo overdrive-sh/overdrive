@@ -1,4 +1,4 @@
 {
 	"title": "Concepts",
-	"pages": ["intent-observation", "deterministic-simulation-testing"]
+	"pages": ["architecture", "intent-observation", "deterministic-simulation-testing"]
 }

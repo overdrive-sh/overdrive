@@ -4,3 +4,127 @@
 
 /* Pull Fumadocs UI components into the Tailwind v4 content scan. */
 @source "../node_modules/fumadocs-ui/dist/**/*.js";
+
+/*
+  Overdrive brand theme — ported from the repo-root `index.html` design system.
+  Brutalist dark: near-black canvas, off-white text, a single hot-orange accent,
+  IBM Plex Sans/Mono + Instrument Serif, and sharp (zero-radius) edges.
+
+  Fumadocs recolors through its `--color-fd-*` tokens (the full set lives in
+  `fumadocs-ui/css/lib/default-colors.css`); fonts and corner radius are plain
+  Tailwind v4 `@theme` keys, since Fumadocs components render with stock
+  `font-*` / `rounded-*` utilities. Overriding the tokens here re-skins every
+  Fumadocs surface (nav, sidebar, search, docs, blog) plus the landing page.
+*/
+@theme {
+	/* --- Typography (wired to next/font variables in app/layout.tsx) --- */
+	--font-sans: var(--font-plex-sans), "IBM Plex Sans", -apple-system,
+		BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+	--font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace,
+		"JetBrains Mono", "SF Mono", Menlo, monospace;
+	--font-serif: var(--font-instrument-serif), "Instrument Serif",
+		"Iowan Old Style", Georgia, serif;
+
+	/* --- Brutalist: sharp edges everywhere (index.html --r-* = 0) --- */
+	--radius-sm: 0px;
+	--radius-md: 0px;
+	--radius-lg: 0px;
+	--radius-xl: 0px;
+	--radius-2xl: 0px;
+	--radius-3xl: 0px;
+
+	/* --- Brand accent ramp (orange) exposed for utilities --- */
+	--color-brand: #ff5c28;
+	--color-brand-2: #ff8b5f;
+}
+
+/*
+  Dark brand palette. The index.html design is dark-only, so we map the brand
+  tokens at `:root` (default) AND `.dark` to the same values — the site reads
+  on-brand regardless of the resolved theme, and we force dark in the provider.
+*/
+:root,
+.dark {
+	--color-fd-background: #0a0a0b; /* --bg */
+	--color-fd-foreground: #f5f5f7; /* --text */
+	--color-fd-muted: #18181c; /* --surface-2 */
+	--color-fd-muted-foreground: #9a9aa3; /* --text-muted */
+	--color-fd-popover: #131316; /* --surface */
+	--color-fd-popover-foreground: #f5f5f7;
+	--color-fd-card: #131316; /* --surface */
+	--color-fd-card-foreground: #f5f5f7;
+	--color-fd-border: #2a2a31; /* --border */
+	--color-fd-primary: #ff5c28; /* --accent */
+	--color-fd-primary-foreground: #0a0a0b; /* dark text on orange (index.html .btn-primary) */
+	--color-fd-secondary: #18181c; /* --surface-2 */
+	--color-fd-secondary-foreground: #f5f5f7;
+	--color-fd-accent: #18181c; /* hover surface */
+	--color-fd-accent-foreground: #f5f5f7;
+	--color-fd-ring: #ff5c28; /* --accent */
+	--color-fd-overlay: rgba(10, 10, 11, 0.72);
+}
+
+/* Keep the sidebar tint consistent with the brutalist surfaces (neutral.css
+   nudges these lighter by default). */
+.dark #nd-sidebar {
+	--color-fd-muted: #18181c;
+	--color-fd-secondary: #18181c;
+	--color-fd-muted-foreground: #9a9aa3;
+}
+
+body {
+	font-size: 15.5px;
+	line-height: 1.55;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+/* Brand wordmark cursor — the blinking orange block from index.html `.brand`. */
+.brand-cursor {
+	display: inline-block;
+	width: 8px;
+	height: 15px;
+	background: var(--color-brand);
+	margin-left: 5px;
+	box-shadow: 0 0 10px rgba(255, 92, 40, 0.35);
+	animation: brand-blink 1.1s steps(2) infinite;
+}
+@keyframes brand-blink {
+	50% {
+		opacity: 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.brand-cursor {
+		animation: none;
+	}
+}
+
+/* IBM Plex is wide by default; tighten display type like index.html. */
+h1,
+h2,
+h3,
+h4 {
+	letter-spacing: -0.03em;
+}
+
+/*
+  Faint engineering-grid backdrop, masked to the top — the signature
+  index.html `body::before` overlay. Fixed, non-interactive, behind content.
+*/
+body::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	background-image: linear-gradient(
+			to right,
+			rgba(255, 255, 255, 0.022) 1px,
+			transparent 1px
+		),
+		linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+	background-size: 64px 64px;
+	pointer-events: none;
+	z-index: 0;
+	mask-image: radial-gradient(ellipse at top, black 25%, transparent 78%);
+	-webkit-mask-image: radial-gradient(ellipse at top, black 25%, transparent 78%);
+}

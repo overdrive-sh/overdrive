@@ -1,0 +1,218 @@
+---
+title: Overdrive vs Kubernetes, Nomad, and Fly.io
+description: How Overdrive's single-binary, eBPF-native design compares to Kubernetes, HashiCorp Nomad, and Fly.io — feature by feature, and where each of those platforms is the better choice today.
+---
+
+Overdrive folds into one Rust binary what other platforms assemble from
+separate parts: the control plane, the load balancer, the service mesh, the
+certificate authority, secrets, and observability. Kubernetes reaches the same
+capability set by composing etcd, a CNI plugin, a mesh, cert-manager, and a
+metrics stack. Nomad ships a single scheduler binary but leans on Consul and
+Vault for mesh and secrets. Fly.io runs a comparable architecture internally —
+microVMs, a Rust edge proxy, a gossip-replicated catalog — but as a managed
+product you deploy onto, not one you operate.
+
+This page compares the four on architecture and design philosophy. It is not a
+maturity claim.
+
+<Callout title="Read this first: Overdrive is early">
+	Overdrive is at Phase 1 — single-node and pre-production. Kubernetes, Nomad,
+	and Fly.io are production systems running real workloads at scale today.
+	Where this page compares Overdrive's design against a competitor's shipped
+	behaviour, it is comparing an intended architecture to a proven one. Where a
+	competitor is more mature, more proven, or simply the right choice, the page
+	says so plainly.
+</Callout>
+
+## The short version
+
+| | Overdrive | Kubernetes | Nomad | Fly.io |
+| --- | --- | --- | --- | --- |
+| Orchestration | Reconcilers + workflows | Controllers + CRDs | Bin-packing scheduler | flyd + Machines API |
+| Workload types | exec · microVM · VM · unikernel · WASM | Containers (VMs via add-ons) | docker · exec · QEMU · Java | Firecracker microVMs |
+| Load balancing | eBPF XDP, in-kernel | CNI; eBPF via Cilium | basic; LB via Consul | fly-proxy (userspace, Rust) |
+| Service mesh | Sidecarless, in the binary | Add-on: sidecar or sidecarless | Consul Connect (add-on) | Not a per-workload mesh |
+| East-west mTLS | Kernel kTLS, per-workload SPIFFE | Mesh add-on | Consul Connect (add-on) | WireGuard (machine-level) |
+| Intent store | Raft (per region) | etcd | Raft (in servers) | managed |
+| Observation store | Corrosion CRDT gossip | etcd (one store for all) | Raft state | Corrosion CRDT gossip |
+| Identity | Built-in CA, SPIFFE, default mTLS | SPIRE / mesh add-on | Vault + Consul (add-ons) | WireGuard keys |
+| Correctness testing | Deterministic simulation, day one | Standard testing | Standard testing | Not publicly documented |
+| Operational footprint | One binary | etcd + several components | One binary (+ Consul + Vault) | Managed for you |
+| Maturity | Phase 1, pre-production | Dominant, proven at scale | Mature, proven | Proven at global scale |
+| License | Source-available (FSL-1.1-ALv2) | Apache 2.0 | Business Source License | Proprietary |
+
+The rest of this page explains the rows that matter, one competitor at a time.
+
+## Why the design looks different
+
+Overdrive starts from a different question than the others. Kubernetes was
+designed in 2014, on the primitives that existed then: container runtimes,
+iptables, userspace proxies, sidecars. Its architecture is sound for that era.
+Then the primitives changed.
+
+Stable eBPF and XDP put a programmable load balancer in the kernel. kTLS moves
+encryption off the userspace proxy. SPIFFE gives every workload a cryptographic
+identity. WASM with the Component Model makes a sandboxed, language-agnostic
+extension model practical. openraft and Corrosion make the consistency split
+tractable in a single process. None of these were production-ready when
+Kubernetes set its shape.
+
+Build on the 2026 primitives instead of retrofitting them, and the parts that
+Kubernetes keeps separate collapse into one binary. That is the bet. It is a
+design bet, and it is unproven at scale — but it is the reason the comparison
+rows below come out the way they do.
+
+## Versus Kubernetes
+
+**What Kubernetes is, and where it shines.** Kubernetes is the declarative
+container orchestrator the industry standardized on. Its control plane —
+kube-apiserver, etcd, kube-scheduler, and the controller-manager — drives a
+reconciliation model: controllers watch desired state and act to make actual
+state match. Its strengths are real and hard to beat. Every major cloud offers
+a managed Kubernetes. The operator ecosystem numbers in the thousands. Helm,
+GitOps, and the CNCF tooling landscape are mature. The hiring pool is the
+deepest in the industry. If the requirement is "boring, supported everywhere,
+and easy to staff," Kubernetes is the answer.
+
+**How Overdrive differs.** Overdrive keeps the reconciliation model Kubernetes
+proved and changes three things underneath it.
+
+- **The reconciler is a pure function.** A Kubernetes operator is a long-running
+  Go program with broad cluster privileges. An Overdrive reconciler is a single
+  synchronous, pure function: it takes the desired and observed state plus its own
+  prior view, and returns the actions to take and the next view to persist. No I/O,
+  no clock, no database handle. That purity is what lets the control plane be replayed deterministically
+  under simulation, and it is why the reconciler's correctness can be expressed
+  as invariants the test harness checks mechanically.
+- **One binary, no etcd, no CNI, no mesh, no cert-manager.** Kubernetes assembles
+  networking from a CNI plugin, mTLS from a mesh add-on or SPIRE, and certificates
+  from cert-manager. Overdrive builds the load balancer, the mesh, and the
+  certificate authority into the same binary that runs the control plane.
+- **All workload types are first-class.** Kubernetes runs containers; VMs need
+  KubeVirt and stronger isolation needs Kata Containers — both add-ons. Overdrive
+  runs exec processes, microVMs, full VMs, unikernels, and WASM modules through
+  one driver interface, one identity model, and one dataplane.
+
+**The honest counterweight.** Sidecarless, eBPF-based service mesh is no longer
+a Kubernetes weakness — Cilium and Istio's ambient mode (GA in November 2024,
+with a per-node Rust proxy for L4 mTLS) both ship it today, in production. The
+difference Overdrive can claim is integration, not invention: the mesh is in the
+binary and identity-bearing kernel mTLS is the default, with no add-on to install.
+On everything maturity confers — ecosystem, scale, managed availability —
+Kubernetes wins, and will for a long time.
+
+<Callout type="info" title="When to choose which">
+	Choose **Kubernetes** when you need a proven platform, a managed offering from
+	your cloud, a large hiring pool, or one of the thousands of existing operators.
+	Choose **Overdrive** when operational simplicity matters more than ecosystem
+	maturity — one binary instead of etcd, a CNI plugin, a mesh, and cert-manager —
+	and you want built-in mTLS and mixed workload types (containers *and* microVMs
+	*and* WASM under one model). The cost is pre-production software.
+</Callout>
+
+## Versus Nomad
+
+**What Nomad is, and where it shines.** Nomad is the closest competitor in
+spirit. It is a single binary that runs as either a server or a client, needs no
+external coordination service, and schedules workloads by bin-packing them onto
+clients subject to job constraints. Its task-driver model runs Docker, raw exec,
+QEMU, Java, and community drivers including Firecracker. Multi-region federation
+is built in. Nomad is the proven benchmark for self-hosted orchestration that is
+simpler than Kubernetes — and it ships today.
+
+**How Overdrive differs.** Both platforms value operational simplicity; they
+draw the binary's boundary in different places.
+
+- **Mesh and secrets are inside, not alongside.** Nomad's service mesh comes from
+  Consul Connect and its secrets from Vault — both separate HashiCorp products you
+  deploy and operate next to Nomad. Overdrive's mesh, certificate authority, and
+  identity live in the same binary as the scheduler. The "single binary" claim
+  holds for the full stack, not just the scheduler.
+- **Identity is structural.** On Nomad, workload mTLS is something you add by
+  wiring in Consul Connect. On Overdrive, every workload gets a short-lived SPIFFE
+  certificate and east-west traffic is encrypted at the socket layer by default —
+  it cannot be turned off.
+- **Correctness is tested by simulation.** Overdrive's nondeterminism — clock,
+  network, randomness, storage — sits behind injectable traits, so partition,
+  timing, and crash-ordering bugs are reproducible from a seed. This is a property
+  shared with serious database projects, not with general-purpose orchestrators.
+
+**The honest counterweight.** Nomad's simplicity is shipped and battle-tested;
+Overdrive's is designed. Nomad's driver ecosystem is broad and proven in
+production now. If the requirement is "simpler than Kubernetes, self-hosted, and
+running this quarter," Nomad is the safer choice today, and adding Consul and
+Vault is a well-trodden path.
+
+<Callout type="info" title="When to choose which">
+	Choose **Nomad** when you want self-hosted orchestration that is simpler than
+	Kubernetes and proven in production, and you are comfortable running Consul and
+	Vault for mesh and secrets. Choose **Overdrive** when you want that simplicity
+	*without* the extra products — mesh, identity, and secrets folded into one
+	binary — and can accept that it is not yet production-ready.
+</Callout>
+
+## Versus Fly.io
+
+**What Fly.io is, and where it shines.** Fly.io is a managed platform for running
+applications close to users. Application code runs in Firecracker microVMs; a
+per-server Rust edge proxy (`fly-proxy`) terminates TLS and routes requests by
+BGP Anycast to the nearest instance; a global WireGuard mesh carries private
+traffic between regions. Its service catalog runs on **Corrosion**, a Rust program
+that propagates a SQLite database by gossip using CRDT semantics. Fly's strengths
+are a proven global edge, a polished deploy experience (`fly deploy`), and the
+fact that you operate none of it.
+
+**How Overdrive differs.** This is the most architecturally similar of the three,
+which makes the differences precise. Overdrive uses the *same* Corrosion component
+for its observation store, and it arrives at the same topology Fly runs in
+production — per-region strong consistency for intent, global gossip for observed
+state. It diverges on two axes.
+
+- **The dataplane is in the kernel, not userspace.** Fly routes east-west traffic
+  through `fly-proxy` and the WireGuard mesh. Overdrive uses XDP for load balancing
+  and sockops with kTLS for encryption — the work happens in the kernel, and
+  same-host delivery skips the network stack entirely via a cgroup socket hook.
+- **Identity is per-workload, not per-machine.** Fly's documented trust model is
+  machine-level WireGuard keys plus TLS termination at the edge proxy. Overdrive
+  binds a SPIFFE identity to each workload and carries it on every east-west packet.
+  (Fly does not document a built-in per-workload mTLS identity; this is the absence
+  of a documented feature, not a claim that Fly cannot do it.)
+- **You run it.** This is the largest difference, and it cuts both ways. Fly is a
+  product; Overdrive is software you deploy and operate.
+
+**The honest counterweight.** Fly's edge is real, global, and proven; Overdrive's
+multi-region design is exactly that — a design. Fly's deploy experience is mature
+and Overdrive's is not. If the goal is "put an application near users without
+running infrastructure," Fly is the product built for that, and Overdrive is not
+a managed offering.
+
+<Callout type="info" title="When to choose which">
+	Choose **Fly.io** when you want a managed platform with a proven global edge and
+	a fast path from code to a deployed app, and you do not want to run
+	infrastructure. Choose **Overdrive** when you want to run the platform yourself,
+	want the dataplane and identity in the kernel rather than a userspace proxy, and
+	are building rather than buying.
+</Callout>
+
+## Where each competitor wins
+
+It is worth stating the trade-off without softening it. Overdrive's
+differentiators are structural — integration, built-in identity, a unified
+workload model, simulation-tested correctness. They are not maturity. On
+maturity, the competitors win:
+
+- **Kubernetes** wins on ecosystem, scale, managed availability, and hiring.
+- **Fly.io** wins on a proven global edge and deploy experience, fully managed.
+- **Nomad** wins on shipped, proven simplicity for self-hosted orchestration.
+
+Overdrive's bet is that the 2026 primitives make a structurally simpler, more
+secure, more verifiable platform possible — one binary instead of a stack, mTLS
+by default instead of by add-on, every workload type under one model, and
+correctness checked by simulation from day one. That bet is not yet proven in
+production. If maturity is the deciding factor, choose one of the platforms
+above. If the architecture is what you are evaluating, that is what this page is
+for.
+
+To see the design decisions these comparisons rest on, read
+[the intent / observation boundary](/docs/concepts/intent-observation) and
+[deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
