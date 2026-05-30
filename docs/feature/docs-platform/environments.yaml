@@ -1,0 +1,175 @@
+# Environment matrix — docs-platform website (overdrive.sh)
+#
+# MANDATORY DEVOPS machine artifact (DISTILL parses this for environmental
+# realism). Target: a Next.js + Fumadocs site built with OpenNext
+# (@opennextjs/cloudflare) and deployed to Cloudflare Workers. Greenfield
+# TypeScript subtree at `website/`, OUTSIDE `crates/`, EXEMPT from the Rust
+# crate-class / dst-lint / nextest / cargo-mutants gates (DISCUSS C-5,
+# brief § docs-platform website). Owner: Apex (DEVOPS wave, 2026-05-30).
+#
+# Coexistence is load-bearing: the website CI/deploy is greenfield and must
+# COEXIST with the existing Rust GitHub Actions pipelines (ci.yml, nightly.yml)
+# and lefthook hooks — never break them, never run them on website-only
+# changes, and vice versa.
+
+feature: docs-platform
+subtree: website/            # greenfield TS/Next.js app; not under crates/
+wave: DEVOPS
+date: "2026-05-30"
+
+# --------------------------------------------------------------------------
+# Target environments
+# --------------------------------------------------------------------------
+environments:
+  - name: local-dev
+    purpose: >
+      Developer inner loop on the website subtree. Two shapes: `next dev`
+      (fast HMR, Node, NOT the Workers runtime) and `wrangler dev` /
+      `opennextjs-cloudflare preview` (the OpenNext build served under the
+      local workerd runtime — the only local shape that exercises
+      nodejs_compat + the Worker fetch surface faithfully).
+    runtime: "Node (next dev) | local workerd via wrangler (preview)"
+    host: developer laptop (macOS or Linux)
+    deploy: none (local process)
+    data:
+      d1: local D1 (wrangler local SQLite emulation) — tool_calls table
+      web_analytics: not wired locally (RUM is production-only)
+    site_origin: "http://localhost:3000 (next dev) | http://localhost:8787 (wrangler)"
+    notes: >
+      The website inner loop is fully independent of the Rust Lima VM. It does
+      NOT use `cargo xtask lima run --`; Lima governs the Rust workspace only.
+      MDX is compiled into the bundle at build time (C-3): no runtime fs.
+
+  - name: preview
+    purpose: >
+      Per-PR / per-branch ephemeral preview deploy for review. Validates the
+      OpenNext-on-Workers build + the deploy smoke test against a real
+      workers.dev URL before merge.
+    runtime: Cloudflare Workers (Node runtime, OpenNext)
+    host: Cloudflare edge
+    trigger: pull_request affecting website/** (path-filtered)
+    deploy: "wrangler versions upload (preview alias) — non-production"
+    data:
+      d1: preview/staging D1 database (separate binding id from production)
+      web_analytics: optional; production token only (RUM not required for preview)
+    site_origin: "https://<preview-alias>.<account>.workers.dev"
+    rollback: superseded by the next preview upload; not a production concern
+    notes: >
+      Preview is the acceptance surface for the deploy smoke test (US-01).
+      The build-time one-index assertion (ADR-0058) runs in CI BEFORE deploy,
+      so a divergent index never reaches preview.
+
+  - name: production
+    purpose: The live overdrive.sh docs / marketing / agent-discovery site.
+    runtime: Cloudflare Workers (Node runtime, OpenNext)
+    host: Cloudflare edge
+    trigger: push to main affecting website/** (path-filtered)
+    deploy: "wrangler deploy (atomic; instant rollback via wrangler rollback)"
+    data:
+      d1: production D1 database — tool_calls table (best-effort sink, ADR-0056)
+      web_analytics: Cloudflare Web Analytics (page-view RUM funnels, D-D)
+    site_origin:
+      skeleton: "https://<name>.<account>.workers.dev (slice 01 accepts this)"
+      production: "https://overdrive.sh (flip the single SITE_ORIGIN constant, D-F)"
+    domain_wiring: >
+      Custom-domain DNS + Workers custom-domain binding for overdrive.sh is a
+      concrete remaining DEVOPS infra task (not a 'wire later' hand-wave). It
+      is one of: a Cloudflare custom domain on the Worker, plus the one-line
+      SITE_ORIGIN flip from workers.dev to https://overdrive.sh (D-F). Owner:
+      DEVOPS infra; sequenced with or after DELIVER slice 01 skeleton-deploy.
+    rollback: >
+      `wrangler rollback [<version-id>]` re-points the live route at the prior
+      immutable Worker version. Atomic + instant; no rebuild. See feature-delta
+      § Deployment Strategy.
+
+# --------------------------------------------------------------------------
+# Coexistence matrix — the website pipeline MUST NOT break the Rust pipelines
+# --------------------------------------------------------------------------
+coexistence:
+  principle: >
+    The website CI/deploy and the Rust CI/deploy are two disjoint pipelines in
+    one repo. Each is path-scoped so neither triggers on the other's changes.
+    The website pipeline NEVER runs Rust gates (cargo, nextest, dst, mutants);
+    the Rust pipelines NEVER run the website gates (tsc, eslint, next build,
+    wrangler). No shared job, no shared runner state, no shared cache key.
+  existing_pipelines_must_not_break:
+    - id: lefthook-pre-commit
+      file: lefthook.yml
+      scope: Rust workspace (cargo fmt, clippy, scoped doctests)
+      website_impact: >
+        none — website changes touch only website/**, which lefthook's Rust
+        commands do not match. If website-local hooks are wanted later they are
+        additive and path-scoped; not in this design's scope.
+      status: must_not_break
+    - id: lefthook-pre-push
+      file: lefthook.yml
+      scope: Rust workspace (nextest via Lima, workspace doctests)
+      website_impact: none (Rust-only)
+      status: must_not_break
+    - id: rust-ci
+      file: .github/workflows/ci.yml
+      jobs: [fmt-clippy, test, integration, dst, dst-lint, yaml-free-cli, bpf-build, bpf-unit]
+      current_triggers: "pull_request:[main], push:[main], workflow_dispatch (NO path filter today)"
+      website_impact: >
+        Today ci.yml runs on EVERY push/PR to main, including website-only ones,
+        wasting ~15 min of Rust build for a docs typo. RECOMMENDED (non-breaking)
+        coexistence improvement: add a `paths-ignore: ['website/**', 'docs/**']`
+        (or `paths:` allowlist) to ci.yml so the Rust gates skip website-only
+        changes. This is OPTIONAL and additive — surfaced for the user to decide;
+        NOT required for correctness (a green-but-wasteful Rust run on a website
+        PR does not break anything). See feature-delta § Coexistence Matrix.
+      status: must_not_break
+    - id: rust-nightly
+      file: .github/workflows/nightly.yml
+      jobs: [mutants-workspace]
+      current_triggers: "schedule (cron 13 3 * * *), workflow_dispatch"
+      website_impact: none (scheduled full-workspace Rust mutants; never touches website/**)
+      status: must_not_break
+    - id: deploy-pages
+      file: .github/workflows/deploy-pages.yml
+      scope: publishes repo root (.) to GitHub Pages on push to main
+      website_impact: >
+        SUPERSEDED by the new Cloudflare Workers deploy. Assessed as a generic
+        whole-repo static publish (path '.') — it serves the repo-root index.html,
+        not a built docs site. The docs platform deploys to Workers instead, so
+        GitHub Pages is superseded. REMOVAL is scheduled for DELIVER slice 01
+        (skeleton-deploy), alongside the working Cloudflare deploy — NEVER remove
+        the only deploy before its replacement exists. NOT removed in this design
+        wave.
+      status: supersede_in_deliver_slice_01
+
+# --------------------------------------------------------------------------
+# Platform coverage
+# --------------------------------------------------------------------------
+platform_coverage:
+  website_ci: ubuntu-latest (GitHub Actions; Node + npm/pnpm; no Lima, no Rust toolchain)
+  website_runtime: Cloudflare Workers (Node runtime via OpenNext; 128 MB isolate)
+  local_dev: macOS or Linux (Node toolchain; wrangler for the workerd preview)
+  rust_pipelines: unchanged (ubuntu-latest + Lima VM; out of scope for the website)
+
+# --------------------------------------------------------------------------
+# Deployment assumptions
+# --------------------------------------------------------------------------
+deployment_assumptions:
+  idempotent: "wrangler deploy is idempotent — same build inputs → same Worker version artifact"
+  strategy: atomic deploy + instant rollback (no canary/gradual for a docs site, D locked)
+  isolation: >
+    the website CI never runs Rust gates and the Rust CI never runs website gates;
+    path-scoping enforces the separation at the workflow trigger boundary
+  runtime_constraints:    # DESIGN constraints the platform MUST satisfy
+    node_runtime_everywhere: "never `export const runtime = 'edge'` (C-2, research § OpenNext)"
+    nodejs_compat: "compatibility_flags include nodejs_compat; compat date >= 2025-09-01"
+    ssg: "build-time content; no runtime fs (C-3); no R2 ISR cache binding"
+    bundle_ceiling: "compressed Worker bundle <= 3 MiB Free / 10 MiB Paid (C-8)"
+    isolate_ceiling: "in-Worker Orama index shares the 128 MB isolate (C-8, ADR-0057)"
+    d1_binding: "tool_calls D1 binding declared in wrangler config (ADR-0056)"
+    site_origin: "single SITE_ORIGIN constant; workers.dev -> overdrive.sh is one flip (D-F)"
+  secrets:
+    - name: CLOUDFLARE_API_TOKEN
+      where: GitHub Actions secret (repository or `production`/`preview` environment secret)
+      purpose: authenticates wrangler deploy/upload in CI
+      provisioning: DEVOPS infra task (create scoped token in Cloudflare; add as GH secret) — no value invented here
+    - name: CLOUDFLARE_ACCOUNT_ID
+      where: GitHub Actions secret (or wrangler config var)
+      purpose: target Cloudflare account for the deploy
+      provisioning: DEVOPS infra task — no value invented here

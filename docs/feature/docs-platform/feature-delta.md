@@ -1133,9 +1133,222 @@ None. The stack and all eight decisions were locked in pass 1; pass 2 wrote the
 SSOT artifacts without altering any DISCUSS assumption, story, or AC. No
 `design/upstream-changes.md` was required.
 
+## Wave: DEVOPS / [REF] Wave Decisions
+
+**Wave**: DEVOPS (Apex, nw-platform-architect). **Mode**: lean / Tier-1. **Date**:
+2026-05-30. All decisions below were locked by the user before this wave; this
+section records them as the SSOT. Per-wave Forge (peer) review SKIPPED — no
+novel deploy target beyond the locked stack; consolidated review fires at
+DISTILL. Machine artifacts: `environments.yaml` (this feature dir),
+`docs/product/kpi-contracts.yaml` (SSOT).
+
+| ID | Decision | Verdict | Rationale |
+|---|---|---|---|
+| V-1 | Deployment target = Cloudflare Workers (edge), via `@opennextjs/cloudflare` (OpenNext) | LOCKED | the DESIGN container; Node runtime everywhere (C-2), SSG (C-3) |
+| V-2 | Container orchestration = none (serverless Workers, no containers) | LOCKED | one Worker = the modular monolith; nothing to orchestrate |
+| V-3 | CI/CD platform = GitHub Actions | LOCKED | the repo already uses it; coexists with the Rust pipelines |
+| V-4 | New website workflow, path-scoped to `website/**`; supersedes `deploy-pages.yml` | LOCKED | greenfield; must never run Rust gates, never break them |
+| V-5 | Observability = Cloudflare-native (Workers Logs + Web Analytics + D1) | LOCKED | no OTel/Datadog/Prometheus/ELK; matches the deploy target |
+| V-6 | Deployment strategy = atomic deploy + instant rollback via `wrangler` | LOCKED | no canary/gradual for a docs site |
+| V-7 | Continuous learning = none at deploy level (no A/B, no feature flags) | LOCKED | the product MCP tool-call loop (J-DOCS-003) IS the learning signal — product instrumentation, not a deploy experiment framework |
+| V-8 | Branching = GitHub Flow (feature branch -> PR -> main) | LOCKED | matches current practice |
+| V-9 | Mutation testing = DISABLED for `website/` | LOCKED | TS subtree, C-5-exempt; gates are tsc + lint + build + deploy-smoke + the one-index assertion (ADR-0058). The Rust workspace's per-feature cargo-mutants strategy in CLAUDE.md is UNCHANGED and does not apply here |
+
+### Risks (DEVOPS)
+
+- **DR-1** Two pipelines in one repo could cross-trigger (Rust CI on a docs typo;
+  website CI on a Rust change) → mitigated by path-scoping each workflow (V-4).
+  Today's `ci.yml` has no path filter; an optional non-breaking `paths-ignore`
+  improvement is surfaced (not required) in the Coexistence Matrix below.
+- **DR-2** Removing `deploy-pages.yml` before the Cloudflare deploy exists would
+  leave the docs with no deploy → mitigated by scheduling removal in DELIVER
+  slice 01 ALONGSIDE the working Workers deploy, never before.
+- **DR-3** Secrets (`CLOUDFLARE_API_TOKEN`, account id) absent at first deploy →
+  concrete DELIVER-slice-01 / DEVOPS-infra prerequisite, stated below; no values
+  invented.
+
+## Wave: DEVOPS / [REF] Environment Matrix
+
+Full machine artifact: `docs/feature/docs-platform/environments.yaml`. Summary:
+
+| Environment | Runtime | Trigger | Deploy | Rollback |
+|---|---|---|---|---|
+| `local-dev` | Node (`next dev`) / local workerd (`wrangler dev`) | manual | none | n/a |
+| `preview` | Cloudflare Workers (OpenNext, Node) | PR on `website/**` | `wrangler versions upload` (preview alias) | superseded by next upload |
+| `production` | Cloudflare Workers (OpenNext, Node) | push to `main` on `website/**` | `wrangler deploy` (atomic) | `wrangler rollback` (instant) |
+
+`SITE_ORIGIN` is `workers.dev` for the skeleton and flips to `https://overdrive.sh`
+in production (one constant, D-F). The website inner loop does NOT use the Rust
+Lima VM — Lima governs the Rust workspace only.
+
+## Wave: DEVOPS / [REF] CI/CD Pipeline Outline (NEW website workflow)
+
+A NEW GitHub Actions workflow (lands in DELIVER slice 01) for the `website/`
+subtree, **path-filtered to `website/**`** so it never runs on Rust changes and
+the Rust gates never run on website changes. Stages (lean — no YAML dump here;
+the skeleton lands in DELIVER):
+
+1. **Commit stage (CI, blocking)** — on `pull_request` touching `website/**`:
+   `tsc --noEmit` (typecheck) · ESLint (lint) · `opennextjs-cloudflare build`
+   (build) · `scripts/assert-one-index.ts` (the build-time one-index assertion,
+   ADR-0058 — every page → reachable `.md` + in `llms.txt` + in search index).
+2. **Acceptance stage (CI/deploy, blocking)** — preview deploy
+   (`wrangler versions upload`) + the **deploy smoke test** (HTTP GET on the
+   deployed `/docs`: assert 200 + heading present, US-01 AC).
+3. **Production deploy** — on `push` to `main` touching `website/**`:
+   `wrangler deploy` (atomic) after the same commit-stage gates, then the
+   production smoke test (advisory; failing smoke → manual `wrangler rollback`).
+
+This workflow **supersedes `deploy-pages.yml`**. Local quality gates: a
+`website/`-scoped pre-commit (tsc + lint, mirroring the commit stage) MAY be
+added in DELIVER if wanted; not required by this design. No SAST/DAST/SBOM
+stages — public docs site, no auth surface, no secrets in the bundle (the only
+secret is the deploy token, referenced from GH Actions, never committed).
+
+## Wave: DEVOPS / [REF] Monitoring Contracts (KPI → instrument)
+
+SSOT: `docs/product/kpi-contracts.yaml`. Every outcome KPI maps to a
+Cloudflare-native instrument:
+
+| KPI | What | Instrument | Note |
+|---|---|---|---|
+| KPI-1 | 99%+ requests 200 | Workers Logs + deploy smoke test | **guardrail**; alert on success-rate drop |
+| KPI-2 | search→click ≥50%, TTFA <15s | Cloudflare Web Analytics page-view funnel | **APPROXIMATED** (no custom-event beacon, D-D) |
+| KPI-3 | 100% pages exported | build-time one-index assertion (ADR-0058) | blocking CI gate |
+| KPI-4 | MCP volume ↑ MoM, re-query <30% | D1 `tool_calls` log | best-effort (C-7 / ADR-0056) |
+| KPI-5 | ≥1 page/mo from top zero-result query; zero-result rate ↓ | D1 `tool_calls` (`SELECT … WHERE result_count=0 GROUP BY query`) + docs changelog | best-effort |
+| KPI-6 | `/`→docs/blog ≥40% | Cloudflare Web Analytics page-view funnel | **APPROXIMATED** (D-D) |
+| North star | MCP volume + low re-query | derived from D1 `tool_calls` | volume = row count; re-query = repeated search_docs/session |
+
+Honest approximation statement: KPIs 2 and 6 are page-view-funnel proxies, not
+instrumented click/nav events — there is no custom-event beacon and no 9th
+slice (D-D). The D1 log (KPIs 4/5) is best-effort: a logging failure NEVER
+blocks/delays/alters the MCP tool response (C-7, guardrail G-2).
+
+## Wave: DEVOPS / [REF] Deployment Strategy (atomic + instant rollback)
+
+The docs site deploys atomically: `wrangler deploy` builds an immutable Worker
+version and re-points the production route at it in one step — there is no
+mixed-version window, no canary, no gradual traffic shift (unnecessary for a
+stateless SSG docs site). **Rollback contract**: every prior deploy is a
+retained immutable Worker version; `wrangler rollback [<version-id>]` re-points
+the live route at the previous version instantly, with no rebuild. Trigger for
+manual rollback: deploy smoke test failure, a stakeholder-reported broken page,
+or a KPI-1 success-rate drop. The D1 `tool_calls` table is additive
+best-effort logging with no destructive migration in scope, so there is no data
+rollback concern at launch; the schema is created once (a concrete DELIVER /
+DEVOPS prerequisite, below).
+
+## Wave: DEVOPS / [REF] Mutation Testing Strategy (DISABLED for website)
+
+Mutation testing is **DISABLED for the `website/` subtree.** Rationale: `website/`
+is a greenfield TypeScript/Next.js app, C-5-exempt from the Rust quality gates;
+its correctness gates are typecheck + lint + build + deploy smoke test + the
+build-time one-index assertion (ADR-0058). The strongest invariant (C-4 one
+index) is enforced structurally by the assertion, not by mutation kill-rate. The
+Rust workspace's per-feature `cargo-mutants` strategy (in CLAUDE.md
+§ Mutation Testing Strategy) is **UNCHANGED and does not apply** to `website/` —
+this decision is recorded ONLY in the feature artifacts, never written as a
+global/conflicting CLAUDE.md line.
+
+## Wave: DEVOPS / [REF] Observability Stack (Cloudflare-native per signal class)
+
+| Signal class | Tool | Captures |
+|---|---|---|
+| Logs / request health | Cloudflare Workers Logs / observability | per-request status, path, timing (KPI-1) |
+| Browser RUM (funnels) | Cloudflare Web Analytics | page views, navigation funnels (KPIs 2/6, approximated) |
+| Product analytics (MCP) | Cloudflare D1 (`tool_calls`) | `{tool, query, ts, result_count}` (KPIs 4/5, north star) |
+| Build-time correctness | website CI (one-index assertion) | every page exported + indexed (KPI-3) |
+
+No OpenTelemetry, no Datadog/Prometheus/ELK — the stack is Cloudflare-native,
+matching the deploy target and the lean operational posture.
+
+## Wave: DEVOPS / [REF] Branching Strategy (GitHub Flow + CI trigger alignment)
+
+GitHub Flow: feature branch → PR → `main`. The active branch is
+`marcus-sa/fumadocs-mcp-search-setup`; default branch `main`. CI trigger
+alignment for the website workflow: `pull_request` (commit + acceptance stages,
+incl. preview deploy + smoke test) on `website/**`; `push` to `main`
+(production `wrangler deploy`) on `website/**`. This matches the existing Rust
+`ci.yml` trigger shape (`pull_request:[main]`, `push:[main]`) — the website
+workflow differs only by the `website/**` path filter that keeps the two
+pipelines disjoint.
+
+## Wave: DEVOPS / [REF] Coexistence Matrix
+
+| Existing pipeline | File | Website impact | Status |
+|---|---|---|---|
+| lefthook pre-commit | `lefthook.yml` | none (Rust-only commands; don't match `website/**`) | must_not_break |
+| lefthook pre-push | `lefthook.yml` | none (Rust-only) | must_not_break |
+| Rust CI | `.github/workflows/ci.yml` | runs today on every push/PR to main (no path filter) — wasteful on website-only changes but NOT broken | must_not_break |
+| Rust nightly | `.github/workflows/nightly.yml` | none (scheduled full-workspace mutants) | must_not_break |
+| GitHub Pages deploy | `.github/workflows/deploy-pages.yml` | SUPERSEDED by the Workers deploy | supersede in DELIVER slice 01 |
+
+**Separation contract**: the website CI never runs Rust gates (cargo, nextest,
+dst, mutants); the Rust CI never runs website gates (tsc, eslint, next build,
+wrangler). No shared job, runner state, or cache key. The new website workflow
+is path-scoped to `website/**`; the Rust workflows are unchanged.
+
+**Optional, non-breaking improvement (surfaced for the user — not applied):**
+`ci.yml` today runs the full ~15-min Rust suite on website-only PRs/pushes. Adding
+`paths-ignore: ['website/**', 'docs/**']` (or a `paths:` allowlist) to `ci.yml`
+would skip the Rust gates on website-only changes. This edits the Rust workflow,
+so it is left as a recommendation for the user to decide — it is NOT required
+for correctness (a green-but-wasteful Rust run does not break anything).
+
+**`deploy-pages.yml` supersession finding**: the workflow publishes repo root
+(`.`) to GitHub Pages on push to `main` — a generic whole-repo static publish
+(it serves the repo-root `index.html`, not a built docs site). It IS active
+today. The docs platform deploys to Cloudflare Workers instead, so GitHub Pages
+is superseded. **Removal is scheduled for DELIVER slice 01 (skeleton-deploy),
+alongside the working Cloudflare deploy** — never remove the only deploy before
+its replacement exists. NOT removed in this design wave.
+
+## Wave: DEVOPS / [REF] Pre-requisites (DESIGN constraints + concrete infra tasks)
+
+DESIGN constraints the platform must satisfy (the deploy config must encode all
+of these):
+
+- **Node runtime everywhere** — never `export const runtime = 'edge'` (C-2);
+  OpenNext manages the Workers Node runtime.
+- **`nodejs_compat`** — compatibility flag set; compat date ≥ 2025-09-01.
+- **SSG / no runtime `fs`** (C-3) — MDX compiled into the bundle at build time;
+  no R2 ISR cache binding.
+- **Bundle ceiling** — compressed Worker bundle ≤ 3 MiB Free / 10 MiB Paid (C-8).
+- **Isolate ceiling** — in-Worker Orama index shares the 128 MB isolate
+  (C-8, ADR-0057); benchmark the external-search migration trigger (>~5k pages
+  or ~60–70 MB) against the real corpus before treating it as committed.
+- **D1 binding** — `tool_calls` table binding declared in the wrangler config
+  (ADR-0056).
+- **`SITE_ORIGIN`** — single config constant; `workers.dev` → `overdrive.sh` is
+  one flip (D-F).
+
+Concrete remaining DEVOPS / DELIVER infra tasks (stated as scope, not "wire
+later" hand-waves; no GitHub issues invented):
+
+1. **Custom-domain DNS + Workers custom-domain binding** for `overdrive.sh`,
+   plus the `SITE_ORIGIN` flip (D-F). DEVOPS-infra; sequenced with/after DELIVER
+   slice 01.
+2. **D1 schema migration** — create the `tool_calls` table (schema in
+   `kpi-contracts.yaml`). DELIVER slice 06 (the analytics slice) or its DEVOPS
+   prerequisite.
+3. **Secrets** — `CLOUDFLARE_API_TOKEN` (scoped to Workers deploy) and
+   `CLOUDFLARE_ACCOUNT_ID`, referenced as GitHub Actions repository or
+   environment (`production`/`preview`) secrets by the deploy workflow. Create
+   the scoped token in Cloudflare and add it as a GH secret — DEVOPS-infra task;
+   no values invented.
+
+## Wave: DEVOPS / [REF] Changed Assumptions
+
+None. Every DEVOPS decision was locked before the wave and aligns with the
+DESIGN SSOT (D-A..D-H, ADRs 0055–0058) and the brief's docs-platform section.
+No DESIGN assumption, story, or AC was altered; no
+`devops/upstream-changes.md` was required.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
 | 2026-05-30 | Initial DISCUSS wave for docs-platform: JTBD (J-DOCS-001/002/003), scope split into 8 slices (walking skeleton = slice 01), two-arc journey, 8 LeanUX stories with embedded AC + KPIs, DoR validation, wave decisions, deferrals surfaced. |
 | 2026-05-30 | DESIGN wave (GUIDE mode, pass 2): appended DESIGN sections (Wave Decisions, DDD verdicts D-A..D-H, component decomposition, driving/driven ports, technology choices, Reuse Analysis, open questions, Changed Assumptions=none). Authoritative prose + C4 (L1/L2/L3) in `docs/product/architecture/brief.md` § docs-platform website. ADRs 0055 (MCP same-Worker), 0056 (D1 + best-effort logging), 0057 (in-Worker Orama + seam + benchmarked trigger), 0058 (one-index assertion). D-2 resolved (D1). D-1 recast as benchmarked threshold. D-5 (`fumadocs-openapi`) confirmed OUT OF SCOPE (non-goal). — Morgan. |
+| 2026-05-30 | DEVOPS wave (lean / Tier-1): appended DEVOPS sections (Wave Decisions V-1..V-9, Environment Matrix, CI/CD Pipeline Outline, Monitoring Contracts KPI→instrument, Deployment Strategy, Mutation Testing Strategy=disabled-for-website, Observability Stack, Branching Strategy, Coexistence Matrix, Pre-requisites, Changed Assumptions=none). Machine artifact `environments.yaml` (local-dev/preview/production + coexistence matrix). SSOT `docs/product/kpi-contracts.yaml` (per-KPI data collection, D1 `tool_calls` schema, Web Analytics funnels, alert thresholds). Locked decisions: Cloudflare Workers via OpenNext; GitHub Actions CI path-scoped to `website/**` (coexists with Rust `ci.yml`/`nightly.yml`, supersedes `deploy-pages.yml`); Cloudflare-native observability (Workers Logs + Web Analytics + D1); atomic deploy + instant `wrangler` rollback; no deploy-level experimentation; GitHub Flow; mutation testing DISABLED for `website/`. `deploy-pages.yml` (active whole-repo GitHub Pages publish) superseded — removal scheduled for DELIVER slice 01, NOT this wave. Concrete remaining infra tasks stated (custom-domain wiring + `SITE_ORIGIN` flip; D1 `tool_calls` schema migration; `CLOUDFLARE_API_TOKEN`/account-id GH secrets). CLAUDE.md Rust mutation section UNTOUCHED. Forge per-wave review skipped (no novel deploy target). — Apex. |
