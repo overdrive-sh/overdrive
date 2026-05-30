@@ -795,3 +795,37 @@ proptest! {
         prop_assert!(!p.inferred);
     }
 }
+
+// Regression: success_threshold = 0 on readiness and failure_threshold = 0
+// on liveness previously hit an `unreachable!()` arm in
+// `map_zero_to_named_error`, panicking instead of returning a typed error.
+
+#[test]
+fn readiness_success_threshold_zero_yields_named_parse_error() {
+    let toml = format!(
+        "{SERVICE_PRELUDE}\n\
+         [[health_check.readiness]]\n\
+         type = \"tcp\"\n\
+         port = 8080\n\
+         success_threshold = 0\n"
+    );
+    match parse_err(&toml) {
+        ParseError::ProbeSuccessThresholdZero { probe_idx } => assert_eq!(probe_idx, 0),
+        other => panic!("expected ProbeSuccessThresholdZero, got {other:?}"),
+    }
+}
+
+#[test]
+fn liveness_failure_threshold_zero_yields_named_parse_error() {
+    let toml = format!(
+        "{SERVICE_PRELUDE}\n\
+         [[health_check.liveness]]\n\
+         type = \"tcp\"\n\
+         port = 8080\n\
+         failure_threshold = 0\n"
+    );
+    match parse_err(&toml) {
+        ParseError::ProbeFailureThresholdZero { probe_idx } => assert_eq!(probe_idx, 0),
+        other => panic!("expected ProbeFailureThresholdZero, got {other:?}"),
+    }
+}

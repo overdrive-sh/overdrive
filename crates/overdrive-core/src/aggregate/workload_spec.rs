@@ -185,6 +185,21 @@ pub enum ParseError {
     )]
     ProbeMaxAttemptsZero { probe_idx: usize },
 
+    /// `success_threshold = 0` on a readiness probe is rejected per
+    /// ADR-0057 §3 — the probe must succeed at least once.
+    #[error(
+        "[[health_check.readiness]][{probe_idx}]: field `success_threshold` must be > 0 — set a positive value or omit the field to inherit the ADR-0057 default of 1"
+    )]
+    ProbeSuccessThresholdZero { probe_idx: usize },
+
+    /// `failure_threshold = 0` on a liveness probe is rejected per
+    /// ADR-0057 §3 — the probe must tolerate at least one failure
+    /// before declaring the workload unhealthy.
+    #[error(
+        "[[health_check.liveness]][{probe_idx}]: field `failure_threshold` must be > 0 — set a positive value or omit the field to inherit the ADR-0057 default of 3"
+    )]
+    ProbeFailureThresholdZero { probe_idx: usize },
+
     /// `type = "<value>"` is not one of the recognised mechanics
     /// (`tcp` for step 01-02; `http` and `exec` land in later slices).
     #[error(
@@ -1560,7 +1575,8 @@ fn parse_optional_positive_u32(
 
 /// Map an `OptionalPositiveU32Error::Zero` to the field-specific
 /// named variant (`ProbeTimeoutZero` / `ProbeIntervalZero` /
-/// `ProbeMaxAttemptsZero`). A `Field` carries through verbatim.
+/// `ProbeMaxAttemptsZero` / `ProbeSuccessThresholdZero` /
+/// `ProbeFailureThresholdZero`). A `Field` carries through verbatim.
 fn map_zero_to_named_error(
     err: OptionalPositiveU32Error,
     field: &str,
@@ -1571,7 +1587,9 @@ fn map_zero_to_named_error(
             "timeout_seconds" => ParseError::ProbeTimeoutZero { probe_idx },
             "interval_seconds" => ParseError::ProbeIntervalZero { probe_idx },
             "max_attempts" => ParseError::ProbeMaxAttemptsZero { probe_idx },
-            _ => unreachable!("map_zero_to_named_error only called for the three known fields"),
+            "success_threshold" => ParseError::ProbeSuccessThresholdZero { probe_idx },
+            "failure_threshold" => ParseError::ProbeFailureThresholdZero { probe_idx },
+            _ => unreachable!("map_zero_to_named_error called for unknown field: {field}"),
         },
         OptionalPositiveU32Error::Field(parse_error) => parse_error,
     }
