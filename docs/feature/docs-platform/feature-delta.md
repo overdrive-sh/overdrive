@@ -1345,6 +1345,85 @@ DESIGN SSOT (D-A..D-H, ADRs 0055–0058) and the brief's docs-platform section.
 No DESIGN assumption, story, or AC was altered; no
 `devops/upstream-changes.md` was required.
 
+## Wave: DELIVER / [REF] Implementation Summary
+
+The `docs-platform` website shipped end-to-end across 8 thin slices into the
+greenfield TypeScript/Next.js subtree at **`website/`** (56 tracked files),
+EXEMPT from the Rust gates per C-5. Stack as designed: Fumadocs v16.9 + Next
+16.2 (App Router/RSC) + React 19, deployed via `@opennextjs/cloudflare` 1.19 to
+Cloudflare Workers (Node runtime, never edge). Delivered LEAN (no DES log /
+roadmap.json / mutation gate — DISTILL was intentionally skipped; the four glue
+checks were folded into the slices that need them). All slices: typecheck +
+eslint + `next build` + `opennextjs-cloudflare build` green, committed
+individually. **The real Cloudflare deploy is pending the user's account/token**
+(slice 01 landed build + local-workerd serve + the deploy workflow; no live URL
+yet).
+
+## Wave: DELIVER / [REF] Slices Shipped
+
+| Slice | Commit | Shipped |
+|---|---|---|
+| 01 Skeleton | `8f644c2e` | Fumadocs+Next+OpenNext scaffold, one `/docs` page, shared `baseOptions()` shell, `lib/source.ts`; OpenNext build + local workerd serve verified |
+| 02 Docs + nav | `fc82b1f6` | Real content (`content/docs/`: intent/observation + DST concepts + `cargo dst` how-to), `meta.json` tree, sidebar/TOC, cross-links (C-6: only real behaviour, verified vs the real `dst` binary) |
+| 03 Search | `279abb4c` | In-Worker Orama via `lib/search.ts` seam (exposes `server.search`), `app/api/search/route.ts`, Cmd+K `RootProvider` dialog |
+| 04 LLM export + assertion | `b8b9cb25` | `lib/get-llm-text.ts` seam, `/llms.txt`, `/llms-full.txt`, per-page `.md` (`app/api/md/[[...slug]]`), and `scripts/assert-one-index.ts` (ADR-0058, falsifiable — proven by injected violation) |
+| 05 MCP server | `252f7ab5` | `app/mcp/route.ts` stateless Streamable HTTP (`WebStandardStreamableHTTPServerTransport`), `search_docs` + `get_doc` reusing the seams; real MCP-client acceptance test |
+| 06 Analytics (D1) | `8dd065d2` | D1 `tool_calls` best-effort log via `getCloudflareContext()` + `ctx.waitUntil`; `migrations/0001_tool_calls.sql`; maintainer zero-result query; genuine C-7 fault-injection test |
+| 07 Blog | `312ea948` | Second collection joining the ONE index (combined Orama index over docs+published blog); hand-rolled list/post; single `publishedBlogPages()` draft gate; assertion extended |
+| 08 Landing | `c13756f3` | `app/(home)/page.tsx` HomeLayout landing under the shared shell, content ported from `index.html`; removed the slice-01 redirect; cold-load value prop in server HTML |
+
+(Plus `c1e2dd56` — scope the package name to `@overdrive/website`.)
+
+## Wave: DELIVER / [REF] Glue-Check Results (the four kept checks)
+
+The acceptance approach agreed in place of a full DISTILL suite: test the
+invisible glue, not library behaviour. All four pass.
+
+1. **One-index assertion (C-4/KPI-3, ADR-0058)** — `bun run assert:one-index`,
+   wired into the build. 7 published pages (2 blog) reachable from all 3
+   consumers (.md, llms.txt, search index); 1 draft excluded from all 3.
+   Falsifiable: an injected violation fails the build.
+2. **MCP behaviour + contract (`test:mcp`)** — lists exactly `search_docs` +
+   `get_doc`; search top-hit correct; **`get_doc(url)` byte-identical to the
+   `.md` export** (US-05 identity, 4007==4007 bytes); honest not-found.
+3. **C-7 best-effort logging (`test:mcp:analytics`)** — a tool call writes a D1
+   row; a zero-result query logs `result_count=0`; **a genuinely induced D1
+   failure leaves the tool response byte-identical and undelayed** (21ms/5ms),
+   with zero rows in the broken table.
+4. **Blog join + draft exclusion (`test:blog`)** — a published-post term is
+   found via both `/api/search` and MCP; a draft-only term returns nothing
+   anywhere; `/blog` omits the draft.
+
+Deploy smoke is local-workerd (`wrangler dev` → `GET /docs`,`/`,`/blog` → 200);
+the live-URL smoke is pending Cloudflare auth.
+
+## Wave: DELIVER / [REF] Deploy Status & Remaining Infra Tasks
+
+Pending the user's Cloudflare account (not blockers to the code, which is
+deploy-ready):
+- **Cloudflare auth** — `wrangler` login / `CLOUDFLARE_API_TOKEN` + account id
+  as GH Actions secrets; then `bun run deploy`.
+- **Custom domain** — `overdrive.sh` DNS + Workers binding; flip `SITE_ORIGIN`
+  (`lib/site.ts`) from `workers.dev`.
+- **D1 production binding** — `wrangler.jsonc` `database_id` is a local-dev
+  placeholder; create the real D1 db + apply `migrations/0001_tool_calls.sql`.
+- **`deploy-pages.yml` removal** — DEVOPS scheduled its removal alongside the
+  working Cloudflare deploy; deferred to when auth lands (never remove the only
+  deploy before its replacement is live). STILL PRESENT.
+- **Benchmark ADR-0057's in-Worker Orama threshold** against the real corpus.
+- Deferrals untouched (no issues created): RSS/OG (D-4); `fumadocs-openapi`
+  out of scope (D-5); KPI-2/6 approximated from CF Web Analytics page-view
+  funnels (D-D).
+
+## Wave: DELIVER / [REF] Pre-requisites
+
+Consumed: the DISTILL-substitute glue checks (defined in DESIGN/this wave), the
+DESIGN component decomposition + ADRs 0055–0058, and `environments.yaml`. No
+roadmap.json / execution-log.json (lean non-DES delivery for the exempt
+subtree).
+
+---
+
 ## Changelog
 
 | Date | Change |
@@ -1352,3 +1431,4 @@ No DESIGN assumption, story, or AC was altered; no
 | 2026-05-30 | Initial DISCUSS wave for docs-platform: JTBD (J-DOCS-001/002/003), scope split into 8 slices (walking skeleton = slice 01), two-arc journey, 8 LeanUX stories with embedded AC + KPIs, DoR validation, wave decisions, deferrals surfaced. |
 | 2026-05-30 | DESIGN wave (GUIDE mode, pass 2): appended DESIGN sections (Wave Decisions, DDD verdicts D-A..D-H, component decomposition, driving/driven ports, technology choices, Reuse Analysis, open questions, Changed Assumptions=none). Authoritative prose + C4 (L1/L2/L3) in `docs/product/architecture/brief.md` § docs-platform website. ADRs 0055 (MCP same-Worker), 0056 (D1 + best-effort logging), 0057 (in-Worker Orama + seam + benchmarked trigger), 0058 (one-index assertion). D-2 resolved (D1). D-1 recast as benchmarked threshold. D-5 (`fumadocs-openapi`) confirmed OUT OF SCOPE (non-goal). — Morgan. |
 | 2026-05-30 | DEVOPS wave (lean / Tier-1): appended DEVOPS sections (Wave Decisions V-1..V-9, Environment Matrix, CI/CD Pipeline Outline, Monitoring Contracts KPI→instrument, Deployment Strategy, Mutation Testing Strategy=disabled-for-website, Observability Stack, Branching Strategy, Coexistence Matrix, Pre-requisites, Changed Assumptions=none). Machine artifact `environments.yaml` (local-dev/preview/production + coexistence matrix). SSOT `docs/product/kpi-contracts.yaml` (per-KPI data collection, D1 `tool_calls` schema, Web Analytics funnels, alert thresholds). Locked decisions: Cloudflare Workers via OpenNext; GitHub Actions CI path-scoped to `website/**` (coexists with Rust `ci.yml`/`nightly.yml`, supersedes `deploy-pages.yml`); Cloudflare-native observability (Workers Logs + Web Analytics + D1); atomic deploy + instant `wrangler` rollback; no deploy-level experimentation; GitHub Flow; mutation testing DISABLED for `website/`. `deploy-pages.yml` (active whole-repo GitHub Pages publish) superseded — removal scheduled for DELIVER slice 01, NOT this wave. Concrete remaining infra tasks stated (custom-domain wiring + `SITE_ORIGIN` flip; D1 `tool_calls` schema migration; `CLOUDFLARE_API_TOKEN`/account-id GH secrets). CLAUDE.md Rust mutation section UNTOUCHED. Forge per-wave review skipped (no novel deploy target). — Apex. |
+| 2026-05-30 | DELIVER wave (LEAN, non-DES — DISTILL skipped by agreement; the four glue checks folded into slices). Shipped the `website/` Next+OpenNext subtree across 8 committed slices (`8f644c2e`..`c13756f3`): skeleton, docs+nav, Orama search, llms export + one-index assertion, MCP server, D1 analytics (C-7), blog (one-index join + draft gate), landing. All slices green on typecheck+eslint+next build+opennext build. Four glue checks pass (one-index falsifiable; MCP `get_doc`===`.md`; genuine C-7 fault-injection; blog join + draft exclusion). Real Cloudflare deploy pending user auth (slice 01 = build + local-workerd serve + deploy workflow). Remaining infra tasks + untouched deferrals enumerated in the DELIVER § above. Implemented by nw-software-crafter; orchestrated lean (no roadmap/execution-log/mutation). |
