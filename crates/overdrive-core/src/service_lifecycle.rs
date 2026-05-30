@@ -36,6 +36,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
 use crate::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
 use crate::observation::{ProbeIdx, ProbeStatus};
 use crate::traits::observation_store::AllocState;
@@ -351,6 +352,14 @@ pub struct ServiceLifecycleView {
     /// "this alloc reached a non-Stable terminal," never a derived
     /// flag.
     pub terminal_announced: BTreeSet<AllocationId>,
+
+    /// Per-service fingerprint of the last `ServiceBackendRow` the
+    /// readiness branch emitted. Compared against the freshly-computed
+    /// fingerprint each tick; the branch emits
+    /// `Action::WriteServiceBackendRow` only on drift (same dedup
+    /// pattern as `BackendDiscoveryBridgeView::last_written_fingerprint`).
+    #[serde(default)]
+    pub last_emitted_backend_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
 impl ServiceLifecycleView {
@@ -756,7 +765,8 @@ fn liveness_restart_action(
 /// Step 03-01 / Slice 04 — recompute every backend's `healthy` flag
 /// for the service THIS TICK and, when the service has a dataplane
 /// identity AND at least one backend, emit a single
-/// [`Action::WriteServiceBackendRow`] carrying the full backend set.
+/// [`Action::WriteServiceBackendRow`] carrying the full backend set
+/// **only when the backend set changed since the last emission**.
 ///
 /// `healthy` derivation per backend, in priority order:
 /// - alloc has NO readiness probe → `healthy = true` (backward-compat
@@ -771,7 +781,9 @@ fn liveness_restart_action(
 ///
 /// Mutates `next_view.readiness_consecutive_successes` in place (the
 /// persisted INPUT). Returns `None` when the service has no dataplane
-/// identity (no VIP → no row can be written) or no allocs.
+/// identity (no VIP → no row can be written), no allocs, or the
+/// backend set is unchanged since the last emission (fingerprint
+/// dedup — avoids unnecessary LWW gossip propagation every tick).
 fn readiness_backend_row_action(
     actual: &ServiceLifecycleState,
     next_view: &mut ServiceLifecycleView,
@@ -792,6 +804,13 @@ fn readiness_backend_row_action(
             healthy,
         });
     }
+
+    let current_fp = fingerprint(&dataplane.vip, &backends);
+    let prev_fp = next_view.last_emitted_backend_fingerprint.get(&dataplane.service_id).copied();
+    if prev_fp == Some(current_fp) {
+        return None;
+    }
+    next_view.last_emitted_backend_fingerprint.insert(dataplane.service_id, current_fp);
 
     let target = format!("service-lifecycle/readiness/{}", dataplane.service_id);
     let spec_hash = ContentHash::of(target.as_bytes());

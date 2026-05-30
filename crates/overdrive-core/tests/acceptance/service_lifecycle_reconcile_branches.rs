@@ -1730,3 +1730,81 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
     assert_eq!(actions.len(), 1, "exactly one action total (StartupProbeFailed only)");
     assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
 }
+
+/// Regression: `readiness_backend_row_action` must suppress
+/// `WriteServiceBackendRow` when the backend set is unchanged
+/// between ticks. Without dedup, each tick emits a row with a
+/// monotonically increasing `LogicalTimestamp`, causing unnecessary
+/// LWW gossip propagation at tick rate.
+#[test]
+fn readiness_branch_suppresses_write_on_unchanged_backends() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    let state = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
+
+    // First tick — write must happen (view starts empty, no prior fingerprint).
+    let (actions_first, view_after_first) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    let row_count_first =
+        actions_first.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count();
+    assert_eq!(row_count_first, 1, "first tick must emit WriteServiceBackendRow");
+
+    // Second tick — same inputs, prior view fed back. Expect NO emission.
+    let (actions_second, _view_after_second) =
+        reconciler.reconcile(&state, &state, &view_after_first, &readiness_tick(200));
+    let row_count_second = actions_second
+        .iter()
+        .filter(|a| matches!(a, Action::WriteServiceBackendRow { .. }))
+        .count();
+    assert_eq!(
+        row_count_second, 0,
+        "second tick with unchanged backends must suppress WriteServiceBackendRow"
+    );
+}
+
+/// Regression complement: when a backend's `healthy` flag changes
+/// between ticks (readiness probe transitions Pass → Fail), the
+/// fingerprint changes and the write MUST be emitted.
+#[test]
+fn readiness_branch_emits_write_when_healthy_flag_changes() {
+    let reconciler = ServiceLifecycleReconciler::new();
+
+    // Tick 1: alloc with readiness probe Pass, threshold=1 → healthy=true.
+    let state_healthy = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
+    let (actions_first, view_after_first) = reconciler.reconcile(
+        &state_healthy,
+        &state_healthy,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    assert_eq!(
+        actions_first.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count(),
+        1,
+        "first tick must emit"
+    );
+
+    // Tick 2: same alloc, readiness probe now Fail → healthy=false.
+    let state_unhealthy = readiness_state(vec![readiness_fact(
+        0,
+        Some(ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }),
+        true,
+        1,
+    )]);
+    let (actions_second, _) = reconciler.reconcile(
+        &state_unhealthy,
+        &state_unhealthy,
+        &view_after_first,
+        &readiness_tick(200),
+    );
+    assert_eq!(
+        actions_second
+            .iter()
+            .filter(|a| matches!(a, Action::WriteServiceBackendRow { .. }))
+            .count(),
+        1,
+        "healthy flag changed → must emit WriteServiceBackendRow"
+    );
+}
