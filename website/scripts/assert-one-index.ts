@@ -1,5 +1,5 @@
 import { llms } from "fumadocs-core/source";
-import { source } from "@/lib/source";
+import { blog, publishedBlogPages, source } from "@/lib/source";
 import { getLLMText } from "@/lib/get-llm-text";
 import { server } from "@/lib/search";
 
@@ -47,12 +47,14 @@ import { server } from "@/lib/search";
 export interface OneIndexViolation {
 	url: string;
 	title: string;
-	consumer: "md-export" | "llms.txt" | "search-index";
+	consumer: "md-export" | "llms.txt" | "search-index" | "draft-leak";
 	detail: string;
 }
 
 export interface OneIndexResult {
 	pageCount: number;
+	blogPublishedCount: number;
+	blogDraftCount: number;
 	violations: OneIndexViolation[];
 }
 
@@ -62,13 +64,28 @@ export interface OneIndexResult {
 // fumadocs-mdx loader has resolved page content (i.e. inside the Next build /
 // runtime), not bare bun.
 export async function checkOneIndex(): Promise<OneIndexResult> {
-	const pages = source.getPages();
+	const docsPages = source.getPages();
+	const publishedBlog = publishedBlogPages();
+	const draftBlog = blog
+		.getPages()
+		.filter((page) => page.data.draft === true);
 	const violations: OneIndexViolation[] = [];
 
-	// Build each consumer's view ONCE from the single enumeration.
-	const llmsIndex = llms(source).index();
+	// Reconstruct the llms.txt body EXACTLY as `app/llms.txt/route.ts` emits it
+	// — the docs index plus a `## Blog` section of published post URLs — so the
+	// presence check tests the real export, not a divergent view.
+	const docsLlmsIndex = llms(source).index();
+	const blogLlmsLines = publishedBlog
+		.map((page) => `- [${page.data.title}](${page.url})`)
+		.join("\n");
+	const llmsBody = blogLlmsLines
+		? `${docsLlmsIndex}\n\n## Blog\n\n${blogLlmsLines}`
+		: docsLlmsIndex;
 
-	for (const page of pages) {
+	// Every PUBLISHED page (docs + blog) must be reachable from all three
+	// consumers of the ONE index. Blog joins docs here — the C-4 slice-07 wiring.
+	const publishedPages = [...docsPages, ...publishedBlog];
+	for (const page of publishedPages) {
 		const title = page.data.title ?? "(untitled)";
 
 		// Consumer 1 — reachable, non-empty `.md` export via the shared seam.
@@ -92,13 +109,13 @@ export async function checkOneIndex(): Promise<OneIndexResult> {
 			});
 		}
 
-		// Consumer 2 — present in the llms.txt index.
-		if (!llmsIndex.includes(page.url)) {
+		// Consumer 2 — present in the llms.txt body.
+		if (!llmsBody.includes(page.url)) {
 			violations.push({
 				url: page.url,
 				title,
 				consumer: "llms.txt",
-				detail: "page URL not found in llms(source).index() output",
+				detail: "page URL not found in /llms.txt body",
 			});
 		}
 
@@ -121,7 +138,49 @@ export async function checkOneIndex(): Promise<OneIndexResult> {
 		}
 	}
 
-	return { pageCount: pages.length, violations };
+	// ── Draft-exclusion assertion (DoR 3rd UAT scenario) ──
+	//
+	// Every DRAFT blog post must be ABSENT from all three consumers: its `.md`
+	// 404s (so it never appears in llms-full), its URL is not in /llms.txt, and
+	// the search index never indexes it. Querying the search index by the
+	// draft's own title must return NO page-result for the draft URL. This is the
+	// falsifiable inverse of the published checks above — if a draft ever leaks
+	// into any consumer (e.g. someone indexes `blog.getPages()` instead of
+	// `publishedBlogPages()`), this fails the build.
+	for (const page of draftBlog) {
+		const title = page.data.title ?? "(untitled)";
+
+		if (llmsBody.includes(page.url)) {
+			violations.push({
+				url: page.url,
+				title,
+				consumer: "draft-leak",
+				detail: "DRAFT post URL leaked into /llms.txt (must be excluded)",
+			});
+		}
+
+		const results = await server.search(title);
+		const leaked = results.some(
+			(result) => result.type === "page" && result.url === page.url,
+		);
+		if (leaked) {
+			violations.push({
+				url: page.url,
+				title,
+				consumer: "draft-leak",
+				detail: `DRAFT post leaked into the search index (server.search(${JSON.stringify(
+					title,
+				)}) returned its URL)`,
+			});
+		}
+	}
+
+	return {
+		pageCount: publishedPages.length,
+		blogPublishedCount: publishedBlog.length,
+		blogDraftCount: draftBlog.length,
+		violations,
+	};
 }
 
 // Formats a passing/failing summary line set. The build route logs these and
@@ -129,7 +188,10 @@ export async function checkOneIndex(): Promise<OneIndexResult> {
 export function formatOneIndexResult(result: OneIndexResult): string[] {
 	if (result.violations.length === 0) {
 		return [
-			`✓ one-index assertion PASSED — all ${result.pageCount} page(s) reachable from all 3 consumers (.md export, llms.txt, search index). C-4 verified (ADR-0058).`,
+			`✓ one-index assertion PASSED — all ${result.pageCount} published page(s) ` +
+				`(${result.blogPublishedCount} blog) reachable from all 3 consumers ` +
+				`(.md export, llms.txt, search index); ${result.blogDraftCount} draft post(s) ` +
+				`excluded from all 3. C-4 verified, drafts gated (ADR-0058).`,
 		];
 	}
 	const lines = [

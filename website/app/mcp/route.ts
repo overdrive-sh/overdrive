@@ -3,8 +3,8 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { z } from "zod";
 import { server as searchServer } from "@/lib/search";
-import { getLLMText } from "@/lib/get-llm-text";
-import { source } from "@/lib/source";
+import { getLLMText, type LLMTextPage } from "@/lib/get-llm-text";
+import { publishedBlogPages, source } from "@/lib/source";
 
 // ── The docs-MCP server (ADR-0055) ──────────────────────────────────────────
 //
@@ -161,29 +161,34 @@ function buildServer(): McpServer {
 
 	// ── get_doc — clean per-page markdown, byte-identical to the `.md` export ──
 	//
-	// Resolves a doc URL to a `source` page and returns `getLLMText(page)` — the
-	// EXACT function `app/api/md/[[...slug]]/route.ts` returns, so `get_doc(url)`
-	// output is byte-identical to `GET /docs/<path>.md` (US-05 identity
-	// invariant). URL → slug: strip the `/docs` base, split on `/`; `/docs`
-	// itself maps to the empty slug (the index page). A URL that does not resolve
-	// returns an HONEST not-found (`isError: true`), never fabricated content.
+	// Resolves a docs OR published-blog URL to its page and returns
+	// `getLLMText(page)` — the EXACT function the `.md` export routes return, so
+	// `get_doc(url)` output is byte-identical to `GET <url>.md` (US-05 identity
+	// invariant) for both `/docs/...` and `/blog/...`. A `/docs` URL maps through
+	// `source.getPage`; a `/blog/<slug>` URL maps through `publishedBlogPages()`
+	// — the SAME published set the blog `.md` route and search use, so a draft
+	// post (DoR 3rd UAT scenario) resolves to no page and returns an HONEST
+	// not-found (`isError: true`), never fabricated content.
 	mcp.registerTool(
 		"get_doc",
 		{
-			title: "Read an Overdrive doc page",
+			title: "Read an Overdrive doc or blog page",
 			description:
-				"Fetch the full clean markdown of a single Overdrive documentation page by " +
-				"its URL (e.g. /docs/concepts/intent-observation). Returns the same content " +
-				"as the page's .md export. Use search_docs first to find a page URL.",
+				"Fetch the full clean markdown of a single Overdrive documentation or blog " +
+				"page by its URL (e.g. /docs/concepts/intent-observation or /blog/why-overdrive). " +
+				"Returns the same content as the page's .md export. Use search_docs first to " +
+				"find a page URL.",
 			inputSchema: {
 				url: z
 					.string()
 					.min(1)
-					.describe("Doc page URL, e.g. /docs/concepts/intent-observation"),
+					.describe(
+						"Doc or blog page URL, e.g. /docs/concepts/intent-observation or /blog/why-overdrive",
+					),
 			},
 		},
 		async ({ url }) => {
-			const page = source.getPage(slugFromDocUrl(url));
+			const page = resolvePage(url);
 			if (!page) {
 				// result_count = 0: the requested url resolved to no page.
 				logToolCall({ tool: "get_doc", query: url, resultCount: 0 });
@@ -191,7 +196,7 @@ function buildServer(): McpServer {
 					content: [
 						{
 							type: "text",
-							text: `No Overdrive doc page resolves to URL "${url}". Use search_docs to find a valid page URL.`,
+							text: `No Overdrive doc or blog page resolves to URL "${url}". Use search_docs to find a valid page URL.`,
 						},
 					],
 					isError: true,
@@ -207,6 +212,26 @@ function buildServer(): McpServer {
 	);
 
 	return mcp;
+}
+
+// Resolves a docs OR published-blog URL to its page. A `/blog/<slug>` URL (with
+// an optional `.md` suffix or absent leading slash) resolves only against the
+// PUBLISHED blog set (`publishedBlogPages()` — the single draft gate), so a
+// draft post returns `undefined` here and `get_doc` answers an honest
+// not-found. Everything else falls through to the docs `source.getPage` slug
+// mapping. Returned pages satisfy `LLMTextPage`, the seam `getLLMText` reads.
+function resolvePage(url: string): LLMTextPage | undefined {
+	let path = url.trim();
+	if (path.endsWith(".md")) path = path.slice(0, -".md".length);
+	if (!path.startsWith("/")) path = `/${path}`;
+	if (path === "/blog" || path === "/blog/") {
+		// The blog list page itself is not an LLM-text page (no MDX body).
+		return undefined;
+	}
+	if (path.startsWith("/blog/")) {
+		return publishedBlogPages().find((page) => page.url === path);
+	}
+	return source.getPage(slugFromDocUrl(url)) ?? undefined;
 }
 
 // Maps a doc URL to the `source.getPage` slug. `/docs/a/b` → `["a","b"]`;

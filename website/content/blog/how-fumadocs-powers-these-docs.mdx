@@ -1,0 +1,41 @@
+---
+title: How Fumadocs powers these docs
+description: One content engine feeds the docs, the search box, the llms.txt export, and the MCP server — here is how the pieces fit together.
+date: 2026-05-22
+author: The Overdrive team
+summary: These docs, the Cmd+K search, the llms.txt export, and the agent-facing MCP server are all consumers of one build-time index. The blog you are reading right now joins that same index — which is exactly why this post is searchable.
+---
+
+If you have searched these docs, asked a coding agent about Overdrive, or
+fetched `llms.txt`, you have used the same machine four different ways. The site
+is built on [Fumadocs](https://fumadocs.dev), and the load-bearing idea is that
+there is exactly **one** build-time content index — and every surface that reads
+content is a *consumer* of that index, never a second copy of it.
+
+## One index, four consumers
+
+At build time, every page is compiled once and registered in a single source.
+From there:
+
+- The **docs pages** render that content with a sidebar and table of contents.
+- The **search box** (try Cmd+K) builds an in-process Orama index over the same
+  pages, so searching is instant and runs entirely in the Worker.
+- The **`llms.txt` / `llms-full.txt` exports** and the per-page `.md` views
+  render the same pages as clean, chrome-free markdown for agents and scripts.
+- The **MCP server** at `/mcp` exposes `search_docs` and `get_doc` tools that
+  delegate to the very same search index and the very same markdown renderer.
+
+Because there is one index, what a human searches and what an agent searches can
+never drift apart. A build-time assertion checks the invariant on every deploy:
+every page must be reachable from the search index, the llms export, and its
+`.md` view — or the build fails. We even have a name for the property internally:
+**indexconvergence** — the guarantee that humans and agents see the same corpus.
+
+## The blog joins the same index
+
+This post is the proof. The blog is a *second content collection*, but it is not
+a second index — published posts are folded into the exact same Orama index, the
+same llms export, and the same MCP tools as the docs. So when you search for a
+phrase that appears only in this post, the search box finds it, and so does an
+agent through `search_docs`. Drafts are the one exception: a post marked
+`draft: true` is excluded from all of it until it ships.

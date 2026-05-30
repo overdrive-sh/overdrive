@@ -26,6 +26,11 @@ const nextConfig: NextConfig = {
 		return [
 			{ source: "/docs.md", destination: "/api/md" },
 			{ source: "/docs/:path*.md", destination: "/api/md/:path*" },
+			// Slice 07: blog per-post `.md` export. Blog posts are flat, so a
+			// single `:slug` segment (not a catch-all) points at the blog `.md`
+			// API route, which runs the same `getLLMText` seam and applies the
+			// published-only draft gate.
+			{ source: "/blog/:slug.md", destination: "/api/blog-md/:slug" },
 		];
 	},
 };

@@ -1,5 +1,3 @@
-import type { source } from "@/lib/source";
-
 // ── The ONE clean-markdown content seam (DESIGN driven-port, slice 04) ──
 //
 // `getLLMText(page)` is the SINGLE definition that turns a build-time `source`
@@ -30,10 +28,23 @@ import type { source } from "@/lib/source";
 // (`/docs/concepts/intent-observation.md`). The index page `/docs` is
 // reachable at `/docs.md` (handled by the `[[...slug]]` catch-all + the
 // `index.mdx` → `/docs` url mapping). The route handler maps the request
-// pathname back to a page via `source.getPage(slug)`.
-export async function getLLMText(
-	page: (typeof source)["$inferPage"],
-): Promise<string> {
+// pathname back to a page via `source.getPage(slug)`. Slice 07's blog posts at
+// `/blog/<slug>` are reachable at `/blog/<slug>.md` the same way.
+//
+// The parameter is typed on the MINIMAL structural surface this seam reads —
+// `url`, `data.title`, `data.getText('processed')` — NOT a single source's
+// `$inferPage`. Both the docs `source` and the blog `source` produce pages that
+// satisfy it (both collections carry `includeProcessedMarkdown`), so the one
+// seam serves both collections without a per-source duplicate.
+export interface LLMTextPage {
+	url: string;
+	data: {
+		title: string;
+		getText: (type: "processed" | "raw") => Promise<string>;
+	};
+}
+
+export async function getLLMText(page: LLMTextPage): Promise<string> {
 	const processed = await page.data.getText("processed");
 	return `# ${page.data.title} (${page.url})\n\n${processed}`;
 }

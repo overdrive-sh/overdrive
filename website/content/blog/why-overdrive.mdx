@@ -1,0 +1,47 @@
+---
+title: Why we built Overdrive
+description: The case for a single source-available platform that unifies orchestration, networking, and policy behind one deterministic control plane.
+date: 2026-05-12
+author: The Overdrive team
+summary: Most teams stitch a scheduler, a service mesh, and a policy engine into a fragile pipeline. Overdrive collapses that stack behind one intent/observation boundary and proves it correct with deterministic simulation.
+---
+
+Running workloads in production usually means assembling three or four
+independent systems — a scheduler, a service mesh, a policy engine, a secrets
+broker — and then spending the next year teaching them to agree with each other.
+Each speaks its own dialect of "desired state," each has its own failure modes,
+and the seams between them are where the outages live.
+
+Overdrive starts from a different premise: the orchestrator, the dataplane, and
+the policy layer are not separate products that need integrating — they are
+three views of one piece of state. We split that state cleanly into **intent**
+(what the cluster should look like) and **observation** (what it actually looks
+like right now), enforce the split structurally rather than by convention, and
+let a single control plane reconcile the two.
+
+## One boundary, enforced by types
+
+The intent/observation split is the load-bearing decision. Intent is
+strongly-consistent, authored through typed actions, and the single source of
+truth. Observation is eventually-consistent, gossiped between nodes, and never
+written back into intent. Because the two live behind different store traits,
+crossing the boundary is a compile error, not a code-review note.
+
+That discipline is what lets the rest of the platform stay simple. The scheduler
+reads intent and writes intent. The reconcilers read both and converge actual
+toward desired. The dataplane is just another observed surface that policy
+verdicts flow into. There is no integration layer because there is nothing to
+integrate.
+
+## Correctness you can reproduce
+
+A platform that places workloads, rotates certificates, and enforces network
+policy cannot be tested by hoping the happy path holds. Every source of
+nondeterminism in Overdrive's core — the clock, the network, entropy, the
+dataplane — sits behind a port trait, so the same logic runs against a
+deterministic simulation harness that can replay any failing schedule
+bit-for-bit from a seed.
+
+The result is a platform where "it works on my cluster" is replaced by "here is
+the seed that reproduces the bug." That is the property we wanted, and it is the
+reason the whole stack is built the way it is.
