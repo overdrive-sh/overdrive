@@ -1,0 +1,78 @@
+---
+title: The intent / observation boundary
+description: Why Overdrive splits declared intent from observed state, and how that split is enforced structurally rather than by convention.
+---
+
+One of Overdrive's load-bearing design decisions is the split between **intent**
+— what the cluster *should* look like — and **observation** — what it *actually*
+looks like right now. These two kinds of state have different consistency
+requirements, so they live behind different abstractions, in different stores,
+with different propagation mechanisms.
+
+The guiding principle, from Overdrive's design: *strong consistency where it
+matters, gossip where it scales.*
+
+## Why two kinds of state
+
+Intent and observation pull in opposite directions:
+
+<Callout type="info" title="Two different correctness contracts">
+	**Intent** must be globally agreed and durable — two nodes must never
+	disagree about what was declared. **Observation** must scale to high write
+	volume across many nodes, and can tolerate brief divergence as long as it
+	converges. A single store optimised for one is wrong for the other.
+</Callout>
+
+| | Intent — *what should be* | Observation — *what is* |
+| --- | --- | --- |
+| Consistency | Strong (linearizable) | Eventual (converges) |
+| Mechanism | Raft consensus | Gossip CRDT |
+| Written by | Typed actions only | The authoritative observer of each row |
+| Examples | desired job spec, declared policy | allocation status, node health |
+
+## How the split is enforced
+
+The boundary is not a convention that reviewers police by hand — it is
+**structural**. Intent and observation are reached through *separate port
+traits* (`IntentStore` and `ObservationStore`), backed by *separate types*. A
+value that belongs to one layer cannot be silently written to the other,
+because the type system and the trait surfaces will not allow it.
+
+This matters because the consistency split is only meaningful if it cannot be
+bypassed. By making the two stores non-substitutable, the design turns "don't
+cross the streams" from a guideline into a compile-time property.
+
+<Tabs items={["Intent", "Observation"]}>
+	<Tab value="Intent">
+		Declared state — the desired shape of the cluster. It is written only via
+		typed actions that go through Raft, so every replica agrees on the same
+		ordered history. This is the source of truth.
+	</Tab>
+	<Tab value="Observation">
+		Measured state — what each node currently reports. It propagates by gossip
+		and is allowed to be briefly out of date on any given node, as long as the
+		cluster converges. Each row has exactly one authoritative writer.
+	</Tab>
+</Tabs>
+
+## Reconciliation closes the loop
+
+Given a strongly-consistent record of intent and an eventually-consistent view
+of observation, the platform's job is to drive observation toward intent — to
+*reconcile* the two. Overdrive's design expresses each reconciler's correctness
+as invariants over this pair: progress (the system keeps moving toward the
+desired state) and stability (once converged, it stays converged).
+
+Because those are invariants over the *boundary itself*, they can be checked
+mechanically. That checking happens under simulation — which is the subject of
+the next concept.
+
+## Where this is proven
+
+The intent / observation boundary is exactly the kind of property that benefits
+from deterministic, replayable testing: a single leader must always be elected,
+intent must never leak into the observation layer, and reconcilers must
+converge. To see how Overdrive runs those checks, read
+[Deterministic Simulation Testing](/docs/concepts/deterministic-simulation-testing),
+then follow [Run the DST harness](/docs/how-to/run-the-dst-harness) to run them
+yourself.

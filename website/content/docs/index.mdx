@@ -1,8 +1,39 @@
 ---
 title: Overdrive docs
-description: The skeleton docs page for the overdrive.sh documentation platform.
+description: Documentation for Overdrive — a single-binary workload orchestration platform written in Rust.
 ---
 
-Welcome to the Overdrive documentation platform. This is the walking-skeleton
-page proving the Fumadocs + Next.js + OpenNext-on-Cloudflare-Workers pipeline
-builds, serves, and renders before any real content lands.
+Overdrive is a workload orchestration platform written entirely in Rust. Its
+design goal is to collapse the
+Kubernetes / etcd / CNI / Envoy / SPIRE / Prometheus stack into one binary,
+built on 2026 primitives — stable eBPF, kTLS, WASM, and SPIFFE — rather than
+retrofitted onto the primitives that existed in 2014.
+
+<Callout title="What these docs cover today">
+	This is an early documentation set. It describes Overdrive's load-bearing
+	*design* and the testing discipline the foundation is built on — not a
+	finished feature catalogue. Where a behaviour is still at the design stage,
+	the docs say so explicitly rather than describing it as shipped.
+</Callout>
+
+## Where to start
+
+- **[Concepts](/docs/concepts)** — the ideas the platform is built around. Start
+  with [the intent / observation boundary](/docs/concepts/intent-observation),
+  the consistency split that the whole control plane rests on, then read about
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
+- **[How-to](/docs/how-to)** — task-oriented guides grounded in workflows that
+  exist today, such as [running the DST harness](/docs/how-to/run-the-dst-harness).
+
+## Design principles
+
+Overdrive's design follows a small set of principles. Two of them shape almost
+every page in these docs:
+
+- **Strong consistency where it matters, gossip where it scales.** Declared
+  intent flows through Raft; observed state propagates through a gossip CRDT.
+  See [the intent / observation boundary](/docs/concepts/intent-observation).
+- **Correctness is provable, not asserted.** Every source of nondeterminism in
+  core logic is injectable behind a trait, so the control plane can be replayed
+  deterministically under simulation. See
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

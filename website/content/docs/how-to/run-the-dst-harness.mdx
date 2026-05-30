@@ -1,0 +1,78 @@
+---
+title: Run the DST harness
+description: Run Overdrive's Deterministic Simulation Testing harness on a clean checkout, and reproduce a failing run from its seed.
+---
+
+This guide runs the **Deterministic Simulation Testing** harness — the
+in-process simulation that exercises Overdrive's control plane against the
+simulated `Sim*` traits. If you have not yet read the concept, start with
+[Deterministic Simulation Testing](/docs/concepts/deterministic-simulation-testing).
+
+<Callout title="Prerequisites">
+	A checkout of the Overdrive repository and a working Rust toolchain
+	(`cargo`). The harness runs in-process and needs no real network, kernel, or
+	external services.
+</Callout>
+
+## Run the harness
+
+The harness is exposed through a workspace cargo alias.
+
+<Steps>
+	<Step>
+		**Run with a fresh seed.** From the repository root:
+
+		```bash
+		cargo dst
+		```
+
+		When no seed is given, the harness draws one from OS entropy and prints it
+		on the first line of its output, so a failing run is always reproducible.
+	</Step>
+	<Step>
+		**Reproduce a specific run.** Pass the seed the harness reported to replay
+		the same trajectory bit-for-bit:
+
+		```bash
+		cargo dst --seed 1234
+		```
+	</Step>
+	<Step>
+		**Focus on one invariant.** To run a single invariant rather than the full
+		catalogue, pass `--only` with its name:
+
+		```bash
+		cargo dst --only single-leader
+		```
+	</Step>
+</Steps>
+
+The alias above expands to a direct binary invocation; if you prefer to call it
+without the alias, the equivalent is:
+
+```bash
+cargo run -p overdrive-sim --bin dst -- --seed 1234
+```
+
+## Read the results
+
+The harness prints a human-readable summary to standard output and also writes
+artifacts under `target/dst/`:
+
+| Artifact | Contents |
+| --- | --- |
+| stdout, line 1 | the seed for this run (survives even a killed run) |
+| `target/dst/output.log` | a mirror of the human-readable output |
+| `target/dst/summary.json` | a structured summary of the run |
+
+If a run fails, note the seed from line 1 and re-run with `--seed <that seed>` to
+reproduce it exactly — that determinism is the whole point of the harness.
+
+## Where DST sits in the wider test strategy
+
+DST is the first of Overdrive's four testing tiers. It catches the class of bugs
+that depend on concurrency, timing, ordering, and partition — precisely the
+risks around the
+[intent / observation boundary](/docs/concepts/intent-observation). The other
+tiers cover concerns DST cannot, such as real-kernel behaviour, and are run
+through their own dedicated tooling.
