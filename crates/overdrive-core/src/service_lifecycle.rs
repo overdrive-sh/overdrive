@@ -799,6 +799,9 @@ fn readiness_backend_row_action(
 
     let mut backends: Vec<Backend> = Vec::with_capacity(actual.allocs.len());
     for (alloc_id, fact) in &actual.allocs {
+        if fact.state != AllocState::Running {
+            continue;
+        }
         let healthy = compute_backend_healthy(alloc_id, fact, next_view);
         backends.push(Backend {
             alloc: fact.backend_spiffe.clone(),
@@ -806,6 +809,10 @@ fn readiness_backend_row_action(
             weight: 1,
             healthy,
         });
+    }
+
+    if backends.is_empty() {
+        return None;
     }
 
     let current_fp = fingerprint(&dataplane.vip, &backends);

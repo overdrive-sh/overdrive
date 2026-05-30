@@ -2014,3 +2014,64 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
     assert_eq!(actions.len(), 1, "exactly one action total (Stable only)");
     assert!(next.stable_announced.contains(&aid(id)), "alloc recorded in stable_announced");
 }
+
+/// Regression: a Failed alloc with no readiness probe was emitted as
+/// `Backend { healthy: true }` because `readiness_backend_row_action`
+/// iterated all allocs without a state guard. Only Running allocs can
+/// serve traffic; non-Running allocs must be excluded from the backend
+/// set entirely.
+#[test]
+fn failed_alloc_excluded_from_backend_row() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    // Failed alloc, no readiness probe → before the fix,
+    // compute_backend_healthy returns true (backward-compat default).
+    let mut f = readiness_fact(0, None, false, 1);
+    f.state = AllocState::Failed;
+    f.exit_code = Some(1);
+    f.started_at = Some(UnixInstant::from_unix_duration(Duration::from_secs(1)));
+    f.latest_startup_probe = None;
+    let state = readiness_state(vec![f]);
+
+    let mut view = ServiceLifecycleView::default();
+    // Mark as terminal so the startup loop skips it (mirrors real
+    // runtime: the previous tick already announced the failure).
+    view.terminal_announced.insert(aid("svc-0"));
+
+    let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(5_000));
+
+    // No WriteServiceBackendRow should be emitted — the only alloc is
+    // Failed and cannot serve traffic.
+    let backend_rows: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    assert!(
+        backend_rows.is_empty(),
+        "Failed alloc must not appear in backend row, got {backend_rows:?}",
+    );
+}
+
+/// Regression: a Pending alloc with no readiness probe was emitted as
+/// `Backend { healthy: true }` — same root cause as the Failed case.
+/// Pending allocs have not started yet and cannot serve traffic.
+#[test]
+fn pending_alloc_excluded_from_backend_row() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    let mut f = readiness_fact(0, None, false, 1);
+    f.state = AllocState::Pending;
+    f.started_at = None;
+    f.latest_startup_probe = None;
+    let state = readiness_state(vec![f]);
+
+    let (actions, _v) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(5_000),
+    );
+
+    let backend_rows: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    assert!(
+        backend_rows.is_empty(),
+        "Pending alloc must not appear in backend row, got {backend_rows:?}",
+    );
+}
