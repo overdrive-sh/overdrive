@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { z } from "zod";
 import { server as searchServer } from "@/lib/search";
 import { getLLMText } from "@/lib/get-llm-text";
@@ -27,6 +28,73 @@ import { source } from "@/lib/source";
 // Node runtime, NEVER edge (C-2): the in-Worker Orama index + the build-time
 // `source` are read in-process. OpenNext manages the Worker runtime.
 export const runtime = "nodejs";
+
+// ── Best-effort MCP tool-call analytics (ADR-0056, C-7 guardrail) ────────────
+//
+// One `{tool, query, ts, result_count}` row per tool call, written to the D1
+// `tool_calls` table (migrations/0001_tool_calls.sql). The maintainer reads it
+// for KPI-4 (volume) and KPI-5 (top zero-result coverage gaps, J-DOCS-003).
+//
+// THE C-7 CONTRACT — the single most load-bearing property of this slice:
+// the logging path MUST NEVER block, delay, or alter the tool response. It is
+// fire-and-forget. `logToolCall` therefore:
+//
+//   1. Computes NOTHING the response depends on — it receives the already-known
+//      `result_count` and returns `void` synchronously.
+//   2. Hands the D1 write to `ctx.waitUntil(insert.catch(() => {}))` so the
+//      write runs AFTER the response is returned, off the critical path. The
+//      response is never awaited against it.
+//   3. Catch-swallows everything: a missing binding, a thrown
+//      `getCloudflareContext()`, a D1 reject (throttle / no-such-table / malformed
+//      row) is, at most, a dropped row — never an error that reaches the handler.
+//
+// Because the helper itself never throws and never awaits the write, a tool
+// callback can call it inline and `return` immediately; the response is byte-
+// identical whether the log succeeds, fails, or is never reachable.
+
+type ToolCallRow = {
+	tool: "search_docs" | "get_doc";
+	query: string;
+	resultCount: number;
+};
+
+const TOOL_CALLS_TABLE = "tool_calls";
+
+// FAULT-INJECTION SEAM (C-7 test): when env.ANALYTICS_FORCE_FAIL === "1" the
+// INSERT targets a table that does not exist, so the live D1 engine rejects the
+// statement at run() time with a real `D1_ERROR: no such table` — a genuine
+// induced failure, NOT a mocked no-op that secretly succeeds. The catch-swallow
+// below must absorb it with zero effect on the response. The flag is set only by
+// the acceptance test's broken-binding worker invocation; production never sets it.
+function targetTable(forceFail: boolean): string {
+	return forceFail ? `${TOOL_CALLS_TABLE}__force_fail_no_such_table` : TOOL_CALLS_TABLE;
+}
+
+function logToolCall(row: ToolCallRow): void {
+	try {
+		const { env, ctx } = getCloudflareContext();
+		const db = env.ANALYTICS_DB;
+		if (!db) return; // unbound D1 → degrade to "no rows", never "broken tools".
+
+		const forceFail =
+			(env as unknown as Record<string, unknown>).ANALYTICS_FORCE_FAIL === "1";
+		const table = targetTable(forceFail);
+		const ts = Date.now();
+
+		const insert = db
+			.prepare(
+				`INSERT INTO ${table} (tool, query, ts, result_count) VALUES (?, ?, ?, ?)`,
+			)
+			.bind(row.tool, row.query, ts, row.resultCount)
+			.run();
+
+		// Fire-and-forget: the write outlives the response, errors swallowed.
+		ctx.waitUntil(Promise.resolve(insert).catch(() => {}));
+	} catch {
+		// getCloudflareContext()/binding access threw — drop the row silently.
+		// The tool response is unaffected (C-7).
+	}
+}
 
 // Each request gets a fresh stateless server. No shared mutable state survives a
 // request — the transport closes when the response stream ends.
@@ -79,6 +147,11 @@ function buildServer(): McpServer {
 				});
 			}
 
+			// result_count = number of page results (0 ⇒ coverage-gap signal, KPI-5).
+			// Best-effort log scheduled here, off the response's critical path (C-7):
+			// the response object below is returned regardless of the write outcome.
+			logToolCall({ tool: "search_docs", query, resultCount: pages.length });
+
 			return {
 				content: [{ type: "text", text: JSON.stringify(pages, null, 2) }],
 				structuredContent: { results: pages },
@@ -112,6 +185,8 @@ function buildServer(): McpServer {
 		async ({ url }) => {
 			const page = source.getPage(slugFromDocUrl(url));
 			if (!page) {
+				// result_count = 0: the requested url resolved to no page.
+				logToolCall({ tool: "get_doc", query: url, resultCount: 0 });
 				return {
 					content: [
 						{
@@ -124,6 +199,9 @@ function buildServer(): McpServer {
 			}
 
 			const markdown = await getLLMText(page);
+			// result_count = 1: the url resolved to exactly one page.
+			// Scheduled off the critical path (C-7) before the response returns.
+			logToolCall({ tool: "get_doc", query: url, resultCount: 1 });
 			return { content: [{ type: "text", text: markdown }] };
 		},
 	);

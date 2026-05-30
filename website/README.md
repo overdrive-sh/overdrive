@@ -37,6 +37,38 @@ npm run deploy
 # or similar package manager command
 ```
 
+## MCP tool-call analytics (D1, best-effort — ADR-0056)
+
+The `/mcp` route logs one `{tool, query, ts, result_count}` row per tool call to
+a Cloudflare D1 table `tool_calls` (binding `ANALYTICS_DB`). The write is
+fire-and-forget via `ctx.waitUntil()` + catch-swallow and MUST NEVER block,
+delay, or alter the tool response (C-7 guardrail).
+
+Apply the schema to the local dev D1 (run once before `wrangler dev` / preview):
+
+```bash
+bunx wrangler d1 migrations apply ANALYTICS_DB --local   # or: bun run analytics:migrate:local
+```
+
+For the provisioned (remote) D1 — DEVOPS wave, once `database_id` is real:
+
+```bash
+bunx wrangler d1 migrations apply ANALYTICS_DB --remote
+```
+
+Maintainer read path (US-06 / J-DOCS-003) — top zero-result + top queries:
+
+```bash
+bun run analytics:top-zero-results            # local D1
+bun run analytics:top-zero-results --remote   # provisioned D1
+```
+
+The C-7 guardrail + analytics acceptance test:
+
+```bash
+bun run test:mcp:analytics
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
