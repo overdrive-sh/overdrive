@@ -75,6 +75,48 @@ pub enum ProbeMechanic {
     Exec { command: Vec<String> },
 }
 
+impl ProbeMechanic {
+    /// Validate field values. Returns `Ok(())` if valid, or a message
+    /// describing the first invalid field.
+    ///
+    /// Centralises the invariants so the TOML parser path
+    /// (`parse_http_mechanic` in `workload_spec.rs`) and the API
+    /// admission path (`ServiceV1::from_submit`) converge on the same
+    /// checks. Neither path can drift independently.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Http { path, port, .. } => {
+                if path.is_empty() {
+                    return Err("http probe `path` must be non-empty".to_owned());
+                }
+                if path.contains("https://") {
+                    return Err(
+                        "https:// URLs are not supported in Phase 1 (plain HTTP only per ADR-0057 C6) — use a plain `path` like `/healthz`"
+                            .to_owned(),
+                    );
+                }
+                if !path.starts_with('/') {
+                    return Err(format!("http probe `path` must start with `/` — got {path:?}"));
+                }
+                if *port == 0 {
+                    return Err("http probe `port` must be in 1..=65535".to_owned());
+                }
+            }
+            Self::Tcp { port, .. } => {
+                if *port == 0 {
+                    return Err("tcp probe `port` must be in 1..=65535".to_owned());
+                }
+            }
+            Self::Exec { command } => {
+                if command.is_empty() {
+                    return Err("exec probe `command` must be a non-empty array".to_owned());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Validated probe declaration after TOML parse + defaults applied.
 ///
 /// Per ADR-0057 §2 (TOML defaults table):

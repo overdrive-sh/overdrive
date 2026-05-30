@@ -586,16 +586,10 @@ impl ServiceV1 {
             validated.push(Listener { port, protocol });
         }
 
-        // Probe descriptors flow through unchanged — validation
-        // happens at parse time (parser-side `parse_startup_probes`
-        // in `workload_spec.rs`) and at wire-serde admission via
-        // `#[serde(deny_unknown_fields)]` on `ProbeDescriptor`. Per
-        // § "Persist inputs, not derived state": the descriptors are
-        // inputs the reconciler consumes every tick — `max_attempts`,
-        // `timeout_seconds`, `interval_seconds`, `mechanic` are all
-        // policy inputs, NOT derived values. The reconciler
-        // recomputes startup deadline / inferred-flag rendering /
-        // mechanic summary on every tick from these fields.
+        validate_probe_mechanics(&startup_probes, "startup_probes")?;
+        validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
+        validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
+
         Ok(Self {
             id,
             replicas,
@@ -613,6 +607,25 @@ impl ServiceV1 {
             liveness_probes,
         })
     }
+}
+
+/// Validate probe mechanic content at the API admission boundary.
+///
+/// The TOML parser validates at parse time in `parse_http_mechanic` /
+/// `parse_exec_mechanic`; the API path deserialises `ProbeDescriptor`
+/// from JSON and must validate here. Both paths converge on
+/// `ProbeMechanic::validate()`.
+fn validate_probe_mechanics(
+    probes: &[ProbeDescriptor],
+    field: &'static str,
+) -> Result<(), AggregateError> {
+    for (idx, probe) in probes.iter().enumerate() {
+        probe.mechanic.validate().map_err(|message| AggregateError::Validation {
+            field,
+            message: format!("[{idx}]: {message}"),
+        })?;
+    }
+    Ok(())
 }
 
 impl ScheduleV1 {
