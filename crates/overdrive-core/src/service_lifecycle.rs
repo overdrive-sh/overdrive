@@ -666,6 +666,9 @@ impl Reconciler for ServiceLifecycleReconciler {
                 continue;
             }
             if let Some(action) = liveness_restart_action(alloc_id, fact, &mut next_view) {
+                if matches!(action, Action::FinalizeFailed { .. }) {
+                    next_view.terminal_announced.insert(alloc_id.clone());
+                }
                 actions.push(action);
             }
         }

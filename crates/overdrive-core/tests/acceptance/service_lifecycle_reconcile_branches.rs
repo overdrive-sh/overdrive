@@ -1808,3 +1808,97 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
         "healthy flag changed → must emit WriteServiceBackendRow"
     );
 }
+
+// ===================================================================
+// Regression: liveness BackoffExhausted dedup via terminal_announced
+// ===================================================================
+
+/// Regression test for liveness `FinalizeFailed { BackoffExhausted }`
+/// duplicate emission. When liveness exhausts the restart budget on
+/// tick 1, the alloc must be recorded in `terminal_announced` so that
+/// tick 2 does NOT re-emit the same terminal action. Without the fix,
+/// `terminal_announced` is never populated by the liveness loop, and
+/// the terminal re-fires every tick until the alloc state changes to
+/// non-Running (inconsistent with the startup path's dedup discipline).
+#[test]
+fn liveness_backoff_exhausted_does_not_re_emit_on_second_tick() {
+    let id = "svc-liveness-dedup-0";
+
+    // Tick 1: Running alloc with liveness probe Fail, streak at
+    // threshold, restart budget exhausted → BackoffExhausted.
+    let fact_tick1 = liveness_fact(
+        id,
+        AllocState::Running,
+        Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
+        3, // failure_threshold
+        overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
+    );
+    let view_tick1 = view_with_liveness_counter(id, 2); // seed=2, +1 Fail → 3 >= threshold
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions_tick1, next_view_tick1) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact_tick1),
+        &view_tick1,
+        &tick_at_ms(10_000),
+    );
+
+    // Tick 1 must emit exactly one BackoffExhausted.
+    let backoff_count_tick1 = actions_tick1
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed {
+                    terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(backoff_count_tick1, 1, "tick 1 emits exactly one BackoffExhausted");
+    assert!(
+        next_view_tick1.terminal_announced.contains(&aid(id)),
+        "tick 1 must insert alloc into terminal_announced for dedup",
+    );
+
+    // Tick 2: same alloc still Running (action not yet applied by the
+    // runtime). Feed tick 1's returned view back in — the dedup guard
+    // must suppress re-emission.
+    let fact_tick2 = liveness_fact(
+        id,
+        AllocState::Running,
+        Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
+        3,
+        overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
+    );
+
+    let (actions_tick2, _next_view_tick2) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact_tick2),
+        &next_view_tick1,
+        &tick_at_ms(10_100),
+    );
+
+    let backoff_count_tick2 = actions_tick2
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed {
+                    terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        backoff_count_tick2, 0,
+        "tick 2 must NOT re-emit BackoffExhausted — terminal_announced dedup must suppress it",
+    );
+    assert_eq!(
+        actions_tick2.len(),
+        0,
+        "tick 2 emits zero actions for an alloc already given a terminal",
+    );
+}
