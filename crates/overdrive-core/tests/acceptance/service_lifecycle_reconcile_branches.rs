@@ -1902,3 +1902,73 @@ fn liveness_backoff_exhausted_does_not_re_emit_on_second_tick() {
         "tick 2 emits zero actions for an alloc already given a terminal",
     );
 }
+
+/// Regression: when the startup probe passes (Stable) on the same tick
+/// that liveness has accumulated enough consecutive failures to trip
+/// `RestartAllocation`, the liveness loop must skip the alloc because
+/// `stable_announced` already recorded it. Without the guard, both
+/// `FinalizeFailed { Stable }` AND `RestartAllocation { LivenessExhausted }`
+/// land in the same actions Vec — contradictory actions for one alloc.
+#[test]
+fn stable_announced_suppresses_liveness_restart_same_tick() {
+    let id = "svc-stable-liveness-0";
+    // Fact: Running, startup probe Pass (triggers Stable in the first
+    // loop), AND liveness probe Fail with pre-seeded streak about to
+    // trip the threshold.
+    let f = ServiceAllocFact {
+        alloc_id: aid(id),
+        state: AllocState::Running,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+        exit_code: None,
+        latest_startup_probe: Some(ProbeStatus::Pass),
+        max_attempts: u32::MAX,
+        startup_deadline: Duration::from_secs(60),
+        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
+        inferred: false,
+        startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: liveness_restart_spec_default(),
+    };
+
+    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3
+    // which meets the threshold=3 gate in liveness_restart_action.
+    let view = view_with_liveness_counter(id, 2);
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        &tick_at_ms(10_000),
+    );
+
+    // The startup loop fires Stable and inserts into stable_announced.
+    let stable_count = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
+            )
+        })
+        .count();
+    assert_eq!(stable_count, 1, "exactly one Stable terminal");
+
+    // The liveness loop must NOT emit a restart for the same alloc.
+    let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
+    assert_eq!(restarts, 0, "liveness must not restart an alloc already announced Stable");
+
+    assert_eq!(actions.len(), 1, "exactly one action total (Stable only)");
+    assert!(next.stable_announced.contains(&aid(id)), "alloc recorded in stable_announced");
+}
