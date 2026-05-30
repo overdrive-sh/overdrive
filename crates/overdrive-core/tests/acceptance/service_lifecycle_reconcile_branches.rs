@@ -1558,9 +1558,9 @@ proptest! {
     /// S-SHCP-RECON-11 — `BackoffExhaustionAfterRestartCeiling`. When
     /// `restart_count == RESTART_BACKOFF_CEILING` AND liveness
     /// re-triggers (Running + streak >= threshold), reconcile emits
-    /// `FinalizeFailed { BackoffExhausted { attempts:
-    /// RESTART_BACKOFF_CEILING } }` via the shared terminal type — and
-    /// NO further RestartAllocation.
+    /// `FinalizeFailed { ServiceFailed { LivenessProbeFailed } }` so
+    /// operators can distinguish liveness-driven backoff from crash-loop
+    /// backoff — and NO further RestartAllocation.
     #[test]
     fn backoff_exhaustion_after_restart_ceiling(
         observed_failures in 3u32..=10,
@@ -1585,14 +1585,16 @@ proptest! {
         let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
         prop_assert_eq!(restarts, 0, "at ceiling, no further RestartAllocation");
 
-        let backoff = actions.iter().any(|a| matches!(
+        let service_failed = actions.iter().any(|a| matches!(
             a,
             Action::FinalizeFailed {
-                terminal: Some(TerminalCondition::BackoffExhausted { attempts }),
+                terminal: Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::LivenessProbeFailed { .. },
+                }),
                 ..
-            } if *attempts == overdrive_core::reconcilers::RESTART_BACKOFF_CEILING
+            }
         ));
-        prop_assert!(backoff, "at ceiling, liveness re-trigger finalises BackoffExhausted; got {actions:?}");
+        prop_assert!(service_failed, "at ceiling, liveness re-trigger finalises ServiceFailed(LivenessProbeFailed); got {:?}", actions);
     }
 }
 
@@ -1909,13 +1911,14 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
 // Regression: liveness BackoffExhausted dedup via terminal_announced
 // ===================================================================
 
-/// Regression test for liveness `FinalizeFailed { BackoffExhausted }`
-/// duplicate emission. When liveness exhausts the restart budget on
-/// tick 1, the alloc must be recorded in `terminal_announced` so that
-/// tick 2 does NOT re-emit the same terminal action. Without the fix,
-/// `terminal_announced` is never populated by the liveness loop, and
-/// the terminal re-fires every tick until the alloc state changes to
-/// non-Running (inconsistent with the startup path's dedup discipline).
+/// Regression test for liveness `FinalizeFailed { ServiceFailed {
+/// LivenessProbeFailed } }` duplicate emission. When liveness exhausts
+/// the restart budget on tick 1, the alloc must be recorded in
+/// `terminal_announced` so that tick 2 does NOT re-emit the same
+/// terminal action. Without the fix, `terminal_announced` is never
+/// populated by the liveness loop, and the terminal re-fires every tick
+/// until the alloc state changes to non-Running (inconsistent with the
+/// startup path's dedup discipline).
 #[test]
 fn liveness_backoff_exhausted_does_not_re_emit_on_second_tick() {
     let id = "svc-liveness-dedup-0";
@@ -1939,20 +1942,25 @@ fn liveness_backoff_exhausted_does_not_re_emit_on_second_tick() {
         &tick_at_ms(10_000),
     );
 
-    // Tick 1 must emit exactly one BackoffExhausted.
-    let backoff_count_tick1 = actions_tick1
+    // Tick 1 must emit exactly one ServiceFailed { LivenessProbeFailed }.
+    let terminal_count_tick1 = actions_tick1
         .iter()
         .filter(|a| {
             matches!(
                 a,
                 Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                    terminal: Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::LivenessProbeFailed { .. },
+                    }),
                     ..
                 }
             )
         })
         .count();
-    assert_eq!(backoff_count_tick1, 1, "tick 1 emits exactly one BackoffExhausted");
+    assert_eq!(
+        terminal_count_tick1, 1,
+        "tick 1 emits exactly one ServiceFailed(LivenessProbeFailed)"
+    );
     assert!(
         next_view_tick1.terminal_announced.contains(&aid(id)),
         "tick 1 must insert alloc into terminal_announced for dedup",
@@ -1976,21 +1984,23 @@ fn liveness_backoff_exhausted_does_not_re_emit_on_second_tick() {
         &tick_at_ms(10_100),
     );
 
-    let backoff_count_tick2 = actions_tick2
+    let terminal_count_tick2 = actions_tick2
         .iter()
         .filter(|a| {
             matches!(
                 a,
                 Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                    terminal: Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::LivenessProbeFailed { .. },
+                    }),
                     ..
                 }
             )
         })
         .count();
     assert_eq!(
-        backoff_count_tick2, 0,
-        "tick 2 must NOT re-emit BackoffExhausted — terminal_announced dedup must suppress it",
+        terminal_count_tick2, 0,
+        "tick 2 must NOT re-emit ServiceFailed — terminal_announced dedup must suppress it",
     );
     assert_eq!(
         actions_tick2.len(),
@@ -2280,4 +2290,73 @@ fn liveness_counter_reset_after_restart_prevents_spurious_retrigger() {
         restart_count_tick2, 0,
         "tick 2 must NOT fire RestartAllocation — counter was reset, probes haven't reported yet",
     );
+}
+
+/// Regression: liveness budget exhaustion must emit
+/// `ServiceFailed { LivenessProbeFailed }`, NOT `BackoffExhausted`.
+///
+/// Before the fix, `liveness_restart_action` emitted
+/// `TerminalCondition::BackoffExhausted` — the same terminal the
+/// crash-loop pathway uses. The streaming projection hard-coded
+/// `BackoffCause::AttemptBudget` for every `BackoffExhausted`, so the
+/// operator's CLI rendered "attempt budget (crash loop)" instead of the
+/// liveness-specific "liveness probe failed after N attempts".
+///
+/// `ServiceFailureReason::LivenessProbeFailed` was defined and handled
+/// by both the streaming projection and the CLI render, but never
+/// emitted. This test pins the correct terminal.
+#[test]
+fn liveness_budget_exhausted_emits_service_failed_not_backoff_exhausted() {
+    let id = "svc-liveness-terminal-0";
+    let threshold: u32 = 3;
+
+    // Running alloc with liveness Fail, streak at threshold,
+    // restart budget exhausted → must emit ServiceFailed.
+    let fact = liveness_fact(
+        id,
+        AllocState::Running,
+        Some(ProbeStatus::Fail { last_fail_reason: "liveness tcp refused".to_string() }),
+        threshold,
+        overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
+    );
+    // Seed counter to threshold - 1; one Fail this tick → threshold reached.
+    let view = view_with_liveness_counter(id, threshold - 1);
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, _next_view) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact),
+        &view,
+        &tick_at_ms(10_000),
+    );
+
+    // Must emit exactly one FinalizeFailed.
+    let terminals: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::FinalizeFailed { terminal, .. } => terminal.as_ref(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(terminals.len(), 1, "exactly one terminal action expected");
+
+    // The terminal MUST be ServiceFailed { LivenessProbeFailed },
+    // NOT BackoffExhausted.
+    match terminals[0] {
+        TerminalCondition::ServiceFailed {
+            reason: ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts },
+        } => {
+            assert_eq!(*probe_idx, 0, "probe_idx must be 0");
+            assert_eq!(*attempts, threshold, "attempts must equal consecutive failures");
+        }
+        TerminalCondition::BackoffExhausted { .. } => {
+            panic!(
+                "BUG: liveness budget exhaustion emitted BackoffExhausted \
+                 (crash-loop terminal) instead of ServiceFailed {{ LivenessProbeFailed }}"
+            );
+        }
+        other => {
+            panic!("unexpected terminal condition: {other:?}");
+        }
+    }
 }

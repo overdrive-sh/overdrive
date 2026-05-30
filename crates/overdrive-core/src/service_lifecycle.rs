@@ -197,8 +197,9 @@ pub struct ServiceAllocFact {
     /// duplicate — the shared `RESTART_BACKOFF_CEILING` budget per
     /// ADR-0055 §7: once `restart_count >= RESTART_BACKOFF_CEILING` the
     /// liveness branch stops emitting `RestartAllocation` and finalises
-    /// the alloc with the same `TerminalCondition::BackoffExhausted`
-    /// the crash-loop pathway uses. Sourced from the runtime's
+    /// the alloc with `TerminalCondition::ServiceFailed {
+    /// LivenessProbeFailed }` so operators can distinguish from crash-
+    /// loop `BackoffExhausted`. Sourced from the runtime's
     /// per-alloc restart-status projection (intent/observation join) —
     /// an INPUT, recomputed each tick, never a cached verdict.
     pub restart_count: u32,
@@ -712,8 +713,9 @@ fn collect_liveness_actions(
 ///   `RestartAllocation { reason: LivenessExhausted { .. } }`
 ///   (S-SHCP-RECON-09).
 /// - `restart_count >= RESTART_BACKOFF_CEILING` → emit
-///   `FinalizeFailed { BackoffExhausted { attempts:
-///   RESTART_BACKOFF_CEILING } }` via the shared terminal type
+///   `FinalizeFailed { ServiceFailed { LivenessProbeFailed {
+///   probe_idx: 0, attempts: consecutive_failures } } }` so operators
+///   can distinguish liveness-driven backoff from crash-loop backoff
 ///   (S-SHCP-RECON-11).
 ///
 /// Returns `None` when the alloc declares no liveness probe, or when
@@ -754,13 +756,16 @@ fn liveness_restart_action(
     }
 
     // Compose with the shared restart budget. Once the budget is spent
-    // the liveness branch finalises with the same terminal the
-    // crash-loop pathway uses, rather than restarting forever.
+    // the liveness branch finalises with ServiceFailed { LivenessProbeFailed }
+    // so operators can distinguish from crash-loop BackoffExhausted.
     if fact.restart_count >= RESTART_BACKOFF_CEILING {
         return Some(Action::FinalizeFailed {
             alloc_id: alloc_id.clone(),
-            terminal: Some(TerminalCondition::BackoffExhausted {
-                attempts: RESTART_BACKOFF_CEILING,
+            terminal: Some(TerminalCondition::ServiceFailed {
+                reason: ServiceFailureReason::LivenessProbeFailed {
+                    probe_idx: 0,
+                    attempts: consecutive_failures,
+                },
             }),
         });
     }

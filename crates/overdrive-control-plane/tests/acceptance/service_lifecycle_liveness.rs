@@ -8,7 +8,7 @@
 //! emitted within 1 reconciler tick; recovery (one Pass below
 //! threshold) resets the counter and emits no restart; once the shared
 //! `RESTART_BACKOFF_CEILING` budget is spent the liveness branch
-//! finalises `BackoffExhausted`.
+//! finalises `ServiceFailed { LivenessProbeFailed }`.
 //!
 //! These acceptance scenarios drive the real
 //! `ServiceLifecycleReconciler::reconcile` through its driving-port
@@ -41,7 +41,7 @@ use overdrive_core::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 
 fn aid(s: &str) -> AllocationId {
     AllocationId::new(s).expect("valid AllocationId")
@@ -209,9 +209,10 @@ fn liveness_fail_fail_pass_resets_counter_and_emits_no_restart() {
 
 /// S-SHCP-RECON-11 (US-05 — restart budget exhaustion) — with the
 /// shared `RESTART_BACKOFF_CEILING` already consumed, a fresh liveness
-/// threshold breach finalises `Failed { BackoffExhausted { attempts: 5
-/// } }` via the shared terminal type, and emits no further
-/// RestartAllocation.
+/// threshold breach finalises `Failed { ServiceFailed {
+/// LivenessProbeFailed { probe_idx: 0, attempts } } }` so operators
+/// can distinguish liveness-driven backoff from crash-loop backoff,
+/// and emits no further RestartAllocation.
 #[test]
 fn liveness_retrigger_at_ceiling_emits_backoff_exhausted() {
     let (actions, _view) = run_consecutive_fails("svc-ceil-0", 3, RESTART_BACKOFF_CEILING, 3);
@@ -219,17 +220,19 @@ fn liveness_retrigger_at_ceiling_emits_backoff_exhausted() {
     let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
     assert_eq!(restarts, 0, "at ceiling, no further RestartAllocation; got {actions:?}");
 
-    let backoff = actions.iter().any(|a| {
+    let service_failed = actions.iter().any(|a| {
         matches!(
             a,
             Action::FinalizeFailed {
-                terminal: Some(TerminalCondition::BackoffExhausted { attempts }),
+                terminal: Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::LivenessProbeFailed { .. },
+                }),
                 ..
-            } if *attempts == RESTART_BACKOFF_CEILING
+            }
         )
     });
     assert!(
-        backoff,
-        "ceiling re-trigger finalises BackoffExhausted{{attempts:5}}; got {actions:?}"
+        service_failed,
+        "ceiling re-trigger finalises ServiceFailed(LivenessProbeFailed); got {actions:?}"
     );
 }
