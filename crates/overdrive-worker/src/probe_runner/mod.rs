@@ -474,6 +474,7 @@ async fn probe_tick(
     let timeout = Duration::from_secs(u64::from(descriptor.timeout_seconds));
     let outcome = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, port } => {
+            let host = http_probe_host(Some(host.as_str()));
             tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
                 ProbeRunnerError::ProbeAdapterFailed {
                     alloc_id: alloc_id.clone(),

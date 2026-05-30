@@ -43,12 +43,17 @@ use overdrive_core::traits::prober::{
 pub struct SimTcpProber {
     queue: Mutex<VecDeque<ProbeOutcome>>,
     probe_count: AtomicU64,
+    last_probed_host: Mutex<String>,
 }
 
 impl SimTcpProber {
     #[must_use]
     pub fn new() -> Self {
-        Self { queue: Mutex::new(VecDeque::new()), probe_count: AtomicU64::new(0) }
+        Self {
+            queue: Mutex::new(VecDeque::new()),
+            probe_count: AtomicU64::new(0),
+            last_probed_host: Mutex::new(String::new()),
+        }
     }
 
     /// Enqueue the outcome the next `probe()` call will return.
@@ -71,6 +76,12 @@ impl SimTcpProber {
     /// Total number of `probe()` invocations since construction.
     pub fn probe_call_count(&self) -> u64 {
         self.probe_count.load(Ordering::Relaxed)
+    }
+
+    /// The `host` argument received by the most recent `probe()` call.
+    /// Returns an empty string if `probe()` has never been called.
+    pub fn last_probed_host(&self) -> String {
+        self.last_probed_host.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 }
 
@@ -99,6 +110,9 @@ impl TcpProber for SimTcpProber {
             });
         }
         self.probe_count.fetch_add(1, Ordering::Relaxed);
+        host.clone_into(
+            &mut self.last_probed_host.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
     }

@@ -218,6 +218,42 @@ async fn given_sim_tcp_prober_fail_when_earned_trust_then_returns_typed_error() 
     );
 }
 
+/// Regression — TCP probe host `"0.0.0.0"` must be translated to
+/// `"127.0.0.1"` before reaching the `TcpProber` adapter, matching
+/// the HTTP branch's `http_probe_host` translation and the
+/// `TcpProber` trait contract (prober.rs:77-80: "caller is
+/// responsible for translating to the workload's reachable address").
+#[tokio::test]
+async fn tcp_probe_translates_wildcard_host_to_loopback() {
+    let tcp = Arc::new(SimTcpProber::new());
+    tcp.enqueue_outcome(ProbeOutcome::Pass);
+    let clock = Arc::new(SimClock::default());
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+    let runner = ProbeRunner::new(
+        tcp.clone(),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
+
+    let alloc = alloc_id("alloc-wildcard-host");
+    // Descriptor carries the bind-side wildcard — the default for
+    // inferred TCP startup probes.
+    let descriptor = descriptor_tcp("0.0.0.0", 8080);
+
+    runner
+        .probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, clock.as_ref(), obs.as_ref())
+        .await
+        .expect("probe succeeds");
+
+    assert_eq!(
+        tcp.last_probed_host(),
+        "127.0.0.1",
+        "probe_tick must translate 0.0.0.0 to 127.0.0.1 before calling TcpProber"
+    );
+}
+
 /// Mutation-kill (01-03c follow-on): `ProbeRunner::stop_alloc` must
 /// remove the supervisor entry AND cooperatively cancel any tasks
 /// derived from its `CancellationToken`. Replacing the body with
