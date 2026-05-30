@@ -653,6 +653,9 @@ impl Reconciler for ServiceLifecycleReconciler {
         // crash-loop pathway uses — composing with, not duplicating, the
         // shared budget.
         for (alloc_id, fact) in &actual.allocs {
+            if next_view.terminal_announced.contains(alloc_id) {
+                continue;
+            }
             if let Some(action) = liveness_restart_action(alloc_id, fact, &mut next_view) {
                 actions.push(action);
             }

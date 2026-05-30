@@ -1630,3 +1630,103 @@ proptest! {
         prop_assert!(early_exit_zero, "exit-0-within-deadline IS EarlyExit{{exit_code:0}}; got {actions:?}");
     }
 }
+
+// ===================================================================
+// Regression — startup × liveness dual-action in one tick
+// ===================================================================
+
+/// A Running alloc past its startup deadline with a failing startup
+/// probe AND a liveness probe that has accumulated enough consecutive
+/// failures MUST emit only the `StartupProbeFailed` terminal — the
+/// liveness loop must skip allocs already given a terminal in the
+/// startup loop on the same tick.
+///
+/// Without the `terminal_announced` guard in the liveness loop, BOTH
+/// `FinalizeFailed { StartupProbeFailed }` AND `RestartAllocation {
+/// LivenessExhausted }` fire for the same alloc, producing two
+/// conflicting actions.
+#[test]
+fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
+    let id = "svc-dual-0";
+    // Fact: Running, startup probe Fail, past deadline, AND liveness
+    // probe Fail with threshold about to trip.
+    let f = ServiceAllocFact {
+        alloc_id: aid(id),
+        state: AllocState::Running,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+        exit_code: None,
+        latest_startup_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "conn refused".to_string(),
+        }),
+        max_attempts: 1,
+        startup_deadline: Duration::from_secs(60),
+        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
+        inferred: false,
+        startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: liveness_restart_spec_default(),
+    };
+
+    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3
+    // which meets the threshold=3 gate in liveness_restart_action.
+    let view = view_with_liveness_counter(id, 2);
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        // 61s after started_at=1s → elapsed=60s >= deadline=60s
+        &tick_at_ms(61_000),
+    );
+
+    // The startup loop fires StartupProbeFailed and inserts into
+    // terminal_announced.
+    let startup_failed = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed {
+                    terminal: Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::StartupProbeFailed { .. },
+                    }),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(startup_failed, 1, "exactly one StartupProbeFailed terminal");
+
+    // The liveness loop must NOT emit a second action for the same alloc.
+    let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
+    assert_eq!(restarts, 0, "liveness must not restart an alloc already given a startup terminal");
+
+    let backoff_exhausted = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed {
+                    terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(backoff_exhausted, 0, "no BackoffExhausted either");
+
+    assert_eq!(actions.len(), 1, "exactly one action total (StartupProbeFailed only)");
+    assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
+}
