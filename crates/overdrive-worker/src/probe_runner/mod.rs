@@ -308,14 +308,18 @@ impl ProbeRunner {
         // spawned future. The supervisor's child token is the
         // cooperative-shutdown handle observed by the `select!`
         // arm.
-        let supervisors = self.supervisors.lock();
-        let Some(supervisor) = supervisors.get(alloc_id) else {
+        let mut supervisors = self.supervisors.lock();
+        let Some(supervisor) = supervisors.get_mut(alloc_id) else {
             // Logically unreachable — `register_alloc` above just
             // inserted the entry. The match shape keeps the lint
             // surface honest per `.claude/rules/development.md`
             // § "Logically unreachable `None` / `Err`".
             return root_token;
         };
+        if supervisor.is_started() {
+            return root_token;
+        }
+        supervisor.mark_started();
         for (idx, descriptor) in probe_descriptors.into_iter().enumerate() {
             let handle = supervisor.spawn_probe_task();
             let child_token = handle.cancellation_token();

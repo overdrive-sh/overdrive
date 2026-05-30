@@ -25,6 +25,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,12 +42,13 @@ use overdrive_core::traits::prober::{
 /// harness can override by enqueueing a `Fail`).
 pub struct SimTcpProber {
     queue: Mutex<VecDeque<ProbeOutcome>>,
+    probe_count: AtomicU64,
 }
 
 impl SimTcpProber {
     #[must_use]
     pub fn new() -> Self {
-        Self { queue: Mutex::new(VecDeque::new()) }
+        Self { queue: Mutex::new(VecDeque::new()), probe_count: AtomicU64::new(0) }
     }
 
     /// Enqueue the outcome the next `probe()` call will return.
@@ -65,6 +67,11 @@ impl SimTcpProber {
     pub fn enqueue_outcome(&self, outcome: ProbeOutcome) {
         self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(outcome);
     }
+
+    /// Total number of `probe()` invocations since construction.
+    pub fn probe_call_count(&self) -> u64 {
+        self.probe_count.load(Ordering::Relaxed)
+    }
 }
 
 impl Default for SimTcpProber {
@@ -81,8 +88,6 @@ impl TcpProber for SimTcpProber {
         port: u16,
         _timeout: Duration,
     ) -> Result<ProbeOutcome, ProbeFailure> {
-        // Input validation mirrors the production adapter — per
-        // `nw-tdd-methodology` § "Test Doubles Must Validate Inputs".
         if host.is_empty() {
             return Err(ProbeFailure::InvalidTarget {
                 reason: "tcp probe host must be non-empty".to_string(),
@@ -93,6 +98,7 @@ impl TcpProber for SimTcpProber {
                 reason: "tcp probe port must be in 1..=65535".to_string(),
             });
         }
+        self.probe_count.fetch_add(1, Ordering::Relaxed);
         let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
     }

@@ -289,3 +289,64 @@ async fn given_started_alloc_when_stop_alloc_then_no_further_probe_result_rows()
          a non-cancelling stop_alloc would shift this timestamp on every post-stop clock.tick"
     );
 }
+
+/// AT-03 — Regression: `start_alloc` called twice for the same
+/// `alloc_id` MUST NOT spawn a second set of probe tasks.
+///
+/// Pre-fix `start_alloc` re-entered the for-loop unconditionally
+/// on re-call — two tasks per descriptor, writing at double cadence.
+/// The observable: after one clock tick, `SimTcpProber::probe_call_count()`
+/// must be exactly 1 (one task fired), not 2 (duplicate tasks).
+#[tokio::test]
+async fn given_start_alloc_called_twice_then_no_duplicate_probe_tasks() {
+    let tcp = Arc::new(SimTcpProber::new());
+    let http = Arc::new(SimHttpProber::new());
+    let exec = Arc::new(SimExecProber::new());
+    let clock = Arc::new(SimClock::default());
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+
+    let runner = ProbeRunner::new(
+        Arc::clone(&tcp) as Arc<dyn overdrive_core::traits::prober::TcpProber>,
+        http,
+        exec,
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
+
+    let alloc = alloc_id("alloc-no-dup");
+    let descriptor = descriptor_tcp_1s("127.0.0.1", 9999);
+
+    // First start — spawns 1 task.
+    let token1 = runner.start_alloc(&alloc, vec![descriptor.clone()]);
+
+    // Second start — MUST be a no-op (same alloc_id).
+    let token2 = runner.start_alloc(&alloc, vec![descriptor]);
+
+    assert_eq!(
+        runner.active_alloc_count(),
+        1,
+        "second start_alloc must not create a second supervisor"
+    );
+
+    yield_for_task_poll().await;
+
+    // Tick past one interval — exactly 1 task should fire.
+    clock.tick(Duration::from_secs(1));
+
+    // Wait for the single expected row.
+    let _rows = wait_for_rows(&obs, &alloc, 1, 64).await;
+
+    // The structural invariant: only 1 probe invocation, not 2.
+    assert_eq!(
+        tcp.probe_call_count(),
+        1,
+        "duplicate start_alloc must not spawn duplicate probe tasks; \
+         expected 1 probe invocation but got {}",
+        tcp.probe_call_count()
+    );
+
+    // Both calls returned the same root token.
+    drop(token1);
+    drop(token2);
+    runner.stop_alloc(&alloc);
+}

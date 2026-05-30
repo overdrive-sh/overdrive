@@ -54,6 +54,12 @@ pub struct AllocSupervisor {
     /// today cancellation alone is sufficient (probes self-terminate
     /// on cancellation observation).
     root: CancellationToken,
+    /// Set to `true` after the first `start_alloc` spawns probe
+    /// tasks. Subsequent calls return the existing token without
+    /// re-spawning — structural guard against duplicate task sets
+    /// writing to the same `(alloc_id, probe_idx)` store keys at
+    /// double cadence.
+    started: bool,
 }
 
 impl AllocSupervisor {
@@ -62,7 +68,7 @@ impl AllocSupervisor {
     /// [`Self::spawn_probe_task`] is called.
     #[must_use]
     pub fn new() -> Self {
-        Self { root: CancellationToken::new() }
+        Self { root: CancellationToken::new(), started: false }
     }
 
     /// The root cancellation token. Per-probe tasks observe a
@@ -78,6 +84,18 @@ impl AllocSupervisor {
     /// handle owning the child token the task observes.
     pub fn spawn_probe_task(&self) -> ProbeTaskHandle {
         ProbeTaskHandle { cancel: self.root.child_token() }
+    }
+
+    /// Whether probe tasks have already been spawned under this
+    /// supervisor. Used by `start_alloc` to guard against duplicate
+    /// task spawning on re-entry.
+    pub const fn is_started(&self) -> bool {
+        self.started
+    }
+
+    /// Mark this supervisor as having spawned its probe tasks.
+    pub const fn mark_started(&mut self) {
+        self.started = true;
     }
 
     /// Cancel every per-probe task spawned under this supervisor.
