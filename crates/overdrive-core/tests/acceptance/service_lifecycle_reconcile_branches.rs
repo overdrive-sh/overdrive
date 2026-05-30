@@ -2069,6 +2069,85 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
     assert!(next.stable_announced.contains(&aid(id)), "alloc recorded in stable_announced");
 }
 
+/// Regression: once an alloc entered `stable_announced` (after passing
+/// its startup probe), the liveness loop permanently skipped it —
+/// `stable_announced` persists across ticks and was never cleared. The
+/// guard was meant to prevent same-tick double-emission only, but the
+/// persistent set made the suppression permanent. On the NEXT tick after
+/// Stable, liveness must resume monitoring and emit `RestartAllocation`
+/// when the threshold is met.
+#[test]
+fn liveness_resumes_after_prior_tick_stable_announcement() {
+    let id = "svc-post-stable-0";
+    // Fact: Running, startup probe still Pass (Stable was already
+    // announced on a prior tick), AND liveness probe Fail with
+    // pre-seeded streak about to trip the threshold.
+    let f = ServiceAllocFact {
+        alloc_id: aid(id),
+        state: AllocState::Running,
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+        exit_code: None,
+        latest_startup_probe: Some(ProbeStatus::Pass),
+        max_attempts: u32::MAX,
+        startup_deadline: Duration::from_secs(60),
+        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
+        inferred: false,
+        startup_probes_empty: false,
+        latest_readiness_probe: None,
+        has_readiness_probe: false,
+        readiness_success_threshold: 1,
+        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+            .expect("valid spiffe"),
+        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        restart_count: 0,
+        restart_spec: liveness_restart_spec_default(),
+    };
+
+    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3
+    // which meets the threshold=3 gate in liveness_restart_action.
+    let mut view = view_with_liveness_counter(id, 2);
+    // Simulate prior tick: alloc already announced Stable.
+    view.stable_announced.insert(aid(id));
+    view.observed.insert(aid(id));
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, _next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        &tick_at_ms(20_000),
+    );
+
+    // The startup loop skips this alloc (already in stable_announced —
+    // correct dedup). The liveness loop MUST still evaluate it and emit
+    // RestartAllocation because the liveness threshold is met.
+    let restarts: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
+    assert_eq!(
+        restarts.len(),
+        1,
+        "liveness must emit RestartAllocation for a post-Stable alloc when threshold is met, got actions: {actions:?}",
+    );
+
+    // No Stable re-emission (the startup loop's stable_announced dedup
+    // is correct and should still fire).
+    let stable_count = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
+            )
+        })
+        .count();
+    assert_eq!(stable_count, 0, "Stable must not be re-emitted on subsequent ticks");
+}
+
 /// Regression: a Failed alloc with no readiness probe was emitted as
 /// `Backend { healthy: true }` because `readiness_backend_row_action`
 /// iterated all allocs without a state guard. Only Running allocs can
@@ -2127,5 +2206,78 @@ fn pending_alloc_excluded_from_backend_row() {
     assert!(
         backend_rows.is_empty(),
         "Pending alloc must not appear in backend row, got {backend_rows:?}",
+    );
+}
+
+/// Regression: liveness consecutive-failure counter not reset after
+/// `RestartAllocation`. Without the fix, when the restarted alloc
+/// reaches Running with `latest_liveness_probe == None` (probes
+/// haven't fired yet), the stale counter exceeds the threshold and
+/// fires another `RestartAllocation` — one restart per tick until
+/// `BackoffExhausted`.
+///
+/// Tick 1: Running, Fail observation pushes counter to threshold →
+///         `RestartAllocation` emitted, counter must be cleared.
+/// Tick 2: Alloc restarted (Running, restart_count += 1), probe is
+///         `None` → no action (counter was cleared).
+#[test]
+fn liveness_counter_reset_after_restart_prevents_spurious_retrigger() {
+    let id = "svc-liveness-reset-0";
+    let threshold: u32 = 3;
+
+    // Tick 1: seed counter to threshold - 1, plus one Fail → hits threshold.
+    let fact_tick1 = liveness_fact(
+        id,
+        AllocState::Running,
+        Some(ProbeStatus::Fail { last_fail_reason: "liveness tcp refused".to_string() }),
+        threshold,
+        0, // restart_count
+    );
+    let view_tick1 = view_with_liveness_counter(id, threshold - 1);
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions_tick1, next_view_tick1) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact_tick1),
+        &view_tick1,
+        &tick_at_ms(10_000),
+    );
+
+    let restart_count_tick1 =
+        actions_tick1.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
+    assert_eq!(restart_count_tick1, 1, "tick 1 must emit exactly one RestartAllocation");
+
+    // The fix: the counter entry must have been removed after restart.
+    let key = (aid(id), overdrive_core::observation::ProbeIdx::new(0));
+    assert_eq!(
+        next_view_tick1.liveness_consecutive_failures.get(&key),
+        None,
+        "counter must be cleared after RestartAllocation so the post-restart alloc starts fresh",
+    );
+
+    // Tick 2: alloc restarted — Running again with restart_count += 1.
+    // No probe results yet (None). With the fix, the counter is 0 and
+    // no action fires. Without the fix, the stale counter >=
+    // threshold immediately re-triggers RestartAllocation.
+    let fact_tick2 = liveness_fact(
+        id,
+        AllocState::Running,
+        None, // probes haven't fired yet after restart
+        threshold,
+        1, // restart_count incremented by runtime
+    );
+
+    let (actions_tick2, _next_view_tick2) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact_tick2),
+        &next_view_tick1,
+        &tick_at_ms(10_100),
+    );
+
+    let restart_count_tick2 =
+        actions_tick2.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
+    assert_eq!(
+        restart_count_tick2, 0,
+        "tick 2 must NOT fire RestartAllocation — counter was reset, probes haven't reported yet",
     );
 }

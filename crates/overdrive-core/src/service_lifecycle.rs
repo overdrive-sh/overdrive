@@ -477,6 +477,7 @@ impl Reconciler for ServiceLifecycleReconciler {
     ) -> (Vec<Action>, Self::View) {
         let mut actions: Vec<Action> = Vec::new();
         let mut next_view = view.clone();
+        let mut stable_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
 
         for (alloc_id, fact) in &actual.allocs {
             if next_view.stable_announced.contains(alloc_id) {
@@ -551,6 +552,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
                 next_view.stable_announced.insert(alloc_id.clone());
+                stable_this_tick.insert(alloc_id.clone());
                 continue;
             }
 
@@ -575,6 +577,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
                 next_view.stable_announced.insert(alloc_id.clone());
+                stable_this_tick.insert(alloc_id.clone());
                 continue;
             }
 
@@ -656,41 +659,33 @@ impl Reconciler for ServiceLifecycleReconciler {
         }
 
         // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
-        //
-        // For every alloc declaring a liveness probe, maintain the
-        // per-(alloc, probe_idx) consecutive-failure counter (the View
-        // INPUT) and recompute the restart-trigger predicate THIS TICK
-        // against the live `liveness_failure_threshold`. Per
-        // `.claude/rules/development.md` § "Persist inputs, not derived
-        // state": the View persists ONLY the counter; the predicate
-        // (`Running AND consecutive >= threshold AND restart_count <
-        // RESTART_BACKOFF_CEILING`) is never persisted as a
-        // `should_restart` bool.
-        //
-        // Composition with the SHARED restart budget (ADR-0055 §7 /
-        // DDD-9 / P3-Q11): the Phase-1 reconciler emits
-        // `RestartAllocation` UNCONDITIONALLY while the budget remains
-        // (no cascading-restart governor). Once `restart_count` reaches
-        // `RESTART_BACKOFF_CEILING` (5, shared with `WorkloadLifecycle`)
-        // the liveness branch finalises the alloc with the same
-        // `TerminalCondition::BackoffExhausted { attempts }` the
-        // crash-loop pathway uses — composing with, not duplicating, the
-        // shared budget.
-        for (alloc_id, fact) in &actual.allocs {
-            if next_view.terminal_announced.contains(alloc_id)
-                || next_view.stable_announced.contains(alloc_id)
-            {
-                continue;
-            }
-            if let Some(action) = liveness_restart_action(alloc_id, fact, &mut next_view) {
-                if matches!(action, Action::FinalizeFailed { .. }) {
-                    next_view.terminal_announced.insert(alloc_id.clone());
-                }
-                actions.push(action);
-            }
-        }
+        collect_liveness_actions(actual, &stable_this_tick, &mut next_view, &mut actions);
 
         (actions, next_view)
+    }
+}
+
+/// Step 03-02 / Slice 05 — walk every alloc declaring a liveness probe,
+/// maintain its consecutive-failure counter in the View, and emit
+/// `RestartAllocation` or `FinalizeFailed { BackoffExhausted }` when the
+/// trigger predicate holds. Extracted from `reconcile` to stay under the
+/// clippy `too_many_lines` limit.
+fn collect_liveness_actions(
+    actual: &ServiceLifecycleState,
+    stable_this_tick: &BTreeSet<AllocationId>,
+    next_view: &mut ServiceLifecycleView,
+    actions: &mut Vec<Action>,
+) {
+    for (alloc_id, fact) in &actual.allocs {
+        if next_view.terminal_announced.contains(alloc_id) || stable_this_tick.contains(alloc_id) {
+            continue;
+        }
+        if let Some(action) = liveness_restart_action(alloc_id, fact, next_view) {
+            if matches!(action, Action::FinalizeFailed { .. }) {
+                next_view.terminal_announced.insert(alloc_id.clone());
+            }
+            actions.push(action);
+        }
     }
 }
 
@@ -736,7 +731,7 @@ fn liveness_restart_action(
     let key = (alloc_id.clone(), ProbeIdx::new(0));
     let consecutive_failures = match &fact.latest_liveness_probe {
         Some(ProbeStatus::Fail { .. }) => {
-            let entry = next_view.liveness_consecutive_failures.entry(key).or_insert(0);
+            let entry = next_view.liveness_consecutive_failures.entry(key.clone()).or_insert(0);
             *entry = entry.saturating_add(1);
             *entry
         }
@@ -769,6 +764,14 @@ fn liveness_restart_action(
             }),
         });
     }
+
+    // Reset the consecutive-failure counter so the post-restart alloc
+    // starts with a clean slate. Without this, the `None` arm above
+    // reads the stale threshold-exceeding value on the first Running
+    // tick after restart (probes haven't fired yet), immediately
+    // re-triggering RestartAllocation — one restart per tick until
+    // BackoffExhausted.
+    next_view.liveness_consecutive_failures.remove(&key);
 
     Some(Action::RestartAllocation {
         alloc_id: alloc_id.clone(),
