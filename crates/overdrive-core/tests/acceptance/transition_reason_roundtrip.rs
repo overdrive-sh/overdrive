@@ -59,7 +59,7 @@ fn arb_completed() -> impl Strategy<Value = TerminalCondition> {
 }
 
 fn arb_failed() -> impl Strategy<Value = TerminalCondition> {
-    arb_exit_code().prop_map(|exit_code| TerminalCondition::Failed { exit_code })
+    prop::option::of(arb_exit_code()).prop_map(|exit_code| TerminalCondition::Failed { exit_code })
 }
 
 fn arb_completed_or_failed() -> impl Strategy<Value = TerminalCondition> {

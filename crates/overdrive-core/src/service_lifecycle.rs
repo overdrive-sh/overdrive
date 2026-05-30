@@ -593,9 +593,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                     actions.push(Action::FinalizeFailed {
                         alloc_id: alloc_id.clone(),
                         terminal: Some(TerminalCondition::ServiceFailed {
-                            reason: ServiceFailureReason::EarlyExit {
-                                exit_code: fact.exit_code.unwrap_or(0),
-                            },
+                            reason: ServiceFailureReason::EarlyExit { exit_code: fact.exit_code },
                         }),
                     });
                     // GAP-9 — record the non-Stable terminal so the

@@ -625,7 +625,7 @@ async fn given_coinflip_as_service_fixture_when_submit_100_seeds_then_99_emit_fa
 
         match terminal {
             ServiceSubmitEvent::Failed { reason, .. } => match reason {
-                ServiceFailureReason::EarlyExit { exit_code: 1 } => {
+                ServiceFailureReason::EarlyExit { exit_code: Some(1) } => {
                     early_exit_failed += 1;
                 }
                 other => {

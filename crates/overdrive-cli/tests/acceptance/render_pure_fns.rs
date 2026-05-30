@@ -267,7 +267,7 @@ fn stable_summary_marks_inferred_witness() {
 fn failed_block_renders_header_reproducer_and_hint() {
     let rendered = format_service_failed_block(
         "payments",
-        &ServiceFailureReason::EarlyExit { exit_code: 7 },
+        &ServiceFailureReason::EarlyExit { exit_code: Some(7) },
         None,
         None,
     );
@@ -286,7 +286,7 @@ fn failed_block_renders_header_reproducer_and_hint() {
 fn failed_block_includes_last_event_when_stderr_tail_present() {
     let rendered = format_service_failed_block(
         "payments",
-        &ServiceFailureReason::EarlyExit { exit_code: 7 },
+        &ServiceFailureReason::EarlyExit { exit_code: Some(7) },
         Some("segfault at 0xdead"),
         None,
     );
@@ -300,7 +300,7 @@ fn failed_block_includes_last_event_when_stderr_tail_present() {
 fn failed_block_omits_last_event_when_stderr_tail_empty() {
     let rendered = format_service_failed_block(
         "payments",
-        &ServiceFailureReason::EarlyExit { exit_code: 7 },
+        &ServiceFailureReason::EarlyExit { exit_code: Some(7) },
         Some(""),
         None,
     );
@@ -329,7 +329,10 @@ fn failed_block_reason_text_is_variant_specific() {
             },
             "startup probe[0] failed after 5 attempts: connection refused",
         ),
-        (ServiceFailureReason::EarlyExit { exit_code: 137 }, "workload exited early with code 137"),
+        (
+            ServiceFailureReason::EarlyExit { exit_code: Some(137) },
+            "workload exited early with code 137",
+        ),
         (
             ServiceFailureReason::LivenessProbeFailed { probe_idx: 2, attempts: 3 },
             "liveness probe[2] failed after 3 attempts",

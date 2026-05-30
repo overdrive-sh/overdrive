@@ -218,7 +218,7 @@ fn given_alloc_exits_within_deadline_no_pass_probe_when_reconcile_then_emits_fai
                 }),
             ..
         } => {
-            assert_eq!(*exit_code, 1);
+            assert_eq!(*exit_code, Some(1));
         }
         other => panic!("expected EarlyExit ServiceFailed, got {other:?}"),
     }
@@ -268,7 +268,7 @@ fn given_alloc_exits_zero_within_deadline_when_reconcile_then_emits_failed_early
                 }),
             ..
         } => {
-            assert_eq!(*exit_code, 0, "exit 0 within deadline is still EarlyExit");
+            assert_eq!(*exit_code, Some(0), "exit 0 within deadline is still EarlyExit");
         }
         other => panic!("expected EarlyExit(0) ServiceFailed, got {other:?}"),
     }

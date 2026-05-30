@@ -39,7 +39,7 @@ use proptest::prelude::*;
 fn early_exit_renders_multiline_block_with_exit_code_elapsed_and_stderr_tail() {
     let rendered = format_service_failed_block(
         "payments",
-        &ServiceFailureReason::EarlyExit { exit_code: 137 },
+        &ServiceFailureReason::EarlyExit { exit_code: Some(137) },
         Some("OOM: killed by cgroup"),
         Some((3, 60)),
     );
@@ -62,7 +62,7 @@ fn early_exit_renders_multiline_block_with_exit_code_elapsed_and_stderr_tail() {
 fn early_exit_zero_render_includes_service_kind_guidance() {
     let rendered = format_service_failed_block(
         "payments",
-        &ServiceFailureReason::EarlyExit { exit_code: 0 },
+        &ServiceFailureReason::EarlyExit { exit_code: Some(0) },
         None,
         Some((1, 60)),
     );
@@ -72,6 +72,24 @@ fn early_exit_zero_render_includes_service_kind_guidance() {
         rendered.contains("The workload exited before any startup probe could pass"),
         "exit-0 render carries the Service-kind guidance text; got:\n{rendered}",
     );
+}
+
+/// Regression: signal-killed alloc (exit_code: None) renders
+/// "killed by signal", never "code 0".
+#[test]
+fn signal_killed_render_says_killed_by_signal() {
+    let rendered = format_service_failed_block(
+        "payments",
+        &ServiceFailureReason::EarlyExit { exit_code: None },
+        None,
+        Some((1, 60)),
+    );
+
+    assert!(
+        rendered.contains("killed by signal"),
+        "signal-kill must say 'killed by signal'; got:\n{rendered}",
+    );
+    assert!(!rendered.contains("code 0"), "signal-kill must NOT say 'code 0'; got:\n{rendered}");
 }
 
 /// Strategy over every `ServiceFailureReason` variant with
@@ -86,7 +104,8 @@ fn any_service_failure_reason() -> impl Strategy<Value = ServiceFailureReason> {
         (any::<u32>(), ".*", any::<u32>()).prop_map(|(p, last_fail, a)| {
             ServiceFailureReason::StartupProbeFailed { probe_idx: p, last_fail, attempts: a }
         }),
-        any::<i32>().prop_map(|exit_code| ServiceFailureReason::EarlyExit { exit_code }),
+        prop::option::of(any::<i32>())
+            .prop_map(|exit_code| ServiceFailureReason::EarlyExit { exit_code }),
         (any::<u32>(), any::<u32>()).prop_map(|(p, a)| {
             ServiceFailureReason::LivenessProbeFailed { probe_idx: p, attempts: a }
         }),
@@ -128,7 +147,7 @@ proptest! {
         // the captured stderr tail rides the `stderr_tail` projection
         // argument (sourced from `LifecycleEvent.detail` in production).
         let terminal = TerminalCondition::ServiceFailed {
-            reason: ServiceFailureReason::EarlyExit { exit_code: 1 },
+            reason: ServiceFailureReason::EarlyExit { exit_code: Some(1) },
         };
         let wire = service_event_from_terminal("alloc-x", &terminal, Some(tail.clone()), Some(1))
             .expect("ServiceFailed projects to a ServiceSubmitEvent");

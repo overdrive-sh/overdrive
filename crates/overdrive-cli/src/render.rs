@@ -412,7 +412,7 @@ pub const fn is_backoff_exhausted(attempts: u32, max_attempts: u32) -> bool {
 #[must_use]
 pub fn format_job_failed_summary(
     workload_name: &str,
-    exit_code: i32,
+    exit_code: Option<i32>,
     took_human: &str,
     attempts: u32,
     max_attempts: u32,
@@ -426,9 +426,11 @@ pub fn format_job_failed_summary(
     } else {
         format!("{attempts} of {max_attempts}")
     };
+    let exit_display =
+        exit_code.map_or_else(|| "none (killed by signal)".to_string(), |c| c.to_string());
     let _ = writeln!(
         s,
-        "Job '{workload_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
+        "Job '{workload_name}' failed. (exit code {exit_display}, took {took_human}, attempts {attempts_str})"
     );
     if !stderr_tail.is_empty() {
         // Per step 02-05 / ADR-0033 Amendment 2026-05-10: the header
@@ -1029,8 +1031,11 @@ pub fn format_service_failed_block(
         ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts } => {
             format!("startup probe[{probe_idx}] failed after {attempts} attempts: {last_fail}")
         }
-        ServiceFailureReason::EarlyExit { exit_code } => {
-            format!("workload exited early with code {exit_code}")
+        ServiceFailureReason::EarlyExit { exit_code: Some(code) } => {
+            format!("workload exited early with code {code}")
+        }
+        ServiceFailureReason::EarlyExit { exit_code: None } => {
+            "workload killed by signal before startup probe could pass".to_string()
         }
         ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts } => {
             format!("liveness probe[{probe_idx}] failed after {attempts} attempts")
@@ -1069,7 +1074,14 @@ pub fn format_service_failed_block(
     // must NEVER render the misleading `(took live)` success phrasing
     // for an early exit.
     if let ServiceFailureReason::EarlyExit { exit_code } = reason {
-        let _ = writeln!(s, "  exit_code: {exit_code}");
+        match exit_code {
+            Some(code) => {
+                let _ = writeln!(s, "  exit_code: {code}");
+            }
+            None => {
+                let _ = writeln!(s, "  exit_code: none (killed by signal)");
+            }
+        }
         if let Some((elapsed_secs, startup_deadline_secs)) = early_exit_timing {
             let _ = writeln!(
                 s,

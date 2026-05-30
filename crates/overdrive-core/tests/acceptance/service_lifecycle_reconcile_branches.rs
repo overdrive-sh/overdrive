@@ -402,7 +402,7 @@ fn early_exit_fires_when_failed_within_deadline_no_pass() {
                 }),
         } => {
             assert_eq!(alloc_id.as_str(), "alloc-svc-1");
-            assert_eq!(*exit_code, 42, "exit_code must be propagated from fact.exit_code");
+            assert_eq!(*exit_code, Some(42), "exit_code must be propagated from fact.exit_code");
         }
         other => panic!("expected EarlyExit, got {other:?}"),
     }
@@ -1622,12 +1622,54 @@ proptest! {
             a,
             Action::FinalizeFailed {
                 terminal: Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { exit_code: 0 },
+                    reason: ServiceFailureReason::EarlyExit { exit_code: Some(0) },
                 }),
                 ..
             }
         ));
         prop_assert!(early_exit_zero, "exit-0-within-deadline IS EarlyExit{{exit_code:0}}; got {actions:?}");
+    }
+}
+
+// ===================================================================
+// Regression — signal-killed alloc must carry None exit_code
+// ===================================================================
+
+/// Before this fix, `unwrap_or(0)` mapped `None` → `0`, making a
+/// SIGKILL look like a clean exit to operators.
+#[test]
+fn signal_killed_alloc_carries_none_exit_code() {
+    let f = fact(
+        "svc-sigkill-0",
+        AllocState::Failed,
+        1_000,
+        None, // signal-killed — no exit code
+        None, // no startup Pass observed
+        u32::MAX,
+        Duration::from_secs(60),
+    );
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, _next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &ServiceLifecycleView::default(),
+        &tick_at_ms(2_000),
+    );
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        Action::FinalizeFailed {
+            terminal:
+                Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::EarlyExit { exit_code },
+                }),
+            ..
+        } => {
+            assert_eq!(
+                *exit_code, None,
+                "signal-killed alloc must carry exit_code: None, not Some(0)"
+            );
+        }
+        other => panic!("expected EarlyExit with None exit_code, got {other:?}"),
     }
 }
 

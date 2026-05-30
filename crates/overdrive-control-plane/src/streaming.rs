@@ -299,7 +299,7 @@ pub fn build_workload_stream(
                                 &*obs, &runtime, &workload_id,
                             ).await;
                             let terminal = JobSubmitEvent::Failed {
-                                exit_code: -1,
+                                exit_code: Some(-1),
                                 duration: String::new(),
                                 attempts,
                                 max_attempts: attempts,
@@ -321,7 +321,7 @@ pub fn build_workload_stream(
                         &*obs, &runtime, &workload_id,
                     ).await;
                     let terminal = JobSubmitEvent::Failed {
-                        exit_code: -1,
+                        exit_code: Some(-1),
                         duration: format!("{after_seconds}s"),
                         attempts,
                         max_attempts: attempts,
@@ -455,14 +455,14 @@ async fn workload_event_from_terminal(
             attempts: attempt_index,
         },
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration: event.at.clone(),
             attempts: *attempts,
             max_attempts: *attempts,
             stderr_tail,
         },
         _ => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration: event.at.clone(),
             attempts: attempt_index,
             max_attempts: attempt_index,
@@ -505,14 +505,14 @@ async fn workload_terminal_from_snapshot(
             JobSubmitEvent::Stopped { stopped_by: *by, duration, attempts: attempt_index }
         }
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration,
             attempts: *attempts,
             max_attempts: *attempts,
             stderr_tail,
         },
         _ => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration,
             attempts: attempt_index,
             max_attempts: attempt_index,
@@ -610,7 +610,7 @@ pub enum JobSubmitEvent {
     /// exit on every attempt. CLI exit code = workload kernel exit
     /// code (per slice 02 KPI K1 honesty contract).
     Failed {
-        exit_code: i32,
+        exit_code: Option<i32>,
         duration: String,
         attempts: u32,
         max_attempts: u32,
@@ -1174,13 +1174,13 @@ mod tests {
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
         let event = make_lifecycle_event(&alloc_id, &wl_id);
-        let cond = TerminalCondition::Failed { exit_code: 42 };
+        let cond = TerminalCondition::Failed { exit_code: Some(42) };
 
         let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
-                assert_eq!(exit_code, 42);
+                assert_eq!(exit_code, Some(42));
                 assert_eq!(attempts, 1);
                 assert_eq!(max_attempts, 1);
             }
@@ -1225,7 +1225,7 @@ mod tests {
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
-                assert_eq!(exit_code, 1);
+                assert_eq!(exit_code, Some(1));
                 assert_eq!(attempts, 5);
                 assert_eq!(max_attempts, 5);
             }
@@ -1268,13 +1268,13 @@ mod tests {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let event = make_lifecycle_event(&alloc_id, &wl_id);
-        let cond = TerminalCondition::Failed { exit_code: 137 };
+        let cond = TerminalCondition::Failed { exit_code: Some(137) };
 
         let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
-                assert_eq!(exit_code, 137);
+                assert_eq!(exit_code, Some(137));
                 assert_eq!(attempts, 3, "2 restarts → attempt_index 3");
                 assert_eq!(max_attempts, 3);
             }
@@ -1386,14 +1386,14 @@ mod tests {
             &alloc_id,
             &wl_id,
             &node,
-            Some(TerminalCondition::Failed { exit_code: 137 }),
+            Some(TerminalCondition::Failed { exit_code: Some(137) }),
         );
         obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. }) => {
-                assert_eq!(exit_code, 137);
+                assert_eq!(exit_code, Some(137));
                 assert_eq!(attempts, 1);
                 assert_eq!(max_attempts, 1);
             }
@@ -1448,7 +1448,7 @@ mod tests {
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. }) => {
-                assert_eq!(exit_code, 1);
+                assert_eq!(exit_code, Some(1));
                 assert_eq!(attempts, 3);
                 assert_eq!(max_attempts, 3);
             }

@@ -950,9 +950,9 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
         return TerminalCondition::Completed { exit_code: 0 };
     }
     if let Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) = row.reason {
-        return TerminalCondition::Failed { exit_code: exit_code.unwrap_or(0) };
+        return TerminalCondition::Failed { exit_code };
     }
-    TerminalCondition::Failed { exit_code: 0 }
+    TerminalCondition::Failed { exit_code: Some(0) }
 }
 
 /// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.

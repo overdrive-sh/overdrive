@@ -916,7 +916,7 @@ async fn consume_stream_job(
                         outcome: acc.outcome,
                         endpoint,
                         next_command,
-                        exit_code,
+                        exit_code: exit_code.unwrap_or(1),
                         summary,
                         streaming_reason: None,
                         streaming_error: stderr_tail,

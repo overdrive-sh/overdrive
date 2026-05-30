@@ -69,7 +69,9 @@ fn arb_service_failure_reason() -> impl Strategy<Value = ServiceFailureReason> {
                 ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts }
             }
         ),
-        (-128i32..128).prop_map(|exit_code| { ServiceFailureReason::EarlyExit { exit_code } }),
+        (-128i32..128).prop_map(|exit_code| {
+            ServiceFailureReason::EarlyExit { exit_code: Some(exit_code) }
+        }),
         (0u32..8, 0u32..16).prop_map(|(probe_idx, attempts)| {
             ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts }
         }),

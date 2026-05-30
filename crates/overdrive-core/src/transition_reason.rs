@@ -428,8 +428,10 @@ pub enum TerminalCondition {
     /// `137` (SIGKILL — typically OOM under cgroup-v2),
     /// `255` (generic shell failure). The full `i32` range is
     /// supported so the variant can carry signal-encoded statuses
-    /// if a future driver emits them.
-    Failed { exit_code: i32 },
+    /// if a future driver emits them. `None` means the process was
+    /// killed by a signal without producing an exit code (OOM-killer,
+    /// external SIGKILL).
+    Failed { exit_code: Option<i32> },
     /// `ServiceLifecycle`: the Service alloc has converged to a
     /// stable, fully-probed Running state per ADR-0055 / ADR-0056.
     /// All declared startup probes (or the inferred default per
@@ -509,7 +511,7 @@ pub enum ServiceFailureReason {
     /// Workload exited before any startup probe could pass AND
     /// within `startup_deadline` window. Closes RCA-A coinflip
     /// case per US-08.
-    EarlyExit { exit_code: i32 },
+    EarlyExit { exit_code: Option<i32> },
     /// Liveness probe consecutive-failure count reached its
     /// threshold AND restart-budget reached
     /// `RESTART_BACKOFF_CEILING`. Composes with the existing
