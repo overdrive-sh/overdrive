@@ -103,9 +103,9 @@ pub const SCAFFOLD: bool = false;
 /// produced the row).
 ///
 /// `LifecycleEvent` is the broadcast payload, NOT the wire type. The
-/// streaming `SubmitEvent::LifecycleTransition` is constructed FROM a
-/// `LifecycleEvent` in slice 02 step 02-02 / 02-03. For that reason
-/// `LifecycleEvent` derives only `Debug + Clone` — NOT
+/// per-kind streaming event (`JobSubmitEvent` / `ServiceSubmitEvent`)
+/// is constructed FROM a `LifecycleEvent` by the streaming loop. For
+/// that reason `LifecycleEvent` derives only `Debug + Clone` — NOT
 /// `Serialize`/`Deserialize`/`ToSchema`. That property is what the
 /// trybuild fixture defends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -478,11 +478,10 @@ async fn dispatch_single(
         // § "Persist inputs, not derived state". Wire consumers wanting
         // the "we gave up after N" / "exited cleanly" / "exited with N"
         // framing render it from `terminal` directly. The streaming
-        // dispatcher's `submit_event_from_terminal` projection consumes
-        // the variants — the explicit Job-kind mapping
-        // (`Completed → Succeeded`, `Failed → Failed`) lands in slice
-        // 02-06; until then both variants flow through the wildcard
-        // `_ => (deleted legacy)` arm so the stream still terminates.
+        // dispatcher's `workload_event_from_terminal` projection maps
+        // each `TerminalCondition` to its `JobSubmitEvent`
+        // (`Completed → Succeeded`, `Failed → Failed`,
+        // `BackoffExhausted → Failed`, `Stopped → Stopped`).
         Action::FinalizeFailed { alloc_id, terminal } => {
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 // No prior row — nothing to finalize against. This is
@@ -545,7 +544,7 @@ async fn dispatch_single(
                 // last failed Start/RestartAllocation populates `detail`
                 // with the `DriverError::StartRejected.reason_text`
                 // (per the StartAllocation arm above); the streaming
-                // surface's `(deleted legacy).error` field reads this
+                // surface's failed-terminal rendering reads this
                 // through `event.detail`. Hardcoding `None` here would
                 // drop the operator-visible cause text on the
                 // budget-exhausted terminal, even though the prior

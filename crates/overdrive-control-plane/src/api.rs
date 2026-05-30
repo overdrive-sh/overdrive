@@ -413,8 +413,8 @@ pub struct OverdriveApi;
 // derive change in `overdrive-core::traits::driver`), which lands in this
 // same step.
 //
-// The streaming `SubmitEvent` declaration (which carries the same
-// `TransitionSource` chain) is deferred to slice 02 step 02-02 so it can
+// The streaming-event declarations (which carry the same
+// `TransitionSource` chain) are deferred to slice 02 step 02-02 so they can
 // land in lockstep with the broadcast-channel wiring in `AppState` and
 // the NDJSON streaming handler. Both surfaces share the SAME
 // `TransitionReason` enum re-exported from `overdrive-core` —
@@ -527,7 +527,7 @@ pub enum TransitionSource {
 
 /// Lifecycle-transition record carried inside the snapshot's
 /// `last_transition` block per ADR-0033 §1 and on the streaming
-/// `SubmitEvent::LifecycleTransition` event per ADR-0032 §3.
+/// `LifecycleEvent` broadcast payload per ADR-0032 §3.
 ///
 /// Both surfaces share the SAME `TransitionRecord` shape — the
 /// type-identity assertion in
@@ -554,7 +554,7 @@ pub struct TransitionRecord {
     /// Wire-state the allocation moved to.
     pub to: AllocStateWire,
     /// Structured cause for this transition. SAME enum as the streaming
-    /// `SubmitEvent::LifecycleTransition.reason` — pinned by
+    /// `LifecycleEvent.reason` — pinned by
     /// S-AS-02's compile-time witness.
     pub reason: TransitionReason,
     /// Who/what produced this row write.

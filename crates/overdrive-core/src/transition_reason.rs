@@ -1,5 +1,5 @@
 // `TransitionReason` is the load-bearing single-source-of-truth enum from
-// ADR-0032 §3 / ADR-0033 §1. Both the streaming `SubmitEvent::LifecycleTransition`
+// ADR-0032 §3 / ADR-0033 §1. Both the streaming `LifecycleEvent`
 // surface and the snapshot `AllocStatusRowBody.last_transition.reason`
 // surface serialise the SAME variant; byte-equality across surfaces is a
 // structural property guaranteed by the type system, not by discipline.

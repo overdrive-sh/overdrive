@@ -1,6 +1,6 @@
 //! Render-function tests for `format_stopped_summary` — the
 //! operator-facing exit-0 success render fired when the streaming
-//! consumer observes `SubmitEvent::(deleted legacy)`.
+//! consumer observes a `Stopped` terminal event.
 //!
 //! Pure-function fixture — no I/O, no server. One test per
 //! `StoppedBy` variant; each asserts the rendered string contains the

@@ -326,20 +326,20 @@ pub async fn stop(args: StopArgs) -> Result<StopOutput, CliError> {
 ///
 /// Per slice 02 step 02-04 acceptance criteria, `submit_streaming`
 /// consumes the `application/x-ndjson` stream until a terminal
-/// (deleted legacy variant) or (deleted legacy variant) event arrives. The handler
+/// `Succeeded` or `Failed` event arrives. The handler
 /// returns this typed shape carrying:
 ///
 ///  * `Accepted`-event-derived fields (`workload_id`, `intent_key`,
 ///    `spec_digest`, `outcome`) — same shape as the one-shot ack lane
 ///    so existing renderer/tests keep their assertion shapes.
-///  * `exit_code` — 0 on (deleted legacy variant), 1 on (deleted legacy variant). The
+///  * `exit_code` — 0 on `Succeeded`, non-zero on `Failed`. The
 ///    binary wrapper at `main.rs` surfaces this as the process exit
 ///    code, satisfying ADR-0032 §9.
 ///  * `summary` — operator-facing rendered text written to stdout (the
-///    success summary line for `Running`, the structured `Error:` block
+///    success summary line for `Succeeded`, the structured `Error:` block
 ///    for `Failed`).
-///  * `terminal_reason` / `streaming_reason` / `streaming_error` —
-///    typed projections of the terminal `SubmitEvent` payloads, used
+///  * `streaming_reason` / `streaming_error` —
+///    typed projections of the terminal event payloads, used
 ///    by the S-WS-02 KPI-02 byte-equality assertions.
 ///
 /// Pre-Accepted failures (4xx/5xx, transport errors, malformed spec)
@@ -360,21 +360,21 @@ pub struct SubmitStreamingOutput {
     pub endpoint: Url,
     /// Next-command hint — `overdrive alloc status --job <workload_id>`.
     pub next_command: String,
-    /// CLI exit code per ADR-0032 §9: 0 for (deleted legacy variant), 1 for
-    /// (deleted legacy variant). Mapping of pre-Accepted errors → 2 lives in
-    /// [`crate::render::cli_error_to_exit_code`].
+    /// CLI exit code per ADR-0032 §9: 0 for `Succeeded`, the workload's
+    /// kernel-observed exit code for `Failed`. Mapping of pre-Accepted
+    /// errors → 2 lives in [`crate::render::cli_error_to_exit_code`].
     pub exit_code: i32,
     /// Operator-facing rendered text written to stdout — the success
-    /// summary for `Running`, or the structured `Error:` block for
+    /// summary for `Succeeded`, or the structured `Error:` block for
     /// `Failed`.
     pub summary: String,
     /// Last cause-class `TransitionReason` observed on the broadcast
-    /// bus before terminal — typically the most recent
-    /// `LifecycleTransition.reason` carrying a failure variant. `None`
+    /// bus before terminal — typically the most recent failure-carrying
+    /// lifecycle transition reason. `None`
     /// when no failure transitions were observed.
     pub streaming_reason: Option<TransitionReason>,
-    /// Verbatim driver error text from the `(deleted legacy).error`
-    /// field. `None` on the happy path.
+    /// Verbatim driver error text from the terminal `Failed` event.
+    /// `None` on the happy path.
     pub streaming_error: Option<String>,
 }
 
@@ -390,7 +390,8 @@ pub struct SubmitStreamingOutput {
 /// 3. Consumes the response body line-by-line via
 ///    `reqwest::Response::bytes_stream()` + a `BytesMut`-backed line
 ///    splitter that tolerates partial chunks crossing recv boundaries.
-/// 4. Deserialises each line into [`SubmitEvent`] and matches on the
+/// 4. Deserialises each line into the per-kind streaming event enum
+///    (`JobSubmitEvent` / `ServiceSubmitEvent`) and matches on the
 ///    event kind — `Accepted` populates the output prefix; lifecycle
 ///    transitions accumulate the latest cause-class reason; terminal
 ///    events compute the rendered summary + exit code and return.
@@ -399,9 +400,9 @@ pub struct SubmitStreamingOutput {
 ///
 /// Same shapes as [`submit`] — pre-Accepted failures bubble up as
 /// [`CliError`] variants. Once `Accepted` arrives this function does
-/// not return `Err` for terminal failures: a (deleted legacy variant) event
-/// is a successful termination of the stream that maps to exit code 1
-/// via [`SubmitStreamingOutput::exit_code`].
+/// not return `Err` for terminal failures: a `Failed` event
+/// is a successful termination of the stream that maps to a non-zero
+/// exit code via [`SubmitStreamingOutput::exit_code`].
 ///
 /// # Panics
 ///
@@ -446,8 +447,8 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
 
 /// Submit a Job-kind spec via the streaming NDJSON lane and consume to
 /// terminal. Per ADR-0047 §3 [D2] / [D7]: Job kind has run-to-
-/// completion semantics — (deleted legacy variant) is structurally
-/// unreachable; the terminal verdict is `Succeeded` (exit 0) or
+/// completion semantics — `Running` is informational and never
+/// terminal; the terminal verdict is `Succeeded` (exit 0) or
 /// `Failed` (non-zero exit code or backoff exhausted). The CLI
 /// process exit code equals the workload's kernel-observed exit code.
 async fn submit_streaming_job(
@@ -725,17 +726,16 @@ async fn consume_stream(
 }
 
 /// Drive a Job-kind streaming submit to terminal — slice 02 of
-/// Drive a Job-kind streaming submit to terminal — slice 02 of
 /// `workload-kind-discriminator`.
 /// Per ADR-0047 §3 [D2]: Job-kind has run-to-completion semantics.
-/// Unlike Service-kind, (deleted legacy variant) is NOT a terminal event;
+/// Unlike Service-kind, `Running` is NOT a terminal event;
 /// the terminal verdict is `Succeeded` (workload exit 0) or `Failed`
 /// (non-zero exit code observed). The CLI process exit code equals
 /// the workload's kernel-observed exit code per KPI K1.
 ///
 /// Per slice 02-06 the wire format is the typed sibling-event enum
-/// [`JobSubmitEvent`] (ADR-0047 §3 [D7]); (deleted legacy variant) is
-/// structurally absent on this code path because the type carries
+/// [`JobSubmitEvent`] (ADR-0047 §3 [D7]); a converged-running terminal
+/// is structurally absent on this code path because the type carries
 /// no equivalent variant. This consumer projects
 /// `JobSubmitEvent::Succeeded` → `format_job_succeeded_summary`,
 /// `JobSubmitEvent::Failed` → `format_job_failed_summary`,
@@ -937,7 +937,7 @@ async fn consume_stream_job(
     })
 }
 
-/// Internal accumulator for the `SubmitEvent::Accepted` fields, used to
+/// Internal accumulator for the streaming `Accepted` event fields, used to
 /// build [`SubmitStreamingOutput`] when the terminal event arrives.
 struct AcceptedFields {
     workload_id: String,

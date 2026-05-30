@@ -184,7 +184,8 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 // on `Accept` per DESIGN [D6] / [D8]. The path declares both content
 // types under a single 200 response — `application/json` returns a
 // one-shot `SubmitWorkloadResponse`; `application/x-ndjson` returns a
-// stream of `SubmitEvent` lines. utoipa 5.x's `responses(..., content(
+// stream of per-kind streaming-event lines (`JobSubmitEvent` /
+// `ServiceSubmitEvent`). utoipa 5.x's `responses(..., content(
 // (T1 = "mime1"), (T2 = "mime2") ))` group form is the multi-content-
 // type shape (see utoipa-gen 5.4.0 src/path/response.rs §"content"
 // branch).

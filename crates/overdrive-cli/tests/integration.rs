@@ -26,7 +26,7 @@ mod integration {
     mod walking_skeleton;
 
     // Slice 02 step 02-04 — Tier 3 streaming submit:
-    //   * S-WS-01 (happy path: real `/bin/sleep` → (deleted legacy) → exit 0)
+    //   * S-WS-01 (happy path: real `/bin/sleep` → Succeeded → exit 0)
     // Legacy Service-kind streaming integration tests
     // (`streaming_submit_broken_binary`, `streaming_submit_converged_stopped`,
     // `streaming_submit_happy_path`) were removed in step 01-03e3

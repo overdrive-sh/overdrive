@@ -7,34 +7,33 @@
 //!
 //! The handler in [`crate::handlers::submit_workload`] branches on the
 //! `Accept` header. The `application/x-ndjson` lane delegates here:
-//! `streaming_submit_loop` builds a stream of `Result<Bytes, _>`
+//! [`build_workload_stream`] builds a stream of `Result<Bytes, _>`
 //! NDJSON lines that axum wraps via `Body::from_stream(...)`.
 //!
-//! The first line (`SubmitEvent::Accepted`) is emitted SYNCHRONOUSLY
+//! The first line ([`JobSubmitEvent::Accepted`]) is emitted SYNCHRONOUSLY
 //! after `IntentStore::put_if_absent` returns. No broadcast wait,
 //! no observation read.
 //!
 //! After `Accepted` the loop subscribes to
 //! `app_state.lifecycle_events` and enters a `tokio::select!` between:
 //!
-//! 1. `bus.recv()` — projects each `LifecycleEvent` to a
-//!    `SubmitEvent::LifecycleTransition` line, then checks for terminal.
+//! 1. `bus.recv()` — projects each `LifecycleEvent` to an intermediate
+//!    [`JobSubmitEvent`] (`Pending` / `Running` / `AttemptFailed`),
+//!    then checks for terminal.
 //! 2. `clock.sleep(cap)` — wall-clock cap timer. Production
 //!    (`SystemClock`) parks on a real timer; DST (`SimClock`) parks
 //!    until the harness calls `sim_clock.tick(cap + ε)`. On expiry,
-//!    emits `(deleted legacy) { Timeout }` and ends the stream.
+//!    emits a terminal `JobSubmitEvent::Failed` (`exit_code = -1`,
+//!    "did not converge in Ns") and ends the stream.
 //!
-//! Terminal detection per architecture.md §4 / ADR-0032 §3 Amendment:
+//! Terminal detection per architecture.md §4 / ADR-0032 §3 Amendment —
+//! each `TerminalCondition` projects to a terminal [`JobSubmitEvent`]:
 //!
-//! - `state == Running && replicas_running >= replicas_desired` →
-//!   `(deleted legacy) { alloc_id, started_at }`.
-//! - `state == Failed && restart_budget.exhausted` (read off
-//!   `view_cache`) → `(deleted legacy) { BackoffExhausted { attempts,
-//!   cause: <last cause-class TransitionReason from row> } }`.
-//! - `state == Terminated` → `(deleted legacy) { alloc_id, by }` where
-//!   `by` is extracted from `TransitionReason::Stopped { by }` or
-//!   defaults to `StoppedBy::Reconciler`.
-//! - cap timer → `(deleted legacy) { Timeout { after_seconds } }`.
+//! - `TerminalCondition::Completed { exit_code }` → `Succeeded`.
+//! - `TerminalCondition::Failed { exit_code }` → `Failed`.
+//! - `TerminalCondition::BackoffExhausted { attempts }` → `Failed`
+//!   (the workload exhausted its restart budget).
+//! - `TerminalCondition::Stopped { by }` → `Stopped`.
 //!
 //! On `RecvError::Lagged(_)`, the loop falls back to a one-shot
 //! `obs.alloc_status_rows()` snapshot per ADR-0032 §7 and resumes the
@@ -48,14 +47,14 @@
 //! the loop:
 //!
 //! 1. Live event delivery — the `bus.recv()` arm projects each
-//!    `LifecycleEvent` and runs `check_terminal` against the obs store.
+//!    `LifecycleEvent` and runs the terminal check against the obs store.
 //! 2. `RecvError::Lagged(_)` — buffer-overflow: a slow subscriber fell
 //!    behind and the broadcast channel evicted older messages. Bridged
 //!    by the `lagged_recover` snapshot in the `Lagged` arm.
 //! 3. `RecvError::Closed` — the `lifecycle_events` sender was dropped;
-//!    the loop emits a (deleted legacy variant) terminal and ends.
-//! 4. Cap timer — `clock.sleep(cap)` fires; the loop emits
-//!    `(deleted legacy) { Timeout }` and ends.
+//!    the loop emits a terminal `JobSubmitEvent::Failed` and ends.
+//! 4. Cap timer — `clock.sleep(cap)` fires; the loop emits a terminal
+//!    `JobSubmitEvent::Failed` and ends.
 //! 5. **Pre-subscription event window** — the upstream `put_if_absent`
 //!    write may trigger the convergence loop *before* `bus.subscribe()`
 //!    runs in this stream. `tokio::sync::broadcast::Sender::send` only
@@ -66,7 +65,7 @@
 //!    by a one-shot `lagged_recover` snapshot taken immediately after
 //!    `bus.subscribe()` and before the select loop is entered: if the
 //!    latest row for the job is already terminal, the snapshot
-//!    projects it to a terminal `SubmitEvent` and the stream ends
+//!    projects it to a terminal [`JobSubmitEvent`] and the stream ends
 //!    without entering the loop.
 
 // `async_stream::stream!` macro expansions trigger several pedantic
@@ -140,9 +139,9 @@ impl std::io::Write for BytesMutW<'_> {
 /// emits before entering the Job-kind streaming loop.
 ///
 /// Per ADR-0047 §3 [D7]: Job-kind submits stream the per-kind sibling
-/// event enum [`JobSubmitEvent`]; the `Accepted` variant mirrors the
-/// existing legacy `SubmitEvent::Accepted` shape so wire-format
-/// migration is a renamed-tag change, not a payload change.
+/// event enum [`JobSubmitEvent`]; `Accepted` is the synchronous
+/// first NDJSON line, emitted before the loop subscribes to the
+/// lifecycle bus.
 #[must_use]
 pub fn build_workload_accepted(
     spec_digest: String,
@@ -155,9 +154,9 @@ pub fn build_workload_accepted(
 /// Build the streaming response body for the Job-kind NDJSON lane.
 ///
 /// Per ADR-0047 §3 [D7]: Job-kind streams the per-kind sibling-event
-/// enum [`JobSubmitEvent`]; the legacy flat [`SubmitEvent::(deleted legacy)`]
-/// variant is structurally unreachable on this code path because the
-/// type carries no equivalent variant — Jobs are run-to-completion and
+/// enum [`JobSubmitEvent`]. A false-positive "converged / running"
+/// terminal is structurally unreachable on this code path because the
+/// type carries no such variant — Jobs are run-to-completion and
 /// `Running` is informational only.
 ///
 /// Contract (per `.claude/rules/development.md` § *Trait definitions
@@ -179,8 +178,8 @@ pub fn build_workload_accepted(
 ///     observed within the wall-clock budget — distinguished from a
 ///     genuine non-zero exit by the sentinel `-1`).
 ///   - Broadcast `Closed` → `Failed { exit_code: -1 }` (server-side
-///     stream interruption — analogous to `TerminalReason::StreamInterrupted`
-///     on the legacy lane).
+///     stream interruption — the Service-kind lane surfaces the same
+///     condition as `ServiceFailureReason::StreamInterrupted`).
 ///   - Pre-subscribe race / `Lagged(_)` → snapshot-and-classify the
 ///     latest LWW-winner row; emit the matching terminal if reached.
 /// - **Observable invariants**: every Job-kind submit produces exactly
@@ -208,9 +207,9 @@ pub fn build_workload_stream(
             }
         }
 
-        // 2. Subscribe BEFORE the pre-subscribe snapshot recovery — same
-        //    ordering as `build_stream` to bridge the pre-subscribe
-        //    event window per architecture.md §10 / ADR-0032 §7.
+        // 2. Subscribe BEFORE the pre-subscribe snapshot recovery to
+        //    bridge the pre-subscribe event window per architecture.md
+        //    §10 / ADR-0032 §7.
         let mut sub = bus.subscribe();
         drop(bus);
 
@@ -342,8 +341,8 @@ pub fn build_workload_stream(
 }
 
 /// One NDJSON line for a [`JobSubmitEvent`] —
-/// `serde_json::to_writer(buf, &event)?` + `b'\n'`. Mirror of
-/// [`emit_line`] for the legacy [`SubmitEvent`] surface.
+/// `serde_json::to_writer(buf, &event)?` + `b'\n'`. The Service-kind
+/// counterpart is [`emit_service_line`].
 fn emit_workload_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
     use std::io::Write as _;
     let mut buf = BytesMut::with_capacity(256);
@@ -553,13 +552,12 @@ async fn best_effort_attempt_count(
 // Per ADR-0047 §3 [D2] + [D7]: Job-kind submits stream a per-kind
 // sibling enum `JobSubmitEvent` whose variants make the historical
 // false-positive "is running with N/M replicas (took live)" rendering
-// structurally unreachable. The enum has NO (deleted legacy variant)
-// variant — the conjunction of RCA root causes B+C+D is rendered
-// impossible at the type level.
+// structurally unreachable — `Running` is informational, only an
+// exit-bearing terminal closes the stream. The conjunction of RCA
+// root causes B+C+D is rendered impossible at the type level.
 //
 // Job semantics (run-to-completion):
-//   * `Accepted` — synchronous first-line ack (mirrors the existing
-//     `SubmitEvent::Accepted` shape).
+//   * `Accepted` — synchronous first-line ack.
 //   * `Pending` — informational, allocation pending placement.
 //   * `Running { since }` — informational, NOT terminal. A Job is not
 //     "done" because it is currently running; it is done only when it
@@ -573,15 +571,15 @@ async fn best_effort_attempt_count(
 
 /// Streaming events emitted by the Job submit sub-path.
 ///
-/// Per ADR-0047 §3 [D2] / [D7]: Job kind has NO (deleted legacy variant)
-/// variant — the conjunction of RCA root causes B+C+D is rendered
-/// structurally unreachable for Job by the type system itself.
+/// Per ADR-0047 §3 [D2] / [D7]: Job kind has no "converged / running"
+/// terminal variant — the conjunction of RCA root causes B+C+D is
+/// rendered structurally unreachable for Job by the type system itself.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum JobSubmitEvent {
-    /// Submit was accepted. Mirrors `SubmitEvent::Accepted` — first
-    /// NDJSON line on the wire. Synchronous; no broadcast wait.
+    /// Submit was accepted. First NDJSON line on the wire.
+    /// Synchronous; no broadcast wait.
     Accepted {
         /// Canonical 64-char lowercase-hex SHA-256 of the rkyv-archived
         /// `WorkloadSpec::Job` bytes (ADR-0002).
@@ -657,7 +655,7 @@ pub enum JobSubmitEvent {
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ServiceSubmitEvent {
-    /// Submit was accepted. Mirrors `SubmitEvent::Accepted`.
+    /// Submit was accepted. First NDJSON line on the wire.
     Accepted { spec_digest: String, intent_key: String, outcome: crate::api::IdempotencyOutcome },
     /// Terminal — service reached the Stable state per ADR-0055
     /// (all declared startup probes passed within `startup_deadline`).
@@ -1007,23 +1005,22 @@ pub fn build_service_stream(
 /// Wire-shape declaration for the Schedule submit streaming sub-path.
 ///
 /// **Not currently emitted on any server code path.** `handlers.rs`
-/// routes `WorkloadKind::Schedule` through the legacy `build_stream`
-/// path, which emits [`SubmitEvent`]-shaped NDJSON. This enum is the
-/// forward-declared wire shape for when that dispatch is wired up;
+/// rejects `WorkloadKind::Schedule` at the submit validation step
+/// (HTTP 400) before any streaming dispatch. This enum is the
+/// forward-declared wire shape for when Schedule firing is wired up;
 /// tracked at GH #166.
 ///
 /// Per ADR-0047 §3 / [D7]: two variants, both emitted synchronously
-/// at submit time. `Accepted` mirrors the existing
-/// [`SubmitEvent::Accepted`] shape; `Registered` carries the cron
-/// expression echoed verbatim and the deferral tracking URL. The
-/// stream closes after `Registered` — Schedule has no firing
-/// semantics this slice (tracked at GH #166).
+/// at submit time. `Accepted` is the first NDJSON line; `Registered`
+/// carries the cron expression echoed verbatim and the deferral
+/// tracking URL. The stream closes after `Registered` — Schedule has
+/// no firing semantics this slice (tracked at GH #166).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ScheduleSubmitEvent {
-    /// Submit was accepted. Mirrors the existing `SubmitEvent::Accepted`
-    /// payload — `spec_digest` is the canonical 64-char lowercase-hex
+    /// Submit was accepted. The first NDJSON line on the wire —
+    /// `spec_digest` is the canonical 64-char lowercase-hex
     /// SHA-256 of the rkyv-archived `WorkloadSpec::Schedule` bytes;
     /// `intent_key` is the canonical `schedules/<id>` key; `outcome`
     /// is the idempotency verdict.

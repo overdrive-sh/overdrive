@@ -286,7 +286,7 @@ async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
 }
 
 // ===========================================================================
-// S-CP-01 — Streaming submit emits Accepted+LifecycleTransition+(deleted legacy)
+// S-CP-01 — Streaming submit emits Accepted+Running+Succeeded
 // ===========================================================================
 
 #[tokio::test]
@@ -410,8 +410,8 @@ async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Second submit — streaming lane, byte-identical spec. Pre-seed an
-    // already-Running row and also fire a synthetic (deleted legacy)
-    // path so the second call terminates without waiting for any
+    // already-Running row and also fire a synthetic `Completed`
+    // terminal so the second call terminates without waiting for any
     // additional transitions.
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
     let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
@@ -786,7 +786,7 @@ async fn s_cp_10_lagged_subscriber_recovers_via_observation_snapshot() {
 // check_terminal(), so `converged_stopped` is never emitted. The test
 // times out (or hits the 10s cap) and the final-line assertion fails.
 // GREEN lands in step 01-02 when check_terminal() gains a Terminated
-// arm that emits (deleted legacy).
+// arm that emits `Stopped`.
 // ===========================================================================
 
 #[tokio::test]
@@ -1002,11 +1002,11 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
 // AFTER the upstream put_if_absent has already triggered the convergence
 // loop. With the obs row pre-seeded and no LifecycleEvent broadcast
 // (subscribe happens too late), the streaming loop hangs until the 60s
-// cap timer fires, emitting a false (deleted legacy) { Timeout }.
+// cap timer fires, emitting a false `Failed` (timeout) terminal.
 //
 // GREEN lands in step 01-02 when build_stream gains a lagged_recover
 // snapshot call between bus.subscribe() and the loop, projecting the
-// pre-existing Running row to (deleted legacy) synchronously.
+// pre-existing Running row to a terminal event synchronously.
 //
 // Carries #[ignore] so lefthook nextest-affected pre-commit pass stays
 // green between this commit and the GREEN commit. The GREEN step un-
@@ -1191,7 +1191,7 @@ async fn attempt_failed_exit_code_comes_from_workload_crashed_immediately_reason
     }
 
     // Advance the SimClock past the 60s cap — this closes the stream with
-    // a (deleted legacy){Timeout} terminal, which is after the AttemptFailed
+    // a `Failed` (timeout) terminal, which is after the AttemptFailed
     // line we care about.
     sim_clock.tick(Duration::from_secs(61));
     for _ in 0..50 {
@@ -1224,7 +1224,7 @@ async fn attempt_failed_exit_code_comes_from_workload_crashed_immediately_reason
 /// re-submit with `workload_kind: None` (defaults to `Service`) would
 /// dispatch through the Service streaming path (`build_stream`), whose
 /// `submit_event_from_terminal` has no `Completed` arm — it falls through
-/// to (deleted legacy variant), reporting a successful Job exit as a failure.
+/// to a `Failed` projection, reporting a successful Job exit as a failure.
 ///
 /// The fix re-writes the kind discriminator on the `Unchanged` path so
 /// streaming dispatch always matches what the reconciler uses.

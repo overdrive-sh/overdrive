@@ -312,13 +312,14 @@ pub fn cli_error(err: &CliError) -> String {
 /// Per slice 02 step 02-04 acceptance criteria S-CLI-05: every
 /// pre-Accepted failure shape (`HttpStatus`, `Transport`, `BodyDecode`,
 /// `InvalidSpec`, `ConfigLoad`) maps to exit code **2**. Convergence
-/// outcomes ((deleted legacy variant) / (deleted legacy variant)) are emitted on the
-/// streaming success path and map to 0 / 1 respectively (see
+/// outcomes (`Succeeded` / `Failed`) are emitted on the
+/// streaming success path and map to exit 0 / the workload's non-zero
+/// exit code respectively (see
 /// [`crate::commands::job::submit_streaming`]); they never flow through
 /// this function.
 ///
-/// Exit code 1 is reserved for (deleted legacy variant) only — the workload
-/// reached the server but did not converge to running. Exit code 2 is
+/// A non-zero streaming exit signals the workload reached the server
+/// but exited non-zero (or did not converge to running). Exit code 2 is
 /// "the CLI never got past pre-Accepted plumbing" — the operator
 /// distinguishes this from "the workload itself failed" via the exit
 /// code alone.
@@ -342,7 +343,7 @@ pub const fn cli_error_to_exit_code(err: &CliError) -> i32 {
 // ---------------------------------------------------------------------------
 //
 // Per ADR-0047 §3 [D2] / [D7]: Job kind workloads are run-to-completion;
-// they have no (deleted legacy variant) shape. The structural fix closing the
+// they have no converged-running terminal shape. The structural fix closing the
 // bug under audit (RCA: B+C+D conjunction) renders Job-kind submits via
 // these dedicated functions whose output cannot contain the historical
 // `"is running with"` substring patterns.
@@ -466,14 +467,13 @@ pub fn format_job_attempt_failed(
     )
 }
 
-/// Render the streaming (deleted legacy variant) summary line — the
+/// Render the streaming running summary line — the
 /// operator-facing exit-0 success render. Pure function.
 ///
 /// Per slice 04 of `workload-kind-discriminator`: the function's sole
 /// caller is the Service code path (post-WorkloadSpec discriminator),
-/// so the rendered vocabulary names "Service". The legacy "Job"
-/// vocabulary was renamed in a single-cut greenfield migration —
-/// `JobSubmitEvent` carries no (deleted legacy variant) variant in the
+/// so the rendered vocabulary names "Service".
+/// `JobSubmitEvent` carries no converged-running terminal variant in the
 /// post-slice-02 tagged-event design. The literal `"live"` (RCA root
 /// cause D) is gone; the `took_human` argument carries a measured
 /// Clock-derived value rendered by `format_human_duration`.
@@ -495,7 +495,7 @@ pub fn format_running_summary(
 ///
 /// Replaces the historical `"live"` literal (US-06 of
 /// `workload-kind-discriminator`) used as a duration placeholder in
-/// the streaming (deleted legacy variant) summary. The output format is
+/// the streaming running summary. The output format is
 /// chosen for human readability at typical convergence latencies
 /// (single-digit ms to a few seconds):
 ///
@@ -748,7 +748,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
     }
 }
 
-/// Render the streaming (deleted legacy variant) summary line — the
+/// Render the streaming stopped summary line — the
 /// operator-facing exit-0 success render fired when a workload
 /// reaches a clean terminal stop. Pure function.
 ///
@@ -997,10 +997,10 @@ pub fn probes_section(
 /// Render the operator-facing `Failed` block for a Service workload
 /// per ADR-0056 / ADR-0059. Pure function.
 ///
-/// Mirror of the deleted legacy `format_failed_block` adapted to the
-/// typed `ServiceFailureReason` discriminator. The five-section shape
-/// (header / reason / last-event / reproducer / hint) is preserved
-/// for renderer continuity.
+/// Renders the operator-facing `Failed` block against the typed
+/// `ServiceFailureReason` discriminator. The five-section shape
+/// (header / reason / last-event / reproducer / hint) gives the
+/// operator a consistent failure render.
 /// `early_exit_timing` carries `(elapsed_secs, startup_deadline_secs)`
 /// for the Slice 08 `EarlyExit` multi-line block (S-SHCP-CLI-07). It is
 /// rendered ONLY for the `EarlyExit` reason; `None` (or any non-
