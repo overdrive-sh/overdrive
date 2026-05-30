@@ -31,11 +31,14 @@
 )]
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::prober::{ExecProber, ProbeOutcome};
-use overdrive_worker::cgroup_manager::{CgroupPath, create_workloads_slice_with_controllers};
+use overdrive_host::RealCgroupFs;
+use overdrive_worker::cgroup_manager::{CgroupManager, CgroupPath};
 use overdrive_worker::probe_runner::CgroupExecProber;
 use serial_test::serial;
 
@@ -47,7 +50,10 @@ const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 /// the absolute scope path string the `ExecProber` API consumes.
 async fn make_scope(alloc: &AllocationId) -> String {
     let cgroup_root = Path::new(CGROUP_ROOT);
-    create_workloads_slice_with_controllers(cgroup_root)
+    let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    CgroupManager::new(cgroup_root.to_path_buf(), fs)
+        .create_workloads_slice_with_controllers()
+        .await
         .expect("workloads.slice bootstrap succeeds");
     let scope = CgroupPath::for_alloc(alloc);
     let dir = scope.resolve(cgroup_root);
@@ -64,7 +70,7 @@ async fn given_real_cgroup_scope_when_cgroup_exec_prober_runs_bin_true_then_retu
     let _cleanup = AllocCleanup::register(Path::new(CGROUP_ROOT).to_path_buf(), alloc.clone());
     let scope_path = make_scope(&alloc).await;
 
-    let prober = CgroupExecProber::new();
+    let prober = CgroupExecProber::new(Arc::new(RealCgroupFs::new()));
     let outcome = prober
         .probe(&["/bin/true".to_owned()], &scope_path, Duration::from_secs(5))
         .await
@@ -86,7 +92,7 @@ async fn given_real_cgroup_scope_when_cgroup_exec_prober_times_out_then_sigkill_
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let scope_path = make_scope(&alloc).await;
 
-    let prober = CgroupExecProber::new();
+    let prober = CgroupExecProber::new(Arc::new(RealCgroupFs::new()));
     let started = Instant::now();
     let outcome = prober
         .probe(&["/bin/sleep".to_owned(), "3600".to_owned()], &scope_path, Duration::from_secs(2))
@@ -140,7 +146,7 @@ async fn given_real_cgroup_scope_when_cgroup_exec_prober_runs_then_pid_membershi
     // Run the probe against a long-ish sleep so the child is alive
     // while we observe membership. A 4s timeout caps the probe; we
     // observe within the first second.
-    let prober = CgroupExecProber::new();
+    let prober = CgroupExecProber::new(Arc::new(RealCgroupFs::new()));
     let scope_for_probe = scope_path.clone();
     let probe_task = tokio::spawn(async move {
         prober

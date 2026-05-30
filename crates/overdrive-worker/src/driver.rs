@@ -1217,8 +1217,12 @@ mod lifecycle_hook_tests {
             Arc::new(ZeroClock),
             obs,
         ));
-        let driver = ExecDriver::new(PathBuf::from("/tmp/overdrive-test"), Arc::new(ZeroClock))
-            .with_probe_runner(Arc::clone(&runner));
+        let driver = ExecDriver::new(
+            PathBuf::from("/tmp/overdrive-test"),
+            Arc::new(ZeroClock),
+            Arc::new(overdrive_sim::SimCgroupFs::new()),
+        )
+        .with_probe_runner(Arc::clone(&runner));
         (driver, runner)
     }
 
@@ -1271,7 +1275,11 @@ mod lifecycle_hook_tests {
         // Driver constructed WITHOUT `with_probe_runner` — the field
         // is `None`; the trait default no-op path fires. Observable
         // outcome: no panic, no state change, no side effect.
-        let driver = ExecDriver::new(PathBuf::from("/tmp/overdrive-test"), Arc::new(ZeroClock));
+        let driver = ExecDriver::new(
+            PathBuf::from("/tmp/overdrive-test"),
+            Arc::new(ZeroClock),
+            Arc::new(overdrive_sim::SimCgroupFs::new()),
+        );
         let alloc_id = AllocationId::new("alloc-noop-1").expect("valid AllocationId");
         let spec = sample_spec(&alloc_id);
 

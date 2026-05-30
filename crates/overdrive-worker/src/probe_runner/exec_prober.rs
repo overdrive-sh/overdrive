@@ -41,28 +41,35 @@
     reason = "shared docstring style for the ProbeRunner subsystem"
 )]
 
-use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::prober::{ExecProber, ProbeFailure, ProbeOutcome};
 
-use crate::cgroup_manager::{CgroupPath, cgroup_kill, place_pid_in_scope};
+use crate::cgroup_manager::{CgroupManager, CgroupPath};
 
 /// Production `ExecProber` over `tokio::process::Command` +
-/// `place_pid_in_scope` (per ADR-0026 / ADR-0059 §2).
-pub struct CgroupExecProber;
+/// [`CgroupManager::place_pid_in_scope`] (per ADR-0026 / ADR-0059 §2).
+///
+/// Holds a [`CgroupManager`] rooted at `/`: [`split_scope`] strips the
+/// leading `/` from the absolute scope path the prober receives, and
+/// [`CgroupPath::resolve`] re-adds it against this root, so the
+/// reconstructed path is the exact absolute scope. The manager carries
+/// the injected `Arc<dyn CgroupFs>` so the prober writes through the
+/// SAME substrate the composition root probed (Earned Trust invariant
+/// per ADR-0054 § Composition root wiring) — production passes the real
+/// cgroupfs adapter, tests pass a real or Sim adapter.
+pub struct CgroupExecProber {
+    cgroup: CgroupManager,
+}
 
 impl CgroupExecProber {
     #[must_use]
-    pub const fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for CgroupExecProber {
-    fn default() -> Self {
-        Self::new()
+    pub fn new(fs: Arc<dyn CgroupFs>) -> Self {
+        Self { cgroup: CgroupManager::new(PathBuf::from("/"), fs) }
     }
 }
 
@@ -178,7 +185,6 @@ impl ExecProber for CgroupExecProber {
         }
 
         let scope = split_scope(cgroup_scope_path)?;
-        let root = Path::new("/");
 
         // Spawn the child. The binary is command[0]; command[1..] are
         // argv. stdout/stderr are discarded (Phase 1 — capture deferred
@@ -209,7 +215,7 @@ impl ExecProber for CgroupExecProber {
         // §3 QR2 — kill the child and surface ExecSpawnFailed (NOT
         // auto-retried by the runner).
         if let Some(pid) = child.id() {
-            if let Err(err) = place_pid_in_scope(root, &scope, pid).await {
+            if let Err(err) = self.cgroup.place_pid_in_scope(&scope, pid).await {
                 let _ = child.kill().await;
                 let _ = child.wait().await;
                 return Err(ProbeFailure::ExecSpawnFailed {
@@ -234,7 +240,7 @@ impl ExecProber for CgroupExecProber {
             // is reaped even if the cgroup write is a no-op on the
             // happy path.
             Err(_elapsed) => {
-                let _ = cgroup_kill(root, &scope).await;
+                let _ = self.cgroup.cgroup_kill(&scope).await;
                 let _ = child.kill().await;
                 let _ = child.wait().await;
                 Ok(ProbeOutcome::Fail { reason: timeout_reason(timeout) })
@@ -246,6 +252,8 @@ impl ExecProber for CgroupExecProber {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "test code per workspace convention")]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]

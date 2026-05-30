@@ -515,6 +515,13 @@ impl ControlPlaneError {
 /// decide whether to serialise immediately or attach headers first;
 /// [`IntoResponse`] wraps this in `Json(...)` for the axum handler path.
 #[must_use]
+// Exhaustive match over every `ControlPlaneError` variant — the
+// exhaustiveness IS the contract (a forgotten variant is a compile
+// error). The arm count crossed the 100-line ceiling as boot-time and
+// probe-runner variants accumulated; splitting the match would trade the
+// single-glance exhaustiveness guarantee for an arbitrary cut. Same
+// disposition as `run_server_with_obs_and_driver`.
+#[allow(clippy::too_many_lines)]
 pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
     use overdrive_core::aggregate::AggregateError;
     use overdrive_core::traits::intent_store::IntentStoreError;

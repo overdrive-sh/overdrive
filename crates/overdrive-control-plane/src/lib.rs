@@ -838,7 +838,7 @@ pub async fn run_server(
     let (driver, _) = compose_production_driver(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
-        Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new()),
+        Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
         cgroup_root_path,
         Arc::new(overdrive_host::SystemClock),
         fs,
