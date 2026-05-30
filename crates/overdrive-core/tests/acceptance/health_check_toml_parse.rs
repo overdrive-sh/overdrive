@@ -719,6 +719,49 @@ fn declared_probe_inherits_adr_0057_defaults_when_fields_omitted() {
     assert!(!p.inferred);
 }
 
+// Regression: parse_http_mechanic / parse_string_array hardcoded
+// section "[[health_check.startup]]" in ParseError::Field regardless
+// of probe role. Readiness and liveness probes must report the
+// role-agnostic "[[health_check.*]]" section.
+#[test]
+fn http_field_error_in_readiness_probe_reports_wildcard_section() {
+    let toml = format!(
+        "{SERVICE_PRELUDE}\n\
+         [[health_check.readiness]]\n\
+         type = \"http\"\n\
+         path = 42\n\
+         port = 8080\n"
+    );
+    match parse_err(&toml) {
+        ParseError::Field { section, .. } => {
+            assert_eq!(
+                section, "[[health_check.*]]",
+                "readiness probe error must not hardcode startup section"
+            );
+        }
+        other => panic!("expected Field, got {other:?}"),
+    }
+}
+
+#[test]
+fn exec_field_error_in_liveness_probe_reports_wildcard_section() {
+    let toml = format!(
+        "{SERVICE_PRELUDE}\n\
+         [[health_check.liveness]]\n\
+         type = \"exec\"\n\
+         command = 42\n"
+    );
+    match parse_err(&toml) {
+        ParseError::Field { section, .. } => {
+            assert_eq!(
+                section, "[[health_check.*]]",
+                "liveness probe error must not hardcode startup section"
+            );
+        }
+        other => panic!("expected Field, got {other:?}"),
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
     #[test]

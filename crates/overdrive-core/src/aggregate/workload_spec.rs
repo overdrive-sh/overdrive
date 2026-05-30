@@ -1409,7 +1409,7 @@ fn parse_http_mechanic(
 ) -> Result<ProbeMechanic, ParseError> {
     let path_raw = entry.get("path").ok_or(ParseError::HttpProbeMissingPath { probe_idx })?;
     let path = path_raw.as_str().ok_or_else(|| ParseError::Field {
-        section: "[[health_check.startup]]",
+        section: "[[health_check.*]]",
         message: format!("entry [{probe_idx}]: field `path` must be a string"),
     })?;
     // Phase 1 plain-HTTP-only gate per ADR-0057 C6. Reject any
@@ -1433,11 +1433,11 @@ fn parse_http_mechanic(
 
     let port_raw = entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
     let port_int = port_raw.as_integer().ok_or_else(|| ParseError::Field {
-        section: "[[health_check.startup]]",
+        section: "[[health_check.*]]",
         message: format!("entry [{probe_idx}]: field `port` must be an integer"),
     })?;
     let port = u16::try_from(port_int).map_err(|_| ParseError::Field {
-        section: "[[health_check.startup]]",
+        section: "[[health_check.*]]",
         message: format!("entry [{probe_idx}]: field `port` must be in 1..=65535"),
     })?;
     if port == 0 {
@@ -1499,13 +1499,13 @@ fn parse_string_array(
     probe_idx: usize,
 ) -> Result<Vec<String>, ParseError> {
     let arr = value.as_array().ok_or_else(|| ParseError::Field {
-        section: "[[health_check.startup]]",
+        section: "[[health_check.*]]",
         message: format!("entry [{probe_idx}]: field `{field}` must be an array of strings"),
     })?;
     arr.iter()
         .map(|element| {
             element.as_str().map(str::to_owned).ok_or_else(|| ParseError::Field {
-                section: "[[health_check.startup]]",
+                section: "[[health_check.*]]",
                 message: format!(
                     "entry [{probe_idx}]: every element of `{field}` must be a string"
                 ),
@@ -1539,7 +1539,7 @@ fn parse_optional_positive_u32(
     };
     let int = value.as_integer().ok_or_else(|| {
         OptionalPositiveU32Error::Field(ParseError::Field {
-            section: "[[health_check.startup]]",
+            section: "[[health_check.*]]",
             message: format!(
                 "entry [{probe_idx}]: field `{field}` must be a non-negative integer fitting in u32"
             ),
@@ -1550,7 +1550,7 @@ fn parse_optional_positive_u32(
     }
     u32::try_from(int).map_err(|_| {
         OptionalPositiveU32Error::Field(ParseError::Field {
-            section: "[[health_check.startup]]",
+            section: "[[health_check.*]]",
             message: format!(
                 "entry [{probe_idx}]: field `{field}` must be a non-negative integer fitting in u32"
             ),
