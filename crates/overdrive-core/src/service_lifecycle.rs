@@ -351,6 +351,13 @@ pub struct ServiceLifecycleView {
     /// Per the same persist-inputs rule: records the observed fact
     /// "this alloc reached a non-Stable terminal," never a derived
     /// flag.
+    ///
+    /// Also covers pre-Running-Failed allocs (`state == Failed`,
+    /// `started_at == None`) the reconciler acknowledges-but-does-not-
+    /// classify: it emits no terminal action for them, but still
+    /// records membership here so the Shape B predicate flips false
+    /// once such a dead alloc is archived (otherwise its stale
+    /// `observed` entry would spin the runtime forever).
     pub terminal_announced: BTreeSet<AllocationId>,
 
     /// Per-service fingerprint of the last `ServiceBackendRow` the
@@ -582,6 +589,16 @@ impl Reconciler for ServiceLifecycleReconciler {
             // semantics table.
             if fact.state == AllocState::Failed {
                 let Some(started) = fact.started_at else {
+                    // Pre-Running Failed: the alloc reached a terminal state but
+                    // never started, so the elapsed-vs-deadline EarlyExit
+                    // classification does not apply and the reconciler emits no
+                    // FinalizeFailed (the row's typed terminal flows through other
+                    // projections via WorkloadLifecycle). Still record the terminal
+                    // membership so `has_alloc_mid_startup_window` returns false and
+                    // the runtime stops self-re-enqueueing this dead alloc after it
+                    // is archived (otherwise the stale `observed` entry — inserted
+                    // above — keeps the predicate true forever → no-op busy-loop).
+                    next_view.terminal_announced.insert(alloc_id.clone());
                     continue;
                 };
                 let elapsed_ms = elapsed_ms_from(tick.now_unix, started);

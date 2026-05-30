@@ -909,6 +909,60 @@ fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
     );
 }
 
+/// A service alloc that reaches `Failed` BEFORE ever starting
+/// (`started_at == None` — driver spawn error, ENOMEM on fork, missing
+/// exec binary) must be recorded in `terminal_announced` so the Shape B
+/// predicate returns false for it. The reconciler does NOT classify
+/// this alloc (the elapsed-vs-deadline `EarlyExit` reasoning needs a
+/// `started_at`), so it emits zero actions — but it MUST still
+/// acknowledge the terminal-set membership.
+///
+/// Without that membership the alloc stays in `observed` but in neither
+/// terminal set, so `has_alloc_mid_startup_window` stays true forever.
+/// Once WorkloadLifecycle finalises the alloc and the action shim
+/// archives the observation row, the alloc vanishes from `actual.allocs`
+/// — the reconcile loop can no longer re-touch it to clear the stale
+/// `observed` entry — and the runtime's `view_has_backoff_pending` arm
+/// re-enqueues the reconciler in a no-op busy-loop until the service is
+/// deleted. This pins the predicate-false outcome that breaks the loop.
+#[test]
+fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
+    // Failed with `started_at == None` — the EarlyExit branch's
+    // `let Some(started) = ... else { ... }` arm fires.
+    let f = ServiceAllocFact {
+        started_at: None,
+        ..fact(
+            "alloc-svc-prefail",
+            AllocState::Failed,
+            1_000,
+            Some(127),
+            None,
+            30,
+            Duration::from_secs(60),
+        )
+    };
+    let actual = one_alloc_state(f);
+    let view = ServiceLifecycleView::default();
+    let tick = tick_at_ms(2_000);
+
+    let r = ServiceLifecycleReconciler::new();
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+
+    assert!(
+        actions.is_empty(),
+        "pre-Running Failed alloc is acknowledged-but-not-classified; emits no action, got {actions:?}"
+    );
+    assert!(
+        next_view.terminal_announced.contains(&aid("alloc-svc-prefail")),
+        "pre-Running Failed alloc must be recorded in terminal_announced"
+    );
+    assert!(
+        !next_view.has_alloc_mid_startup_window(),
+        "a pre-Running Failed alloc must NOT keep the runtime spinning (predicate false)"
+    );
+}
+
 // =====================================================================
 // Category F — GAP-10: startup_attempts_per_alloc increment/reset
 // =====================================================================
