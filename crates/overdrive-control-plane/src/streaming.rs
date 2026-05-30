@@ -239,7 +239,7 @@ pub fn build_workload_stream(
                     match recv {
                         Ok(event) => {
                             if event.workload_id != workload_id {
-                                // Falls through to the next select! iteration.
+                                continue;
                             }
                             // Project the LifecycleEvent into the
                             // JobSubmitEvent shape — informational
@@ -917,7 +917,7 @@ pub fn build_service_stream(
                     match recv {
                         Ok(event) => {
                             if event.workload_id != workload_id {
-                                // Falls through to the next select! iteration.
+                                continue;
                             }
                             // Service-kind: only terminal events
                             // project to a wire line. Non-terminal

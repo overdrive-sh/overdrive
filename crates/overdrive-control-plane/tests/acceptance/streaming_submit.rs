@@ -34,7 +34,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
-use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
@@ -1337,5 +1337,236 @@ async fn unchanged_resubmit_with_different_kind_uses_stored_discriminator_for_st
         "Job completed successfully but stream reported {:?} — streaming dispatch \
          used the request's workload_kind (Service) instead of the stored kind (Job)",
         terminal_line["kind"]
+    );
+}
+
+/// Regression: the Service streaming path's workload-id guard at
+/// `streaming.rs:919` had an empty `if` body — no `continue`. A
+/// terminal `LifecycleEvent` from a concurrent service (different
+/// `workload_id`) fell through to the `event.terminal` check, emitted
+/// the foreign terminal as if it belonged to this service, and closed
+/// the stream with incorrect output.
+#[tokio::test]
+async fn foreign_service_terminal_does_not_leak_into_service_stream() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let sim_clock = Arc::new(SimClock::new());
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    state.streaming_cap = Duration::from_secs(60);
+
+    let our_workload = WorkloadId::from_str("svc-ours-v0").expect("workload id");
+    let foreign_workload = WorkloadId::from_str("svc-foreign-v0").expect("workload id");
+    let our_alloc = AllocationId::from_str("alloc-svc-ours-0").expect("alloc id");
+    let foreign_alloc = AllocationId::from_str("alloc-svc-foreign-0").expect("alloc id");
+
+    // Seed a Running row for our service so the stream progresses past
+    // the pre-subscribe snapshot check.
+    write_row(
+        state.obs.as_ref(),
+        &our_alloc,
+        &our_workload,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+
+    let service_spec = ServiceSpecInput {
+        id: "svc-ours-v0".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/usr/local/bin/svc-ours".to_string(),
+            args: vec![],
+        }),
+        listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
+    };
+
+    let router = build_router(state.clone());
+    let request_task = tokio::spawn({
+        let spec = service_spec;
+        async move {
+            let body =
+                serde_json::to_vec(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
+                    .expect("serialize");
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/v1/jobs")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ACCEPT, "application/x-ndjson")
+                .body(Body::from(body))
+                .expect("build request");
+            let response = router.oneshot(request).await.expect("router oneshot");
+            assert_eq!(response.status(), StatusCode::OK);
+            body_ndjson_lines(response.into_body()).await
+        }
+    });
+
+    // Wait for handler subscription.
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Emit a terminal from a FOREIGN service. Before the fix, this
+    // would leak through and close our stream with the wrong terminal.
+    let mut foreign_terminal = make_lifecycle_event(
+        foreign_alloc.clone(),
+        foreign_workload.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    foreign_terminal.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::ServiceFailed {
+            reason: overdrive_core::transition_reason::ServiceFailureReason::Other {
+                source: "foreign".to_string(),
+                message: "foreign service crashed".to_string(),
+            },
+        });
+    emit_lifecycle(&state, foreign_terminal);
+
+    // Yield to let handler process the foreign event.
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // Now emit the CORRECT terminal for our service.
+    let mut our_terminal = make_lifecycle_event(
+        our_alloc.clone(),
+        our_workload.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    our_terminal.terminal = Some(overdrive_core::transition_reason::TerminalCondition::Stable {
+        settled_in_ms: 5000,
+        witness: overdrive_core::transition_reason::ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_string(),
+            mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
+            inferred: false,
+        },
+    });
+    emit_lifecycle(&state, our_terminal);
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("request must complete within 5s — bug: stream hung or closed early")
+        .expect("task ok");
+
+    // The stream MUST emit exactly 2 lines: accepted + stable.
+    // Before the fix it emitted: accepted + failed (from the foreign
+    // service's ServiceFailed terminal).
+    assert_eq!(lines.len(), 2, "expected exactly 2 NDJSON lines; got {lines:?}");
+    assert_eq!(lines[0]["kind"], "accepted", "first line must be `accepted`");
+    assert_eq!(
+        lines[1]["kind"], "stable",
+        "second line must be `stable` (our service), not `failed` (foreign); got {lines:?}"
+    );
+}
+
+/// Regression: the Job streaming path's workload-id guard at
+/// `streaming.rs:241` had the same empty `if` body as the Service path.
+/// A terminal `LifecycleEvent` from a concurrent job (different
+/// `workload_id`) fell through, emitting the foreign terminal as a
+/// `Succeeded` / `Failed` for this job and closing the stream.
+#[tokio::test]
+async fn foreign_job_terminal_does_not_leak_into_job_stream() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let sim_clock = Arc::new(SimClock::new());
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    state.streaming_cap = Duration::from_secs(60);
+
+    // payments_spec() uses id "payments-v0" — the handler derives the
+    // workload_id from the spec, so lifecycle events must match.
+    let our_workload = WorkloadId::from_str("payments-v0").expect("workload id");
+    let foreign_workload = WorkloadId::from_str("job-foreign-v0").expect("workload id");
+    let our_alloc = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let foreign_alloc = AllocationId::from_str("alloc-job-foreign-0").expect("alloc id");
+
+    // Seed a Running row so the stream progresses past the pre-subscribe
+    // snapshot check.
+    write_row(
+        state.obs.as_ref(),
+        &our_alloc,
+        &our_workload,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+
+    let router = build_router(state.clone());
+    let request_task = tokio::spawn({
+        let spec = payments_spec();
+        async move {
+            let response = router
+                .oneshot(build_submit_request(&spec, "application/x-ndjson"))
+                .await
+                .expect("router oneshot");
+            assert_eq!(response.status(), StatusCode::OK);
+            body_ndjson_lines(response.into_body()).await
+        }
+    });
+
+    // Wait for handler subscription.
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Emit a terminal from a FOREIGN job. Before the fix, this
+    // would leak through and close our stream.
+    let mut foreign_terminal = make_lifecycle_event(
+        foreign_alloc.clone(),
+        foreign_workload.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    foreign_terminal.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Completed { exit_code: 42 });
+    emit_lifecycle(&state, foreign_terminal);
+
+    // Yield to let handler process the foreign event.
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // Now emit the CORRECT terminal for our job.
+    let mut our_terminal = make_lifecycle_event(
+        our_alloc.clone(),
+        our_workload.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    our_terminal.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Completed { exit_code: 0 });
+    emit_lifecycle(&state, our_terminal);
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("request must complete within 5s — bug: stream hung or closed early")
+        .expect("task ok");
+
+    // The stream MUST NOT have picked up the foreign terminal (exit 42).
+    // It should emit: accepted + succeeded (from our Completed { exit_code: 0 }).
+    let terminal_line = lines.last().expect("at least one streaming line");
+    assert_eq!(
+        terminal_line["kind"], "succeeded",
+        "terminal line must be `succeeded` (our job, exit 0), \
+         not from the foreign job (exit 42); got {lines:?}"
+    );
+    assert_eq!(
+        terminal_line["data"]["exit_code"], 0,
+        "exit_code must be 0 (our job), not 42 (foreign); got {lines:?}"
     );
 }
