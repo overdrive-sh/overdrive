@@ -165,7 +165,7 @@ impl HttpProber for SimHttpProber {
 /// Tier 3 concern, asserted by the production-adapter integration
 /// test).
 pub struct SimExecProber {
-    queue: Mutex<VecDeque<ProbeOutcome>>,
+    queue: Mutex<VecDeque<Result<ProbeOutcome, ProbeFailure>>>,
 }
 
 impl SimExecProber {
@@ -176,7 +176,14 @@ impl SimExecProber {
 
     /// Enqueue the outcome the next `probe()` call will return.
     pub fn enqueue_outcome(&self, outcome: ProbeOutcome) {
-        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(outcome);
+        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(Ok(outcome));
+    }
+
+    /// Enqueue a probe-adapter error the next `probe()` call will
+    /// return — exercises infrastructure-failure paths (e.g.
+    /// cgroup-placement EACCES) that `enqueue_outcome` cannot reach.
+    pub fn enqueue_error(&self, err: ProbeFailure) {
+        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(Err(err));
     }
 }
 
@@ -205,7 +212,7 @@ impl ExecProber for SimExecProber {
             });
         }
         let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
+        guard.pop_front().unwrap_or(Ok(ProbeOutcome::Pass))
     }
 }
 

@@ -507,13 +507,32 @@ async fn probe_tick(
             // PID into). The `CgroupExecProber` reuses
             // `place_pid_in_scope` + `cgroup_kill` against this path.
             let scope_path = exec_scope_path(alloc_id);
-            exec_prober.probe(command, &scope_path, timeout).await.map_err(|err| {
-                ProbeRunnerError::ProbeAdapterFailed {
-                    alloc_id: alloc_id.clone(),
-                    probe_idx,
-                    source: err,
+            match exec_prober.probe(command, &scope_path, timeout).await {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    // Cgroup-placement failures (EACCES / ENOENT /
+                    // EBUSY) are runtime infrastructure errors. Write
+                    // a Fail row so the reconciler observes the
+                    // failure and can fire StartupProbeFailed once
+                    // the budget exhausts. Without this row,
+                    // startup_attempts_per_alloc stays at 0 and the
+                    // startup window hangs indefinitely.
+                    let fail_row = ProbeResultRow {
+                        alloc_id: alloc_id.clone(),
+                        probe_idx,
+                        role: descriptor.role,
+                        status: ProbeStatus::Fail { last_fail_reason: err.to_string() },
+                        last_observed_at_unix_ms: unix_ms_from_clock(clock),
+                        inferred: descriptor.inferred,
+                    };
+                    let _ = observation_store.write_probe_result(fail_row).await;
+                    return Err(ProbeRunnerError::ProbeAdapterFailed {
+                        alloc_id: alloc_id.clone(),
+                        probe_idx,
+                        source: err,
+                    });
                 }
-            })?
+            }
         }
     };
     let status = match outcome {

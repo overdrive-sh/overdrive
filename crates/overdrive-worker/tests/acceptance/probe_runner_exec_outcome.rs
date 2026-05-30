@@ -49,7 +49,7 @@ use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::traits::prober::ProbeOutcome;
+use overdrive_core::traits::prober::{ProbeFailure, ProbeOutcome};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
@@ -248,4 +248,44 @@ async fn exec_nonzero_exit_outcome_flows_through_probe_runner_to_store() {
     let after = obs.list_probe_results_for_alloc(&alloc).await.expect("list after");
     assert_eq!(after.len(), 1, "exactly one row written");
     assert_eq!(after[0].status, returned_row.status, "stored row carries the Fail reason");
+}
+
+/// Regression — exec cgroup-placement failure must still write a
+/// `ProbeResultRow::Fail` to the observation store so the
+/// `ServiceLifecycleReconciler` can observe the failure and
+/// eventually fire `StartupProbeFailed`. Before the fix,
+/// `probe_tick` returned `Err(ProbeAdapterFailed)` without writing
+/// any row, leaving `startup_attempts_per_alloc` at 0 and the
+/// startup window open indefinitely.
+#[tokio::test]
+async fn exec_cgroup_placement_error_still_writes_fail_row_to_store() {
+    let exec = Arc::new(SimExecProber::new());
+    exec.enqueue_error(ProbeFailure::ExecSpawnFailed {
+        reason: "cgroup placement failed: EACCES".to_owned(),
+    });
+    let runner = runner_with_exec(Arc::clone(&exec));
+    let clock = SimClock::default();
+    let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);
+
+    let alloc = alloc_id("alloc-exec-cgroup-fail");
+    let descriptor = descriptor_exec(&["/bin/true"]);
+
+    let before = obs.list_probe_results_for_alloc(&alloc).await.expect("list before");
+    assert!(before.is_empty(), "no rows before first probe");
+
+    // probe_once_and_record is expected to return Err (the adapter
+    // error propagates), but the observation store MUST contain a
+    // Fail row written before the error was returned.
+    let result =
+        runner.probe_once_and_record(&alloc, ProbeIdx::new(0), &descriptor, &clock, &obs).await;
+    assert!(result.is_err(), "adapter error propagates to caller");
+
+    let after = obs.list_probe_results_for_alloc(&alloc).await.expect("list after");
+    assert_eq!(after.len(), 1, "exactly one Fail row written despite adapter error");
+    assert!(
+        matches!(after[0].status, ProbeStatus::Fail { .. }),
+        "stored row is Fail, not Pass — got {:?}",
+        after[0].status,
+    );
+    assert_eq!(after[0].role, ProbeRole::Startup);
 }
