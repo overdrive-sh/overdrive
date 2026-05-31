@@ -35,7 +35,7 @@ import { server } from "@/lib/search";
 // only happens inside the Next/Turbopack build — a bare `bun run` of this file
 // imports the raw `.source` module WITHOUT the loader and `getText('processed')`
 // / `server.search` throw. So the assertion is driven from a force-static route
-// (`app/__assert-one-index/route.ts`) that Next prerenders during `next build`:
+// (`app/one-index-check/route.ts`) that Next prerenders during `next build`:
 // a violation throws there and fails the build, which is exactly the ADR-0058
 // "wired into the build pipeline so a failure fails the build" contract. See
 // that route's `bun run assert:one-index` deviation note.
@@ -109,8 +109,12 @@ export async function checkOneIndex(): Promise<OneIndexResult> {
 			});
 		}
 
-		// Consumer 2 — present in the llms.txt body.
-		if (!llmsBody.includes(page.url)) {
+		// Consumer 2 — present in the llms.txt body. Anchor to the markdown-link
+		// position (`](url)`) so a page whose URL is a prefix of another's (e.g.
+		// `/docs/comparisons` vs `/docs/comparisons/kubernetes`) can't false-pass
+		// on a bare substring match. Both the docs index (fumadocs
+		// `formatMarkdownLink`) and the blog lines emit URLs in this exact shape.
+		if (!llmsBody.includes(`](${page.url})`)) {
 			violations.push({
 				url: page.url,
 				title,
@@ -150,7 +154,9 @@ export async function checkOneIndex(): Promise<OneIndexResult> {
 	for (const page of draftBlog) {
 		const title = page.data.title ?? "(untitled)";
 
-		if (llmsBody.includes(page.url)) {
+		// Anchored to the markdown-link position for the same prefix-collision
+		// reason as the published check above.
+		if (llmsBody.includes(`](${page.url})`)) {
 			violations.push({
 				url: page.url,
 				title,

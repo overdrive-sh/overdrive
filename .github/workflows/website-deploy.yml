@@ -76,8 +76,19 @@ jobs:
       - name: OpenNext (Cloudflare) build
         run: bunx opennextjs-cloudflare build
 
+      # Hand the compiled Worker output to the deploy job so it never rebuilds.
+      # `include-hidden-files` is required — `.open-next/` holds the compiled
+      # config under a dot-prefixed `.build/` dir that v4 would otherwise drop.
+      - name: Upload OpenNext build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-next-build
+          path: website/.open-next
+          include-hidden-files: true
+          retention-days: 1
+
   deploy:
-    name: deploy to Cloudflare Workers
+    name: Deploy to Cloudflare Workers
     needs: build
     # Deploy only on a push to main — never on PRs.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -93,8 +104,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Reuse the Worker output the build job already produced — `deploy` reads
+      # the compiled `.open-next/` config and runs `wrangler deploy`; it does not
+      # rebuild, so no second `opennextjs-cloudflare build` pass is needed here.
+      - name: Download OpenNext build output
+        uses: actions/download-artifact@v4
+        with:
+          name: open-next-build
+          path: website/.open-next
+
       - name: Deploy (OpenNext → Cloudflare Workers)
-        run: bunx opennextjs-cloudflare build && bunx opennextjs-cloudflare deploy
+        run: bunx opennextjs-cloudflare deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
