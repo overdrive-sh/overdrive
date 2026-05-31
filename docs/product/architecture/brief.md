@@ -1403,6 +1403,10 @@ Rules to enforce:
 | 0042 | `ServiceMapHydrator` reconciler + new `Action::DataplaneUpdateService` variant + new `service_hydration_results` ObservationStore table; failure surface is observation, NOT `TerminalCondition` (preserves ADR-0037); ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState` (Phase 2.2; closes J-PLAT-004) | Accepted |
 | 0043 | XDP L4LB three-iface transit test topology (`client-ns ↔ lb-ns ↔ backend-ns`) — `lb-ns` carries the routing host that `XDP_TX` returned frames need to reach the backend network; restores production XDP L4LB shape in netns form (Phase 2.2) | Accepted |
 | 0044 | XDP per-CPU LRU conntrack table — Phase 2.16 design lockpoint. **SUPERSEDED 2026-05-07** — empirically falsified; the conntrack-shaped fix this ADR proposed is unnecessary. The actual S-2.2-17 root cause was the sanity prologue's `claimed_pkt_len > packet_len` check firing spuriously on forwarded skbs at TC egress. Fix lives in ADR-0040 § Revision 2026-05-07 (Q3 amendment — sanity prologue is ingress-only). See ADR-0044 § Falsification for the diagnostic trail. GH #154 remains open with its original flow-affinity-across-rotations scope, no longer urgency-attached to Phase 2.2. | Superseded |
+| 0055 | **docs-platform (website)** — MCP server is a same-Worker Next route handler (`website/app/mcp/route.ts`, Node runtime) sharing the ONE in-process build-time `source` index with `/api/search` and the llms export; stateless Streamable HTTP; strongest no-divergence guarantee for C-4 | Accepted |
+| 0056 | **docs-platform (website)** — D1 analytics binding for MCP tool-call logging (real SQL: top zero-result queries = one `SELECT … WHERE result_count=0 GROUP BY query`); best-effort contract via `ctx.waitUntil()` + catch-swallow — a logging failure NEVER alters/delays the tool response (resolves DISCUSS D-2) | Accepted |
+| 0057 | **docs-platform (website)** — in-Worker Orama search now (`createFromSource`) behind a `lib/search.ts` seam shared by `/api/search` and MCP `search_docs`; benchmarked external-search migration trigger (>~5k pages OR ~60–70 MB of the 128 MB isolate — inference, to be benchmarked) | Accepted |
+| 0058 | **docs-platform (website)** — build-time one-index enforcement assertion (Node build step in `website/`, NOT a Rust gate): every `source.getPages()` page has a reachable `.md`, appears in `llms.txt`, and is in the search index; blog joins the same index — makes the C-4 invariant structural | Accepted |
 
 ---
 
@@ -3431,6 +3435,299 @@ policy.
 
 ---
 
+## docs-platform website (overdrive.sh)
+
+> **This section is architecturally INDEPENDENT of the Rust platform above.** It
+> documents the overdrive.sh documentation / marketing / agent-discovery site —
+> a greenfield TypeScript/Next.js application living in the `website/` subtree
+> (DISCUSS D-DEC-1, C-5), OUTSIDE `crates/`, EXEMPT from the Rust crate-class /
+> dst-lint / nextest / cargo-mutants gates. It shares no code, no runtime, and
+> no deployment with the Rust control plane / dataplane; it consumes the Rust
+> platform only as documentation *subject matter* (and only behaviour that is
+> already implemented — DISCUSS C-6). Its quality gates are: typecheck, lint,
+> build, a build-time one-index assertion (ADR-0058), and a deploy smoke test.
+> Owner: Morgan (DESIGN wave for docs-platform, 2026-05-30). Paradigm:
+> TypeScript / React / Next.js — the project-wide OOP paradigm line in CLAUDE.md
+> governs Rust only and is NOT extended here.
+
+The feature ships J-DOCS-001/002/003 (human evaluator finds answers; a coding
+agent grounds itself via MCP; the maintainer prioritises from logged demand)
+across 8 thin slices. Full DISCUSS detail:
+`docs/feature/docs-platform/feature-delta.md`; the cross-feature journey:
+`docs/product/journeys/docs-platform.yaml`.
+
+### The strategic invariant — one index, multiple consumers (C-4)
+
+Everything in this architecture is organised around DISCUSS C-4: there is ONE
+build-time content index (`source.getPages()`) and ONE LLM-text primitive
+(`getLLMText`), and every surface that searches or exports docs is a *consumer*
+of those two, never a re-builder. The browser search dialog, the MCP
+`search_docs` tool, the `llms.txt`/`llms-full.txt`/per-page `.md` exports, and
+the blog all read the same index. Divergence between what a human searches and
+what an agent searches is an integration failure. Three design moves make the
+invariant structural rather than aspirational:
+
+- **One Worker, one in-process index** (ADR-0055): the MCP handler is a route
+  in the same Worker as `/api/search` and the exports — they literally import
+  the same module graph, so there is no second index to drift.
+- **One query seam** `lib/search.ts` (ADR-0057): `/api/search` and MCP
+  `search_docs` both call `searchIndex(query)`; one ranking path.
+- **One LLM-text primitive** `lib/get-llm-text.ts` (`getLLMText`): MCP
+  `get_doc`, per-page `.md`, and `llms-full.txt` all call it; `get_doc` output
+  is byte-identical to the `.md` export (US-05 AC).
+- **A build-time assertion** (ADR-0058) probes the invariant on every build:
+  every page has a reachable `.md`, appears in `llms.txt`, and is in the search
+  index; blog posts are in the same index.
+
+### Component decomposition (one container: the OpenNext Worker)
+
+This is a **modular monolith** — one Next.js application, one OpenNext-built
+Cloudflare Worker, internal boundaries enforced by the shared seams
+(ports-and-adapters-equivalent). Team ≪ 10, time-to-market and no-divergence are
+the driving quality attributes; microservices / a second Worker were rejected
+(ADR-0055 Alternative A). Node runtime everywhere; never `runtime = 'edge'`
+(C-2). SSG / build-time content; no runtime `fs` (C-3); no R2 ISR cache binding
+(SSG — research § Decision); `next/image` → `unoptimized` (D-G).
+
+| Component | Path (`website/`) | Change type |
+|---|---|---|
+| Next config + MDX plugin | `next.config.*` (`createMDX()` from `fumadocs-mdx/next`) | USE library primitive |
+| Content source (the ONE index) | `lib/source.ts` (`loader()` over the Next-emitted source) | USE library primitive |
+| Search seam | `lib/search.ts` (`searchIndex(query)` over `createFromSource`) | **CREATE-NEW glue** |
+| LLM-text primitive | `lib/get-llm-text.ts` (`getLLMText`) | **CREATE-NEW glue** (thin wrapper over `getText('processed')`) |
+| Site-origin config | `lib/site.ts` (`SITE_ORIGIN`) | **CREATE-NEW glue** (D-F) |
+| Shared nav shell | `lib/layout.shared.tsx` (`baseOptions()`) | USE library primitive (one instance) |
+| Landing (`/`) | `app/(home)/page.tsx` (`HomeLayout`, content from `index.html`) | **CREATE-NEW glue** (content port) |
+| Docs (`/docs/[[...slug]]`) | `app/docs/[[...slug]]/page.tsx` (`DocsLayout`) | USE library primitive |
+| Blog list + post | `app/(home)/blog/page.tsx`, `app/(home)/blog/[slug]/page.tsx` | **CREATE-NEW glue** (no turnkey blog layout) |
+| Search API | `app/api/search/route.ts` (`export const { GET } = createFromSource(source)`) | USE library primitive (calls seam) |
+| MCP endpoint | `app/mcp/route.ts` (stateless Streamable HTTP) | **CREATE-NEW glue** (handler + zod tool schemas) |
+| Tool-call logging wrapper | inside `app/mcp/route.ts` (`ctx.waitUntil()` + catch-swallow → D1) | **CREATE-NEW glue** |
+| llms exports | `app/llms.txt/route.ts`, `app/llms-full.txt/route.ts`, per-page `.md` route | USE library primitive (calls `getLLMText`) |
+| One-index assertion | `scripts/assert-one-index.ts` (build step) | **CREATE-NEW glue** (ADR-0058) |
+| Content (authored) | `content/docs/`, `content/blog/` | content (not repo-root `docs/`) — D-G |
+
+### Driving ports (inbound HTTP surface)
+
+| Port | Serves | Story |
+|---|---|---|
+| `GET /` | Landing (`HomeLayout`, value prop) | US-08 |
+| `GET /docs/[[...slug]]` | Docs pages (sidebar + TOC) | US-01, US-02 |
+| `GET /blog`, `GET /blog/[slug]` | Blog list + post | US-07 |
+| `GET /api/search` | Browser search (Cmd+K dialog backend) | US-03 |
+| `POST/GET /mcp` | MCP Streamable HTTP (`search_docs`, `get_doc`) | US-05, US-06 |
+| `GET /llms.txt` | Doc-URL index | US-04 |
+| `GET /llms-full.txt` | Full corpus as clean markdown | US-04 |
+| `GET /docs/<page>.md` | Per-page clean markdown | US-04 |
+
+### Driven ports / seams (outbound + shared)
+
+| Driven port / seam | Adapter | Purpose |
+|---|---|---|
+| `source` (one build-time index) | `lib/source.ts` over Fumadocs `loader()` | C-4 SSOT; consumed by search, MCP, llms, blog |
+| `searchIndex(query)` | `lib/search.ts` over in-Worker Orama (`createFromSource`) | one query path for `/api/search` + MCP `search_docs` (ADR-0057) |
+| `getLLMText(page)` | `lib/get-llm-text.ts` over `getText('processed')` | one text path for `get_doc` + `.md` + `llms-full.txt` |
+| `SITE_ORIGIN` | `lib/site.ts` constant | absolute URLs for llms.txt, MCP `get_doc`, canonical/OG (D-F) |
+| analytics sink | D1 binding (`tool_calls` table) via `wrangler.jsonc` | best-effort tool-call log (ADR-0056) |
+| RUM / funnel analytics | Cloudflare Web Analytics (page-view) | KPI-1/2/6 approximation (D-D) |
+
+### Technology stack (pinned)
+
+OSS-first; every primary dependency is permissively licensed.
+
+| Technology | Version | License | Role |
+|---|---|---|---|
+| Next.js | 15 (latest minor) or 16 | MIT | App Router / RSC framework (research: Next 14 dropped Q1 2026) |
+| Fumadocs (`fumadocs-core` / `fumadocs-ui`) | v16 | MIT | docs framework (layout, page tree, search, llms, MDX source) |
+| `fumadocs-mdx` | v16-compatible | MIT | build-time MDX compilation (`createMDX()` Next plugin) |
+| Orama | (Fumadocs-bundled) | Apache-2.0 | in-Worker search engine (`createFromSource`) |
+| `@opennextjs/cloudflare` (OpenNext) | current | MIT | Next → Cloudflare Workers adapter |
+| Cloudflare Workers runtime | — | (platform) | Node runtime, 128 MB isolate, 3 MiB/10 MiB bundle ceiling |
+| Cloudflare D1 | — | (platform) | analytics sink (ADR-0056) |
+| Cloudflare Web Analytics | — | (platform) | RUM page-view funnels (D-D) |
+| MCP TypeScript SDK (`@modelcontextprotocol/sdk`) | current | MIT | MCP server transport / tool registration |
+| Cloudflare Agents SDK (`createMcpHandler()`) | current | MIT/Apache-2.0 | OPTIONAL inside the MCP route (implementation latitude — ADR-0055) |
+| `zod` | current | MIT | MCP tool input schemas |
+| React | 19 (Next-pinned) | MIT | UI runtime |
+| TypeScript | 5.x | Apache-2.0 | language |
+
+### Decisions table (DDD)
+
+| ID | Decision | Verdict | Rationale (one line) | ADR |
+|---|---|---|---|---|
+| DDD-1 | Modular monolith — one Next app / one OpenNext Worker | ACCEPT | team ≪ 10; no-divergence + time-to-market; microservices unjustified | ADR-0055 |
+| DDD-2 | MCP topology = same-Worker Next route handler | ACCEPT | strongest C-4 no-divergence guarantee; one in-process index | ADR-0055 |
+| DDD-3 | Analytics binding = D1 (real SQL) | ACCEPT | top-zero-result query = one `SELECT … GROUP BY` | ADR-0056 |
+| DDD-4 | Tool-call logging = best-effort (`ctx.waitUntil` + catch-swallow) | ACCEPT | C-7 — logging never alters/delays the tool response | ADR-0056 |
+| DDD-5 | Search = in-Worker Orama now, behind `lib/search.ts` seam | ACCEPT | simplest viable for launch corpus; one query path; single-file external swap | ADR-0057 |
+| DDD-6 | External-search migration trigger (benchmarked) | THRESHOLD | >~5k pages OR ~60–70 MB of 128 MB isolate — inference, benchmark first | ADR-0057 |
+| DDD-7 | Browser KPIs = page-view funnel approximation (CF Web Analytics) | ACCEPT | KPI-2/6 explicitly approximated; no custom-event beacon, no 9th slice | (D-D) |
+| DDD-8 | OpenAPI playground (`fumadocs-openapi`) | OUT OF SCOPE | user non-goal; Next/RSC path keeps it addable later with zero rework | (D-E) |
+| DDD-9 | `SITE_ORIGIN` single config constant | ACCEPT | one flip `workers.dev` → `overdrive.sh`; DNS/binding is DEVOPS | (D-F) |
+| DDD-10 | `website/` App Router layout; content in `content/docs|blog/` | ACCEPT | not repo-root `docs/` (whitepaper/ADR tree); C-6 — site ≠ internal-design mirror | (D-G) |
+| DDD-11 | One-index build-time assertion | ACCEPT | C-4 made structural; enforceable rule + Earned-Trust probe | ADR-0058 |
+
+### C4 — System Context (Level 1)
+
+```mermaid
+C4Context
+  title System Context — overdrive.sh docs platform
+  Person(priya, "Priya (human evaluator)", "Lands, searches, reads docs in a browser")
+  Person(diego, "Diego (docs maintainer)", "Prioritises docs from logged agent demand")
+  System_Ext(agent, "Maya's coding agent", "Calls the MCP endpoint to ground its answers")
+  Person(maya, "Maya (developer)", "Configures the agent's MCP endpoint once")
+
+  System(site, "overdrive.sh website", "Next.js + Fumadocs on Cloudflare Workers (OpenNext); docs, blog, search, llms exports, MCP")
+
+  System_Ext(d1, "Cloudflare D1", "Best-effort tool-call analytics sink")
+  System_Ext(rum, "Cloudflare Web Analytics", "Page-view funnel RUM")
+
+  Rel(priya, site, "Browses, searches (Cmd+K) via HTTPS")
+  Rel(maya, agent, "Runs / configures")
+  Rel(agent, site, "Calls search_docs / get_doc over", "MCP Streamable HTTP /mcp")
+  Rel(site, d1, "Logs {tool, query, ts, result_count} to", "best-effort, ctx.waitUntil")
+  Rel(diego, d1, "Queries top zero-result queries from", "SQL")
+  Rel(priya, rum, "Emits page-view funnels to")
+  UpdateRelStyle(site, d1, $offsetY="-10")
+```
+
+### C4 — Container (Level 2)
+
+```mermaid
+C4Container
+  title Container Diagram — overdrive.sh website (one OpenNext Worker)
+  Person(priya, "Priya", "Human evaluator")
+  System_Ext(agent, "Coding agent", "MCP client")
+  Person(diego, "Diego", "Docs maintainer")
+
+  Container_Boundary(worker, "Cloudflare Worker (OpenNext, Node runtime)") {
+    Container(landing, "Landing + Blog", "Next RSC (home) routes", "/ , /blog, /blog/[slug] — HomeLayout, shared baseOptions()")
+    Container(docs, "Docs", "Next RSC route", "/docs/[[...slug]] — DocsLayout, sidebar + TOC")
+    Container(searchapi, "Search API", "Next route handler", "/api/search — createFromSource(source)")
+    Container(mcp, "MCP endpoint", "Next route handler", "/mcp — stateless Streamable HTTP: search_docs, get_doc")
+    Container(llms, "llms exports", "Next route handlers", "/llms.txt, /llms-full.txt, /docs/*.md")
+    ContainerDb(index, "source index + seams", "build-time (lib/source.ts, lib/search.ts, lib/get-llm-text.ts)", "THE ONE index; in-Worker Orama; getLLMText")
+  }
+
+  System_Ext(d1, "Cloudflare D1", "tool_calls table")
+  System_Ext(rum, "Cloudflare Web Analytics", "page-view RUM")
+
+  Rel(priya, landing, "Loads / navigates", "HTTPS")
+  Rel(priya, docs, "Reads / searches", "HTTPS")
+  Rel(docs, searchapi, "Cmd+K dialog queries")
+  Rel(agent, mcp, "search_docs / get_doc", "MCP HTTP")
+  Rel(searchapi, index, "searchIndex(query)")
+  Rel(mcp, index, "searchIndex(query) + getLLMText(page)")
+  Rel(llms, index, "getLLMText(page)")
+  Rel(landing, index, "reads source")
+  Rel(docs, index, "reads source")
+  Rel(mcp, d1, "logs tool call to", "ctx.waitUntil, best-effort")
+  Rel(diego, d1, "SQL: top zero-result queries")
+  Rel(priya, rum, "page-view funnels")
+```
+
+### C4 — Component (Level 3): MCP + search + index subsystem (the C-4 invariant)
+
+```mermaid
+C4Component
+  title Component Diagram — one index, three consumers (C-4 strategic invariant)
+  Container_Boundary(b, "OpenNext Worker") {
+    Component(source, "lib/source.ts", "Fumadocs loader()", "THE ONE build-time source index (source.getPages())")
+    Component(search, "lib/search.ts", "searchIndex(query)", "single query seam over in-Worker Orama")
+    Component(llmtext, "lib/get-llm-text.ts", "getLLMText(page)", "single LLM-text primitive")
+    Component(site, "lib/site.ts", "SITE_ORIGIN", "absolute-URL config")
+
+    Component(searchapi, "/api/search", "route handler", "createFromSource(source)")
+    Component(mcp, "/mcp", "route handler", "search_docs, get_doc; zod schemas; logging wrapper")
+    Component(llms, "llms exports", "route handlers", "/llms.txt, /llms-full.txt, *.md")
+    Component(assert, "scripts/assert-one-index.ts", "build step", "every page → .md + llms.txt + search index; blog in same index")
+  }
+  System_Ext(d1, "Cloudflare D1", "tool_calls")
+
+  Rel(search, source, "indexes")
+  Rel(llmtext, source, "resolves page from")
+  Rel(searchapi, search, "calls searchIndex")
+  Rel(mcp, search, "calls searchIndex (search_docs)")
+  Rel(mcp, llmtext, "calls getLLMText (get_doc)")
+  Rel(mcp, site, "resolves URL via SITE_ORIGIN")
+  Rel(llms, llmtext, "calls getLLMText")
+  Rel(llms, site, "absolute URLs via")
+  Rel(mcp, d1, "logs (best-effort)")
+  Rel(assert, source, "enumerates once")
+  Rel(assert, search, "asserts membership")
+  Rel(assert, llms, "asserts coverage")
+```
+
+### Reuse Analysis (HARD GATE — library-primitive USE vs CREATE-NEW glue)
+
+The Fumadocs + Next + OpenNext + Orama + MCP-SDK stack supplies the overwhelming
+majority of the surface as **library primitives used as documented**. The only
+**CREATE-NEW glue** is the application-specific wiring that the libraries cannot
+supply because it encodes *our* invariants (C-4, C-7) and *our* content.
+
+| Capability | Verdict | What / why |
+|---|---|---|
+| MDX build pipeline | USE | `createMDX()` from `fumadocs-mdx/next` — documented Next plugin |
+| Content source / one index | USE | `loader()` / `source.getPages()` — framework-agnostic core |
+| Docs layout + nav + TOC | USE | `DocsLayout`, page tree, `meta.json` ordering |
+| Shared nav shell | USE | one `baseOptions()` instance (the `baseOptions_shell` invariant) |
+| Search engine + `/api/search` | USE | in-Worker Orama via `createFromSource(source)` (documented Next default) |
+| llms.txt / llms-full.txt / per-page `.md` | USE | `llms(source).index()` + `getText('processed')` — documented |
+| Cmd+K search dialog | USE | Fumadocs default `RootProvider search` dialog (fetch client) |
+| MCP transport / tool registration | USE | MCP TS SDK (or CF `createMcpHandler()`) — Streamable HTTP |
+| Deploy to Workers | USE | `@opennextjs/cloudflare` scaffold (`npm create cloudflare … --framework=next`) |
+| **MCP route handler + tool schemas** | **CREATE-NEW** | the `/mcp` handler body + zod `search_docs`/`get_doc` schemas + not-found honesty |
+| **D1 logging wrapper** | **CREATE-NEW** | `ctx.waitUntil()` + catch-swallow best-effort write (C-7) |
+| **`lib/search.ts` seam** | **CREATE-NEW** | one `searchIndex(query)` for both consumers (C-4) |
+| **`lib/get-llm-text.ts` seam** | **CREATE-NEW** | thin wrapper pinning `getLLMText` as the one text path |
+| **`lib/site.ts` seam** | **CREATE-NEW** | `SITE_ORIGIN` config constant (D-F) |
+| **Blog list / post components** | **CREATE-NEW** | no turnkey Fumadocs blog layout (hand-rolled, documented Next components) |
+| **Landing content port** | **CREATE-NEW** | `HomeLayout` page seeded from `index.html` |
+| **One-index assertion script** | **CREATE-NEW** | build-time C-4 enforcement (ADR-0058) |
+
+No CREATE-NEW item re-implements a library primitive; each encodes an
+application invariant or our content. No proprietary dependency; the only
+non-OSS elements are the Cloudflare *platform* bindings (Workers/D1/Web
+Analytics), which are the chosen deployment target, not a library choice.
+
+### Quality attributes (ISO 25010 mapping)
+
+- **Functional suitability / reliability**: the one-index assertion (ADR-0058)
+  + deploy smoke test (US-01) are the build-time correctness gate; SSG means
+  every page is a static asset (no runtime `fs`, no per-request compute for
+  docs).
+- **Performance efficiency**: SSG static serving; in-Worker Orama is single-MB
+  for the launch corpus; the 128 MB isolate and 3/10 MiB bundle ceilings are
+  the watched budgets (C-8, ADR-0057 trigger).
+- **Maintainability / testability**: ports-and-adapters-equivalent seams
+  (`lib/search.ts`, `lib/get-llm-text.ts`, `lib/site.ts`) isolate the swappable
+  infrastructure; the external-search migration is a single-file change.
+- **Security**: stateless MCP (no session state to leak); best-effort logging
+  cannot be weaponised to break the answer path; no auth surface in scope
+  (public docs).
+- **Reliability of the analytics loop**: deliberately lossy-under-failure (C-7)
+  — the maintainer reads trends, not an audit ledger.
+
+### Open questions / handoff notes
+
+- **Custom-domain wiring** (`overdrive.sh` DNS + Workers binding) is
+  **DEVOPS-wave** — the skeleton uses `workers.dev`; production flips the single
+  `SITE_ORIGIN` constant (D-F). Not a deferral-with-forward-pointer; a one-flip
+  config property.
+- **External-search migration trigger** numbers (>~5k pages / ~60–70 MB) are
+  **inference to be benchmarked** against the real corpus before being treated
+  as committed (ADR-0057). Carried to DEVOPS/DISTILL as a measurement task.
+- **KPI-2 (search→click) and KPI-6 (landing→proceed)** are explicitly
+  **approximated from page-view funnels** at baseline (D-D); no custom-event
+  beacon is in scope.
+- **DEVOPS handoff (external integrations)**: at launch there are no third-party
+  external API integrations to contract-test. IF/WHEN the ADR-0057 external-
+  search migration is taken, Orama Cloud / Algolia become external integrations
+  warranting consumer-driven contract tests (Pact-JS) on the build-time `sync()`
+  boundary — flagged for that future wave, not needed now.
+
+---
+
 ## Changelog
 
 | Date | Change |
@@ -3453,4 +3750,6 @@ policy.
 | 2026-05-24 | Phase 1 service-health-check-probes extension (§§75–87). Added ADR-0054 (ProbeRunner subsystem — per-alloc-per-probe tokio tasks in `overdrive-worker`; `TcpProber`/`HttpProber`/`ExecProber` port traits; `ProbeResultRow` LWW observation). Added ADR-0055 (ServiceLifecycleReconciler — typed View, pure sync reconcile, `Stable` non-terminal condition extending ADR-0037; AND-of-all multi-startup-probe semantic; readiness `successThreshold` default 1; cascading-restart rate-limiter Phase 2+ surface). Added ADR-0056 (ServiceSubmitEvent V1→V2 — `Stable { settled_in, witness }` + `Failed { reason: ServiceFailureReason }`; single per-kind reason enum; `ConvergedRunning`/`ConvergedFailed` deleted per single-cut greenfield migration; streaming-cap 60s unchanged as deliberate non-decision). Added ADR-0057 (`[[health_check.*]]` TOML spec — defaults table aligned with K8s where defensible (timeout 5s vs K8s 1s justified); kind rejection for `[job]`/`[schedule]`; `ServiceSpecEnvelope::V1→V2` bump per ADR-0048). Added ADR-0058 (default-probe inference — "honest by default" TCP-connect on `listener[0]` when probes absent; explicit opt-out via empty array; divergence from K8s/Nomad defaults justified by RCA-A). Added ADR-0059 (exec-probe cgroup placement — `cgroup.procs` write Phase 1; reuses `place_pid_in_scope` from ExecDriver; `clone3 + CLONE_INTO_CGROUP` deferred to Phase 2+ pending `nix-rust/nix#2120`). Amendments to ADR-0032 (Service wire variants), ADR-0037 (TerminalCondition gains `Stable`, `Failed` additive variants), ADR-0048 (`ProbeResultRowEnvelope::V1` + `ServiceSpecEnvelope::V2` fixtures), ADR-0050 (`ServiceSpec` gains `startup_probes`/`readiness_probes`/`liveness_probes` Vec fields). C4 Component diagram added for ProbeRunner subsystem topology (§86). Closes RCA-A (`docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md`) for Service kind structurally — `Stable` cannot fire from a kernel-accepted exec; it fires only from a reconciler-confirmed startup-gate pass against `ProbeResultRow.status == Pass`. — Morgan. |
 | 2026-05-04 | Phase 2.1 eBPF dataplane scaffolding extension (§40–§43). Added ADR-0038 (eBPF crate layout `overdrive-bpf` + `overdrive-dataplane`; `xtask bpf-build` + `build.rs` artifact-check shim build pipeline; `bpf-linker` provisioning via Lima image + xtask dev-setup + which-or-hint; `default-members` exclusion for the kernel-side crate; `EbpfDataplane` mirroring `SimDataplane`'s constructor seam). Two new crates: `overdrive-bpf` (class `binary`, target `bpfel-unknown-none`, `#![no_std]`, `aya-ebpf`-only) and `overdrive-dataplane` (class `adapter-host`, hosts `EbpfDataplane` impl of `Dataplane` port). `cargo xtask bpf-build` is NEW; `cargo xtask bpf-unit` and `cargo xtask integration-test vm` filled in (against the no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter); `verifier-regress` and `xdp-perf` remain stubbed for #29. Workspace `members` grows from 9 to 11 entries; new `default-members` declaration excludes `overdrive-bpf` so `cargo check --workspace` builds on macOS. Lima image `cargo install --locked` line extended with `bpf-linker`. C4 L1 (System Context) + L2 (Container) added at `c4-diagrams.md` § Phase 2.1; L3 deliberately skipped (loader is a single struct with two no-op methods). dst-lint scope unchanged — both new crates are non-`core`. ADR-0029 mirrored as the closest-precedent extraction ADR. — Morgan. |
 | 2026-05-24 | Phase 1 cgroup-fs-port extension. Added ADR-0054 (`CgroupFs` port trait — narrow, cgroup-semantic; lives in `overdrive-core::traits::cgroup_fs`; `RealCgroupFs` adapter in `overdrive-host` wrapping `tokio::fs::*`; `SimCgroupFs` adapter in `overdrive-sim` over a `BTreeMap<PathBuf, Vec<u8>>` byte store with per-(method, path) injectable error schedule). Closes GH #136. Refactors the eight free functions in `crates/overdrive-worker/src/cgroup_manager.rs` into methods on a new `CgroupManager` struct holding `Arc<dyn CgroupFs>`; `ExecDriver::new` signature gains a mandatory `fs: Arc<dyn CgroupFs>` parameter (no builder, no default — per `.claude/rules/development.md` § "Port-trait dependencies"). Composition root in `overdrive-cli`'s `serve` subcommand instantiates `RealCgroupFs`, calls `probe()` (Earned Trust per CLAUDE.md principle 12 — round-trip a payload through the substrate; failure surfaces as `health.startup.refused` event and the binary exits non-zero), threads `Arc<dyn CgroupFs>` through the worker subsystem entrypoint into `ExecDriver::new`. `AppState` gains no new field — control-plane crate never names `CgroupFs`, preserving ADR-0029's `overdrive-control-plane`-does-NOT-depend-on-`overdrive-worker` invariant. ADR-0026's direct-cgroupfs-writes mechanism unchanged in substance; only the call surface from `tokio::fs::*` to `self.fs.{create_dir, write, remove_dir}.await` changes. **Non-replacement contract** recorded: SimCgroupFs is byte-write only and does NOT model kernel-side effects (`cgroup.kill` mass-kill, `subtree_control` EBUSY-on-live-child, controller-value rejection, kernel-managed pseudo-files); Tier 3 integration tests under `cargo xtask lima run --` stay mandatory for kernel-semantic coverage; ADR-0034's removal of `--allow-no-cgroups` continues to hold (SimCgroupFs cannot smuggle in as a production wiring because the existing `cgroup_preflight` v2-delegation gate from ADR-0028 still requires real `/sys/fs/cgroup`). Cancellation semantics for SimCgroupFs: method-entry deterministic (mutation happens atomically inside the method body before the first `.await`; mid-syscall is a kernel concept that does not apply in-process); K3 (seed → bit-identical trajectory) extends naturally — only nondeterminism source is the BTreeMap-keyed injection schedule. Migration is single-cut greenfield per `feedback_single_cut_greenfield_migrations`: no compatibility shim, no `cfg(test)` swap, no `#[deprecated]`. Existing 12 tempfile-based unit tests triaged per-test — 8 convert to SimCgroupFs (logic + byte-side-effect assertions), 4 stay tempfile-backed against `RealCgroupFs` (`ENOTDIR` error-kind discrimination requires real kernel VFS semantics). No new external dep — `tokio::fs` already in workspace; `BTreeMap` std; `parking_lot::Mutex` already in workspace; `uuid` already in workspace (probe tempdir naming). C4 Container diagram embedded in ADR-0054; System-Context (L1) deliberately omitted (internal refactor at known scale, no external boundary change). ADR-0016 / ADR-0026 / ADR-0028 / ADR-0029 / ADR-0030 / ADR-0034 / ADR-0049 (Earned Trust precedent at §71) cross-referenced. — Morgan. |
+| 2026-05-30 | **docs-platform website (overdrive.sh) extension** — NEW top-level section `## docs-platform website (overdrive.sh)`, architecturally independent of the Rust platform (greenfield TypeScript/Next.js `website/` subtree, C-5-exempt). DESIGN pass 2 (GUIDE mode) writing the locked decisions. Added ADR-0055 (MCP = same-Worker Next route handler at `website/app/mcp/route.ts`, Node runtime, stateless Streamable HTTP, sharing the ONE in-process build-time `source` index — strongest C-4 no-divergence guarantee; rejected separate-Worker + `mcpdoc`), ADR-0056 (D1 analytics binding — real SQL for top-zero-result-query aggregation; best-effort `ctx.waitUntil()` + catch-swallow logging contract per C-7; resolves DISCUSS D-2; rejected Analytics Engine + synchronous logging), ADR-0057 (in-Worker Orama now via `createFromSource` behind a `lib/search.ts` seam shared by `/api/search` + MCP `search_docs`; benchmarked external-search migration trigger — >~5k pages OR ~60–70 MB of 128 MB isolate, labelled inference; rejected day-one external search + no-seam), ADR-0058 (build-time one-index enforcement assertion — Node build step in `website/`, NOT a Rust gate — every `source.getPages()` page has reachable `.md` + appears in `llms.txt` + is in the search index, blog in same index; makes C-4 structural per nWave principle 11/12; rejected seam-only-no-assertion). C4 System Context (L1) + Container (L2) + Component (L3, the MCP+search+index subsystem) added as Mermaid in the new section. DDD-1..DDD-11 decisions table; component decomposition + driving/driven ports + Reuse Analysis (USE library-primitive vs CREATE-NEW glue) tables. OUT OF SCOPE (non-goal, not a deferral): `fumadocs-openapi` playground (D-E). DEVOPS-wave: custom-domain DNS/binding (single `SITE_ORIGIN` flip, D-F); external-search migration benchmark + contract tests if/when taken. KPI-2/6 approximated from page-view funnels (CF Web Analytics, D-D). No Rust-section edits; no assumptions changed from DISCUSS. ADR index grows by 4 (0055–0058). Outcome Collision Check: N/A (no `docs/product/outcomes/registry.yaml`). — Morgan. |
 | 2026-05-24 (amendment) | ADR-0054 § Production probe (RealCgroupFs) amended in-place. The original probe spec wrote a regular `probe-file` inside the probe cgroup and asserted byte-equality on read-back; DELIVER step 01-02 empirically falsified this against real `/sys/fs/cgroup` — cgroupfs only permits kernel-managed pseudo-files inside cgroup directories, so the regular-file write was rejected by the kernel substrate. Amended spec round-trips on `cgroup.subtree_control` (kernel-managed pseudo-file production code already touches): step 1 `create_dir` the probe leaf cgroup, step 2 `write(&probe_dir.join("cgroup.subtree_control"), b"")` (kernel-supported no-op empty controller-diff), step 3 `tokio::fs::read` and assert "no error + valid UTF-8 response" (NOT byte-equality with what was written — kernel returns its own canonical controller-list payload), step 4 `remove_dir` (no `remove_file` — kernel forbids unlinking its own pseudo-files; kernel garbage-collects them on rmdir). `ProbeError::RoundTripMismatch { wrote, read }` repurposed: for RealCgroupFs `wrote = vec![]` and the leg fires on non-UTF-8 kernel response (substrate-lying signal); for SimCgroupFs unchanged semantics. The 2026-05-24 brief.md row above implicitly carries the amended probe semantic — the "round-trip a payload through the substrate" framing remains accurate at this row's level of detail; the specifics live in ADR-0054 § Production probe and § Alternatives considered → Alternative F (the rejected regular-file approach, with empirical disproof). Scenario names (`C-probe-success`, `C-probe-with-custom-root`) and DISTILL-level scope unchanged — only the probe internals shift. User-approved 2026-05-24. — Morgan. |
+| 2026-05-30 | **docs-platform website DELIVERED** (LEAN, non-DES; DISTILL skipped by agreement, the four glue checks folded into slices). The `website/` Next 16 + Fumadocs v16 + OpenNext subtree shipped end-to-end across 8 committed slices (`8f644c2e`..`c13756f3`): (01) skeleton — OpenNext-on-Workers builds Fumadocs + serves locally [the key de-risk]; (02) real docs content (intent/observation + DST) + nav tree; (03) Orama search via the `lib/search.ts` seam (ADR-0057); (04) llms.txt/llms-full.txt/per-page `.md` via `lib/get-llm-text.ts` + the falsifiable one-index assertion (ADR-0058); (05) the docs-MCP server `search_docs`+`get_doc` over the one index (ADR-0055), with `get_doc`===`.md` byte-identity proven; (06) D1 `tool_calls` best-effort analytics with a genuine C-7 fault-injection test (ADR-0056); (07) blog as a second collection joining the ONE combined index + single `publishedBlogPages()` draft gate; (08) HomeLayout landing seeded from `index.html`. All components in the docs-platform Component Decomposition shipped as designed. **Pending the user's Cloudflare account (not code blockers):** real `wrangler deploy` + live URL (slice 01 landed build + local-workerd serve + the deploy workflow), custom-domain/`SITE_ORIGIN` flip, real D1 `database_id` + migration apply, and the scheduled `deploy-pages.yml` removal (deferred until the working deploy lands). Untouched deferrals: RSS/OG (D-4), `fumadocs-openapi` out-of-scope (D-5), KPI-2/6 approximated (D-D). Implemented by nw-software-crafter; orchestrated lean. |

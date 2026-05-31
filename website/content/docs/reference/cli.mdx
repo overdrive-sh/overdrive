@@ -1,0 +1,135 @@
+---
+title: CLI reference
+description: Every overdrive command, flag, and exit code that ships in Phase 1 — serve, deploy, and the job, node, alloc, and cluster inspection verbs.
+---
+
+`overdrive` is the single binary for both running the control plane and
+operating it. This page documents the command surface that ships today. Phase 1
+is single-node: there is no node-join flow and no multi-region configuration, so
+the commands here assume one machine running one control plane.
+
+## How the CLI finds the server
+
+Every command except `serve` talks to a running control plane, and they all
+learn where it is the same way: from `~/.overdrive/config`. When `serve` binds
+its listener it writes three things to that file as one unit — the endpoint, the
+CA pin, and your operator certificate. Later commands read the unit back.
+
+The trust posture is fixed, not tunable per command:
+
+- There is **no `--endpoint` flag** and **no `OVERDRIVE_ENDPOINT` variable**. The
+  config file is the only source of the server address.
+- There is **no `--insecure` flag**. `overdrive --insecure ...` is rejected as an
+  unknown argument. The connection is mutually authenticated or it does not
+  happen.
+
+To point the CLI at a different control plane, swap the active config directory
+with `OVERDRIVE_CONFIG_DIR`. That moves the whole trust triple — endpoint, CA
+pin, and certificate together — never just the address.
+
+## `overdrive serve`
+
+Start the control plane on a TLS-bound listener. This is the one command that
+does not read an existing config; it writes one.
+
+```bash
+overdrive serve [--bind <ADDR>] [--data-dir <PATH>]
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--bind <ADDR>` | `127.0.0.1:7001` | Socket address to bind. Pass `127.0.0.1:0` to request an ephemeral port. |
+| `--data-dir <PATH>` | `dirs::data_dir()/overdrive` | Parent directory for the IntentStore file, the per-primitive state files, and the trust-triple config. |
+
+The recorded endpoint names the *resolved* port, not the requested one — so a
+`--bind 127.0.0.1:0` server writes the concrete port it actually got, and the
+next command connects to it without you reading the port off the logs.
+
+## `overdrive deploy`
+
+Deploy a workload from a TOML spec file. See
+[Deploy a workload](/docs/how-to/deploy-a-workload) for the spec shape and a
+worked run.
+
+```bash
+overdrive deploy <SPEC> [--detach]
+```
+
+| Argument / flag | Meaning |
+| --- | --- |
+| `<SPEC>` | Path to a TOML spec file. |
+| `--detach` | Wait only for the IntentStore commit; do not stream lifecycle events. |
+
+Deploy is idempotent on the spec's content hash. A spec the cluster has not seen
+reports `Inserted`; re-deploying an identical spec reports `Unchanged` and
+commits nothing. By default the command streams lifecycle events until the
+workload converges; `--detach` consumes the commit acknowledgement and exits.
+
+The command exits `0` on an `Inserted` or `Unchanged` outcome and `2` on a
+transport failure or a server-side validation error.
+
+## `overdrive job`
+
+Workload lifecycle.
+
+```bash
+overdrive job stop <ID>      # stop the workload with this id
+```
+
+`stop` declares that the named workload should no longer run; the control plane
+records the intent and its allocations wind down. To read back what is running,
+use [`alloc status`](#overdrive-alloc) — `job list` is parsed but not yet wired
+(see [Accepted but not yet functional](#accepted-but-not-yet-functional)).
+
+## `overdrive alloc`
+
+Allocation inspection.
+
+```bash
+overdrive alloc status --job <ID>
+```
+
+Returns the canonical `spec_digest` the control plane holds for the job and the
+number of live allocations for it. This is the command to confirm that a deploy
+took effect: match the returned digest against the spec you deployed, and check
+the allocation count.
+
+## `overdrive node`
+
+Node inspection.
+
+```bash
+overdrive node list          # list nodes the control plane knows about
+```
+
+## `overdrive cluster`
+
+Cluster mode and membership.
+
+```bash
+overdrive cluster status
+```
+
+`cluster status` reports the control plane's current mode — `single` on a fresh
+node.
+
+## Accepted but not yet functional
+
+Two subcommands are part of the `clap` argv surface — they parse, and
+`--help` lists them — but their handlers are not wired in Phase 1. Each
+currently logs `command not yet wired` and exits `0` without doing anything:
+
+| Command | State |
+| --- | --- |
+| `overdrive job list` | Parsed, no handler. Use [`alloc status --job <ID>`](#overdrive-alloc) to inspect a workload today. |
+| `overdrive cluster upgrade --mode <single\|ha> --peers <list>` | Parsed, no handler. High-availability mode is design-stage; Phase 1 is single-node. |
+
+They are documented here so the behavior is not mistaken for a bug: the command
+appears to succeed (exit `0`) but has no effect.
+
+## Global behavior
+
+- `overdrive --version` prints the build version; `overdrive --help` and
+  `overdrive <command> --help` print usage.
+- Unknown flags are rejected rather than ignored — there is no silent
+  pass-through for options like `--insecure`.

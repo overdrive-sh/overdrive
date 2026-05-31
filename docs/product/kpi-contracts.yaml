@@ -1,0 +1,173 @@
+# KPI contracts — SSOT for outcome-KPI instrumentation
+#
+# Per-KPI: data collection (event/log field names, D1 schema, Web Analytics
+# funnel definitions), dashboard mapping, and alert thresholds. Created by the
+# docs-platform DEVOPS wave (Apex, 2026-05-30). The KPI definitions, baselines,
+# and targets are owned by DISCUSS (feature-delta § Outcome KPIs); this file is
+# the DEVOPS instrumentation contract that makes them measurable.
+#
+# Observability stack is Cloudflare-native (locked DEVOPS decision): Workers
+# Logs / Workers observability + Cloudflare Web Analytics (browser RUM) + D1
+# (the MCP tool-call analytics log). No OpenTelemetry, no Datadog/Prometheus/ELK.
+
+schema_version: 1
+feature: docs-platform
+north_star:
+  name: mcp-tool-call-volume-low-requery
+  definition: >
+    MCP tool-call volume rising month-over-month WITH a low re-query rate —
+    agents adopting the endpoint AND finding answers on the first/second call.
+  derived_from: D1 tool_calls log (volume = row count; re-query = repeated
+    search_docs within an agent session for the same task).
+
+# --------------------------------------------------------------------------
+# Data collection surfaces
+# --------------------------------------------------------------------------
+surfaces:
+  workers_logs:
+    provider: Cloudflare Workers Logs / observability
+    captures: per-request status, path, timing for the Worker fetch handler
+    used_by: [KPI-1]
+  web_analytics:
+    provider: Cloudflare Web Analytics (browser RUM beacon, page-view only)
+    captures: page views per path; referrer; navigation between paths
+    custom_events: NOT used (no custom-event beacon, no 9th slice — D-D)
+    used_by: [KPI-2, KPI-6]
+    approximation_note: >
+      KPI-2 (search->click) and KPI-6 (landing->proceed) are APPROXIMATED from
+      page-view funnels, NOT measured from explicit click/nav events. Stated
+      honestly per D-D: the funnels are page-transition proxies, not
+      instrumented user-action events.
+  build_assertion:
+    provider: website CI (Node build step — scripts/assert-one-index.ts, ADR-0058)
+    captures: every source page has a reachable .md, an llms.txt entry, and a
+      search-index entry; blog posts in the same index
+    used_by: [KPI-3]
+  d1_tool_calls:
+    provider: Cloudflare D1
+    captures: one row per MCP tool invocation (best-effort, C-7 / ADR-0056)
+    used_by: [KPI-4, KPI-5, north_star]
+
+# --------------------------------------------------------------------------
+# D1 schema — the MCP tool-call log (ADR-0056)
+# --------------------------------------------------------------------------
+d1_tool_calls_schema:
+  table: tool_calls
+  contract: >
+    Best-effort write via ctx.waitUntil() + catch-swallow. A logging failure
+    NEVER blocks, delays, or alters the MCP tool response (C-7, guardrail).
+    The maintainer reads trends, not an audit ledger — lossy-under-failure by
+    design.
+  columns:
+    - name: tool
+      type: TEXT
+      note: "'search_docs' | 'get_doc'"
+    - name: query
+      type: TEXT
+      note: "the search_docs query string, or the get_doc url"
+    - name: ts
+      type: INTEGER
+      note: "unix epoch ms of the tool call"
+    - name: result_count
+      type: INTEGER
+      note: "count of results returned; 0 marks a coverage gap (KPI-5)"
+  maintainer_queries:
+    top_zero_result: >
+      SELECT query, COUNT(*) AS n FROM tool_calls
+      WHERE tool = 'search_docs' AND result_count = 0
+      GROUP BY query ORDER BY n DESC LIMIT 25;
+    volume_by_month: >
+      SELECT strftime('%Y-%m', ts/1000, 'unixepoch') AS month, COUNT(*) AS calls
+      FROM tool_calls GROUP BY month ORDER BY month;
+
+# --------------------------------------------------------------------------
+# Per-KPI contracts
+# --------------------------------------------------------------------------
+kpis:
+  - id: KPI-1
+    who: first-time visitors
+    does_what: successfully load the deployed docs URL
+    target: ">= 99% of requests return 200 (excluding cold-start latency)"
+    baseline: 0 (no site existed)
+    instrument: workers_logs + deploy smoke test (US-01)
+    collection:
+      smoke_test: "HTTP GET on the deployed /docs URL post-deploy; assert 200 + heading present"
+      runtime: "Workers Logs success-rate over total requests"
+    dashboard: "Workers observability — request success rate panel (2xx / total)"
+    alert:
+      guardrail: true
+      threshold: "success rate < 99% sustained -> Warning; deploy smoke test failing -> Page (blocks/rolls back deploy)"
+      rationale: "KPI-1 success rate must NOT degrade as features land (guardrail)"
+
+  - id: KPI-2
+    who: evaluators using search
+    does_what: search -> click through to a result
+    target: ">= 50% click-through; median time-to-first-answer < 15s"
+    baseline: n/a (no search before)
+    instrument: web_analytics (page-view funnel APPROXIMATION, D-D)
+    collection:
+      funnel: "docs page-view following a session that loaded the search-bearing page; proxy for search->click"
+      ttfa: "approximated from page-transition timing; manual timing for the launch baseline"
+    dashboard: "Web Analytics — path funnel (docs entry -> docs answer page)"
+    alert: none (leading indicator; approximated — not a guardrail)
+
+  - id: KPI-3
+    who: agent tooling consuming the corpus
+    does_what: fetch clean .md / llms for grounding
+    target: 100% of published docs pages exported (reachable .md + in llms.txt + in index)
+    baseline: 0
+    instrument: build_assertion (ADR-0058)
+    collection: "scripts/assert-one-index.ts fails the build if any page lacks a .md, llms.txt entry, or index entry"
+    dashboard: "CI build status (pass/fail) — the assertion is the gate"
+    alert:
+      threshold: "build assertion failure -> Blocking (CI red; no deploy)"
+      rationale: "C-4 made structural — one index, all consumers"
+
+  - id: KPI-4
+    who: developers (via their agents)
+    does_what: agent ships grounded code
+    target: "MCP tool-call volume rising MoM; re-query rate < 30%"
+    baseline: 0
+    instrument: d1_tool_calls
+    collection:
+      volume: "row count over time (volume_by_month query)"
+      requery: "repeated search_docs for the same task within an agent session / total search_docs"
+    dashboard: "D1-backed maintainer view — monthly volume + re-query rate"
+    alert: none (product adoption signal; observed, not alerted)
+
+  - id: KPI-5
+    who: docs maintainer (Diego)
+    does_what: author docs from logged demand
+    target: ">= 1 page/month from a top zero-result query; zero-result rate trending down"
+    baseline: 0
+    instrument: d1_tool_calls (top_zero_result query) + docs changelog
+    collection:
+      zero_result: "top_zero_result query surfaces the highest-demand coverage gaps"
+      attribution: "docs changelog cites the query that motivated each new page"
+    dashboard: "D1-backed maintainer view — top zero-result queries; zero-result rate over time"
+    alert: none (compounding strategic signal; reviewed, not alerted)
+
+  - id: KPI-6
+    who: first-time visitors landing on /
+    does_what: navigate / -> docs or blog
+    target: ">= 40% of / sessions proceed into docs or blog"
+    baseline: n/a (no home)
+    instrument: web_analytics (page-view funnel APPROXIMATION, D-D)
+    collection:
+      funnel: "sessions with a / page-view followed by a /docs or /blog page-view / total / sessions"
+    dashboard: "Web Analytics — path funnel (/ -> /docs | /blog)"
+    alert: none (leading indicator; approximated — not a guardrail)
+
+# --------------------------------------------------------------------------
+# Guardrails (must NOT degrade)
+# --------------------------------------------------------------------------
+guardrails:
+  - id: G-1
+    statement: "Page-load success rate (KPI-1) must not drop as features are added."
+    enforced_by: KPI-1 alert + deploy smoke test
+  - id: G-2
+    statement: "Analytics logging must NEVER block or fail an MCP tool response (C-7)."
+    enforced_by: best-effort D1 write (ctx.waitUntil + catch-swallow); UAT scenario in US-06
+  - id: G-3
+    statement: "Search and MCP must reuse ONE index — no divergence (C-4)."
+    enforced_by: build_assertion (ADR-0058) + the single lib/search.ts seam

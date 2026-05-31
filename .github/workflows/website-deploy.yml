@@ -1,0 +1,120 @@
+# overdrive.sh docs platform (website/ subtree) — build + deploy.
+#
+# This workflow is strictly independent of the Rust platform CI (ci.yml /
+# nightly.yml). It shares no jobs, no runners-state, and no triggers with them:
+# it fires ONLY on changes under website/**. The website/ subtree is a
+# greenfield TypeScript/Next.js app exempt from every Rust gate
+# (cargo/nextest/dst-lint/cargo-mutants). See brief.md
+# § "docs-platform website (overdrive.sh)".
+#
+# - Pull request → typecheck + lint + Next build + OpenNext build (no deploy).
+# - Push to main → the above, then deploy to Cloudflare Workers via OpenNext.
+#
+# Deploy requires the CLOUDFLARE_API_TOKEN repo secret (and, for some account
+# operations, CLOUDFLARE_ACCOUNT_ID). Until those are wired, the deploy job is
+# a no-op-on-PR / runs-only-on-main path; the build gates run regardless.
+name: website-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/website-deploy.yml"
+  pull_request:
+    paths:
+      - "website/**"
+      - ".github/workflows/website-deploy.yml"
+
+# Never run two deploys against the same ref concurrently.
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: website
+
+jobs:
+  build:
+    name: typecheck + lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Next production build
+        # `next build` prerenders the force-static `app/one-index-check` route,
+        # which runs the C-4 one-index assertion (ADR-0058) INSIDE the build —
+        # a violation throws there and fails this step outright.
+        run: bun run build
+
+      - name: One-index assertion gate (C-4 / ADR-0058)
+        # Belt-and-braces: confirms the assertion actually RAN and PASSED in the
+        # build step above by checking the prerendered gate artifact, rather than
+        # rebuilding. Guards against the gate route silently vanishing (e.g. a
+        # `_`-prefixed rename that Next would drop from routing). Verifies every
+        # source.getPages() page is reachable from all three consumers (.md
+        # export, llms.txt, search index).
+        run: bun run scripts/verify-one-index-gate.ts
+
+      - name: OpenNext (Cloudflare) build
+        run: bunx opennextjs-cloudflare build
+
+      # Hand the compiled Worker output to the deploy job so it never rebuilds.
+      # `include-hidden-files` is required — `.open-next/` holds the compiled
+      # config under a dot-prefixed `.build/` dir that v4 would otherwise drop.
+      - name: Upload OpenNext build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-next-build
+          path: website/.open-next
+          include-hidden-files: true
+          retention-days: 1
+
+  deploy:
+    name: Deploy to Cloudflare Workers
+    needs: build
+    # Deploy only on a push to main — never on PRs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Reuse the Worker output the build job already produced — `deploy` reads
+      # the compiled `.open-next/` config and runs `wrangler deploy`; it does not
+      # rebuild, so no second `opennextjs-cloudflare build` pass is needed here.
+      - name: Download OpenNext build output
+        uses: actions/download-artifact@v4
+        with:
+          name: open-next-build
+          path: website/.open-next
+
+      - name: Deploy (OpenNext → Cloudflare Workers)
+        run: bunx opennextjs-cloudflare deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

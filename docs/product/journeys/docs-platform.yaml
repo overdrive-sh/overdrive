@@ -1,0 +1,194 @@
+schema_version: 1
+
+# Product-level journey for the docs-platform feature (overdrive.sh).
+#
+# Unlike trust-the-sim.yaml / submit-a-job.yaml (which are about the Rust
+# PLATFORM), this journey is about DOCS CONSUMERS of overdrive.sh. It carries
+# TWO arcs because the feature serves two personas with distinct emotional
+# journeys (UX research depth: comprehensive):
+#   Arc A — Priya, the human evaluator/adopter (browser)
+#   Arc B — Maya, the developer whose coding agent queries docs via MCP
+#
+# The authoritative detailed version lives in the feature narrative
+# (docs/feature/docs-platform/feature-delta.md). This file is the
+# cross-feature product-level summary, following the journey schema.
+#
+# Feature origin: docs-platform DISCUSS wave (2026-05-30).
+
+journey:
+  name: "Find authoritative Overdrive docs — as a human, or through an agent"
+  goal: >
+    A docs consumer reaches an authoritative, current Overdrive answer
+    from overdrive.sh. Priya (human) lands, searches or browses, finds the
+    answer, and decides/proceeds. Maya's agent (MCP) searches the corpus,
+    pulls a whole page as grounded context, and produces code that runs —
+    while the tool call is logged as docs-prioritisation signal.
+  persona: >
+    Priya Nair (staff platform engineer, evaluator/adopter — primary,
+    Arc A) and Maya Okonkwo (developer whose coding agent queries docs via
+    MCP — primary, Arc B; the agent is a secondary actor). Tertiary: the
+    docs maintainer who reads the analytics loop (J-DOCS-003).
+
+  emotional_arc:
+    start: "Skeptical (Priya: 'is this real or a landing page?'; Maya: 'my agent will hallucinate the API')."
+    middle: "Engaged then reassured — search/MCP returns a real, relevant answer fast; the page actually explains/grounds; the command or spec works."
+    end: "Confident and hands-off — Priya takes it to her team; Maya trusts her agent on Overdrive specifics and stops correcting it."
+
+# ---------------------------------------------------------------------------
+# ARC A — Priya, human evaluator (browser)
+# ---------------------------------------------------------------------------
+steps:
+  - id: A1
+    name: "Land on the site"
+    command: "open https://overdrive.sh/"
+    summary: >
+      Priya lands on the landing page (HomeLayout, marketing content
+      seeded from index.html). She sizes up seriousness in seconds: clear
+      value prop, a path into /docs, a real navigation shell shared across
+      all surfaces.
+    emotional_state:
+      entry: "Skeptical — 'prove this is substantive.'"
+      exit: "Curious — 'okay, there is a docs section, let me dig in.'"
+    failure_modes:
+      - "Site is slow to first paint (cold Worker) — first impression damaged"
+      - "Landing page over-promises features the docs do not back up — trust erodes"
+
+  - id: A2
+    name: "Search for a specific answer"
+    command: "Cmd+K → type 'intent observation boundary'"
+    summary: >
+      Priya hits the search hotkey and types a technical query. The Orama
+      search (one build-time index) returns ranked results against the
+      real docs corpus within a perceptible instant. She clicks the top
+      result.
+    shared_artifacts:
+      - name: "docs_content_index"
+        source: "build-time Fumadocs source.getPages() index"
+        displayed_as: "search results / MCP results / llms.txt entries"
+        consumers: ["search dialog (Arc A)", "MCP search_docs (Arc B)", "llms.txt / llms-full.txt"]
+    emotional_state:
+      entry: "Curious — 'will search actually find my technical term?'"
+      exit: "Engaged — 'a real result, not marketing fluff.'"
+    failure_modes:
+      - "Empty results for an answerable query (index gap or tokenisation miss)"
+      - "Results ranked by marketing pages over the relevant concept doc"
+
+  - id: A3
+    name: "Read the concept, follow into the how-to"
+    command: "click result → read /docs/concepts/... → follow link to /docs/how-to/..."
+    summary: >
+      The concept page (DocsLayout, real nav/TOC) explains the boundary;
+      it links to the how-to that uses the concept. Priya follows the
+      thread without dead ends. The how-to shows a runnable command.
+    emotional_state:
+      entry: "Engaged — 'does this actually explain it?'"
+      exit: "Reassured — 'it explains AND links me to how to use it.'"
+    failure_modes:
+      - "Concept page is a stub or describes unimplemented behaviour"
+      - "No link from concept to the how-to (dead end forces a re-search)"
+
+  - id: A4
+    name: "Decide / proceed"
+    command: "(decision — bookmark a page, share with team, or run the command locally)"
+    summary: >
+      Priya has her answer. She either makes the adoption decision, shares
+      a docs URL with her team, or proceeds with the spike — all without
+      leaving the site or reading source.
+    emotional_state:
+      entry: "Reassured — 'I have what I need.'"
+      exit: "Confident — 'well-documented; I can take this to my team.'"
+    failure_modes:
+      - "She found the page but it omitted the one detail she needed, sending her to source after all"
+
+# ---------------------------------------------------------------------------
+# ARC B — Maya, agent-operating developer (MCP)
+# ---------------------------------------------------------------------------
+  - id: B1
+    name: "Configure the MCP endpoint once"
+    command: "add https://overdrive.sh/mcp to the agent's MCP server config"
+    summary: >
+      Maya copies the /mcp endpoint from a docs page into her agent's MCP
+      config once. The endpoint is Streamable HTTP, Node runtime, stateless.
+    emotional_state:
+      entry: "Wary — 'will this be a pain to wire up?'"
+      exit: "Neutral-hopeful — 'configured; we'll see if the agent uses it.'"
+    failure_modes:
+      - "Endpoint config is unclear or the handshake fails silently"
+
+  - id: B2
+    name: "Agent searches the docs for task context"
+    command: "(agent calls) search_docs('write a job spec')"
+    summary: >
+      Maya asks her agent to write a job spec. The agent calls
+      search_docs over the SAME build-time index Arc A's search uses,
+      gets ranked {title, url, excerpt} results, and picks the relevant
+      page. The tool call {tool, query, ts, result_count} is logged to a
+      Cloudflare binding (analytics loop, J-DOCS-003).
+    shared_artifacts:
+      - name: "docs_content_index"
+        source: "build-time Fumadocs source.getPages() index"
+        displayed_as: "MCP search_docs ranked results"
+        consumers: ["MCP search_docs", "search dialog (Arc A)", "llms export"]
+      - name: "tool_call_log_record"
+        source: "MCP route handler logging wrapper"
+        displayed_as: "{tool, query, ts, result_count} row in Analytics Engine / D1"
+        consumers: ["analytics loop (J-DOCS-003 maintainer dashboard/query)"]
+    emotional_state:
+      entry: "Wary — 'it'll probably hallucinate the API.'"
+      exit: "Surprised — 'it actually queried the docs and found a real page.'"
+    failure_modes:
+      - "search_docs returns irrelevant pages → agent grounds on the wrong thing"
+      - "Logging failure blocks the tool response (analytics must never break the answer)"
+
+  - id: B3
+    name: "Agent pulls a whole page as grounded context"
+    command: "(agent calls) get_doc('https://overdrive.sh/docs/how-to/submit-a-job')"
+    summary: >
+      The agent calls get_doc(url), which returns getLLMText(page) — clean
+      title + processed markdown, NOT rendered HTML chrome. The agent now
+      has authoritative, current content to ground its answer.
+    shared_artifacts:
+      - name: "page_llm_text"
+        source: "getLLMText(page) primitive over the build-time source"
+        displayed_as: "markdown returned by get_doc / per-page .md / llms-full.txt"
+        consumers: ["MCP get_doc", "per-page .md export", "llms-full.txt"]
+    emotional_state:
+      entry: "Surprised — 'it found the page; will the content be usable?'"
+      exit: "Relieved — 'clean markdown grounded the answer; no HTML soup.'"
+    failure_modes:
+      - "get_doc returns HTML/marketing chrome instead of clean markdown"
+      - "URL not found → must return an honest not-found, not a fabricated page"
+
+  - id: B4
+    name: "Agent ships grounded code; the loop closes"
+    command: "(agent emits) a job spec that validates; Maya runs it"
+    summary: >
+      The agent produces a job spec with real CLI verbs and real shapes,
+      grounded in the pulled docs. Maya runs it; it works first try. The
+      maintainer later reads the aggregated tool-call log to see what
+      agents actually ask and prioritise docs accordingly (J-DOCS-003).
+    emotional_state:
+      entry: "Relieved — 'the agent has real context now.'"
+      exit: "Trusting — 'output works; I trust my agent on Overdrive now.'"
+    failure_modes:
+      - "Docs were stale → grounded answer is wrong (worse than no answer)"
+
+integration_validation:
+  shared_artifacts_summary:
+    - "docs_content_index — ONE build-time index from source.getPages(). The strategic invariant: search (Arc A), MCP search_docs (Arc B), and llms.txt export are THREE CONSUMERS of ONE index. They must never diverge."
+    - "page_llm_text — getLLMText(page). ONE primitive feeding get_doc (MCP), per-page .md, and llms-full.txt. The agent must get clean markdown, identical to the .md export."
+    - "tool_call_log_record — {tool, query, ts, result_count} written to a Cloudflare binding. Single source for the J-DOCS-003 analytics loop; logging must be best-effort and must NEVER block or fail the tool response."
+    - "baseOptions_shell — ONE baseOptions() navigation shell shared by landing (/), docs (/docs), and blog (/blog). Nav drift across surfaces is an integration failure."
+
+related_features:
+  - id: docs-platform
+    role: "Ships this journey end-to-end across 8 thin slices (skeleton-deploy → landing page)."
+
+changelog:
+  - date: 2026-05-30
+    feature: docs-platform
+    change: >
+      Initial product-level journey for overdrive.sh docs platform. Two
+      arcs (human evaluator via browser; developer's coding agent via MCP)
+      over one shared build-time index. Distinct in kind from the
+      platform-internal journeys (trust-the-sim, submit-a-job).

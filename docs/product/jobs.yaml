@@ -162,6 +162,68 @@ jobs:
     served_by_phase: 1
     status: active
 
+  - id: J-DOCS-001
+    title: "Find an authoritative Overdrive answer fast while evaluating or adopting"
+    situation: >
+      When I, an engineer evaluating or adopting Overdrive (platform lead
+      comparing it to Kubernetes/Nomad, or a new team member onboarding),
+      land on overdrive.sh with a concrete question — a concept ("what is
+      the intent/observation boundary?"), a how-to ("how do I submit a
+      job?"), or an API/CLI detail,
+    motivation: >
+      I want to find the authoritative answer on the site in seconds —
+      via search or browsing — without reading the Rust source, guessing
+      from a blog post, or asking in Slack and waiting,
+    outcome: >
+      so I can make an adoption decision or make forward progress on my
+      own, and so my first impression of Overdrive is "this is a serious,
+      well-documented platform" rather than "I'll have to reverse-engineer
+      this."
+    source: docs-platform DISCUSS wave (2026-05-30); vision.md "Who this is for"
+    served_by_phase: docs-platform
+    status: active
+
+  - id: J-DOCS-002
+    title: "Have my coding agent pull authoritative, current Overdrive docs as task context"
+    situation: >
+      When I, a developer building against Overdrive with an AI coding
+      agent in my terminal/IDE (Claude Code, Cursor, etc.), ask the agent
+      to do something Overdrive-specific (write a job spec, explain a
+      reconciler contract, wire the CLI),
+    motivation: >
+      I want my agent to query overdrive.sh's docs directly through an MCP
+      endpoint — searching the corpus and pulling whole pages as grounded
+      context — instead of relying on its stale training data or
+      hallucinating an API that does not exist,
+    outcome: >
+      so the code my agent produces is grounded in the real, current
+      Overdrive docs (correct CLI verbs, real reconciler shapes, real
+      newtype names), I spend less time correcting confident-but-wrong
+      output, and Overdrive is a first-class citizen in agent-assisted
+      workflows rather than a platform the agent guesses about.
+    source: docs-platform DISCUSS wave (2026-05-30); research §1 (custom MCP server)
+    served_by_phase: docs-platform
+    status: active
+
+  - id: J-DOCS-003
+    title: "Prioritise the docs I write next from evidence of what users actually ask"
+    situation: >
+      When I, the Overdrive docs maintainer / developer advocate, decide
+      what documentation to write or improve next,
+    motivation: >
+      I want evidence of what real users (humans searching, and agents
+      querying via MCP) actually ask for — the queries, their frequency,
+      whether they found an answer, and the follow-up trajectory — rather
+      than guessing or relying on a noisy support channel,
+    outcome: >
+      so I prioritise docs work by real demand, close the highest-impact
+      coverage gaps first, and can prove the docs platform is improving the
+      evaluator and agent experiences over time instead of accumulating
+      pages nobody reads.
+    source: docs-platform DISCUSS wave (2026-05-30); research §1.3.1 (analytics loop)
+    served_by_phase: docs-platform
+    status: active
+
 changelog:
   - date: 2026-04-21
     change: Initial job register for phase-1-foundation DISCUSS wave.
@@ -208,3 +270,14 @@ changelog:
       Supersedes GH #169's rejected settle-window primitive (operator
       framing rejected synthetic-timer shape in favour of k8s-shape
       declarative probes).
+  - date: 2026-05-30
+    change: >
+      Bootstrapped the J-DOCS-* job family for the docs-platform feature
+      (overdrive.sh documentation/marketing/agent-discovery site). This is
+      a different KIND of job than the platform-internal J-PLAT-*/J-OPS-*
+      jobs: these jobs are about DOCS CONSUMERS, not the Rust platform
+      itself. Added J-DOCS-001 (human evaluator/adopter finds an
+      authoritative answer fast), J-DOCS-002 (a developer's coding agent
+      pulls grounded Overdrive docs via MCP), and J-DOCS-003 (the docs
+      maintainer prioritises from MCP/search analytics evidence). Existing
+      entries unmodified.

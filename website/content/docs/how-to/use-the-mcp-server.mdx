@@ -1,0 +1,68 @@
+---
+title: Use the docs MCP server
+description: Connect a coding agent to Overdrive's documentation over MCP so it grounds its answers in the current docs instead of guessing.
+---
+
+Overdrive exposes its documentation to coding agents through a
+[Model Context Protocol](https://modelcontextprotocol.io) server at a single
+endpoint: `https://overdrive.sh/mcp`. An agent that is configured to use it can
+search the docs and read whole pages on its own, so its answers reflect the
+documentation as it is published right now rather than whatever happened to be
+in its training data.
+
+The endpoint is **stateless** and serves the same documentation index the
+website's own search uses, so what your agent finds is exactly what a human
+finds in the search dialog.
+
+## What the server exposes
+
+The server provides two tools over Streamable HTTP. Both are read-only.
+
+| Tool | Input | Returns |
+| --- | --- | --- |
+| `search_docs` | `query` (string) | Ranked pages — each with a `title`, a `url`, and a short `excerpt` |
+| `get_doc` | `url` (string) | The full clean markdown of one page, identical to that page's `.md` export |
+
+The intended loop is: call `search_docs` to find the relevant page URLs, then
+call `get_doc` on the most relevant URL to read the page in full.
+
+<Callout type="info" title="get_doc is honest about misses">
+	`get_doc` only ever returns a page that exists in the docs. If you pass a URL
+	that does not resolve to a real page, it returns an explicit "not found"
+	result — it never invents a page. Pass a `url` exactly as `search_docs`
+	returned it (for example `/docs/concepts/intent-observation`).
+</Callout>
+
+## Configure your agent
+
+Most MCP-capable clients accept a remote server entry that names the transport
+and the URL. The shape varies per client, but it is some form of:
+
+```json
+{
+	"mcpServers": {
+		"overdrive-docs": {
+			"type": "streamable-http",
+			"url": "https://overdrive.sh/mcp"
+		}
+	}
+}
+```
+
+Clients that cannot yet speak remote MCP directly can bridge through the
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) proxy, pointing it at
+the same URL.
+
+Once the entry is in place, the two tools appear in your agent's tool list and
+it can call them without any further setup — there is no key to manage and no
+session to keep alive.
+
+## Try it
+
+A quick way to confirm the connection is the
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector): point it at
+`https://overdrive.sh/mcp`, and you should see `search_docs` and `get_doc` in
+the tool list. Run `search_docs` with a query such as
+`deterministic simulation` and the top result should be
+[Deterministic Simulation Testing](/docs/concepts/deterministic-simulation-testing);
+then run `get_doc` on that page's URL to read it in full.

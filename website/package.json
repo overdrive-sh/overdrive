@@ -1,0 +1,47 @@
+{
+	"name": "@overdrive/website",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"postinstall": "fumadocs-mdx",
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"typecheck": "fumadocs-mdx && tsc --noEmit",
+		"lint": "eslint .",
+		"assert:one-index": "next build && bun run scripts/verify-one-index-gate.ts",
+		"test:mcp": "opennextjs-cloudflare build && bun run scripts/test-mcp.ts",
+		"test:mcp:analytics": "opennextjs-cloudflare build && bun run scripts/test-mcp-analytics.ts",
+		"test:blog": "opennextjs-cloudflare build && bun run scripts/test-blog.ts",
+		"analytics:migrate:local": "wrangler d1 migrations apply ANALYTICS_DB --local",
+		"analytics:top-zero-results": "bun run scripts/analytics-top-zero-results.ts",
+		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+		"upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@opennextjs/cloudflare": "^1.19.9",
+		"fumadocs-core": "^16.9.3",
+		"fumadocs-mdx": "^15.0.10",
+		"fumadocs-ui": "^16.9.3",
+		"mermaid": "^11.15.0",
+		"next": "16.2.6",
+		"react": "^19.1.7",
+		"react-dom": "^19.1.7",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@eslint/eslintrc": "^3",
+		"@tailwindcss/postcss": "^4",
+		"@types/node": "^25.9.1",
+		"@types/react": "^19.1.7",
+		"@types/react-dom": "^19.1.7",
+		"eslint": "^9",
+		"eslint-config-next": "16.2.6",
+		"tailwindcss": "^4",
+		"typescript": "^5.7.4",
+		"wrangler": "^4.95.0"
+	}
+}

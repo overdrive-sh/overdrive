@@ -1,0 +1,252 @@
+---
+title: Architecture overview
+description: How the parts of Overdrive fit together as it ships today — one binary, a reconciling control plane over redb, an eBPF dataplane, and process workloads under cgroups, all on a single node.
+---
+
+This page describes Overdrive as it runs today, not as the whitepaper imagines
+it finished. The shipped system is smaller and sharper than the full design: one
+binary, one node, a control plane that reconciles declared intent into running
+processes, a real eBPF dataplane in the packet path, and mutual TLS between the
+operator and the server. Where a subsystem from the design is not yet wired, this
+page says so plainly rather than describing it as present — see
+[What is not here yet](#what-is-not-here-yet) for the boundary.
+
+The mental model to hold: **you declare what should run; a loop makes it so.**
+Everything below is in service of that loop.
+
+<Mermaid chart={`
+flowchart TB
+  cli["overdrive CLI<br/>(operator)"]
+
+  subgraph node["overdrive — single binary, one node"]
+    direction TB
+    subgraph cp["Control plane"]
+      api["TLS API<br/>axum + rustls · ephemeral CA"]
+      loop["Convergence loop<br/>5 reconcilers"]
+      views[("ViewStore<br/>redb")]
+    end
+    intent[("IntentStore<br/>redb")]
+    obs[("ObservationStore<br/>redb")]
+    subgraph worker["Worker"]
+      exec["ExecDriver<br/>process in cgroup"]
+      probes["Probe runner<br/>TCP · HTTP · Exec"]
+    end
+    dp["eBPF dataplane<br/>XDP + cgroup sockops"]
+  end
+
+  wl["Workload process"]
+
+  cli -- "deploy / inspect · mTLS" --> api
+  api -- "write intent" --> intent
+  loop -- "desired" --> intent
+  loop -- "actual" --> obs
+  loop -- "persist memory" --> views
+  loop -- "StartAllocation" --> exec
+  loop -- "program maps" --> dp
+  exec -- "runs" --> wl
+  exec -- "alloc status" --> obs
+  probes -- "probe" --> wl
+  probes -- "probe results" --> obs
+  dp -- "forwards traffic (kernel)" --> wl
+`} />
+
+The boxes below walk through this diagram — the single binary, the two stores,
+the loop that joins them, the worker, and the kernel dataplane — in that order.
+
+## One binary, one node
+
+`overdrive` is a single binary. `overdrive serve` starts a control plane and a
+co-resident worker in one process on one host. There is no separate node agent
+to install, no scheduler service to run, and no cluster to join — the node
+identifies itself as `local` and serves only itself. A production multi-node,
+role-at-bootstrap topology is the design target; the shipped path is the
+single-node one, and the rest of this page describes that path.
+
+When the process starts, it does three things before it will accept work, and it
+refuses to boot if any of them fails:
+
+- **Probes the cgroup filesystem.** The worker runs Linux processes inside
+  cgroups; if it cannot reach a usable cgroup v2 hierarchy, boot stops with a
+  structured `health.startup.refused` event rather than limping along.
+- **Loads and probes the eBPF dataplane.** The XDP and cgroup programs are
+  attached and verified up front, not lazily on first packet.
+- **Mints its TLS identity** and binds the listener.
+
+This is "earned trust": the server proves it can do its job at boot instead of
+discovering it cannot at the first deploy.
+
+## The shape of a deploy
+
+Following a single `overdrive deploy` through the system is the fastest way to
+see how the pieces connect.
+
+1. The CLI reads `~/.overdrive/config`, opens a mutually-authenticated TLS
+   connection to the control plane, and submits the parsed spec.
+2. The control plane writes the spec to the **IntentStore** and returns an
+   outcome — `Inserted` for a new content hash, `Unchanged` for one it already
+   holds. The deploy is now durable; nothing is running yet.
+3. The **convergence loop** notices the new intent, computes the gap between what
+   should run and what is running, and emits actions to close it.
+4. An action like `StartAllocation` reaches the **worker**, which launches the
+   process under a cgroup and watches it.
+5. The worker writes the allocation's status into the **ObservationStore**. The
+   next turn of the loop reads that status as the new "actual," and the gap is
+   closed.
+
+Steps 2 and 5 touch the two halves of cluster state; step 3 is the engine that
+joins them.
+
+## Two stores, one consistency split
+
+Overdrive keeps **intent** (what should run) separate from **observation** (what
+is running) — separate traits, separate types, separate files. The
+[intent / observation boundary](/docs/concepts/intent-observation) explains why
+this split is load-bearing. What ships today is the structural separation, not
+yet its multi-node payoff:
+
+| | IntentStore | ObservationStore |
+| --- | --- | --- |
+| Holds | declared workload specs | live allocation status, node health, service backends, probe results |
+| Backed by | redb (`intent.redb`) | redb (`observation.redb`) |
+| Written by | the control plane, via typed actions | the node that owns each row |
+| Conflict rule | content-hash idempotency | last-writer-wins on a logical timestamp |
+
+Both stores are local redb files on the one node. The gossip propagation the
+boundary concept describes — every node writing its own rows and the cluster
+converging — is the multi-node design; on a single node there is nothing to
+gossip to. The boundary is built now so that adding nodes later is a change of
+backend, not a change of architecture.
+
+## The convergence loop
+
+The loop is the heart of the control plane, and it is deliberately boring: a
+real background task wakes on a tick, drains a queue of pending evaluations, and
+for each one runs a **reconciler**.
+
+A reconciler is a pure function. It receives the desired state (hydrated from
+intent), the actual state (hydrated from observation), and its own durable memory
+(a typed view), and it returns a list of actions plus its next memory. It does no
+I/O and reads no clock of its own — the runtime hands it everything, which is
+what lets the whole loop be replayed deterministically under
+[simulation](/docs/concepts/deterministic-simulation-testing). The runtime owns
+the rest: it persists the reconciler's memory to a redb-backed view store
+(writing and flushing to disk *before* it treats the action as done, so a crash
+mid-tick resumes cleanly), then dispatches the actions.
+
+Five reconcilers run today:
+
+- **WorkloadLifecycle** — drives allocations toward the declared replica count
+  and emits `StartAllocation`, `StopAllocation`, or `ReleaseServiceVip`. It
+  places work with a first-fit walk over nodes (the same algorithm the
+  `overdrive-scheduler` crate defines) and backs off restarts on repeated
+  failure.
+- **ServiceLifecycle** — drives a service through its health gates. It reads the
+  latest probe results from observation and decides whether an allocation has
+  passed startup (becomes `Stable`), is ready to receive traffic, or has
+  exhausted its liveness budget and must be restarted — emitting
+  `RestartAllocation` or marking the service failed. See
+  [Health checks close a second loop](#health-checks-close-a-second-loop).
+- **BackendDiscoveryBridge** and **ServiceMapHydrator** — together they turn live
+  allocations into dataplane state, feeding the service map the eBPF programs
+  read.
+- **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick;
+  it exists to anchor the "reconcilers are pure" invariant the test suite checks.
+
+Adding a behavior to the control plane means adding a reconciler, not threading
+logic through the loop. The loop does not know what the reconcilers do.
+
+## The worker runs processes under cgroups
+
+The shipped workload driver is `ExecDriver`: it runs a Linux process with
+`std::process::Command`, places it in a cgroup under
+`overdrive.slice/workloads.slice`, and watches its exit. A spec's `[exec]` block
+— `command` plus `args` — describes the process to run; the `[resources]` block
+(`cpu_milli`, `memory_bytes`) rides along to placement. The spec's top-level
+section names the workload's *kind* — `[service]`, `[job]`, or `[schedule]` —
+which is orthogonal to the driver that runs it.
+
+The driver trait names other drivers — microVM, VM, unikernel, WASM — but those
+variants are scaffolding with no implementation behind them. Today, `exec` is the
+only driver that runs.
+
+## Health checks close a second loop
+
+A service declares health-check probes — startup, readiness, and liveness — and
+the worker runs them. When an allocation reaches running, the worker spawns one
+task per declared probe; each ticks on its own interval and executes the probe
+through a port trait. All three mechanics ship: `TcpProber` connects a socket,
+`HttpProber` issues a plain-HTTP GET, and `ExecProber` runs a command inside the
+workload's cgroup. The result of every tick is written to the ObservationStore as
+a probe-result row.
+
+That write is what closes the loop. The probe runner does not decide anything —
+it only observes. The **ServiceLifecycle** reconciler reads those probe results
+on the next tick and makes the decisions: a service is not `Stable` until its
+startup probes pass, not sent traffic until readiness passes, and is restarted
+once its liveness failures exhaust the budget. The same intent/observation
+discipline applies — probing is observation, the verdict is a reconciler acting
+on it — which is why the health-check logic is a pure reconcilable function and
+not ad-hoc timers scattered through the worker.
+
+## The dataplane is in the kernel
+
+This is the part of the shipped system that most exceeds a "phase one"
+expectation: the dataplane is real eBPF, attached at boot. `EbpfDataplane` loads
+XDP programs onto the client and backend interfaces and a sockops program onto
+the workloads cgroup. Service traffic is matched and forwarded in the kernel —
+forward path and reverse-NAT path both — keyed off BPF maps (`SERVICE_MAP`,
+`BACKEND_MAP`, `REVERSE_NAT_MAP`) that the discovery reconcilers keep in sync
+with live allocations.
+
+There is no userspace proxy in the packet path. The control plane's job is to
+keep the maps correct; the kernel does the forwarding.
+
+## Identity is mutual TLS, minted at boot
+
+The control plane has no persistent certificate authority and no key files on
+disk. At boot it mints an ephemeral CA, issues itself a server leaf and the
+operator a client leaf, and binds a rustls listener. It writes the endpoint, the
+CA pin, and the operator certificate to `~/.overdrive/config` as one unit — the
+"trust triple" every CLI command reads. The connection is mutually
+authenticated; there is no flag to turn that off. These are standard X.509
+certificates. (SPIFFE identifiers appear in the data model — every allocation
+carries one — but they do not yet drive the TLS handshake.)
+
+## Why it is built on a swappable seam
+
+Every source of nondeterminism — the clock, the network, randomness, the
+dataplane, the workload driver, the stores — sits behind a port trait in
+`overdrive-core`. Production wires the real adapters (`SystemClock`,
+`EbpfDataplane`, `ExecDriver`, the redb stores); the test harness wires
+in-process simulated ones. The core logic never names a concrete implementation,
+so the same control plane that runs your workloads can be driven by a simulated
+world and replayed bit-for-bit from a seed. A lint gate keeps direct calls to the
+real world out of core logic. This seam is the foundation
+[deterministic simulation testing](/docs/concepts/deterministic-simulation-testing)
+is built on, and it is why the convergence loop can be tested as a pure function
+rather than against a live cluster.
+
+## What is not here yet
+
+The whitepaper describes a larger system. The following are design-stage — there
+is no wired, functional code for them in what ships today, and these docs will
+not describe them as present until there is:
+
+- **High availability.** Intent lives in single-node redb; there is no Raft
+  replication. `cluster upgrade --mode ha` parses but is not wired.
+- **Gossip-replicated observation.** Observation is local redb; the CR-SQLite /
+  Corrosion gossip layer is the multi-node design target.
+- **Other workload drivers.** microVM (Cloud Hypervisor), unikernel, and WASM
+  drivers are named in the trait but unimplemented.
+- **The ingress gateway, the policy engine, native telemetry, and the LLM
+  self-healing agent.** Each is part of the design; none is wired into `serve`.
+- **Multi-region federation.** The node is always `local`.
+
+## Where to go next
+
+- Run the loop end-to-end: [Deploy a workload](/docs/how-to/deploy-a-workload).
+- The consistency split this rests on:
+  [the intent / observation boundary](/docs/concepts/intent-observation).
+- How the pure-function design makes the control plane replayable:
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
+- Every shipped command: the [CLI reference](/docs/reference/cli).

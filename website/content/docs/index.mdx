@@ -1,0 +1,46 @@
+---
+title: Introduction
+description: A single-binary workload orchestration platform written in Rust
+---
+
+Overdrive is a workload orchestration platform written entirely in Rust. Its
+design goal is to collapse the
+Kubernetes / etcd / CNI / Envoy / SPIRE / Prometheus stack into one binary,
+built on 2026 primitives — stable eBPF, kTLS, WASM, and SPIFFE — rather than
+retrofitted onto the primitives that existed in 2014.
+
+<Callout title="What these docs cover today">
+	This is an early documentation set. It describes Overdrive's load-bearing
+	*design* and the testing discipline the foundation is built on — not a
+	finished feature catalogue. Where a behaviour is still at the design stage,
+	the docs say so explicitly rather than describing it as shipped.
+</Callout>
+
+## Where to start
+
+- **[Deploy a workload](/docs/how-to/deploy-a-workload)** — the fastest path to
+  something running: start a single-node control plane, write a TOML spec, and
+  deploy it. Everything in this guide runs today.
+- **[Concepts](/docs/concepts)** — the ideas the platform is built around. Start
+  with [the intent / observation boundary](/docs/concepts/intent-observation),
+  the consistency split that the whole control plane rests on, then read about
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
+- **[How-to](/docs/how-to)** — task-oriented guides grounded in workflows that
+  exist today, from [deploying a workload](/docs/how-to/deploy-a-workload) to
+  [running the DST harness](/docs/how-to/run-the-dst-harness).
+- **[Reference](/docs/reference)** — exact surfaces. The
+  [CLI reference](/docs/reference/cli) documents every `overdrive` command, flag,
+  and exit code that ships in Phase 1.
+
+## Design principles
+
+Overdrive's design follows a small set of principles. Two of them shape almost
+every page in these docs:
+
+- **Strong consistency where it matters, gossip where it scales.** Declared
+  intent flows through Raft; observed state propagates through a gossip CRDT.
+  See [the intent / observation boundary](/docs/concepts/intent-observation).
+- **Correctness is provable, not asserted.** Every source of nondeterminism in
+  core logic is injectable behind a trait, so the control plane can be replayed
+  deterministically under simulation. See
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

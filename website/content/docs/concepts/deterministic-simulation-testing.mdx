@@ -1,0 +1,83 @@
+---
+title: Deterministic Simulation Testing
+description: How Overdrive makes its control plane replayable — the sim/host split, seeded runs, and the lint gate that keeps nondeterminism out of core logic.
+---
+
+Distributed-systems bugs — leader election under partition, races between
+concurrent submissions, convergence after a node rejoins — are hard to
+reproduce because they depend on timing, ordering, and chance. Overdrive's
+answer is **Deterministic Simulation Testing (DST)**: every source of
+nondeterminism in core logic is injectable behind a trait, so a whole control
+plane can be driven by a simulated world and replayed bit-for-bit from a seed.
+
+## The sim / host split
+
+The core logic depends only on a set of *port traits* — the abstractions for
+everything nondeterministic. Each trait has two implementations: a **host**
+binding that talks to the real OS, and a **sim** binding that the test harness
+controls.
+
+| Trait | Host (production) | Sim (tests) |
+| --- | --- | --- |
+| `Clock` | system clock | simulated, harness-driven time |
+| `Transport` | real TCP | in-process simulated network |
+| `Entropy` | OS randomness | seeded RNG |
+| `Driver` | real workload driver | scripted driver |
+
+Production wires the host implementations; tests wire the sim implementations.
+The core never picks a side — it is written against the trait surface only.
+
+<Callout type="warn" title="Core logic must never reach for the real world">
+	Calling the wall clock, the OS RNG, or raw sockets directly from core logic
+	defeats the entire scheme — that call cannot be controlled or replayed. The
+	fix for "I need the time here" is always *a method on a trait*, never a
+	direct system call.
+</Callout>
+
+## Seeds make failures reproducible
+
+Every DST run takes a seed. The simulated clock, network, and RNG are all
+derived from it, so the same seed produces the same trajectory every time. When
+a run fails, the harness prints the seed; re-running with that seed reproduces
+the failure exactly, which is what makes these bugs debuggable at all.
+
+A flaky simulation run is therefore treated as a bug in the simulation layer —
+not something to re-run until it passes.
+
+## Properties, not scripts
+
+DST tests prefer *invariants* over scripted assertions — statements that must
+hold across every interleaving the harness explores. They fall into three
+families:
+
+<Accordions type="single">
+	<Accordion title="Safety — nothing bad ever happens">
+		For example: at most one leader at any time, and intent never crosses into
+		the observation layer. A safety invariant that holds in every explored
+		state gives confidence the bad thing genuinely cannot occur.
+	</Accordion>
+	<Accordion title="Liveness — good things eventually happen">
+		For example: a submitted job eventually receives an allocation. Liveness
+		invariants guard against a system that is "safe" only because it never
+		makes progress.
+	</Accordion>
+	<Accordion title="Convergence — reconcilers reach the desired state">
+		Desired state and actual state eventually agree. This is the invariant form
+		of the [intent / observation](/docs/concepts/intent-observation)
+		reconciliation loop.
+	</Accordion>
+</Accordions>
+
+## A lint gate keeps the discipline honest
+
+The split only works if core logic actually stays free of direct
+nondeterminism. Overdrive enforces this with a lint gate (`dst-lint`) that scans
+the core-class crates and rejects direct calls to the wall clock, the OS RNG, or
+raw network APIs. If the gate flags your code, the intended fix is to route the
+need through the relevant trait — not to suppress the gate.
+
+## Running it
+
+DST is the first of Overdrive's four testing tiers, and it runs in-process with
+the sim traits. To run the harness on a clean checkout, follow
+[Run the DST harness](/docs/how-to/run-the-dst-harness).

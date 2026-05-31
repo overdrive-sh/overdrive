@@ -1,0 +1,4 @@
+{
+	"title": "How-to",
+	"pages": ["deploy-a-workload", "run-the-dst-harness", "use-the-mcp-server"]
+}

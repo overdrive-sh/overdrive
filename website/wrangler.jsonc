@@ -1,0 +1,78 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "website",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-05-30",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".open-next/assets"
+	},
+	"images": {
+		// Enable image optimization
+		// see https://opennext.js.org/cloudflare/howtos/image
+		"binding": "IMAGES"
+	},
+	"services": [
+		{
+			// Self-reference service binding, the service name must match the worker name
+			// see https://opennext.js.org/cloudflare/caching
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "website"
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	/**
+	 * D1 — MCP tool-call analytics log (ADR-0056, docs-platform slice 06).
+	 *
+	 * Best-effort write target: app/mcp/route.ts writes one `{tool, query, ts,
+	 * result_count}` row per tool call via ctx.waitUntil() + catch-swallow (C-7).
+	 * Schema lives in migrations/0001_tool_calls.sql (SSOT: kpi-contracts.yaml
+	 * d1_tool_calls_schema). Apply locally with:
+	 *   bunx wrangler d1 migrations apply ANALYTICS_DB --local
+	 *
+	 * The `database_id` is a dev placeholder; the real D1 database is provisioned
+	 * in the DEVOPS wave (ADR-0056 Consequences). Because the write is best-effort,
+	 * an unbound/misconfigured D1 degrades to "no rows", never "broken tools".
+	 */
+	"d1_databases": [
+		{
+			"binding": "ANALYTICS_DB",
+			"database_name": "overdrive-docs-analytics",
+			"database_id": "9bbc417c-d340-4bfe-985d-a2699a920586",
+			"migrations_dir": "migrations"
+		}
+	],
+	"upload_source_maps": true
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": {  "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	/**
+	 * Environment Variables
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 * Note: Use secrets to store sensitive data.
+	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 */
+	// "vars": {  "MY_VARIABLE": "production_value" }
+}

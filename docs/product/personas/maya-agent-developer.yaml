@@ -1,0 +1,67 @@
+schema_version: 1
+
+# Persona for the docs-platform feature (overdrive.sh).
+# The agent-operating developer arc. The coding AGENT is a secondary actor;
+# Maya — the human running it — is the persona. Pairs with priya-evaluator.yaml.
+# Origin: docs-platform DISCUSS wave (2026-05-30).
+
+persona:
+  id: maya-agent-developer
+  name: "Maya Okonkwo"
+  role: "Application developer building a service that runs on Overdrive, using an AI coding agent"
+  one_liner: >
+    Builds against Overdrive day-to-day with a terminal coding agent
+    (Claude Code / Cursor). She does not want to memorise Overdrive's CLI
+    verbs or reconciler contracts — she wants her agent to know them,
+    correctly and currently, instead of confidently inventing an API that
+    does not exist.
+
+  characteristics:
+    - "Mid-level full-stack developer; productive but leans heavily on agent assistance"
+    - "Has been burned by agents hallucinating plausible-but-wrong infra APIs"
+    - "Will configure a tool ONCE if it visibly improves output, then forget about it"
+    - "Judges the agent's Overdrive answers by whether the resulting code actually runs"
+    - "Does not read the full docs herself — the agent is her interface to the docs"
+
+  secondary_actor:
+    name: "Her coding agent (Claude Code / Cursor / MCP-capable client)"
+    behavior: >
+      Calls the overdrive.sh MCP endpoint's tools — search_docs(query) to
+      find relevant pages, get_doc(url) to pull whole pages as grounded
+      context — when Maya asks it to do something Overdrive-specific. The
+      agent's tool calls are task-contextual (it queries what it needs to
+      finish Maya's task) and produce a follow-up trajectory (search →
+      get_doc → maybe re-search), which is the analytics signal J-DOCS-003
+      consumes.
+
+  context:
+    device: "Terminal + IDE; the MCP endpoint is configured in her agent's MCP server list"
+    entry_points:
+      - "She adds the overdrive.sh /mcp endpoint to her agent config once (copy-paste from a docs page)"
+      - "Thereafter the agent reaches the endpoint autonomously whenever a task needs Overdrive knowledge"
+    triggers:
+      - "Maya asks the agent: 'write a job spec for my payments service on Overdrive'"
+      - "Maya asks: 'why is my reconciler not converging?' and the agent needs the reconciler contract"
+
+  motivations:
+    functional: "Agent produces Overdrive code grounded in real, current docs — correct verbs, real shapes"
+    emotional: "Stop babysitting the agent's infra output; trust it on Overdrive specifics"
+    social: "Ship working code without becoming the team's reluctant Overdrive expert"
+
+  emotional_arc:
+    start: "Wary — 'my agent will probably hallucinate the Overdrive API like it does for every new platform.'"
+    middle: "Surprised then relieved — the agent cites a real docs page, the CLI verb it used actually exists, the job spec validates first try."
+    end: "Trusting and hands-off — 'I just ask, the agent grounds itself in the docs, and the output works; Overdrive is a solved context for my agent.'"
+
+  frustrations_to_avoid:
+    - "MCP endpoint that is hard to configure or silently fails (agent falls back to hallucination, she never knows why)"
+    - "search_docs returning irrelevant pages so the agent grounds on the wrong thing"
+    - "get_doc returning rendered HTML/marketing chrome instead of clean markdown the agent can use"
+    - "Stale docs: the agent grounds confidently on an answer that the platform no longer matches"
+
+  success_signals:
+    - "Agent's first Overdrive answer cites a real docs URL and the code runs"
+    - "She configures the endpoint once and never thinks about it again"
+    - "Re-query rate is low for answerable questions (the agent finds it on the first/second tool call)"
+
+  related_jobs: [J-DOCS-002, J-DOCS-003]

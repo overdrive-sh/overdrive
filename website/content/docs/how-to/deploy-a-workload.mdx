@@ -1,0 +1,193 @@
+---
+title: Deploy a workload
+description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end Phase 1 path that runs today.
+---
+
+This guide takes you from an empty machine to a deployed workload using the
+commands Overdrive ships today. You start a control plane, write a TOML spec,
+deploy it, and confirm the control plane accepted it. Every command here runs on
+a single node — Phase 1 is single-node by design, so there is no cluster to join
+and no membership to configure first.
+
+<Callout title="Prerequisites">
+	A build of the `overdrive` binary and a writable home directory. The control
+	plane stores its state on the local disk and binds a TLS listener on
+	loopback; it needs no external network, database, or kernel features to run
+	this flow.
+</Callout>
+
+## Start the control plane
+
+`overdrive serve` runs the control plane. It binds a TLS listener, mints the
+operator credentials, and writes them to `~/.overdrive/config` — the single
+file every other command reads to find and authenticate to the server.
+
+<Steps>
+	<Step>
+		**Start the server.** It binds `127.0.0.1:7001` by default:
+
+		```bash
+		overdrive serve
+		```
+
+		Leave it running. On bind it writes the endpoint, the CA pin, and your
+		operator certificate to `~/.overdrive/config` as one trust triple. There
+		is no `--endpoint` flag and no `--insecure` flag — the config file is the
+		sole source of where the CLI connects and how it trusts the server, and
+		that posture is not tunable per command.
+	</Step>
+	<Step>
+		**Confirm it is up.** In a second terminal:
+
+		```bash
+		overdrive cluster status
+		```
+
+		This reads the endpoint from the config the server just wrote and reports
+		the control plane's mode — `single` on a fresh node.
+	</Step>
+</Steps>
+
+## Write a workload spec
+
+A workload is a TOML file. Its top-level section names the workload's **kind**:
+`[service]` for a long-running workload that serves traffic, `[job]` for one that
+runs to completion. Every spec also carries an `[exec]` block — the process to
+run — and a `[resources]` block. A service additionally declares one or more
+`[[listener]]` ports and, under them, its health-check probes:
+
+```toml title="payments.toml"
+[service]
+id       = "payments"   # name across the cluster — stop / inspect / re-deploy by it
+replicas = 1
+
+[exec]
+command = "/opt/payments/bin/payments-server"
+args    = ["--port", "8080"]
+
+[resources]
+cpu_milli    = 500         # CPU in thousandths of a core (500 = half a core)
+memory_bytes = 134217728   # hard memory cap in bytes (134217728 = 128 MiB)
+
+[[listener]]
+port     = 8080   # a port the service holds open
+protocol = "tcp"
+
+# Readiness — may it receive traffic yet?
+[[health_check.readiness]]
+type = "http"
+path = "/healthz"
+port = 8080
+
+# Liveness — is it still healthy, or should it be restarted?
+[[health_check.liveness]]
+type = "http"
+path = "/healthz"
+port = 8080
+```
+
+### Health checks
+
+Health-check probes tell the platform when a service has started, when it is
+ready to receive traffic, and whether it is still alive. They attach to services
+under three roles. A run-to-completion `[job]` takes none — its exit code already
+answers "did it succeed?".
+
+- **Three roles.** `startup` gates "has it come up?", `readiness` gates "send it
+  traffic", and `liveness` gates "restart it if this fails".
+- **Three mechanics.** `type = "tcp"` connects to a `port`; `type = "http"`
+  issues a GET to a `path` (plain HTTP; the path must start with `/`) on a
+  `port`; `type = "exec"` runs a `command` inside the workload and treats exit
+  `0` as a pass.
+- **A startup probe is inferred by default.** Declare none and the platform
+  synthesises a single TCP probe against your first listener, so a service is
+  never reported "up" before something is actually listening. Write
+  `[[health_check.startup]] = []` to opt out.
+- **Each probe is tunable.** `timeout_seconds` (default 5), `interval_seconds`
+  (startup 2, readiness 2, liveness 10), and `max_attempts` (default 30 — a 60s
+  startup deadline), plus `failure_threshold` for liveness (default 3) and
+  `success_threshold` for readiness (default 1).
+
+## Deploy it
+
+<Steps>
+	<Step>
+		**Deploy the spec.** Pass the file to `deploy`:
+
+		```bash
+		overdrive deploy payments.toml
+		```
+
+		The CLI submits the spec, the control plane commits it to the IntentStore,
+		and the command streams the resulting lifecycle events until the workload
+		converges. It reports the workload id, the derived intent key
+		(`workloads/payments`), the canonical `spec_digest`, and an outcome of
+		`Inserted` for a spec the cluster has not seen before.
+	</Step>
+	<Step>
+		**Re-run it.** Deploy the same unchanged file again:
+
+		```bash
+		overdrive deploy payments.toml
+		```
+
+		The outcome is now `Unchanged`. Deploy is idempotent on the spec's content
+		hash: an identical spec commits nothing new. Edit the file — change the
+		args, bump the replica count, adjust a probe — and the next deploy reports
+		`Inserted` against the new digest. This is what makes deploy safe to run
+		from a script or a CI job that cannot know whether the spec already landed.
+	</Step>
+	<Step>
+		**Skip the event stream.** For a script that wants the commit
+		acknowledgement and nothing else, pass `--detach`:
+
+		```bash
+		overdrive deploy payments.toml --detach
+		```
+
+		`--detach` waits only for the IntentStore commit and exits — it does not
+		stream lifecycle events. Reach for it the way you reach for `docker run -d`
+		or `nomad job run --detach`: when you want the workload submitted, not
+		watched.
+	</Step>
+</Steps>
+
+<Callout type="info" title="Exit codes are script-friendly">
+	`deploy` exits `0` on an `Inserted` or `Unchanged` outcome and `2` on a
+	transport failure or a server-side validation error. A script can branch on
+	the exit code alone without parsing output.
+</Callout>
+
+## Inspect what you deployed
+
+The CLI reads live state back through the same config:
+
+```bash
+overdrive alloc status --job payments   # spec digest + live allocation count
+overdrive node list                     # nodes the control plane knows about
+```
+
+`alloc status` is the command to reach for when you want to confirm a deploy
+took effect: it returns the canonical `spec_digest` the control plane holds for
+the workload alongside the number of live allocations, so you can check that the
+digest matches the spec you just deployed and that the workload is actually
+running.
+
+## Stop it
+
+Stop a workload by its id:
+
+```bash
+overdrive job stop payments
+```
+
+This declares that the workload should no longer run. The control plane records
+the new intent and the workload's allocations wind down.
+
+## Where to go next
+
+- Every command, flag, and exit code in one place:
+  [CLI reference](/docs/reference/cli).
+- Why the control plane keeps your declared spec (intent) separate from what is
+  actually running (observation), and why deploy is idempotent on a content
+  hash: [the intent / observation boundary](/docs/concepts/intent-observation).
