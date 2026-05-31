@@ -14,6 +14,45 @@ page says so plainly rather than describing it as present — see
 The mental model to hold: **you declare what should run; a loop makes it so.**
 Everything below is in service of that loop.
 
+<Mermaid chart={`
+flowchart TB
+  cli["overdrive CLI<br/>(operator)"]
+
+  subgraph node["overdrive — single binary, one node"]
+    direction TB
+    subgraph cp["Control plane"]
+      api["TLS API<br/>axum + rustls · ephemeral CA"]
+      loop["Convergence loop<br/>5 reconcilers"]
+      views[("ViewStore<br/>redb")]
+    end
+    intent[("IntentStore<br/>redb")]
+    obs[("ObservationStore<br/>redb")]
+    subgraph worker["Worker"]
+      exec["ExecDriver<br/>process in cgroup"]
+      probes["Probe runner<br/>TCP · HTTP · Exec"]
+    end
+    dp["eBPF dataplane<br/>XDP + cgroup sockops"]
+  end
+
+  wl["Workload process"]
+
+  cli -- "deploy / inspect · mTLS" --> api
+  api -- "write intent" --> intent
+  loop -- "desired" --> intent
+  loop -- "actual" --> obs
+  loop -- "persist memory" --> views
+  loop -- "StartAllocation" --> exec
+  loop -- "program maps" --> dp
+  exec -- "runs" --> wl
+  exec -- "alloc status" --> obs
+  probes -- "probe" --> wl
+  probes -- "probe results" --> obs
+  dp -- "forwards traffic (kernel)" --> wl
+`} />
+
+The boxes below walk through this diagram — the single binary, the two stores,
+the loop that joins them, the worker, and the kernel dataplane — in that order.
+
 ## One binary, one node
 
 `overdrive` is a single binary. `overdrive serve` starts a control plane and a

@@ -52,7 +52,7 @@
 		{
 			"binding": "ANALYTICS_DB",
 			"database_name": "overdrive-docs-analytics",
-			"database_id": "local-dev-placeholder",
+			"database_id": "9bbc417c-d340-4bfe-985d-a2699a920586",
 			"migrations_dir": "migrations"
 		}
 	],
