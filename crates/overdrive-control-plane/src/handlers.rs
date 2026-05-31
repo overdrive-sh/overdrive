@@ -184,7 +184,8 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 // on `Accept` per DESIGN [D6] / [D8]. The path declares both content
 // types under a single 200 response — `application/json` returns a
 // one-shot `SubmitWorkloadResponse`; `application/x-ndjson` returns a
-// stream of `SubmitEvent` lines. utoipa 5.x's `responses(..., content(
+// stream of per-kind streaming-event lines (`JobSubmitEvent` /
+// `ServiceSubmitEvent`). utoipa 5.x's `responses(..., content(
 // (T1 = "mime1"), (T2 = "mime2") ))` group form is the multi-content-
 // type shape (see utoipa-gen 5.4.0 src/path/response.rs §"content"
 // branch).
@@ -196,7 +197,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
         (status = 200, description = "Job accepted (Accept negotiates one-shot vs streaming)",
             content(
                 (api::SubmitWorkloadResponse = "application/json"),
-                (api::SubmitEvent       = "application/x-ndjson"),
+                (crate::streaming::ServiceSubmitEvent       = "application/x-ndjson"),
             )
         ),
         (status = 400, description = "Validation error", body = api::ErrorBody),
@@ -439,10 +440,12 @@ pub async fn submit_workload(
     // Branch on Accept header per [D6] / [D8]. JSON lane preserves
     // the existing `SubmitWorkloadResponse` shape unchanged (back-compat
     // S-CP-08). NDJSON lane delegates to the per-kind streaming loop
-    // per ADR-0047 §3 [D7]: Service → `build_stream` (legacy flat
-    // `SubmitEvent`); Job → `build_workload_stream` (typed sibling-event
-    // enum, no `ConvergedRunning` variant — RCA root causes B+C+D
-    // structurally unreachable). Schedule support lands in slice 05.
+    // per ADR-0047 §3 [D7] / ADR-0056 / ADR-0059 §Q6:
+    //   * Job     → `build_workload_stream`  (typed `JobSubmitEvent`)
+    //   * Service → `build_service_stream`   (typed `ServiceSubmitEvent`)
+    //   * Schedule is rejected at validation step (HTTP 400); the
+    //     unreachable!() arm is the structural defense if that
+    //     rejection drifts.
     if want_streaming {
         let body = match workload_kind {
             WorkloadKind::Job => {
@@ -458,51 +461,23 @@ pub async fn submit_workload(
                 );
                 Body::from_stream(stream)
             }
-            WorkloadKind::Service | WorkloadKind::Schedule => {
-                // Service / Schedule (Schedule is no-op streaming for
-                // Phase 1 per slice 05) flow through the legacy
-                // flat-`SubmitEvent` path. For Service the allocator-
-                // issued VIP rides on `SubmitEvent::Accepted` per
-                // ADR-0049 (amended 2026-05-15) / step 02-03d; Schedule
-                // emits `vip: None`.
-                //
-                // `replicas_desired` is hydrated from the validated
-                // aggregate already in scope and threaded into the
-                // streaming task per issue #140: the streaming-lane
-                // `ConvergedRunning` gate compares the count of
-                // Running rows for this workload against this value.
-                // Schedule arms never actually reach this builder —
-                // the submit handler rejects Schedule at the validation
-                // step above with HTTP 400. The `unreachable!()` arm
-                // is structurally defended and panics with a citation
-                // if the rejection above ever drifts.
-                let replicas_desired = match &intent {
-                    WorkloadIntent::Service(s) => s.replicas,
-                    WorkloadIntent::Schedule(_) => unreachable!(
-                        "Schedule rejected at submit (handlers.rs validation step \
-                         returns HTTP 400 before reaching this branch); \
-                         Job uses build_workload_stream"
-                    ),
-                    WorkloadIntent::Job(_) => unreachable!(
-                        "Job dispatch is the sibling arm above; this branch is \
-                         Service-or-Schedule only"
-                    ),
-                };
-                let accepted_vip = service_vip.map(|v| v.get().to_string());
-                let accepted = crate::streaming::build_accepted(
+            WorkloadKind::Service => {
+                let accepted = crate::streaming::build_service_accepted(
                     spec_digest,
                     key.as_str().to_owned(),
                     outcome,
-                    accepted_vip,
                 );
-                let stream = crate::streaming::build_stream(
+                let stream = crate::streaming::build_service_stream(
                     state.clone(),
                     workload_id.clone(),
                     accepted,
-                    replicas_desired,
                 );
                 Body::from_stream(stream)
             }
+            WorkloadKind::Schedule => unreachable!(
+                "Schedule rejected at submit (handlers.rs validation step \
+                 returns HTTP 400 before reaching this branch)"
+            ),
         };
         let response = Response::builder()
             .status(axum::http::StatusCode::OK)

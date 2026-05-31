@@ -16,6 +16,7 @@
 //! ADR-0051 § 3; `deny_unknown_fields` rejects any incoming JSON
 //! carrying it.
 
+use crate::aggregate::probe_descriptor::ProbeDescriptor;
 use crate::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +71,30 @@ pub struct ServiceSpecInput {
     /// at least one element; no two share `(port, protocol)`; protocol
     /// is `tcp` / `udp` only.
     pub listeners: Vec<ListenerInput>,
+    /// Operator-declared startup probes, projected from the parser-
+    /// side `[[health_check.startup]]` blocks. Per ADR-0057. May
+    /// include a platform-synthesised default-TCP probe per ADR-0058
+    /// when zero startup probes were declared and at least one
+    /// listener is present.
+    ///
+    /// Defaults to an empty `Vec` on the wire when the client omits
+    /// the field — `#[serde(default)]` preserves the legacy
+    /// `ServiceSpecInput { id, replicas, resources, driver, listeners
+    /// }` shape for callers that have not yet been updated to thread
+    /// probes. Once an operator declares probes in TOML, the CLI's
+    /// `submit_streaming_service` populates this field.
+    #[serde(default)]
+    pub startup_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared readiness probes. Same defaulting policy as
+    /// [`Self::startup_probes`]. Reserved field; populated by future
+    /// slices (02-01).
+    #[serde(default)]
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared liveness probes. Same defaulting policy as
+    /// [`Self::startup_probes`]. Reserved field; populated by future
+    /// slices (02-02).
+    #[serde(default)]
+    pub liveness_probes: Vec<ProbeDescriptor>,
 }
 
 /// HTTP/JSON wire-shape for a single listener entry.

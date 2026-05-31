@@ -181,7 +181,16 @@ pub use service_map_hydrator::{
 };
 pub use workload_lifecycle::{
     RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView, backoff_for_attempt,
+    WorkloadLifecycleView, backoff_for_attempt, project_probe_descriptors,
+};
+
+// `ServiceLifecycleReconciler` lives in `overdrive_core::service_lifecycle`
+// (NOT under this module) for cycle-breaking reasons documented at the
+// `crate::service_lifecycle` module header. Re-import here so the
+// dispatch enums (`AnyState`, `AnyReconciler`, `AnyReconcilerView`) can
+// reference it without forcing every dispatcher to spell the full path.
+use crate::service_lifecycle::{
+    ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 
 // ---------------------------------------------------------------------------
@@ -327,6 +336,10 @@ pub enum AnyState {
     /// `BackendDiscoveryBridge` reconciler's typed projection — see
     /// [`backend_discovery_bridge::BackendDiscoveryBridgeState`].
     BackendDiscoveryBridge(BackendDiscoveryBridgeState),
+    /// `ServiceLifecycle` reconciler's typed projection — see
+    /// [`crate::service_lifecycle::ServiceLifecycleState`]. Per
+    /// ADR-0055; landed by the `service-health-check-probes` feature.
+    ServiceLifecycle(ServiceLifecycleState),
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +407,25 @@ pub enum Action {
         spec: AllocationSpec,
         /// Workload-kind discriminator per ADR-0047 §1.
         kind: WorkloadKind,
+        /// Why the reconciler decided to restart this alloc.
+        ///
+        /// `None` for the pre-existing `WorkloadLifecycle` crash-loop
+        /// restart pathway (a Job/Service post-spawn crash with budget
+        /// remaining — the restart cause is implicit in the prior
+        /// alloc's terminal). `Some(_)` is the Service-lifecycle
+        /// liveness-driven restart (step 03-02 / Slice 05): the
+        /// `service-lifecycle` reconciler observed a liveness probe's
+        /// consecutive-failure count reach its `failure_threshold` and
+        /// stamps the cause so downstream surfaces (audit row,
+        /// operator render) can name *why* the restart fired.
+        ///
+        /// Additive `Option` keeps the existing `WorkloadLifecycle`
+        /// emit site + the `action_shim` consumer unchanged — they
+        /// neither construct nor read the reason; the shim's
+        /// stop+start semantics are identical regardless of cause per
+        /// ADR-0023 §2 / ADR-0037 §4 (RestartAllocation is never a
+        /// terminal claim).
+        reason: Option<RestartReason>,
     },
 
     /// Finalize a failed allocation as terminal.
@@ -464,6 +496,47 @@ pub enum Action {
         vip_port: u16,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
+    },
+}
+
+/// Why a reconciler emitted [`Action::RestartAllocation`].
+///
+/// Carried as `Option<RestartReason>` on the action so the
+/// pre-existing `WorkloadLifecycle` crash-loop restart pathway can
+/// keep emitting `reason: None` unchanged (the restart cause is
+/// implicit in the prior alloc's terminal there). The
+/// `service-lifecycle` reconciler stamps `Some(_)` so the
+/// liveness-driven restart names its cause.
+///
+/// `#[non_exhaustive]` per ADR-0037 §5 / ADR-0055 §7 — future
+/// restart causes (e.g. a Phase-2 `LivenessRestartGovernor`
+/// rate-limit verdict) append at the tail; external `match` sites
+/// carry a wildcard arm so adding a variant is a non-breaking
+/// minor bump.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RestartReason {
+    /// Service-lifecycle liveness probe at `probe_idx` reached its
+    /// `failure_threshold` consecutive failures on a `Running` alloc.
+    ///
+    /// `consecutive_failures` is the observed count at the deciding
+    /// tick (>= `threshold`); `threshold` is the live
+    /// `failure_threshold` policy value the predicate was recomputed
+    /// against this tick (per `.claude/rules/development.md`
+    /// § "Persist inputs, not derived state" — the View persists the
+    /// counter INPUT, never a `should_restart` bool). Per ADR-0055
+    /// §7 / DDD-9 / P3-Q11 the Phase-1 reconciler emits the restart
+    /// unconditionally — there is no cascading-restart governor;
+    /// composition with the shared `RESTART_BACKOFF_CEILING` budget
+    /// (`WorkloadLifecycle`) caps the crash loop and surfaces
+    /// `BackoffExhausted` once the budget is spent.
+    LivenessExhausted {
+        /// 0-indexed liveness probe whose streak hit the threshold.
+        probe_idx: u32,
+        /// Observed consecutive-failure count at the deciding tick.
+        consecutive_failures: u32,
+        /// The live `failure_threshold` the predicate compared against.
+        threshold: u32,
     },
 }
 
@@ -638,6 +711,9 @@ pub enum AnyReconciler {
     ServiceMapHydrator(ServiceMapHydrator),
     /// Phase 2.2 — `backend-discovery-bridge`.
     BackendDiscoveryBridge(BackendDiscoveryBridge),
+    /// Service-health-check-probes — `service-lifecycle` per
+    /// ADR-0055. See [`crate::service_lifecycle::ServiceLifecycleReconciler`].
+    ServiceLifecycle(ServiceLifecycleReconciler),
 }
 
 impl AnyReconciler {
@@ -649,6 +725,7 @@ impl AnyReconciler {
             Self::WorkloadLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
             Self::BackendDiscoveryBridge(r) => r.name(),
+            Self::ServiceLifecycle(r) => r.name(),
         }
     }
 
@@ -661,6 +738,7 @@ impl AnyReconciler {
             Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
             Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
+            Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
         }
     }
 
@@ -706,6 +784,15 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::BackendDiscoveryBridge(next_view))
             }
+            (
+                Self::ServiceLifecycle(r),
+                AnyState::ServiceLifecycle(desired),
+                AnyState::ServiceLifecycle(actual),
+                AnyReconcilerView::ServiceLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::ServiceLifecycle(next_view))
+            }
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
@@ -728,4 +815,9 @@ pub enum AnyReconcilerView {
     ServiceMapHydrator(ServiceMapHydratorView),
     /// `BackendDiscoveryBridge` reconciler's view.
     BackendDiscoveryBridge(BackendDiscoveryBridgeView),
+    /// `ServiceLifecycle` reconciler's view per ADR-0055 § 3 / DDD-5.
+    /// Carries inputs only (counters / once-only Stable-announcement
+    /// set) — derived state (`Stable` predicate, deadlines) is
+    /// recomputed every tick.
+    ServiceLifecycle(ServiceLifecycleView),
 }

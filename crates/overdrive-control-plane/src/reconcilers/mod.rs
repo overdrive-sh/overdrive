@@ -15,3 +15,7 @@
 
 pub mod backend_discovery_bridge;
 pub mod service_map_hydrator;
+// SCAFFOLD: true — service-health-check-probes feature.
+// `ServiceLifecycleReconciler` per ADR-0055. Pure sync `reconcile`.
+// Lands GREEN across slices 01 / 04 / 05 / 08.
+pub mod service_lifecycle;

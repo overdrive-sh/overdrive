@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
@@ -123,8 +124,14 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
-    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .await
+        .expect("seed Running alloc row");
 
     // --- Submit ONE evaluation. The convergence-tick loop in
     //     `lib.rs::run_server_with_obs_and_driver` drains the broker per
@@ -290,8 +297,14 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
-    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .await
+        .expect("seed Running alloc row");
 
     // --- Submit ONE evaluation naming `job-lifecycle` only.
     let target = TargetResource::new("job/payments").expect("valid target");
@@ -478,6 +491,17 @@ async fn stop_after_failed_alloc_drains_broker() {
     let job_key = IntentKey::for_workload(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
+    // NOTE: this test deliberately does NOT persist a workload-kind
+    // discriminator. `read_workload_kind` therefore defaults to
+    // `WorkloadKind::Service` (the absent-byte forward-compat fallback),
+    // which gives the alloc Service-kind restart-on-failure semantics —
+    // the Failed-mid-backoff behaviour the warm-up below depends on (a
+    // Job kind would natural-exit to FinalizeFailed instead of
+    // RestartAllocation, and `restart_counts` would never increment).
+    // Post GAP-9 each Service-kind RestartAllocation also dual-emits a
+    // bounded `service-lifecycle` EnqueueEvaluation (Shape C); assertion
+    // 2 below accounts for that bounded extra dispatch.
+
     // --- Submit the seed evaluation.
     let target = TargetResource::new("job/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
@@ -606,11 +630,23 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     the stop converges in 1-2 ticks; pre-fix the broker
     //     self-re-enqueues until `restart_counts` reaches the
     //     ceiling — observable as ≥5 extra dispatches.
+    //
+    //     GAP-9 raises the bound from 2 to 3: the warm-up's last
+    //     Service-kind RestartAllocation dual-emits a `service-lifecycle`
+    //     EnqueueEvaluation (Shape C) that is still pending when the
+    //     stop snapshot is taken; the post-stop ticks drain it exactly
+    //     once (the intent is a `WorkloadIntent::Job`, so the
+    //     service-lifecycle hydrate is an empty Service state → 0 actions
+    //     → no re-enqueue). That is one bounded extra dispatch, NOT a
+    //     busy-loop — assertion 1 above (`queued == 0`) is the
+    //     busy-loop guard and still holds. The pre-fix ≥5 signal stays
+    //     well above the new bound.
     let dispatched_during_stop = counters.dispatched - dispatched_at_stop_submit;
     assert!(
-        dispatched_during_stop <= 2,
-        "post-stop dispatch traffic must be bounded; expected <= 2 \
-         dispatches between stop submit and broker drain, got \
+        dispatched_during_stop <= 3,
+        "post-stop dispatch traffic must be bounded; expected <= 3 \
+         dispatches between stop submit and broker drain (≤2 job-lifecycle \
+         + ≤1 bounded GAP-9 service-lifecycle drain), got \
          {dispatched_during_stop} (pre-fix value: ≥5 — the broker \
          self-re-enqueues until restart_counts reaches \
          RESTART_BACKOFF_CEILING)",
@@ -731,6 +767,11 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let job_key = IntentKey::for_workload(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
+    // NOTE: no workload-kind discriminator persisted — the kind defaults
+    // to Service (see the note in `stop_after_failed_alloc_drains_broker`
+    // above), giving the alloc the restart-on-failure semantics this
+    // warm-up depends on.
+
     // --- Submit the seed evaluation.
     let target = TargetResource::new("job/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
@@ -843,6 +884,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
@@ -852,6 +894,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     });
 
     // Single TickContext shared across both reconcile calls — same
@@ -1042,8 +1085,14 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Failed-after-running carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
-    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .await
+        .expect("seed Failed alloc row");
 
     // Seed cached view with the supplied restart_counts and
     // last_failure_seen_at = now_unix (zero — the backoff window has

@@ -106,6 +106,8 @@ fn alloc_terminal_operator_stopped(
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated state was Running first.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 
@@ -132,6 +134,7 @@ fn service_state_with_terminal_alloc(
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: spec_digest,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid(workload_id),
@@ -141,6 +144,7 @@ fn service_state_with_terminal_alloc(
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: spec_digest,
+        probe_descriptors: Vec::new(),
     };
     (desired, actual)
 }
@@ -240,6 +244,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("web-api"),
@@ -249,6 +254,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

@@ -1,0 +1,43 @@
+# Walking-skeleton Fixture A (S-SHCP-INT-CLI-01 / K1 north star)
+# — coinflip-as-Service: RCA-A regression guard.
+#
+# A Service whose exec command exits 1 within ~30ms — well before
+# the startup probe has a chance to observe a Pass. The reconciler's
+# EarlyExit branch (US-08) closes the RCA-A honesty gap: instead of
+# reporting `(took live)` or `Stable`, the wire surface MUST emit
+# `Failed { reason: EarlyExit { exit_code: 1 } }`.
+#
+# Per RCA-A (`docs/feature/service-health-check-probes/discuss/...`):
+# the legacy Service submit path inferred `Stable` whenever the alloc
+# briefly entered `Running` before the kernel observed the exit —
+# even when the workload's true behaviour was deterministic-failure.
+# The K1 KPI: across 100 deterministic seeds of submitting this
+# fixture, ≥99 MUST emit `Failed { EarlyExit }`, zero MUST emit
+# `Stable`, and the literal string `(took live)` MUST NEVER appear.
+#
+# The exec target `/tmp/coinflip-helper` is the test-only binary
+# fixture co-located in this slice (see
+# `crates/overdrive-cli/tests/integration/helpers/coinflip_helper.rs`).
+# Step 01-03f-2 produces the binary into `/tmp/` before running the
+# K1 100-seed loop.
+
+[service]
+id = "coinflip-svc"
+replicas = 1
+
+[[listener]]
+port = 18080
+protocol = "tcp"
+
+[exec]
+# The coinflip helper binary exits 1 within ~30ms. Per RCA-A the
+# alloc transitions Running → Failed in well under the 60s default
+# startup_deadline, so the reconciler's EarlyExit branch
+# (`state == Failed && elapsed < startup_deadline && no Pass`)
+# fires.
+command = "/tmp/coinflip-helper"
+args = []
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864

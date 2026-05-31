@@ -51,6 +51,18 @@ mod acceptance {
     // S-AS-06 in `alloc_status_render` covers the new contract:
     // Pending-no-capacity renders an explicit reason row, never
     // `Allocations: 0`.
+    // Tests for the deleted legacy `SubmitEvent` enum were removed
+    // in step 01-03e3 alongside the enum deletion per single-cut
+    // discipline (`CLAUDE.md` § `feedback_single_cut_greenfield_migrations.md`):
+    //   * `submit_event_serialization` — proptest round-trips of the
+    //     deleted `SubmitEvent` / `TerminalReason` enums.
+    //   * `streaming_channel_closed` — exercised the legacy
+    //     `build_stream` channel-closed arm via `TerminalReason::
+    //     StreamInterrupted`; replaced by `service_submit_dispatch_wiring::
+    //     s_shcp_wire_14_broadcast_closed_synthesises_stream_interrupted`
+    //     in this same step.
+    //   * `transition_reason_type_identity` — compile-time witness on
+    //     `TransitionRecord.reason` (still pinned by `alloc_status_snapshot`).
     mod row_body_conversions;
     // `runtime_convergence_loop.rs` consumes the `*_for_test`
     // accessors on `ReconcilerRuntime` that are gated behind
@@ -63,7 +75,6 @@ mod acceptance {
     mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
     mod submit_job_idempotency;
-    mod transition_reason_type_identity;
     mod trust_triple_getters;
 
     // wire-exec-spec-end-to-end — operator-facing job spec carries
@@ -76,25 +87,12 @@ mod acceptance {
     // S-CP-04 broadcast property test + S-CP-05 classifier scenarios.
     mod lifecycle_broadcast;
 
-    // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-02.
-    // SubmitEvent wire enum serde round-trip + literal wire-shape
-    // regression assertions per ADR-0032 §3 Amendment 2026-04-30.
-    mod submit_event_serialization;
-
     // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-03.
     // Content-negotiated submit_workload + streaming_submit_loop with
     // select! cap timer + lagged-recovery fallback.
     // Scenarios: S-CP-01, S-CP-02, S-CP-03, S-CP-06, S-CP-07,
     // S-CP-08, S-CP-10 (#[ignore]'d per wave-decisions.md).
     mod streaming_submit;
-
-    // fix-terminal-reason-channel-closed — Slice 01 step 01-01 (RED).
-    // `closed_lifecycle_channel_emits_stream_interrupted_terminal` —
-    // asserts that the streaming handler emits
-    // `TerminalReason::StreamInterrupted` (not `Timeout { after_seconds: 0 }`)
-    // when the lifecycle broadcast channel is dropped mid-stream.
-    // FAILS on current code; GREEN lands in step 01-02.
-    mod streaming_channel_closed;
 
     // issue-141-persist-backoff-inputs step 02-01 — runtime
     // construction-site verification: `run_convergence_tick`
@@ -160,4 +158,51 @@ mod acceptance {
     // execute before the workloads-slice bootstrap in `run_server`.
     // See `docs/feature/fix-preflight-ordering/bugfix-rca.md`.
     mod preflight_before_workloads_bootstrap;
+
+    // service-health-check-probes — Tier 1 acceptance for the
+    // `ServiceLifecycleReconciler` per ADR-0055 + wire shape
+    // evolution per ADR-0056. RED scaffolds.
+    //   * Slice 01 (US-01 / US-08): Stable / EarlyExit / StartupProbeFailed
+    //   * Slice 04 (US-04 / K2): readiness → Backend.healthy
+    //   * Slice 05 (US-05 / K3): liveness → RestartAllocation
+    //   * Cross-cutting: reconcile-fn purity + View-no-derived-state
+    //   * Wire shape: ServiceSubmitEvent::Stable / Failed serde roundtrip
+    /// Service-health-check-probes step 01-03d — composition-root
+    /// `ProbeRunner` Earned-Trust gate per ADR-0054 § 7.
+    mod probe_runner_boot_gate;
+    /// GAP-4 + GAP-5 corrective AT — production `ExecDriver` carries
+    /// a wired `ProbeRunner` and its lifecycle hooks drive the
+    /// supervisor on the runner. Closes the structural gap that pre-
+    /// patch let the production composition root discard
+    /// `Arc<ProbeRunner>` into an underscore-binding. See
+    /// `.context/01-03-structural-gap-audit.md`.
+    mod probe_runner_composition;
+    // GAP-1 corrective patch — real ServiceLifecycle hydrate impls
+    // (`hydrate_desired` / `hydrate_actual` join intent + observation
+    // + LWW probe projection per the Phase 01 structural gap audit).
+    // See `.context/01-03-structural-gap-audit.md`.
+    mod service_lifecycle_hydrate;
+    mod service_lifecycle_liveness;
+    // GAP-7 closure — end-to-end witness that ProbeRunner → row →
+    // hydrate → ServiceLifecycleReconciler emits Stable. See
+    // `.context/01-03-structural-gap-audit.md` GAP-7.
+    mod service_lifecycle_probe_to_stable;
+    mod service_lifecycle_purity;
+    mod service_lifecycle_readiness;
+    // GAP-9 — runtime self-re-enqueue witness (Shape B). Uses the
+    // `loaded_service_lifecycle_views_for_test` runtime accessor, which is
+    // `#[cfg(any(test, feature = "integration-tests"))]`; cfg(test) does
+    // not propagate to dependencies from an integration-test binary, so
+    // gate the module behind the feature (mirrors `runtime_convergence_loop`).
+    #[cfg(feature = "integration-tests")]
+    mod service_lifecycle_runtime_reenqueue;
+    mod service_lifecycle_stable;
+    mod service_submit_event_taxonomy;
+    mod service_submit_event_v2;
+
+    // service-health-check-probes step 01-03e3 — handler dispatch
+    // wiring for Service-kind submit. S-SHCP-WIRE-09 through
+    // S-SHCP-WIRE-15 cover the production dispatch path from
+    // handlers.rs:498 through build_service_stream end-to-end.
+    mod service_submit_dispatch_wiring;
 }

@@ -11,6 +11,9 @@
 //! commit; existing constants stay verbatim. See `development.md`
 //! § "Version-bump procedure".
 
+use std::time::Duration;
+
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -29,7 +32,25 @@ use super::harness::{
 /// See `job.rs::GOLDEN_DISCRIMINANT_OFFSET_V1` for the full rationale
 /// (two-source triangulation guards against unilateral drift of
 /// either pin).
-const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 168;
+///
+/// Re-pinned 2026-05-24 from 168 → 192 — greenfield, no shipped
+/// consumers; layout shifted by `TerminalCondition::{Stable,
+/// ServiceFailed}` variant append per user directive (see
+/// `feedback_single_cut_greenfield_migrations.md` — pre-shipment the
+/// V1 fixture is the canonical spec, regenerated when the spec
+/// changes).
+///
+/// Re-pinned 2026-05-29 — greenfield retype of the GAP-1 subsidiary
+/// field from `started_at_unix_ms: Option<u64>` to
+/// `started_at: Option<UnixInstant>` (corrective patch closing the
+/// newtype-discipline violation in commit 6f2b2cb9). `UnixInstant`
+/// wraps `Duration` (12-byte inline layout: 8 bytes for seconds + 4
+/// bytes for nanos), so the inlined `Option<UnixInstant>` payload
+/// grows relative to the prior `Option<u64>` (8 bytes), shifting the
+/// outer enum's discriminant byte from 208 to its new empirical
+/// position. The new value is determined by regenerating `FIXTURE_V1`
+/// and observing where `0x00` lives in the trailing root structure.
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 212;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -50,14 +71,32 @@ fn canonical_v1_payload() -> AllocStatusRowLatest {
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // Subsidiary GAP-1 fix: canonical payload carries the
+        // wall-clock at the Pending → Running transition. Pinned
+        // value is arbitrary but stable — re-pin on every
+        // FIXTURE_V<N+1> bump.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 
 /// Hex-encoded rkyv-archived bytes of
-/// `AllocStatusRowEnvelope::V1(canonical_v1_payload())`. Generated
-/// once at the GREEN landing of step 01-03 and pinned verbatim from
-/// that moment onward. NEVER touched on subsequent commits.
-const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d30303100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005affffff00000000";
+/// `AllocStatusRowEnvelope::V1(canonical_v1_payload())`.
+///
+/// Regenerated 2026-05-29 — greenfield retype of GAP-1 subsidiary
+/// field from `Option<u64>` to `Option<UnixInstant>` (the corrective
+/// patch closing the newtype-discipline violation in commit
+/// 6f2b2cb9). The inlined `Option<UnixInstant>` payload uses a
+/// `Duration` (12 bytes — `u64` seconds + `u32` nanos) where the
+/// prior `Option<u64>` used 8 bytes, growing the trailing root
+/// structure by 4 bytes per `Some`. The new hex was produced by
+/// running `print_fixture_v1_bytes` and pasted verbatim.
+///
+/// Pre-shipment regeneration is allowed under
+/// `feedback_single_cut_greenfield_migrations.md`. Once V1 has
+/// shipped to a deployed consumer, this constant becomes immutable
+/// per `.claude/rules/development.md` § "rkyv schema evolution" —
+/// future variants would need a `V2` envelope.
+const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000010000000000000000f15365000000000000000000000000";
 
 #[test]
 fn alloc_status_row_v1_decodes_through_current_envelope() {
@@ -133,6 +172,11 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
+        // Subsidiary GAP-1 fix: this test exercises a Terminated row
+        // (SystemGc), which by lifecycle ordering must have reached
+        // Running first — the field is `Some(_)` to reflect that.
+        // Value is arbitrary; the test asserts round-trip equality.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     let envelope = AllocStatusRowEnvelope::latest(payload.clone());
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");

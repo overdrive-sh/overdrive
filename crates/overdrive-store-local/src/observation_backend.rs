@@ -78,6 +78,7 @@ use futures::Stream;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
     ObservationStore, ObservationStoreError, ObservationSubscription, ServiceBackendRow,
@@ -111,6 +112,41 @@ const SERVICE_HYDRATION_TABLE: TableDefinition<&[u8], &[u8]> =
 /// service — the full current backend set. GH #160.
 const SERVICE_BACKENDS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_service_backends");
+
+/// Holds the rkyv-archived bytes of every `ProbeResultRow`, keyed on
+/// the canonical composite encoding of `(alloc_id, probe_idx)` per
+/// ADR-0054 §5. Key layout: `alloc_id_bytes || 0x00 || probe_idx LE
+/// u32` — the NUL separator guarantees unambiguous prefix-scan
+/// boundaries (no `AllocationId` byte sequence may contain NUL since
+/// it is parsed from non-empty `&str`). LWW resolution on
+/// `last_observed_at_unix_ms`.
+const PROBE_RESULTS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_probe_results");
+
+/// Encode the composite `(alloc_id, probe_idx)` key as a byte
+/// sequence. Sort order on the underlying redb `BTree` mirrors the
+/// lexicographic-on-bytes order of this layout — for a given
+/// `alloc_id`, probe indices sort ascending.
+fn encode_probe_result_key(alloc_id: &AllocationId, probe_idx: ProbeIdx) -> Vec<u8> {
+    let alloc_bytes = alloc_id.as_str().as_bytes();
+    let idx_bytes = probe_idx.get().to_le_bytes();
+    let mut out = Vec::with_capacity(alloc_bytes.len() + 1 + idx_bytes.len());
+    out.extend_from_slice(alloc_bytes);
+    out.push(0x00);
+    out.extend_from_slice(&idx_bytes);
+    out
+}
+
+/// Encode the prefix `(alloc_id, *)` for range scans — the
+/// `alloc_id` bytes + NUL separator (first segment of
+/// [`encode_probe_result_key`]).
+fn encode_probe_result_prefix(alloc_id: &AllocationId) -> Vec<u8> {
+    let alloc_bytes = alloc_id.as_str().as_bytes();
+    let mut out = Vec::with_capacity(alloc_bytes.len() + 1);
+    out.extend_from_slice(alloc_bytes);
+    out.push(0x00);
+    out
+}
 
 /// Encode the composite `(service_id, fingerprint)` key as 16 bytes
 /// (`service_id` LE u64 || `fingerprint` LE u64). Sort order on the
@@ -190,6 +226,9 @@ impl LocalObservationStore {
                 let _ = write.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
                 // Service-backends table — GH #160.
                 let _ = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
+                // Probe-results table — ADR-0054 §5. New table;
+                // never alters existing tables.
+                let _ = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
             }
             write.commit().map_err(map_to_io)?;
         }
@@ -417,6 +456,66 @@ impl ObservationStore for LocalObservationStore {
         Ok(rows)
     }
 
+    async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let row_for_commit = row.clone();
+        tokio::task::spawn_blocking(move || {
+            let write = inner.db.begin_write().map_err(map_to_io)?;
+            {
+                let mut table = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
+                apply_probe_result_lww(&mut table, &row_for_commit)?;
+            }
+            write.commit().map_err(map_to_io)?;
+            Ok::<_, ObservationStoreError>(())
+        })
+        .await
+        .map_err(map_to_io)??;
+        Ok(())
+    }
+
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<ProbeResultRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let prefix = encode_probe_result_prefix(alloc_id);
+        // Build a range [prefix, prefix-after) — prefix-after is the
+        // prefix with its trailing NUL replaced by 0x01 to capture
+        // every key whose first segment is exactly `alloc_id_bytes ||
+        // 0x00`. Equivalent to a prefix scan.
+        let mut range_end = prefix.clone();
+        if let Some(last) = range_end.last_mut() {
+            *last = 0x01;
+        }
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
+            let mut out: Vec<ProbeResultRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            let iter = table.range(prefix.as_slice()..range_end.as_slice()).map_err(map_to_io)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_envelope::<ProbeResultRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((out, failures))
+        })
+        .await
+        .map_err(map_to_io)??;
+
+        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
+        // envelope decode failed. Convergence proceeds on surviving
+        // rows.
+        log_decode_failures(
+            "observation_probe_results",
+            "skipping probe-result row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
+    }
+
     async fn service_backends_rows(
         &self,
         service_id: &ServiceId,
@@ -601,6 +700,30 @@ fn apply_service_backends_lww(
         // ADR-0048 § 1 — the on-disk shape is the envelope, never the
         // bare payload.
         let envelope = ServiceBackendRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
+        table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
+
+/// LWW-guarded insert for `ProbeResultRow`. Keyed on the composite
+/// `(alloc_id, probe_idx)` per ADR-0054 §5. Strictly-dominate on
+/// `last_observed_at_unix_ms` — equal timestamps are no-ops
+/// (idempotent re-write). On envelope decode failure of the prior
+/// row, treats the incoming write as dominating per ADR-0048 § 3.
+fn apply_probe_result_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &ProbeResultRow,
+) -> Result<bool, ObservationStoreError> {
+    let key = encode_probe_result_key(&incoming.alloc_id, incoming.probe_idx);
+    let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<ProbeResultRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.last_observed_at_unix_ms > prior_row.last_observed_at_unix_ms,
+            Err(_) => true,
+        }
+    });
+    if dominates {
+        let envelope = ProbeResultRowEnvelope::latest(incoming.clone());
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }

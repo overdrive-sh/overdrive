@@ -1,0 +1,28 @@
+{
+  "project_id": "",
+  "total_steps": 18,
+  "completed_steps": 18,
+  "completed_step_ids": [
+    "01-01",
+    "01-02",
+    "01-03",
+    "01-03b",
+    "01-03c",
+    "01-03d",
+    "01-03e",
+    "01-03e2",
+    "01-03e3",
+    "01-03e3-fix",
+    "01-03f-1",
+    "01-03f-2",
+    "01-03f",
+    "02-01",
+    "02-02",
+    "02-03",
+    "03-01",
+    "03-02"
+  ],
+  "pending_step_ids": [],
+  "all_steps_done": true,
+  "phases_completed": {}
+}

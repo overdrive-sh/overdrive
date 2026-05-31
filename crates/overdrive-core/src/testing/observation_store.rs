@@ -60,6 +60,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use tokio::time::timeout;
 
+use crate::UnixInstant;
 use crate::id::{AllocationId, NodeId, Region, WorkloadId};
 use crate::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
@@ -95,6 +96,14 @@ fn region() -> Region {
 }
 
 fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -> AllocStatusRow {
+    // Subsidiary GAP-1 fix: trait-conformance harness rows model
+    // generic LWW shapes. `None` on Pending (no Running observation
+    // yet); `Some(_)` on Running-or-later states to match the
+    // production invariant. Value is fixed for test determinism.
+    let started_at = match state {
+        AllocState::Pending => None,
+        _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+    };
     AllocStatusRow {
         alloc_id: alloc_id(scope, idx),
         workload_id: WorkloadId::from_str("payments").expect("job id is valid"),
@@ -107,6 +116,7 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         stderr_tail: None,
         kind: crate::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        started_at,
     }
 }
 
@@ -181,25 +191,25 @@ async fn case_newer_dominates_older_alloc_status<T: ObservationStore + ?Sized>(s
 
     let mut sub = store.subscribe_all().await.expect("subscribe");
 
-    store.write(ObservationRow::AllocStatus(older.clone())).await.expect("write older");
+    store.write(ObservationRow::AllocStatus(Box::new(older.clone()))).await.expect("write older");
     let first = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
         .await
         .expect("subscription delivers older within timeout")
         .expect("stream yields older");
     assert_eq!(
         first,
-        ObservationRow::AllocStatus(older.clone()),
+        ObservationRow::AllocStatus(Box::new(older.clone())),
         "(i) older row must be emitted on first write — no prior to dominate it"
     );
 
-    store.write(ObservationRow::AllocStatus(newer.clone())).await.expect("write newer");
+    store.write(ObservationRow::AllocStatus(Box::new(newer.clone()))).await.expect("write newer");
     let second = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
         .await
         .expect("subscription delivers newer within timeout")
         .expect("stream yields newer");
     assert_eq!(
         second,
-        ObservationRow::AllocStatus(newer.clone()),
+        ObservationRow::AllocStatus(Box::new(newer.clone())),
         "(i) newer row must be emitted — it dominates the older row"
     );
 
@@ -216,13 +226,13 @@ async fn case_older_after_newer_rejected_alloc_status<T: ObservationStore + ?Siz
     let older = alloc_row(scope, 0, AllocState::Pending, ts(2, "control-plane-0"));
 
     // Newer first — accepted because no prior.
-    store.write(ObservationRow::AllocStatus(newer.clone())).await.expect("write newer");
+    store.write(ObservationRow::AllocStatus(Box::new(newer.clone()))).await.expect("write newer");
 
     // Subscribe BEFORE the older write so a wrongly-emitted loser would
     // be observed.
     let mut sub = store.subscribe_all().await.expect("subscribe");
 
-    store.write(ObservationRow::AllocStatus(older)).await.expect("write older");
+    store.write(ObservationRow::AllocStatus(Box::new(older))).await.expect("write older");
 
     let delivery = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
     assert!(delivery.is_err(), "(ii) LWW loser must NOT emit on subscriptions; got {delivery:?}");
@@ -240,20 +250,20 @@ async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Siz
 
     let mut sub = store.subscribe_all().await.expect("subscribe");
 
-    store.write(ObservationRow::AllocStatus(row_a.clone())).await.expect("write first");
+    store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("write first");
     let first = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
         .await
         .expect("subscription delivers first within timeout")
         .expect("stream yields first");
     assert_eq!(
         first,
-        ObservationRow::AllocStatus(row_a.clone()),
+        ObservationRow::AllocStatus(Box::new(row_a.clone())),
         "(iii) first delivery must emit the row"
     );
 
     // Re-deliver the same row. Equal timestamps do NOT dominate
     // (idempotency case) — must be rejected.
-    store.write(ObservationRow::AllocStatus(row_a.clone())).await.expect("re-deliver");
+    store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("re-deliver");
     let delivery = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
     assert!(delivery.is_err(), "(iii) re-delivered identical row must NOT emit; got {delivery:?}");
 
@@ -274,7 +284,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
     // Write lower-writer first; it has no prior to compare against, so
     // it is accepted.
     store
-        .write(ObservationRow::AllocStatus(lower_writer.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(lower_writer.clone())))
         .await
         .expect("write lower writer");
 
@@ -284,7 +294,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
     // Higher-writer arrives second. Same counter; tiebreak on writer:
     // "control-plane-1" > "control-plane-0", so higher wins.
     store
-        .write(ObservationRow::AllocStatus(higher_writer.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(higher_writer.clone())))
         .await
         .expect("write higher writer");
 
@@ -294,7 +304,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
         .expect("stream yields higher writer");
     assert_eq!(
         delivery,
-        ObservationRow::AllocStatus(higher_writer.clone()),
+        ObservationRow::AllocStatus(Box::new(higher_writer.clone())),
         "(iv) higher-`Display` writer must win the tiebreak"
     );
 
@@ -311,7 +321,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
     // (counter ties, writer < winning writer).
     let mut sub2 = store.subscribe_all().await.expect("subscribe-2");
     store
-        .write(ObservationRow::AllocStatus(lower_writer.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(lower_writer.clone())))
         .await
         .expect("write lower writer second time");
     let reject_delivery = timeout(REJECT_POLL_TIMEOUT, sub2.next()).await;
@@ -335,7 +345,10 @@ async fn case_alloc_status_row_point_lookup<T: ObservationStore + ?Sized>(store:
     let initial = alloc_row(scope, 0, AllocState::Pending, ts(1, "control-plane-0"));
     let updated = alloc_row(scope, 0, AllocState::Running, ts(4, "control-plane-0"));
 
-    store.write(ObservationRow::AllocStatus(initial.clone())).await.expect("write initial");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(initial.clone())))
+        .await
+        .expect("write initial");
     let after_initial =
         store.alloc_status_row(&initial.alloc_id).await.expect("point lookup initial");
     assert_eq!(
@@ -344,7 +357,10 @@ async fn case_alloc_status_row_point_lookup<T: ObservationStore + ?Sized>(store:
         "(v) point lookup must return the LWW-winner; got {after_initial:?}"
     );
 
-    store.write(ObservationRow::AllocStatus(updated.clone())).await.expect("write updated");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(updated.clone())))
+        .await
+        .expect("write updated");
     let after_updated =
         store.alloc_status_row(&updated.alloc_id).await.expect("point lookup updated");
     assert_eq!(
@@ -544,8 +560,8 @@ async fn property_loop_alloc_status<T: ObservationStore + ?Sized>(store: &T) {
         let row_a = alloc_row("property-loop", idx, AllocState::Pending, ts(*counter_a, writer_a));
         let row_b = alloc_row("property-loop", idx, AllocState::Running, ts(*counter_b, writer_b));
 
-        store.write(ObservationRow::AllocStatus(row_a.clone())).await.expect("write a");
-        store.write(ObservationRow::AllocStatus(row_b.clone())).await.expect("write b");
+        store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("write a");
+        store.write(ObservationRow::AllocStatus(Box::new(row_b.clone()))).await.expect("write b");
 
         let rows = store.alloc_status_rows().await.expect("read alloc rows");
         let observed: Vec<&AllocStatusRow> =

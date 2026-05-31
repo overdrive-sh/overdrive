@@ -35,7 +35,7 @@ fn job_succeeded_summary_names_exit_code_and_duration() {
 #[test]
 fn job_failed_summary_names_exit_code_attempts_and_stderr_tail() {
     let stderr_tail = "ERROR\nERROR\nERROR\n";
-    let rendered = format_job_failed_summary("coinflip", 1, "1.0s", 3, 3, true, stderr_tail);
+    let rendered = format_job_failed_summary("coinflip", Some(1), "1.0s", 3, 3, true, stderr_tail);
     assert!(
         rendered.contains("Job 'coinflip' failed."),
         "expected Job failed line; got: {rendered}",
@@ -69,7 +69,7 @@ fn job_attempt_failed_intermediate_line() {
 #[test]
 fn job_renders_never_contain_is_running_with() {
     let succeeded = format_job_succeeded_summary("any", 0, "1ms", 1);
-    let failed = format_job_failed_summary("any", 1, "1ms", 1, 1, true, "stderr");
+    let failed = format_job_failed_summary("any", Some(1), "1ms", 1, 1, true, "stderr");
     let attempt = format_job_attempt_failed("any", 1, 1, "1ms");
 
     for r in [&succeeded, &failed, &attempt] {

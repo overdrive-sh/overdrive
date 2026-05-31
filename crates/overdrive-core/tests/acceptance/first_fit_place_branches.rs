@@ -95,6 +95,11 @@ fn alloc_with_state_on(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at: match state {
+            AllocState::Pending => None,
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        },
     }
 }
 
@@ -125,6 +130,7 @@ fn placement_actions(
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: wid,
@@ -134,6 +140,7 @@ fn placement_actions(
         allocations: current_allocs,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -167,8 +174,9 @@ fn placement_returns_node_when_capacity_fits() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "expected StartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions:?}",
+        3,
+        "expected StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
+         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {
@@ -201,8 +209,8 @@ fn placement_succeeds_at_exact_cpu_fit_with_memory_excess() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "exact-fit on cpu must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06); got {actions:?}",
+        3,
+        "exact-fit on cpu must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9); got {actions:?}",
     );
     assert!(matches!(
         actions[0],
@@ -233,8 +241,8 @@ fn placement_succeeds_at_exact_memory_fit_with_cpu_excess() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "exact-fit on memory must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06); got {actions:?}",
+        3,
+        "exact-fit on memory must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9); got {actions:?}",
     );
     assert!(matches!(
         actions[0],
@@ -343,8 +351,8 @@ fn node_free_capacity_excludes_non_running_allocs_on_same_node() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(bridge) per UI-06); got {actions:?}",
+        3,
+        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9); got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {

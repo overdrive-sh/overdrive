@@ -34,12 +34,38 @@ use crate::traits::intent_store::IntentStoreError;
 // and `JobSpecInput` remain in this module as the production path until
 // downstream slices (02–06) migrate every reader.
 // ---------------------------------------------------------------------------
+pub use self::probe_descriptor::{
+    JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
+};
+pub use self::service_spec::{
+    ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
+};
+
+// Re-export the parser-side `ExecInput` / `ResourcesInput` from
+// `workload_spec` under disambiguating aliases. The wire-shape twins
+// (`ExecInput` / `ResourcesInput` defined directly in this module)
+// remain the canonical wire-side types; the parser-side variants are
+// what `ServiceSpecV{1,2}` carry and what schema-evolution fixtures
+// construct.
 pub use self::workload_spec::{
-    CronExpr, JobSpec, Listener, ParseError, ScheduleSpec, ServiceSpec, ServiceVip, WorkloadKind,
-    WorkloadSpec, WorkloadSpecInput,
+    CronExpr, JobSpec, Listener, ParseError, ScheduleSpec, ServiceVip, WorkloadKind, WorkloadSpec,
+    WorkloadSpecInput,
+};
+pub use self::workload_spec::{
+    ExecInput as ParserExecInput, ResourcesInput as ParserResourcesInput,
 };
 
 mod workload_spec;
+
+// `ProbeDescriptor` aggregate type per ADR-0057. Lands additively
+// across slices 01 / 02 / 03 + 04 / 05 / 07 — TCP mechanic in 01-02,
+// HTTP in 02-01, Exec in 02-02.
+pub mod probe_descriptor;
+
+// `ServiceSpec` parser-side aggregate + per-type rkyv envelope per
+// ADR-0048 + ADR-0057. Step 01-02 lands the V1 → V2 envelope bump
+// with the three `Vec<ProbeDescriptor>` fields.
+mod service_spec;
 
 // ---------------------------------------------------------------------------
 // Aggregate error
@@ -365,12 +391,37 @@ pub enum WorkloadIntentV1 {
     Schedule(ScheduleV1),
 }
 
-/// Phase 1 minimal `Service` payload per ADR-0050 § 2 + OQ-3.
+/// Phase 1 minimal `Service` payload per ADR-0050 § 2 + OQ-3,
+/// extended with health-check probe descriptors per ADR-0057.
 ///
 /// Mirrors [`JobV1`]'s `(id, replicas, resources, driver)` shape and
-/// adds `listeners`. Listener health-check policy, TLS-termination
-/// config, and backend weights are deferred per OQ-3 (additive
-/// envelope evolution).
+/// adds `listeners` plus three `Vec<ProbeDescriptor>` slots (startup
+/// / readiness / liveness). The probe vecs carry the parsed-and-
+/// validated descriptors the operator declared under
+/// `[[health_check.startup]]` / `[[health_check.readiness]]` /
+/// `[[health_check.liveness]]` (plus any platform-synthesised
+/// default-TCP probe per ADR-0058). Persisting the descriptors
+/// themselves is correct per § "Persist inputs, not derived state":
+/// the reconciler recomputes derived values (startup deadline,
+/// inferred-flag rendering, mechanic summary) every tick from the
+/// descriptors + the live policy, never persisting them as cached
+/// outputs.
+///
+/// # rkyv schema-evolution note
+///
+/// Per `.claude/rules/development.md` § "rkyv schema evolution" the
+/// archived layout of this struct is positional — appending the
+/// three probe vecs in this commit shifts trailing offsets relative
+/// to the pre-GAP-6 layout. The `WorkloadIntentEnvelope` only ships
+/// `V1` today; under the Phase-1 greenfield single-cut migration
+/// policy ("delete the on-disk redb file" is the official upgrade
+/// path, per `feedback_single_cut_greenfield_migrations.md`), the
+/// new field set is admitted in-place rather than minting
+/// `WorkloadIntentV2`. The historical golden-bytes fixtures under
+/// `tests/schema_evolution/workload_intent.rs` are regenerated in
+/// this same commit to pin the new V1 layout — the structural
+/// defense (every persisted layout has a pinned golden-bytes
+/// fixture) is preserved.
 ///
 /// Carries no VIP — VIPs are platform-issued via
 /// `ServiceVipAllocator` per ADR-0049 § 5. The aggregate carries
@@ -396,6 +447,19 @@ pub struct ServiceV1 {
     /// Operator-declared listeners in declaration order. Reuses the
     /// parser-layer [`Listener`] newtype — `(port, protocol)` only.
     pub listeners: Vec<Listener>,
+    /// Operator-declared startup probes plus any platform-synthesised
+    /// default per ADR-0058. Empty IFF the operator wrote
+    /// `[[health_check.startup]] = []` (explicit opt-out, preserves
+    /// Phase-1 first-Running semantics). The reconciler reads these
+    /// descriptors and recomputes `max_attempts × interval` →
+    /// startup-deadline on every tick (NOT a cached value).
+    pub startup_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared readiness probes. Populated by future
+    /// slices (02-01); reserved here for ServiceV1 layout stability.
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared liveness probes. Populated by future
+    /// slices (02-02); reserved here for ServiceV1 layout stability.
+    pub liveness_probes: Vec<ProbeDescriptor>,
 }
 
 /// Phase 1 `Schedule` payload per ADR-0050 § 2 + OQ-4 (embedded
@@ -448,8 +512,16 @@ impl ServiceV1 {
 
         use crate::dataplane::backend_key::Proto;
 
-        let crate::api::submit::ServiceSpecInput { id, replicas, resources, driver, listeners } =
-            input;
+        let crate::api::submit::ServiceSpecInput {
+            id,
+            replicas,
+            resources,
+            driver,
+            listeners,
+            startup_probes,
+            readiness_probes,
+            liveness_probes,
+        } = input;
 
         // Identity + scalar field validation — mirrors `JobV1::from_submit`.
         let id = WorkloadId::new(&id)?;
@@ -514,6 +586,10 @@ impl ServiceV1 {
             validated.push(Listener { port, protocol });
         }
 
+        validate_probe_mechanics(&startup_probes, "startup_probes")?;
+        validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
+        validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
+
         Ok(Self {
             id,
             replicas,
@@ -526,8 +602,30 @@ impl ServiceV1 {
                 args: exec_input.args,
             }),
             listeners: validated,
+            startup_probes,
+            readiness_probes,
+            liveness_probes,
         })
     }
+}
+
+/// Validate probe mechanic content at the API admission boundary.
+///
+/// The TOML parser validates at parse time in `parse_http_mechanic` /
+/// `parse_exec_mechanic`; the API path deserialises `ProbeDescriptor`
+/// from JSON and must validate here. Both paths converge on
+/// `ProbeMechanic::validate()`.
+fn validate_probe_mechanics(
+    probes: &[ProbeDescriptor],
+    field: &'static str,
+) -> Result<(), AggregateError> {
+    for (idx, probe) in probes.iter().enumerate() {
+        probe.mechanic.validate().map_err(|message| AggregateError::Validation {
+            field,
+            message: format!("[{idx}]: {message}"),
+        })?;
+    }
+    Ok(())
 }
 
 impl ScheduleV1 {

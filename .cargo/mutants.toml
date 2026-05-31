@@ -79,6 +79,24 @@
 #    `overdrive-sim` crate — the `overdrive-sim/src/bin/dst.rs`
 #    binary entry point and any future non-Tier-1 surface remain in
 #    scope. Slim glob targets `adapters/` and `invariants/` only.
+#
+# 8. `crates/*/src/testing/**` — shared test fixtures exposed via
+#    `pub mod testing` for downstream test crates (`overdrive-sim`,
+#    `overdrive-store-local`, etc.) to exercise port-trait impls
+#    against shared invariants (LWW, etc.). These modules are NOT
+#    `#[cfg(test)]`-gated because downstream test crates depend on
+#    them through `[dev-dependencies]`, so Rule 5's blanket
+#    `#[cfg(test)]` exclusion does not cover them. The `case_*` /
+#    `property_loop_*` fns ARE the test logic (subscribe / write /
+#    assert_eq! / assert!); the downstream caller's contract is
+#    just "the fn returned", so mutating the fn body to `()` does
+#    not flip any assertion. Per `.claude/rules/testing.md` §
+#    "Mutation testing → What it's NOT for" item 5 ("Tests
+#    themselves"), this is structurally test code and excluded for
+#    the same reason `**/tests/**` is. Surfaced by the step 01-01
+#    mutation gate (service-health-check-probes, GH #170): 6 of 7
+#    missed mutants traced to `crates/overdrive-core/src/testing/
+#    observation_store.rs`.
 
 # ---------------------------------------------------------------------------
 # Excluded paths
@@ -99,6 +117,14 @@ exclude_globs = [
     # a future refactor of `#[cfg(test)]` boundaries does not surprise us.
     "**/tests/**",
     "**/benches/**",
+
+    # Rule 8 — shared test fixtures under `pub mod testing` (not
+    # `#[cfg(test)]`-gated because downstream test crates import them
+    # via `[dev-dependencies]`). The `case_*` / `property_loop_*`
+    # fns ARE the test logic; mutating them is structurally
+    # equivalent to deleting a test. See header comment for full
+    # rationale + the step 01-01 mutation gate citation.
+    "crates/*/src/testing/**",
 
     # Rule 6 — xtask developer tooling. Not platform code; correctness
     # surfaced by the CI workflow and subcommand acceptance tests.
@@ -313,6 +339,23 @@ exclude_re = [
     # `try_as_ipv4().is_none()`, at which point this exclusion is
     # removed in the same commit.
     "ServiceVip::try_as_ipv4 -> Option<std::net::Ipv4Addr> with None",
+
+    # `ProbeRunner::probe` is a RED scaffold whose body is `todo!()`
+    # awaiting GREEN landing in slice 01-03c per ADR-0054 §7. The
+    # function returns `Result<(), ProbeRunnerError>`; cargo-mutants
+    # synthesises an `Ok(())` replacement that is semantically
+    # equivalent to the scaffold panic NOT firing — but the scaffold
+    # IS the spec for the unimplemented work, and no test can
+    # distinguish a "succeeded vacuously" Ok(()) from a "panicked
+    # because not yet implemented" todo!() until the GREEN body
+    # lands. The source-level `// mutants: skip` comment above the
+    # function does not suffice because cargo-mutants matches it
+    # case-sensitively on a single line above the fn, and an em-dash
+    # continuation in the existing comment ate the parser's
+    # `mutants: skip` token. Add an exclude_re entry instead — when
+    # the GREEN body lands in slice 01-03c, this exclusion is
+    # removed in the same commit and a real test kills the mutant.
+    "replace ProbeRunner::probe -> Result<\\(\\), ProbeRunnerError> with Ok\\(\\(\\)\\)",
 
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement

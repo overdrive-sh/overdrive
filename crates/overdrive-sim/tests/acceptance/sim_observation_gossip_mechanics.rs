@@ -17,6 +17,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -44,6 +45,11 @@ fn row_at(writer: &NodeId, counter: u64, state: AllocState) -> AllocStatusRow {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at: match state {
+            AllocState::Pending => None,
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        },
     }
 }
 
@@ -68,11 +74,11 @@ async fn lww_tiebreak_uses_writer_node_id_for_equal_counters() {
     let row_from_b = row_at(&node("node-b"), 1, AllocState::Draining);
 
     peer_a
-        .write(ObservationRow::AllocStatus(row_from_a.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(row_from_a.clone())))
         .await
         .expect("write on A succeeds");
     peer_b
-        .write(ObservationRow::AllocStatus(row_from_b.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(row_from_b.clone())))
         .await
         .expect("write on B succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -112,7 +118,10 @@ async fn partition_blocks_gossip_bidirectionally() {
     // Write on B, not on A — if partition only blocked A→B (and not
     // B→A) this write would still reach A.
     let row = row_at(&node("node-b"), 1, AllocState::Running);
-    peer_b.write(ObservationRow::AllocStatus(row.clone())).await.expect("write on B succeeds");
+    peer_b
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .await
+        .expect("write on B succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
 
     assert!(
@@ -140,7 +149,10 @@ async fn runtime_partition_blocks_subsequent_gossip() {
     cluster.partition(&node("node-a"), &node("node-b")).await;
 
     let row = row_at(&node("node-a"), 1, AllocState::Running);
-    peer_a.write(ObservationRow::AllocStatus(row.clone())).await.expect("write on A succeeds");
+    peer_a
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .await
+        .expect("write on A succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
 
     assert!(
@@ -170,6 +182,8 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     // Identical timestamp, but a different payload — represents the
     // same logical row being re-delivered via gossip. Under LWW, this
@@ -177,9 +191,12 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
     // must be retained on the peer.
     let row_v2_same_ts = AllocStatusRow { state: AllocState::Draining, ..row_v1.clone() };
 
-    store.write(ObservationRow::AllocStatus(row_v1.clone())).await.expect("first write succeeds");
     store
-        .write(ObservationRow::AllocStatus(row_v2_same_ts))
+        .write(ObservationRow::AllocStatus(Box::new(row_v1.clone())))
+        .await
+        .expect("first write succeeds");
+    store
+        .write(ObservationRow::AllocStatus(Box::new(row_v2_same_ts)))
         .await
         .expect("second write at same timestamp succeeds but loses LWW");
 
@@ -211,7 +228,10 @@ async fn repair_on_unpartitioned_pair_is_a_noop() {
     let peer_a = cluster.peer(&node("node-a"));
     let peer_b = cluster.peer(&node("node-b"));
     let row = row_at(&node("node-a"), 1, AllocState::Running);
-    peer_a.write(ObservationRow::AllocStatus(row.clone())).await.expect("write on A succeeds");
+    peer_a
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .await
+        .expect("write on A succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
 
     assert_eq!(

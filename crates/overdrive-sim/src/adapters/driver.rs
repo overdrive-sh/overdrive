@@ -496,6 +496,7 @@ mod release_for_exit_emission_tests {
             command: "/bin/true".to_owned(),
             args: vec![],
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+            probe_descriptors: Vec::new(),
         }
     }
 

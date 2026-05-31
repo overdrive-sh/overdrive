@@ -49,6 +49,7 @@ async fn cpu_weight_and_memory_max_are_written_from_spec() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

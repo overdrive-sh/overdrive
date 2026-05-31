@@ -24,6 +24,7 @@ async fn default_lane_does_not_spawn_real_processes() {
         command: "/bin/sleep".to_owned(),
         args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     // Action — enter through the driving port.

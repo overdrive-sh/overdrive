@@ -12,10 +12,8 @@
 //! 100ms target on localhost per US-05 AC.
 
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, StopOutcome, TerminalReason,
-    TransitionSource,
+    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, StopOutcome, TransitionSource,
 };
-use overdrive_core::TransitionReason;
 
 // workload-kind-discriminator slice 05 — Schedule submit/alloc-status
 // render functions and the SCHEDULE_EXECUTION_TRACKING_URL SSOT
@@ -314,190 +312,41 @@ pub fn cli_error(err: &CliError) -> String {
 /// Per slice 02 step 02-04 acceptance criteria S-CLI-05: every
 /// pre-Accepted failure shape (`HttpStatus`, `Transport`, `BodyDecode`,
 /// `InvalidSpec`, `ConfigLoad`) maps to exit code **2**. Convergence
-/// outcomes (`ConvergedRunning` / `ConvergedFailed`) are emitted on the
-/// streaming success path and map to 0 / 1 respectively (see
+/// outcomes (`Succeeded` / `Failed`) are emitted on the
+/// streaming success path and map to exit 0 / the workload's non-zero
+/// exit code respectively (see
 /// [`crate::commands::job::submit_streaming`]); they never flow through
 /// this function.
 ///
-/// Exit code 1 is reserved for `ConvergedFailed` only — the workload
-/// reached the server but did not converge to running. Exit code 2 is
+/// A non-zero streaming exit signals the workload reached the server
+/// but exited non-zero (or did not converge to running). Exit code 2 is
 /// "the CLI never got past pre-Accepted plumbing" — the operator
 /// distinguishes this from "the workload itself failed" via the exit
 /// code alone.
 #[must_use]
-pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
-    // Every CliError variant is pre-Accepted — the CLI never got an
-    // `Accepted` line on the streaming bus. Per S-CLI-05 the
-    // parametrised expectation is exit 2 across the board.
-    2
-}
-
-/// Render the operator-facing `Error:` block emitted on
-/// `SubmitEvent::ConvergedFailed`. Pure function — no I/O.
-///
-/// Per `docs/feature/cli-submit-vs-deploy-and-alloc-status/deliver/02-04`
-/// step 02-04 acceptance criteria S-CLI-04 and the journey TUI mockup
-/// in `docs/.../journey/walking-skeleton.md`. Five labelled sections:
-///
-/// ```text
-/// Error: workload '<name>' did not converge to running.
-///   reason: <human_readable rendering>
-///   last-event: <verbatim driver text>
-///   reproducer: overdrive alloc status --job <name>
-///
-/// Hint: <variant-specific hint>
-/// ```
-///
-/// `reason` argument is the standalone `SubmitEvent::ConvergedFailed.reason`
-/// field. When present it carries the most-recent cause-class
-/// `TransitionReason`. When absent the renderer falls back to the
-/// `terminal_reason`'s inner cause (`BackoffExhausted` / `DriverError` carry
-/// one); for `Timeout` the reason line cites the configured cap.
-///
-/// `last_event_detail` is the verbatim driver text (typically the same
-/// source as `SubmitEvent::ConvergedFailed.error`). Optional — Phase-2
-/// terminal causes may not carry verbatim text.
-///
-/// `terminal_reason` controls the `Hint:` line mapping per the criteria's
-/// cause-class table.
-#[must_use]
-pub fn format_failed_block(
-    workload_name: &str,
-    reason: Option<&TransitionReason>,
-    last_event_detail: Option<&str>,
-    terminal_reason: &TerminalReason,
-) -> String {
-    use std::fmt::Write as _;
-    let mut s = String::new();
-    let _ = writeln!(s, "Error: workload '{workload_name}' did not converge to running.");
-
-    // `reason:` line — standalone reason wins; otherwise derive from
-    // terminal_reason. The streaming `ConvergedFailed.reason` carries
-    // the most recent cause-class TransitionReason; for cap-fired
-    // timeouts that field is None and the terminal_reason is the only
-    // signal.
-    let reason_text = reason
-        .map(TransitionReason::human_readable)
-        .or_else(|| derive_reason_from_terminal(terminal_reason));
-    if let Some(text) = reason_text {
-        let _ = writeln!(s, "  reason: {text}");
-    }
-
-    if let Some(detail) = last_event_detail {
-        let _ = writeln!(s, "  last-event: {detail}");
-    }
-
-    // Reproducer line — points the operator at `alloc status --job <name>`
-    // for the structured snapshot. Per US-02 walking-skeleton transcript.
-    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
-
-    // Blank line separates the structured block from the variant-specific
-    // Hint line.
-    let _ = writeln!(s);
-
-    let hint = derive_hint(reason, terminal_reason);
-    let _ = writeln!(s, "Hint: {hint}");
-    s
-}
-
-/// Compute the `reason:` line text when no standalone reason was carried
-/// on the streaming `ConvergedFailed` event. Falls back to the inner
-/// cause of `BackoffExhausted` / `DriverError`, or the cap-cited
-/// rendering for `Timeout`.
-fn derive_reason_from_terminal(terminal: &TerminalReason) -> Option<String> {
-    match terminal {
-        TerminalReason::BackoffExhausted { cause, .. } | TerminalReason::DriverError { cause } => {
-            Some(cause.human_readable())
-        }
-        TerminalReason::Timeout { after_seconds } => {
-            Some(format!("workload did not converge within {after_seconds}s"))
-        }
-        TerminalReason::StreamInterrupted => {
-            Some("server-side stream interrupted before convergence".to_owned())
-        }
-        // `TerminalReason` is `#[non_exhaustive]` for forward-compat.
-        // Future variants get a generic rendering until the renderer
-        // grows a specific arm.
-        _ => None,
+pub const fn cli_error_to_exit_code(err: &CliError) -> i32 {
+    match err {
+        // Slice 07 / US-07 — a spec-rejection (e.g. probes on a
+        // non-Service workload) is a clean "your spec is wrong" exit,
+        // distinct from a plumbing failure. The operator gets exit 1
+        // (spec rejected) so scripts can distinguish "fix the spec"
+        // from "the CLI never reached the server" (exit 2).
+        CliError::ParseError(_) => 1,
+        // Every other CliError variant is pre-Accepted plumbing — the
+        // CLI never got an `Accepted` line on the streaming bus. Per
+        // S-CLI-05 the parametrised expectation is exit 2.
+        _ => 2,
     }
 }
-
-/// Map a `(reason, terminal_reason)` pair to the operator-facing `Hint:`
-/// text per the criteria's cause-class table. The mapping consults the
-/// inner cause when reason is None — the operator still gets variant-
-/// specific guidance.
-fn derive_hint(reason: Option<&TransitionReason>, terminal_reason: &TerminalReason) -> String {
-    // Resolve the cause-class TransitionReason to consult, preferring
-    // the standalone `reason` field over the terminal_reason's inner
-    // cause. Either source flows through the same hint table.
-    let cause: Option<&TransitionReason> = reason.map_or_else(
-        || match terminal_reason {
-            TerminalReason::BackoffExhausted { cause, .. }
-            | TerminalReason::DriverError { cause } => Some(cause),
-            _ => None,
-        },
-        Some,
-    );
-
-    if let Some(cause) = cause {
-        return hint_for_transition_reason(cause).to_owned();
-    }
-
-    // No cause-class reason → consult the terminal_reason for the
-    // outer-shape hint (Timeout is the canonical example).
-    match terminal_reason {
-        TerminalReason::Timeout { .. } => {
-            "workload did not converge within the server cap; consider --detach for \
-             long-running submits"
-                .to_owned()
-        }
-        TerminalReason::StreamInterrupted => {
-            "server-side stream was interrupted; re-run `overdrive job submit` or \
-             consult `overdrive alloc status --job <id>` for the current state"
-                .to_owned()
-        }
-        _ => "see alloc status for full context".to_owned(),
-    }
-}
-
-/// Hint text for a cause-class `TransitionReason` per the step 02-04
-/// criteria mapping table.
-const fn hint_for_transition_reason(reason: &TransitionReason) -> &'static str {
-    match reason {
-        TransitionReason::ExecBinaryNotFound { .. }
-        | TransitionReason::ExecPermissionDenied { .. } => {
-            "fix the spec's exec.command path and re-run"
-        }
-        TransitionReason::ExecBinaryInvalid { .. } => {
-            "the file at exec.command is not a valid executable; verify the build artefact"
-        }
-        TransitionReason::CgroupSetupFailed { .. } => {
-            "check cgroup v2 delegation; see overdrive cluster doctor"
-        }
-        TransitionReason::RestartBudgetExhausted { .. } => {
-            "the workload failed repeatedly; address the root cause and re-submit"
-        }
-        TransitionReason::NoCapacity { .. } => "reduce resource requests or scale the cluster",
-        // Every other variant — including progress markers (which
-        // should never reach the failed-block renderer in practice but
-        // are matched for forward-compat) and the generic
-        // `DriverInternalError` — falls back to the neutral hint.
-        // `TransitionReason` is `#[non_exhaustive]` so the catch-all
-        // arm here ALSO covers any Phase 2+ variant added without
-        // updating the mapping table.
-        _ => "see alloc status for full context",
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Job-kind render fns — slice 02 of `workload-kind-discriminator`.
 // ---------------------------------------------------------------------------
 //
 // Per ADR-0047 §3 [D2] / [D7]: Job kind workloads are run-to-completion;
-// they have no `ConvergedRunning` shape. The structural fix closing the
+// they have no converged-running terminal shape. The structural fix closing the
 // bug under audit (RCA: B+C+D conjunction) renders Job-kind submits via
 // these dedicated functions whose output cannot contain the historical
-// `"is running with"` / `"(took live)"` substrings.
+// `"is running with"` substring patterns.
 
 /// Render the operator-facing submit echo for a Job-kind workload.
 ///
@@ -563,7 +412,7 @@ pub const fn is_backoff_exhausted(attempts: u32, max_attempts: u32) -> bool {
 #[must_use]
 pub fn format_job_failed_summary(
     workload_name: &str,
-    exit_code: i32,
+    exit_code: Option<i32>,
     took_human: &str,
     attempts: u32,
     max_attempts: u32,
@@ -577,9 +426,11 @@ pub fn format_job_failed_summary(
     } else {
         format!("{attempts} of {max_attempts}")
     };
+    let exit_display =
+        exit_code.map_or_else(|| "none (killed by signal)".to_string(), |c| c.to_string());
     let _ = writeln!(
         s,
-        "Job '{workload_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
+        "Job '{workload_name}' failed. (exit code {exit_display}, took {took_human}, attempts {attempts_str})"
     );
     if !stderr_tail.is_empty() {
         // Per step 02-05 / ADR-0033 Amendment 2026-05-10: the header
@@ -618,14 +469,13 @@ pub fn format_job_attempt_failed(
     )
 }
 
-/// Render the streaming `ConvergedRunning` summary line — the
+/// Render the streaming running summary line — the
 /// operator-facing exit-0 success render. Pure function.
 ///
 /// Per slice 04 of `workload-kind-discriminator`: the function's sole
 /// caller is the Service code path (post-WorkloadSpec discriminator),
-/// so the rendered vocabulary names "Service". The legacy "Job"
-/// vocabulary was renamed in a single-cut greenfield migration —
-/// `JobSubmitEvent` carries no `ConvergedRunning` variant in the
+/// so the rendered vocabulary names "Service".
+/// `JobSubmitEvent` carries no converged-running terminal variant in the
 /// post-slice-02 tagged-event design. The literal `"live"` (RCA root
 /// cause D) is gone; the `took_human` argument carries a measured
 /// Clock-derived value rendered by `format_human_duration`.
@@ -647,7 +497,7 @@ pub fn format_running_summary(
 ///
 /// Replaces the historical `"live"` literal (US-06 of
 /// `workload-kind-discriminator`) used as a duration placeholder in
-/// the streaming `ConvergedRunning` summary. The output format is
+/// the streaming running summary. The output format is
 /// chosen for human readability at typical convergence latencies
 /// (single-digit ms to a few seconds):
 ///
@@ -900,7 +750,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
     }
 }
 
-/// Render the streaming `ConvergedStopped` summary line — the
+/// Render the streaming stopped summary line — the
 /// operator-facing exit-0 success render fired when a workload
 /// reaches a clean terminal stop. Pure function.
 ///
@@ -946,4 +796,313 @@ pub fn format_stopped_summary(
             format!("Schedule '{workload_name}' was deregistered by {initiator}.\n")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Service-kind streaming render fns — step 01-03e3 (ADR-0056 / ADR-0059).
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0056: the Service-kind streaming wire surface emits the
+// typed `ServiceSubmitEvent` enum. The CLI render layer projects each
+// terminal variant into operator-facing text. The `format_stopped_summary`
+// (kind-aware) function above already renders the `Stopped` variant —
+// these two functions cover the `Stable` and `Failed` shapes.
+
+/// Render the operator-facing `Stable` terminal summary for a Service
+/// workload per ADR-0055. Pure function.
+///
+/// Form: `Service '<name>' is stable (settled in <ms>; witness: <role> probe[<idx>] (<mech>))`.
+#[must_use]
+pub fn format_service_stable_summary(
+    workload_name: &str,
+    settled_in_ms: u64,
+    witness: &overdrive_core::transition_reason::ProbeWitness,
+) -> String {
+    let inferred = if witness.inferred { " inferred" } else { "" };
+    format!(
+        "Service '{workload_name}' is stable (settled in {settled_in_ms}ms; \
+         witness:{inferred} {role} probe[{idx}] ({mech}))\n",
+        role = witness.role,
+        idx = witness.probe_idx,
+        mech = witness.mechanic_summary,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Probes-section render fns — slice 06 step 02-03 (ADR-0033 enrichment /
+// US-06 / K4).
+// ---------------------------------------------------------------------------
+//
+// The Probes section is rendered IFF `kind == Service AND
+// probes_present`; it is ABSENT for Job / Schedule per US-06. The
+// kind-guard is the load-bearing render contract — property-tested by
+// `ProbeRenderIsKindGuarded` in
+// `tests/acceptance/probes_section_render.rs`.
+//
+// `ProbeRenderRow` is the typed render-input (newtype/typed discipline
+// per `.claude/rules/development.md` § "Newtypes"). It is composed by
+// the caller from the spec-side `ProbeDescriptor` (mechanic, role,
+// inferred, failure_threshold) and the observation-side
+// `ProbeResultRow` (status, last_observed_at_unix_ms,
+// consecutive_failures). The render layer is pure over this input — it
+// performs no hydration of its own.
+
+/// Typed render-input for a single probe row in the Probes section.
+///
+/// Composed by the caller from the spec-side `ProbeDescriptor` and the
+/// observation-side `ProbeResultRow`. `status == None` materialises the
+/// `last=pending` rendering per US-06 (row absence IS pending).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeRenderRow {
+    /// Role of this probe (`startup` / `readiness` / `liveness`).
+    pub role: overdrive_core::observation::probe_result_row::ProbeRole,
+    /// 0-indexed position within the role array.
+    pub probe_idx: overdrive_core::observation::probe_result_row::ProbeIdx,
+    /// Concrete mechanic — drives the per-mechanic summary line shape.
+    pub mechanic: overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+    /// Latest observed outcome; `None` for a declared-but-not-yet-ticked
+    /// probe (renders `last=pending`).
+    pub status: Option<overdrive_core::observation::probe_result_row::ProbeStatus>,
+    /// Wall-clock (UNIX-epoch ms) of the latest observation; `None`
+    /// when no row exists yet.
+    pub last_observed_at_unix_ms: Option<u64>,
+    /// `true` IFF the platform synthesised this probe per ADR-0058
+    /// (renders an `(inferred)` suffix).
+    pub inferred: bool,
+    /// Consecutive failures observed for this probe. Drives the
+    /// `(<consecutive_failures>/<threshold>)` ratio suffix when the
+    /// probe is currently failing under a declared threshold.
+    pub consecutive_failures: u32,
+    /// Failure threshold for this probe (liveness `failure_threshold`,
+    /// readiness `success_threshold`); `None` for startup probes (no
+    /// ratio suffix).
+    pub failure_threshold: Option<u32>,
+}
+
+/// Render the operator-facing per-mechanic summary for a probe, per the
+/// US-06 AC shapes.
+///
+/// - `Tcp` renders `tcp <host>:<port>`.
+/// - `Http` renders `http GET http://<host>:<port><path>`; the host
+///   defaults to the bind-side wildcard `0.0.0.0` when the descriptor
+///   omits it.
+/// - `Exec` renders `exec <command>` (space-joined argv).
+///
+/// Distinct from the reconciler's compact `ProbeWitness.mechanic_summary`
+/// surface (`http <host>:<port><path>`) — this is the operator-facing
+/// alloc-status render shape.
+#[must_use]
+pub fn format_probe_mechanic_summary(
+    mechanic: &overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+) -> String {
+    use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
+    match mechanic {
+        ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
+        ProbeMechanic::Http { path, port, host } => {
+            let host = host.as_deref().unwrap_or("0.0.0.0");
+            format!("http GET http://{host}:{port}{path}")
+        }
+        ProbeMechanic::Exec { command } => format!("exec {}", command.join(" ")),
+    }
+}
+
+/// Render the operator-facing `last=...` status fragment for a probe
+/// row. `None` → `last=pending`; `Pass` → `last=pass`; `Fail` →
+/// `last=fail (<reason>)`.
+fn format_probe_last_status(
+    status: Option<&overdrive_core::observation::probe_result_row::ProbeStatus>,
+) -> String {
+    use overdrive_core::observation::probe_result_row::ProbeStatus;
+    match status {
+        None => "last=pending".to_string(),
+        Some(ProbeStatus::Pass) => "last=pass".to_string(),
+        Some(ProbeStatus::Fail { last_fail_reason }) => {
+            format!("last=fail ({last_fail_reason})")
+        }
+    }
+}
+
+/// Render the `Probes:` section of an alloc-status output.
+///
+/// Per US-06 / K4 the section is emitted IFF `kind` is
+/// `WorkloadKind::Service` and the probe set is non-empty. For Job /
+/// Schedule allocs (or an empty probe set) the function returns an
+/// empty string — the kind-guard is the load-bearing render contract
+/// (`ProbeRenderIsKindGuarded` property test).
+///
+/// Each row carries `role`, `probe_idx`, mechanic summary, last
+/// status, and `last_observed_at`. An `(inferred)` suffix marks
+/// synthesised default probes, `last=pending` marks
+/// declared-but-unobserved probes, and a
+/// `(<consecutive_failures>/<threshold>)` ratio suffix marks a probe
+/// currently failing under a declared threshold.
+///
+/// `no_color` is honoured per the `NO_COLOR` env-var AC: when `true`
+/// the output carries zero ANSI escape sequences. Phase 1 emits no
+/// colour on either branch (the render is plain text), so the flag is
+/// observed-and-respected rather than toggling a colour path that does
+/// not yet exist — the structural guarantee is that no ANSI escape can
+/// appear in the output regardless of the flag, which the `NO_COLOR`
+/// proptest pins.
+#[must_use]
+pub fn probes_section(
+    kind: overdrive_core::aggregate::WorkloadKind,
+    probes: &[ProbeRenderRow],
+    no_color: bool,
+) -> String {
+    use overdrive_core::aggregate::WorkloadKind;
+    use std::fmt::Write as _;
+
+    // Kind-guard: Service-only, and only when probes are present.
+    if !matches!(kind, WorkloadKind::Service) || probes.is_empty() {
+        return String::new();
+    }
+    // `no_color` is respected by construction — Phase 1 render is plain
+    // text with no ANSI sequences on either branch. Bind it so a future
+    // colourised branch must thread the flag rather than ignore it.
+    let _ = no_color;
+
+    let mut s = String::new();
+    let _ = writeln!(s, "Probes:");
+    for probe in probes {
+        let role = probe.role.as_str();
+        let mechanic = format_probe_mechanic_summary(&probe.mechanic);
+        let last = format_probe_last_status(probe.status.as_ref());
+        let observed = probe.last_observed_at_unix_ms.map_or_else(
+            || "last_observed_at=\u{2014}".to_string(),
+            |ms| format!("last_observed_at={ms}"),
+        );
+        let inferred_suffix = if probe.inferred { " (inferred)" } else { "" };
+
+        // Failure-ratio suffix: rendered only when the probe is
+        // currently failing AND a threshold is declared.
+        let failing = matches!(
+            probe.status,
+            Some(overdrive_core::observation::probe_result_row::ProbeStatus::Fail { .. })
+        );
+        let ratio_suffix = match (failing, probe.failure_threshold) {
+            (true, Some(threshold)) => {
+                format!(" ({}/{threshold})", probe.consecutive_failures)
+            }
+            _ => String::new(),
+        };
+
+        let _ = writeln!(
+            s,
+            "  {role} probe[{idx}] {mechanic} {last} {observed}{ratio_suffix}{inferred_suffix}",
+            idx = probe.probe_idx.get(),
+        );
+    }
+    s
+}
+
+/// Render the operator-facing `Failed` block for a Service workload
+/// per ADR-0056 / ADR-0059. Pure function.
+///
+/// Renders the operator-facing `Failed` block against the typed
+/// `ServiceFailureReason` discriminator. The five-section shape
+/// (header / reason / last-event / reproducer / hint) gives the
+/// operator a consistent failure render.
+/// `early_exit_timing` carries `(elapsed_secs, startup_deadline_secs)`
+/// for the Slice 08 `EarlyExit` multi-line block (S-SHCP-CLI-07). It is
+/// rendered ONLY for the `EarlyExit` reason; `None` (or any non-
+/// `EarlyExit` reason) omits the `elapsed:` line. The values are
+/// supplied by the caller from the stream-side elapsed measurement +
+/// the live `startup_deadline` policy — they are NOT carried on the
+/// `EarlyExit { exit_code }` wire variant (extending that variant would
+/// bump the rkyv `AllocStatusRowEnvelope`; per the persist-inputs rule
+/// the elapsed/deadline are recomputed render-side, not persisted).
+#[must_use]
+pub fn format_service_failed_block(
+    workload_name: &str,
+    reason: &overdrive_core::transition_reason::ServiceFailureReason,
+    stderr_tail: Option<&str>,
+    early_exit_timing: Option<(u64, u64)>,
+) -> String {
+    use overdrive_core::transition_reason::{BackoffCause, ServiceFailureReason};
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "Error: workload '{workload_name}' did not converge to stable.");
+
+    let reason_text = match reason {
+        ServiceFailureReason::StartupTimeout { probe_idx, attempts } => {
+            format!("startup probe[{probe_idx}] timed out after {attempts} attempts")
+        }
+        ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts } => {
+            format!("startup probe[{probe_idx}] failed after {attempts} attempts: {last_fail}")
+        }
+        ServiceFailureReason::EarlyExit { exit_code: Some(code) } => {
+            format!("workload exited early with code {code}")
+        }
+        ServiceFailureReason::EarlyExit { exit_code: None } => {
+            "workload killed by signal before startup probe could pass".to_string()
+        }
+        ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts } => {
+            format!("liveness probe[{probe_idx}] failed after {attempts} attempts")
+        }
+        ServiceFailureReason::BackoffExhausted { attempts, cause, last_exit_code } => {
+            let cause_label = match cause {
+                BackoffCause::AttemptBudget => "attempt budget",
+                BackoffCause::LivenessBudget => "liveness budget",
+                _ => "unknown cause",
+            };
+            let exit_suffix =
+                last_exit_code.map(|c| format!(" (last exit code {c})")).unwrap_or_default();
+            format!("backoff exhausted after {attempts} attempts ({cause_label}){exit_suffix}")
+        }
+        ServiceFailureReason::Other { source, message } => {
+            format!("custom failure '{source}': {message}")
+        }
+        ServiceFailureReason::Timeout { after_seconds } => {
+            format!("workload did not converge within {after_seconds}s")
+        }
+        ServiceFailureReason::StreamInterrupted => {
+            "server-side stream interrupted before convergence".to_string()
+        }
+        _ => "unknown failure reason".to_string(),
+    };
+    let _ = writeln!(s, "  reason: {reason_text}");
+
+    // S-SHCP-CLI-07 / 08 (Slice 08, RCA-A render hardening) — the
+    // `EarlyExit` failure on a Service-kind alloc renders a multi-line
+    // diagnostic block: the exit code on its own line, the Service-kind
+    // guidance explaining why an early exit IS a failure (a Service is
+    // expected to stay up; exiting before any startup probe could pass
+    // is the RCA-A coinflip case), and the stderr tail. This is the
+    // operator-facing surface that the RCA-A guard
+    // (`ServiceKindRenderNeverContainsTookLive`) defends — a Service
+    // must NEVER render the misleading `(took live)` success phrasing
+    // for an early exit.
+    if let ServiceFailureReason::EarlyExit { exit_code } = reason {
+        match exit_code {
+            Some(code) => {
+                let _ = writeln!(s, "  exit_code: {code}");
+            }
+            None => {
+                let _ = writeln!(s, "  exit_code: none (killed by signal)");
+            }
+        }
+        if let Some((elapsed_secs, startup_deadline_secs)) = early_exit_timing {
+            let _ = writeln!(
+                s,
+                "  elapsed: {elapsed_secs}s (startup_deadline={startup_deadline_secs}s)"
+            );
+        }
+        let _ = writeln!(
+            s,
+            "  The workload exited before any startup probe could pass; a Service is expected to stay running."
+        );
+    }
+
+    if let Some(detail) = stderr_tail {
+        if !detail.is_empty() {
+            let _ = writeln!(s, "  last-event: {detail}");
+            let _ = writeln!(s, "  stderr_tail: \"{detail}\"");
+        }
+    }
+
+    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
+    let _ = writeln!(s);
+    let _ = writeln!(s, "Hint: see alloc status for full context");
+    s
 }

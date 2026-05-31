@@ -175,6 +175,7 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         command: "/bin/true".to_owned(),
         args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     }
 }
 
@@ -454,8 +455,10 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
-    obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
+    obs.write(ObservationRow::AllocStatus(Box::new(prior_row))).await.expect("seed prior row");
 
     // Dispatch a Stop action — should write Terminated row AND emit broadcast.
     // ADR-0037 §4: emission sites outside a reconciler tick (here, a

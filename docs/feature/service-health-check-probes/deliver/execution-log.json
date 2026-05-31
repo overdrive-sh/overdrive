@@ -1,0 +1,790 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "service-health-check-probes",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T16:11:02Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T16:12:24Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T16:14:34Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T16:30:32Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T16:34:03Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T17:38:13Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T17:39:27Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T17:41:25Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T18:05:53Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T18:08:03Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 corrective fix for ADR-0048 fixture pinning per /nw-review D1",
+      "t": "2026-05-24T18:31:42Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 corrective fix for ADR-0048 fixture pinning carry-over from 01-01",
+      "t": "2026-05-24T18:38:22Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T18:48:16Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T18:52:13Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T18:53:42Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-24T18:54:02Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 checkpoint commit 2fabf259; ProbeRunner + wire migration + walking-skeleton deferred to follow-up sub-steps per CLAUDE.md \u00a7 'No effort/time budget cuts' \u2014 body documents remaining work",
+      "t": "2026-05-24T19:00:30Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "RETRACTED \u2014 prior COMMIT 2fabf259 (logged 2026-05-24T19:00:30Z as PASS) covered reconciler-core only; per user directive 2026-05-25, step 01-03 is being re-sliced into 01-03a/b/c/d via nw-solution-architect; this entry retracts the 'step complete' claim \u2014 see roadmap.json post-architect-dispatch for canonical sub-step IDs",
+      "t": "2026-05-24T19:06:44Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:05:28Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:07:49Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test alone drives all dispatch-enum edits; no additional PBT unit test needed inside core/reconcilers/mod.rs",
+      "t": "2026-05-25T08:07:49Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:14:53Z"
+    },
+    {
+      "sid": "01-03b",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T08:16:45Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T13:56:05Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:13:08Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:13:08Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:13:08Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:18:34Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:18:58Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 mutation-gate tightening (test-only additions; kills 5/6 missed mutants for overdrive-worker probe_runner)",
+      "t": "2026-05-25T14:38:44Z"
+    },
+    {
+      "sid": "01-03c",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T14:50:30Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:06:25Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:19:22Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:22:40Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:25:34Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T15:31:05Z"
+    },
+    {
+      "sid": "01-03d",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 mutation-gate tightening (kills 2/2 lifecycle-hook mutants for overdrive-worker driver.rs)",
+      "t": "2026-05-25T15:39:28Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:00:10Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:02:36Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test reaches GREEN via direct minimal implementation of api.rs/streaming.rs variant edits; no separate unit-level decomposition needed",
+      "t": "2026-05-25T16:04:52Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:09:30Z"
+    },
+    {
+      "sid": "01-03e",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-25T16:13:30Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:06:01Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:08:27Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test reaches GREEN via direct minimal implementation; 10 proptest properties + 3 example tests already exercise every new variant + projection + reconciler branch at port-to-port granularity",
+      "t": "2026-05-26T06:08:34Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:18:04Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:18:09Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:18:15Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:21:13Z"
+    },
+    {
+      "sid": "01-03e2",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T06:21:48Z"
+    },
+    {
+      "sid": "01-03e3",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T07:42:01Z"
+    },
+    {
+      "sid": "01-03e3",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T07:45:38Z"
+    },
+    {
+      "sid": "01-03e3",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: dispatch wiring exercises already-PBT-covered projection from 01-03e2",
+      "t": "2026-05-26T07:48:34Z"
+    },
+    {
+      "sid": "01-03e3",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T08:20:22Z"
+    },
+    {
+      "sid": "01-03e3",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T08:22:26Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T11:43:09Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T11:43:28Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface (service_lifecycle_stable.rs + service_submit_event_v2.rs + service_submit_event_taxonomy.rs + service_submit_dispatch_wiring.rs)",
+      "t": "2026-05-26T11:43:34Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: scope-vs-budget mismatch; CLI Service-kind dispatch path does not exist (submit_streaming only dispatches Job; legacy fall-through wraps Service TOML in SubmitSpecInput::Job which is wrong). Full GREEN requires: (1) new submit_streaming_service() in CLI with ServiceSpec\u2192ServiceSpecInput conversion, (2) three TOML fixtures, (3) coinflip-exit-1-30ms fixture binary or bash wrapper, (4) 100-seed Lima orchestration against real ProbeRunner+ExecDriver+ServiceLifecycleReconciler, (5) rkyv byte-equality fixture between snapshot AllocStatusRow.terminal and streaming LifecycleEvent.terminal. Conservatively 2-3 days of focused work; not a 30-turn single-dispatch task. RED scaffolds remain intact (5 sub-scenarios in service_honest_stable.rs with #[should_panic(expected=RED scaffold)]). Tier-1 + dispatch-wiring acceptance tests landed in 01-03e/e2/e3 cover the underlying contract; this step composes them end-to-end at Tier 3.",
+      "t": "2026-05-26T11:45:07Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN not executed (scope-vs-budget mismatch surfaced as P0 blocker); no production code changes to commit. RED scaffolds remain intact at #[should_panic(expected=RED scaffold)]. Working tree contains only DES log entries (this file + .develop-progress.json). Awaiting user direction on Option A (split step), Option B (re-scope to SimDriver), or Option C (multi-checkpoint budget) per return message.",
+      "t": "2026-05-26T11:46:02Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:09:18Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:13:15Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface (PBT lockstep guards from 01-03e2 cover the projection dimension)",
+      "t": "2026-05-26T12:13:15Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:16:29Z"
+    },
+    {
+      "sid": "01-03e3-fix",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:19:59Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-26T12:42:07Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: structural gap \u2014 ServiceLifecycleReconciler hydrate_actual returns default() (reconciler_runtime.rs:1360); probe_runner constructed but NOT wired into ExecDriver (lib.rs:1007-1015 comment explicitly defers to slices 02-01 + 02-02); end-to-end Service-kind Stable/Failed/StartupProbeFailed cannot fire on Lima today",
+      "t": "2026-05-26T12:42:15Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface from 01-03b + 01-03e2 + 01-03e2 taxonomy property tests",
+      "t": "2026-05-26T12:42:18Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: see RED_ACCEPTANCE blocker \u2014 Service-kind reconciler hydrate_actual + probe_runner-to-ExecDriver wiring deferred to slices 02-01 + 02-02",
+      "t": "2026-05-26T12:42:20Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: see RED_ACCEPTANCE/GREEN blockers \u2014 no commit since no activation",
+      "t": "2026-05-26T12:42:22Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PARTIAL: fixtures+helper landed; sub-scenarios S-SHCP-INT-CLI-02/03/04/05 stay RED \u2014 blocked on upstream gaps in reconciler_runtime.rs:1360 (ServiceLifecycle hydrate_actual returns default()) and lib.rs:1007-1015 (ProbeRunner not wired into ExecDriver, deferred to slices 02-01+02-02); see commit body",
+      "t": "2026-05-26T12:49:22Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 upstream GAP-1..10 cascade now complete (HEAD a84a1b5a); ServiceLifecycleReconciler hydrate_actual returns real probe rows (GAP-1), reconciler enqueued + self-sustaining through startup window (GAP-9/10), ProbeRunner threaded into ExecDriver (GAP-4/5); the BLOCKED_BY_DEPENDENCY blockers logged 2026-05-26 are resolved. Verified exactly one #[should_panic(expected=RED scaffold)] marker remains (CLI-01) in service_honest_stable.rs",
+      "t": "2026-05-29T13:46:03Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 four sub-scenario AT scaffolds (S-SHCP-INT-CLI-02/03/04/05) unskipped (#[should_panic] removed, real bodies authored); they failed for the correct business-logic reason against the pre-cascade composition root (Service-kind reconciler never reached terminal). After the GAP-1..10 cascade landed they fail-no-more \u2014 fail-for-right-reason gate satisfied historically, now GREEN. CLI-01 retains #[should_panic(expected=RED scaffold)] for 01-03f-2",
+      "t": "2026-05-29T13:46:12Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped test composes already-PBT-covered surface from 01-03b (dispatch enum) + 01-03e2 (variant + projection taxonomy property tests) + 01-03c/d (probe_runner + driver-hook mutation gates); no new unit-level decomposition needed to reach GREEN",
+      "t": "2026-05-29T13:46:17Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 all five service_honest_stable sub-scenarios pass under Lima at HEAD a84a1b5a: CLI-02 quick-bind Stable settled-in-window PASS, CLI-03 never-binds StartupProbeFailed PASS, CLI-04 snapshot+streaming terminal byte-equality PASS, CLI-05 composition-root probe gate PASS; CLI-01 should_panic-green (stays RED for 01-03f-2). Full workspace suite 1621/1621 passed (4 leaky, 16 skipped) \u2014 no regressions",
+      "t": "2026-05-29T13:46:24Z"
+    },
+    {
+      "sid": "01-03f-1",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 commit c2d99561 activates S-SHCP-INT-CLI-02/03/04/05 (#[should_panic] removed, GREEN end-to-end through real CLI handler \u2192 in-process server \u2192 reconciler \u2192 driver \u2192 ProbeRunner \u2192 obs-store); CLI-01 stays RED (#[should_panic(expected=RED scaffold)]) for 01-03f-2. Supersedes the 2026-05-26 PARTIAL COMMIT \u2014 the upstream GAP-1..10 blockers it cited are now closed. Gates: check/clippy/dst-lint clean; full suite 1621/1621. Umbrella 01-03f NOT logged (reserved for 01-03f-2 + user approval)",
+      "t": "2026-05-29T13:47:29Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T13:56:51Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: S-SHCP-INT-CLI-01 activated (should_panic removed, 100-seed K1 loop authored); ran under Lima against real composition root. AT fails for a business-logic reason (valid RED): terminal is Failed{EarlyExit{exit_code:0}} not exit_code:1 \u2014 kernel exit 1 lives in row.reason=WorkloadCrashedImmediately{exit_code:Some(1)} but hydrate_service_alloc_facts (reconciler_runtime.rs:1949) hardcodes exit_code:None. Zero Stable, zero (took live) \u2014 RCA-A branch fires correctly; only exit-code projection is missing.",
+      "t": "2026-05-29T14:00:37Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 S-SHCP-INT-CLI-01 activated (RED-scaffold marker removed, 100-seed K1 loop authored, compiles + runs under Lima against the real composition root). Valid RED: the AT fails for a business-logic reason \u2014 terminal is Failed EarlyExit exit_code=0 not exit_code=1; zero Stable, zero (took live), so the RCA-A branch fires correctly. Root cause is a production gap surfaced for approval (see report).",
+      "t": "2026-05-29T14:01:41Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: K1 is a Tier-3 walking-skeleton over already-complete production; no new unit surface authored by this step. The exit-code-projection gap (if its fix is approved) has Tier-1 precedent coverage at workload_lifecycle.rs:944; no new unit test is in-scope here.",
+      "t": "2026-05-29T14:01:54Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN unreachable within the declared files_to_modify set. The K1 north-star AC requires Failed{EarlyExit{exit_code:1}} but production delivers exit_code:0 \u2014 hydrate_service_alloc_facts (overdrive-control-plane/src/reconciler_runtime.rs:1949) hardcodes exit_code:None instead of sourcing it from row.reason=WorkloadCrashedImmediately{exit_code} (canonical Job-kind precedent: reconcilers/workload_lifecycle.rs:944). The one-line fix is outside this step's declared scope; per CLAUDE.md No-budget-cuts + BOUNDARY_RULES, surfaced for user approval to expand scope rather than ship a partial or weaken the AC.",
+      "t": "2026-05-29T14:02:06Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: no commit \u2014 GREEN not reached (see GREEN entry). Committing a non-GREEN state would violate the 100%-green discipline and the Iron Rule (never weaken a failing AT). PART B mutation gate and PART C umbrella-01-03f DES-log close are both blocked behind the same user decision. Working tree carries only the two in-scope files (service_honest_stable.rs with K1 loop + scaffold removed; append-only execution-log.json); no out-of-scope production file touched, no GH issue created.",
+      "t": "2026-05-29T14:02:14Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:25:59Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:28:04Z"
+    },
+    {
+      "sid": "01-03f-2",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:29:24Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:38:22Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:47:03Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:47:03Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:47:03Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:54:27Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T15:59:26Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T16:07:25Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T16:07:25Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T16:16:59Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T16:17:17Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T16:49:05Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:08:37Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:08:37Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:08:37Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:12:09Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:57:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:57:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:57:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T17:57:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T18:00:07Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T18:36:47Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T18:36:47Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T18:36:47Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T18:36:47Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T18:58:21Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T19:04:14Z"
+    },
+    {
+      "sid": "01-03f",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-29T19:04:14Z"
+    }
+  ]
+}

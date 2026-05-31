@@ -55,6 +55,7 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
             command: "registry/livemap:1.0".to_owned(),
             args: vec![],
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+            probe_descriptors: Vec::new(),
         };
 
         let handle = driver.start(&spec).await.expect("start succeeds");

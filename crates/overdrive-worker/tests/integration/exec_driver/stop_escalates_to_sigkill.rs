@@ -165,6 +165,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
         command: "/bin/sh".to_owned(),
         args: vec!["-c".to_owned(), "trap '' TERM; sleep 60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

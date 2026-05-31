@@ -101,6 +101,12 @@ fn alloc_with_state(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock
+        // otherwise. Value arbitrary for this test.
+        started_at: match state {
+            AllocState::Pending => None,
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        },
     }
 }
 
@@ -158,6 +164,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -167,6 +174,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -179,8 +187,9 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     // (NOT /bin/sleep + ["60"]).
     assert_eq!(
         actions.len(),
-        2,
-        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions:?}",
+        3,
+        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
+         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { spec, .. } => {
@@ -231,6 +240,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -240,6 +250,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     // attempts=0, no deadline → restart fires immediately.
     let view = WorkloadLifecycleView::default();
@@ -253,8 +264,9 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     // resources.
     assert_eq!(
         actions.len(),
-        2,
-        "must emit RestartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions:?}",
+        3,
+        "must emit RestartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
+         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
     );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, spec, .. } => {
@@ -304,6 +316,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -313,6 +326,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
 
@@ -337,11 +351,13 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     // both invocations — guards against a pathological case where the
     // function is deterministic but produces wrong output. Per UI-06
     // WorkloadLifecycle dual-emits StartAllocation + EnqueueEvaluation
-    // (bridge), so the vec length is 2.
+    // (bridge); per GAP-9 a Service-kind start ALSO dual-emits
+    // EnqueueEvaluation(service-lifecycle), so the vec length is 3.
     assert_eq!(
         actions_a.len(),
-        2,
-        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06; got {actions_a:?}",
+        3,
+        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
+         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions_a:?}",
     );
     match &actions_a[0] {
         Action::StartAllocation { spec, .. } => {

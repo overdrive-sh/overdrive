@@ -1,5 +1,5 @@
 // `TransitionReason` is the load-bearing single-source-of-truth enum from
-// ADR-0032 §3 / ADR-0033 §1. Both the streaming `SubmitEvent::LifecycleTransition`
+// ADR-0032 §3 / ADR-0033 §1. Both the streaming `LifecycleEvent`
 // surface and the snapshot `AllocStatusRowBody.last_transition.reason`
 // surface serialise the SAME variant; byte-equality across surfaces is a
 // structural property guaranteed by the type system, not by discipline.
@@ -428,8 +428,200 @@ pub enum TerminalCondition {
     /// `137` (SIGKILL — typically OOM under cgroup-v2),
     /// `255` (generic shell failure). The full `i32` range is
     /// supported so the variant can carry signal-encoded statuses
-    /// if a future driver emits them.
-    Failed { exit_code: i32 },
+    /// if a future driver emits them. `None` means the process was
+    /// killed by a signal without producing an exit code (OOM-killer,
+    /// external SIGKILL).
+    Failed { exit_code: Option<i32> },
+    /// `ServiceLifecycle`: the Service alloc has converged to a
+    /// stable, fully-probed Running state per ADR-0055 / ADR-0056.
+    /// All declared startup probes (or the inferred default per
+    /// ADR-0058) reported Pass; the alloc is considered Stable
+    /// from the publication boundary onward.
+    ///
+    /// `settled_in_ms` is the elapsed wall-clock duration (in
+    /// milliseconds) from alloc start to the deciding tick that
+    /// observed the last-to-Pass startup probe. `witness` names
+    /// which probe's Pass moved the reconciler to Stable (see
+    /// [`ProbeWitness`] for the per-field semantics).
+    ///
+    /// **Additive position**: appended after `Failed` to keep the
+    /// pre-existing rkyv discriminants (`BackoffExhausted=0`,
+    /// `Stopped=1`, `Custom=2`, `Completed=3`, `Failed=4`) stable.
+    /// This variant takes discriminant `5`. Existing archived rows
+    /// decode unchanged (the canonical `Option<TerminalCondition>`
+    /// embeddings in `AllocStatusRowV1` continue to decode through
+    /// the same `AllocStatusRowEnvelope::V1` shape; the V1 fixture
+    /// is regenerated against the new canonical layout per
+    /// `.claude/rules/development.md` § "rkyv schema evolution"
+    /// greenfield single-cut exception, because no shipped consumer
+    /// has persisted bytes against the pre-existing V1 layout).
+    Stable { settled_in_ms: u64, witness: ProbeWitness },
+    /// `ServiceLifecycle`: the Service alloc transitioned to a
+    /// terminal Failed state per ADR-0055 / ADR-0056. The `reason`
+    /// carries the typed failure cause (startup-timeout / startup-
+    /// probe-failed / early-exit / liveness-probe-failed); see
+    /// [`ServiceFailureReason`] for the per-variant semantics.
+    ///
+    /// **Additive position**: appended after `Stable` and takes
+    /// discriminant `6`. Same greenfield rationale as `Stable`.
+    ServiceFailed { reason: ServiceFailureReason },
+}
+
+// Companion types `ServiceFailureReason` and `ProbeWitness` are
+// defined below. `TerminalCondition::Stable` / `::ServiceFailed`
+// carry these types as payloads; the Service-lifecycle reconciler
+// (slice 01-03+ per ADR-0055) is the sole emitter, and downstream
+// consumers branch on the variant for operator-facing render.
+
+/// Reason a Service alloc transitioned to a terminal Failed state.
+///
+/// Per ADR-0055 § 4 + ADR-0056 (wire projection): single
+/// `#[non_exhaustive]` enum; additive variants only.
+///
+/// Lives in `transition_reason.rs` (and is re-exported from
+/// `service_lifecycle.rs`) so it can be carried inside
+/// [`TerminalCondition::ServiceFailed`] without inducing a module-
+/// dependency cycle. The Service-lifecycle reconciler is the sole
+/// constructor; downstream consumers branch on the variant for
+/// operator-facing render.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "reason", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ServiceFailureReason {
+    /// Startup deadline elapsed before any successful probe.
+    /// `probe_idx` names the last-attempted probe; `attempts`
+    /// records how many attempts were made.
+    StartupTimeout { probe_idx: u32, attempts: u32 },
+    /// Startup probe exhausted `max_attempts` without a Pass result
+    /// within `startup_deadline`. `last_fail` carries the last
+    /// observed `ProbeStatus::Fail.last_fail_reason` for direct
+    /// operator-renderable surface.
+    StartupProbeFailed { probe_idx: u32, last_fail: String, attempts: u32 },
+    /// Workload exited before any startup probe could pass AND
+    /// within `startup_deadline` window. Closes RCA-A coinflip
+    /// case per US-08.
+    EarlyExit { exit_code: Option<i32> },
+    /// Liveness probe consecutive-failure count reached its
+    /// threshold AND restart-budget reached
+    /// `RESTART_BACKOFF_CEILING`. Composes with the existing
+    /// `BackoffExhausted` JobLifecycle pathway for Service-kind
+    /// liveness-driven restart attempts.
+    LivenessProbeFailed { probe_idx: u32, attempts: u32 },
+    /// Service-kind workload exhausted the general restart-attempt
+    /// budget (`WorkloadLifecycleView::restart_counts >=
+    /// RESTART_BACKOFF_CEILING`). Distinct from
+    /// [`Self::LivenessProbeFailed`] (which fires when liveness
+    /// consecutive-failures + restart-budget jointly exhaust).
+    ///
+    /// `attempts` is the count at the deciding tick. `cause`
+    /// disambiguates the budget that ran out; `last_exit_code` is
+    /// read from the latest `AllocStatusRow.exit_code` observation
+    /// at projection time. Per ADR-0059 Q2.
+    BackoffExhausted { attempts: u32, cause: BackoffCause, last_exit_code: Option<i32> },
+    /// Fallback projection for third-party WASM reconciler terminals
+    /// (`TerminalCondition::Custom`). `source` carries the
+    /// reconciler's canonical name (`type_name`); `message` carries
+    /// the rendered detail bytes (UTF-8 if valid, lowercase-hex
+    /// otherwise). Per ADR-0059 Q3.
+    Other { source: String, message: String },
+    /// Streaming-loop wall-clock cap timer expired before any
+    /// terminal arrived. Synthesised by `build_stream`; the
+    /// reconciler MUST NOT emit this variant. Per ADR-0059 Q4.
+    Timeout { after_seconds: u32 },
+    /// Broadcast channel closed mid-stream (server shutdown / action
+    /// shim teardown). Synthesised by `build_stream`; the reconciler
+    /// MUST NOT emit this variant. Per ADR-0059 Q4.
+    StreamInterrupted,
+}
+
+/// Disambiguator on [`ServiceFailureReason::BackoffExhausted`]
+/// naming the budget that ran out. Per ADR-0059 Q2.
+///
+/// Phase 1 emits only [`Self::AttemptBudget`].
+/// [`Self::LivenessBudget`] is defined for forward-compat with
+/// the future `LivenessRestartGovernor` (ADR-0055 §7) — Phase 2+.
+/// Including the discriminator now keeps the wire shape additive
+/// without splitting the variant later.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BackoffCause {
+    /// General post-spawn crash loop — driver exit + WorkloadLifecycle
+    /// restart budget ran out. Phase 1 emit site.
+    AttemptBudget,
+    /// Liveness-probe-driven restart budget ran out. Reserved for
+    /// Phase 2+ when the `LivenessRestartGovernor` (ADR-0055 §7)
+    /// lands; today the `LivenessProbeFailed` variant covers this
+    /// case end-to-end.
+    LivenessBudget,
+}
+
+/// Names which probe's Pass moved the reconciler to Stable.
+///
+/// Per DDD-7 (multi-probe AND-of-all semantic): when N startup
+/// probes are declared, all must Pass; the witness names the
+/// **last-to-Pass** probe. Renderer surfaces as `witness:
+/// startup probe #<idx> (<mechanic_summary>)`.
+///
+/// Lives in `transition_reason.rs` (and is re-exported from
+/// `service_lifecycle.rs`) so it can be carried inside
+/// [`TerminalCondition::Stable`] without inducing a module-
+/// dependency cycle.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProbeWitness {
+    /// 0-indexed position of the witnessing probe within its role
+    /// array.
+    pub probe_idx: u32,
+    /// Operator-facing role name (`"startup"` / `"readiness"` /
+    /// `"liveness"`). Carried as `String` to keep
+    /// `transition_reason.rs` decoupled from `observation::ProbeRole`
+    /// (which lives in a separate module — projection happens at the
+    /// reconciler's emission site).
+    pub role: String,
+    /// Operator-facing summary (e.g. `"tcp 0.0.0.0:8080"`,
+    /// `"http GET http://0.0.0.0:8080/healthz"`,
+    /// `"exec /usr/local/bin/healthcheck.sh"`). Reconciler
+    /// composes from `ProbeDescriptor.mechanic` at the deciding
+    /// tick.
+    pub mechanic_summary: String,
+    /// `true` IFF this witness was the platform's inferred default
+    /// probe per ADR-0058.
+    pub inferred: bool,
 }
 
 /// Initiator of a `Cancelled` transition.

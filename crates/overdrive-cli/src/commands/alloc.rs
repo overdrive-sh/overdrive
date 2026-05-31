@@ -26,7 +26,10 @@
 
 use std::path::PathBuf;
 
-use overdrive_control_plane::api::AllocStatusResponse;
+use overdrive_control_plane::api::{AllocStatusResponse, ProbeResultRowJson};
+use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::observation::probe_result_row::ProbeResultRow;
+use serde::Serialize;
 
 use crate::http_client::{ApiClient, CliError};
 
@@ -137,4 +140,56 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
 pub async fn status_snapshot(args: StatusArgs) -> Result<AllocStatusResponse, CliError> {
     let client = ApiClient::from_config(&args.config_path)?;
     client.alloc_status_for_workload(&args.job).await
+}
+
+// ---------------------------------------------------------------------------
+// JSON-mode marshalling — slice 06 step 02-03 (ADR-0033 enrichment).
+// ---------------------------------------------------------------------------
+//
+// The `probes` field is carried on the JSON view per the ADR-0033
+// enrichment shape and is OMITTED entirely for non-Service kinds via
+// `#[serde(skip_serializing_if = "Option::is_none")]` — Job / Schedule
+// allocs have no readiness/liveness question, so the field is absent
+// (not `null`) per US-06.
+
+/// Operator-facing `--json` view of an alloc status, enriched with the
+/// per-probe `ProbeResultRowJson` array per ADR-0033.
+///
+/// `probes` is `Some([...])` for `WorkloadKind::Service` (even when the
+/// array is empty — a Service declares the question) and `None` for
+/// Job / Schedule, which serialises to an OMITTED field per the
+/// skip-if-none attribute. This is the structural kind-guard mirror of
+/// the TUI `probes_section` render.
+#[derive(Debug, Clone, Serialize)]
+pub struct AllocStatusJsonView {
+    /// Workload-kind discriminator — drives the `probes` skip-if-none
+    /// guard.
+    pub kind: WorkloadKind,
+    /// Per-probe observation rows projected to the wire shape. `None`
+    /// for non-Service kinds (serialises to an omitted field).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probes: Option<Vec<ProbeResultRowJson>>,
+}
+
+/// Marshal an alloc status into its `--json` form.
+///
+/// Enriched with the per-probe array per ADR-0033. Pure function over
+/// already-hydrated inputs — the `probes` field is present (as an
+/// array) IFF `kind` is `Service`, and OMITTED for Job / Schedule per
+/// US-06.
+#[must_use]
+pub fn format_alloc_status_json(kind: WorkloadKind, probe_rows: &[ProbeResultRow]) -> String {
+    let probes = match kind {
+        WorkloadKind::Service => Some(probe_rows.iter().map(ProbeResultRowJson::from).collect()),
+        WorkloadKind::Job | WorkloadKind::Schedule => None,
+    };
+    let view = AllocStatusJsonView { kind, probes };
+    // `AllocStatusJsonView` is a plain serde struct over owned
+    // `String` / `u32` / fieldless-or-string-keyed enums — serde JSON
+    // serialisation of such a value is infallible. `unreachable!`
+    // documents the invariant per `.claude/rules/development.md`
+    // § "Logically unreachable `None` / `Err`" (no `.expect()` in
+    // production library code).
+    serde_json::to_string(&view)
+        .unwrap_or_else(|_| unreachable!("AllocStatusJsonView is infallibly serde-serialisable"))
 }

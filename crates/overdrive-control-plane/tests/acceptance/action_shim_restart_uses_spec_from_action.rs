@@ -83,6 +83,10 @@ impl Driver for RecordingDriver {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "step 03-02 added the mandatory `reason` field to Action::RestartAllocation, pushing this pre-existing test one line over the 100-line budget; the field is required, not bloat"
+)]
 async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged() {
     let driver = Arc::new(RecordingDriver::new());
     let captured = driver.captured_specs();
@@ -109,8 +113,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated was Running first.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
-    obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior alloc row");
+    obs.write(ObservationRow::AllocStatus(Box::new(prior_row)))
+        .await
+        .expect("seed prior alloc row");
 
     // Construct the RestartAllocation action with a fully-populated
     // spec carrying operator-declared command + args.
@@ -126,11 +134,13 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         command: "/opt/x/y".to_string(),
         args: vec!["--mode=fast".to_string()],
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
     let action = Action::RestartAllocation {
         alloc_id,
         spec: restart_spec.clone(),
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        reason: None, // shim ignores cause (ADR-0023 §2)
     };
 
     let now = Instant::now();

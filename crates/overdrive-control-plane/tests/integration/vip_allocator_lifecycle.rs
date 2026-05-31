@@ -158,6 +158,9 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 
@@ -565,10 +568,14 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: vec![],
+        // GAP-1 subsidiary: Terminated was Running first.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     state
         .obs
-        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(terminal_row))
+        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(Box::new(
+            terminal_row,
+        )))
         .await
         .expect("write terminal observation row");
 

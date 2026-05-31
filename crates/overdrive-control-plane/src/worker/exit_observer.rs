@@ -252,6 +252,47 @@ pub fn spawn_with_runtime(
                             // updated `[backend]` slice.
                             runtime.broker().submit(Evaluation {
                                 reconciler: backend_discovery_bridge_name(),
+                                target: target.clone(),
+                            });
+                            // GAP-9 (Shape C) — also re-enqueue the
+                            // service-lifecycle reconciler for the same
+                            // workload-scoped target so it observes the
+                            // AllocStatusRow transition the exit observer
+                            // just wrote (a Running → Failed transition is
+                            // exactly an EarlyExit / StartupProbeFailed
+                            // witness for a Service alloc).
+                            //
+                            // UNCONDITIONAL (not kind-gated): the exit
+                            // observer holds an `ObservationStore` but NOT
+                            // an `IntentStore`, so the persisted
+                            // workload-kind discriminator
+                            // (`IntentKey::for_workload_kind`) is not
+                            // cheaply readable here — kind-gating would
+                            // require threading the intent store through
+                            // the whole observer subsystem. Per the GAP-9
+                            // brief, unconditional enqueue is permitted
+                            // here PROVIDED it cannot busy-loop:
+                            //
+                            //   - For a Job-kind workload,
+                            //     `hydrate_actual`'s service-lifecycle arm
+                            //     reads `service_spec_from_intent`, which
+                            //     returns `None` on a kind mismatch →
+                            //     `actual.allocs` is empty → the reconcile
+                            //     loop emits 0 actions and returns a
+                            //     default `next_view` (empty `observed`).
+                            //   - `view_has_backoff_pending`'s
+                            //     ServiceLifecycle arm
+                            //     (`has_alloc_mid_startup_window`) returns
+                            //     false on that empty view.
+                            //
+                            // So a Job-kind enqueue runs exactly one empty
+                            // reconcile and then drains — no re-enqueue, no
+                            // churn. The kind-gated WorkloadLifecycle
+                            // dual-emit (Shape C in workload_lifecycle.rs)
+                            // is the precise first-tick path; this site is
+                            // the on-exit nudge.
+                            runtime.broker().submit(Evaluation {
+                                reconciler: service_lifecycle_name(),
                                 target,
                             });
                         }
@@ -516,8 +557,16 @@ async fn handle_exit_event(
         // `kind` is the authoritative value written at submit time.
         kind: prior.kind,
         listeners: Vec::new(),
+        // Subsidiary GAP-1 fix: the exit observer is a successor-row
+        // writer for a Terminated / Failed transition — by definition
+        // the alloc MUST have reached Running at some point (the
+        // exit-observer watcher is only ever armed after the action
+        // shim records Pending → Running). Preserve the prior row's
+        // `started_at` verbatim. Same forward-carry pattern as
+        // `stderr_tail` / `kind` / `workload_id` / `node_id`.
+        started_at: prior.started_at,
     };
-    obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+    obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
     Ok(Some((row, prior_state)))
 }
 
@@ -588,6 +637,22 @@ fn backend_discovery_bridge_name() -> ReconcilerName {
     #[allow(clippy::expect_used)]
     ReconcilerName::new(<BackendDiscoveryBridge as Reconciler>::NAME)
         .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
+}
+
+/// GAP-9 — canonical `ReconcilerName` for the service-lifecycle
+/// reconciler, sourced from the trait const per the same
+/// `refactor-reconciler-static-name` RCA pattern as
+/// [`workload_lifecycle_name`] / [`backend_discovery_bridge_name`].
+///
+/// Used by the exit observer's on-exit re-enqueue site (Shape C) to
+/// nudge the service-lifecycle reconciler against the
+/// `AllocStatusRow` transition the observer just wrote.
+fn service_lifecycle_name() -> ReconcilerName {
+    #[allow(clippy::expect_used)]
+    ReconcilerName::new(
+        <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
+    )
+    .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.

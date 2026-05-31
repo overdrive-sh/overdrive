@@ -158,4 +158,55 @@ mod tests {
         let b = fingerprint(&vip, &unhealthy_backends);
         assert_ne!(a, b, "differing healthy flag must produce a different fingerprint");
     }
+
+    // S-SHCP-RECON K2 contract (step 03-01 / Slice 04) — toggling a
+    // backend's `healthy` flag (the observable consequence of a
+    // readiness Pass → Fail transition) MUST change `fingerprint(vip,
+    // backends)` for EVERY backend position in a 1..=3 backend set.
+    // This is the structural guarantee that a readiness flip
+    // propagates to the dataplane: the hydrator dedups on this
+    // fingerprint, so a flip that did not move the fingerprint would
+    // never reach the kernel maps.
+    //
+    // Universe (observable): the fingerprint value before vs after the
+    // single-bit flip. The property is `before != after` for every
+    // generated (backend_count, flip_index) pair.
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+        #[test]
+        fn readiness_health_flip_changes_fingerprint(
+            backend_count in 1usize..=3,
+            flip_seed in 0usize..3,
+        ) {
+            use proptest::prelude::*;
+
+            let vip = vip_v4(10, 0, 0, 1);
+            // All-healthy baseline (post first-readiness-Pass).
+            let healthy: Vec<Backend> = (0..backend_count)
+                .map(|i| {
+                    let last = u8::try_from(10 + i).unwrap_or(u8::MAX);
+                    backend(
+                        &format!("spiffe://overdrive.local/job/svc/alloc/a{i}"),
+                        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, last)), 8080),
+                        1,
+                        true,
+                    )
+                })
+                .collect();
+
+            // Flip exactly one backend's health to false (readiness Fail).
+            let flip_index = flip_seed % backend_count;
+            let mut flipped = healthy.clone();
+            flipped[flip_index].healthy = false;
+
+            let before = fingerprint(&vip, &healthy);
+            let after = fingerprint(&vip, &flipped);
+            prop_assert_ne!(
+                before,
+                after,
+                "readiness Pass→Fail (healthy flip at {}) must move the fingerprint",
+                flip_index
+            );
+        }
+    }
 }

@@ -29,6 +29,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -68,6 +69,11 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at: match state {
+            AllocState::Pending => None,
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        },
     }
 }
 
@@ -117,7 +123,10 @@ async fn row_written_on_one_peer_is_observable_on_every_peer_after_convergence()
 
     // When peer A writes a full alloc_status row.
     let row = alloc_status(AllocState::Running, &node("node-a"), 1);
-    peer_a.write(ObservationRow::AllocStatus(row.clone())).await.expect("write on peer A succeeds");
+    peer_a
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .await
+        .expect("write on peer A succeeds");
 
     // And the simulation advances past the gossip convergence window.
     cluster.advance(PAST_CONVERGENCE).await;
@@ -128,12 +137,12 @@ async fn row_written_on_one_peer_is_observable_on_every_peer_after_convergence()
 
     assert_eq!(
         delivered_b,
-        vec![ObservationRow::AllocStatus(row.clone())],
+        vec![ObservationRow::AllocStatus(Box::new(row.clone()))],
         "peer B must observe the row peer A wrote after convergence"
     );
     assert_eq!(
         delivered_c,
-        vec![ObservationRow::AllocStatus(row)],
+        vec![ObservationRow::AllocStatus(Box::new(row))],
         "peer C must observe the row peer A wrote after convergence"
     );
 }
@@ -164,11 +173,11 @@ async fn lww_chooses_higher_timestamp_regardless_of_arrival_order() {
     // forces the LWW merge to happen on receive, on every peer, despite
     // A's write arriving after B's in wall-clock order.
     peer_b
-        .write(ObservationRow::AllocStatus(row_t2.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(row_t2.clone())))
         .await
         .expect("write on peer B succeeds");
     peer_a
-        .write(ObservationRow::AllocStatus(row_t1.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(row_t1.clone())))
         .await
         .expect("write on peer A succeeds");
 
@@ -212,7 +221,10 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
 
     // Seed every peer with a T0 row, then wait for convergence.
     let t0_row = alloc_status(AllocState::Running, &node("node-a"), 1);
-    peer_a.write(ObservationRow::AllocStatus(t0_row.clone())).await.expect("seed T0 write");
+    peer_a
+        .write(ObservationRow::AllocStatus(Box::new(t0_row.clone())))
+        .await
+        .expect("seed T0 write");
     cluster.advance(PAST_CONVERGENCE).await;
 
     // When a third peer writes a full updated row at T1 > T0. The new
@@ -233,9 +245,11 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Draining state was Running first.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
     peer_c
-        .write(ObservationRow::AllocStatus(t1_row.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(t1_row.clone())))
         .await
         .expect("T1 write on peer C succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -281,7 +295,10 @@ async fn partition_blocks_gossip_delivery_until_repair() {
     // When peer A writes a row and the sim advances past the usual
     // gossip window.
     let row = alloc_status(AllocState::Running, &node("node-a"), 1);
-    peer_a.write(ObservationRow::AllocStatus(row.clone())).await.expect("write on peer A succeeds");
+    peer_a
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .await
+        .expect("write on peer A succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
 
     // Then peers B and C do NOT yet observe the row.
@@ -301,12 +318,12 @@ async fn partition_blocks_gossip_delivery_until_repair() {
 
     assert_eq!(
         post_b,
-        vec![ObservationRow::AllocStatus(row.clone())],
+        vec![ObservationRow::AllocStatus(Box::new(row.clone()))],
         "peer B must observe A's row after partition heals and gossip converges"
     );
     assert_eq!(
         post_c,
-        vec![ObservationRow::AllocStatus(row)],
+        vec![ObservationRow::AllocStatus(Box::new(row))],
         "peer C must observe A's row after partition heals and gossip converges"
     );
 }

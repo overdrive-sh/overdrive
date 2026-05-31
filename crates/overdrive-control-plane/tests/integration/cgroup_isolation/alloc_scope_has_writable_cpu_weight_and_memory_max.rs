@@ -146,6 +146,7 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     }
 }
 

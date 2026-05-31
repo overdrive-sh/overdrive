@@ -51,6 +51,7 @@ async fn limit_write_failure_warns_and_continues() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     // With force-fail injection, the limit-write helper returns

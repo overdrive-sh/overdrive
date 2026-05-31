@@ -456,3 +456,83 @@ async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_i
     let after2 = runtime.loaded_backend_discovery_bridge_views_for_test(&n).expect("map present");
     assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
 }
+
+/// Same Eq-diff contract as the three preceding variants, but for
+/// `ServiceLifecycleView`. The `persist_view` arm at
+/// `crates/overdrive-control-plane/src/reconciler_runtime.rs:649`
+/// carries `if current == view { return Ok(()); }`. The
+/// mutation-test catalogue flips that `==` to `!=`, which would (a)
+/// elide `write_through` when the view CHANGED and (b) fsync on every
+/// equal tick. The two assertion pairs below catch both halves in a
+/// single test.
+///
+/// Per service-health-check-probes step 01-03b mutation-tightening
+/// pass — closes the gap where the `WorkloadLifecycle` /
+/// `ServiceMapHydrator` / `BackendDiscoveryBridge` variants each had
+/// their Eq-diff gates pinned, but `ServiceLifecycle` did not.
+#[tokio::test]
+async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memory() {
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleView};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let sim = Arc::new(SimViewStore::new());
+    let n = name("service-lifecycle");
+    let t = target("service/payments");
+
+    let mut runtime =
+        ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
+    runtime
+        .register(AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new()))
+        .await
+        .expect("register service-lifecycle");
+
+    // Seed an in-memory view directly via the test-only seeder
+    // (bypasses the very `persist_view` gate this test asserts on).
+    let mut seeded = ServiceLifecycleView::default();
+    let alloc_id = AllocationId::new("alloc-svc-0").expect("valid AllocationId");
+    seeded.startup_attempts_per_alloc.insert(alloc_id.clone(), 3);
+    runtime.seed_service_lifecycle_view_for_test(&t, seeded.clone());
+
+    // Reset the counter — `register` calls `probe()` which itself
+    // performs a write_through against the probe sentinel name.
+    sim.reset_write_through_count();
+    assert_eq!(sim.write_through_count(), 0, "counter must be zero after reset");
+
+    // (1) Equal-view path — `next_view == in-memory view`. The
+    //     Eq-diff gate MUST elide the fsync; the call still returns Ok.
+    let result = runtime.apply_next_service_lifecycle_view_for_test(&n, &t, seeded.clone()).await;
+    assert!(result.is_ok(), "Eq-diff skip must return Ok, got {result:?}");
+
+    assert_eq!(
+        sim.write_through_count(),
+        0,
+        "runtime MUST skip write_through when ServiceLifecycleView next_view == \
+         in-memory view; observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+
+    let after = runtime
+        .loaded_service_lifecycle_views_for_test(&n)
+        .expect("service-lifecycle map must exist");
+    assert_eq!(after.get(&t), Some(&seeded), "in-memory map must be unchanged");
+
+    // (2) Changed-view path — `next_view != in-memory view`. The
+    //     gate MUST fall through; write_through fires exactly once.
+    //     Pinning this in the same test prevents the dual regression
+    //     where the gate short-circuits on every call.
+    let mut changed = seeded.clone();
+    changed.startup_attempts_per_alloc.insert(alloc_id, 4);
+    runtime
+        .apply_next_service_lifecycle_view_for_test(&n, &t, changed.clone())
+        .await
+        .expect("changed view must persist");
+    assert_eq!(
+        sim.write_through_count(),
+        1,
+        "a non-equal next_view MUST write through exactly once; observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+    let after2 = runtime.loaded_service_lifecycle_views_for_test(&n).expect("map present");
+    assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
+}

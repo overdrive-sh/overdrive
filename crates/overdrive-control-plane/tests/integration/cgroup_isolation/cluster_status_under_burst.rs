@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{noop_heartbeat, workload_lifecycle};
 use overdrive_core::SpiffeId;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
@@ -88,6 +89,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
             "for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait".to_string(),
         ],
         resources: Resources { cpu_milli: 1000, memory_bytes: 256 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
     let handle = driver.start(&spec).await.expect("driver.start cpu-burner");
 
@@ -107,8 +109,10 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     };
-    obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
+    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
 
     // Give the workload a moment to actually saturate the cores; the
     // shell needs to fork its `nproc`-many busy loops and the kernel

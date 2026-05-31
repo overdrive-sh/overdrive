@@ -26,16 +26,15 @@ mod integration {
     mod walking_skeleton;
 
     // Slice 02 step 02-04 — Tier 3 streaming submit:
-    //   * S-WS-01 (happy path: real `/bin/sleep` → ConvergedRunning → exit 0)
-    //   * S-WS-02 (REGRESSION TARGET KPI-02: real ENOENT → ConvergedFailed
-    //     with byte-equal cause-class payload across streaming + snapshot)
-    mod streaming_submit_broken_binary;
-    // fix-converged-stopped-cli-arm — regression: ConvergedStopped
-    // must terminate the streaming consumer with exit code 0; current
-    // code falls through to the `_ =>` catch-all and returns
-    // Err(BodyDecode).
-    mod streaming_submit_converged_stopped;
-    mod streaming_submit_happy_path;
+    //   * S-WS-01 (happy path: real `/bin/sleep` → Succeeded → exit 0)
+    // Legacy Service-kind streaming integration tests
+    // (`streaming_submit_broken_binary`, `streaming_submit_converged_stopped`,
+    // `streaming_submit_happy_path`) were removed in step 01-03e3
+    // per single-cut greenfield discipline alongside the deleted
+    // `SubmitEvent::Converged*` variants. The Service-kind dispatch
+    // wiring is covered end-to-end by
+    // `overdrive-control-plane::tests::acceptance::service_submit_dispatch_wiring`
+    // (S-SHCP-WIRE-09 through WIRE-15).
 
     // workload-kind-discriminator slice 05 — Schedule kind submit /
     // alloc-status render surface + IntentStore persistence, with
@@ -69,4 +68,23 @@ mod integration {
     // failure emits `health.startup.refused` event and returns
     // `CliError::ProbeRefused`. Per ADR-0054 § Composition root wiring.
     mod serve_probe_refusal;
+
+    // service-health-check-probes — Tier 3 integration test that
+    // closes the K1 north-star contract:
+    //   * Fixture A: coinflip-as-Service (RCA-A regression guard) →
+    //     99/100 deterministic seeds emit `Failed { EarlyExit }`.
+    //   * Fixture B: quick-bind Service → Stable with settled_in
+    //     ∈ [500ms, 2000ms].
+    //   * Fixture C: never-binds Service → Failed StartupProbeFailed.
+    //   * Fixture D: snapshot/streaming terminal byte-equality.
+    //   * Cross-fixture regression: NEVER "(took live)" for Service.
+    // RED scaffold — production bodies land in slice 01 + slice 08.
+    mod service_honest_stable;
+
+    // service-health-check-probes step 01-03e3-fix — CLI submit-side
+    // dispatch routing. Closes the gap 01-03e3 missed: a Service-kind
+    // TOML through `submit_streaming` must route to the new
+    // `submit_streaming_service` (the `ServiceSubmitEvent` consumer),
+    // not fall through to the legacy `JobSpecInput` path.
+    mod service_submit_streaming_cli_dispatch;
 }

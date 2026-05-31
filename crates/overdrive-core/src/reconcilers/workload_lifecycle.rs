@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, WorkloadDriver, WorkloadKind};
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
@@ -193,6 +193,57 @@ impl Reconciler for WorkloadLifecycle {
                     target: bridge_target,
                 });
             }
+
+            // GAP-9 (Shape C) — dual-emit `Action::EnqueueEvaluation`
+            // routed at the `service-lifecycle` reconciler for
+            // Service-kind workloads, on alloc-STARTING transitions only
+            // (`StartAllocation` / `RestartAllocation`). This gives the
+            // service-lifecycle reconciler its FIRST tick: a fresh
+            // Service alloc starting or restarting is the moment its
+            // startup probes become relevant. Without this enqueue the
+            // reconciler — registered at boot — was never submitted by
+            // any production path, so after the initial broker drain it
+            // was never re-ticked and its terminal branches were
+            // structurally unreachable.
+            //
+            // Narrower than the bridge predicate above: the bridge
+            // re-renders its backend set on ADD *and* REMOVE
+            // (Start/Restart/Stop/Finalize), but the service-lifecycle
+            // reconciler only cares when an alloc starts probing —
+            // Stop / FinalizeFailed are terminal-removal events that
+            // bring no new startup window. The exit observer (Shape C
+            // part 2) is the on-exit nudge for the failure path; this
+            // site is the on-start nudge. Restricting to the starting
+            // pair also keeps Stop/GC/Finalize tick shapes unchanged.
+            //
+            // Job-kind / Schedule workloads do NOT emit this — the
+            // service-lifecycle reconciler is a Service-kind concern.
+            // The `desired.workload_kind` gate is what keeps a Job-kind
+            // StartAllocation from spuriously enqueueing it (which would
+            // hydrate an empty Service state → 0 actions → broker churn).
+            //
+            // Same `job/<workload_id>` target keying as the bridge
+            // dual-emit, same single-emission-per-tick discipline (the
+            // broker is LWW at `(ReconcilerName, TargetResource)`),
+            // reuses the existing `Action::EnqueueEvaluation` variant.
+            if desired.workload_kind == WorkloadKind::Service
+                && actions.iter().any(is_service_alloc_starting_action)
+            {
+                #[allow(clippy::expect_used)]
+                {
+                    let service_name = ReconcilerName::new(SERVICE_LIFECYCLE_NAME)
+                        .expect("'service-lifecycle' is a valid ReconcilerName by construction");
+                    let service_target =
+                        TargetResource::new(&format!("job/{}", desired.workload_id)).expect(
+                            "'job/<workload_id>' is a valid TargetResource by construction \
+                         (WorkloadId is constructor-validated, prefix is canonical)",
+                        );
+                    actions.push(Action::EnqueueEvaluation {
+                        reconciler: service_name,
+                        target: service_target,
+                    });
+                }
+            }
         }
 
         (actions, next_view)
@@ -205,6 +256,16 @@ impl Reconciler for WorkloadLifecycle {
 /// — a rename of the bridge's `NAME` constant without updating this
 /// reference is a compile error, not a silent handoff failure.
 const BACKEND_DISCOVERY_BRIDGE_NAME: &str = <BackendDiscoveryBridge as Reconciler>::NAME;
+
+/// GAP-9 — name of the `ServiceLifecycleReconciler`.
+///
+/// Compile-time alias to
+/// `<ServiceLifecycleReconciler as Reconciler>::NAME` — same anti-drift
+/// discipline as [`BACKEND_DISCOVERY_BRIDGE_NAME`]: renaming the
+/// reconciler's `NAME` const without updating this reference is a
+/// compile error, not a silent GAP-9-style dead handoff.
+const SERVICE_LIFECYCLE_NAME: &str =
+    <crate::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME;
 
 /// UI-06 — predicate: is `action` one of the four alloc-mutating
 /// variants the `BackendDiscoveryBridge` cares about?
@@ -223,6 +284,21 @@ const fn is_alloc_mutating_action(action: &Action) -> bool {
             | Action::StopAllocation { .. }
             | Action::FinalizeFailed { .. }
     )
+}
+
+/// GAP-9 — predicate: is `action` an alloc-STARTING transition the
+/// `service-lifecycle` reconciler cares about?
+///
+/// Strictly narrower than [`is_alloc_mutating_action`]: only
+/// `StartAllocation` / `RestartAllocation` open a fresh startup window
+/// in which the Service's startup probes become relevant. `Stop` /
+/// `FinalizeFailed` are terminal-removal events — the service-lifecycle
+/// reconciler has nothing new to converge on them, and the failure
+/// path is nudged separately by the exit observer (Shape C part 2). The
+/// wildcard arm therefore covers `StopAllocation`, `FinalizeFailed`,
+/// `Noop`, and every non-alloc action.
+const fn is_service_alloc_starting_action(action: &Action) -> bool {
+    matches!(action, Action::StartAllocation { .. } | Action::RestartAllocation { .. })
 }
 
 impl WorkloadLifecycle {
@@ -558,8 +634,25 @@ impl WorkloadLifecycle {
                             command: command.clone(),
                             args: args.clone(),
                             resources: job.resources,
+                            // Per ADR-0054 §3 + GAP-8 close-out: the
+                            // descriptor vec is projected from the live
+                            // intent at hydrate-desired time. Job-kind
+                            // workloads carry an empty vec (no probe
+                            // surface); Service-kind workloads carry
+                            // startup → readiness → liveness in
+                            // canonical role order. See
+                            // `WorkloadLifecycleState::probe_descriptors`.
+                            probe_descriptors: desired.probe_descriptors.clone(),
                         },
                         kind: desired.workload_kind,
+                        // Crash-loop restart pathway — the restart cause is
+                        // implicit in the prior alloc's terminal. The typed
+                        // liveness cause (`RestartReason::LivenessExhausted`)
+                        // is stamped only by the `service-lifecycle`
+                        // reconciler (step 03-02 / Slice 05); this site
+                        // keeps `None` per the additive-`Option` contract on
+                        // `Action::RestartAllocation`.
+                        reason: None,
                     };
                     let mut next_view = view.clone();
                     let count =
@@ -626,6 +719,13 @@ impl WorkloadLifecycle {
                                 command: command.clone(),
                                 args: args.clone(),
                                 resources: job.resources,
+                                // Per ADR-0054 §3 + GAP-8 close-out:
+                                // projected from the live intent at
+                                // hydrate-desired time. Job-kind = empty
+                                // vec; Service-kind = startup → readiness
+                                // → liveness in canonical order. See
+                                // `WorkloadLifecycleState::probe_descriptors`.
+                                probe_descriptors: desired.probe_descriptors.clone(),
                             },
                             kind: desired.workload_kind,
                         };
@@ -850,9 +950,9 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
         return TerminalCondition::Completed { exit_code: 0 };
     }
     if let Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) = row.reason {
-        return TerminalCondition::Failed { exit_code: exit_code.unwrap_or(0) };
+        return TerminalCondition::Failed { exit_code };
     }
-    TerminalCondition::Failed { exit_code: 0 }
+    TerminalCondition::Failed { exit_code: Some(0) }
 }
 
 /// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.
@@ -883,6 +983,80 @@ pub struct WorkloadLifecycleState {
     pub workload_kind: WorkloadKind,
     /// Content-addressed `spec_digest` for the workload.
     pub service_spec_digest: Option<crate::id::ContentHash>,
+    /// Probe descriptors projected from the live intent at
+    /// hydrate-desired time. Per ADR-0054 §3 + closes GAP-8 from the
+    /// Phase 01 structural audit: for Service-kind workloads this
+    /// carries the concatenation of `startup_probes`, `readiness_probes`,
+    /// and `liveness_probes` in canonical role order (startup →
+    /// readiness → liveness) so `ProbeRunner::start_alloc`'s
+    /// `iter().enumerate()` assigns deterministic `probe_idx` values.
+    /// For Job-kind workloads this is always empty — Job-kind has no
+    /// probe surface (`ProbeRunner` is a Service-kind concern).
+    ///
+    /// The reconciler clones this vec into every emitted
+    /// `Action::StartAllocation { spec, .. }` and
+    /// `Action::RestartAllocation { spec, .. }` so the runtime's
+    /// per-descriptor probe-task spawn loop (GAP-7) receives the live
+    /// descriptor set the operator declared. Pre-GAP-8 the reconciler
+    /// hardcoded `probe_descriptors: Vec::new()` at both sites,
+    /// silently dropping Service-kind probes even after GAP-6 admission
+    /// + GAP-7 spawn-loop wiring landed.
+    pub probe_descriptors: Vec<ProbeDescriptor>,
+}
+
+/// Project the operator-declared probe descriptors of a
+/// [`crate::aggregate::WorkloadIntent`] into the flat vector consumed
+/// by `Action::StartAllocation { spec, .. }` /
+/// `Action::RestartAllocation { spec, .. }` (via
+/// [`WorkloadLifecycleState::probe_descriptors`]) and downstream by
+/// `ProbeRunner::start_alloc`'s per-descriptor spawn loop.
+///
+/// Closes GAP-8 from the Phase 01 structural audit. Pre-patch the
+/// reconciler hardcoded an empty `Vec` at both action arms with a
+/// comment justifying it for Job-kind; Service-kind silently inherited
+/// the empty vec even though `ServiceV1` carries three probe vectors
+/// (GAP-6 admission close-out). The runtime now calls this helper at
+/// hydrate-desired time and stamps the result onto
+/// [`WorkloadLifecycleState::probe_descriptors`]; the reconciler
+/// clones it into both action arms.
+///
+/// **Projection order is canonical**: `startup → readiness → liveness`.
+/// This matches [`crate::observation::ProbeRole`]'s declared order
+/// (`Startup`, `Readiness`, `Liveness`) and is the order
+/// `ProbeRunner::start_alloc` consumes the vec via `iter().enumerate()`,
+/// so `probe_idx` lands at a deterministic position per role. Reordering
+/// the concatenation would break the downstream
+/// `(alloc_id, probe_idx) → ProbeResultRow` slot mapping that the
+/// `ServiceLifecycleReconciler` hydrate path reads.
+///
+/// Per-variant projection:
+///
+/// - `WorkloadIntent::Job(_)` → empty vec (Job-kind has no probe
+///   surface per ADR-0054 §3; `ProbeRunner` is a Service-kind concern).
+/// - `WorkloadIntent::Service(svc)` → `svc.startup_probes ++
+///   svc.readiness_probes ++ svc.liveness_probes` (clones, since the
+///   helper is `pub fn(&WorkloadIntent)` and the projection escapes
+///   the borrow).
+/// - `WorkloadIntent::Schedule(_)` → empty vec (the schedule's per-fire
+///   instance is a Job, not a Service; probes on a Schedule's inner
+///   Job make no semantic sense in Phase 1).
+#[must_use]
+pub fn project_probe_descriptors(
+    intent: &crate::aggregate::WorkloadIntent,
+) -> Vec<ProbeDescriptor> {
+    match intent {
+        crate::aggregate::WorkloadIntent::Job(_)
+        | crate::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
+        crate::aggregate::WorkloadIntent::Service(svc) => {
+            let mut out = Vec::with_capacity(
+                svc.startup_probes.len() + svc.readiness_probes.len() + svc.liveness_probes.len(),
+            );
+            out.extend(svc.startup_probes.iter().cloned());
+            out.extend(svc.readiness_probes.iter().cloned());
+            out.extend(svc.liveness_probes.iter().cloned());
+            out
+        }
+    }
 }
 
 /// `WorkloadLifecycle` reconciler's typed view — the runtime-persisted

@@ -34,6 +34,7 @@ use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
+use crate::observation::ProbeResultRow;
 use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
@@ -485,9 +486,27 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 /// cannot be written into an [`ObservationStore`]. Phase 2+ extensions
 /// add variants here as new row shapes are introduced (compiled policy
 /// verdicts, revoked operator certs, ...).
+///
+/// # Why `AllocStatus` carries `Box<AllocStatusRow>`
+///
+/// [`AllocStatusRow`] grew past the `large_enum_variant` clippy
+/// threshold (~304 bytes) when `TerminalCondition::{Stable,
+/// ServiceFailed}` were appended on 2026-05-24 per ADR-0055 /
+/// ADR-0056 — the inline `Option<TerminalCondition>` footprint is
+/// dominated by `Stable { settled_in_ms: u64, witness: ProbeWitness }`.
+/// Leaving the variant unboxed would 6× the memory cost of every
+/// other variant in the enum (`NodeHealth`, `ServiceHydration`,
+/// `ServiceBackend`) because the enum's discriminant + slot is sized
+/// to its largest variant.
+///
+/// The `Box` is a private implementation detail — public callers
+/// continue to construct `ObservationRow::AllocStatus(Box::new(row))`
+/// and destructuring readers see `&AllocStatusRow` via auto-deref.
+/// `ObservationStore::write` still takes `ObservationRow` by value;
+/// the boxing happens at construction sites only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObservationRow {
-    AllocStatus(AllocStatusRow),
+    AllocStatus(Box<AllocStatusRow>),
     NodeHealth(NodeHealthRow),
     /// `service_hydration_results` row — written by the action shim
     /// on `Action::DataplaneUpdateService` dispatch per
@@ -572,6 +591,55 @@ pub struct AllocStatusRowV1 {
     pub stderr_tail: Option<String>,
     pub kind: WorkloadKind,
     pub listeners: Vec<ListenerRow>,
+    /// Wall-clock instant at which this allocation first transitioned
+    /// Pending → Running, as observed by the owning node via the
+    /// injected [`crate::traits::clock::Clock`] port.
+    ///
+    /// Typed [`UnixInstant`] — the unit (since-UNIX-epoch) and origin
+    /// are encoded in the type itself, per the canonical wall-clock
+    /// newtype defined in [`crate::wall_clock`].
+    ///
+    /// # Semantics
+    ///
+    /// - `None`: the allocation has not yet been observed Running
+    ///   (Pending only, or driver-rejected start). This is the honest
+    ///   shape — no Running observation exists yet, so there is no
+    ///   wall-clock to record.
+    /// - `Some(ts)`: the allocation reached Running at wall-clock
+    ///   `ts`. The value is captured ONCE at the Pending → Running
+    ///   transition from `tick.now_unix` — the same `Clock` port DST
+    ///   already controls (`SystemClock` in production, `SimClock`
+    ///   under simulation).
+    ///
+    /// Once `Some(ts)`, the field is preserved verbatim on every
+    /// subsequent state transition (Failed, Stopped, Terminated) by
+    /// reading the LWW-winner prior row and copying the field forward.
+    /// This is the load-bearing invariant that lets the
+    /// `ServiceLifecycleReconciler`'s deadline gates (Stable
+    /// `settled_in_ms`, EarlyExit `elapsed < startup_deadline`,
+    /// StartupProbeFailed `elapsed >= deadline_ms`) read a stable
+    /// "started at" wall-clock from any post-Running row.
+    ///
+    /// # Discipline
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": this field is the INPUT (the observed
+    /// wall-clock of the Pending → Running transition). Derived
+    /// values — `elapsed` (computed as `tick.now_unix` minus
+    /// `started_at`), `settled_in_ms`, and deadline gates —
+    /// are recomputed on every reconcile tick from this input plus
+    /// the live policy (deadline thresholds in the spec). The field
+    /// is never a cache of today's policy.
+    ///
+    /// Per `.claude/rules/development.md` § "Distinct failure modes
+    /// get distinct error variants": consumers MUST match on
+    /// `Some(ts)` explicitly. Do NOT collapse to an unwrap-to-zero —
+    /// that re-creates the silent-zero bug this field exists to
+    /// avoid (elapsed becomes huge → EarlyExit never fires,
+    /// StartupProbeFailed always fires). `None` is the explicit
+    /// "no Running observation yet" signal; reconcilers branch on
+    /// it rather than treating it as zero.
+    pub started_at: Option<UnixInstant>,
 }
 
 impl VersionedEnvelope for AllocStatusRowEnvelope {
@@ -591,25 +659,51 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// measured from the END of the archive bytes.
     ///
     /// Empirically determined against canonical V1 payloads of
-    /// varying `listeners: Vec<ListenerRow>` sizes: rkyv 0.8 places
-    /// the outer enum's discriminant byte 168 bytes from the END of
-    /// the archive, stable across all payload sizes (the trailing
-    /// "root" structure has a fixed footprint; only the leading slab
-    /// grows with variable-length data).
+    /// varying `listeners: Vec<ListenerRow>` / `detail` / `stderr_tail`
+    /// / `terminal` shapes: rkyv 0.8 places the outer enum's
+    /// discriminant byte at a fixed offset from the END of the
+    /// archive, stable across all payload sizes (the trailing "root"
+    /// structure has a fixed footprint; only the leading slab grows
+    /// with variable-length data).
+    ///
+    /// **Repinned 2026-05-24** (greenfield, no shipped consumers; per
+    /// the `feedback_single_cut_greenfield_migrations` rule): the
+    /// previously-pinned offset of 168 reflected the canonical V1
+    /// layout before `TerminalCondition::Stable` and `::ServiceFailed`
+    /// were appended. Appending those two variants grew the inline
+    /// footprint of `Option<TerminalCondition>` (which `AllocStatusRowV1`
+    /// embeds inline), which extended the trailing root structure by
+    /// 24 bytes. The new offset of 192 was empirically located by
+    /// flipping each stable-zero byte in canonical archives to 0xFE
+    /// and observing which one caused rkyv to reject the archive with
+    /// `invalid discriminant '254' for enum
+    /// 'ArchivedAllocStatusRowEnvelope'`.
+    ///
+    /// **Repinned 2026-05-29** (greenfield extension per the
+    /// subsidiary GAP-1 fix): added an `Option<UnixInstant>`
+    /// `started_at` field inline to `AllocStatusRowV1`. `UnixInstant`
+    /// wraps `Duration` (12 bytes — 8 for seconds + 4 for nanos),
+    /// inlined behind the `Option` discriminant; this extends the
+    /// trailing root structure beyond the prior 192-byte pin. The
+    /// new offset is determined empirically by the schema-evolution
+    /// fixture's triangulation test (`alloc_status_row_discriminant
+    /// _offset_triangulation`); update this constant and
+    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant
+    /// or layout change.
     ///
     /// Re-pin alongside the schema-evolution fixture at every
     /// version-bump per
     /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
     /// docstring.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(168)
+        Some(212)
     }
 
     fn known_discriminants() -> &'static [u8] {
         // V1 carries rkyv discriminant 0 (declaration order — first
         // variant). Empirically verified by archiving a canonical
         // `AllocStatusRowEnvelope::latest(...)` and inspecting the
-        // byte at `bytes.len() - 168`.
+        // byte at `bytes.len() - 208`.
         &[0]
     }
 
@@ -956,4 +1050,85 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
+    /// Write a single [`ProbeResultRow`] — the latest observed
+    /// outcome of one probe for one allocation.
+    ///
+    /// # Preconditions
+    /// - `row.alloc_id` identifies a live or terminated allocation
+    ///   this peer observes. The store does not validate referential
+    ///   integrity against the intent surface; an alloc that never
+    ///   existed produces an unreachable orphan row (acceptable —
+    ///   readers filter by alloc_id at read time).
+    /// - `row.probe_idx` matches the spec's 0-indexed probe position
+    ///   at the time of observation. The probe-runner is the only
+    ///   sanctioned writer; it never invents indices.
+    ///
+    /// # Postconditions
+    /// - On `Ok(())`, the row is durable: a subsequent
+    ///   [`Self::list_probe_results_for_alloc`] call MUST include the
+    ///   written row IFF its `last_observed_at_unix_ms` dominates the
+    ///   prior row at the composite primary key
+    ///   `(alloc_id, probe_idx)`.
+    /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
+    ///   timestamp does NOT strictly exceed the existing row's
+    ///   timestamp at the same `(alloc_id, probe_idx)` MUST NOT
+    ///   mutate state.
+    /// - The probe-result surface is per-alloc-per-probe LATEST only;
+    ///   per-tick history is NOT persisted. Per
+    ///   `.claude/rules/development.md` § "Persist inputs, not derived
+    ///   state" the renderer recomputes history from the row + the
+    ///   live spec policy.
+    ///
+    /// # Edge cases
+    /// - Concurrent writes for the same `(alloc_id, probe_idx)` with
+    ///   identical `last_observed_at_unix_ms`: the second write loses
+    ///   (strict-dominate rule). Idempotent.
+    /// - `row.status == ProbeStatus::Fail { reason }` where `reason`
+    ///   is empty: accepted as-is. The trait does not validate the
+    ///   reason string shape — the renderer handles empty strings.
+    ///
+    /// # Observable invariants
+    /// - For any `(alloc_id, probe_idx)`,
+    ///   `list_probe_results_for_alloc(alloc_id)` returns exactly one
+    ///   row per distinct `probe_idx` — the LWW winner.
+    /// - `write_probe_result` is the ONLY mutator of the probe-result
+    ///   table; no other trait method writes probe rows.
+    async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError>;
+
+    /// List every LWW-winner [`ProbeResultRow`] for the given
+    /// allocation, one row per distinct `probe_idx`.
+    ///
+    /// # Preconditions
+    /// - `alloc_id` is well-formed. The store does not validate
+    ///   existence; an allocation that has never been observed
+    ///   returns `Ok(vec![])`.
+    ///
+    /// # Postconditions
+    /// - Iteration order is deterministic — sorted ascending by
+    ///   `probe_idx` (per
+    ///   `.claude/rules/development.md` § "Ordered-collection choice"
+    ///   — `BTreeMap`-shape semantics on the underlying store).
+    /// - At most one row per distinct `probe_idx` is returned (the
+    ///   LWW winner; see [`Self::write_probe_result`]).
+    /// - The returned rows have `row.alloc_id == *alloc_id` for every
+    ///   element. The store filters at read time; the caller does
+    ///   not need to re-filter.
+    ///
+    /// # Edge cases
+    /// - No rows for `alloc_id`: returns `Ok(vec![])`, not an error.
+    /// - Malformed envelope bytes for one row: the row is skipped
+    ///   with a `tracing::warn!` event per ADR-0048 § 3
+    ///   observation-layer policy (log + skip). Convergence proceeds
+    ///   on surviving rows.
+    ///
+    /// # Observable invariants
+    /// - Calling this method has no side effects beyond an optional
+    ///   `tracing::warn!` on envelope-decode failure.
+    /// - The result reflects every write that happens-before this
+    ///   call — single-node read-after-write is strict.
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<ProbeResultRow>, ObservationStoreError>;
 }

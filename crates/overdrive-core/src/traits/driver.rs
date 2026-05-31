@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use crate::aggregate::probe_descriptor::ProbeDescriptor;
 use crate::{AllocationId, SpiffeId};
 
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
@@ -138,6 +139,20 @@ pub struct AllocationSpec {
     /// `Command::new(&self.command).args(&self.args)`.
     pub args: Vec<String>,
     pub resources: Resources,
+    /// Validated health-check probe declarations per ADR-0054 §3.
+    ///
+    /// Carried from the reconciler-emitted `Action::StartAllocation`
+    /// down to the worker-side `ExecDriver` so the driver's
+    /// `on_alloc_running` lifecycle hook can hand them to
+    /// `ProbeRunner::start_alloc`.
+    ///
+    /// For Phase 1 Job-kind and Schedule-kind workloads the
+    /// reconciler constructs an empty `Vec` — those kinds have no
+    /// probes per ADR-0054 §2 ("probes are a Service-kind concern").
+    /// Service-kind workloads project the descriptors from
+    /// `ServiceSpec.health_check` (per ADR-0057) into the
+    /// reconciler-emitted `AllocationSpec`.
+    pub probe_descriptors: Vec<ProbeDescriptor>,
 }
 
 /// Opaque handle returned by the driver at start. The node agent does not
@@ -384,4 +399,37 @@ pub trait Driver: Send + Sync + 'static {
     fn take_exit_receiver(&self) -> Option<tokio::sync::mpsc::Receiver<ExitEvent>> {
         None
     }
+
+    /// Lifecycle hook fired by the action shim when an allocation
+    /// transitions to `Running` (i.e. immediately after the action
+    /// shim writes the `AllocStatusRow { state: Running, .. }` row
+    /// via `obs.write`).
+    ///
+    /// Production [`crate::traits::driver::Driver`] implementations
+    /// that hold a reference to the worker's `ProbeRunner` (today:
+    /// `overdrive_worker::ExecDriver`) override this to call
+    /// `probe_runner.start_alloc(&spec.alloc, spec.probe_descriptors.clone())`,
+    /// handing the validated probe descriptors to the per-alloc
+    /// supervisor per ADR-0054 § 3.
+    ///
+    /// Default no-op for drivers that do not run probes
+    /// (`overdrive_sim::SimDriver`, future Phase-2 driver types).
+    /// Per ADR-0054 § 2 probes are a worker-level concern; sim /
+    /// future drivers that delegate to other observation surfaces
+    /// continue to compile.
+    fn on_alloc_running(&self, _spec: &AllocationSpec) {}
+
+    /// Lifecycle hook fired by the action shim when an allocation
+    /// transitions to a terminal state (Terminated / Failed) — i.e.
+    /// immediately after the action shim writes the terminal
+    /// `AllocStatusRow` via `obs.write`.
+    ///
+    /// Production [`crate::traits::driver::Driver`] implementations
+    /// that hold a reference to the worker's `ProbeRunner` override
+    /// this to call `probe_runner.stop_alloc(alloc_id)`, cooperatively
+    /// shutting down every per-probe task spawned under the
+    /// allocation's supervisor per ADR-0054 § 2.
+    ///
+    /// Default no-op — symmetric with [`Self::on_alloc_running`].
+    fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {}
 }

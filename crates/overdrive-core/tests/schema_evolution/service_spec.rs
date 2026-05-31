@@ -1,0 +1,157 @@
+//! Schema-evolution roundtrip — `ServiceSpecEnvelope` per ADR-0057
+//! + ADR-0048 § 6 + § "rkyv schema evolution" → "Version-bump procedure".
+//!
+//! Step 01-02 of service-health-check-probes lands the V1 → V2 bump.
+//! V1 = parser-side `ServiceSpec` before probes existed; V2 adds three
+//! `Vec<ProbeDescriptor>` fields (startup / readiness / liveness).
+//! `From<ServiceSpecV1> for ServiceSpecV2` is additive — V1 specs
+//! project to V2 with three empty probe vectors.
+//!
+//! **`FIXTURE_V1` is never touched on subsequent commits.** Bumping
+//! to V3 appends a new `FIXTURE_V3` constant + a new assertion in
+//! the same commit; existing constants stay verbatim.
+
+use std::num::NonZeroU16;
+
+use overdrive_core::aggregate::{
+    Listener, ParserExecInput as ExecInput, ParserResourcesInput as ResourcesInput,
+    ProbeDescriptor, ProbeMechanic, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1,
+    ServiceSpecV2,
+};
+use overdrive_core::codec::VersionedEnvelope;
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::observation::ProbeRole;
+
+use super::harness::assert_envelope_v_roundtrip;
+
+/// Canonical V1 payload — `ServiceSpec` shape before
+/// service-health-check-probes landed. Pinned to a one-listener Service
+/// with the smallest valid scalar fields.
+fn canonical_v1_payload() -> ServiceSpecV1 {
+    ServiceSpecV1 {
+        id: "svc-pre-probes".to_string(),
+        replicas: 1,
+        exec: ExecInput { command: "/usr/bin/server".to_string(), args: vec![] },
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        listeners: vec![Listener {
+            port: NonZeroU16::new(8080).expect("non-zero port"),
+            protocol: Proto::Tcp,
+        }],
+    }
+}
+
+/// Canonical V2 payload — same shape as V1 with a single inferred
+/// startup probe. Mirrors the runtime shape the parser produces from
+/// the default-inference rule (ADR-0058).
+fn canonical_v2_payload() -> ServiceSpecLatest {
+    ServiceSpecV2 {
+        id: "svc-with-probe".to_string(),
+        replicas: 1,
+        exec: ExecInput { command: "/usr/bin/server".to_string(), args: vec![] },
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        listeners: vec![Listener {
+            port: NonZeroU16::new(9090).expect("non-zero port"),
+            protocol: Proto::Tcp,
+        }],
+        startup_probes: vec![ProbeDescriptor {
+            role: ProbeRole::Startup,
+            mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: 9090 },
+            timeout_seconds: 5,
+            interval_seconds: 2,
+            max_attempts: 30,
+            failure_threshold: None,
+            success_threshold: None,
+            inferred: true,
+        }],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
+    }
+}
+
+/// Hex-encoded rkyv-archived bytes of
+/// `ServiceSpecEnvelope::V1(canonical_v1_payload())`. Pinned on the
+/// GREEN landing of step 01-02 and NEVER touched on subsequent
+/// commits. Per ADR-0048 § Version-bump procedure step 6: every
+/// future bump appends a new `FIXTURE_V<N>` constant; existing
+/// fixtures stay verbatim.
+const FIXTURE_V1: &str = "7376632d7072652d70726f6265732f7573722f62696e2f736572766572000000901f00000000000000000000000000008e000000d0ffffff010000008f000000d2ffffffdcffffff000000000000000064000000000000000000000800000000c0ffffff01000000000000000000000000000000000000000000000000000000";
+
+/// Hex-encoded rkyv-archived bytes of
+/// `ServiceSpecEnvelope::V2(canonical_v2_payload())`. Pinned on the
+/// GREEN landing of step 01-02.
+const FIXTURE_V2: &str = "7376632d776974682d70726f62652f7573722f62696e2f736572766572000000822300000000000000000000302e302e302e30ff8223000000000000000000000000000005000000020000001e00000000000000000000000000000000000000010000000000000001000000000000008e00000090ffffff010000008f00000092ffffff9cffffff00000000000000006400000000000000000000080000000080ffffff010000007cffffff01000000b4ffffff00000000acffffff00000000";
+
+/// V1 fixture decodes through the bumped envelope and projects to the
+/// canonical V2 `Latest` (with three empty probe vectors). This is the
+/// load-bearing "old persisted bytes still readable" assertion per
+/// ADR-0048 § 6.
+#[test]
+fn service_spec_v1_decodes_through_current_envelope() {
+    // V1 -> Latest: From<V1> for V2 fills the three probe Vecs with
+    // empty. The expected Latest projection is the V1 payload re-cast
+    // into V2 shape with no probes.
+    let expected: ServiceSpecLatest = canonical_v1_payload().into();
+    assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(FIXTURE_V1, &expected);
+}
+
+/// V2 fixture is a canonical Latest projection that round-trips
+/// bit-equivalently through the envelope.
+#[test]
+fn service_spec_v2_decodes_through_current_envelope() {
+    let expected = canonical_v2_payload();
+    assert_envelope_v_roundtrip::<ServiceSpecEnvelope>(FIXTURE_V2, &expected);
+}
+
+/// Pin `<ServiceSpecEnvelope as VersionedEnvelope>::known_discriminants`
+/// to exactly `&[0, 1]`. Kills mutations that replace the body with
+/// `Vec::leak(Vec::new())` (empty slice) or `Vec::leak(vec![1])`
+/// (missing V1 tag). Per service-health-check-probes step 01-03b
+/// mutation-tightening pass.
+#[test]
+fn service_spec_envelope_known_discriminants_is_exactly_v1_and_v2() {
+    let discriminants = ServiceSpecEnvelope::known_discriminants();
+    assert_eq!(
+        discriminants,
+        &[0u8, 1u8],
+        "ServiceSpecEnvelope::known_discriminants() must equal &[0, 1] — V1=0, V2=1 (rkyv assigns in declaration order). Got {discriminants:?}"
+    );
+}
+
+/// Pin `<ServiceSpecEnvelope as VersionedEnvelope>::type_name` to
+/// exactly `"ServiceSpecEnvelope"`. Kills mutations that replace
+/// the body with `""` or `"xyzzy"`. The string feeds the
+/// `EnvelopeError::UnknownVersion.type_name` operator-facing
+/// diagnostic; an incorrect value silently relabels the error.
+#[test]
+fn service_spec_envelope_type_name_is_exact_string() {
+    let name = ServiceSpecEnvelope::type_name();
+    assert_eq!(
+        name, "ServiceSpecEnvelope",
+        "ServiceSpecEnvelope::type_name() must equal \"ServiceSpecEnvelope\" verbatim; got {name:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Bootstrap helper — emits canonical hex on demand.
+// ---------------------------------------------------------------------
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand when bumping the envelope; the pinned FIXTURE_V<N> constants are the load-bearing artifact"]
+#[allow(
+    clippy::print_stdout,
+    reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V<N>"
+)]
+fn print_service_spec_fixture_bytes() {
+    {
+        let envelope = ServiceSpecEnvelope::V1(canonical_v1_payload());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+        println!("FIXTURE_V1 = \"{}\"", hex::encode(bytes.as_ref()));
+        println!("buffer_len (V1) = {}", bytes.len());
+    }
+    {
+        let envelope = ServiceSpecEnvelope::latest(canonical_v2_payload());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+        println!("FIXTURE_V2 = \"{}\"", hex::encode(bytes.as_ref()));
+        println!("buffer_len (V2) = {}", bytes.len());
+    }
+}

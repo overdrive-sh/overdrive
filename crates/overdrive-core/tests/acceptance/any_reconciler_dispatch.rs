@@ -37,9 +37,9 @@ use overdrive_core::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
 };
 use overdrive_core::reconcilers::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
-    ServiceMapHydratorState, ServiceMapHydratorView, TickContext, WorkloadLifecycle,
-    WorkloadLifecycleState,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler,
+    ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView, TickContext,
+    WorkloadLifecycle, WorkloadLifecycleState,
 };
 use overdrive_core::traits::driver::Resources;
 
@@ -114,6 +114,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
@@ -123,6 +124,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = AnyReconcilerView::WorkloadLifecycle(
         overdrive_core::reconcilers::WorkloadLifecycleView::default(),
@@ -249,5 +251,78 @@ fn dispatch_routes_backend_discovery_bridge_triple_to_bridge_view() {
         matches!(returned_view, AnyReconcilerView::BackendDiscoveryBridge(_)),
         "BackendDiscoveryBridge dispatch must return \
          AnyReconcilerView::BackendDiscoveryBridge; got {returned_view:?}",
+    );
+}
+
+// -------------------------------------------------------------------
+// L727 — ServiceLifecycle dispatch arm
+// (service-health-check-probes step 01-03b mutation tightening)
+// -------------------------------------------------------------------
+
+#[test]
+fn dispatch_routes_service_lifecycle_triple_to_service_lifecycle_view() {
+    // Construct a `ServiceLifecycleReconciler`, wrap it in
+    // `AnyReconciler::ServiceLifecycle`, and dispatch with the matching
+    // state + view triple. Production: routes to
+    // `ServiceLifecycleReconciler::reconcile` → returns
+    // `AnyReconcilerView::ServiceLifecycle(_)`. Mutant
+    // (`delete match arm` at reconciler.rs:727): wildcard `_ => panic!`
+    // fires; the variant-of-returned-view assertion below is uniquely
+    // produced by the ServiceLifecycle dispatch arm.
+    //
+    // Per service-health-check-probes step 01-03b mutation report:
+    // until this test, the ServiceLifecycle arm was the one dispatch
+    // arm whose `delete match arm` mutant was MISSED in the
+    // `--diff origin/main` scope.
+    use overdrive_core::service_lifecycle::{
+        ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+    };
+
+    let any = AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new());
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    // Empty service-lifecycle state — no allocs. The reconciler returns
+    // no actions; only the variant of the returned view discriminates
+    // the dispatch arm. We additionally assert oracle equivalence: the
+    // (actions, view) tuple from `AnyReconciler::reconcile` must match
+    // the direct `ServiceLifecycleReconciler::reconcile` call on the
+    // same inputs.
+    let desired = ServiceLifecycleState::default();
+    let actual = ServiceLifecycleState::default();
+    let view_inner = ServiceLifecycleView::default();
+    let view = AnyReconcilerView::ServiceLifecycle(view_inner.clone());
+
+    let (actions_via_any, returned_view) = any.reconcile(
+        &AnyState::ServiceLifecycle(desired.clone()),
+        &AnyState::ServiceLifecycle(actual.clone()),
+        &view,
+        &tick,
+    );
+
+    assert!(
+        matches!(returned_view, AnyReconcilerView::ServiceLifecycle(_)),
+        "ServiceLifecycle dispatch must return AnyReconcilerView::ServiceLifecycle; \
+         got {returned_view:?}",
+    );
+
+    // Oracle: direct reconcile call. Same inputs => same output.
+    let r = ServiceLifecycleReconciler::new();
+    let (actions_direct, view_direct) = r.reconcile(&desired, &actual, &view_inner, &tick);
+    assert_eq!(
+        actions_via_any, actions_direct,
+        "AnyReconciler::reconcile must emit the same actions as the direct call"
+    );
+    let AnyReconcilerView::ServiceLifecycle(unwrapped) = returned_view else {
+        panic!("must be ServiceLifecycle variant")
+    };
+    assert_eq!(
+        unwrapped, view_direct,
+        "AnyReconciler::reconcile must return the same view as the direct call"
     );
 }

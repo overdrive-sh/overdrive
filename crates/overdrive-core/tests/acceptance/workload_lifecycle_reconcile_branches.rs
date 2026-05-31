@@ -107,6 +107,11 @@ fn alloc_with_state(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+        started_at: match state {
+            AllocState::Pending => None,
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        },
     }
 }
 
@@ -187,6 +192,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("absent"),
@@ -196,6 +202,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -247,6 +254,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -256,6 +264,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -302,6 +311,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -311,6 +321,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         allocations: allocs,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -367,6 +378,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -376,6 +388,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -404,6 +417,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -413,6 +427,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -422,8 +437,9 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "must emit StartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "must emit StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle \
+         EnqueueEvaluation per GAP-9 (Service-kind start); got {actions:?}"
     );
     assert!(
         matches!(
@@ -450,8 +466,8 @@ fn restart_emitted_when_attempts_below_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(attempts_when_below_ceiling);
     assert_eq!(
         actions.len(),
-        2,
-        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+        3,
+        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions:?}",
     );
     assert!(
         matches!(
@@ -523,6 +539,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -532,6 +549,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), attempts);
@@ -591,9 +609,10 @@ fn restart_emitted_when_now_equals_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        2,
+        3,
         "now_unix == seen_at + backoff must emit RestartAllocation + bridge \
-         EnqueueEvaluation per UI-06 (backoff elapsed); got {actions:?}",
+         EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 \
+         (Service-kind restart, backoff elapsed); got {actions:?}",
     );
     assert!(
         matches!(
@@ -619,9 +638,10 @@ fn restart_emitted_when_now_strictly_after_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        2,
+        3,
         "now_unix > seen_at + backoff must emit RestartAllocation + bridge \
-         EnqueueEvaluation per UI-06 (backoff elapsed); got {actions:?}",
+         EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 \
+         (Service-kind restart, backoff elapsed); got {actions:?}",
     );
 }
 
@@ -639,6 +659,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -648,6 +669,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), seen_at);
@@ -705,6 +727,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -714,6 +737,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     // view is empty — fresh failure, no prior restart bookkeeping.
     let view = WorkloadLifecycleView::default();
@@ -727,8 +751,9 @@ fn fresh_failure_writes_seen_at_into_next_view() {
     // RestartAllocation emitted for the failed alloc.
     assert_eq!(
         actions.len(),
-        2,
-        "fresh failure must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "fresh failure must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + \
+         service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, .. } => {
@@ -777,6 +802,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -786,6 +812,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
 
     // Tick 1: fresh failure. Capture next_view as the input to tick 2.
@@ -852,6 +879,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -861,6 +889,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
 
     // Tick 1: fresh failure.
@@ -883,8 +912,8 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
 
     assert_eq!(
         actions_2.len(),
-        2,
-        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions_2:?}",
+        3,
+        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions_2:?}",
     );
     assert!(
         matches!(
@@ -966,6 +995,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -975,6 +1005,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
 
     // Seed the view: restart_counts < CEILING (so
@@ -1054,6 +1085,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -1063,6 +1095,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         allocations,
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -1145,6 +1178,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1154,6 +1188,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             allocations: allocs,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1210,6 +1245,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1219,6 +1255,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             allocations: empty_alloc_map(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
 
         // Seed the view: a stale `last_failure_seen_at` carried over
@@ -1284,6 +1321,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1293,6 +1331,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             allocations: allocs,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
 
         let now = Instant::now();
@@ -1351,6 +1390,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1360,6 +1400,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             allocations: allocs,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1458,6 +1499,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1467,6 +1509,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             allocations,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1475,11 +1518,16 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
         let r = WorkloadLifecycle::canonical();
         let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
+        // GAP-9: Service-kind emits an extra service-lifecycle
+        // EnqueueEvaluation on the StartAllocation (a starting
+        // transition); Job / Schedule do not (the gate is `== Service`).
+        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
         assert_eq!(
             actions.len(),
-            2,
+            expected_len,
             "kind={kind:?}: SystemGc-Terminated row + intent present must emit \
-             exactly one fresh placement + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             exactly one fresh placement + bridge EnqueueEvaluation per UI-06 \
+             (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         match &actions[0] {
             Action::StartAllocation { alloc_id, .. } => {
@@ -1521,6 +1569,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1530,6 +1579,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             allocations,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1572,6 +1622,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1581,6 +1632,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             allocations: allocs,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1624,6 +1676,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1633,6 +1686,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             allocations: allocs,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1648,11 +1702,18 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         // Both shapes prove the asymmetry: the SystemGc row is NEVER
         // the action target (no Stop or other action emitted against
         // alloc-payments-0).
+        // GAP-9: Service-kind emits RestartAllocation (a starting
+        // transition) → +1 service-lifecycle EnqueueEvaluation.
+        // Schedule emits RestartAllocation too but the `== Service`
+        // gate excludes it; Job emits FinalizeFailed (not a starting
+        // transition). So only Service hits 3.
+        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
         assert_eq!(
             actions.len(),
-            2,
+            expected_len,
             "kind={kind:?}: SystemGc row + Failed row must emit exactly one action \
-             (against the Failed row, not the SystemGc row) + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             (against the Failed row, not the SystemGc row) + bridge EnqueueEvaluation per UI-06 \
+             (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         let action_alloc_id = match &actions[0] {
             Action::RestartAllocation { alloc_id, .. }
@@ -1764,6 +1825,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1773,6 +1835,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             allocations,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1815,11 +1878,15 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         // row → exactly one fresh `Action::StartAllocation` with a
         // NEW alloc_id (architecture.md § 5 promise). Same assertion
         // shape across kinds — the placement path is kind-agnostic.
+        // GAP-9: Service-kind StartAllocation → +1 service-lifecycle
+        // EnqueueEvaluation; Job / Schedule stay at 2.
+        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
         assert_eq!(
             actions.len(),
-            2,
+            expected_len,
             "kind={kind:?}: filtered SystemGc-via-reason row + intent present must \
-             emit exactly one fresh placement + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             emit exactly one fresh placement + bridge EnqueueEvaluation per UI-06 \
+             (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         match &actions[0] {
             Action::StartAllocation { alloc_id, .. } => {
@@ -1870,6 +1937,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             allocations: BTreeMap::new(),
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1879,6 +1947,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             allocations,
             workload_kind: *kind,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1953,6 +2022,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             allocations: BTreeMap::new(),
             workload_kind: WorkloadKind::Job,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1962,6 +2032,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             allocations,
             workload_kind: WorkloadKind::Job,
             service_spec_digest: None,
+            probe_descriptors: Vec::new(),
         };
         let view = WorkloadLifecycleView::default();
         let tick =

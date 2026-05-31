@@ -21,6 +21,16 @@ path = "src/lib.rs"
 name = "overdrive"
 path = "src/main.rs"
 
+# Test-fixture binary consumed by `examples/coinflip-as-service.toml`
+# (Fixture A) for the K1 100-seed honesty loop in step 01-03f-2. Per
+# `.claude/rules/development.md` § "src/ is production code — tooling
+# binaries live in bin/": this is a test-only fixture with no library
+# consumer; it lives at `bin/` and needs an explicit `[[bin]]` entry
+# because Cargo's autodiscovery covers `src/bin/` only.
+[[bin]]
+name = "coinflip_helper"
+path = "bin/coinflip_helper.rs"
+
 [lints]
 workspace = true
 
@@ -123,3 +133,9 @@ serial_test.workspace        = true
 # wall-clock budget; the render fns are pure-function-shaped and
 # 1024 cases run in well under the slow-test budget.
 proptest.workspace           = true
+# Slice 06 step 02-03 — `insta` pins the per-mechanic Probes-section
+# line shapes as golden-output snapshots (the PBT-paradigm EXEMPT
+# golden-file case; the `ProbeRenderIsKindGuarded` proptest on the
+# adjacent kind-guard slot compensates). Inline snapshots keep the
+# golden in the test source for same-diff review.
+insta.workspace              = true

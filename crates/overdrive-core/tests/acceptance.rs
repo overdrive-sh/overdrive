@@ -162,4 +162,41 @@ mod acceptance {
     // alongside every `StartAllocation` / `RestartAllocation` /
     // `StopAllocation` / `FinalizeFailed`. Mirrors UI-05.
     mod workload_lifecycle_enqueues_bridge_on_alloc_transitions;
+
+    // service-health-check-probes — Tier 1 acceptance for the
+    // `[[health_check.*]]` TOML parser surface per ADR-0057 + ADR-
+    // 0058 default-inference rule + the `ProbeResultRowEnvelope`
+    // V1 roundtrip + discriminant pinning per ADR-0054 §5 QR1.
+    // Slices 01 / 02 / 03 / 07. RED scaffolds.
+    mod health_check_toml_parse;
+    mod probe_descriptor_roundtrip;
+    mod probe_result_row_envelope;
+
+    // service-health-check-probes step 01-03b mutation-tightening —
+    // branch + boundary coverage for `ServiceLifecycleReconciler::reconcile`
+    // (Stable / EarlyExit / StartupProbeFailed). Pins every boolean
+    // operator and comparison in the reconcile body so cargo-mutants
+    // can kill flipped operators and dropped match arms.
+    mod service_lifecycle_reconcile_branches;
+
+    // service-health-check-probes — GAP-6 corrective patch.
+    // Probe descriptors persist end-to-end through the parser →
+    // wire (ServiceSpecInput) → intent (WorkloadIntent::Service /
+    // ServiceV1) → IntentStore rkyv-archived bytes round-trip.
+    // Pre-corrective state: ServiceV1::from_submit had zero
+    // probe-related code and silently dropped operator-declared
+    // probes between admission and IntentStore. Surfaced when the
+    // GAP-1 corrective crafter found hydrate_desired had no probe
+    // data to read. Five sub-scenarios pin the contract end-to-end.
+    mod intent_persists_probe_descriptors;
+
+    // service-health-check-probes — GAP-8 corrective patch.
+    // `WorkloadLifecycle::reconcile` projects `desired.probe_descriptors`
+    // into both `Action::StartAllocation` and `Action::RestartAllocation`
+    // alloc specs. Closes the silent-drop between GAP-6 (admission)
+    // and GAP-7 (per-descriptor probe-task spawn loop) — pre-patch the
+    // reconciler hardcoded `probe_descriptors: Vec::new()` at both
+    // action arms, defeating both prior gap closures for Service-kind
+    // workloads. Per ADR-0054 §3 + Phase 01 structural audit close-out.
+    mod workload_lifecycle_projects_service_probes_into_alloc_spec;
 }

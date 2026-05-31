@@ -11,7 +11,7 @@
 //! > written.
 //!
 //! "Bytes" here is interpreted as *row equality after a typed
-//! round-trip*: the write is a typed `ObservationRow::AllocStatus(...)`
+//! round-trip*: the write is a typed `ObservationRow::AllocStatus(Box::new(...))`
 //! value and the subscription yields the same typed value. Strict byte
 //! equality (rkyv archive) becomes load-bearing once production
 //! `CorrosionStore` is introduced (Phase 2+); for the sim path, value
@@ -22,6 +22,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -51,6 +52,8 @@ fn sample_alloc_status() -> AllocStatusRow {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Running state carries fixed wall-clock.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 
@@ -67,7 +70,7 @@ async fn written_alloc_status_is_observable_on_same_peer() {
     // When the peer writes an alloc_status row for alloc/a1b2c3.
     let row = sample_alloc_status();
     store
-        .write(ObservationRow::AllocStatus(row.clone()))
+        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
         .await
         .expect("write succeeds on sole peer");
 
@@ -79,7 +82,7 @@ async fn written_alloc_status_is_observable_on_same_peer() {
 
     assert_eq!(
         delivered,
-        ObservationRow::AllocStatus(row),
+        ObservationRow::AllocStatus(Box::new(row)),
         "subscription must yield the same typed row the peer wrote"
     );
 }

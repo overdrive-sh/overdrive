@@ -100,6 +100,8 @@ fn alloc_clean_exit(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocSt
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Terminated state was Running first.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 
@@ -129,6 +131,8 @@ fn alloc_crashed_with_exit(
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Failed-after-crash state was Running first.
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
     }
 }
 
@@ -155,6 +159,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -164,6 +169,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         allocations,
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -209,6 +215,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -218,6 +225,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         allocations,
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -235,11 +243,63 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
             assert_eq!(
                 *terminal,
-                Some(TerminalCondition::Failed { exit_code: 1 }),
+                Some(TerminalCondition::Failed { exit_code: Some(1) }),
                 "Job-kind exit_code=1 must stamp Failed {{ exit_code: 1 }}",
             );
         }
         other => panic!("expected FinalizeFailed for Job-kind crash, got {other:?}"),
+    }
+}
+
+/// Regression: signal-killed alloc (exit_code: None) must carry
+/// `TerminalCondition::Failed { exit_code: None }`, not `Some(0)`.
+#[test]
+fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
+    let nodes = one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    let mut row = alloc_crashed_with_exit("alloc-payments-0", "payments", "local", 1);
+    row.reason = Some(TransitionReason::WorkloadCrashedImmediately {
+        exit_code: None,
+        signal: None,
+        stderr_tail: None,
+    });
+    allocations.insert(aid("alloc-payments-0"), row);
+
+    let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    match &actions[0] {
+        Action::FinalizeFailed { terminal, .. } => {
+            assert_eq!(
+                *terminal,
+                Some(TerminalCondition::Failed { exit_code: None }),
+                "signal-killed alloc must carry exit_code: None, not Some(0)",
+            );
+        }
+        other => panic!("expected FinalizeFailed with None exit_code, got {other:?}"),
     }
 }
 
@@ -266,6 +326,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -275,6 +336,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         allocations,
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
+        probe_descriptors: Vec::new(),
     };
     // Budget remaining: attempts == 0 < ceiling.
     let mut restart_counts = BTreeMap::new();
@@ -291,8 +353,8 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}

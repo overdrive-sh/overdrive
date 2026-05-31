@@ -48,6 +48,7 @@ async fn exec_driver_starts_real_sleep_in_cgroup_scope() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     // Action — through driving port.

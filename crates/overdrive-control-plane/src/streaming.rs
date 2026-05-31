@@ -7,34 +7,33 @@
 //!
 //! The handler in [`crate::handlers::submit_workload`] branches on the
 //! `Accept` header. The `application/x-ndjson` lane delegates here:
-//! `streaming_submit_loop` builds a stream of `Result<Bytes, _>`
+//! [`build_workload_stream`] builds a stream of `Result<Bytes, _>`
 //! NDJSON lines that axum wraps via `Body::from_stream(...)`.
 //!
-//! The first line (`SubmitEvent::Accepted`) is emitted SYNCHRONOUSLY
+//! The first line ([`JobSubmitEvent::Accepted`]) is emitted SYNCHRONOUSLY
 //! after `IntentStore::put_if_absent` returns. No broadcast wait,
 //! no observation read.
 //!
 //! After `Accepted` the loop subscribes to
 //! `app_state.lifecycle_events` and enters a `tokio::select!` between:
 //!
-//! 1. `bus.recv()` — projects each `LifecycleEvent` to a
-//!    `SubmitEvent::LifecycleTransition` line, then checks for terminal.
+//! 1. `bus.recv()` — projects each `LifecycleEvent` to an intermediate
+//!    [`JobSubmitEvent`] (`Pending` / `Running` / `AttemptFailed`),
+//!    then checks for terminal.
 //! 2. `clock.sleep(cap)` — wall-clock cap timer. Production
 //!    (`SystemClock`) parks on a real timer; DST (`SimClock`) parks
 //!    until the harness calls `sim_clock.tick(cap + ε)`. On expiry,
-//!    emits `ConvergedFailed { Timeout }` and ends the stream.
+//!    emits a terminal `JobSubmitEvent::Failed` (`exit_code = -1`,
+//!    "did not converge in Ns") and ends the stream.
 //!
-//! Terminal detection per architecture.md §4 / ADR-0032 §3 Amendment:
+//! Terminal detection per architecture.md §4 / ADR-0032 §3 Amendment —
+//! each `TerminalCondition` projects to a terminal [`JobSubmitEvent`]:
 //!
-//! - `state == Running && replicas_running >= replicas_desired` →
-//!   `ConvergedRunning { alloc_id, started_at }`.
-//! - `state == Failed && restart_budget.exhausted` (read off
-//!   `view_cache`) → `ConvergedFailed { BackoffExhausted { attempts,
-//!   cause: <last cause-class TransitionReason from row> } }`.
-//! - `state == Terminated` → `ConvergedStopped { alloc_id, by }` where
-//!   `by` is extracted from `TransitionReason::Stopped { by }` or
-//!   defaults to `StoppedBy::Reconciler`.
-//! - cap timer → `ConvergedFailed { Timeout { after_seconds } }`.
+//! - `TerminalCondition::Completed { exit_code }` → `Succeeded`.
+//! - `TerminalCondition::Failed { exit_code }` → `Failed`.
+//! - `TerminalCondition::BackoffExhausted { attempts }` → `Failed`
+//!   (the workload exhausted its restart budget).
+//! - `TerminalCondition::Stopped { by }` → `Stopped`.
 //!
 //! On `RecvError::Lagged(_)`, the loop falls back to a one-shot
 //! `obs.alloc_status_rows()` snapshot per ADR-0032 §7 and resumes the
@@ -48,14 +47,14 @@
 //! the loop:
 //!
 //! 1. Live event delivery — the `bus.recv()` arm projects each
-//!    `LifecycleEvent` and runs `check_terminal` against the obs store.
+//!    `LifecycleEvent` and runs the terminal check against the obs store.
 //! 2. `RecvError::Lagged(_)` — buffer-overflow: a slow subscriber fell
 //!    behind and the broadcast channel evicted older messages. Bridged
 //!    by the `lagged_recover` snapshot in the `Lagged` arm.
 //! 3. `RecvError::Closed` — the `lifecycle_events` sender was dropped;
-//!    the loop emits a `ConvergedFailed` terminal and ends.
-//! 4. Cap timer — `clock.sleep(cap)` fires; the loop emits
-//!    `ConvergedFailed { Timeout }` and ends.
+//!    the loop emits a terminal `JobSubmitEvent::Failed` and ends.
+//! 4. Cap timer — `clock.sleep(cap)` fires; the loop emits a terminal
+//!    `JobSubmitEvent::Failed` and ends.
 //! 5. **Pre-subscription event window** — the upstream `put_if_absent`
 //!    write may trigger the convergence loop *before* `bus.subscribe()`
 //!    runs in this stream. `tokio::sync::broadcast::Sender::send` only
@@ -66,7 +65,7 @@
 //!    by a one-shot `lagged_recover` snapshot taken immediately after
 //!    `bus.subscribe()` and before the select loop is entered: if the
 //!    latest row for the job is already terminal, the snapshot
-//!    projects it to a terminal `SubmitEvent` and the stream ends
+//!    projects it to a terminal [`JobSubmitEvent`] and the stream ends
 //!    without entering the loop.
 
 // `async_stream::stream!` macro expansions trigger several pedantic
@@ -94,32 +93,20 @@
 // `rust_2024_compatibility = warn` does not block commits.
 #![allow(tail_expr_drop_order)]
 
-use std::num::NonZeroU32;
-
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
 use overdrive_core::TransitionReason;
 use overdrive_core::id::WorkloadId;
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::traits::observation_store::ObservationStore;
 use tokio::sync::broadcast;
 
 use crate::AppState;
 use crate::action_shim::LifecycleEvent;
-use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
+use crate::api::{AllocStateWire, IdempotencyOutcome};
 use crate::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::reconcilers::{TargetResource, backoff_for_attempt};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
-
-/// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
-fn emit_line(event: &SubmitEvent) -> std::io::Result<Bytes> {
-    use std::io::Write as _;
-    let mut buf = BytesMut::with_capacity(256);
-    let mut writer = (&mut buf).writer();
-    serde_json::to_writer(&mut writer, event).map_err(std::io::Error::other)?;
-    writer.write_all(b"\n")?;
-    Ok(buf.freeze())
-}
 
 // `BytesMut` implements `BufMut` but not `io::Write`; the small
 // shim here adapts so `serde_json::to_writer` can drive into it.
@@ -148,470 +135,13 @@ impl std::io::Write for BytesMutW<'_> {
     }
 }
 
-/// Build the streaming response body for the NDJSON lane.
-///
-/// `accepted` carries the `Accepted` event prepared synchronously by
-/// the handler after the `IntentStore::put_if_absent` returned, so
-/// the first line is structurally guaranteed to land before the
-/// reconcile path is entered.
-///
-/// `replicas_desired` is hydrated once at stream start (from the
-/// validated `ServiceV1.replicas` aggregate the handler has in scope)
-/// per the issue #140 fix. The streaming task captures it by value
-/// (`NonZeroU32: Copy`) and passes it to both `check_terminal` and
-/// `lagged_recover` so the `ConvergedRunning` gate (`running_count >=
-/// replicas_desired`) is evaluated against the operator-declared
-/// replica count, not the single-row shortcut. Phase 1 invariants
-/// (immutable aggregate; re-submit of a different spec is `Conflict`)
-/// guarantee `replicas_desired` cannot change mid-stream, so the
-/// one-shot hydration is correct for the stream's entire lifetime.
-///
-/// The returned stream yields `Result<Bytes, std::io::Error>` items
-/// that axum's `Body::from_stream(...)` wraps into the response body.
-pub fn build_stream(
-    state: AppState,
-    workload_id: WorkloadId,
-    accepted: SubmitEvent,
-    replicas_desired: NonZeroU32,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
-    let bus = state.lifecycle_events.clone();
-    let clock = state.clock.clone();
-    let obs = state.obs.clone();
-    let cap = state.streaming_cap;
-
-    async_stream::stream! {
-        // 1. Emit Accepted SYNCHRONOUSLY — first byte on the wire.
-        match emit_line(&accepted) {
-            Ok(line) => yield Ok(line),
-            Err(err) => {
-                yield Err(err);
-                return;
-            }
-        }
-
-        // 2. Subscribe to the broadcast bus AFTER Accepted is
-        //    emitted. The `Accepted` line does not depend on broadcast
-        //    state.
-        let mut sub = bus.subscribe();
-
-        // Drop the local `Arc<Sender>` clone immediately after
-        // subscribing. The `Receiver` we just created keeps the
-        // channel alive for our reads; retaining the `Sender` clone
-        // here would keep the channel open even when every external
-        // sender has dropped, making the `Err(RecvError::Closed)` arm
-        // below unreachable in normal operation. Dropping `bus` lets
-        // external senders (the action shim, exit observer) be the
-        // sole owners of the channel's send-side — when they all drop,
-        // our `sub.recv()` produces `Err(RecvError::Closed)` and we
-        // emit `TerminalReason::StreamInterrupted`.
-        drop(bus);
-
-        // 3. Bridge the pre-subscribe window: the upstream
-        //    `put_if_absent` + broker enqueue may have already
-        //    triggered a reconcile tick that wrote a terminal
-        //    `AllocStatusRow` and broadcast its `LifecycleEvent`
-        //    BEFORE the subscriber above existed. Such events are
-        //    permanently lost (`tokio::sync::broadcast::Sender::send`
-        //    only delivers to receivers `subscribe()`-d at send-time).
-        //    Reuse the same snapshot-and-classify primitive used for
-        //    `Lagged` recovery: read `obs.alloc_status_rows()` once and,
-        //    if the latest row for this job is already terminal, emit
-        //    the terminal event and end the stream — analogous to
-        //    ADR-0032 §7 lagged-recovery, applied to the subscribe-race
-        //    rather than the buffer-overflow class.
-        if let Some(terminal) = lagged_recover(&*obs, &workload_id, replicas_desired).await {
-            match emit_line(&terminal) {
-                Ok(line) => {
-                    yield Ok(line);
-                    return;
-                }
-                Err(err) => {
-                    yield Err(err);
-                    return;
-                }
-            }
-        }
-
-        let cap_future = clock.sleep(cap);
-        tokio::pin!(cap_future);
-
-        loop {
-            tokio::select! {
-                biased;
-                recv = sub.recv() => {
-                    match recv {
-                        Ok(event) => {
-                            if event.workload_id != workload_id {
-                                // Event for a different job — ignore.
-                                continue;
-                            }
-                            // Project to the wire shape.
-                            let line_event = SubmitEvent::LifecycleTransition {
-                                alloc_id: event.alloc_id.to_string(),
-                                from: event.from,
-                                to: event.to,
-                                reason: event.reason.clone(),
-                                detail: event.detail.clone(),
-                                source: event.source,
-                                at: event.at.clone(),
-                            };
-                            match emit_line(&line_event) {
-                                Ok(line) => yield Ok(line),
-                                Err(err) => {
-                                    yield Err(err);
-                                    return;
-                                }
-                            }
-
-                            // Terminal-detection: project the
-                            // event's reconciler-emitted terminal claim
-                            // into the wire-shape `SubmitEvent` per
-                            // ADR-0037 §4. The event's `terminal` field
-                            // is the single source of truth — no view
-                            // lookups, no `restart_counts >= CEILING`
-                            // recomputation.
-                            if let Some(terminal) = check_terminal(
-                                &*obs,
-                                &workload_id,
-                                &event,
-                                replicas_desired,
-                            ).await {
-                                match emit_line(&terminal) {
-                                    Ok(line) => {
-                                        yield Ok(line);
-                                        return;
-                                    }
-                                    Err(err) => {
-                                        yield Err(err);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            // Per ADR-0032 §7: fall back to a one-shot
-                            // observation snapshot. The next recv()
-                            // after Lagged is the new front of the
-                            // channel; no explicit resubscribe needed.
-                            if let Some(terminal) = lagged_recover(
-                                &*obs,
-                                &workload_id,
-                                replicas_desired,
-                            ).await {
-                                match emit_line(&terminal) {
-                                    Ok(line) => {
-                                        yield Ok(line);
-                                        return;
-                                    }
-                                    Err(err) => {
-                                        yield Err(err);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            // Channel closed — every `Sender` clone has
-                            // dropped (server shutdown, action shim
-                            // teardown, etc.) and no further events can
-                            // arrive. Emit `TerminalReason::StreamInterrupted`
-                            // to distinguish this server-side
-                            // interruption from a wall-clock cap timeout
-                            // (`TerminalReason::Timeout`) and from a
-                            // driver-error terminal
-                            // (`TerminalReason::DriverError`).
-                            let terminal = SubmitEvent::ConvergedFailed {
-                                alloc_id: None,
-                                terminal_reason: TerminalReason::StreamInterrupted,
-                                reason: None,
-                                error: Some("lifecycle channel closed".to_string()),
-                            };
-                            match emit_line(&terminal) {
-                                Ok(line) => yield Ok(line),
-                                Err(err) => yield Err(err),
-                            }
-                            return;
-                        }
-                    }
-                }
-                // Wall-clock cap timer. Production (`SystemClock`)
-                // parks on a real timer; DST (`SimClock`) parks until
-                // the harness calls `sim_clock.tick(cap + ε)`. On
-                // expiry, emit the timeout terminal and end the stream.
-                () = &mut cap_future => {
-                    let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
-                    let terminal = SubmitEvent::ConvergedFailed {
-                        alloc_id: None,
-                        terminal_reason: TerminalReason::Timeout { after_seconds },
-                        reason: None,
-                        error: Some(format!("did not converge in {after_seconds}s")),
-                    };
-                    match emit_line(&terminal) {
-                        Ok(line) => yield Ok(line),
-                        Err(err) => yield Err(err),
-                    }
-                    return;
-                }
-            }
-        }
-    }
-}
-
-/// Project a single broadcast [`LifecycleEvent`] into a terminal-or-
-/// running [`SubmitEvent`], gated on the operator-declared
-/// `replicas_desired` per issue #140.
-///
-/// Per ADR-0037 §4: terminal classification is the reconciler's
-/// decision, durably stamped onto `Action.terminal` and threaded onto
-/// `LifecycleEvent.terminal` by the action shim. This function reads
-/// `event.terminal` as the single source of truth for the terminal
-/// projection — no view lookups, no `restart_counts >= CEILING`
-/// recomputation.
-///
-/// Contract (per `.claude/rules/development.md` § *Trait definitions
-/// specify behavior, not just signature*):
-///
-/// * **Preconditions** — `obs` is the live observation store wired
-///   into `AppState`; `workload_id` is the Service the stream is
-///   bound to; `replicas_desired` is the validated `ServiceV1.replicas`
-///   carrying the `NonZero` invariant from the constructor.
-/// * **Postconditions** — returns `Some(ConvergedRunning { ... })`
-///   only when **every** of the following holds: `event.terminal` is
-///   `None`, `event.to == Running`, and the observation store
-///   carries at least `replicas_desired.get()` rows with
-///   `(workload_id == self, state == Running)`. Returns
-///   `Some(<terminal variant>)` whenever `event.terminal.is_some()`,
-///   bypassing the running-count gate (fail-fast on any single
-///   terminal claim — RCA §7). Otherwise returns `None`.
-/// * **Edge cases** — `replicas_desired == 1` behaves identically to
-///   the prior single-row shortcut by construction
-///   (`running_count >= 1` is equivalent to `rows.any(state ==
-///   Running)`). An obs read that returns `Err(_)` is treated as
-///   "not yet converged" and the function returns `None`; the next
-///   broadcast event will re-attempt the snapshot.
-/// * **Invariant** — a single terminal claim closes the stream
-///   regardless of the running-count gate state. This matches the
-///   pre-fix terminal-projection semantics (RCA §7 Q1 / Q2): any
-///   one allocation's `BackoffExhausted` / `Stopped` / `Custom`
-///   surfaces immediately, even with `replicas_desired > 1` and
-///   other allocations still pending or running.
-async fn check_terminal(
-    obs: &dyn ObservationStore,
-    workload_id: &WorkloadId,
-    event: &LifecycleEvent,
-    replicas_desired: NonZeroU32,
-) -> Option<SubmitEvent> {
-    // Terminal path — project the reconciler-emitted terminal claim
-    // (per ADR-0037 §4) into the wire-shape SubmitEvent. Both
-    // `AllocStatusRow.terminal` and `LifecycleEvent.terminal` carry
-    // the same value from the same dispatch frame — drift is
-    // structurally impossible. Fail-fast: a single terminal claim
-    // closes the stream regardless of how many other allocations
-    // are still pending or running (RCA §7).
-    if let Some(cond) = &event.terminal {
-        return Some(submit_event_from_terminal(cond, event));
-    }
-
-    // Success path — emit `ConvergedRunning` only when at least
-    // `replicas_desired` rows for this workload have reached
-    // `state == Running`. We read the obs store rather than trusting
-    // `event.to` alone so that a Running broadcast event without a
-    // corresponding obs row (e.g. a pre-stop Running event in the
-    // stop-while-streaming scenario) does NOT prematurely close the
-    // stream — and so the count is computed against the durable
-    // surface, not a transient broadcast view.
-    if matches!(event.to, AllocStateWire::Running) {
-        if let Ok(rows) = obs.alloc_status_rows().await {
-            let running_count: u32 = rows
-                .iter()
-                .filter(|r| r.workload_id == *workload_id && r.state == AllocState::Running)
-                .count()
-                .try_into()
-                .unwrap_or(u32::MAX);
-            if running_count >= replicas_desired.get() {
-                return Some(SubmitEvent::ConvergedRunning {
-                    alloc_id: event.alloc_id.to_string(),
-                    started_at: event.at.clone(),
-                });
-            }
-        }
-    }
-    None
-}
-
-/// Project a reconciler-emitted [`TerminalCondition`] into the wire-
-/// shape [`SubmitEvent`] terminal variant. Pure over its inputs;
-/// reused by both the live-event path (`check_terminal`) and the
-/// snapshot recovery path (`lagged_recover`) so the projection is in
-/// exactly one place.
-fn submit_event_from_terminal(cond: &TerminalCondition, event: &LifecycleEvent) -> SubmitEvent {
-    match cond {
-        TerminalCondition::Stopped { by } => {
-            SubmitEvent::ConvergedStopped { alloc_id: Some(event.alloc_id.to_string()), by: *by }
-        }
-        TerminalCondition::BackoffExhausted { attempts } => SubmitEvent::ConvergedFailed {
-            alloc_id: Some(event.alloc_id.to_string()),
-            terminal_reason: TerminalReason::BackoffExhausted {
-                attempts: *attempts,
-                cause: event.reason.clone(),
-            },
-            reason: Some(event.reason.clone()),
-            error: event.detail.clone(),
-        },
-        TerminalCondition::Custom { type_name, .. } => SubmitEvent::ConvergedFailed {
-            alloc_id: Some(event.alloc_id.to_string()),
-            terminal_reason: TerminalReason::DriverError { cause: event.reason.clone() },
-            reason: Some(event.reason.clone()),
-            error: Some(format!("custom terminal: {type_name}")),
-        },
-        // Forward-compat for future `#[non_exhaustive]` additions to
-        // `TerminalCondition`. Render unknown terminals as a generic
-        // ConvergedFailed{DriverError} carrying the event's existing
-        // cause so the stream still terminates rather than silently
-        // dropping the event.
-        _ => SubmitEvent::ConvergedFailed {
-            alloc_id: Some(event.alloc_id.to_string()),
-            terminal_reason: TerminalReason::DriverError { cause: event.reason.clone() },
-            reason: Some(event.reason.clone()),
-            error: event.detail.clone(),
-        },
-    }
-}
-
-/// On `Lagged(_)` (or the pre-subscribe snapshot), classify the
-/// observation-store snapshot for this workload against the
-/// operator-declared `replicas_desired`. Per ADR-0037 §4 the row's
-/// `terminal` field is the authoritative durable surface for
-/// terminal claims — no view consultation needed.
-///
-/// Contract (per `.claude/rules/development.md` § *Trait definitions
-/// specify behavior, not just signature*):
-///
-/// * **Preconditions** — `obs` is the live observation store;
-///   `workload_id` is the Service the stream is bound to;
-///   `replicas_desired` carries the `NonZero` invariant from the
-///   validated `ServiceV1.replicas`. Called at exactly two sites in
-///   [`build_stream`]: the pre-subscribe-window bridge and the
-///   `broadcast::error::RecvError::Lagged(_)` recovery arm.
-/// * **Postconditions** — returns `Some(<terminal variant>)` when
-///   the LWW-winner row for `workload_id` carries
-///   `Some(TerminalCondition)` (fail-fast: any single terminal row
-///   closes the stream regardless of running-count). Returns
-///   `Some(ConvergedRunning { ... })` when the count of rows with
-///   `state == Running` for `workload_id` meets or exceeds
-///   `replicas_desired.get()`; the emitted `alloc_id` / `started_at`
-///   identify the **most-recently-updated** Running row (not
-///   necessarily the LWW winner of the whole row set, which may be
-///   a non-Running transition even when sibling Running counts have
-///   met the gate). Otherwise returns `None`.
-/// * **Edge cases** — `replicas_desired == 1` behaves identically to
-///   the prior single-row shortcut by construction. Zero observation
-///   rows for `workload_id` returns `None`. An obs read failure
-///   returns `None` (the next broadcast event re-classifies).
-/// * **Invariant** — terminal-projection bypasses the running-count
-///   gate (RCA §7 Q1 / Q2 — fail-fast semantics preserved across the
-///   replicas-aware refactor).
-async fn lagged_recover(
-    obs: &dyn ObservationStore,
-    workload_id: &WorkloadId,
-    replicas_desired: NonZeroU32,
-) -> Option<SubmitEvent> {
-    let rows = obs.alloc_status_rows().await.ok()?;
-    let job_rows: Vec<_> = rows.into_iter().filter(|r| r.workload_id == *workload_id).collect();
-    // Fail-fast: ANY terminal row closes the stream regardless of
-    // running-count (docstring invariant, RCA §7 Q1/Q2).  Scan all
-    // rows, not just the LWW winner, because a sibling allocation may
-    // have a higher counter yet be non-terminal.
-    if let Some(terminal_row) =
-        job_rows.iter().filter(|r| r.terminal.is_some()).max_by_key(|r| r.updated_at.counter)
-    {
-        let cond = terminal_row
-            .terminal
-            .as_ref()
-            .unwrap_or_else(|| unreachable!("filter guarantees terminal.is_some()"));
-        let to_wire: AllocStateWire = terminal_row.state.into();
-        let event = LifecycleEvent {
-            alloc_id: terminal_row.alloc_id.clone(),
-            workload_id: terminal_row.workload_id.clone(),
-            from: to_wire,
-            to: to_wire,
-            reason: terminal_row.reason.clone().unwrap_or(
-                overdrive_core::TransitionReason::DriverInternalError { detail: String::new() },
-            ),
-            detail: terminal_row.detail.clone(),
-            source: crate::api::TransitionSource::Reconciler,
-            at: format!(
-                "{}@{}",
-                terminal_row.updated_at.counter,
-                terminal_row.updated_at.writer.as_str()
-            ),
-            terminal: Some(cond.clone()),
-        };
-        return Some(submit_event_from_terminal(cond, &event));
-    }
-
-    // Guard: need at least one row to proceed to the running-count gate.
-    if job_rows.is_empty() {
-        return None;
-    }
-
-    // Non-terminal — count Running rows for this workload and emit
-    // `ConvergedRunning` only when the count meets the operator's
-    // `replicas_desired`. The `alloc_id` / `started_at` seed for the
-    // wire event is the most-recently-updated Running row — `latest`
-    // may itself be a non-Running transition (e.g. a Pending row
-    // that arrived after sibling Running rows already met the gate).
-    let running_count: u32 = job_rows
-        .iter()
-        .filter(|r| r.state == AllocState::Running)
-        .count()
-        .try_into()
-        .unwrap_or(u32::MAX);
-    if running_count >= replicas_desired.get() {
-        let running = job_rows
-            .iter()
-            .filter(|r| r.state == AllocState::Running)
-            .max_by_key(|r| r.updated_at.counter)
-            .unwrap_or_else(|| {
-                unreachable!("running_count >= 1 guarantees at least one Running row")
-            });
-        return Some(SubmitEvent::ConvergedRunning {
-            alloc_id: running.alloc_id.to_string(),
-            started_at: format!(
-                "{}@{}",
-                running.updated_at.counter,
-                running.updated_at.writer.as_str()
-            ),
-        });
-    }
-    None
-}
-
-/// Build the synchronous `Accepted` event the handler emits before
-/// entering the streaming loop.
-///
-/// `vip` is the allocator-issued Service VIP per ADR-0049 (amended
-/// 2026-05-15); the legacy Service streaming lane carries it on
-/// `SubmitEvent::Accepted` so a consumer of the NDJSON Service stream
-/// observes the same VIP the JSON `SubmitWorkloadResponse` echoes.
-/// Pass `None` for Schedule / non-Service streams.
-#[must_use]
-pub fn build_accepted(
-    spec_digest: String,
-    intent_key: String,
-    outcome: IdempotencyOutcome,
-    vip: Option<String>,
-) -> SubmitEvent {
-    SubmitEvent::Accepted { spec_digest, intent_key, outcome, vip }
-}
-
 /// Build the synchronous `JobSubmitEvent::Accepted` event the handler
 /// emits before entering the Job-kind streaming loop.
 ///
 /// Per ADR-0047 §3 [D7]: Job-kind submits stream the per-kind sibling
-/// event enum [`JobSubmitEvent`]; the `Accepted` variant mirrors the
-/// existing legacy `SubmitEvent::Accepted` shape so wire-format
-/// migration is a renamed-tag change, not a payload change.
+/// event enum [`JobSubmitEvent`]; `Accepted` is the synchronous
+/// first NDJSON line, emitted before the loop subscribes to the
+/// lifecycle bus.
 #[must_use]
 pub fn build_workload_accepted(
     spec_digest: String,
@@ -624,9 +154,9 @@ pub fn build_workload_accepted(
 /// Build the streaming response body for the Job-kind NDJSON lane.
 ///
 /// Per ADR-0047 §3 [D7]: Job-kind streams the per-kind sibling-event
-/// enum [`JobSubmitEvent`]; the legacy flat [`SubmitEvent::ConvergedRunning`]
-/// variant is structurally unreachable on this code path because the
-/// type carries no equivalent variant — Jobs are run-to-completion and
+/// enum [`JobSubmitEvent`]. A false-positive "converged / running"
+/// terminal is structurally unreachable on this code path because the
+/// type carries no such variant — Jobs are run-to-completion and
 /// `Running` is informational only.
 ///
 /// Contract (per `.claude/rules/development.md` § *Trait definitions
@@ -648,8 +178,8 @@ pub fn build_workload_accepted(
 ///     observed within the wall-clock budget — distinguished from a
 ///     genuine non-zero exit by the sentinel `-1`).
 ///   - Broadcast `Closed` → `Failed { exit_code: -1 }` (server-side
-///     stream interruption — analogous to `TerminalReason::StreamInterrupted`
-///     on the legacy lane).
+///     stream interruption — the Service-kind lane surfaces the same
+///     condition as `ServiceFailureReason::StreamInterrupted`).
 ///   - Pre-subscribe race / `Lagged(_)` → snapshot-and-classify the
 ///     latest LWW-winner row; emit the matching terminal if reached.
 /// - **Observable invariants**: every Job-kind submit produces exactly
@@ -677,9 +207,9 @@ pub fn build_workload_stream(
             }
         }
 
-        // 2. Subscribe BEFORE the pre-subscribe snapshot recovery — same
-        //    ordering as `build_stream` to bridge the pre-subscribe
-        //    event window per architecture.md §10 / ADR-0032 §7.
+        // 2. Subscribe BEFORE the pre-subscribe snapshot recovery to
+        //    bridge the pre-subscribe event window per architecture.md
+        //    §10 / ADR-0032 §7.
         let mut sub = bus.subscribe();
         drop(bus);
 
@@ -769,7 +299,7 @@ pub fn build_workload_stream(
                                 &*obs, &runtime, &workload_id,
                             ).await;
                             let terminal = JobSubmitEvent::Failed {
-                                exit_code: -1,
+                                exit_code: Some(-1),
                                 duration: String::new(),
                                 attempts,
                                 max_attempts: attempts,
@@ -791,7 +321,7 @@ pub fn build_workload_stream(
                         &*obs, &runtime, &workload_id,
                     ).await;
                     let terminal = JobSubmitEvent::Failed {
-                        exit_code: -1,
+                        exit_code: Some(-1),
                         duration: format!("{after_seconds}s"),
                         attempts,
                         max_attempts: attempts,
@@ -811,8 +341,8 @@ pub fn build_workload_stream(
 }
 
 /// One NDJSON line for a [`JobSubmitEvent`] —
-/// `serde_json::to_writer(buf, &event)?` + `b'\n'`. Mirror of
-/// [`emit_line`] for the legacy [`SubmitEvent`] surface.
+/// `serde_json::to_writer(buf, &event)?` + `b'\n'`. The Service-kind
+/// counterpart is [`emit_service_line`].
 fn emit_workload_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
     use std::io::Write as _;
     let mut buf = BytesMut::with_capacity(256);
@@ -925,14 +455,14 @@ async fn workload_event_from_terminal(
             attempts: attempt_index,
         },
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration: event.at.clone(),
             attempts: *attempts,
             max_attempts: *attempts,
             stderr_tail,
         },
         _ => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration: event.at.clone(),
             attempts: attempt_index,
             max_attempts: attempt_index,
@@ -975,14 +505,14 @@ async fn workload_terminal_from_snapshot(
             JobSubmitEvent::Stopped { stopped_by: *by, duration, attempts: attempt_index }
         }
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration,
             attempts: *attempts,
             max_attempts: *attempts,
             stderr_tail,
         },
         _ => JobSubmitEvent::Failed {
-            exit_code: 1,
+            exit_code: Some(1),
             duration,
             attempts: attempt_index,
             max_attempts: attempt_index,
@@ -1022,13 +552,12 @@ async fn best_effort_attempt_count(
 // Per ADR-0047 §3 [D2] + [D7]: Job-kind submits stream a per-kind
 // sibling enum `JobSubmitEvent` whose variants make the historical
 // false-positive "is running with N/M replicas (took live)" rendering
-// structurally unreachable. The enum has NO `ConvergedRunning`
-// variant — the conjunction of RCA root causes B+C+D is rendered
-// impossible at the type level.
+// structurally unreachable — `Running` is informational, only an
+// exit-bearing terminal closes the stream. The conjunction of RCA
+// root causes B+C+D is rendered impossible at the type level.
 //
 // Job semantics (run-to-completion):
-//   * `Accepted` — synchronous first-line ack (mirrors the existing
-//     `SubmitEvent::Accepted` shape).
+//   * `Accepted` — synchronous first-line ack.
 //   * `Pending` — informational, allocation pending placement.
 //   * `Running { since }` — informational, NOT terminal. A Job is not
 //     "done" because it is currently running; it is done only when it
@@ -1042,15 +571,15 @@ async fn best_effort_attempt_count(
 
 /// Streaming events emitted by the Job submit sub-path.
 ///
-/// Per ADR-0047 §3 [D2] / [D7]: Job kind has NO `ConvergedRunning`
-/// variant — the conjunction of RCA root causes B+C+D is rendered
-/// structurally unreachable for Job by the type system itself.
+/// Per ADR-0047 §3 [D2] / [D7]: Job kind has no "converged / running"
+/// terminal variant — the conjunction of RCA root causes B+C+D is
+/// rendered structurally unreachable for Job by the type system itself.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum JobSubmitEvent {
-    /// Submit was accepted. Mirrors `SubmitEvent::Accepted` — first
-    /// NDJSON line on the wire. Synchronous; no broadcast wait.
+    /// Submit was accepted. First NDJSON line on the wire.
+    /// Synchronous; no broadcast wait.
     Accepted {
         /// Canonical 64-char lowercase-hex SHA-256 of the rkyv-archived
         /// `WorkloadSpec::Job` bytes (ADR-0002).
@@ -1081,7 +610,7 @@ pub enum JobSubmitEvent {
     /// exit on every attempt. CLI exit code = workload kernel exit
     /// code (per slice 02 KPI K1 honesty contract).
     Failed {
-        exit_code: i32,
+        exit_code: Option<i32>,
         duration: String,
         attempts: u32,
         max_attempts: u32,
@@ -1099,31 +628,359 @@ pub enum JobSubmitEvent {
 // Service streaming sub-path — slice 02 of `workload-kind-discriminator`.
 // ---------------------------------------------------------------------------
 //
-// Per ADR-0047 §3 [D2] / [D7]: Service-kind retains the existing
-// `ConvergedRunning` shape — long-running workloads converge on
-// "running" and stream remains observable. The legacy flat
-// `SubmitEvent` continues to serve Service-kind for backward
-// compatibility with existing consumers (this slice introduces the
-// per-kind enum surface; later slices may collapse the flat shape).
+// Per ADR-0056 / DDD-11 (single-cut V1→V2 wire migration, step 01-03e):
+// Service-kind's terminal events project the typed `TerminalCondition::
+// {Stable, ServiceFailed}` variants directly. `ServiceSubmitEvent::Stable`
+// carries the typed `ProbeWitness` naming the last-to-Pass startup probe;
+// `ServiceSubmitEvent::Failed` carries the typed `ServiceFailureReason`
+// (StartupTimeout / StartupProbeFailed / EarlyExit / LivenessProbeFailed)
+// per ADR-0055 §4. The wire shape preserves byte-equality with the row's
+// `terminal` field per ADR-0037 §4 K2 trace-equivalence.
 
 /// Streaming events emitted by the Service submit sub-path.
 ///
-/// Per ADR-0047 §3 [D7]: Service-kind retains `ConvergedRunning`
-/// (long-running workloads converge on the live state).
+/// Per ADR-0056 / DDD-11: V2 wire shape. Terminal events:
+/// * `Stable { settled_in_ms, witness }` — convergence reached the
+///   `TerminalCondition::Stable` shape (all declared startup probes
+///   passed within `startup_deadline`).
+/// * `Failed { reason, stderr_tail }` — convergence failed with a
+///   typed `ServiceFailureReason` cause (startup-timeout, startup-
+///   probe-failed, early-exit, liveness-probe-failed).
+///
+/// The wire projection is byte-equal with the row's typed
+/// `TerminalCondition` carried in `AllocStatusRow.terminal` — both
+/// surfaces project from the same `Action.terminal` value in the
+/// same action-shim call frame per ADR-0037 §4.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ServiceSubmitEvent {
-    /// Submit was accepted. Mirrors `SubmitEvent::Accepted`.
+    /// Submit was accepted. First NDJSON line on the wire.
     Accepted { spec_digest: String, intent_key: String, outcome: crate::api::IdempotencyOutcome },
-    /// Terminal — convergence reached `Running` with replicas met.
-    ConvergedRunning { alloc_id: String, started_at: String },
-    /// Terminal — convergence failed.
-    ConvergedFailed {
+    /// Terminal — service reached the Stable state per ADR-0055
+    /// (all declared startup probes passed within `startup_deadline`).
+    /// `settled_in_ms` is the wall-clock interval (in milliseconds)
+    /// from alloc start to the deciding tick that observed the
+    /// last-to-Pass startup probe. `witness` names which probe's
+    /// Pass moved the reconciler to Stable.
+    Stable { alloc_id: String, settled_in_ms: u64, witness: crate::api::ProbeWitnessWire },
+    /// Terminal — service convergence failed. `reason` carries the
+    /// typed `ServiceFailureReasonWire` cause discriminator per
+    /// ADR-0055 §4 / ADR-0056. `stderr_tail` is the last-N lines of
+    /// the workload's stderr (populated by ExitObserver in slice
+    /// 03-02; Option<String> here so the wire shape is stable
+    /// against the future plumbing).
+    Failed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         alloc_id: Option<String>,
-        terminal_reason: crate::api::TerminalReason,
-        error: Option<String>,
+        reason: crate::api::ServiceFailureReasonWire,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stderr_tail: Option<String>,
     },
+    /// Terminal — service stopped (by operator or by reconciler-
+    /// observed process exit / system gc). Per ADR-0059 Q1 this is
+    /// a sibling variant of `Failed`, NOT folded into it — CLI
+    /// exit-code semantics diverge (Stopped exits 0 / 130; Failed
+    /// exits with the failure-specific code). Mirrors the
+    /// `JobSubmitEvent::Stopped` sibling convention.
+    Stopped { alloc_id: String, by: overdrive_core::transition_reason::StoppedBy },
+}
+
+// ---------------------------------------------------------------------------
+// Service-kind projection — `TerminalCondition` → `ServiceSubmitEvent`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0059: single write site for Service-kind wire projections.
+// Lands the new variants from ADR-0059 Q1 (Stopped), Q2 (BackoffExhausted
+// with BackoffCause + last_exit_code), Q3 (Custom → Other with UTF-8-or-
+// hex render), and Q4 (Timeout / StreamInterrupted — synthesised, not
+// projected).
+//
+// These functions are NOT yet wired into the production `handlers.rs:498`
+// dispatch path — that wiring is the next step's concern per ADR-0059 Q6.
+// They land here as the taxonomy infrastructure the dispatch will consume.
+
+/// Project a [`TerminalCondition`] into the matching
+/// [`ServiceSubmitEvent`] variant.
+///
+/// Per ADR-0037 §3/§4 — single-write-site discipline: the same
+/// `Action.terminal` value the action_shim writes onto
+/// `AllocStatusRow.terminal` MUST project to the corresponding wire
+/// event byte-equal. The projection lives here so future wiring sites
+/// (handlers.rs:498 dispatch — next step) reuse one canonical mapping.
+///
+/// Returns `None` for `TerminalCondition` variants without a Service-
+/// kind wire projection (e.g. `Completed { exit_code }` — Job-kind
+/// natural exit, not reachable on the Service-kind broadcast lane).
+///
+/// `stderr_tail` is read by the caller from the row's `stderr_tail`
+/// field (typically via `obs.alloc_status_row(...).stderr_tail`).
+/// `last_exit_code` is read by the caller from the row's `exit_code`
+/// observation field — required for `BackoffExhausted` per ADR-0059
+/// Q2. `None` for projections that do not consult exit code.
+#[must_use]
+pub fn service_event_from_terminal(
+    alloc_id: &str,
+    terminal: &overdrive_core::transition_reason::TerminalCondition,
+    stderr_tail: Option<String>,
+    last_exit_code: Option<i32>,
+) -> Option<ServiceSubmitEvent> {
+    use overdrive_core::transition_reason::{
+        BackoffCause, ServiceFailureReason, TerminalCondition,
+    };
+    match terminal {
+        TerminalCondition::Stable { settled_in_ms, witness } => Some(ServiceSubmitEvent::Stable {
+            alloc_id: alloc_id.to_string(),
+            settled_in_ms: *settled_in_ms,
+            witness: witness.clone(),
+        }),
+        TerminalCondition::ServiceFailed { reason } => Some(ServiceSubmitEvent::Failed {
+            alloc_id: Some(alloc_id.to_string()),
+            reason: reason.clone(),
+            stderr_tail,
+        }),
+        TerminalCondition::Stopped { by } => {
+            Some(ServiceSubmitEvent::Stopped { alloc_id: alloc_id.to_string(), by: *by })
+        }
+        TerminalCondition::BackoffExhausted { attempts } => Some(ServiceSubmitEvent::Failed {
+            alloc_id: Some(alloc_id.to_string()),
+            reason: ServiceFailureReason::BackoffExhausted {
+                attempts: *attempts,
+                cause: BackoffCause::AttemptBudget,
+                last_exit_code,
+            },
+            stderr_tail,
+        }),
+        TerminalCondition::Custom { type_name, detail } => {
+            let message = render_custom_detail(detail.as_deref());
+            Some(ServiceSubmitEvent::Failed {
+                alloc_id: Some(alloc_id.to_string()),
+                reason: ServiceFailureReason::Other { source: type_name.clone(), message },
+                stderr_tail,
+            })
+        }
+        // Job-kind natural exit terminals have no Service-kind wire
+        // projection. The Service-kind broadcast lane is not reached
+        // for these in production; this match arm exists for
+        // exhaustiveness against the `#[non_exhaustive]` enum.
+        // mutants: skip — equivalent mutant: deleting this explicit arm
+        // folds it into the `_ => None` catch-all below; both return the
+        // identical `None`, so no test can observe the difference.
+        TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. } => None,
+        // Forward-compat for future `#[non_exhaustive]` additions to
+        // `TerminalCondition`. Unknown variants do not project to a
+        // Service-kind wire event; callers fall back to the
+        // streaming-loop's cap-timer / channel-closed synthesis.
+        _ => None,
+    }
+}
+
+/// Render `TerminalCondition::Custom.detail` bytes into the wire
+/// `ServiceFailureReason::Other.message` string per ADR-0059 Q3:
+/// best-effort UTF-8-or-lowercase-hex. `None` / empty → empty string.
+fn render_custom_detail(detail: Option<&[u8]>) -> String {
+    use std::fmt::Write as _;
+    let Some(bytes) = detail else { return String::new() };
+    if bytes.is_empty() {
+        return String::new();
+    }
+    std::str::from_utf8(bytes).map_or_else(
+        |_| {
+            let mut hex = String::with_capacity(bytes.len() * 2);
+            for b in bytes {
+                let _ = write!(&mut hex, "{b:02x}");
+            }
+            hex
+        },
+        ToString::to_string,
+    )
+}
+
+/// Synthesise the streaming wall-clock cap-timer terminal per
+/// ADR-0059 Q4. Streaming-loop-only — the reconciler MUST NOT emit
+/// this variant.
+#[must_use]
+pub fn service_stream_synth_cap_timeout(after_seconds: u32) -> ServiceSubmitEvent {
+    ServiceSubmitEvent::Failed {
+        alloc_id: None,
+        reason: overdrive_core::transition_reason::ServiceFailureReason::Timeout { after_seconds },
+        stderr_tail: None,
+    }
+}
+
+/// Synthesise the streaming broadcast-channel-closed terminal per
+/// ADR-0059 Q4. Streaming-loop-only — the reconciler MUST NOT emit
+/// this variant.
+#[must_use]
+pub fn service_stream_synth_closed() -> ServiceSubmitEvent {
+    ServiceSubmitEvent::Failed {
+        alloc_id: None,
+        reason: overdrive_core::transition_reason::ServiceFailureReason::StreamInterrupted,
+        stderr_tail: None,
+    }
+}
+
+/// Build the synchronous `ServiceSubmitEvent::Accepted` event the
+/// handler emits before entering the Service-kind streaming loop.
+///
+/// Mirror of [`build_workload_accepted`] for the Service-kind sibling
+/// surface. Per ADR-0056: Service-kind Accepted carries spec_digest
+/// + intent_key + outcome — no `vip` field (the VIP is on the JSON
+/// `SubmitWorkloadResponse` lane only).
+#[must_use]
+pub fn build_service_accepted(
+    spec_digest: String,
+    intent_key: String,
+    outcome: IdempotencyOutcome,
+) -> ServiceSubmitEvent {
+    ServiceSubmitEvent::Accepted { spec_digest, intent_key, outcome }
+}
+
+/// One NDJSON line for a [`ServiceSubmitEvent`] —
+/// `serde_json::to_writer(buf, &event)?` + `b'\n'`. Mirror of
+/// [`emit_workload_line`] for the Service-kind sibling surface.
+fn emit_service_line(event: &ServiceSubmitEvent) -> std::io::Result<Bytes> {
+    use std::io::Write as _;
+    let mut buf = BytesMut::with_capacity(256);
+    let mut writer = (&mut buf).writer();
+    serde_json::to_writer(&mut writer, event).map_err(std::io::Error::other)?;
+    writer.write_all(b"\n")?;
+    Ok(buf.freeze())
+}
+
+/// Build the streaming response body for the Service-kind NDJSON
+/// lane per ADR-0056 / ADR-0059.
+///
+/// Service-kind streams emit a synchronous `Accepted` line, then
+/// await broadcast `LifecycleEvent`s and project ONLY terminal events
+/// (`TerminalCondition::{Stable, ServiceFailed, Stopped,
+/// BackoffExhausted, Custom}`) into `ServiceSubmitEvent::{Stable,
+/// Failed, Stopped}` via [`service_event_from_terminal`]. The stream
+/// closes after the first terminal.
+///
+/// Contract (per `.claude/rules/development.md` § *Trait definitions
+/// specify behavior, not just signature*):
+///
+/// - **Preconditions**: `state.lifecycle_events` and `state.clock` are
+///   wired; `accepted` is the synchronous Accepted built by
+///   [`build_service_accepted`].
+/// - **Postconditions**: the returned stream emits `Accepted` first,
+///   then exactly ONE terminal variant
+///   (`Stable` / `Failed` / `Stopped`) before closing. No intermediate
+///   `LifecycleTransition` / `Running` / `Pending` lines per ADR-0056
+///   — the Service-kind wire surface is reduced to
+///   {Accepted, terminal}.
+/// - **Edge cases**:
+///   - Cap timer expiry → `Failed { reason: Timeout { after_seconds } }`
+///     per ADR-0059 Q4 via [`service_stream_synth_cap_timeout`].
+///   - Broadcast `Closed` → `Failed { reason: StreamInterrupted }`
+///     per ADR-0059 Q4 via [`service_stream_synth_closed`].
+///   - Non-terminal events (`event.terminal.is_none()`) are SILENTLY
+///     IGNORED — the Service-kind wire surface omits them by design
+///     (S-SHCP-WIRE-15).
+///   - Events for a different workload_id are ignored.
+/// - **Observable invariant**: every Service-kind submit produces
+///   exactly ONE terminal line on the wire; the stream never closes
+///   silently.
+pub fn build_service_stream(
+    state: AppState,
+    workload_id: WorkloadId,
+    accepted: ServiceSubmitEvent,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+    let bus = state.lifecycle_events.clone();
+    let clock = state.clock.clone();
+    let cap = state.streaming_cap;
+
+    async_stream::stream! {
+        // 1. Emit Accepted SYNCHRONOUSLY.
+        match emit_service_line(&accepted) {
+            Ok(line) => yield Ok(line),
+            Err(err) => {
+                yield Err(err);
+                return;
+            }
+        }
+
+        // 2. Subscribe after Accepted. Drop the local Sender clone so
+        //    `RecvError::Closed` is reachable when external Senders
+        //    drop.
+        let mut sub = bus.subscribe();
+        drop(bus);
+
+        let cap_future = clock.sleep(cap);
+        tokio::pin!(cap_future);
+
+        loop {
+            tokio::select! {
+                biased;
+                recv = sub.recv() => {
+                    match recv {
+                        Ok(event) => {
+                            if event.workload_id != workload_id {
+                                continue;
+                            }
+                            // Service-kind: only terminal events
+                            // project to a wire line. Non-terminal
+                            // (`event.terminal.is_none()`) is silently
+                            // ignored per ADR-0056 / S-SHCP-WIRE-15.
+                            let Some(terminal) = &event.terminal else {
+                                continue;
+                            };
+                            let alloc_id_str = event.alloc_id.to_string();
+                            let stderr_tail = event.detail.clone();
+                            let Some(wire) = service_event_from_terminal(
+                                &alloc_id_str,
+                                terminal,
+                                stderr_tail,
+                                None,
+                            ) else {
+                                // TerminalCondition variant without a
+                                // Service-kind wire projection (e.g.
+                                // Job-kind natural exit). Skip — the
+                                // cap timer or a subsequent broadcast
+                                // event will close the stream.
+                                continue;
+                            };
+                            match emit_service_line(&wire) {
+                                Ok(line) => {
+                                    yield Ok(line);
+                                    return;
+                                }
+                                Err(err) => {
+                                    yield Err(err);
+                                    return;
+                                }
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            // No observation-store fallback for the
+                            // Service-kind sibling surface in Phase 1
+                            // — a lagged Service stream waits for the
+                            // next live event or the cap timer.
+                            // Falls through to the next select! iteration.
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            let wire = service_stream_synth_closed();
+                            match emit_service_line(&wire) {
+                                Ok(line) => yield Ok(line),
+                                Err(err) => yield Err(err),
+                            }
+                            return;
+                        }
+                    }
+                }
+                () = &mut cap_future => {
+                    let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
+                    let wire = service_stream_synth_cap_timeout(after_seconds);
+                    match emit_service_line(&wire) {
+                        Ok(line) => yield Ok(line),
+                        Err(err) => yield Err(err),
+                    }
+                    return;
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,23 +1005,22 @@ pub enum ServiceSubmitEvent {
 /// Wire-shape declaration for the Schedule submit streaming sub-path.
 ///
 /// **Not currently emitted on any server code path.** `handlers.rs`
-/// routes `WorkloadKind::Schedule` through the legacy `build_stream`
-/// path, which emits [`SubmitEvent`]-shaped NDJSON. This enum is the
-/// forward-declared wire shape for when that dispatch is wired up;
+/// rejects `WorkloadKind::Schedule` at the submit validation step
+/// (HTTP 400) before any streaming dispatch. This enum is the
+/// forward-declared wire shape for when Schedule firing is wired up;
 /// tracked at GH #166.
 ///
 /// Per ADR-0047 §3 / [D7]: two variants, both emitted synchronously
-/// at submit time. `Accepted` mirrors the existing
-/// [`SubmitEvent::Accepted`] shape; `Registered` carries the cron
-/// expression echoed verbatim and the deferral tracking URL. The
-/// stream closes after `Registered` — Schedule has no firing
-/// semantics this slice (tracked at GH #166).
+/// at submit time. `Accepted` is the first NDJSON line; `Registered`
+/// carries the cron expression echoed verbatim and the deferral
+/// tracking URL. The stream closes after `Registered` — Schedule has
+/// no firing semantics this slice (tracked at GH #166).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ScheduleSubmitEvent {
-    /// Submit was accepted. Mirrors the existing `SubmitEvent::Accepted`
-    /// payload — `spec_digest` is the canonical 64-char lowercase-hex
+    /// Submit was accepted. The first NDJSON line on the wire —
+    /// `spec_digest` is the canonical 64-char lowercase-hex
     /// SHA-256 of the rkyv-archived `WorkloadSpec::Schedule` bytes;
     /// `intent_key` is the canonical `schedules/<id>` key; `outcome`
     /// is the idempotency verdict.
@@ -1197,11 +1053,13 @@ pub enum ScheduleSubmitEvent {
 #[allow(clippy::expect_used)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::num::NonZeroU32;
+
     use std::str::FromStr;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use overdrive_core::TransitionReason;
+    use overdrive_core::UnixInstant;
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::reconcilers::WorkloadLifecycleView;
@@ -1213,11 +1071,11 @@ mod tests {
     use overdrive_sim::adapters::observation_store::SimObservationStore;
 
     use crate::action_shim::LifecycleEvent;
-    use crate::api::{AllocStateWire, SubmitEvent, TransitionSource};
+    use crate::api::{AllocStateWire, TransitionSource};
     use crate::reconciler_runtime::ReconcilerRuntime;
 
     use super::{
-        JobSubmitEvent, best_effort_attempt_count, check_terminal, workload_event_from_terminal,
+        JobSubmitEvent, best_effort_attempt_count, workload_event_from_terminal,
         workload_terminal_from_snapshot,
     };
 
@@ -1253,6 +1111,8 @@ mod tests {
             stderr_tail: None,
             kind: WorkloadKind::Job,
             listeners: vec![],
+            // GAP-1 subsidiary: Terminated state was Running first.
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         }
     }
 
@@ -1277,41 +1137,6 @@ mod tests {
         };
         runtime.seed_workload_lifecycle_view_for_test(&target, view);
         runtime
-    }
-
-    // -----------------------------------------------------------------------
-    // check_terminal
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn check_terminal_projects_event_terminal_to_converged_stopped() {
-        let node = NodeId::from_str("node-a").expect("node id");
-        let obs = Arc::new(SimObservationStore::single_peer(node, 0));
-        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
-        let workload_id = WorkloadId::from_str("job-0").expect("job id");
-
-        let event = LifecycleEvent {
-            alloc_id: alloc_id.clone(),
-            workload_id: workload_id.clone(),
-            from: AllocStateWire::Running,
-            to: AllocStateWire::Terminated,
-            reason: TransitionReason::Stopped { by: StoppedBy::Reconciler },
-            detail: None,
-            source: TransitionSource::Driver(DriverType::Exec),
-            at: "1@node-a".to_string(),
-            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Reconciler }),
-        };
-
-        // `replicas_desired` is immaterial here — `event.terminal.is_some()`
-        // takes the fail-fast terminal-projection branch which bypasses
-        // the running-count gate per the RCA §7 invariant.
-        let replicas_desired = NonZeroU32::new(1).expect("non-zero");
-        let result = check_terminal(&*obs, &workload_id, &event, replicas_desired).await;
-
-        assert!(
-            matches!(result, Some(SubmitEvent::ConvergedStopped { .. })),
-            "expected Some(ConvergedStopped), got {result:?}"
-        );
     }
 
     // -----------------------------------------------------------------------
@@ -1349,13 +1174,13 @@ mod tests {
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
         let event = make_lifecycle_event(&alloc_id, &wl_id);
-        let cond = TerminalCondition::Failed { exit_code: 42 };
+        let cond = TerminalCondition::Failed { exit_code: Some(42) };
 
         let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
-                assert_eq!(exit_code, 42);
+                assert_eq!(exit_code, Some(42));
                 assert_eq!(attempts, 1);
                 assert_eq!(max_attempts, 1);
             }
@@ -1400,7 +1225,7 @@ mod tests {
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
-                assert_eq!(exit_code, 1);
+                assert_eq!(exit_code, Some(1));
                 assert_eq!(attempts, 5);
                 assert_eq!(max_attempts, 5);
             }
@@ -1443,13 +1268,13 @@ mod tests {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let event = make_lifecycle_event(&alloc_id, &wl_id);
-        let cond = TerminalCondition::Failed { exit_code: 137 };
+        let cond = TerminalCondition::Failed { exit_code: Some(137) };
 
         let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
-                assert_eq!(exit_code, 137);
+                assert_eq!(exit_code, Some(137));
                 assert_eq!(attempts, 3, "2 restarts → attempt_index 3");
                 assert_eq!(max_attempts, 3);
             }
@@ -1493,7 +1318,7 @@ mod tests {
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
 
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         assert!(result.is_none(), "expected None when row has no terminal, got {result:?}");
@@ -1515,7 +1340,7 @@ mod tests {
             &node,
             Some(TerminalCondition::Completed { exit_code: 0 }),
         );
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         assert!(result.is_none(), "expected None for non-matching workload_id, got {result:?}");
@@ -1536,7 +1361,7 @@ mod tests {
             &node,
             Some(TerminalCondition::Completed { exit_code: 0 }),
         );
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1561,14 +1386,14 @@ mod tests {
             &alloc_id,
             &wl_id,
             &node,
-            Some(TerminalCondition::Failed { exit_code: 137 }),
+            Some(TerminalCondition::Failed { exit_code: Some(137) }),
         );
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. }) => {
-                assert_eq!(exit_code, 137);
+                assert_eq!(exit_code, Some(137));
                 assert_eq!(attempts, 1);
                 assert_eq!(max_attempts, 1);
             }
@@ -1591,7 +1416,7 @@ mod tests {
             &node,
             Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
         );
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1618,12 +1443,12 @@ mod tests {
             &node,
             Some(TerminalCondition::BackoffExhausted { attempts: 3 }),
         );
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. }) => {
-                assert_eq!(exit_code, 1);
+                assert_eq!(exit_code, Some(1));
                 assert_eq!(attempts, 3);
                 assert_eq!(max_attempts, 3);
             }
@@ -1650,7 +1475,7 @@ mod tests {
             &node,
             Some(TerminalCondition::Completed { exit_code: 0 }),
         );
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1674,7 +1499,7 @@ mod tests {
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
 
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let count = best_effort_attempt_count(&*obs, &runtime, &wl_id).await;
         assert_eq!(count, 4, "3 restarts → attempt_index 4");
@@ -1703,7 +1528,7 @@ mod tests {
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
 
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
-        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
 
         let count = best_effort_attempt_count(&*obs, &runtime, &other_wl).await;
         assert_eq!(count, 1, "no obs rows for queried workload → default 1");

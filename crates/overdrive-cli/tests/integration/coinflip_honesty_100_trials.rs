@@ -205,7 +205,7 @@ async fn s_02_09_k1_honesty_100_trials() {
         // every trial's summary MUST NOT contain the historical
         // false-positive substrings. A single violation across 100
         // trials is a hard-fail because the structural fix from
-        // 02-01 (no `ConvergedRunning` on `JobSubmitEvent`) is
+        // 02-01 (no converged-running terminal on `JobSubmitEvent`) is
         // supposed to make these substrings unreachable for Job kind
         // by construction.
         if output.summary.contains("is running with") || output.summary.contains("(took live)") {

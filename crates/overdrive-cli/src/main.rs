@@ -97,8 +97,9 @@ async fn run(cli: Cli) -> Result<()> {
                         if out.exit_code == 0 {
                             Ok(())
                         } else {
-                            // Convergence failed — exit with the typed
-                            // code (1 for `ConvergedFailed`). Emit a
+                            // Convergence failed — exit with the
+                            // workload's kernel-observed exit code from
+                            // the terminal `Failed` event. Emit a
                             // discrete exit so the `eyre::Report` path
                             // does not collapse 1 and 2 into the same
                             // shell signal.

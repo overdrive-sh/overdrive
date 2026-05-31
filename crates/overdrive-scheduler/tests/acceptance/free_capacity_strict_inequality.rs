@@ -90,6 +90,8 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
+        // GAP-1 subsidiary: Pending state has no Running wall-clock yet.
+        started_at: None,
     }];
 
     let result = schedule(&nodes, &job, &allocs);

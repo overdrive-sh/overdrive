@@ -428,6 +428,9 @@ fn canonical_service_spec() -> ServiceSpecInput {
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
     }
 }
 
@@ -487,6 +490,198 @@ fn service_from_submit_rejects_duplicate_listener_port_protocol_with_validation_
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Service: probe mechanic validation on the API path.
+//
+// Regression tests for the bug where `from_submit` passed probe
+// descriptors without content validation. A `ProbeDescriptor` with
+// `path: "health"` (no leading `/`) passed admission, reached the
+// worker, and caused an indefinite service hang — the probe loop
+// built `http://127.0.0.1:8080health`, hyper rejected it, and
+// `supervised_probe_loop` swallowed the error without writing a
+// `ProbeResultRow`, so `startup_attempts_per_alloc` stayed at 0
+// and the startup window never closed.
+// ---------------------------------------------------------------------------
+
+use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::observation::ProbeRole;
+
+fn make_http_probe(path: &str) -> ProbeDescriptor {
+    ProbeDescriptor {
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::Http { path: path.to_owned(), port: 8080, host: None },
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_http_probe_path_without_leading_slash() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![make_http_probe("health")];
+
+    let err = ServiceV1::from_submit(spec)
+        .expect_err("http probe path without leading `/` must be rejected");
+
+    match err {
+        AggregateError::Validation { field, ref message } => {
+            assert_eq!(field, "startup_probes", "field must name `startup_probes`; got {field:?}");
+            assert!(message.contains('/'), "message must mention `/`; got {message:?}");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_empty_http_probe_path() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![make_http_probe("")];
+
+    let err = ServiceV1::from_submit(spec).expect_err("empty http probe path must be rejected");
+
+    match err {
+        AggregateError::Validation { field, .. } => {
+            assert_eq!(field, "startup_probes");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_https_in_probe_path() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![make_http_probe("https://example.com/healthz")];
+
+    let err = ServiceV1::from_submit(spec).expect_err("https:// in probe path must be rejected");
+
+    match err {
+        AggregateError::Validation { field, ref message } => {
+            assert_eq!(field, "startup_probes");
+            assert!(message.contains("https://"), "message must mention https://; got {message:?}");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_http_probe_with_zero_port() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![ProbeDescriptor {
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::Http { path: "/healthz".to_owned(), port: 0, host: None },
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    }];
+
+    let err = ServiceV1::from_submit(spec).expect_err("http probe with port 0 must be rejected");
+
+    match err {
+        AggregateError::Validation { field, .. } => {
+            assert_eq!(field, "startup_probes");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_tcp_probe_with_zero_port() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![ProbeDescriptor {
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port: 0 },
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    }];
+
+    let err = ServiceV1::from_submit(spec).expect_err("tcp probe with port 0 must be rejected");
+
+    match err {
+        AggregateError::Validation { field, .. } => {
+            assert_eq!(field, "startup_probes");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_rejects_exec_probe_with_empty_command() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![ProbeDescriptor {
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::Exec { command: vec![] },
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    }];
+
+    let err =
+        ServiceV1::from_submit(spec).expect_err("exec probe with empty command must be rejected");
+
+    match err {
+        AggregateError::Validation { field, .. } => {
+            assert_eq!(field, "startup_probes");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_validates_readiness_probes_too() {
+    let mut spec = canonical_service_spec();
+    spec.readiness_probes = vec![make_http_probe("health")];
+
+    let err = ServiceV1::from_submit(spec)
+        .expect_err("readiness probe without leading `/` must be rejected");
+
+    match err {
+        AggregateError::Validation { field, .. } => {
+            assert_eq!(field, "readiness_probes");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_validates_liveness_probes_too() {
+    let mut spec = canonical_service_spec();
+    spec.liveness_probes = vec![make_http_probe("health")];
+
+    let err = ServiceV1::from_submit(spec)
+        .expect_err("liveness probe without leading `/` must be rejected");
+
+    match err {
+        AggregateError::Validation { field, .. } => {
+            assert_eq!(field, "liveness_probes");
+        }
+        other => panic!("expected AggregateError::Validation, got {other:?}"),
+    }
+}
+
+#[test]
+fn service_from_submit_accepts_valid_http_probe() {
+    let mut spec = canonical_service_spec();
+    spec.startup_probes = vec![make_http_probe("/healthz")];
+
+    let service =
+        ServiceV1::from_submit(spec).expect("valid http probe with absolute path must be accepted");
+    assert_eq!(service.startup_probes.len(), 1);
 }
 
 // Sanity counter-check — two listeners with the SAME port but DIFFERENT

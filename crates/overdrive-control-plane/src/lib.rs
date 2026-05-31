@@ -68,6 +68,9 @@ pub mod observation_wiring;
 // orchestration, NOT a runtime entry point" in
 // `.claude/rules/development.md`.
 pub mod openapi;
+// service-health-check-probes step 01-03d — composition-root
+// `ProbeRunner` Earned-Trust boot helper per ADR-0054 § 7.
+pub mod probe_runner_boot;
 pub mod reconciler_runtime;
 // Phase 2.2 reconcilers per DWD-3. Currently hosts only the
 // `service_map_hydrator`; future Phase 2+ reconcilers will land
@@ -810,13 +813,95 @@ pub async fn run_server(
         .await
         .map_err(error::ControlPlaneError::from)?;
 
-    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
+    // Service-health-check-probes step 01-03d / ADR-0054 § 7 — the
+    // probe-runner Earned-Trust gate runs here, at the binary
+    // composition root, and the resulting `Arc<ProbeRunner>` is
+    // threaded into the production `ExecDriver` via the
+    // `compose_production_driver` helper below. Acceptance test
+    // `probe_runner_composition` drives the helper with `SimProber`
+    // adapters to assert the threading structurally — closes
+    // GAP-4 + GAP-5 from `.context/01-03-structural-gap-audit.md`.
+    // The `ProbeRunner` half of the composed pair is intentionally
+    // discarded here: the driver retains a clone of the `Arc` inside
+    // its `with_probe_runner(...)` field, so the supervisor map stays
+    // alive for the driver's lifetime. Destructuring the second
+    // tuple slot with `_` (NOT `_probe_runner`) makes the discard
+    // local + intentional and keeps the binary structurally distinct
+    // from the pre-patch shape that the dst-lint
+    // `underscore-binding-probe-runner` clause guards against.
+    //
+    // The driver shares the SAME cgroup root + probed `Arc<dyn CgroupFs>`
+    // substrate the workloads-slice bootstrap above used (Earned Trust
+    // invariant per ADR-0054 § Composition root wiring): `cgroup_root_path`
+    // and `fs` are threaded through rather than re-deriving the literal
+    // `/sys/fs/cgroup`.
+    let (driver, _) = compose_production_driver(
+        Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
+        Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
+        Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
         cgroup_root_path,
         Arc::new(overdrive_host::SystemClock),
         fs,
-    ));
+        Arc::clone(&obs),
+    )
+    .await?;
 
     run_server_with_obs_and_driver(config, obs, driver).await
+}
+
+/// Compose the production `ExecDriver` with its Earned-Trust-vetted
+/// `Arc<ProbeRunner>` already threaded via `with_probe_runner(...)`.
+///
+/// This is the single composition site for the production driver +
+/// probe-runner threading per service-health-check-probes
+/// step 01-03d / ADR-0054 § 7 + § 2. The Earned-Trust gate
+/// (`probe_runner_boot::compose_and_probe_runner_gate`) runs FIRST;
+/// on success the returned `Arc<ProbeRunner>` is cloned into the
+/// driver builder so `ExecDriver::on_alloc_running` /
+/// `on_alloc_terminal` fire the per-alloc supervisor lifecycle in
+/// production. Without this threading the driver's lifecycle hooks
+/// fall through to the trait-default no-op and the probe subsystem
+/// is structurally dead — the failure mode `.context/01-03-structural-
+/// gap-audit.md` GAP-4 + GAP-5 documents.
+///
+/// Returns `(Arc<dyn Driver>, Arc<ProbeRunner>)` so acceptance tests
+/// can capture both halves of the composition and assert on
+/// observable state (`runner.active_alloc_count()` before and after
+/// `driver.on_alloc_running(...)` fires).
+///
+/// # Errors
+///
+/// Propagates `ControlPlaneError::ProbeRunnerBoot` from the
+/// Earned-Trust gate — the helper emits the canonical
+/// `health.startup.refused` tracing event before returning so the
+/// CLI binary boundary surfaces a structured refusal.
+pub async fn compose_production_driver(
+    tcp_prober: Arc<dyn overdrive_core::traits::prober::TcpProber>,
+    http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
+    exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
+    cgroup_root: std::path::PathBuf,
+    clock: Arc<dyn Clock>,
+    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+    observation_store: Arc<dyn ObservationStore>,
+) -> Result<
+    (Arc<dyn Driver>, Arc<overdrive_worker::probe_runner::ProbeRunner>),
+    error::ControlPlaneError,
+> {
+    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
+        tcp_prober,
+        http_prober,
+        exec_prober,
+        Arc::clone(&clock),
+        observation_store,
+    )
+    .await?;
+
+    let driver: Arc<dyn Driver> = Arc::new(
+        overdrive_worker::ExecDriver::new(cgroup_root, clock, fs)
+            .with_probe_runner(Arc::clone(&probe_runner)),
+    );
+
+    Ok((driver, probe_runner))
 }
 
 /// Start the control-plane server with caller-supplied observation
@@ -1048,6 +1133,21 @@ pub async fn run_server_with_obs_and_driver(
     // placeholder from 01-04 is removed in the same commit per
     // `feedback_single_cut_greenfield_migrations.md`.
     let host_ipv4 = resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?;
+    // Service-health-check-probes — the `ProbeRunner` Earned-Trust
+    // gate and the threading of `Arc<ProbeRunner>` into the
+    // production `ExecDriver` now live at the binary composition
+    // root (`run_server`) per ADR-0054 § 7. This split function
+    // accepts a caller-supplied driver and intentionally bypasses
+    // the gate: production drivers come in already-wired (the
+    // composition-root threaded the runner via
+    // `ExecDriver::with_probe_runner(...)` before delegating here);
+    // test callers that pass a non-`ExecDriver` (`SimDriver` etc.)
+    // are not exercising the probe path. A test caller that
+    // genuinely needs the gate's behaviour with a custom driver
+    // calls `probe_runner_boot::compose_and_probe_runner_gate(...)`
+    // itself and applies `.with_probe_runner(...)` before passing
+    // the driver in.
+
     runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
     // UI-05 (`backend-discovery-bridge-service-reachability` step
     // 02-04 architectural remediation) — register the
@@ -1061,6 +1161,14 @@ pub async fn run_server_with_obs_and_driver(
     // .. }` resolves against a registered reconciler when the
     // broker first drains.
     runtime.register(service_map_hydrator(host_ipv4)).await?;
+    // Service-health-check-probes step 01-03d — register the
+    // `service-lifecycle` reconciler via the `AnyReconciler::
+    // ServiceLifecycle` dispatch enum landed in step 01-03b
+    // (commit 087bada4). Phase-1 reconcile-body branches (Stable,
+    // EarlyExit, StartupProbeFailed, idempotent-no-op) landed in
+    // step 01-03 (commit 2fabf259); the readiness / liveness
+    // arms land in slices 04 / 05.
+    runtime.register(service_lifecycle()).await?;
     let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
@@ -1310,6 +1418,30 @@ pub fn backend_discovery_bridge(
     use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
 
     AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
+}
+
+/// Construct the `service-lifecycle` reconciler per ADR-0055.
+///
+/// The Phase 1 Service-kind workload reconciler — converges
+/// `Stable` / `StartupProbeFailed` / `EarlyExit` terminal conditions
+/// against the running `AllocStatusRow` set + probe-result rows.
+/// Registered at production boot alongside `noop-heartbeat` /
+/// `workload-lifecycle` / `backend-discovery-bridge` /
+/// `service-map-hydrator`.
+///
+/// Per service-health-check-probes step 01-03d this completes the
+/// composition-root registration arc: the reconciler-core
+/// (`ServiceLifecycleReconciler::reconcile`) landed in commit
+/// `2fabf259` (step 01-03), the `AnyReconciler::ServiceLifecycle`
+/// dispatch enum landed in commit `087bada4` (step 01-03b), and
+/// this factory is the runtime-facing constructor invoked by
+/// `run_server_with_obs_and_driver`.
+#[must_use]
+pub fn service_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::AnyReconciler;
+    use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
+
+    AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new())
 }
 
 /// Construct the `service-map-hydrator` reconciler.

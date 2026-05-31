@@ -55,6 +55,7 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

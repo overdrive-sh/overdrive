@@ -40,7 +40,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
+use overdrive_core::aggregate::{IntentKey, Job, Node, ProbeDescriptor, WorkloadKind};
 use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconcilers::ServiceMapHydrator;
@@ -50,6 +50,7 @@ use overdrive_core::reconcilers::{
     ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
     WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
+use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
 
@@ -86,6 +87,12 @@ enum AnyViewMap {
     /// views per ADR-0035 §5. Phase 2.2
     /// (`backend-discovery-bridge-service-reachability` step 01-01).
     BackendDiscoveryBridge(BTreeMap<TargetResource, BackendDiscoveryBridgeView>),
+    /// `ServiceLifecycle` carries `View = ServiceLifecycleView`;
+    /// the map holds per-target persisted views per ADR-0035 §5 /
+    /// ADR-0055. Service-health-check-probes step 01-03b (dispatch
+    /// wiring); the runtime-registration call site lands in a
+    /// later slice.
+    ServiceLifecycle(BTreeMap<TargetResource, ServiceLifecycleView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -269,6 +276,20 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::BackendDiscoveryBridge(loaded)
             }
+            // service-health-check-probes step 01-03b — bulk-load the
+            // persisted `ServiceLifecycleView` map. Shape mirrors
+            // `WorkloadLifecycle` exactly; the registration call site
+            // is wired in a later slice.
+            AnyReconciler::ServiceLifecycle(_) => {
+                let loaded: BTreeMap<TargetResource, ServiceLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::ServiceLifecycle(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -350,7 +371,8 @@ impl ReconcilerRuntime {
             AnyViewMap::WorkloadLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
             AnyViewMap::Unit
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => WorkloadLifecycleView::default(),
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -404,6 +426,11 @@ impl ReconcilerRuntime {
             AnyViewMap::BackendDiscoveryBridge(map) => AnyReconcilerView::BackendDiscoveryBridge(
                 map.get(target).cloned().unwrap_or_default(),
             ),
+            // service-health-check-probes step 01-03b — same shape as
+            // the WorkloadLifecycle / ServiceMapHydrator arms.
+            AnyViewMap::ServiceLifecycle(map) => {
+                AnyReconcilerView::ServiceLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
         })
     }
 
@@ -486,7 +513,8 @@ impl ReconcilerRuntime {
                         }
                         AnyViewMap::Unit
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_) => WorkloadLifecycleView::default(),
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -530,9 +558,8 @@ impl ReconcilerRuntime {
                         }
                         AnyViewMap::Unit
                         | AnyViewMap::WorkloadLifecycle(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_) => {
-                            ServiceMapHydratorView::default()
-                        }
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => ServiceMapHydratorView::default(),
                     }
                 };
                 if current == view {
@@ -574,9 +601,8 @@ impl ReconcilerRuntime {
                         }
                         AnyViewMap::Unit
                         | AnyViewMap::WorkloadLifecycle(_)
-                        | AnyViewMap::ServiceMapHydrator(_) => {
-                            BackendDiscoveryBridgeView::default()
-                        }
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::ServiceLifecycle(_) => BackendDiscoveryBridgeView::default(),
                     }
                 };
                 if current == view {
@@ -599,6 +625,47 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::BackendDiscoveryBridge(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            // service-health-check-probes step 01-03b — Eq-diff skip
+            // + fsync-then-memory write-through, mirrors the
+            // BackendDiscoveryBridge arm above. ADR-0055 / ADR-0035 §5.
+            AnyReconcilerView::ServiceLifecycle(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::ServiceLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_) => ServiceLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::ServiceLifecycle(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -654,7 +721,8 @@ impl ReconcilerRuntime {
             AnyViewMap::WorkloadLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
         }
     }
 
@@ -728,7 +796,8 @@ impl ReconcilerRuntime {
             AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
             AnyViewMap::Unit
             | AnyViewMap::WorkloadLifecycle(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
         }
     }
 
@@ -781,7 +850,8 @@ impl ReconcilerRuntime {
             AnyViewMap::BackendDiscoveryBridge(map) => Some(map.clone()),
             AnyViewMap::Unit
             | AnyViewMap::WorkloadLifecycle(_)
-            | AnyViewMap::ServiceMapHydrator(_) => None,
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
         }
     }
 
@@ -819,6 +889,61 @@ impl ReconcilerRuntime {
             map.insert(target.clone(), view);
         }
     }
+
+    /// Snapshot of the in-memory `ServiceLifecycleView` map for
+    /// `name`. Mirrors the BackendDiscoveryBridge variant for the
+    /// ServiceLifecycle reconciler. **Test-only.** Per
+    /// service-health-check-probes step 01-03b mutation-tightening
+    /// pass — exposes the in-memory state so the Eq-diff write-skip
+    /// gate can be asserted directly.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_service_lifecycle_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, ServiceLifecycleView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::ServiceLifecycle(map) => Some(map.clone()),
+            AnyViewMap::Unit
+            | AnyViewMap::WorkloadLifecycle(_)
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path with a typed
+    /// `ServiceLifecycleView`. Mirrors the BackendDiscoveryBridge
+    /// variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_service_lifecycle_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: ServiceLifecycleView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::ServiceLifecycle(next)).await
+    }
+
+    /// Seed the in-memory view for `(service-lifecycle, target)`
+    /// directly, bypassing the `ViewStore`. Mirrors the
+    /// BackendDiscoveryBridge variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_service_lifecycle_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: ServiceLifecycleView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&service_lifecycle_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::ServiceLifecycle(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
 }
 
 /// Build the canonical [`ReconcilerName`] for the [`WorkloadLifecycle`]
@@ -853,6 +978,15 @@ fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
             as Reconciler>::NAME,
     )
     .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn service_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(
+        <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
+    )
+    .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,6 +1239,26 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // backoff-pending signal, so this arm returns false. A future
         // bridge-side retry policy would extend this match.
         | AnyReconcilerView::BackendDiscoveryBridge(_) => false,
+        // GAP-9 Shape B — keep the service-lifecycle reconciler alive
+        // across cadences while any observed alloc is mid-startup-window.
+        //
+        // During the active startup window the reconciler emits ZERO
+        // actions (Running, no Pass yet, deadline not elapsed), so the
+        // §18 *action-emitted* self-re-enqueue gate (`has_work`) is
+        // false and the broker would drain empty after the FIRST tick —
+        // leaving the reconciler never re-ticked and its Stable /
+        // EarlyExit / StartupProbeFailed branches structurally
+        // unreachable in production (the GAP-9 defect).
+        //
+        // The predicate is true IFF the view records an observed alloc
+        // that has NOT yet reached a terminal (`stable_announced` ∪
+        // `terminal_announced`). It flips to false the instant the alloc
+        // reaches ANY terminal — Stable OR ServiceFailed — so a
+        // terminal alloc does NOT keep the runtime spinning (the
+        // busy-loop GAP-9's fix must avoid). The decision is derivable
+        // from `next_view` alone, as `view_has_backoff_pending`
+        // requires.
+        AnyReconcilerView::ServiceLifecycle(view) => view.has_alloc_mid_startup_window(),
         AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
@@ -1129,7 +1283,7 @@ async fn hydrate_desired(
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            let (job, intent_digest) = read_job(state, &workload_id).await?;
+            let (job, intent_digest, probe_descriptors) = read_job(state, &workload_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
@@ -1158,6 +1312,10 @@ async fn hydrate_desired(
                 allocations: BTreeMap::new(),
                 workload_kind,
                 service_spec_digest,
+                // GAP-8 close-out — Service-kind probes projected at the
+                // hydrate-desired boundary via `project_probe_descriptors`.
+                // Job-kind / Schedule / absent intent → empty vec.
+                probe_descriptors,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }
@@ -1211,7 +1369,212 @@ async fn hydrate_desired(
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
         }
+        // service-health-check-probes — closes GAP-1 from Phase 01
+        // structural gap audit (`.context/01-03-structural-gap-audit.md`).
+        //
+        // `desired` carries the per-alloc `ServiceAllocFact`s populated
+        // from the SPEC side only — `max_attempts`, `startup_deadline`,
+        // `mechanic_summary`, `inferred`, `startup_probes_empty` come
+        // from the live `ServiceSpec`. The observation-derived fields
+        // (`state`, `started_at`, `exit_code`, `latest_startup_probe`)
+        // are filled in by [`hydrate_actual`] against the same
+        // `AllocationId` keys; the reconciler reads `actual.allocs`
+        // for the per-tick decision per ADR-0055.
+        //
+        // The desired-side `allocs` map is keyed by allocation id —
+        // however, the desired side has no allocations to enumerate
+        // (the spec describes the workload, not its instances). Phase 1
+        // returns an empty `desired.allocs` map; the reconciler's
+        // decision loop walks `actual.allocs` and the spec-derived
+        // fields are duplicated onto every actual-side fact below in
+        // [`hydrate_actual`] (the spec is per-workload, not per-alloc,
+        // so the spec-derived fields are uniform across allocs of the
+        // same workload).
+        AnyReconciler::ServiceLifecycle(_) => {
+            let workload_id = workload_id_from_target(target)?;
+            // Empty intent => empty desired (no panic; next tick retries).
+            let allocs = service_spec_from_intent(state, &workload_id)
+                .await?
+                .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
+            // Desired side carries no dataplane identity — the readiness
+            // branch reads it from `actual` only (the observed backend
+            // set is the actual-side projection).
+            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
+                allocs,
+                service_dataplane: None,
+            }))
+        }
     }
+}
+
+/// Read `WorkloadIntent::Service(ServiceV1)` from the IntentStore for
+/// `workload_id`. Returns `Ok(None)` when the intent is absent
+/// (deferred to next tick) or when the persisted intent is a
+/// `Job` / `Schedule` variant (kind mismatch — Service-lifecycle
+/// dispatch arm should not have been picked, but defend in depth).
+async fn service_spec_from_intent(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<Option<overdrive_core::aggregate::ServiceV1>, ConvergenceError> {
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = state
+        .store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+        bytes.as_ref(),
+        &state.intent_redb_path,
+        Some(key.as_str()),
+    )
+    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    match intent {
+        overdrive_core::aggregate::WorkloadIntent::Service(svc) => Ok(Some(svc)),
+        overdrive_core::aggregate::WorkloadIntent::Job(_)
+        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok(None),
+    }
+}
+
+/// Format a `ProbeMechanic` into the `ProbeWitness.mechanic_summary`
+/// operator-facing string per US-06 AC (e.g. `"tcp 0.0.0.0:8080"`,
+/// `"http /healthz"`, `"exec /bin/probe"`).
+fn format_mechanic_summary(
+    mechanic: &overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+) -> String {
+    use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
+    match mechanic {
+        ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
+        ProbeMechanic::Http { path, port, host } => host
+            .as_ref()
+            .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
+        ProbeMechanic::Exec { command } => {
+            command.first().map_or_else(|| "exec".to_string(), |c| format!("exec {c}"))
+        }
+    }
+}
+
+/// Project the spec-derived fields a `ServiceAllocFact` carries
+/// uniformly across every alloc of the same workload. Returns a
+/// closure-able tuple `(max_attempts, startup_deadline,
+/// mechanic_summary, inferred, startup_probes_empty)` derived from
+/// `ServiceV1.startup_probes` per ADR-0057/0058.
+fn spec_facts_for_service(
+    svc: &overdrive_core::aggregate::ServiceV1,
+) -> (u32, Duration, String, bool, bool) {
+    use overdrive_core::service_lifecycle::DEFAULT_STARTUP_DEADLINE;
+    let startup_probes_empty = svc.startup_probes.is_empty();
+    if startup_probes_empty {
+        // Per ADR-0058 §4 / ADR-0059 Q5 opt-out semantics: no probes
+        // declared. The reconciler's empty-probes opt-out branch
+        // never reads `mechanic_summary` (it hardcodes
+        // `"none (opted out)"`) — provide a defensible default for
+        // the field so the fact shape stays uniform.
+        return (30, DEFAULT_STARTUP_DEADLINE, String::new(), false, true);
+    }
+    // Phase 1: only probe at idx 0 is consulted by the reconciler's
+    // Stable / EarlyExit / StartupProbeFailed branches per ADR-0055.
+    // Slice 04 / 05 introduce readiness / liveness; the descriptors
+    // are already carried in the spec but the desired-side projection
+    // for those branches is out of GAP-1's scope.
+    let probe = &svc.startup_probes[0];
+    let max_attempts = probe.max_attempts;
+    let interval = Duration::from_secs(u64::from(probe.interval_seconds));
+    let startup_deadline =
+        interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
+    let mechanic_summary = format_mechanic_summary(&probe.mechanic);
+    (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
+}
+
+/// Slice 04 — project the readiness facts uniform across every alloc:
+/// `(has_readiness_probe, success_threshold)`. `has_readiness_probe`
+/// is `ServiceV1.readiness_probes` non-empty; `success_threshold` is
+/// the first readiness probe's declared threshold (default 1 per
+/// ADR-0055 §6 / ADR-0057 §2), or 1 when absent. Per persist-inputs,
+/// these are re-derived from the live spec every tick.
+fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+    let has_readiness_probe = !svc.readiness_probes.is_empty();
+    let success_threshold =
+        svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
+    (has_readiness_probe, success_threshold)
+}
+
+/// Step 03-02 / Slice 05 — project the liveness facts uniform across
+/// every alloc: `(has_liveness_probe, failure_threshold)`.
+/// `has_liveness_probe` is `ServiceV1.liveness_probes` non-empty;
+/// `failure_threshold` is the first liveness probe's declared
+/// threshold (default 3 per ADR-0057 §2 / DDD-14), or 3 when absent.
+/// Per persist-inputs, these are re-derived from the live spec every
+/// tick — never persisted as a `should_restart` flag.
+fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+    let has_liveness_probe = !svc.liveness_probes.is_empty();
+    let failure_threshold = svc
+        .liveness_probes
+        .first()
+        .and_then(|p| p.failure_threshold)
+        .unwrap_or(LIVENESS_FAILURE_THRESHOLD_DEFAULT);
+    (has_liveness_probe, failure_threshold)
+}
+
+/// Liveness probe `failure_threshold` default per ADR-0057 §2 /
+/// DDD-14 — three consecutive Fails on a Running alloc trigger
+/// `RestartAllocation`. Operator-configurable.
+const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
+
+/// Slice 04 — resolve the service's dataplane identity (service_id +
+/// allocator-issued VIP + local writer node) for the readiness
+/// branch's `ServiceBackendRow` composition. Mirrors
+/// [`hydrate_bridge_desired_listeners`]'s VIP resolution: compute the
+/// spec digest, consult the allocator memo, derive the `ServiceId`
+/// from the first listener's `(vip, port)` per ADR-0052 § 1.
+///
+/// Returns `None` when the Service has no listener (no VIP surface) or
+/// the allocator memo is absent (VIP not yet issued) — in either case
+/// the readiness branch is a no-op for this tick.
+async fn service_dataplane_identity(
+    state: &AppState,
+    workload_id: &WorkloadId,
+    svc: &overdrive_core::aggregate::ServiceV1,
+) -> Result<Option<overdrive_core::service_lifecycle::ServiceDataplaneIdentity>, ConvergenceError> {
+    let Some(listener) = svc.listeners.first() else {
+        return Ok(None);
+    };
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = state
+        .store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+        bytes.as_ref(),
+        &state.intent_redb_path,
+        Some(key.as_str()),
+    )
+    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    let spec_digest_hash =
+        intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+    let assigned_vip_opt = {
+        let guard = state.allocator.lock().await;
+        let vip = guard.get(&digest_bytes);
+        drop(guard);
+        vip
+    };
+    let Some(assigned_vip) = assigned_vip_opt else {
+        return Ok(None);
+    };
+    let service_id =
+        overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
+    Ok(Some(overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
+        service_id,
+        vip: assigned_vip,
+        writer: state.node_id.clone(),
+    }))
 }
 
 /// Test-only public wrapper for [`hydrate_desired`]. Used by
@@ -1368,33 +1731,46 @@ async fn hydrate_bridge_desired_listeners(
 async fn read_job(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<(Option<Job>, Option<ContentHash>), ConvergenceError> {
+) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>), ConvergenceError> {
     let key = IntentKey::for_workload(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let Some(b) = bytes else { return Ok((None, None)) };
+    let Some(b) = bytes else { return Ok((None, None, Vec::new())) };
     let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
         b.as_ref(),
         &state.intent_redb_path,
         Some(key.as_str()),
     )
     .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    // GAP-8 close-out (Phase 01 structural audit): project the live
+    // intent's probe descriptors here at hydrate-desired time and
+    // thread them through `WorkloadLifecycleState::probe_descriptors`.
+    // Pre-patch the projection step did not exist and the reconciler
+    // hardcoded `probe_descriptors: Vec::new()` in both action arms;
+    // Service-kind workloads silently lost their declared probes even
+    // after GAP-6 (admission) + GAP-7 (per-descriptor spawn loop)
+    // landed. The helper is canonical-order (startup → readiness →
+    // liveness); Job / Schedule yield empty per ADR-0054 §3.
+    let probe_descriptors = overdrive_core::reconcilers::project_probe_descriptors(&intent);
     match &intent {
-        overdrive_core::aggregate::WorkloadIntent::Job(job) => Ok((Some(job.clone()), None)),
+        overdrive_core::aggregate::WorkloadIntent::Job(job) => {
+            Ok((Some(job.clone()), None, probe_descriptors))
+        }
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
             // Project Service onto a kind-agnostic Job shape. JobV1
             // and ServiceV1 are field-for-field equivalent over
             // (id, replicas, resources, driver) — the reconciler's
             // `Some(job) =>` arm reads only these four fields, so the
             // projection is lossless from its perspective. Service-
-            // only fields (listeners) are consumed elsewhere via
-            // ServiceV1-typed reads. The `WorkloadKind::Service`
-            // discriminator is threaded separately via
-            // `desired.workload_kind` so emitted actions and rows
-            // correctly record their Service origin.
+            // only fields (listeners, *_probes) are consumed elsewhere:
+            // listeners via ServiceV1-typed reads; probe descriptors
+            // via `probe_descriptors` returned alongside `job`. The
+            // `WorkloadKind::Service` discriminator is threaded
+            // separately via `desired.workload_kind` so emitted actions
+            // and rows correctly record their Service origin.
             let job = Job {
                 id: svc.id.clone(),
                 replicas: svc.replicas,
@@ -1403,9 +1779,11 @@ async fn read_job(
             };
             let digest =
                 intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            Ok((Some(job), Some(digest)))
+            Ok((Some(job), Some(digest), probe_descriptors))
         }
-        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok((None, None)),
+        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
+            Ok((None, None, probe_descriptors))
+        }
     }
 }
 
@@ -1466,23 +1844,15 @@ async fn hydrate_actual(
                 allocations.insert(row.alloc_id.clone(), row);
             }
             let nodes = baseline_nodes_phase1();
-            // `actual.job` is unused — the reconciler reads desired.job.
-            // `actual.desired_to_stop` is also unused (only the desired
-            // side carries it); set false unconditionally.
-            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
-            // persisted workload-kind discriminator at
-            // `IntentKey::for_workload_kind` so the `actual` side carries
-            // the same kind as `desired`. Only the `desired` side
-            // drives `reconcile`'s kind-branching logic today, but
-            // populating both with the same value keeps the field
-            // semantically uniform across the State pair so future
-            // `actual`-side branching has a non-default value to work
-            // with.
+            // `actual.job` / `actual.desired_to_stop` are unused (only
+            // the desired side carries them). Per ADR-0037 Amendment
+            // 2026-05-10 / ADR-0047 §1: read the persisted workload-kind
+            // discriminator so the State pair stays semantically uniform.
             let workload_kind = read_workload_kind(state, &workload_id).await?;
-            let (_, intent_digest) = read_job(state, &workload_id).await?;
+            let (_, intent_digest, _) = read_job(state, &workload_id).await?;
             let service_spec_digest =
                 if workload_kind == WorkloadKind::Service { intent_digest } else { None };
-            let s = WorkloadLifecycleState {
+            Ok(AnyState::WorkloadLifecycle(WorkloadLifecycleState {
                 workload_id,
                 job: None,
                 desired_to_stop: false,
@@ -1490,8 +1860,8 @@ async fn hydrate_actual(
                 allocations,
                 workload_kind,
                 service_spec_digest,
-            };
-            Ok(AnyState::WorkloadLifecycle(s))
+                probe_descriptors: Vec::new(), // GAP-8: actual side unused; desired side drives action arms
+            }))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             // 08-02 hydrate-actual reads from
@@ -1579,6 +1949,270 @@ async fn hydrate_actual(
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
         }
+        // service-health-check-probes — closes GAP-1 from Phase 01
+        // structural gap audit. Three-source join per the audit's
+        // recommended fix:
+        //
+        //   1. `obs.alloc_status_rows()` filtered to the target
+        //      workload — sources `alloc_id`, `state`,
+        //      `started_at` (verbatim from the row's
+        //      `Option<UnixInstant>` per the AllocStatusRow extension
+        //      commit `6f2b2cb9`), `exit_code`.
+        //   2. `obs.list_probe_results_for_alloc(alloc_id)` LWW
+        //      projection — sources `latest_startup_probe`. Mirrors
+        //      the `ServiceMapHydrator` LWW pattern at the arm above
+        //      (`updated_at.dominates`).
+        //   3. `IntentStore::get(IntentKey::for_workload(workload_id))`
+        //      → `WorkloadIntent::Service(ServiceV1)` — sources
+        //      `max_attempts`, `startup_deadline`, `mechanic_summary`,
+        //      `inferred`, `startup_probes_empty`. Same `service_spec_from_intent`
+        //      helper as the `hydrate_desired` arm above.
+        //
+        // Per `.claude/rules/development.md` § "Persist inputs, not
+        // derived state": the spec-derived fields are recomputed every
+        // tick from the live spec; never persisted onto a row.
+        AnyReconciler::ServiceLifecycle(_) => {
+            let workload_id = workload_id_from_target(target)?;
+            hydrate_service_lifecycle_actual(state, &workload_id).await
+        }
+    }
+}
+
+/// Actual-side projection for the `ServiceLifecycle` reconciler.
+///
+/// Extracted from [`hydrate_actual`]'s arm to keep that dispatcher
+/// within the project's `clippy::too_many_lines` budget per
+/// `.claude/rules/development.md` § Object Calisthenics. Joins the
+/// per-alloc fact projection ([`hydrate_service_alloc_facts`]) with the
+/// service-level dataplane identity ([`service_dataplane_identity`])
+/// the Slice 04 readiness branch consumes.
+async fn hydrate_service_lifecycle_actual(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<AnyState, ConvergenceError> {
+    // Spec-derived facts — uniform across allocs of this workload.
+    let Some(spec) = service_spec_from_intent(state, workload_id).await? else {
+        // Intent absent — empty actual. Next tick retries after submit.
+        // (Explicit `allocs: BTreeMap::new()` rather than
+        // `ServiceLifecycleState::default()` to keep the GAP-1
+        // structural defense — the audit's acceptance gate forbids the
+        // `default()` call site in this file.)
+        return Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
+            allocs: BTreeMap::new(),
+            service_dataplane: None,
+        }));
+    };
+    let spec_facts = spec_facts_for_service(&spec);
+    let readiness_facts = readiness_facts_for_service(&spec);
+    // Slice 05 — liveness facts uniform across allocs:
+    // `(has_liveness_probe, failure_threshold)`. The per-alloc
+    // restart_count + restart_spec are joined per-alloc inside
+    // `hydrate_service_alloc_facts` (the count is observation-derived,
+    // the spec is intent-derived from `spec.driver`).
+    let liveness_facts = liveness_facts_for_service(&spec);
+    // Slice 04 — the readiness branch needs the service's dataplane
+    // identity (service_id + VIP) and the backend port to compose the
+    // `ServiceBackendRow` it writes. Both derive from the first listener
+    // + the allocator-issued VIP (same path the BackendDiscoveryBridge
+    // uses). `None` when the Service has no VIP yet — the readiness
+    // branch is a no-op until the VIP lands.
+    let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
+    let service_dataplane = service_dataplane_identity(state, workload_id, &spec).await?;
+    let allocs = hydrate_service_alloc_facts(
+        state,
+        workload_id,
+        &spec,
+        &spec_facts,
+        &readiness_facts,
+        &liveness_facts,
+        backend_port,
+    )
+    .await?;
+    Ok(AnyState::ServiceLifecycle(ServiceLifecycleState { allocs, service_dataplane }))
+}
+
+/// Per-workload projection of every `AllocStatusRow` belonging to
+/// `workload_id` into a `BTreeMap<AllocationId, ServiceAllocFact>`,
+/// joining each row with its per-`(alloc_id, probe_idx=0,
+/// role=Startup)` LWW probe-result projection and the workload's
+/// spec-derived facts.
+///
+/// Extracted from [`hydrate_actual`]'s `ServiceLifecycle` arm to keep
+/// the dispatcher body within the project's `clippy::too_many_lines`
+/// budget per `.claude/rules/development.md` § Object Calisthenics.
+async fn hydrate_service_alloc_facts(
+    state: &AppState,
+    workload_id: &WorkloadId,
+    spec: &overdrive_core::aggregate::ServiceV1,
+    spec_facts: &(u32, Duration, String, bool, bool),
+    readiness_facts: &(bool, u32),
+    liveness_facts: &(bool, u32),
+    backend_port: u16,
+) -> Result<
+    BTreeMap<AllocationId, overdrive_core::service_lifecycle::ServiceAllocFact>,
+    ConvergenceError,
+> {
+    let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
+        spec_facts;
+    let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
+    let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
+    // Slice 05 — the `service-lifecycle` target the runtime keys the
+    // shared WorkloadLifecycle restart-count view by is `job/<id>`
+    // (mirrors `service_event_from_terminal`'s target shape). Used per
+    // alloc below to read `restart_count` — the input the liveness
+    // branch composes with the shared `RESTART_BACKOFF_CEILING` budget.
+    let restart_target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    // Slice 05 — the live driver command/args the liveness restart
+    // replays. Same projection the WorkloadLifecycle Run branch uses
+    // (`workload_lifecycle.rs`): single Phase-1 Exec variant.
+    let overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
+        command: live_command,
+        args: live_args,
+    }) = &spec.driver;
+    let rows = state
+        .obs
+        .alloc_status_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    let mut allocs = BTreeMap::new();
+    for row in rows.into_iter().filter(|r| r.workload_id == *workload_id) {
+        let probe_rows = state
+            .obs
+            .list_probe_results_for_alloc(&row.alloc_id)
+            .await
+            .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+        // Per-alloc LWW projection of probe results — latest status at
+        // startup-role probe_idx 0 (the only probe the Slice-01
+        // reconciler branches consult).
+        let latest_startup_probe = probe_rows
+            .iter()
+            .filter(|p| {
+                p.role == overdrive_core::observation::ProbeRole::Startup
+                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+            })
+            .max_by_key(|p| p.last_observed_at_unix_ms)
+            .map(|p| p.status.clone());
+        // Slice 04 — per-alloc LWW projection of the readiness-role
+        // probe at idx 0. `None` (no row yet) is the load-bearing
+        // initial state: `Backend.healthy = false` until first Pass
+        // (S-SHCP-RECON-08c, avoids the inverse race).
+        let latest_readiness_probe = probe_rows
+            .iter()
+            .filter(|p| {
+                p.role == overdrive_core::observation::ProbeRole::Readiness
+                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+            })
+            .max_by_key(|p| p.last_observed_at_unix_ms)
+            .map(|p| p.status.clone());
+        // Slice 05 — per-alloc LWW projection of the liveness-role probe
+        // at idx 0. `None` (no row yet) leaves the consecutive-failure
+        // counter untouched in the reconciler (no observation this tick).
+        let latest_liveness_probe = probe_rows
+            .iter()
+            .filter(|p| {
+                p.role == overdrive_core::observation::ProbeRole::Liveness
+                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+            })
+            .max_by_key(|p| p.last_observed_at_unix_ms)
+            .map(|p| p.status.clone());
+
+        // Backend identity for the dataplane backend set this alloc
+        // contributes to. SPIFFE shape matches the project-wide
+        // `mint_alloc_identity` used by the BackendDiscoveryBridge; the
+        // addr is `(host_ipv4, listener_port)` per the bridge precedent.
+        let backend_spiffe = overdrive_core::SpiffeId::new(&format!(
+            "spiffe://overdrive.local/job/{}/alloc/{}",
+            workload_id.as_str(),
+            row.alloc_id.as_str()
+        ))
+        .map_err(|e| ConvergenceError::TargetShape(e.to_string()))?;
+        let backend_addr =
+            std::net::SocketAddr::new(std::net::IpAddr::V4(state.host_ipv4), backend_port);
+
+        // `exit_code` is sourced from the row's `reason:
+        // Option<TransitionReason>` — the `WorkloadCrashedImmediately`
+        // variant carries the observed process exit code (written by
+        // `worker/exit_observer.rs`). Mirrors the Job-kind precedent
+        // at `workload_lifecycle.rs::classify_natural_exit_terminal`
+        // (line ~944). The `started_at` invariant (Some on Running) is
+        // load-bearing per the GAP-1 contract.
+        let exit_code = match row.reason {
+            Some(
+                overdrive_core::transition_reason::TransitionReason::WorkloadCrashedImmediately {
+                    exit_code,
+                    ..
+                },
+            ) => exit_code,
+            _ => None,
+        };
+        // Slice 05 — restart_count: how many times the SHARED
+        // WorkloadLifecycle budget already restarted this alloc.
+        // `restart_status_for_alloc` returns `(attempt_index,
+        // will_restart)` where `attempt_index = restart_counts + 1`; the
+        // liveness predicate composes against the raw restart_counts, so
+        // subtract the +1 the attempt-index carries. Falls back to 0 when
+        // the target shape is malformed (defensive; never in practice).
+        let restart_count = restart_target.as_ref().map_or(0, |t| {
+            state.runtime.restart_status_for_alloc(t, &row.alloc_id).0.saturating_sub(1)
+        });
+        // Slice 05 — restart_spec: the live workload spec the liveness
+        // restart replays (extracted into `liveness_restart_spec` to keep
+        // this fn within the `too_many_lines` budget).
+        let restart_spec =
+            liveness_restart_spec(spec, &row.alloc_id, &backend_spiffe, live_command, live_args);
+        let fact = overdrive_core::service_lifecycle::ServiceAllocFact {
+            alloc_id: row.alloc_id.clone(),
+            state: row.state,
+            started_at: row.started_at,
+            exit_code,
+            latest_startup_probe,
+            max_attempts: *max_attempts,
+            startup_deadline: *startup_deadline,
+            mechanic_summary: mechanic_summary.clone(),
+            inferred: *inferred,
+            startup_probes_empty: *startup_probes_empty,
+            latest_readiness_probe,
+            has_readiness_probe,
+            readiness_success_threshold,
+            backend_spiffe,
+            backend_addr,
+            latest_liveness_probe,
+            has_liveness_probe,
+            liveness_failure_threshold,
+            restart_count,
+            restart_spec,
+        };
+        allocs.insert(row.alloc_id, fact);
+    }
+    Ok(allocs)
+}
+
+/// Build the `AllocationSpec` a Slice 05 liveness restart replays for
+/// one alloc. Same projection the `WorkloadLifecycle` Run branch uses
+/// (single Phase-1 Exec variant); the identity reuses the per-alloc
+/// `backend_spiffe`. Extracted from [`hydrate_service_alloc_facts`] to
+/// keep that fn within the `clippy::too_many_lines` budget per
+/// `.claude/rules/development.md` § Object Calisthenics.
+fn liveness_restart_spec(
+    spec: &overdrive_core::aggregate::ServiceV1,
+    alloc_id: &AllocationId,
+    identity: &overdrive_core::SpiffeId,
+    command: &str,
+    args: &[String],
+) -> overdrive_core::traits::driver::AllocationSpec {
+    overdrive_core::traits::driver::AllocationSpec {
+        alloc: alloc_id.clone(),
+        identity: identity.clone(),
+        command: command.to_owned(),
+        args: args.to_vec(),
+        resources: spec.resources,
+        probe_descriptors: spec
+            .startup_probes
+            .iter()
+            .chain(spec.readiness_probes.iter())
+            .chain(spec.liveness_probes.iter())
+            .cloned()
+            .collect(),
     }
 }
 
@@ -1742,8 +2376,11 @@ mod tests {
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::dataplane::backend_key::Proto;
         use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
+        use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
         use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+        use overdrive_core::reconcilers::workload_lifecycle::WorkloadLifecycle;
         use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource};
+        use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
@@ -1795,6 +2432,9 @@ mod tests {
                     args: vec![],
                 }),
                 listeners,
+                startup_probes: vec![],
+                readiness_probes: vec![],
+                liveness_probes: vec![],
             })
             .expect("valid service spec");
             WorkloadIntent::Service(svc)
@@ -1884,8 +2524,17 @@ mod tests {
                 stderr_tail: None,
                 kind: WorkloadKind::Service,
                 listeners: vec![],
+                // GAP-1 subsidiary: None on Pending; fixed wall-clock otherwise.
+                started_at: match alloc_state {
+                    AllocState::Pending => None,
+                    _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+                },
             };
-            state.obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
+            state
+                .obs
+                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .await
+                .expect("write alloc row");
         }
 
         // -------------------------------------------------------------
@@ -2083,6 +2732,135 @@ mod tests {
             assert!(s.actual.running.contains(&AllocationId::new("payments-0").expect("alloc id")));
             assert!(s.actual.running.contains(&AllocationId::new("payments-2").expect("alloc id")));
             assert_eq!(s.actual.workload_id, workload_id());
+        }
+
+        // -------------------------------------------------------------
+        // Mutation-gate killing tests (step 01-03f-2 Part B)
+        // -------------------------------------------------------------
+
+        fn workload_lifecycle_reconciler() -> AnyReconciler {
+            AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
+        }
+
+        fn service_lifecycle_reconciler() -> AnyReconciler {
+            AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new())
+        }
+
+        /// Kills `reconciler_runtime.rs:1759 == → !=` in `hydrate_actual`:
+        /// `workload_kind == WorkloadKind::Service` gates whether
+        /// `service_spec_digest` is populated from the persisted intent
+        /// digest or forced to `None`. For a persisted Service intent the
+        /// digest MUST be `Some(_)`; the `!=` mutant flips it to `None`.
+        #[tokio::test]
+        async fn hydrate_actual_service_kind_populates_service_spec_digest() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let intent = service_intent(&[8080]);
+            let state = build_state(&tmp, Some(intent)).await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &workload_lifecycle_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::WorkloadLifecycle(s) = result else {
+                panic!("expected AnyState::WorkloadLifecycle variant");
+            };
+            assert_eq!(
+                s.workload_kind,
+                WorkloadKind::Service,
+                "persisted Service intent must hydrate kind == Service"
+            );
+            assert!(
+                s.service_spec_digest.is_some(),
+                "Service-kind workload MUST carry the intent spec_digest \
+                 (kills == → != mutant at reconciler_runtime.rs:1759); got None"
+            );
+        }
+
+        /// Write a single startup-role probe-result row for `alloc`.
+        async fn write_probe(
+            state: &AppState,
+            alloc: &str,
+            role: ProbeRole,
+            probe_idx: u32,
+            status: ProbeStatus,
+            last_observed_at_unix_ms: u64,
+        ) {
+            let row = ProbeResultRow {
+                alloc_id: AllocationId::new(alloc).expect("alloc id"),
+                probe_idx: ProbeIdx::new(probe_idx),
+                role,
+                status,
+                last_observed_at_unix_ms,
+                inferred: false,
+            };
+            state.obs.write_probe_result(row).await.expect("write probe row");
+        }
+
+        /// Kills `reconciler_runtime.rs:1937 && → ||` in
+        /// `hydrate_service_alloc_facts`: the per-alloc LWW probe
+        /// projection filters `role == Startup && probe_idx == 0`.
+        ///
+        /// The SimObservationStore LWW index is keyed on
+        /// `(alloc_id, probe_idx)`, so the two rows MUST carry distinct
+        /// `probe_idx` values to coexist. The discriminating row is
+        /// `Startup / idx 1 / Fail` at a LATER timestamp: it satisfies
+        /// exactly ONE clause of the filter (`role == Startup`, but
+        /// `probe_idx != 0`). Under the correct `&&` it is excluded and
+        /// only the `Startup / idx 0 / Pass` row survives →
+        /// `Some(Pass)`. Under the `||` mutant the idx-1 Fail row is
+        /// wrongly admitted (role clause alone suffices) and, being
+        /// later, wins `max_by_key(last_observed_at)` → `Some(Fail)`.
+        #[tokio::test]
+        async fn hydrate_service_alloc_facts_probe_filter_requires_both_role_and_idx() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let intent = service_intent(&[8080]);
+            let state = build_state(&tmp, Some(intent)).await;
+
+            write_alloc_status(&state, "payments-0", AllocState::Running, 1).await;
+            // Matching row: Startup / idx 0 / Pass at t=100 (both clauses).
+            write_probe(&state, "payments-0", ProbeRole::Startup, 0, ProbeStatus::Pass, 100).await;
+            // Discriminating row: Startup / idx 1 / Fail at LATER t=200.
+            // `role == Startup` true but `probe_idx == 0` false — under
+            // `&&` excluded; under `||` admitted (and winning by ts).
+            // Distinct probe_idx keeps it from colliding with the idx-0
+            // row under the store's `(alloc_id, probe_idx)` PK.
+            write_probe(
+                &state,
+                "payments-0",
+                ProbeRole::Startup,
+                1,
+                ProbeStatus::Fail { last_fail_reason: "mutant-bait".to_string() },
+                200,
+            )
+            .await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &service_lifecycle_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected AnyState::ServiceLifecycle variant");
+            };
+            let fact = s
+                .allocs
+                .get(&AllocationId::new("payments-0").expect("alloc id"))
+                .expect("payments-0 fact present");
+            assert_eq!(
+                fact.latest_startup_probe,
+                Some(ProbeStatus::Pass),
+                "only the Startup/idx-0 Pass row may project as latest_startup_probe; the \
+                 later Startup/idx-1 Fail row must be excluded because BOTH role AND probe_idx \
+                 must match (kills && → || mutant at reconciler_runtime.rs:1937); got {:?}",
+                fact.latest_startup_probe
+            );
         }
     }
 }

@@ -216,6 +216,14 @@ pub struct ExecDriver {
     /// production code per `.claude/rules/testing.md` § Sources of
     /// Nondeterminism.
     clock: Arc<dyn Clock>,
+    /// Optional `ProbeRunner` reference. Production composition
+    /// root threads this in via [`Self::with_probe_runner`] so the
+    /// driver's [`Driver::on_alloc_running`] / [`Driver::on_alloc_terminal`]
+    /// hooks can dispatch to `probe_runner.start_alloc` /
+    /// `probe_runner.stop_alloc` per ADR-0054 § 2. `None` (the
+    /// default) yields a no-op hook — used by acceptance tests that
+    /// do not exercise the probe path.
+    probe_runner: Option<Arc<crate::probe_runner::ProbeRunner>>,
 }
 
 impl std::fmt::Debug for ExecDriver {
@@ -264,7 +272,27 @@ impl ExecDriver {
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
             clock,
+            probe_runner: None,
         }
+    }
+
+    /// Thread a `ProbeRunner` reference into the driver so the
+    /// `Driver::on_alloc_running` / `Driver::on_alloc_terminal`
+    /// lifecycle hooks dispatch to it. Production composition root
+    /// wires this in via the builder; tests that don't exercise
+    /// probes leave the field as `None` (default no-op hooks).
+    ///
+    /// Per ADR-0054 § 2 + § 3: the hooks are the structural seam
+    /// between the action-shim's `obs.write(Running)` /
+    /// `obs.write(Terminated)` writes and the `ProbeRunner` per-alloc
+    /// supervisor lifecycle.
+    #[must_use]
+    pub fn with_probe_runner(
+        mut self,
+        probe_runner: Arc<crate::probe_runner::ProbeRunner>,
+    ) -> Self {
+        self.probe_runner = Some(probe_runner);
+        self
     }
 
     /// Target every spawned child at `netns_path` (typically
@@ -742,6 +770,34 @@ impl Driver for ExecDriver {
         // Unknown alloc OR gate already fired: no-op per the
         // idempotent-fire contract.
     }
+
+    /// Per ADR-0054 § 2 / § 3: when the action shim observes a
+    /// successful `Driver::start` and writes the
+    /// `AllocStatusRow { state: Running, .. }` row, it fires this
+    /// hook with the same `AllocationSpec` it handed to `start`.
+    /// The driver projects `spec.probe_descriptors` (validated
+    /// upstream per ADR-0057) into a `start_alloc` call on the
+    /// configured `ProbeRunner`. Drivers wired without a
+    /// `ProbeRunner` (acceptance tests, sim wiring) inherit the
+    /// trait's default no-op via the `None` arm below.
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        if let Some(ref runner) = self.probe_runner {
+            let _token = runner.start_alloc(&spec.alloc, spec.probe_descriptors.clone());
+        }
+    }
+
+    /// Symmetric companion to [`Self::on_alloc_running`]. Fired by
+    /// the action shim immediately after the terminal
+    /// `AllocStatusRow` write commits. Dispatches to
+    /// `probe_runner.stop_alloc(alloc_id)` so every per-probe task
+    /// spawned under this allocation's supervisor is cooperatively
+    /// shut down — no `JoinHandle::abort()` per
+    /// `.claude/rules/testing.md` § cooperative-shutdown discipline.
+    fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
+        if let Some(ref runner) = self.probe_runner {
+            runner.stop_alloc(alloc_id);
+        }
+    }
 }
 
 /// Spawn a per-allocation watcher task that owns the `Child`, awaits
@@ -1036,5 +1092,199 @@ mod classify_exit_tests {
         // Terminated upstream.
         let kind = classify_exit(from_signal(15), true);
         assert_eq!(kind, ExitKind::CleanExit);
+    }
+}
+
+/// Service-health-check-probes step 01-03d — observable-outcome
+/// unit tests for the new `on_alloc_running` / `on_alloc_terminal`
+/// lifecycle hooks per ADR-0054 § 2 / § 3.
+///
+/// Asserts: when an [`ExecDriver`] is constructed with a
+/// `ProbeRunner` via [`ExecDriver::with_probe_runner`], the
+/// lifecycle hooks dispatch through to
+/// `probe_runner.start_alloc` / `probe_runner.stop_alloc`. The
+/// observable effect is `ProbeRunner::active_alloc_count` —
+/// before the hooks fire it is 0; after `on_alloc_running` it is
+/// 1; after `on_alloc_terminal` it is back to 0.
+///
+/// Mutation kill: these tests kill the per-method mutants
+/// `<impl Driver for ExecDriver>::on_alloc_running → ()` and
+/// `<impl Driver for ExecDriver>::on_alloc_terminal → ()` —
+/// without the dispatch the supervisor-count delta would not
+/// appear.
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod lifecycle_hook_tests {
+    use std::path::PathBuf;
+    use std::str::FromStr as _;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use overdrive_core::SpiffeId;
+    use overdrive_core::aggregate::probe_descriptor::ProbeDescriptor;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::driver::{AllocationSpec, Driver as _, Resources};
+    use overdrive_core::traits::prober::{
+        ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
+    };
+
+    use super::ExecDriver;
+    use crate::probe_runner::ProbeRunner;
+
+    // Minimal sim TCP prober that returns Pass for everything.
+    // (We don't use overdrive_sim here to avoid the dev-dep cycle.)
+    struct AlwaysPassTcpProber;
+
+    #[async_trait]
+    impl TcpProber for AlwaysPassTcpProber {
+        async fn probe(
+            &self,
+            _host: &str,
+            _port: u16,
+            _timeout: Duration,
+        ) -> Result<ProbeOutcome, ProbeFailure> {
+            Ok(ProbeOutcome::Pass)
+        }
+    }
+
+    struct UnusedHttpProber;
+
+    #[async_trait]
+    impl HttpProber for UnusedHttpProber {
+        async fn probe(
+            &self,
+            _url: &str,
+            _timeout: Duration,
+        ) -> Result<ProbeOutcome, ProbeFailure> {
+            Ok(ProbeOutcome::Pass)
+        }
+    }
+
+    struct UnusedExecProber;
+
+    #[async_trait]
+    impl ExecProber for UnusedExecProber {
+        async fn probe(
+            &self,
+            _command: &[String],
+            _cgroup_path: &str,
+            _timeout: Duration,
+        ) -> Result<ProbeOutcome, ProbeFailure> {
+            Ok(ProbeOutcome::Pass)
+        }
+    }
+
+    // Stub clock — never called for hook dispatch tests but
+    // required by ExecDriver::new. Wall-clock methods return
+    // synthetic zeroes; `sleep` is unreachable on this path.
+    struct ZeroClock;
+
+    #[async_trait]
+    impl Clock for ZeroClock {
+        fn now(&self) -> std::time::Instant {
+            std::time::Instant::now()
+        }
+        fn unix_now(&self) -> Duration {
+            Duration::ZERO
+        }
+        async fn sleep(&self, _: Duration) {
+            // Not exercised by the lifecycle-hook dispatch path.
+        }
+    }
+
+    fn build_driver_with_runner() -> (ExecDriver, Arc<ProbeRunner>) {
+        // GAP-7 closure: ProbeRunner::new now takes `Arc<dyn Clock>` +
+        // `Arc<dyn ObservationStore>` as mandatory constructor
+        // parameters so `start_alloc` can spawn supervised
+        // per-descriptor tick tasks. These tests exercise only the
+        // lifecycle-hook dispatch path with an empty
+        // `probe_descriptors` Vec — no tick task is actually spawned,
+        // so the injected clock + obs are never observed.
+        // `overdrive_sim` is a dev-dep (also used by `node_health`
+        // tests in this crate); the AlwaysPassTcpProber comment
+        // above predates the dev-dep addition.
+        let obs: Arc<dyn overdrive_core::traits::observation_store::ObservationStore> =
+            Arc::new(overdrive_sim::adapters::observation_store::SimObservationStore::single_peer(
+                overdrive_core::id::NodeId::new("driver-test-node").expect("static NodeId parses"),
+                0,
+            ));
+        let runner = Arc::new(ProbeRunner::new(
+            Arc::new(AlwaysPassTcpProber),
+            Arc::new(UnusedHttpProber),
+            Arc::new(UnusedExecProber),
+            Arc::new(ZeroClock),
+            obs,
+        ));
+        let driver = ExecDriver::new(
+            PathBuf::from("/tmp/overdrive-test"),
+            Arc::new(ZeroClock),
+            Arc::new(overdrive_sim::SimCgroupFs::new()),
+        )
+        .with_probe_runner(Arc::clone(&runner));
+        (driver, runner)
+    }
+
+    fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
+        AllocationSpec {
+            alloc: alloc_id.clone(),
+            identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
+                .expect("valid SpiffeId"),
+            command: "/bin/true".to_owned(),
+            args: vec![],
+            resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+            probe_descriptors: Vec::<ProbeDescriptor>::new(),
+        }
+    }
+
+    #[test]
+    fn on_alloc_running_registers_supervisor_on_probe_runner() {
+        let (driver, runner) = build_driver_with_runner();
+        let alloc_id = AllocationId::new("alloc-run-1").expect("valid AllocationId");
+        let spec = sample_spec(&alloc_id);
+
+        assert_eq!(runner.active_alloc_count(), 0);
+        driver.on_alloc_running(&spec);
+        assert_eq!(
+            runner.active_alloc_count(),
+            1,
+            "on_alloc_running must register an alloc supervisor on the wired ProbeRunner"
+        );
+    }
+
+    #[test]
+    fn on_alloc_terminal_cancels_supervisor_on_probe_runner() {
+        let (driver, runner) = build_driver_with_runner();
+        let alloc_id = AllocationId::new("alloc-term-1").expect("valid AllocationId");
+        let spec = sample_spec(&alloc_id);
+
+        driver.on_alloc_running(&spec);
+        assert_eq!(runner.active_alloc_count(), 1);
+
+        driver.on_alloc_terminal(&alloc_id);
+        assert_eq!(
+            runner.active_alloc_count(),
+            0,
+            "on_alloc_terminal must cancel the alloc's supervisor on the wired ProbeRunner"
+        );
+    }
+
+    #[test]
+    fn on_alloc_running_without_probe_runner_is_a_noop() {
+        // Driver constructed WITHOUT `with_probe_runner` — the field
+        // is `None`; the trait default no-op path fires. Observable
+        // outcome: no panic, no state change, no side effect.
+        let driver = ExecDriver::new(
+            PathBuf::from("/tmp/overdrive-test"),
+            Arc::new(ZeroClock),
+            Arc::new(overdrive_sim::SimCgroupFs::new()),
+        );
+        let alloc_id = AllocationId::new("alloc-noop-1").expect("valid AllocationId");
+        let spec = sample_spec(&alloc_id);
+
+        // No panic — the None branch returns immediately.
+        driver.on_alloc_running(&spec);
+        driver.on_alloc_terminal(&alloc_id);
     }
 }

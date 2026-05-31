@@ -23,7 +23,9 @@ mod schema_evolution {
     mod alloc_status_row;
     mod harness;
     mod node_health_row;
+    mod probe_result_row;
     mod service_backend_row;
     mod service_hydration_result_row;
+    mod service_spec;
     mod workload_intent;
 }

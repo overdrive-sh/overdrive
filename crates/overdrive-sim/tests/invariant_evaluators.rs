@@ -17,6 +17,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -164,7 +165,7 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
 
     let peer_a = cluster.peer(&node("node-a"));
     peer_a
-        .write(ObservationRow::AllocStatus(AllocStatusRow {
+        .write(ObservationRow::AllocStatus(Box::new(AllocStatusRow {
             alloc_id: AllocationId::from_str("alloc-1").expect("alloc id"),
             workload_id: WorkloadId::from_str("payments").expect("job id"),
             node_id: node("node-a"),
@@ -176,7 +177,9 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
             stderr_tail: None,
             kind: overdrive_core::aggregate::WorkloadKind::Service,
             listeners: Vec::new(),
-        }))
+            // GAP-1 subsidiary: Running state carries fixed wall-clock.
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        })))
         .await
         .expect("write");
 

@@ -28,15 +28,14 @@ mod acceptance {
     mod render_workload_stop;
     mod render_workload_submit;
 
-    // Slice 02 step 02-04 — S-CLI-04 (Failed-block render) and
-    // S-CLI-05 (exit-code 2 across HTTP error variants).
-    mod streaming_submit_cli_render;
-    // fix-converged-stopped-cli-arm — render-fn tests for
-    // `format_stopped_summary` (one per `StoppedBy` variant). Pairs
-    // with the integration-test regression in
-    // `tests/integration/streaming_submit_converged_stopped.rs`.
+    // Legacy `streaming_submit_cli_render` (Failed-block render
+    // against deleted `TerminalReason`) and
+    // `streaming_submit_http_error_exit_2` were deleted in step
+    // 01-03e3 alongside the legacy `format_failed_block` removal
+    // per single-cut greenfield discipline. `format_stopped_summary`
+    // render coverage stays in `streaming_submit_cli_render_stopped`
+    // (the function itself is kind-aware and survives the migration).
     mod streaming_submit_cli_render_stopped;
-    mod streaming_submit_http_error_exit_2;
 
     // Slice 03 step 03-01 — S-CLI-01 `--detach` flag argv surface.
     mod submit_detach_flag;
@@ -57,4 +56,21 @@ mod acceptance {
     // Pure render helpers — format_human_duration, derive_job_verdict,
     // alloc_status_kind_aware spec-digest branches.
     mod render_pure_fns;
+
+    // service-health-check-probes — Tier 1 acceptance for the CLI
+    // render surface per US-06 / US-07 / US-08. RED scaffolds.
+    //   * Slice 06 (US-06 / K4): Probes section in alloc-status render
+    //   * Slice 07 (US-07 / K5): ProbesNotAllowedOnKind CLI surface
+    //   * Slice 08 (US-08 / K1): EarlyExit multi-line render +
+    //     RCA-A "(took live)" regression guard
+    mod probes_kind_rejection_cli;
+    mod probes_section_render;
+    // Step 03-02 / Slice 08 — EarlyExit multi-line render
+    // (S-SHCP-CLI-07/08) + the cross-cutting RCA-A
+    // `ServiceKindRenderNeverContainsTookLive` regression guard
+    // (S-SHCP-CLI-09..11). Re-created against the current
+    // `format_service_failed_block` surface (the 01-03e3 deletion
+    // removed the legacy `format_failed_block` variant; this file
+    // targets the typed `ServiceFailureReason` renderer).
+    mod service_early_exit_render;
 }
