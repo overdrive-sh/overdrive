@@ -1,0 +1,204 @@
+schema_version: 1
+
+# Product-level UDP-Service submit journey.
+#
+# Pairs with `submit-a-service.yaml` (the probe-derived Stable/Failed
+# Service-submit journey) and `submit-a-job.yaml` (the original
+# walking-skeleton submit journey). This journey extends the Service
+# submit shape to a workload that declares a UDP `[[listener]]`, and
+# is the product-level summary of the detailed feature-level journey at
+# `docs/feature/udp-service-support/discuss/journey-udp-service-visual.md`
+# + `.yaml`.
+#
+# Why a separate journey from submit-a-service.yaml: that journey is
+# about the lifecycle SIGNAL (probe-derived Stable / Failed). This
+# journey is about the DATAPLANE WIRE PATH — whether a UDP service's
+# forward AND reverse traffic actually completes with the VIP as the
+# source of the response. They are orthogonal operator concerns; the
+# probe journey cannot absorb a wire-path-correctness concern without
+# conflating "is it serving?" with "does the LB rewrite my response?".
+#
+# Feature origin: udp-service-support DISCUSS wave (2026-06-02, GH #163).
+
+journey:
+  name: "Submit a UDP Service and trust the wire path both ways"
+  goal: >
+    An operator declares a `[[listener]]` with `protocol = "udp"` on a
+    Service-kind workload, submits it via `overdrive job submit <spec>`,
+    and the platform load-balances UDP traffic such that BOTH the
+    forward path (client → VIP → backend) AND the reverse path
+    (backend response → client, source-rewritten to the VIP) work. The
+    client sees every response sourced from the VIP it sent to — never
+    leaking the backend IP. Closes GH #163: the production
+    REVERSE_NAT_MAP lockstep installs only TCP entries, so a UDP
+    backend's response silently bypasses source rewrite (`XDP_PASS`
+    without rewriting the 5-tuple), and the client's connection breaks.
+  persona: >
+    Ana, Overdrive platform engineer. Runs UDP-bearing services
+    (DNS resolvers, QUIC edge endpoints, game servers, syslog
+    collectors) and expects UDP to be a first-class workload protocol,
+    exactly as TCP is (vision.md principle 4 "all workload types are
+    first class"). Has been bitten before by silent dataplane
+    asymmetry where the forward path works and the reverse path
+    fails invisibly — the hardest class of bug to diagnose because
+    `job submit` succeeds and `alloc status` shows Running.
+    Secondary: Omar, future operator using the same CLI once auth lands.
+  job_id: [J-OPS-004, J-PLAT-004]
+
+  emotional_arc:
+    start: >
+      Confident-but-cautious — "TCP services work; UDP is declared the
+      same way (#164 shipped `protocol = "udp"`). But UDP reverse-path
+      bugs are invisible until a real client times out."
+    middle: >
+      Focused — submit is Accepted, the service reaches Running, the
+      forward path carries UDP packets to the backend. The open
+      question hangs: does the response come back sourced from the VIP?
+    end: >
+      Trusting (happy path) — a real UDP round-trip completes; the
+      captured response packet's source is the VIP, not the backend IP.
+      OR Relieved (sad path, pre-fix) — the lockstep invariant /
+      acceptance test FAILS LOUDLY at PR time instead of in production,
+      so the asymmetry is caught before an operator ever submits.
+
+steps:
+  - id: 1
+    name: "Declare a UDP listener and submit"
+    command: "overdrive job submit dns-resolver.toml"
+    summary: >
+      Submit + Stable lifecycle per `submit-a-service.yaml` (that journey
+      is the single source for the submit / Stable / witness detail); this
+      journey picks up at the wire path. The only delta this journey adds
+      to step 1: the `[[listener]]` carries `protocol = "udp"` (parse +
+      validate already shipped by #164), and the spec-declared `Proto::Udp`
+      is threaded — NOT defaulted to TCP — into the `ServiceFrontend`
+      newtype carried into the dataplane.
+    emotional_state:
+      entry: "Confident-but-cautious"
+      exit: "Focused — Accepted landed, listener proto recorded."
+
+  - id: 2
+    name: "ServiceMapHydrator emits update_service with the UDP proto"
+    command: "(internal — observable via the reverse-NAT key set)"
+    summary: >
+      The ServiceMapHydrator reconciler (ADR-0042) reads
+      `Vec<Listener>` from the intent-side Service aggregate and emits
+      one `update_service(frontend, backends)` call per listener, each
+      carrying a `ServiceFrontend` newtype (ServiceVip + port + proto);
+      `backends` is a separate arg and `service_id`/`correlation` stay
+      on the Action envelope. For the UDP listener the frontend's proto
+      is `Proto::Udp`, so the EbpfDataplane installs REVERSE_NAT_MAP
+      entries keyed `(backend_ip, backend_port, udp) → vip` — matching
+      what SimDataplane's `reverse_nat_keys_for` installs once narrowed
+      from its over-broad `[Tcp,Udp]` hardcode to `frontend.proto`.
+    emotional_state:
+      entry: "Focused"
+      exit: "Focused — the (ip,port,udp) key is now present in BOTH adapters."
+
+  - id: 3
+    name: "Forward + reverse UDP path completes with VIP source"
+    command: "(internal — observable via Tier 3 wire capture)"
+    summary: >
+      A real UDP datagram from the client to `vip:port` is rewritten
+      by the forward XDP program to a backend. The backend's UDP
+      response hits `xdp_reverse_nat_lookup` with proto=17, finds the
+      REVERSE_NAT_MAP entry (now present), and rewrites the source
+      5-tuple back to the VIP. The client receives a response sourced
+      from the VIP it sent to. The connection is symmetric.
+    emotional_state:
+      entry: "Focused"
+      exit: "Trusting — the round-trip is honest both ways."
+
+  - id: 4
+    name: "Lockstep cannot silently regress"
+    command: "(CI — Tier-1 ReverseNatLockstep Sim set-equality + Tier-3 Ebpf acceptance)"
+    summary: >
+      The lockstep is pinned two ways, meeting at the shared BackendKey
+      set: the Tier-1 ReverseNatLockstep invariant asserts the
+      SimDataplane installs exactly the declared-`frontend.proto` key set
+      (per-PR critical path), and a Tier-3 acceptance test drives the
+      real EbpfDataplane through the same `update_service(udp)` call and
+      asserts `bpftool map dump REVERSE_NAT_MAP` shows the `(ip,port,udp)`
+      entry with a VIP-sourced wire capture (integration lane). A pure
+      in-process both-adapter retarget is infeasible (the real adapter
+      needs a kernel + bpffs). A future change that drops the UDP fan-out
+      from the Sim adapter fails Tier 1, or from the Ebpf adapter fails
+      Tier 3 — the divergence that caused #163 is structurally impossible
+      to reintroduce silently.
+    emotional_state:
+      entry: "Cautious"
+      exit: "Reassured — the gate guards the symmetry forever."
+
+integration_validation:
+  shared_artifacts_summary:
+    - >
+      reverse_nat_key — the `(backend_ip, backend_port, proto) → vip`
+      tuple (`BackendKey` newtype, crates/overdrive-core/src/dataplane/
+      backend_key.rs). THE central shared artifact of this feature. Its
+      single source of truth MUST be the `ServiceFrontend` newtype's
+      `(vip, port, proto)` — both the SimDataplane lockstep and the
+      production EbpfDataplane Step 4b derive their REVERSE_NAT_MAP
+      entries from the same frontend. Today the proto source diverges:
+      Sim fans out a hard-coded Tcp+Udp; production hard-codes Tcp.
+      After this feature, both derive from `frontend.proto`.
+    - >
+      service_proto — the per-service L4 protocol. Source of truth is
+      the intent-side `Listener.protocol` (Proto enum). Flows: intent
+      Service aggregate → ServiceMapHydrator → `ServiceFrontend` newtype
+      → Dataplane::update_service → REVERSE_NAT_MAP key proto byte.
+      Must NOT be defaulted to TCP anywhere on this path.
+    - >
+      service_frontend — the new `ServiceFrontend` newtype carrying
+      `(ServiceVip, port, Proto)` that threads proto into the existing
+      `update_service` call (FROM the shipped trait option C,
+      `update_service(vip: Ipv4Addr, backends)`, dataplane.rs:101);
+      `backends` stays a separate arg. The frontend re-absorbs
+      `ServiceVip` (locked-A's typed-VIP intent) but leaves
+      `service_id`/`correlation` on the `Action::DataplaneUpdateService`
+      envelope (validate.rs:288) by design — service_id is
+      action-routing, not a dataplane key. Single source of truth for
+      the `(vip, port, proto)` triple the dataplane needs. Supersedes
+      phase-2.2 architecture.md § 5 Q-Sig — note that locked decision A
+      was a PAPER decision never landed; the migration is C →
+      `ServiceFrontend`. Validated by the scoped DIVERGE (Option 6,
+      4.17); see feature-delta.md D1 + recommendation.md.
+
+related_features:
+  - id: udp-service-support
+    role: "Ships the implementation of this journey (GH #163)."
+  - id: phase-2-xdp-service-map
+    role: >
+      Established the XDP SERVICE_MAP / REVERSE_NAT_MAP dataplane and the
+      `update_service` trait surface this journey extends. Its
+      architecture.md § 5 Q-Sig locked decision A was a paper decision
+      never landed; the shipped trait is option C
+      (`update_service(vip: Ipv4Addr, backends)`). This feature threads
+      proto FROM option C into a `ServiceFrontend` newtype (C →
+      `ServiceFrontend`, DIVERGE Option 6), superseding the paper
+      locked-A.
+  - id: workload-kind-discriminator
+    role: >
+      Shipped the intent-side `Listener { port, protocol }` shape
+      (#164, closed) that this journey reads.
+
+changelog:
+  - date: 2026-06-02
+    feature: udp-service-support
+    change: >
+      Initial product-level journey for UDP-Service submit with
+      symmetric forward+reverse dataplane semantics. Walking skeleton
+      is the single-UDP-listener forward+reverse e2e slice. Separate
+      from submit-a-service.yaml because this is a dataplane-wire-path
+      concern, not a lifecycle-signal concern.
+  - date: 2026-06-02
+    feature: udp-service-support
+    change: >
+      DIVERGE-convergence revision (B1/H1/M1). Step 1 now cross-references
+      submit-a-service.yaml for the submit + Stable lifecycle instead of
+      re-rendering it (M1). The typed_service_descriptor artifact is now
+      service_frontend (ServiceFrontend newtype, DIVERGE Option 6); the
+      from-state corrected to shipped trait option C (locked-A never
+      landed); step 4 lockstep collapsed to the two-pronged pin (Tier-1
+      Sim set-equality + Tier-3 Ebpf acceptance) since the in-process
+      both-adapter retarget is infeasible (H1). See feature-delta.md D1 +
+      recommendation.md.
