@@ -259,7 +259,16 @@ fn build_single_service_scenario() -> Result<Scenario, String> {
     let fp = fingerprint(&vip, &backends);
 
     let mut desired = BTreeMap::new();
-    desired.insert(service_id, ServiceDesired { vip, backends, fingerprint: fp });
+    desired.insert(
+        service_id,
+        ServiceDesired {
+            vip,
+            port: const { std::num::NonZeroU16::new(8080).expect("8080 is non-zero") },
+            proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+            backends,
+            fingerprint: fp,
+        },
+    );
 
     Ok(Scenario { state: ServiceMapHydratorState { desired, actual: BTreeMap::new() } })
 }
@@ -491,6 +500,8 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
         svc_id,
         ServiceDesired {
             vip: desired_vip,
+            port: const { std::num::NonZeroU16::new(8080).expect("8080 is non-zero") },
+            proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
             backends: desired_backends.clone(),
             fingerprint: desired_fp,
         },
@@ -690,7 +701,13 @@ mod retry_budget_proptest {
             healthy: true,
         }];
         let fp = fingerprint(&vip, &backends);
-        ServiceDesired { vip, backends, fingerprint: fp }
+        ServiceDesired {
+            vip,
+            port: const { std::num::NonZeroU16::new(8080).expect("8080 is non-zero") },
+            proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+            backends,
+            fingerprint: fp,
+        }
     }
 
     fn make_tick(now_secs: u64) -> TickContext {

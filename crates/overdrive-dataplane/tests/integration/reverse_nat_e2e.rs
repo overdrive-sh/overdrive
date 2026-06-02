@@ -53,10 +53,29 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use overdrive_core::SpiffeId;
+use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::id::ServiceVip;
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_dataplane::EbpfDataplane;
 use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
+
+/// Build a TCP `ServiceFrontend` for `vip` on the service listener port.
+/// These Tier-3 tests pre-date the per-proto `ServiceFrontend` surface
+/// (ADR-0060) and exercise the TCP reverse-NAT path; the frontend's port
+/// matches `BACKEND_PORT`/`VIP_PORT` where load-bearing, but the
+/// production SERVICE_MAP key still derives its port from
+/// `backends[0].addr.port()`.
+fn tcp_frontend(vip: Ipv4Addr, port: u16) -> ServiceFrontend {
+    let service_vip = ServiceVip::new(IpAddr::V4(vip)).expect("valid IPv4 ServiceVip");
+    ServiceFrontend::new(
+        service_vip,
+        std::num::NonZeroU16::new(port).expect("non-zero listener port"),
+        Proto::Tcp,
+    )
+    .expect("IPv4 ServiceFrontend constructs")
+}
 
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
 
@@ -390,7 +409,7 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
     runtime
         .block_on(dataplane.update_service(
-            A_VIP,
+            tcp_frontend(A_VIP, VIP_PORT),
             vec![Backend {
                 alloc: backend_alloc.clone(),
                 addr: backend_addr,
@@ -639,7 +658,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/B1").expect("alloc B1 SpiffeId");
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
@@ -702,7 +721,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/B1b").expect("alloc B1b SpiffeId");
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![
                 Backend {
                     alloc: alloc_b1.clone(),
@@ -757,7 +776,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/B2").expect("alloc B2 SpiffeId");
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_b2.clone(),
                 addr: SocketAddr::new(IpAddr::V4(backend_b2_ip), BACKEND_PORT),
@@ -872,7 +891,7 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
     // Step 1: install a backend.
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
@@ -899,7 +918,9 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
     );
 
     // Step 2: remove the service by passing empty backends.
-    runtime.block_on(dataplane.update_service(VIP, vec![])).expect("update_service empty backends");
+    runtime
+        .block_on(dataplane.update_service(tcp_frontend(VIP, VIP_PORT), vec![]))
+        .expect("update_service empty backends");
 
     // Verify: all maps are cleaned up.
     assert!(
@@ -924,7 +945,7 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
 
     // Step 3: idempotent — removing again is a no-op.
     runtime
-        .block_on(dataplane.update_service(VIP, vec![]))
+        .block_on(dataplane.update_service(tcp_frontend(VIP, VIP_PORT), vec![]))
         .expect("update_service empty backends (idempotent)");
 
     drop(_ns_guard);
@@ -988,7 +1009,7 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
     // Step 1: register VIP on port 80.
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_port80,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_80),
@@ -1001,7 +1022,7 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
     // Step 2: register same VIP on port 443.
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_port443,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_443),
@@ -1027,7 +1048,9 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
     );
 
     // Step 3: purge the VIP with empty backends — must remove BOTH ports.
-    runtime.block_on(dataplane.update_service(VIP, vec![])).expect("update_service empty");
+    runtime
+        .block_on(dataplane.update_service(tcp_frontend(VIP, VIP_PORT), vec![]))
+        .expect("update_service empty");
 
     // Verify: SERVICE_MAP has no entries for either port.
     assert!(
@@ -1105,7 +1128,7 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
     // Step 1: register a backend.
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
@@ -1118,7 +1141,9 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
     assert_eq!(dataplane.allocator_memo_len(), 1, "memo must contain 1 entry after installing B1");
 
     // Step 2: deregister via empty-backend update.
-    runtime.block_on(dataplane.update_service(VIP, vec![])).expect("update_service empty backends");
+    runtime
+        .block_on(dataplane.update_service(tcp_frontend(VIP, VIP_PORT), vec![]))
+        .expect("update_service empty backends");
 
     assert_eq!(
         dataplane.allocator_memo_len(),
@@ -1131,7 +1156,7 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
     // (counter increment), not the old id (memo hit on a stale entry).
     runtime
         .block_on(dataplane.update_service(
-            VIP,
+            tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
                 alloc: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),

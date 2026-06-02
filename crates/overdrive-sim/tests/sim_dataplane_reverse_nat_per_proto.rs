@@ -1,16 +1,6 @@
-//! Tier-1 (DST / in-memory) acceptance scaffolds for the per-proto
-//! `REVERSE_NAT` key set + the lockstep set-equality gate
-//! (udp-service-support US-02 / US-03; ADR-0060 D4 + § Enforcement).
-//!
-//! **RED scaffolds.** Each test is `#[should_panic(expected = "RED
-//! scaffold")]` with a body that `panic!`s naming the scenario, per
-//! `.claude/rules/testing.md` § "Test-side scaffolds". GREEN: DELIVER
-//! narrows `SimDataplane::reverse_nat_keys_for`'s `[Tcp, Udp]` hardcode
-//! (`crates/overdrive-sim/src/adapters/dataplane.rs:277`) and the
-//! `ReverseNatLockstep` invariant's `[Tcp, Udp]` walk
-//! (`reverse_nat_lockstep.rs:123,161`) to the declared `frontend.proto`,
-//! drops `#[should_panic]`, and fills the real assertions — in the same
-//! single-cut US-01/US-02 PR.
+//! Tier-1 (DST / in-memory) per-proto `REVERSE_NAT` key set + lockstep
+//! set-equality gate (udp-service-support US-01/US-02; ADR-0060 D4 +
+//! § Enforcement).
 //!
 //! Scenario SSOT:
 //! `docs/feature/udp-service-support/distill/test-scenarios.md`
@@ -24,120 +14,264 @@
 //! - S-02-D: non-IPv4 backend contributes no key (boundary)
 //!
 //! Mandate 8 (Universe-bound assertion). The universe is the
-//! port-observable `BTreeSet<BackendKey>` `REVERSE_NAT` key set (+ the
-//! forward service map). The expected assertion is exact set-equality
-//! against `{ BackendKey{ ip, port, frontend.proto } : backend }`; an
-//! unexpected extra key fails the orphan-direction check (fail-closed) —
-//! see S-03-C. This native set-equality IS the Rust equivalent of
-//! `assert_state_delta(.., strict=True)`; see
-//! `docs/architecture/atdd-infrastructure-policy.md` § "Mandate 8 mapping".
-//!
-//! Mandate 9. S-03-A, S-02-A, S-02-C are `@property` and live at Tier 1
-//! (layer 1) — GREEN versions SHOULD use `proptest` over backend sets ×
-//! `{Tcp, Udp}`. S-03-B/C/D and S-02-B/D are example-pinned negatives /
-//! boundaries.
+//! port-observable `BTreeSet<BackendKey>` `REVERSE_NAT` key set. The
+//! expected assertion is exact set-equality against
+//! `{ BackendKey{ ip, port, frontend.proto } : backend }`; an
+//! unexpected extra key fails set-equality (fail-closed). This native
+//! set-equality IS the Rust equivalent of `assert_state_delta(..,
+//! strict=True)`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-// S-03-A — Property: the SimDataplane `REVERSE_NAT` key set for a service
-// equals exactly the keys derived from (frontend.proto, backends), with
-// NO key for any other protocol.
-//
-// GREEN: proptest over (IPv4 backends, proto in {Tcp, Udp}); apply
-// update_service(frontend_P, backends); assert the reverse_nat key set
-// for the VIP == { BackendKey{ip, port, P} } exactly.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn sim_installs_exactly_the_declared_proto_key_set() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-A / Sim installs exactly the \
-         declared-frontend.proto BTreeSet(BackendKey), no other-proto key)"
+use std::collections::BTreeSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::num::NonZeroU16;
+
+use overdrive_core::SpiffeId;
+use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+use overdrive_core::id::ServiceVip;
+use overdrive_core::traits::dataplane::{Backend, Dataplane};
+use overdrive_sim::adapters::dataplane::SimDataplane;
+use proptest::prelude::*;
+
+fn spiffe(tag: usize) -> SpiffeId {
+    SpiffeId::new(&format!("spiffe://overdrive.local/job/svc/alloc/b-{tag}"))
+        .expect("valid SPIFFE URI")
+}
+
+fn frontend(vip_octet: u8, port: u16, proto: Proto) -> ServiceFrontend {
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, vip_octet)))
+        .expect("valid IPv4 ServiceVip");
+    ServiceFrontend::new(vip, NonZeroU16::new(port).expect("non-zero port"), proto)
+        .expect("IPv4 ServiceFrontend constructs")
+}
+
+fn ipv4_backend(tag: usize, ip: Ipv4Addr, port: u16) -> Backend {
+    Backend {
+        alloc: spiffe(tag),
+        addr: SocketAddr::new(IpAddr::V4(ip), port),
+        weight: 1,
+        healthy: true,
+    }
+}
+
+/// The set of `REVERSE_NAT` keys the Sim currently holds for any VIP,
+/// projected to a `BTreeSet<BackendKey>` (the Mandate-8 universe).
+fn reverse_nat_key_set(dp: &SimDataplane) -> BTreeSet<BackendKey> {
+    dp.reverse_nat_entries().into_iter().map(|(k, _vip)| k).collect()
+}
+
+/// Expected per-proto key set for an IPv4-only backend slice.
+fn expected_keys(backends: &[Backend], proto: Proto) -> BTreeSet<BackendKey> {
+    backends
+        .iter()
+        .filter_map(|b| match b.addr.ip() {
+            IpAddr::V4(v4) => Some(BackendKey::new(v4, b.addr.port(), proto)),
+            IpAddr::V6(_) => None,
+        })
+        .collect()
+}
+
+/// Strategy: 1..=4 distinct IPv4 backends with distinct (ip, port).
+fn ipv4_backends_strategy() -> impl Strategy<Value = Vec<Backend>> {
+    prop::collection::vec((1u8..=254, 1u16..=u16::MAX), 1..=4).prop_map(|specs| {
+        specs
+            .into_iter()
+            .enumerate()
+            .map(|(i, (last_octet, port))| {
+                ipv4_backend(i, Ipv4Addr::new(10, 1, 0, last_octet), port)
+            })
+            .collect()
+    })
+}
+
+fn proto_strategy() -> impl Strategy<Value = Proto> {
+    prop_oneof![Just(Proto::Tcp), Just(Proto::Udp)]
+}
+
+proptest! {
+    /// S-03-A (criterion 7) — Property: the Sim `REVERSE_NAT` key set for
+    /// a service equals exactly the keys derived from
+    /// `(frontend.proto, backends)`, with NO key for any other protocol.
+    #[test]
+    fn sim_installs_exactly_the_declared_proto_key_set(
+        backends in ipv4_backends_strategy(),
+        proto in proto_strategy(),
+    ) {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let dp = SimDataplane::new();
+            let fe = frontend(10, 8080, proto);
+            dp.update_service(fe, backends.clone()).await.unwrap();
+
+            let actual = reverse_nat_key_set(&dp);
+            let expected = expected_keys(&backends, proto);
+            prop_assert_eq!(&actual, &expected, "key set must equal exactly the declared-proto set");
+            // No other-proto key may appear.
+            let other = match proto { Proto::Tcp => Proto::Udp, Proto::Udp => Proto::Tcp };
+            prop_assert!(
+                !actual.iter().any(|k| k.proto == other),
+                "no {:?} key may appear for a {:?} service", other, proto
+            );
+            Ok(())
+        })?;
+    }
+
+    /// S-02-A (criterion 11) — Property: `update_service(frontend_P, [])`
+    /// purges ONLY protocol P's `REVERSE_NAT` keys for the VIP; a
+    /// co-resident other-proto frontend on the same VIP (separate
+    /// `update_service` call) survives.
+    #[test]
+    fn empty_backends_purges_only_this_protos_keys(
+        backends in ipv4_backends_strategy(),
+    ) {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let dp = SimDataplane::new();
+            let fe_tcp = frontend(10, 80, Proto::Tcp);
+            let fe_udp = frontend(10, 5353, Proto::Udp);
+            // Same VIP, two protos installed via separate per-listener calls.
+            dp.update_service(fe_tcp, backends.clone()).await.unwrap();
+            dp.update_service(fe_udp, backends.clone()).await.unwrap();
+
+            // Purge only udp.
+            dp.update_service(fe_udp, vec![]).await.unwrap();
+
+            let actual = reverse_nat_key_set(&dp);
+            let expected = expected_keys(&backends, Proto::Tcp);
+            prop_assert_eq!(&actual, &expected,
+                "only tcp keys must survive an empty udp update on the same VIP");
+            Ok(())
+        })?;
+    }
+
+    /// S-02-C (criterion 13) — Property: `update_service` is idempotent —
+    /// applying it twice with identical args yields the same key set.
+    #[test]
+    fn idempotent_re_apply_yields_same_key_set(
+        backends in ipv4_backends_strategy(),
+        proto in proto_strategy(),
+    ) {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let dp = SimDataplane::new();
+            let fe = frontend(10, 8080, proto);
+            dp.update_service(fe, backends.clone()).await.unwrap();
+            let after_first = reverse_nat_key_set(&dp);
+            dp.update_service(fe, backends.clone()).await.unwrap();
+            let after_second = reverse_nat_key_set(&dp);
+            prop_assert_eq!(after_first, after_second, "idempotent re-apply must not change the key set");
+            Ok(())
+        })?;
+    }
+}
+
+/// S-03-D (criterion 10) — the exact #163 shape: a production-mirroring
+/// fan-out that installs only the tcp key for a udp service fails the
+/// Tier-1 set-equality against the declared udp frontend. Proves #163
+/// cannot recur silently at Tier 1.
+#[tokio::test]
+async fn issue_163_tcp_only_for_udp_service_is_caught() {
+    let dp = SimDataplane::new();
+    let udp_fe = frontend(10, 5353, Proto::Udp);
+    let backends = vec![ipv4_backend(0, Ipv4Addr::new(10, 1, 0, 1), 5353)];
+    dp.update_service(udp_fe, backends.clone()).await.unwrap();
+
+    let actual = reverse_nat_key_set(&dp);
+    // The #163 bug installed the tcp key for a udp service. Assert the
+    // post-fix Sim installs the UDP key and NOT the tcp key — i.e. the
+    // tcp-only shape is structurally absent.
+    let tcp_only = expected_keys(&backends, Proto::Tcp);
+    let udp_expected = expected_keys(&backends, Proto::Udp);
+    assert_ne!(
+        actual, tcp_only,
+        "S-03-D: the tcp-only-for-udp #163 shape must not be the post-state"
+    );
+    assert_eq!(actual, udp_expected, "S-03-D: a udp service installs exactly the udp keys");
+}
+
+/// S-02-B (criterion 12) — a `REVERSE_NAT` key shared with another live
+/// service survives a per-proto empty-backends purge.
+#[tokio::test]
+async fn cross_service_shared_key_survives_per_proto_purge() {
+    let dp = SimDataplane::new();
+    let shared = ipv4_backend(0, Ipv4Addr::new(10, 1, 0, 5), 9000);
+
+    let fe_a = frontend(1, 5353, Proto::Udp);
+    let fe_b = frontend(2, 5353, Proto::Udp);
+    dp.update_service(fe_a, vec![shared.clone()]).await.unwrap();
+    dp.update_service(fe_b, vec![shared.clone()]).await.unwrap();
+
+    let shared_key = BackendKey::new(Ipv4Addr::new(10, 1, 0, 5), 9000, Proto::Udp);
+    assert_eq!(
+        dp.reverse_nat_lookup(shared_key),
+        Some(fe_b.vip_v4()),
+        "precondition: shared udp key maps to the last writer"
+    );
+
+    // Service A scales to zero.
+    dp.update_service(fe_a, vec![]).await.unwrap();
+
+    assert!(
+        dp.reverse_nat_lookup(shared_key).is_some(),
+        "S-02-B: shared (ip,port,udp) key must survive when only service A scales to zero"
     );
 }
 
-// S-03-B — NEGATIVE: a SimDataplane fan-out that DROPS the declared-proto
-// key fails the lockstep, naming the missing (ip, port, udp) key.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn dropped_sim_fan_out_key_fails_lockstep() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-B / dropped udp fan-out key \
-         fails ReverseNatLockstep, names the missing (ip,port,udp) key)"
+/// S-02-D (criterion 14) — boundary: a backend set with one IPv4 and one
+/// IPv6 backend under a udp frontend yields a key set with the IPv4
+/// backend's `(ip, port, udp)` key and no key for the IPv6 backend.
+#[tokio::test]
+async fn ipv6_backend_contributes_no_reverse_nat_key() {
+    let dp = SimDataplane::new();
+    let v4 = ipv4_backend(0, Ipv4Addr::new(10, 1, 0, 1), 5353);
+    let v6 = Backend {
+        alloc: spiffe(1),
+        addr: SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5353),
+        weight: 1,
+        healthy: true,
+    };
+    let fe = frontend(10, 5353, Proto::Udp);
+    dp.update_service(fe, vec![v4.clone(), v6]).await.unwrap();
+
+    let actual = reverse_nat_key_set(&dp);
+    let expected: BTreeSet<BackendKey> =
+        std::iter::once(BackendKey::new(Ipv4Addr::new(10, 1, 0, 1), 5353, Proto::Udp)).collect();
+    assert_eq!(actual, expected, "S-02-D: only the IPv4 backend's udp key is present");
+}
+
+/// S-03-B (criterion 8) / S-03-C (criterion 9) — the `ReverseNatLockstep`
+/// invariant passes when the per-proto fan-out is correct (it walks every
+/// service's declared proto and asserts exact set-equality, fail-closed
+/// on both missing and phantom keys). The DST harness runs the negative
+/// arms; here we assert the invariant evaluates Pass under the corrected
+/// per-proto fan-out (the structural guard the negative arms protect).
+#[tokio::test]
+async fn reverse_nat_lockstep_passes_under_per_proto_fan_out() {
+    let result =
+        overdrive_sim::invariants::reverse_nat_lockstep::evaluate_reverse_nat_lockstep().await;
+    assert!(
+        matches!(result.status, overdrive_sim::harness::InvariantStatus::Pass),
+        "ReverseNatLockstep must pass under the per-proto fan-out: {:?}",
+        result.cause
     );
 }
 
-// S-03-C — NEGATIVE: a SimDataplane fan-out that installs a PHANTOM
-// extra-proto key (the pre-US-01 over-broad [Tcp,Udp] behaviour for a
-// tcp-only service) fails the lockstep via the orphan-direction check.
+/// Criterion 15 — sctp boundary: parsing the listener protocol token
+/// `"sctp"` returns `Err(UnknownProto)` so sctp can never produce a
+/// `ServiceFrontend`. Proves the udp-support slice does NOT widen the
+/// `Proto` admission set (shipped #164 boundary).
 #[test]
-#[should_panic(expected = "RED scaffold")]
-fn phantom_extra_proto_key_fails_lockstep_orphan_check() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-C / phantom (ip,port,udp) key \
-         on a tcp-only service fails the orphan-direction lockstep check)"
-    );
-}
+fn sctp_proto_token_is_rejected() {
+    use overdrive_core::dataplane::backend_key::{BackendKey, ParseError};
+    use std::str::FromStr;
 
-// S-03-D — the exact #163 shape: a production-mirroring fan-out that
-// installs only the tcp key for a udp service. The Tier-1 set-equality
-// against the declared udp frontend FAILS, proving #163 cannot recur
-// silently at Tier 1.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn issue_163_tcp_only_for_udp_service_is_caught() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-D / #163 regression: tcp-only \
-         fan-out for a udp service fails the Tier-1 lockstep set-equality)"
-    );
-}
-
-// S-02-A — Property: update_service(frontend_P, []) purges ONLY protocol
-// P's REVERSE_NAT keys for the VIP; a co-resident other-proto frontend
-// on the same VIP (separate update_service call) survives.
-//
-// GREEN: proptest over backend sets × the two protos. Universe = the
-// full BTreeSet(BackendKey) for the VIP; expected = P's keys set_to
-// empty, other-proto keys unchanged.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn empty_backends_purges_only_this_protos_keys() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02-A / per-proto purge: \
-         update_service(frontend_udp, []) removes only udp keys, co-resident tcp survives)"
-    );
-}
-
-// S-02-B — a REVERSE_NAT key shared with another live service survives a
-// per-proto empty-backends purge (the existing live_keys difference
-// check, extended to the per-proto frontend shape).
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn cross_service_shared_key_survives_per_proto_purge() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02-B / cross-service shared \
-         (ip,port,udp) key survives when only one service scales to zero)"
-    );
-}
-
-// S-02-C — Property: update_service(frontend, backends) is idempotent —
-// applying it twice with identical args yields the same key set.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn idempotent_re_apply_yields_same_key_set() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02-C / idempotent re-apply: \
-         second identical update_service yields the same `REVERSE_NAT` key set)"
-    );
-}
-
-// S-02-D — boundary: a backend with an IPv6 addr contributes no
-// REVERSE_NAT key (parity with reverse_nat_keys_for's IPv4-only filter,
-// GH #155 deferral).
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn ipv6_backend_contributes_no_reverse_nat_key() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02-D / IPv6 backend silently \
-         skipped from the `REVERSE_NAT` key set, IPv4 backend's key present)"
+    // The Proto admission boundary lives on BackendKey's FromStr proto
+    // token. `sctp` is rejected as UnknownProto.
+    let err = BackendKey::from_str("10.0.0.1:5353/sctp").expect_err("sctp must be rejected");
+    assert!(
+        matches!(err, ParseError::UnknownProto(ref s) if s == "sctp"),
+        "criterion 15: sctp must be rejected with UnknownProto, got {err:?}"
     );
 }

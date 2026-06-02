@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::SpiffeId;
+use crate::dataplane::ServiceFrontend;
 
 #[derive(Debug, Error)]
 pub enum DataplaneError {
@@ -97,10 +98,53 @@ pub trait Dataplane: Send + Sync + 'static {
     /// Install or update a single policy verdict.
     async fn update_policy(&self, key: PolicyKey, verdict: Verdict) -> Result<(), DataplaneError>;
 
-    /// Atomically replace the backend set for a service VIP.
+    /// Atomically replace the backend set for the service frontend
+    /// `(frontend.vip, frontend.port, frontend.proto)`.
+    ///
+    /// # Preconditions
+    ///
+    /// - `frontend` is V4-guaranteed by construction
+    ///   ([`ServiceFrontend::new`] rejected IPv6 at the action-shim);
+    ///   adapters narrow `frontend.vip → Ipv4Addr` infallibly via
+    ///   [`ServiceFrontend::vip_v4`]. No adapter re-validates the VIP.
+    /// - `backends` MAY be empty (see edge cases). Each `Backend.addr`
+    ///   is a `SocketAddr`; non-IPv4 backend addresses are skipped from
+    ///   the `REVERSE_NAT` key set (GH #155 deferral).
+    ///
+    /// # Postconditions on `Ok(())`
+    ///
+    /// After return, the adapter's `REVERSE_NAT` key set **for
+    /// `frontend.proto`** equals exactly the keys derived from
+    /// `backends`: `{ BackendKey { ip, port: backend.addr.port(),
+    /// proto: frontend.proto } : backend ∈ backends, backend.addr is
+    /// IPv4 }`, each mapping to `frontend.vip_v4()`. Keys for **other**
+    /// protocols of the same VIP — installed by separate per-listener
+    /// `update_service` calls — are untouched.
+    ///
+    /// # Edge cases
+    ///
+    /// - `backends.is_empty()` ⇒ **per-proto purge** (ADR-0060 D4). The
+    ///   adapter removes the prior `frontend.proto` `REVERSE_NAT` keys
+    ///   for this VIP that are not still live in another service's
+    ///   backend set (the existing `live_keys` difference check).
+    ///   `REVERSE_NAT` keys for *other* protocols of the same VIP are
+    ///   **not** removed.
+    /// - Idempotent re-apply: calling `update_service(frontend,
+    ///   backends)` twice with identical arguments yields the same
+    ///   post-state.
+    /// - A backend with an IPv6 `addr` contributes no `REVERSE_NAT` key
+    ///   (silently skipped).
+    ///
+    /// # Observable invariant (cross-adapter)
+    ///
+    /// For the same `(frontend, backends)`, `SimDataplane` and
+    /// `EbpfDataplane` install the **identical** `(ip, port, proto) →
+    /// vip` `REVERSE_NAT` set. The `ReverseNatLockstep` three-tier gate
+    /// enforces this (per `.claude/rules/development.md` § "The DST
+    /// equivalence test is the structural guard").
     async fn update_service(
         &self,
-        vip: Ipv4Addr,
+        frontend: ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError>;
 

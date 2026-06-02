@@ -1,0 +1,129 @@
+{
+  "roadmap": {
+    "project_id": "udp-service-support",
+    "created_at": "2026-06-02T08:40:31Z",
+    "total_steps": 4
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "UDP L4 service support — ServiceFrontend threading + per-proto reverse-NAT lockstep (fixes #163)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Single-cut core: thread ServiceFrontend(vip,port,proto) through all 8 sites + per-proto Sim/Ebpf fan-out + Tier-1 lockstep narrowing",
+          "criteria": [
+            "ServiceFrontend::new(vip, port, proto) over any IPv4 ServiceVip, any NonZeroU16 port, and proto in {Tcp,Udp} returns Ok, and vip_v4()/port()/proto() round-trip exactly the supplied inputs (proptest over IPv4 octets x NonZeroU16 x {Tcp,Udp}; PARADIGM: proptest! full)",
+            "ServiceFrontend::new over any IPv6 ServiceVip returns Err(ParseError) and produces no ServiceFrontend value (proptest over IPv6 segments, pinned example ::1; PARADIGM: proptest! full)",
+            "A desired projection sourced from a listener-bearing fact declaring protocol udp on port 5353 yields a ServiceFrontend reaching update_service carrying proto Udp, with no Proto::Tcp literal reached on the intent->hydrator->frontend->dataplane path for that service",
+            "The desired projection reads protocol from the listener-bearing fact (ListenerRow / BackendDiscoveryBridge per-listener projection), not synthesised from a default, for a service whose service_backends row carries neither port nor protocol",
+            "A desired projection with no resolvable listener-bearing protocol fact produces a structured Failed signal (operator-visible) AND emits no update_service action carrying a silently-defaulted Proto::Tcp — both the absence of the Tcp-defaulted action and the presence of the Failed signal are asserted (C3 guard)",
+            "An action carrying an IPv6 service VIP is rejected at the action-shim's existing ipv4_from_vip site, writing an operator-visible ServiceHydrationStatus::Failed observation row with reason Ipv6Unsupported, and is NOT demoted to a late opaque DataplaneError in an adapter",
+            "After update_service(frontend_P, backends) on the SimDataplane, the REVERSE_NAT key set for that service equals exactly { BackendKey{ip, port, P} : backend in backends, addr is IPv4 } and contains no key for any protocol other than P (proptest over backend sets x {Tcp,Udp}, exact BTreeSet<BackendKey> set-equality as the Mandate-8 universe guard; PARADIGM: proptest! full)",
+            "The ReverseNatLockstep invariant FAILS, naming the missing (ip, port, udp) key, when a udp service's Sim fan-out is mutated to install no key or a tcp-only key (negative arm)",
+            "The ReverseNatLockstep invariant FAILS via the orphan-direction check, naming the phantom (ip, port, udp) key, when a tcp-only service's Sim fan-out installs an extra udp key (extra-key arm)",
+            "The exact #163 shape (production-mirroring fan-out installs only the tcp key for a udp service) FAILS the lockstep set-equality against the declared udp frontend, proving the divergence that shipped #163 cannot recur silently at Tier 1",
+            "update_service(frontend_udp, []) removes every udp REVERSE_NAT key for the VIP while every co-resident tcp REVERSE_NAT key for the same VIP (installed via a separate update_service call) survives (proptest over backend sets x the two protos, full BTreeSet<BackendKey> universe; PARADIGM: proptest! full)",
+            "A REVERSE_NAT key (ip, port, udp) referenced by both service A and service B survives service A scaling to zero backends via update_service(frontend_udp_A, []), preserved by the live_keys difference check",
+            "update_service(frontend, backends) applied twice with identical arguments yields an identical REVERSE_NAT key set after the second application as after the first (proptest; PARADIGM: proptest! full)",
+            "A backend set with one IPv4 and one IPv6 backend under a udp frontend yields a REVERSE_NAT key set containing the IPv4 backend's (ip, port, udp) key and no key for the IPv6 backend (parity with reverse_nat_keys_for IPv4-only filter, GH #155 deferral)",
+            "Parsing the listener protocol token \"sctp\" returns Err(UnknownProto) so sctp can never produce a ServiceFrontend, confirming the udp-support feature does not widen the Proto admission set beyond tcp/udp (shipped #164 boundary)"
+          ],
+          "test_file": "crates/overdrive-core/tests/service_frontend.rs",
+          "scenario_name": "S-01-A"
+        },
+        {
+          "id": "01-02",
+          "name": "Tier 2 kernel UDP reverse-NAT triptych: xdp_reverse_nat_lookup rewrites proto=17 source to the VIP",
+          "criteria": [
+            "Given REVERSE_NAT_MAP populated with (backend_ip, backend_port, udp) -> VIP and a synthetic UDP response packet (IPv4 proto=17) sourced from (backend_ip, backend_port), running xdp_reverse_nat_lookup via BPF_PROG_TEST_RUN rewrites the output packet's source 5-tuple to (vip, vip_port) and returns the reverse-NAT egress verdict (not XDP_PASS with an unmodified frame)",
+            "Given an empty REVERSE_NAT_MAP and a synthetic UDP response packet (proto=17), running xdp_reverse_nat_lookup via BPF_PROG_TEST_RUN returns XDP_PASS and the output frame is byte-identical to the input (no rewrite, no DROP_COUNTER slot consumed)"
+          ],
+          "test_file": "crates/overdrive-bpf/tests/integration/xdp_reverse_nat_udp.rs",
+          "scenario_name": "S-03-E"
+        },
+        {
+          "id": "01-03",
+          "name": "Tier 3 walking skeleton: single UDP listener forward+reverse e2e via real overdrive deploy subprocess",
+          "criteria": [
+            "Given a dns-resolver.toml declaring a udp listener on 5353 and a backend bound on 5353, running `overdrive deploy dns-resolver.toml` as a real subprocess of the built binary exits 0 and prints \"Accepted.\", `bpftool map dump REVERSE_NAT_MAP` shows the (backend_ip, 5353, udp) key mapping to the VIP, and a wire capture on the client veth shows the backend's reply sourced from the VIP (10.96.0.10:5353), not the backend IP",
+            "Given the running single-UDP-listener service, three UDP datagrams sent to the VIP each produce a captured reply sourced from the VIP (each reply independently source-rewritten; UDP is connectionless)",
+            "Given a UDP service whose backend is NOT bound on the listener port, a datagram sent to the VIP produces no captured reply and the test reports \"no response\" rather than a source-rewrite failure (distinguishing backend-down from the #163 wrong-source defect)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/reverse_nat_udp_e2e.rs",
+          "scenario_name": "S-04-A"
+        },
+        {
+          "id": "01-04",
+          "name": "Tier 3 multi-listener TCP+UDP e2e: per-listener reverse path installed, both paths VIP-sourced",
+          "criteria": [
+            "Given an edge.toml declaring tcp/8080 and udp/8081 and a backend bound on both ports, running `overdrive deploy edge.toml` as a real subprocess exits 0 with accepted output reflecting the multi-listener service, `bpftool map dump REVERSE_NAT_MAP` shows both the (backend,8080,tcp) and (backend,8081,udp) keys — one reverse path installed per listener, each with its own declared proto byte — and two wire captures (one tcp, one udp) both show the reply sourced from the VIP",
+            "Given the running two-listener service, exercising both the tcp and udp listeners yields a tcp reply and a udp reply each captured with the same VIP as source",
+            "Given a running two-listener service (tcp/8080 + udp/8081), re-submitting edge.toml with an added udp/8082 listener converges so that `bpftool map dump REVERSE_NAT_MAP` shows a third (backend,8082,udp) key, the new udp/8082 reverse path works, and the existing two paths still work"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/multi_listener_tcp_udp_e2e.rs",
+          "scenario_name": "S-05-A"
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/dataplane/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-core/src/reconcilers/",
+      "crates/overdrive-sim/src/adapters/",
+      "crates/overdrive-sim/src/invariants/",
+      "crates/overdrive-control-plane/src/action_shim/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-dataplane/src/",
+      "crates/overdrive-bpf/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-sim/tests/",
+      "crates/overdrive-control-plane/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-cli/tests/integration/",
+      "crates/overdrive-bpf/tests/integration/",
+      "crates/overdrive-dataplane/tests/integration/"
+    ],
+    "excluded_patterns": []
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  },
+  "reviews": [
+    {
+      "reviewer": "nw-solution-architect-reviewer (Atlas)",
+      "model": "opus (inherit)",
+      "date": "2026-06-02",
+      "artifact_type": "roadmap",
+      "mandate": "roadmap vs wave artifacts (ADR-0060, design/wave-decisions.md, design/upstream-changes.md, distill/test-scenarios.md, feature-delta.md)",
+      "verdict": "APPROVED",
+      "verdict_note": "Originally conditionally_approved (1 high finding); the condition was resolved in-line — see resolution.",
+      "checks_passed": [
+        "Scenario completeness: all 23 DISTILL scenarios mapped 1:1 (15 Tier-1 in 01-01, 2 Tier-2 in 01-02, 3+3 Tier-3 in 01-03/01-04); none dropped or double-counted",
+        "Single-cut integrity (C6/D6): 01-01 fuses all 8 sites atomically; 01-02/03/04 are safely additive",
+        "C3 defense load-bearing: 01-01 criteria explicitly guard 'proto sourced from listener-bearing fact, never Tcp-defaulted' (S-01-C/D/E)",
+        "Implementation-scope fidelity: real Rust crate paths for all 8 sites; overdrive-cli/tests/integration/ present for the M-2 subprocess-deploy driving half; no src/TODO placeholders",
+        "CLI verb correctness: 'overdrive deploy <spec>' throughout, never 'job submit'",
+        "Issue references valid: only #163 (bug) and #155 (IPv6-backend deferral); no invented numbers",
+        "Upstream-changes consistency: per-proto purge (D4) and 8-site blast radius both reflected"
+      ],
+      "findings": [
+        {
+          "severity": "high",
+          "label": "issue (blocking)",
+          "location": "phases[0].steps[3] (01-04) criteria[0] and criteria[2]",
+          "finding": "Tier-3 black-box e2e criteria asserted white-box internal hydrator call counts ('ServiceMapHydrator emits one update_service per listener'; 'reconciles to three update_service calls'), which a subprocess e2e cannot observe without instrumenting the control-plane adapter — violates the Tier-3 assertion rule (observable side effects only, never internal reachability). Transcribed verbatim from DISTILL S-05-A / S-05-C.",
+          "resolution": "RESOLVED in-line: rewrote both criteria + the step name to express the per-listener fan-out via an observable proxy — `bpftool map dump REVERSE_NAT_MAP` shows one key per listener, each with its own proto byte — plus the dual VIP-sourced wire captures. Intent preserved, boundary honored, AC strengthened (now checkable).",
+          "downstream_note": "DISTILL S-05-A / S-05-C carry the same white-box phrasing in their middle clauses. The committed test-scenarios.md was NOT edited by this review; the crafter implementing 01-04 must assert via the observable proxy regardless. Aligning the DISTILL prose is a separate decision (left to the user)."
+        }
+      ],
+      "praise": "Step boundaries are compile-atomicity boundaries, not story boundaries — correctly fusing US-01/US-02/US-03-Tier1 into one single-cut commit because the update_service trait-signature change breaks both adapters at once. This is the architecturally honest decomposition and avoids a non-compiling intermediate commit."
+    }
+  ]
+}

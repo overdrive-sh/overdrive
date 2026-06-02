@@ -1326,21 +1326,36 @@ async fn hydrate_desired(
                 .service_backends_rows(&service_id)
                 .await
                 .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+            // Listener-bearing facts (ADR-0060 site #8): proto MUST be
+            // sourced from a listener-bearing fact, NEVER defaulted to Tcp
+            // (C3). The SSOT for the per-listener protocol is the Service
+            // intent's `listeners` (the `BackendDiscoveryBridge` derives
+            // its `(vip, port, protocol)` projection from the same place);
+            // `service_backends` and `alloc_status` rows carry no proto.
+            let listeners = gather_service_listener_facts(state).await?;
             let mut desired = BTreeMap::new();
             for row in rows {
-                // Wrap the row's wire-shape `Ipv4Addr` into `ServiceVip`
-                // at the read boundary per architecture.md § 8.
-                let vip = overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(row.vip))
-                    .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-                let fp = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
-                desired.insert(
-                    row.service_id,
-                    overdrive_core::reconcilers::ServiceDesired {
-                        vip,
-                        backends: row.backends,
-                        fingerprint: fp,
-                    },
-                );
+                // Source `(port, proto)` from the listener-bearing fact.
+                // On an unresolvable proto, skip the service — emitting
+                // NO `update_service` action carrying a silently-defaulted
+                // `Proto::Tcp` (C3 guard) — and surface the structured
+                // failure for the operator.
+                match overdrive_core::reconcilers::service_map_hydrator::project_service_desired(
+                    &row, &listeners,
+                ) {
+                    Ok(desired_svc) => {
+                        desired.insert(row.service_id, desired_svc);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            name: "service_map_hydrator.desired.unresolvable_proto",
+                            service_id = %row.service_id,
+                            error = %e,
+                            "skipping service-map desired projection: no listener-bearing \
+                             protocol fact; refusing to default to Tcp (ADR-0060 C3)"
+                        );
+                    }
+                }
             }
             Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
                 desired,
@@ -1698,6 +1713,76 @@ async fn hydrate_bridge_desired_listeners(
         );
     }
     Ok(listeners)
+}
+
+/// Gather the cluster-wide listener-bearing protocol facts for the
+/// `ServiceMapHydrator` desired projection (ADR-0060 site #8 / C3).
+///
+/// The per-listener L4 protocol SSOT is the Service intent's
+/// `listeners` (the same source `hydrate_bridge_desired_listeners`
+/// projects). `ServiceBackendRow` and `alloc_status` rows carry no
+/// protocol, so the proto MUST come from here — and `hydrate_desired`
+/// refuses to synthesise a `Proto::Tcp` default when no fact resolves.
+///
+/// Each returned [`ListenerRow`] carries the allocator-issued VIP
+/// (`vip: Some(_)`) so the hydrator's projection matches it to the
+/// `service_backends` row by VIP. Scans the `workloads/` intent prefix,
+/// decodes each `Service` intent, and emits one `ListenerRow` per
+/// listener. Non-Service intents and intents without an allocator memo
+/// (VIP not yet issued) contribute no facts.
+async fn gather_service_listener_facts(
+    state: &AppState,
+) -> Result<Vec<overdrive_core::traits::observation_store::ListenerRow>, ConvergenceError> {
+    use overdrive_core::traits::observation_store::ListenerRow;
+
+    let rows = state
+        .store
+        .scan_prefix(b"workloads/")
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+
+    let mut facts = Vec::new();
+    for (key_bytes, value_bytes) in rows {
+        // Only the canonical `workloads/<id>` records carry the intent
+        // payload — skip the `workloads/<id>/stop` and
+        // `workloads/<id>/kind` sub-keys.
+        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
+        let suffix = &key_str["workloads/".len()..];
+        if suffix.is_empty() || suffix.contains('/') {
+            continue;
+        }
+
+        // A non-intent payload under the prefix (or a decode failure) is
+        // not a listener fact — skip it.
+        let Ok(intent) = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+            value_bytes.as_ref(),
+            &state.intent_redb_path,
+            Some(key_str),
+        ) else {
+            continue;
+        };
+        let overdrive_core::aggregate::WorkloadIntent::Service(service_v1) = &intent else {
+            continue;
+        };
+
+        let Ok(spec_digest) = intent.spec_digest() else { continue };
+        let digest_bytes: [u8; 32] = *spec_digest.as_bytes();
+        let assigned_vip_opt = {
+            let guard = state.allocator.lock().await;
+            let vip = guard.get(&digest_bytes);
+            drop(guard);
+            vip
+        };
+        let Some(assigned_vip) = assigned_vip_opt else { continue };
+        for listener in &service_v1.listeners {
+            facts.push(ListenerRow {
+                port: listener.port,
+                protocol: listener.protocol,
+                vip: Some(assigned_vip),
+            });
+        }
+    }
+    Ok(facts)
 }
 
 /// Read a workload from the `IntentStore` at the canonical

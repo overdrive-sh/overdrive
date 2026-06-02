@@ -58,7 +58,13 @@ fn make_desired_svc() -> ServiceDesired {
     let vip = make_vip();
     let backends = vec![make_backend()];
     let fp = fingerprint(&vip, &backends);
-    ServiceDesired { vip, backends, fingerprint: fp }
+    ServiceDesired {
+        vip,
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+        backends,
+        fingerprint: fp,
+    }
 }
 
 fn make_tick(now_secs: u64) -> TickContext {
@@ -405,7 +411,16 @@ fn hydrator_skips_register_local_backend_for_loopback() {
     let fp = fingerprint(&vip, &backends);
 
     let mut desired = BTreeMap::new();
-    desired.insert(s_id, ServiceDesired { vip, backends, fingerprint: fp });
+    desired.insert(
+        s_id,
+        ServiceDesired {
+            vip,
+            port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+            proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+            backends,
+            fingerprint: fp,
+        },
+    );
     let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
     let view = ServiceMapHydratorView::default();
     let (actions, _) = r.reconcile(&state, &state, &view, &make_tick(0));

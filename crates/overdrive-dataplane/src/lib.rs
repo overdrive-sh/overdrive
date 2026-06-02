@@ -1232,14 +1232,19 @@ impl Dataplane for EbpfDataplane {
     /// the trait (architecture.md § 5 D-Sig).
     async fn update_service(
         &self,
-        vip: Ipv4Addr,
+        frontend: overdrive_core::dataplane::ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
         use std::os::fd::AsFd;
 
         use crate::maps::wire::{BackendEntryPod, ServiceKey};
         use crate::maps::{BackendKeyPod, VipPod};
-        use overdrive_core::dataplane::backend_key::Proto;
+
+        // `frontend.vip` is IPv4-by-construction (ADR-0060 D1a) — narrow
+        // infallibly. `frontend.proto()` is the single declared L4
+        // protocol; the REVERSE_NAT fan-out is per-proto (D4).
+        let vip = frontend.vip_v4();
+        let svc_proto = frontend.proto();
 
         // Empty backend set — remove this VIP from all maps so XDP
         // returns XDP_PASS. Collect ALL ServiceKeys matching the VIP
@@ -1331,9 +1336,9 @@ impl Dataplane for EbpfDataplane {
         // updates (memo-table hit); orphan GC removes IDs not in the
         // new set.
         //
-        // Phase 2.2 hardcodes proto = TCP because the trait surface
-        // does not yet carry per-service protocol (GH #163).
-        let proto = Proto::Tcp.as_u8();
+        // Proto threaded from the `ServiceFrontend` (ADR-0060, GH #163)
+        // — the per-service L4 protocol, no longer hardcoded TCP.
+        let proto = svc_proto.as_u8();
         let mut backend_ids: Vec<u32> = Vec::with_capacity(backends.len());
         {
             // Locks held only for the BACKEND_MAP populate loop;
@@ -1452,7 +1457,7 @@ impl Dataplane for EbpfDataplane {
                 std::net::IpAddr::V4(v4) => Some(BackendKeyPod {
                     ip_host: u32::from(v4),
                     port_host: backend.addr.port(),
-                    proto: Proto::Tcp.as_u8(),
+                    proto: svc_proto.as_u8(),
                     _pad: 0,
                 }),
                 std::net::IpAddr::V6(_) => None,
@@ -1530,8 +1535,8 @@ impl Dataplane for EbpfDataplane {
         // longer receive forward-path traffic) while the pre-swap
         // insert ordering is safety-critical.
         //
-        // Phase 2.2 hardcodes `proto = TCP` because the trait
-        // surface does not yet carry per-service protocol (GH #163).
+        // The proto is `frontend.proto()` (ADR-0060 D4) — the
+        // per-service L4 protocol threaded through `new_keys` above.
         let (prior_keys, live_nat_keys): (
             std::collections::BTreeSet<BackendKeyPod>,
             std::collections::BTreeSet<BackendKeyPod>,

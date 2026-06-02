@@ -67,6 +67,8 @@ fn update_service(o1: u8) -> Action {
     Action::DataplaneUpdateService {
         service_id: service_id(),
         vip: service_vip_for(o1),
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
         backends: vec![],
         correlation: correlation("update-service"),
     }

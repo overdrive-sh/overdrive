@@ -288,6 +288,8 @@ mod tests {
         Action::DataplaneUpdateService {
             service_id: service_id(),
             vip: service_vip(o1),
+            port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+            proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
             backends: vec![],
             correlation: correlation("update-service"),
         }

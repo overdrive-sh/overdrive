@@ -29,12 +29,14 @@
 #![allow(clippy::expect_used)]
 
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use overdrive_core::SpiffeId;
+use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{NodeId, ServiceVip};
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 
 use crate::adapters::dataplane::SimDataplane;
@@ -70,10 +72,13 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
 
     // Build N services × M backends. Distinct VIPs and distinct
     // backend addresses so the (vip, backend) cross-product yields
-    // unique reverse-NAT keys.
-    let mut layout: BTreeMap<Ipv4Addr, Vec<Backend>> = BTreeMap::new();
+    // unique reverse-NAT keys. Each service declares ONE proto
+    // (alternating tcp/udp) — the per-proto fan-out (ADR-0060 D4)
+    // installs exactly the declared-proto key, never both.
+    let mut layout: BTreeMap<Ipv4Addr, (Proto, Vec<Backend>)> = BTreeMap::new();
     for s in 0..SERVICES {
         let vip = Ipv4Addr::new(10, 0, 0, u8::try_from(s + 1).expect("s < 256"));
+        let proto = if s % 2 == 0 { Proto::Tcp } else { Proto::Udp };
         let mut backends = Vec::with_capacity(BACKENDS_PER_SERVICE as usize);
         for b in 0..BACKENDS_PER_SERVICE {
             let backend_ip = Ipv4Addr::new(
@@ -84,14 +89,15 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
             );
             backends.push(backend(s, b, backend_ip, 8080));
         }
-        layout.insert(vip, backends);
+        layout.insert(vip, (proto, backends));
     }
 
     // Install every service. After each install, assert lockstep
     // holds for the cumulative set: every backend across every
-    // service has a REVERSE_NAT entry pointing to its VIP.
-    for (vip, backends) in &layout {
-        if let Err(e) = dataplane.update_service(*vip, backends.clone()).await {
+    // service has a REVERSE_NAT entry, under its declared proto only,
+    // pointing to its VIP.
+    for (vip, (proto, backends)) in &layout {
+        if let Err(e) = dataplane.update_service(frontend(*vip, *proto), backends.clone()).await {
             return fail(NAME, format!("install update_service({vip}) failed: {e}"));
         }
     }
@@ -102,40 +108,42 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
     // Remove one backend from the first service via update_service
     // with one less. The reverse-NAT entries for the removed backend
     // MUST be purged.
-    let (first_vip, first_backends) =
-        layout.iter().next().map(|(v, b)| (*v, b.clone())).expect("SERVICES > 0");
+    let (first_vip, first_proto, first_backends) =
+        layout.iter().next().map(|(v, (p, b))| (*v, *p, b.clone())).expect("SERVICES > 0");
     let removed_backend = first_backends.last().cloned().expect("BACKENDS_PER_SERVICE > 0");
     let mut shrunk = first_backends.clone();
     shrunk.pop();
 
-    if let Err(e) = dataplane.update_service(first_vip, shrunk.clone()).await {
+    if let Err(e) = dataplane.update_service(frontend(first_vip, first_proto), shrunk.clone()).await
+    {
         return fail(NAME, format!("shrink update_service({first_vip}) failed: {e}"));
     }
 
     // Update the layout to match the post-shrink reality.
     let mut after_shrink = layout.clone();
-    after_shrink.insert(first_vip, shrunk.clone());
+    after_shrink.insert(first_vip, (first_proto, shrunk.clone()));
     if let Some(violation) = check_lockstep(&dataplane, &after_shrink) {
         return fail(NAME, format!("after shrink: {violation}"));
     }
 
-    // The removed backend's REVERSE_NAT entries must be ABSENT.
-    for proto in [Proto::Tcp, Proto::Udp] {
-        let removed_key = backend_key_for(&removed_backend, proto);
-        if let Some(stale_vip) = dataplane.reverse_nat_lookup(removed_key) {
-            return fail(
-                NAME,
-                format!(
-                    "removed backend {removed_key} still has REVERSE_NAT entry → \
-                     {stale_vip}; expected purged"
-                ),
-            );
-        }
+    // The removed backend's REVERSE_NAT entry (under the service's
+    // declared proto) must be ABSENT.
+    let removed_key = backend_key_for(&removed_backend, first_proto);
+    if let Some(stale_vip) = dataplane.reverse_nat_lookup(removed_key) {
+        return fail(
+            NAME,
+            format!(
+                "removed backend {removed_key} still has REVERSE_NAT entry → \
+                 {stale_vip}; expected purged"
+            ),
+        );
     }
 
     // Add the backend back via update_service. The REVERSE_NAT
     // entries must reappear with the correct VIP.
-    if let Err(e) = dataplane.update_service(first_vip, first_backends.clone()).await {
+    if let Err(e) =
+        dataplane.update_service(frontend(first_vip, first_proto), first_backends.clone()).await
+    {
         return fail(NAME, format!("restore update_service({first_vip}) failed: {e}"));
     }
     if let Some(violation) = check_lockstep(&dataplane, &layout) {
@@ -145,6 +153,18 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
     pass(NAME)
 }
 
+/// Build a `ServiceFrontend` for a VIP under a declared proto. Listener
+/// port is fixed at 8080 (the lockstep does not vary port).
+fn frontend(vip: Ipv4Addr, proto: Proto) -> ServiceFrontend {
+    let service_vip = ServiceVip::new(IpAddr::V4(vip)).expect("valid IPv4 ServiceVip");
+    ServiceFrontend::new(
+        service_vip,
+        const { NonZeroU16::new(8080).expect("non-zero port") },
+        proto,
+    )
+    .expect("IPv4 ServiceFrontend constructs")
+}
+
 /// Walk every (service, backend, proto) triple in `layout` and assert
 /// that the dataplane's `reverse_nat` map carries the expected entry,
 /// AND that no orphan reverse-NAT entries exist (every entry maps
@@ -152,15 +172,15 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
 /// `None` on success, `Some(reason)` on first violation.
 fn check_lockstep(
     dataplane: &SimDataplane,
-    layout: &BTreeMap<Ipv4Addr, Vec<Backend>>,
+    layout: &BTreeMap<Ipv4Addr, (Proto, Vec<Backend>)>,
 ) -> Option<String> {
-    // Build the expected reverse-NAT map from the layout.
+    // Build the expected reverse-NAT map from the layout — exactly one
+    // key per backend, under the service's DECLARED proto (D4). A key
+    // for any other proto is a phantom and fails the orphan check below.
     let mut expected: BTreeMap<BackendKey, Ipv4Addr> = BTreeMap::new();
-    for (vip, backends) in layout {
+    for (vip, (proto, backends)) in layout {
         for backend in backends {
-            for proto in [Proto::Tcp, Proto::Udp] {
-                expected.insert(backend_key_for(backend, proto), *vip);
-            }
+            expected.insert(backend_key_for(backend, *proto), *vip);
         }
     }
 

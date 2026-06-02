@@ -266,13 +266,22 @@ async fn sim_dataplane_stores_policy_and_service_state() {
     );
 
     let vip: Ipv4Addr = "10.0.0.7".parse().expect("valid ip");
+    let frontend = overdrive_core::dataplane::ServiceFrontend::new(
+        overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(vip)).expect("valid ServiceVip"),
+        std::num::NonZeroU16::new(8080).expect("non-zero"),
+        overdrive_core::dataplane::backend_key::Proto::Tcp,
+    )
+    .expect("IPv4 ServiceFrontend constructs");
     let backend = Backend {
         alloc: spiffe("job/payments/alloc/a1b2c3"),
         addr: "127.0.0.1:8080".parse().expect("valid addr"),
         weight: 100,
         healthy: true,
     };
-    dataplane.update_service(vip, vec![backend.clone()]).await.expect("update_service succeeds");
+    dataplane
+        .update_service(frontend, vec![backend.clone()])
+        .await
+        .expect("update_service succeeds");
 
     let stored = dataplane.service_backends(vip);
     assert_eq!(stored.as_deref(), Some(&[backend][..]));

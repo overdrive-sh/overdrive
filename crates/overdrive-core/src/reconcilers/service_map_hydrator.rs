@@ -24,8 +24,10 @@
 //! re-exports the public surface.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU16;
 use std::time::Duration;
 
+use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use crate::traits::dataplane::Backend;
@@ -41,11 +43,82 @@ pub struct ServiceDesired {
     /// Virtual IP the kernel-side XDP program matches incoming packets
     /// against.
     pub vip: ServiceVip,
+    /// Service listener port — sourced from a listener-bearing fact
+    /// (ADR-0060 site #8), never synthesised.
+    pub port: NonZeroU16,
+    /// L4 protocol — sourced from a listener-bearing fact, NEVER
+    /// defaulted to `Tcp` (ADR-0060 C3).
+    pub proto: Proto,
     /// Backend set, in deterministic `BTreeMap<BackendId, Backend>`
     /// iteration order.
     pub backends: Vec<Backend>,
     /// Content-hash of the `(vip, backends)` pair.
     pub fingerprint: BackendSetFingerprint,
+}
+
+/// Failure of the observation→desired projection
+/// ([`project_service_desired`]). Per ADR-0060 C3 an unresolvable
+/// listener protocol is a structured error — NEVER a silent `Proto::Tcp`
+/// default.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ServiceProjectionError {
+    /// No listener-bearing fact resolves the service's L4 protocol.
+    /// `ServiceBackendRow` carries neither port nor proto, so the proto
+    /// MUST come from a `ListenerRow` (or `BackendDiscoveryBridge`
+    /// per-listener projection); when none is resolvable the projection
+    /// fails rather than defaulting to `Tcp` (C3 guard).
+    #[error(
+        "no listener-bearing protocol fact for service {service_id} (vip {vip}); \
+         refusing to default to Tcp (ADR-0060 C3)"
+    )]
+    NoListenerProto {
+        /// Service whose proto could not be resolved.
+        service_id: ServiceId,
+        /// The service VIP, for operator-facing diagnostics.
+        vip: std::net::Ipv4Addr,
+    },
+}
+
+/// Project a `ServiceBackendRow` + its listener-bearing facts into a
+/// [`ServiceDesired`], sourcing `(port, proto)` from the listener fact.
+///
+/// Per ADR-0060 site #8 + C3: `ServiceBackendRow` carries neither port
+/// nor proto, so the protocol MUST be sourced from a `ListenerRow` whose
+/// `vip` matches the row's VIP. The first matching listener wins (US-01
+/// is single-listener; US-05 generalises to per-listener fan-out). When
+/// no listener resolves the proto the projection returns
+/// [`ServiceProjectionError::NoListenerProto`] — it NEVER defaults to
+/// `Tcp`.
+///
+/// # Errors
+///
+/// Returns [`ServiceProjectionError::NoListenerProto`] when no
+/// `ListenerRow` resolves the service's protocol.
+pub fn project_service_desired(
+    row: &crate::traits::observation_store::ServiceBackendRow,
+    listeners: &[crate::traits::observation_store::ListenerRow],
+) -> Result<ServiceDesired, ServiceProjectionError> {
+    let vip = ServiceVip::new(std::net::IpAddr::V4(row.vip)).unwrap_or_else(|_| {
+        unreachable!(
+            "ServiceBackendRow.vip is a wire-shape Ipv4Addr; ServiceVip::new is total over IPv4"
+        )
+    });
+    // Source `(port, proto)` from the listener-bearing fact whose `vip`
+    // matches this service's VIP. The fact's SSOT is the Service intent's
+    // listeners (the allocator-issued VIP is stamped onto the fact). When
+    // no fact resolves, fail — refusing to synthesise a `Proto::Tcp`
+    // default (C3).
+    let listener = listeners.iter().find(|l| l.vip == Some(vip)).ok_or(
+        ServiceProjectionError::NoListenerProto { service_id: row.service_id, vip: row.vip },
+    )?;
+    let fingerprint = crate::dataplane::fingerprint::fingerprint(&vip, &row.backends);
+    Ok(ServiceDesired {
+        vip,
+        port: listener.port,
+        proto: listener.protocol,
+        backends: row.backends.clone(),
+        fingerprint,
+    })
 }
 
 /// Hydrator state — split into `desired` and `actual` projections
@@ -235,6 +308,8 @@ impl Reconciler for ServiceMapHydrator {
                         actions.push(Action::DataplaneUpdateService {
                             service_id: *service_id,
                             vip: desired_svc.vip,
+                            port: desired_svc.port,
+                            proto: desired_svc.proto,
                             backends: desired_svc.backends.clone(),
                             correlation: CorrelationKey::derive(
                                 &target_str,
@@ -263,6 +338,8 @@ impl Reconciler for ServiceMapHydrator {
                     actions.push(Action::DataplaneUpdateService {
                         service_id: *service_id,
                         vip: desired_svc.vip,
+                        port: desired_svc.port,
+                        proto: desired_svc.proto,
                         backends: remote.into_iter().cloned().collect(),
                         correlation: CorrelationKey::derive(
                             &target_str,
@@ -272,35 +349,14 @@ impl Reconciler for ServiceMapHydrator {
                     });
                 }
 
-                for backend in &local {
-                    let backend_v4 = match backend.addr {
-                        std::net::SocketAddr::V4(s4) => s4,
-                        std::net::SocketAddr::V6(_) => continue,
-                    };
-                    if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
-                        tracing::warn!(
-                            name: "service_map_hydrator.register_local_backend.rejected",
-                            service_id = %service_id,
-                            vip = %vip_v4,
-                            vip_port = backend_v4.port(),
-                            backend = %backend_v4,
-                            reason = %reason,
-                            "skipping RegisterLocalBackend: backend address rejected by classifier"
-                        );
-                        continue;
-                    }
-                    actions.push(Action::RegisterLocalBackend {
-                        service_id: *service_id,
-                        vip: vip_v4,
-                        vip_port: backend.addr.port(),
-                        backend: backend_v4,
-                        correlation: CorrelationKey::derive(
-                            &target_str,
-                            &spec_hash,
-                            "register-local-backend",
-                        ),
-                    });
-                }
+                push_register_local_backend_actions(
+                    &mut actions,
+                    &local,
+                    *service_id,
+                    vip_v4,
+                    &target_str,
+                    &spec_hash,
+                );
 
                 let _ = (local_is_empty, remote_is_empty);
 
@@ -321,6 +377,46 @@ impl Reconciler for ServiceMapHydrator {
         next_view.retries.retain(|service_id, _| desired.desired.contains_key(service_id));
 
         (actions, next_view)
+    }
+}
+
+/// Emit one `Action::RegisterLocalBackend` per local backend whose
+/// address passes the ADR-0053 § 4 classifier guard. Backends with an
+/// IPv6 address or a guard-rejected IPv4 (loopback / link-local /
+/// multicast / broadcast / reserved) are skipped with a structured warn.
+/// Extracted from `reconcile` to keep that method under the 100-line cap.
+fn push_register_local_backend_actions(
+    actions: &mut Vec<Action>,
+    local: &[&Backend],
+    service_id: ServiceId,
+    vip_v4: std::net::Ipv4Addr,
+    target_str: &str,
+    spec_hash: &ContentHash,
+) {
+    for backend in local {
+        let backend_v4 = match backend.addr {
+            std::net::SocketAddr::V4(s4) => s4,
+            std::net::SocketAddr::V6(_) => continue,
+        };
+        if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
+            tracing::warn!(
+                name: "service_map_hydrator.register_local_backend.rejected",
+                service_id = %service_id,
+                vip = %vip_v4,
+                vip_port = backend_v4.port(),
+                backend = %backend_v4,
+                reason = %reason,
+                "skipping RegisterLocalBackend: backend address rejected by classifier"
+            );
+            continue;
+        }
+        actions.push(Action::RegisterLocalBackend {
+            service_id,
+            vip: vip_v4,
+            vip_port: backend.addr.port(),
+            backend: backend_v4,
+            correlation: CorrelationKey::derive(target_str, spec_hash, "register-local-backend"),
+        });
     }
 }
 

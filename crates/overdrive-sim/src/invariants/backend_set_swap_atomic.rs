@@ -82,7 +82,7 @@ pub async fn evaluate_backend_set_swap_atomic() -> InvariantResult {
     ];
 
     // Pre-load.
-    if let Err(e) = dataplane.update_service(vip, pre_swap.clone()).await {
+    if let Err(e) = dataplane.update_service(super::tcp_frontend(vip), pre_swap.clone()).await {
         return fail(NAME, format!("pre-load update_service failed: {e}"));
     }
 
@@ -108,7 +108,7 @@ pub async fn evaluate_backend_set_swap_atomic() -> InvariantResult {
     // Concurrently issue the swap. A `yield_now` first gives observers
     // a chance to record at least one pre-swap snapshot.
     tokio::task::yield_now().await;
-    if let Err(e) = dataplane.update_service(vip, post_swap.clone()).await {
+    if let Err(e) = dataplane.update_service(super::tcp_frontend(vip), post_swap.clone()).await {
         return fail(NAME, format!("swap update_service failed: {e}"));
     }
 
