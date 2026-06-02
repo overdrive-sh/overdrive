@@ -24,7 +24,7 @@ journey:
   name: "Submit a UDP Service and trust the wire path both ways"
   goal: >
     An operator declares a `[[listener]]` with `protocol = "udp"` on a
-    Service-kind workload, submits it via `overdrive job submit <spec>`,
+    Service-kind workload, submits it via `overdrive deploy <spec>`,
     and the platform load-balances UDP traffic such that BOTH the
     forward path (client → VIP → backend) AND the reverse path
     (backend response → client, source-rewritten to the VIP) work. The
@@ -41,7 +41,7 @@ journey:
     first class"). Has been bitten before by silent dataplane
     asymmetry where the forward path works and the reverse path
     fails invisibly — the hardest class of bug to diagnose because
-    `job submit` succeeds and `alloc status` shows Running.
+    `overdrive deploy` succeeds and `alloc status` shows Running.
     Secondary: Omar, future operator using the same CLI once auth lands.
   job_id: [J-OPS-004, J-PLAT-004]
 
@@ -64,7 +64,7 @@ journey:
 steps:
   - id: 1
     name: "Declare a UDP listener and submit"
-    command: "overdrive job submit dns-resolver.toml"
+    command: "overdrive deploy dns-resolver.toml"
     summary: >
       Submit + Stable lifecycle per `submit-a-service.yaml` (that journey
       is the single source for the submit / Stable / witness detail); this

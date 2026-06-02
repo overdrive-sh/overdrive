@@ -327,7 +327,18 @@ Then `(vip, port, proto)` is read from the single `ServiceFrontend` at every cal
 ### Technical Notes
 - Threads proto FROM shipped option C (`update_service(vip: Ipv4Addr, backends)`, `dataplane.rs:101`) → `ServiceFrontend`; locked-A (`update_service(service_id, vip: ServiceVip, backends)`, architecture.md §5:155) was a paper decision NEVER implemented. The frontend re-absorbs ServiceVip (locked-A's newtype intent) but leaves `service_id` on the Action envelope.
 - The exact newtype field names/derives and whether `port` is `NonZeroU16` are DESIGN's call (P1-Q2); DISCUSS locks the *family* (thread-proto-as-typed-field, frontend re-absorbs ServiceVip, service_id on Action). The §5 Q-Sig amendment (C → ServiceFrontend) is the architect's job in DESIGN (forward-point only).
-- Single-cut migration (C6); all call sites in the same PR. Blast radius = 5 sites (trait, EbpfDataplane, SimDataplane, action-shim dispatch, ReverseNatLockstep invariant); hydrator UNCHANGED for US-01/US-04.
+- Single-cut migration (C6); all call sites in the same PR. True blast radius = **8 sites**: trait, `ServiceFrontend` (new), SimDataplane, EbpfDataplane, action-shim dispatch, ReverseNatLockstep invariant, **`Action::DataplaneUpdateService` (+ proto)**, and **`ServiceDesired` + the observation→desired projection (+ proto)**. The DISCUSS "5 sites / hydrator unchanged" estimate was low: C3 (no `Tcp` default) requires the Action and the desired projection to carry proto from a **listener-bearing fact** (`ListenerRow` / `BackendDiscoveryBridge` per-listener projection — NOT `service_backends`, which carries neither port nor proto; ATLAS-1 b). If no listener proto can be resolved, that is an error (Failed/structured), never a silent `Proto::Tcp` default. The hydrator's *multi-listener fan-out* is still a separate US-05 concern.
+
+  > **Changed Assumptions (DISTILL, 2026-06-02):** per
+  > `design/upstream-changes.md` Correction 2 (ADR-0060 D6 + ATLAS-1 b),
+  > the original "Blast radius = 5 sites … hydrator UNCHANGED" was low.
+  > Sites 7–8 (the `Action` + the `ServiceDesired`/obs→desired
+  > projection) are added because C3 is satisfiable only if proto is
+  > carried end-to-end from a listener-bearing fact. The DISTILL C3-guard
+  > scenarios S-01-C/D/E pin this provenance and make a silent `Tcp`
+  > default a failing test.
+
+- **Acceptance Criteria addition (DISTILL):** the protocol dimension is added to `Action::DataplaneUpdateService` and `ServiceDesired`; the desired projection reads it from a listener-bearing fact (`ListenerRow` and/or the `BackendDiscoveryBridge` per-listener projection), never from the proto-less `service_backends` row, and if no listener proto can be resolved that is an error (Failed/structured), never a silent `Proto::Tcp` default (C3).
 - `Backend` already carries `addr` (ip:port); the frontend adds the service-level `(ServiceVip, port, Proto)`.
 
 ---
@@ -377,10 +388,21 @@ backend's reply is source-rewritten to 10.96.0.10.
 Ana submits `web.toml` (tcp/8080). REVERSE_NAT_MAP gains the tcp-keyed
 entry exactly as before; no udp entry is spuriously added.
 
-#### 3: Error/Boundary — empty backend set removes both protos' entries
-Ana scales `dns-resolver` to 0 backends. The update removes the
-`(10.244.0.20, 5353, udp)` entry (cross-service purge logic, mirroring
-the Sim adapter's `difference` check) — no stale udp entry lingers.
+#### 3: Error/Boundary — empty backend set removes only THIS proto's entries
+
+> **Changed Assumptions (DISTILL, 2026-06-02):** per
+> `design/upstream-changes.md` Correction 1 (ADR-0060 D4 — per-proto
+> purge), the original heading "removes **both protos'** entries"
+> contradicted D4 and the example body itself. Empty-backends purge is
+> **per-proto**: only `frontend.proto`'s keys are removed; a co-resident
+> other-proto frontend on the same VIP survives.
+
+Ana scales `dns-resolver` (udp/5353) to 0 backends. The update removes the
+`(10.244.0.20, 5353, udp)` entry only; a co-resident tcp frontend on the
+same VIP (installed by a separate `update_service` call) keeps its
+`(…, tcp)` entries. Cross-service shared-backend keys are preserved by the
+`live_keys` difference check — no stale udp entry lingers, no live tcp
+entry is collaterally purged.
 
 ### UAT Scenarios (BDD)
 #### Scenario: UDP service gains a reverse-NAT entry keyed by udp
@@ -740,7 +762,7 @@ Outcome KPIs per `nw-outcome-kpi-framework`).
 
 | Story | 1. Problem clear | 2. Persona specific | 3. ≥3 examples w/ real data | 4. UAT 3-7 | 5. AC from UAT | 6. Right-sized | 7. Tech notes | 8. Deps tracked | 9. KPIs | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| US-01 | PASS — protocol stranded in intent | PASS — Ana, mixed TCP/UDP | PASS — web/dns-resolver/edge .toml | PASS — 3 | PASS | PASS — ~1 day (pure refactor, 5 sites) | PASS — §5 C→ServiceFrontend noted | PASS — none (foundation) | PASS — K5 | **PASS** |
+| US-01 | PASS — protocol stranded in intent | PASS — Ana, mixed TCP/UDP | PASS — web/dns-resolver/edge .toml | PASS — 3 | PASS | PASS — ~1 day (refactor + proto plumbing; **8 sites** per DESIGN Correction 2 — DISCUSS est. was 5) | PASS — §5 C→ServiceFrontend noted | PASS — none (foundation) | PASS — K5 | **PASS** |
 | US-02 | PASS — Step 4b Tcp-only | PASS — Ana, UDP services | PASS — dns-resolver/web/scale-to-0 | PASS — 3 | PASS | PASS — ~1 day | PASS — mirrors `reverse_nat_keys_for` | PASS — US-01 | PASS — K1 | **PASS** |
 | US-03 | PASS — invariant Sim-only | PASS — Ana + teammates / CI | PASS — pass/regression/kernel-proof | PASS — 3 | PASS | PASS — ~1.5 days | PASS — retarget site named | PASS — US-02 | PASS — K2/K3 | **PASS** |
 | US-04 | PASS — reverse path unverified | PASS — Ana, real submit | PASS — DNS/multi-datagram/backend-down | PASS — 3 | PASS | PASS — ~1 day | PASS — `reverse_nat_e2e` shape | PASS — US-01,02 | PASS — K1 | **PASS** |
@@ -795,7 +817,7 @@ gate is the dataplane author (J-PLAT-004 persona), and the decision
 |---|---|---|---|
 | RESOLVED (H1): driving the real EbpfDataplane inside a Tier 1 DST invariant is infeasible (needs a kernel + bpffs) | — | — | RESOLVED at DIVERGE — the lockstep is Tier-1 Sim set-equality + Tier-3 Ebpf acceptance + Tier-2 triptych (US-03), NOT a both-adapter in-process retarget. No in-slice SPIKE. |
 | US-01 narrows the Sim `reverse_nat_keys_for` `[Tcp,Udp]` hardcode to `frontend.proto` — a TCP service's Sim key set shrinks `{tcp,udp}→{tcp}` (production-true zero-change, Sim-corrected); existing two-proto-Sim assertions must be updated in the same single-cut PR (H2) | M | L | DELIVER — US-01 AC requires the assertion update in-PR; the change is the intended correction of an over-broad Sim fan-out |
-| `update_service` C → `ServiceFrontend` trait migration touches 5 call sites (single-cut) | L | L | DESIGN pins the newtype shape (P1-Q2); blast radius is 5 sites (trait, EbpfDataplane, SimDataplane, action-shim, lockstep invariant), hydrator unchanged |
+| `update_service` C → `ServiceFrontend` trait migration (single-cut) | L | L | **DESIGN-corrected to 8 sites** (the DISCUSS estimate of 5 omitted the proto plumbing): trait, EbpfDataplane, SimDataplane, action-shim, lockstep invariant, **+ `Action::DataplaneUpdateService`, `ServiceDesired`, obs→desired projection**. The hydrator IS changed in US-01 (C3 requires proto end-to-end). See `design/upstream-changes.md` Correction 2 + ADR-0060. |
 | Phase-2 architecture.md §5 Q-Sig C → `ServiceFrontend` (superseding the paper locked-A) needs an ADR amendment, not just a code change | H (certain) | L | DESIGN authors the ADR amendment (architect's job); DISCUSS forward-points only |
 | Multi-listener VIP:port allocation semantics (US-05) underspecified — per-port VIP vs shared VIP | M | M | DESIGN — existing SERVICE_MAP outer key is `(VIP,port)`, so per-(VIP,port) is the natural shape; flag as P2 question |
 | Empty-backend cross-service purge for udp entries could regress the existing tcp purge if not mirrored carefully | L | M | DELIVER — mirror the Sim adapter's `difference`/`live_keys` shape exactly (US-02 AC) |
@@ -838,7 +860,7 @@ a locked developer-tool taste matrix and selected **Option 6
 
 | ID | Decision | Status | Rationale |
 |---|---|---|---|
-| **D1** | **Thread the per-service L4 protocol through a `ServiceFrontend` newtype as a TYPED FIELD of the existing `update_service` call — NOT a whole-call aggregate.** New shape: `update_service(frontend: ServiceFrontend, backends: Vec<Backend>)` where `ServiceFrontend` carries `(ServiceVip, port, Proto)`. The frontend RE-ABSORBS `ServiceVip` (the typed home for the validated VIP that shipped-option-C dropped to a raw `Ipv4Addr`); `service_id` and `correlation` STAY on the `Action::DataplaneUpdateService` envelope (`validate.rs:288`) by design (action-routing, not dataplane-key — the SERVICE_MAP key is `(VIP,port)`, the REVERSE_NAT key is `BackendKey{ip,port,proto}`, neither keyed by `service_id`); `backends` stays a separate positional arg. Migration is FROM shipped **option C** (`update_service(vip: Ipv4Addr, backends)`, `dataplane.rs:101`) — locked-A was a paper decision never landed. DISCUSS locks the FAMILY (thread-proto-as-typed-field, frontend re-absorbs ServiceVip, service_id on Action); DESIGN picks the final detail (newtype field names, whether `port` is `NonZeroU16`). Multi-listener fan-out (US-05) is a HYDRATOR concern (one `update_service` per listener), NOT a trait-surface one. | **LOCKED (user-confirmed convergence on the DIVERGE recommendation, Option 6)** | Validated by the scoped DIVERGE taste matrix: **Option 6 (`ServiceFrontend` newtype) = 4.17**, in a statistical tie with Option 1 (positional proto) = 4.13, both decisively ahead of the typed aggregate (Option 2) = 3.57. Option 6 wins on concept-anchoring (the forward twin of the `BackendKey` the engineer already reads on the reverse side — Katran `VipKey` shape) and on making the lockstep set-equality trivial to express, at a 5-site blast radius (trait + both adapters + action-shim + lockstep invariant), hydrator unchanged. **Mandatory dissent (Option 2 / full aggregate):** wins ONLY if (a) multi-listener becomes a trait-surface concern rather than hydrator fan-out, OR (b) the team commits to `update_service`-as-typed-SSOT (re-absorbing `service_id` too), OR (c) an explicit documented reweight for industry-alignment. None is established by J-OPS-004/J-PLAT-004. The final newtype shape + the architecture.md §5 Q-Sig amendment (C → `ServiceFrontend`) are forward-pointed to DESIGN; DISCUSS does not edit ADRs. See `recommendation.md` + `diverge/taste-evaluation.md` + `diverge/wave-decisions.md`. |
+| **D1** | **Thread the per-service L4 protocol through a `ServiceFrontend` newtype as a TYPED FIELD of the existing `update_service` call — NOT a whole-call aggregate.** New shape: `update_service(frontend: ServiceFrontend, backends: Vec<Backend>)` where `ServiceFrontend` carries `(ServiceVip, port, Proto)`. The frontend RE-ABSORBS `ServiceVip` (the typed home for the validated VIP that shipped-option-C dropped to a raw `Ipv4Addr`); `service_id` and `correlation` STAY on the `Action::DataplaneUpdateService` envelope (`validate.rs:288`) by design (action-routing, not dataplane-key — the SERVICE_MAP key is `(VIP,port)`, the REVERSE_NAT key is `BackendKey{ip,port,proto}`, neither keyed by `service_id`); `backends` stays a separate positional arg. Migration is FROM shipped **option C** (`update_service(vip: Ipv4Addr, backends)`, `dataplane.rs:101`) — locked-A was a paper decision never landed. DISCUSS locks the FAMILY (thread-proto-as-typed-field, frontend re-absorbs ServiceVip, service_id on Action); DESIGN picks the final detail (newtype field names, whether `port` is `NonZeroU16`). Multi-listener fan-out (US-05) is a HYDRATOR concern (one `update_service` per listener), NOT a trait-surface one. | **LOCKED (user-confirmed convergence on the DIVERGE recommendation, Option 6)** | Validated by the scoped DIVERGE taste matrix: **Option 6 (`ServiceFrontend` newtype) = 4.17**, in a statistical tie with Option 1 (positional proto) = 4.13, both decisively ahead of the typed aggregate (Option 2) = 3.57. Option 6 wins on concept-anchoring (the forward twin of the `BackendKey` the engineer already reads on the reverse side — Katran `VipKey` shape) and on making the lockstep set-equality trivial to express, at a blast radius the DISCUSS analysis estimated at 5 sites (trait + both adapters + action-shim + lockstep invariant), hydrator unchanged — **DESIGN corrected this to 8 sites** (the proto plumbing requires changing `Action::DataplaneUpdateService`, `ServiceDesired`, and the obs→desired projection; the hydrator IS touched in US-01 per C3; see `design/upstream-changes.md` Correction 2 + ADR-0060). **Mandatory dissent (Option 2 / full aggregate):** wins ONLY if (a) multi-listener becomes a trait-surface concern rather than hydrator fan-out, OR (b) the team commits to `update_service`-as-typed-SSOT (re-absorbing `service_id` too), OR (c) an explicit documented reweight for industry-alignment. None is established by J-OPS-004/J-PLAT-004. The final newtype shape + the architecture.md §5 Q-Sig amendment (C → `ServiceFrontend`) are forward-pointed to DESIGN; DISCUSS does not edit ADRs. See `recommendation.md` + `diverge/taste-evaluation.md` + `diverge/wave-decisions.md`. |
 | D2 | Feature type: **Cross-cutting** (core trait + sim + bpf + dataplane + reconciler). | Locked (Wizard) | 3 bounded contexts; touches the trait surface and both adapters. |
 | D3 | Walking skeleton: **single-UDP-listener forward+reverse e2e (US-04)**, brownfield — its prerequisites (US-01 `ServiceFrontend` newtype, US-02 production fan-out) land first. | Locked (Wizard 2) | Thinnest slice touching every backbone activity; the riskiest assumption (reverse path rewrites proto=17). |
 | D4 | UX research depth: **Lightweight** (happy + key error paths). | Locked (Wizard 3) | Operator surface is small — #164 already ships the `protocol="udp"` declaration; this feature is dataplane-internal. |
@@ -1057,3 +1079,212 @@ No outcome-registry collision check (no `docs/product/outcomes/registry.yaml`
 | ATLAS-2 | low | Existing `ServiceBackendRow` write path collapses listeners to the first (`reconciler_runtime.rs:2015-2019`: first-listener-only, port default 0, no proto). If a DELIVER crafter sources proto from `ServiceBackendRow` it becomes a hidden 9th site; correctly out of US-01 scope (US-05 owns multi-listener fan-out). | Flag to DISTILL/DELIVER so the first-listener collapse is not rediscovered as a surprise; confirm US-01 sources proto from the listener fact, not the proto-less `ServiceBackendRow`. |
 
 **Gate:** CLEARED for DISTILL/DEVOPS handoff. The medium finding is a provenance-precision correction (artifact text + a DISTILL acceptance scenario), not a DESIGN re-spin.
+
+---
+
+# DISTILL wave (Sentinel, 2026-06-02 — lean / Tier-1)
+
+**Mode:** acceptance-test authoring. **Density:** lean (Tier-1 [REF] only;
+no Tier-2 expansion — no trigger fired). **Scenario SSOT:**
+`distill/test-scenarios.md` (GIVEN/WHEN/THEN spec blocks — specification-only
+per `.claude/rules/testing.md` § "No `.feature` files anywhere"; the executable
+artifacts are the Rust RED scaffolds below). **Wave-Decision Reconciliation:**
+PASSED — 0 contradictions across DISCUSS (D1–D8) / DESIGN (D1a–D8) / DEVOPS
+(no `devops/` wave-decisions present — default environment matrix applied,
+warning logged; no contradiction).
+
+## Wave: DISTILL / [REF] Scenario list
+
+23 scenarios. Error/edge ratio 10/23 = **43%** (≥40% met). Walking skeleton: 1
+(S-04-A). `@property` (PBT-full, Tier 1 only): 5.
+
+| Scenario | Tier | Tags | US |
+|---|---|---|---|
+| S-01-A IPv4 VIP constructs + accessors round-trip | 1 | `@property @in-memory @K5` | US-01 |
+| S-01-B IPv6 VIP rejected | 1 | `@property @error @in-memory @D1a` | US-01 |
+| S-01-C udp listener proto reaches dataplane as Udp | 1 | `@in-memory` | US-01 |
+| S-01-D proto sourced from listener fact (not service_backends) | 1 | `@in-memory @C3` | US-01 |
+| S-01-E unresolvable listener proto → structured Failed (NEGATIVE) | 1 | `@error @in-memory @C3` | US-01 |
+| S-01-F IPv6 rejected at action-shim as operator-visible Failed | 1 | `@error @in-memory @D1a` | US-01 |
+| S-02-A empty backends purge only this proto's keys | 1 | `@property @in-memory @D4` | US-02 |
+| S-02-B cross-service shared key survives per-proto purge | 1 | `@in-memory @D4` | US-02 |
+| S-02-C idempotent re-apply | 1 | `@property @in-memory` | US-02 |
+| S-02-D IPv6 backend contributes no key | 1 | `@error @in-memory` | US-02 |
+| S-02-E sctp rejected at parse boundary (confirm #164) | 1 | `@error @in-memory` | US-02 |
+| S-03-A Sim installs exactly declared-proto key set | 1 | `@property @in-memory @K2` | US-03 |
+| S-03-B dropped Sim fan-out key fails lockstep (NEGATIVE) | 1 | `@error @in-memory @K2` | US-03 |
+| S-03-C phantom extra key fails lockstep orphan check (NEGATIVE) | 1 | `@error @in-memory @K2` | US-03 |
+| S-03-D #163 shape (tcp-only for udp service) caught (NEGATIVE) | 1 | `@error @in-memory @K2` | US-03 |
+| S-03-E xdp_reverse_nat rewrites proto=17 source to VIP | 2 | `@real-io @adapter-integration @K3` | US-03 |
+| S-03-F REVERSE_NAT miss → XDP_PASS unmodified | 2 | `@error @real-io` | US-03 |
+| S-04-A single-UDP-listener round-trip, VIP source (WS) | 3 | `@walking_skeleton @driving_adapter @real-io @adapter-integration @K1` | US-04 |
+| S-04-B every UDP reply independently rewritten | 3 | `@real-io` | US-04 |
+| S-04-C missing-backend response distinguished | 3 | `@error @real-io` | US-04 |
+| S-05-A two-listener installs both protocol paths | 3 | `@real-io @adapter-integration @K4` | US-05 |
+| S-05-B each listener reverse path VIP-sourced | 3 | `@real-io` | US-05 |
+| S-05-C added listener on re-submit converges | 3 | `@real-io` | US-05 |
+
+## Wave: DISTILL / [REF] Four-tier mapping (replaces WS-strategy A/B/C/D)
+
+The generic skill's Walking-Skeleton-Strategy A/B/C/D is **retired** here in
+favour of the project's four-tier model (`.claude/rules/testing.md`). Tier IS
+the test taxonomy.
+
+| Tier | Lane / runner | Scenarios | Input mode (Mandate 9) | Assertion (Mandate 8) |
+|---|---|---|---|---|
+| Tier 1 (DST / in-memory) | default lane, `cargo dst` / `cargo nextest run` | 15 | PBT-full allowed (layer 1–2) for `@property` | `BTreeSet<BackendKey>` set-equality (native universe guard — see infra policy § Mandate 8 mapping) |
+| Tier 2 (BPF unit) | `cargo xtask bpf-unit`, `BPF_PROG_TEST_RUN` | 2 | example-only (Mandate 11) | kernel-side observable: verdict + `data_out` rewrite |
+| Tier 3 (real veth) | `cargo xtask lima run --`, `integration-tests` | 6 | example-only (Mandate 11) | observable kernel side-effects: `bpftool map dump` + wire capture source |
+
+## Wave: DISTILL / [REF] Adapter coverage (Mandate 6 — every driven adapter ≥1 real-IO)
+
+| Driven adapter / port | Real-IO scenario | Tier | Covered by |
+|---|---|---|---|
+| `Dataplane` via `EbpfDataplane` (REVERSE_NAT_MAP) | YES | 3 | S-04-A (`bpftool map dump` + wire capture), S-05-A |
+| `xdp_reverse_nat_lookup` (kernel program) | YES | 2 | S-03-E (`BPF_PROG_TEST_RUN` proto=17 rewrite) |
+| `Dataplane` via `SimDataplane` (in-process driven-internal) | YES (in-memory, DST-real) | 1 | S-03-A set-equality + S-02-A/B/C purge |
+| Driving adapter `overdrive deploy` (CLI subprocess) | YES | 3 | S-04-A (exit 0 + `Accepted.` + UDP reverse path) |
+
+Zero "NO — MISSING" rows. No new external/non-deterministic driven port is
+introduced (no clock/email/payment/LLM/third-party) — see infra policy
+§ "Driven external".
+
+## Wave: DISTILL / [REF] Scaffolds (RED-ready, project convention)
+
+All test-side scaffolds use `#[should_panic(expected = "RED scaffold")]` (GREEN
+at the bar — no `--no-verify` needed for sibling commits, per
+`.claude/rules/testing.md`). The one production stub uses `todo!("RED scaffold:
+…")` gated with `#[expect(clippy::todo, …)]`.
+
+| File | Kind | Scenarios |
+|---|---|---|
+| `crates/overdrive-core/src/dataplane/service_frontend.rs` | **production stub** (`todo!`) — `ServiceFrontend` type only; the 8 production sites are DELIVER's job | (enables S-01-A/B) |
+| `crates/overdrive-core/tests/service_frontend.rs` | test (`#[should_panic]`) | S-01-A, S-01-B |
+| `crates/overdrive-core/tests/service_frontend_provenance.rs` | test (`#[should_panic]`) | S-01-C, S-01-D, S-01-E (C3 guard) |
+| `crates/overdrive-control-plane/tests/acceptance/service_frontend_ipv6_rejected.rs` | test (`#[should_panic]`) | S-01-F (D1a) |
+| `crates/overdrive-sim/tests/sim_dataplane_reverse_nat_per_proto.rs` | test (`#[should_panic]`) | S-03-A/B/C/D, S-02-A/B/C/D |
+| `crates/overdrive-bpf/tests/integration/xdp_reverse_nat_udp.rs` | test (`#[should_panic]`) | S-03-E, S-03-F |
+| `crates/overdrive-dataplane/tests/integration/reverse_nat_udp_e2e.rs` | test (`#[should_panic]`) | S-04-A (WS), S-04-B, S-04-C |
+| `crates/overdrive-dataplane/tests/integration/multi_listener_tcp_udp_e2e.rs` | test (`#[should_panic]`) | S-05-A, S-05-B, S-05-C |
+
+S-02-E (sctp boundary, confirms #164's `Proto` admission) has no new scaffold —
+it is a confirmation against the shipped `Proto::try_from`/`FromStr`
+(`backend_key.rs:100`); DELIVER adds it to the existing `backend_key.rs` test
+or `sim_dataplane_reverse_nat_per_proto.rs` as a thin assertion.
+
+Each test file is wired into its crate's entrypoint (`tests/integration.rs` /
+`tests/acceptance.rs`) — no orphan modules. The production `ServiceFrontend`
+stub is re-exported from `overdrive_core::dataplane`.
+
+## Wave: DISTILL / [REF] Test placement (with precedent)
+
+| Crate / dir | Scenarios | Precedent |
+|---|---|---|
+| `crates/overdrive-core/tests/*.rs` (standalone entrypoints) | S-01-A..E | `tests/service_vip.rs`, `tests/backend_key.rs` (newtype/proptest entrypoints) |
+| `crates/overdrive-control-plane/tests/acceptance/` | S-01-F | `tests/acceptance/service_vip_submit_acceptance.rs`, `release_service_vip_dispatch.rs` |
+| `crates/overdrive-sim/tests/*.rs` + `src/invariants/reverse_nat_lockstep.rs` | S-02-A..D, S-03-A..D | `tests/sim_dataplane_reverse_nat_cross_service.rs`; the invariant to retarget |
+| `crates/overdrive-bpf/tests/integration/` | S-03-E/F | `tests/integration/xdp_reverse_nat_redirect_neigh.rs` (TCP triptych) |
+| `crates/overdrive-dataplane/tests/integration/` | S-04-A..C, S-05-A..C | `tests/integration/reverse_nat_e2e.rs`, `service_map_forward.rs` (Tier 3, `ThreeIfaceTopology`) |
+
+## Wave: DISTILL / [REF] Driving adapter coverage
+
+| Driving surface (DESIGN) | Protocol-level exercise | Scenario |
+|---|---|---|
+| `overdrive deploy <spec.toml>` (CLI verb `Deploy`) | real **subprocess** of the built binary; assert exit code 0 + `Accepted.` stdout + UDP reverse wire path | S-04-A (WS) ; S-05-A (multi-listener) |
+| `ServiceMapHydrator.reconcile` (in-process driving port) | direct call; assert emitted `Action`/`ServiceFrontend` proto | S-01-C/D/E |
+| action-shim `dispatch` (Action → `update_service`) | direct call; assert operator-visible `Failed` row on IPv6 | S-01-F |
+
+> **BLOCKER (resolved by instruction, surfaced for the record).** The product
+> journey `docs/product/journeys/submit-a-udp-service.yaml` step 1 names
+> `overdrive job submit dns-resolver.toml`. The **shipped CLI verb is
+> `overdrive deploy`** (`crates/overdrive-cli/src/cli.rs:42` `Command::Deploy`,
+> `main.rs:63`). DISTILL uses `overdrive deploy` (per the instruction and the
+> verified CLI source) for the walking-skeleton driving adapter. The journey
+> YAML's `job submit` text is a pre-existing artifact drift — **not** a
+> wave-decision contradiction (the journey is product-level SSOT context, not
+> a DISCUSS/DESIGN/DEVOPS wave-decision), so it does not trip the Reconciliation
+> HARD GATE. Flagged for a follow-up journey-text fix (architect's territory;
+> no GH issue created — surfaced for user/orchestrator to decide).
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+- **DESIGN driving ports:** `ServiceMapHydrator.reconcile` + action-shim
+  `dispatch` (DESIGN [REF] Driving ports). No new external/REST surface.
+- **DESIGN driven ports/adapters:** `Dataplane` (`EbpfDataplane` prod /
+  `SimDataplane` sim); existing `EbpfDataplane::probe()` covers REVERSE_NAT_MAP
+  FD (no new probe). The `overdrive-testing` `ThreeIfaceTopology` netns/veth
+  fixtures (real-infra, dev-dep) back the Tier 3 lane.
+- **DEVOPS environment matrix:** no `docs/feature/udp-service-support/devops/`
+  present — **default matrix applied** (warning logged). Tier 2/3 require Lima
+  (`cargo xtask lima run --`) + the BPF object (`cargo xtask bpf-build` →
+  `target/bpf/overdrive_bpf.o`) as a Tier-3/mutation prerequisite.
+- **Project Infrastructure Policy:** bootstrapped this run at
+  `docs/architecture/atdd-infrastructure-policy.md` (was absent) — Rust-native,
+  no Python state-delta port (Mandate 8 satisfied via native `BTreeSet`
+  set-equality; mapping documented in the policy file).
+- **No `kpi-contracts.yaml` entry** maps to a new emittable metric event;
+  `@kpi` observability scenarios are not warranted (soft gate — noted). KPIs
+  K1–K5 are measured by the tier assertions (see test-scenarios.md § KPI links).
+- **No `docs/product/outcomes/registry.yaml`** — Outcome registration SKIPPED
+  (confirmed absent; this is a code-feature but the registry is not adopted in
+  this project).
+
+## Wave: DISTILL / [REF] DoD self-check
+
+- [x] All scenarios authored + RED scaffolds created & wired (zero orphan modules).
+- [x] Tier mapping complete (15 Tier 1 / 2 Tier 2 / 6 Tier 3); pyramid honoured.
+- [x] Wave-Decision Reconciliation HARD GATE passed (0 contradictions).
+- [x] Mandate 8 — Tier 1 set-mutating scenarios use `BTreeSet<BackendKey>`
+      set-equality (native universe guard, fail-closed via orphan check);
+      Tier 2/3 (layer 3+) traditional kernel-observable assertions.
+- [x] Mandate 9 — PBT-full only on Tier 1 `@property` scenarios; Tier 2/3
+      example-only.
+- [x] Mandate 10 — Tier B state-machine PBT **NOT** warranted: the journey is
+      a dataplane wire-path (the observable is set-equality + wire capture,
+      not a ≥3-chained-scenario rich-input journey with a state-machine model);
+      Tier A (example-only, production composition root) covers the space.
+- [x] Mandate 11 — Tier 2/3 sad paths are named example-based tests (S-03-F,
+      S-04-C); no PBT machinery at layer 3+.
+- [x] Pillar 1 — scenario titles/steps use domain language (no HTTP/JSON/schema
+      jargon; "reply sourced from the VIP", "the gate fails naming the missing
+      udp key").
+- [x] Pillar 2 — chained narrative within the US-04→US-05 journey (US-05 reuses
+      the US-04 deploy+reverse-path setup).
+- [x] Pillar 3 — Tier 3 WS uses the production composition root (real
+      `overdrive deploy` subprocess → real control-plane → real EbpfDataplane);
+      only the host netns/veth fixtures stand in for the cluster topology.
+- [x] C3 guard (S-01-C/D/E) + D1a IPv6 (S-01-B/F) + per-proto purge (S-02-A/B) +
+      #163 regression (S-03-D Tier 1 + S-04-A Tier 3) scenarios present.
+- [x] Both `upstream-changes.md` corrections applied to the DISCUSS [REF]
+      stories with `> Changed Assumptions (DISTILL, 2026-06-02):` annotations.
+
+## Wave: DISTILL / [REF] Inherited commitments
+
+| Origin | Commitment | DDD | Impact |
+|--------|------------|-----|--------|
+| DESIGN#ATLAS-1 | DISTILL pins proto provenance to a listener-bearing fact + adds a C3 guard scenario (unresolvable-listener → structured error, never silent `Tcp`) | n/a | S-01-C/D/E make a `Tcp`-default a failing test — the load-bearing C3 defense against the #163 class recurring at the projection layer |
+| DESIGN#ATLAS-2 | Confirm US-01 sources proto from the listener fact, not the proto-less `ServiceBackendRow` (first-listener collapse) | n/a | S-01-D asserts the listener-fact source explicitly; the `ServiceBackendRow` write-path generalization stays US-05 scope |
+| DESIGN#D4 | Per-proto purge | n/a | S-02-A/B pin per-proto purge + cross-service-shared survival; upstream-changes Correction 1 applied |
+| DESIGN#D6 | 8-site blast radius; proto plumbed end-to-end in US-01 | n/a | upstream-changes Correction 2 applied to US-01 Technical Notes |
+| DESIGN#D1a | V4-by-construction, IPv6 rejected at operator-visible action-shim site | n/a | S-01-B (newtype reject) + S-01-F (operator-visible Failed row) |
+| ADR-0060 § Enforcement | Three-tier `ReverseNatLockstep` gate (T1 Sim set-equality + T2 triptych + T3 Ebpf acceptance) | n/a | S-03-A..D (T1) + S-03-E/F (T2) + S-04-A (T3) realise the gate |
+
+---
+
+## Wave: DISTILL / [REVIEW] Sentinel review (nw-acceptance-designer-reviewer)
+
+**Date:** 2026-06-02 · **Verdict:** APPROVED (0 blocker, 0 high, 3 medium, 2 low) · **Iteration:** 1 of 2 (no second required) · **Hand to DELIVER:** yes.
+
+**Verified REAL (not nominal):** C3 guard S-01-E asserts BOTH a structured `Failed` AND the absence of a `Tcp`-defaulted action; the #163 lockstep is pinned in BOTH directions (S-03-B missing-key + S-03-C orphan/phantom-key); per-proto purge S-02-A asserts the co-resident other-proto frontend SURVIVES. All scaffolds use the project `#[should_panic(expected = "RED scaffold")]` / `todo!` convention; zero `.feature` files; all 8 scaffold files wired into entrypoints; observable-behavior assertions throughout (`BTreeSet<BackendKey>` set-equality via port accessors, `bpftool` dump, wire-capture) — no internal-state coupling. Cross-wave fidelity to ADR-0060 high (8-site radius, per-proto purge, listener-fact provenance, no string-roundtrip proptest, rkyv mandate correctly N/A).
+
+| ID | Sev | Finding | Disposition |
+|---|---|---|---|
+| M-1 | medium | 3 DISCUSS-internal sites (DoR matrix, Risk table, D1 wave-decision) still printed stale "5 sites / hydrator unchanged". | **RESOLVED** (this wave) — all three annotated to the locked **8 sites** with pointers to upstream-changes Correction 2 + ADR-0060. |
+| M-2 | medium | S-04-A walking-skeleton driving-adapter half (subprocess `overdrive deploy` exit-0 + `Accepted.`) has no scaffold; placement left as "or" between overdrive-control-plane / overdrive-cli. Wire half IS scaffolded. | **DELIVER precondition** — create the subprocess-deploy scaffold in a definite crate (suggest `overdrive-cli/tests/integration/` per the `exec_spec_walking_skeleton` precedent) before closing S-04-A. |
+| M-3 | medium | S-04-A asserts byte-exact stdout `"Accepted."` — couples a Tier-3 WS to the exact render string (cosmetic-drift red risk). | DELIVER judgment — prefer exit-0 + a structural "accepted" predicate over the literal. Tier-3 traditional assertions are permitted (not a Mandate-8 violation). |
+| L-1 | low | S-02-E cites `backend_key.rs:100-110` (`TryFrom<u8>`, IANA byte) for rejecting the string token `"sctp"`; that token is rejected at the `Listener` proto `FromStr` boundary (#164), a different site. No-scaffold confirmation. | DELIVER points the assertion at the actual `FromStr` string-parse site shipped by #164. |
+| L-2 | low | `ServiceFrontend::vip()` accessor scaffolded but no scenario drives it (S-01-A round-trips `vip_v4()`/`port()`/`proto()` only). | DELIVER: S-01-A GREEN adds a `vip()` assertion, or drop `vip()` if no consumer materialises (deletion discipline). |
+
+**DELIVER preconditions carried:** (1) `cargo xtask bpf-build` must run first (`target/bpf/overdrive_bpf.o`) before Tier-2/3 scaffolds compile — environment caveat, not a scaffold defect; (2) M-2 — name the subprocess-deploy WS scaffold file before closing S-04-A.
+
+**Gate:** CLEARED for DELIVER. Scores all ≥7; all mandates pass.

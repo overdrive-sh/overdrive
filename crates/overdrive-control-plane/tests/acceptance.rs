@@ -205,4 +205,9 @@ mod acceptance {
     // S-SHCP-WIRE-15 cover the production dispatch path from
     // handlers.rs:498 through build_service_stream end-to-end.
     mod service_submit_dispatch_wiring;
+
+    // udp-service-support US-01 / S-01-F (ADR-0060 D1a) — RED scaffold.
+    // IPv6 VIP rejected at the action-shim as an operator-visible Failed
+    // row via ServiceFrontend::new (NOT a late opaque DataplaneError).
+    mod service_frontend_ipv6_rejected;
 }
