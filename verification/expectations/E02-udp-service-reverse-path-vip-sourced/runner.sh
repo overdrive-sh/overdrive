@@ -16,8 +16,8 @@
 source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
 VIP="10.96.0.10"
-VIP_PORT="5353"
-SPEC="crates/overdrive-cli/examples/dns-resolver.toml"
+VIP_PORT="15353"
+SPEC="examples/dns-resolver.toml"
 
 if [[ ! -f "$REPO_ROOT/$SPEC" ]]; then
   echo "  [pending] fixture missing: $SPEC"

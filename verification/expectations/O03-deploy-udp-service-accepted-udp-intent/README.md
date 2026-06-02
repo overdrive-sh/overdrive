@@ -2,7 +2,7 @@
 
 **Surface:** O (operator CLI) · **KPI:** K1 (deploy half) · **Status:** `satisfied`
 
-<!-- Status rationale (2026-06-03, SHA 2ff69851, SEED=1, executed_in_lima: true,
+<!-- Status rationale (2026-06-03, SHA 5a9cebd2, SEED=1, executed_in_lima: true,
 runner_exit_code: 0). All three sub-claims captured black-box and satisfied,
 confirmed by a different-fox adversarial evidence audit (executed not narrated,
 no dodged sub-claim, no 15353/tcp coercion).
@@ -93,7 +93,7 @@ human-readable operator-surface companion.
 ## Evidence
 
 Captured under `evidence/` by `harness/run-expectation.sh O03` (SHA
-`2ff69851`, `SEED=1`, `executed_in_lima: true`, `runner_exit_code: 0` — see
+`5a9cebd2`, `SEED=1`, `executed_in_lima: true`, `runner_exit_code: 0` — see
 `evidence/verification.yaml`). Adversarially reviewed by a different-fox audit
 (read-only, evidence-only): all three sub-claims CONFIRMED executed (not
 narrated), no `15353/tcp` coercion, no dodged sub-claim.

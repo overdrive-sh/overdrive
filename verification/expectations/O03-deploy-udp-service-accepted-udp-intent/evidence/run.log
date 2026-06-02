@@ -14,8 +14,8 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary (single compile shared by serve+deploy)
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.eBFdce data=/tmp/od-o03-data.WZtAQ3
-# serve ready: trust triple written at /tmp/od-o03-cfg.eBFdce/.overdrive/config (pid 3291723)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.W8JHal data=/tmp/od-o03-data.2mUL7h
+# serve ready: trust triple written at /tmp/od-o03-cfg.W8JHal/.overdrive/config (pid 3291930)
 # deploy exit: 0
 # alloc status exit: 0
 INNER_DONE serve_status=ready deploy_rc=0

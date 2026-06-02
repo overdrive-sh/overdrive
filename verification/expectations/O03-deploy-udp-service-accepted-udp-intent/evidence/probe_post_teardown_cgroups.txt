@@ -1,2 +1,2 @@
 # probe: workload cgroups POST-TEARDOWN (after sweep)
-alloc-dns-resolver-0.scope
+(no alloc-*.scope)

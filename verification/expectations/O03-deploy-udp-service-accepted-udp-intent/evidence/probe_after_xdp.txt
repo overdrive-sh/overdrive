@@ -6,5 +6,5 @@ Device "vcli27f8@vbk27f8" does not exist.
 Device "vbka2985@vclia2985" does not exist.
 Device "vclia2985@vbka2985" does not exist.
 --- bpftool prog show (xdp/sched_cls only) ---
-39347: xdp  name xdp_service_map  tag 4a2a53950024617d  gpl
-39348: xdp  name xdp_reverse_nat  tag 2a8f6be27062f6f1  gpl
+39357: xdp  name xdp_service_map  tag 4a2a53950024617d  gpl
+39358: xdp  name xdp_reverse_nat  tag 2a8f6be27062f6f1  gpl

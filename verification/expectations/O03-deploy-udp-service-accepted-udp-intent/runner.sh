@@ -32,7 +32,7 @@
 # kernel exposes (`ip link`, `bpftool`, cgroupfs). No overdrive-* crate is linked.
 source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
-SPEC="crates/overdrive-cli/examples/dns-resolver.toml"
+SPEC="examples/dns-resolver.toml"
 if [[ ! -f "$REPO_ROOT/$SPEC" ]]; then
   echo "  [pending] fixture missing: $SPEC"
   exit 0
