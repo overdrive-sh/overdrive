@@ -99,7 +99,7 @@ distilled from whitepaper/vision, not interviews).
 
 **The single force that matters (lightweight):** the **anxiety of
 silent asymmetry**. UDP reverse-path bugs are the worst class of
-dataplane defect because `job submit` succeeds, `alloc status` shows
+dataplane defect because `deploy` succeeds, `alloc status` shows
 Running, and the failure only surfaces when a real client times out.
 The whole design intent is to convert that silence into a loud,
 mechanical PR-time gate failure (US-03).
@@ -132,7 +132,7 @@ trust the forward+reverse wire path.
 
 | Declare | Submit & commit | Load-balance | Verify both ways | Guard forever |
 |---|---|---|---|---|
-| Write `protocol="udp"` listener (shipped #164) | `overdrive job submit` → intent → hydrator | Dataplane installs forward + reverse entries | Real UDP round-trip; response sourced from VIP | Lockstep gate Sim≡Ebpf |
+| Write `protocol="udp"` listener (shipped #164) | `overdrive deploy` → intent → hydrator | Dataplane installs forward + reverse entries | Real UDP round-trip; response sourced from VIP | Lockstep gate Sim≡Ebpf |
 
 ### Ribs (tasks under each activity)
 
@@ -229,9 +229,9 @@ instruction's explicit watch).
   (option C, `dataplane.rs:101`) carries no protocol; the dataplane
   cannot know whether a service is TCP or UDP, so REVERSE_NAT entries
   are hard-coded to one proto.
-- **After:** `overdrive job submit dns-resolver.toml` (with a udp
+- **After:** `overdrive deploy dns-resolver.toml` (with a udp
   listener) commits an intent whose protocol flows into a typed
-  `ServiceFrontend`; the existing TCP e2e (`overdrive job submit web.toml`)
+  `ServiceFrontend`; the existing TCP e2e (`overdrive deploy web.toml`)
   still prints `Service 'web' is stable` unchanged — the migration is
   production-behavior-preserving. Observable proof: the existing
   `service_map_forward` Tier 3 test stays green, and the new frontend
@@ -295,7 +295,7 @@ single-cut PR.
 ### UAT Scenarios (BDD)
 #### Scenario: TCP service round-trips unchanged in production after the migration
 Given Ana has web.toml with a tcp listener on 8080 and one backend
-When Ana runs `overdrive job submit web.toml`
+When Ana runs `overdrive deploy web.toml`
 Then the service reaches stable and the production forward+reverse TCP path works exactly as before the migration
 
 #### Scenario: The frontend carries the declared protocol
@@ -335,12 +335,12 @@ Then `(vip, port, proto)` is read from the single `ServiceFrontend` at every cal
 ## US-02: Production EbpfDataplane installs REVERSE_NAT entries matching the declared proto
 
 ### Elevator Pitch
-- **Before:** `overdrive job submit dns-resolver.toml` succeeds, the
+- **Before:** `overdrive deploy dns-resolver.toml` succeeds, the
   service runs, but the UDP backend's response hits
   `xdp_reverse_nat_lookup` with proto=17, finds NO entry, and returns
   `XDP_PASS` without rewriting the source — the client gets a response
   from the backend IP and the connection breaks (the #163 bug).
-- **After:** `overdrive job submit dns-resolver.toml` installs a
+- **After:** `overdrive deploy dns-resolver.toml` installs a
   REVERSE_NAT_MAP entry `(backend_ip, 5353, udp) → vip`; the backend's
   UDP response is source-rewritten to the VIP. Observable proof: a
   `bpftool map dump` of REVERSE_NAT_MAP shows the udp-keyed entry; the
@@ -532,7 +532,7 @@ Then the output packet's source 5-tuple is rewritten to the VIP
 - **Before:** there is no end-to-end proof that a UDP service works both
   ways on Overdrive — the forward path is tested, the reverse path is
   not.
-- **After:** Ana runs `overdrive job submit dns-resolver.toml`, sends a
+- **After:** Ana runs `overdrive deploy dns-resolver.toml`, sends a
   real UDP datagram to the VIP, and a `tcpdump` capture on the client
   veth shows the reply sourced from `10.96.0.10:5353` (the VIP), not the
   backend. Observable proof: the Tier 3 capture line
@@ -547,7 +547,7 @@ the reverse path — the only way to discover the #163 asymmetry is to
 deploy and watch a real client time out.
 
 ### Who
-- Platform engineer (Ana) | running a real `overdrive job submit` for a UDP service | wants to see the round-trip on the wire.
+- Platform engineer (Ana) | running a real `overdrive deploy` for a UDP service | wants to see the round-trip on the wire.
 
 ### Solution
 A Tier 3 e2e (real veth, behind `integration-tests`): submit a
@@ -611,7 +611,7 @@ Then no reply is captured, and the test does NOT report a source-rewrite failure
 - **Before:** the ServiceMapHydrator emits a single `update_service`
   per service; a multi-listener service (TCP + UDP) cannot install both
   protocols' dataplane entries.
-- **After:** Ana runs `overdrive job submit edge.toml` (tcp/8080 +
+- **After:** Ana runs `overdrive deploy edge.toml` (tcp/8080 +
   udp/8081); the hydrator emits one `update_service` per listener with
   the spec-declared proto, and BOTH the TCP forward+reverse path AND the
   UDP forward+reverse path work. Observable proof: the accepted line
@@ -756,15 +756,15 @@ Per `nw-po-review-dimensions` Dimension 0 (BLOCKING, checked first).
 
 | Story | Has section | Real entry point | Concrete output | Real decision | Verdict |
 |---|---|---|---|---|---|
-| US-01 | PASS | PASS — `overdrive job submit` | PASS — existing TCP e2e stays green; `ServiceFrontend` carries proto:Udp | PASS — "rely on one typed surface for protocol" | **PASS** |
-| US-02 | PASS | PASS — `overdrive job submit` | PASS — `bpftool map dump` shows udp entry; capture shows VIP source | PASS — "deploy a UDP service and trust the reverse path" | **PASS** |
+| US-01 | PASS | PASS — `overdrive deploy` | PASS — existing TCP e2e stays green; `ServiceFrontend` carries proto:Udp | PASS — "rely on one typed surface for protocol" | **PASS** |
+| US-02 | PASS | PASS — `overdrive deploy` | PASS — `bpftool map dump` shows udp entry; capture shows VIP source | PASS — "deploy a UDP service and trust the reverse path" | **PASS** |
 | US-03 | PASS | PASS — `cargo dst` + `cargo xtask bpf-unit` (the author's gate surface) | PASS — gate fails loudly on dropped fan-out | PASS — "trust the lockstep holds before merge" | **PASS** |
-| US-04 | PASS | PASS — `overdrive job submit` + wire capture | PASS — `IP 10.96.0.10.5353 > ...` capture line | PASS — "confidently deploy a real UDP workload" | **PASS** |
-| US-05 | PASS | PASS — `overdrive job submit edge.toml` | PASS — accepted line shows both listeners; two captures VIP-sourced | PASS — "run dual-protocol services on one VIP" | **PASS** |
+| US-04 | PASS | PASS — `overdrive deploy` + wire capture | PASS — `IP 10.96.0.10.5353 > ...` capture line | PASS — "confidently deploy a real UDP workload" | **PASS** |
+| US-05 | PASS | PASS — `overdrive deploy edge.toml` | PASS — accepted line shows both listeners; two captures VIP-sourced | PASS — "run dual-protocol services on one VIP" | **PASS** |
 
 **No `@infrastructure` stories.** US-01 is a refactor but it is NOT
 infrastructure-only — its Elevator Pitch references a real operator entry
-point (`overdrive job submit`) and an observable outcome (the existing
+point (`overdrive deploy`) and an observable outcome (the existing
 TCP e2e staying green is operator-visible behavior preservation), and it
 enables a real decision. **Slice-composition hard gate: every slice
 contains at least one operator-visible value-producing story.**
@@ -926,3 +926,134 @@ re-review; ready for DESIGN handoff.
 artifacts; ACs pin observable kernel side-effects (not branch reachability); emotional
 arc fully defined with honest dual happy/sad terminal; DIVERGE-absent risk surfaced
 rather than hidden.
+
+---
+
+# DESIGN wave (Morgan, 2026-06-02 — lean / Tier-1)
+
+**Mode:** Propose (decisions locked by user, Phase A enumerated, Phase B
+writes). **Density:** lean (Tier-1 [REF] only; no Tier-2 expansion — no
+trigger fired). **SSOT:** ADR-0060 + `brief.md` § "UDP service support
+extension" + `c4-diagrams.md` § "UDP service support". Back-prop
+corrections to DISCUSS recorded in
+`docs/feature/udp-service-support/design/upstream-changes.md`.
+
+## Wave: DESIGN / [REF] DDD subdomain classification
+
+| ID | Subdomain | Class | Note |
+|---|---|---|---|
+| D-DDD-1 | Dataplane reverse-NAT / service frontend | **Core** | The #163 correctness surface; the lockstep equality is the differentiator. |
+| D-DDD-2 | Reconciliation (ServiceMapHydrator desired→Action) | Supporting | Existing reconciler (ADR-0042); gains a protocol dimension, not a new boundary. |
+| D-DDD-3 | Intent/spec (`Listener`, `Proto`) | Generic (shipped #164) | Untouched by this feature; the proto source. |
+
+No DDD skill load triggered — single bounded context (`overdrive-core`
+trait surface + its two adapters), no aggregate redesign, no new
+context map. `ServiceFrontend` is a value object (immutable `Copy`
+newtype), not an aggregate.
+
+## Wave: DESIGN / [REF] Component decomposition
+
+| Component | Path | Disposition | Responsibility |
+|---|---|---|---|
+| `ServiceFrontend` | `crates/overdrive-core/src/dataplane/service_frontend.rs` | **CREATE NEW** | Typed `(ServiceVip [V4-by-construction], NonZeroU16 port, Proto)`; fallible `new()` (IPv4 validation), infallible `vip_v4()` narrow. |
+| `Dataplane::update_service` | `crates/overdrive-core/src/traits/dataplane.rs:101` | EXTEND | Signature → `(frontend, backends)`; rustdoc contract per ADR-0060. |
+| `Action::DataplaneUpdateService` | `crates/overdrive-core/src/reconcilers/mod.rs:440` | EXTEND | + protocol dimension; `service_id`/`correlation` retained. |
+| `ServiceDesired` + obs→desired projection | `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs:40,235,263` | EXTEND | + protocol dimension carried from observed `Listener`. |
+| `SimDataplane` + `reverse_nat_keys_for` | `crates/overdrive-sim/src/adapters/dataplane.rs:266,289` | EXTEND | Narrow `[Tcp,Udp]`→`frontend.proto`; per-proto purge. |
+| `EbpfDataplane::update_service` | `crates/overdrive-dataplane/src/lib.rs` | EXTEND | Step 4b per-`frontend.proto` REVERSE_NAT fan-out (US-02). |
+| action-shim dispatch | `crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs:100,130,160` | EXTEND | Build `ServiceFrontend::new` (IPv6-reject site); call with frontend. |
+| `ReverseNatLockstep` | `crates/overdrive-sim/src/invariants/reverse_nat_lockstep.rs` | EXTEND | Per-proto set-equality assertion. |
+| `BackendKey` / `Proto` | `crates/overdrive-core/src/dataplane/backend_key.rs:137,66` | REUSE | REVERSE_NAT key + IANA proto enum; reused by `ServiceFrontend`. |
+| `Listener` | `crates/overdrive-core/src/aggregate/workload_spec.rs:540` | REUSE (read-only) | The proto source; not modified. |
+
+## Wave: DESIGN / [REF] Driving ports
+
+| Port | Surface | Note |
+|---|---|---|
+| `ServiceMapHydrator.reconcile` | desired→Action emission | Pure sync (ADR-0035); emits `Action::DataplaneUpdateService` (+ proto). |
+| action-shim `dispatch` | Action→`update_service` | Builds `ServiceFrontend`; the driving adapter into the dataplane port. |
+
+No new driving port. No new external/REST surface (the CLI is unchanged —
+shipped #164).
+
+## Wave: DESIGN / [REF] Driven ports + adapters
+
+| Driven port | Production adapter | Sim adapter | Probe (Earned Trust) |
+|---|---|---|---|
+| `Dataplane` (`update_service`) | `EbpfDataplane` (aya-rs, REVERSE_NAT_MAP via bpffs) | `SimDataplane` (in-memory `BTreeMap`) | `EbpfDataplane::probe()` already exists (ADR-0052 wire-then-probe-then-use); this feature adds **no new driven port** and no new probe surface — the existing dataplane probe at composition root covers the REVERSE_NAT_MAP FD. No new external dependency (filesystem/time/subprocess/SDK) is introduced. |
+
+**Earned Trust note:** `ServiceFrontend` is a pure in-process value object;
+the adapters it feeds (`EbpfDataplane`) already carry their composition-root
+probe per ADR-0052. The IPv4-by-construction invariant is enforced at
+`new()` (the action-shim), and the three-tier `ReverseNatLockstep` gate is
+the empirical proof that both adapters honor the per-proto contract in their
+real environment — Tier 3 exercises the actual kernel REVERSE_NAT_MAP, the
+"does the substrate lie about proto=17 rewrite?" probe.
+
+## Wave: DESIGN / [REF] Technology choices
+
+| Choice | Decision | Rationale | License |
+|---|---|---|---|
+| `ServiceFrontend` derives | `Debug,Clone,Copy,PartialEq,Eq` only | Not wire, not persisted (D2); narrower than `BackendKey`/`Listener` deliberately. | (in-repo) |
+| Port type | `NonZeroU16` | Matches `Listener.port`; port=0 unrepresentable (D1b). | std |
+| Proto type | reuse `overdrive_core::…::Proto` | IANA tcp/udp enum already shipped (#164); no new type. | (in-repo) |
+| Enforcement tooling | dst-lint (existing) + `cargo dst`/`bpf-unit`/`lima` gates | Rust-appropriate; `ReverseNatLockstep` is the DST-equivalence guard. | (in-repo) |
+
+No new third-party crate. No proprietary dependency. No external API
+integration (the dataplane boundary is an internal trait) — no
+consumer-driven contract test warranted.
+
+## Wave: DESIGN / [REF] Decisions table
+
+| ID | Decision | Disposition |
+|---|---|---|
+| D1a | `ServiceFrontend { vip: ServiceVip, … }`, V4-guaranteed-by-construction via fallible `new()`; IPv6 rejected at the action-shim (existing operator-visible Failed row); adapters narrow infallibly. | LOCKED |
+| D1b | `port: NonZeroU16` (matches `Listener.port`); project to `BackendKey.u16` via `.get()`. | LOCKED |
+| D2 | Derives `Debug,Clone,Copy,PartialEq,Eq` only — no serde/utoipa/rkyv/Hash. | LOCKED |
+| D3 | New file `crates/overdrive-core/src/dataplane/service_frontend.rs`. | LOCKED |
+| D4 | Empty-backends purge is **per-proto** (only `frontend.proto`'s REVERSE_NAT keys; other protos + cross-service shared keys preserved). | LOCKED |
+| D5 | ADR-0060 (next free number; supersedes phase-2 §5 Q-Sig locked-A paper). | LOCKED |
+| D6 | Proto folds into **US-01** (NOT US-04); true blast radius = 8 sites (Action + ServiceDesired + obs→desired projection included). | LOCKED |
+| D7 | No new endianness discipline (`Proto` is a single IANA byte; §11 governs ip/port only). | LOCKED |
+| D8 | US-05 forward-key granularity (VIP-only per `validate.rs:218` vs `(VIP,port)` per architecture.md §5 Drift-3) **deferred to US-05 DESIGN** — disagreement flagged, not resolved. | DEFERRED |
+
+## Wave: DESIGN / [REF] Reuse Analysis (HARD GATE)
+
+| Touched component | Existing alternative considered | Decision | Justification |
+|---|---|---|---|
+| **`ServiceFrontend`** | (a) reuse `Listener { port, protocol }`; (b) reuse `BackendKey { ip, port, proto }`; (c) positional `(ServiceVip, NonZeroU16, Proto)` args | **CREATE NEW** | (a) `Listener` is the intent/spec **wire** type (serde+utoipa+rkyv, `deny_unknown_fields`) carrying no VIP — reusing it on the dataplane boundary would drag wire-schema-evolution coupling onto an ephemeral call argument and still lack the VIP. (b) `BackendKey` is the **backend-side** REVERSE_NAT *key* (`ip` = backend IP); `ServiceFrontend` is the **service-side** frontend (`vip` = service VIP) — semantically inverted; reusing it would conflate the two sides of the NAT and re-introduce a raw `Ipv4Addr` VIP. (c) positional args reintroduce the C2 sprawl the newtype exists to kill. No existing type is the `(service VIP, listener port, proto)` triple; CREATE NEW is justified. |
+| `update_service` | keep shipped option-C `(vip, backends)` | EXTEND | The from-state's defect — no proto on the boundary; cannot be reused as-is. |
+| `Action` / `ServiceDesired` | keep current shape (no proto) | EXTEND | C3 (no `Tcp` default) is satisfiable only if proto is carried end-to-end. |
+| `SimDataplane` / `EbpfDataplane` / `ReverseNatLockstep` | reuse existing logic | EXTEND | Narrow the proto fan-out; purge logic shape unchanged. |
+| `Proto` / `BackendKey` / `Listener` | — | REUSE | IANA enum + REVERSE_NAT key + proto source; no change needed. |
+
+**Self-challenge passed:** `ServiceFrontend` is the only CREATE NEW; every
+other site EXTENDs or REUSEs. The newtype earns its existence — no existing
+type expresses the `(service VIP, listener port, proto)` triple, and the two
+near-neighbours (`Listener`, `BackendKey`) are semantically wrong (wire-intent
+type / backend-side key respectively).
+
+## Wave: DESIGN / [REF] Open questions
+
+| ID | Question | Owner | Status |
+|---|---|---|---|
+| OQ-1 | `SERVICE_MAP` forward-key granularity: VIP-only (`validate.rs:218`) vs `(VIP, port)` (architecture.md §5 Drift-3). | US-05 DESIGN | OPEN (D8 — flagged in ADR-0060, not resolved here). |
+| OQ-2 | Action payload shape for the proto dimension: two scalar fields `(port, proto)` vs an embedded per-listener frontend payload. | US-01 DELIVER | OPEN (dimension locked; encoding is an implementation detail). |
+
+No outcome-registry collision check (no `docs/product/outcomes/registry.yaml`
+— Outcome Collision Check skipped, confirmed).
+
+---
+
+## Wave: DESIGN / [REVIEW] Atlas review (nw-solution-architect-reviewer)
+
+**Date:** 2026-06-02 · **Verdict:** APPROVED (0 critical, 0 high, 1 medium, 1 low) · **Iteration:** 1
+
+**Fidelity to locked decisions:** D1a (literal `ServiceVip` + V4-by-construction) FAITHFUL — `ServiceFrontend::new` replaces `ipv4_from_vip` at `dataplane_update_service.rs:110`, operator-visible Failed row preserved, `vip_v4()` narrow backed by sole-constructor invariant using `unreachable!()` (not `.expect()`). D4/D5/D6/D7/D8 all FAITHFUL. No drift from DIVERGE/DISCUSS; corrections back-propagated openly via `upstream-changes.md`. Trait contract complete (preconditions/postconditions/every edge case/cross-adapter invariant). Reuse Analysis a genuine self-challenge. C4 L1/L2/L3 match the 8-site decomposition.
+
+| ID | Sev | Finding | Disposition |
+|---|---|---|---|
+| ATLAS-1 | medium | ADR-0060 site #8 (+ brief.md row 8, C4 L3 node) describe proto/port as carried from the `service_backends` observation — verified FALSE: `ServiceBackendRowV1` (`observation_store.rs:875`) and `ServiceDesired` (`service_map_hydrator.rs:40`) carry no port/proto; `hydrate_desired` (`reconciler_runtime.rs:1322-1348`) reads only `service_backends_rows`. Proto/port actually live on `ListenerRow` (`observation_store.rs:321`) + the `BackendDiscoveryBridge` per-listener projection (`reconciler_runtime.rs:2569`). Risk: a crafter implementing against the literal text could synthesize a `Tcp` default (C3 violation). | **Non-blocking for handoff** (dimension locked end-to-end; data exists). Correct the provenance text in ADR-0060/brief/C4; DISTILL pins proto provenance to a listener-bearing source + adds a C3 guard scenario ("unresolvable-listener desired projection is an error, never a silent `Tcp` default"). |
+| ATLAS-2 | low | Existing `ServiceBackendRow` write path collapses listeners to the first (`reconciler_runtime.rs:2015-2019`: first-listener-only, port default 0, no proto). If a DELIVER crafter sources proto from `ServiceBackendRow` it becomes a hidden 9th site; correctly out of US-01 scope (US-05 owns multi-listener fan-out). | Flag to DISTILL/DELIVER so the first-listener collapse is not rediscovered as a surprise; confirm US-01 sources proto from the listener fact, not the proto-less `ServiceBackendRow`. |
+
+**Gate:** CLEARED for DISTILL/DEVOPS handoff. The medium finding is a provenance-precision correction (artifact text + a DISTILL acceptance scenario), not a DESIGN re-spin.

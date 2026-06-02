@@ -11,7 +11,7 @@
 
 ## Goal the operator can verify
 
-After this slice, `overdrive job submit dns-resolver.toml` (udp/5353)
+After this slice, `overdrive deploy dns-resolver.toml` (udp/5353)
 installs a REVERSE_NAT_MAP entry `(backend_ip, 5353, udp) → vip`. A
 `bpftool map dump` of REVERSE_NAT_MAP shows the udp-keyed entry. The
 Sim-vs-Ebpf REVERSE_NAT key-set diff for a udp service is empty.

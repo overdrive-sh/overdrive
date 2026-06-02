@@ -24,7 +24,7 @@ journey:
 steps:
   - id: 1
     name: "Declare a UDP listener and submit"
-    command: "overdrive job submit dns-resolver.toml"
+    command: "overdrive deploy dns-resolver.toml"
 
     shared_artifacts:
       - name: service_proto
@@ -51,7 +51,7 @@ steps:
       Scenario: Operator submits a Service declaring a UDP listener
         Given Ana has dns-resolver.toml with a [service] block and a
           [[listener]] carrying port = 5353 and protocol = "udp"
-        When Ana runs `overdrive job submit dns-resolver.toml`
+        When Ana runs `overdrive deploy dns-resolver.toml`
         Then the CLI prints an Accepted line naming "udp/5353"
         And the committed intent Service aggregate carries
           Listener.protocol == Proto::Udp

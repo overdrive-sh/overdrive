@@ -452,3 +452,137 @@ The diagram makes six architectural properties visually explicit:
    layering rule preserved verbatim — streaming forwards
    `LifecycleEvent.terminal` without re-deriving.
 
+---
+
+## UDP service support — `ServiceFrontend` on `update_service` (Mermaid)
+
+**Source:** `docs/feature/udp-service-support/` DESIGN-wave artifacts.
+**ADR:** ADR-0060. Extends Phase 2.2 (ADR-0040..0042).
+**Date:** 2026-06-02. **GH:** #163.
+
+### C4 Level 1 — System Context
+
+System Context inherits unchanged from Phase 2.1/2.2: no new external
+actors, no new external systems. The operator (Ana) submits a Service-kind
+workload with a `protocol = "udp"` listener; the Linux kernel's BPF
+subsystem is the enforcement boundary. Reproduced for self-containment.
+
+```mermaid
+C4Context
+  title System Context — Overdrive (UDP service support, GH #163)
+
+  Person(operator, "Platform Engineer (Ana)", "Submits a Service with a udp listener via `overdrive job submit`; verifies the reverse path with a wire capture")
+  System(overdrive, "Overdrive node", "Single binary — control plane + worker + dataplane; per-service L4 protocol now threaded to the dataplane boundary")
+  System_Ext(kernel, "Linux kernel (BPF)", "XDP/TC hooks; REVERSE_NAT_MAP; xdp_reverse_nat_lookup rewrites a backend response source back to the VIP per (ip,port,proto)")
+  System_Ext(ci, "CI", "Runs the three-tier ReverseNatLockstep gate: cargo dst (T1) + cargo xtask bpf-unit (T2) + cargo xtask lima run integration (T3)")
+
+  Rel(operator, overdrive, "Submits a udp Service; sends a UDP datagram to the VIP")
+  Rel(overdrive, kernel, "Installs REVERSE_NAT_MAP (backend_ip, port, proto) → vip via update_service(frontend, backends)")
+  Rel(kernel, operator, "UDP response source-rewritten to the VIP (was: backend IP — the #163 defect)")
+  Rel(ci, overdrive, "Gates Sim≡Ebpf REVERSE_NAT key-set equality per declared proto")
+```
+
+### C4 Level 2 — Container annotation
+
+Container topology inherits unchanged: no new container. `overdrive-core`
+gains the `ServiceFrontend` newtype + the protocol dimension on the Action
+and the desired projection; `overdrive-dataplane` (Ebpf) and `overdrive-sim`
+(Sim) gain the per-proto REVERSE_NAT fan-out; `overdrive-control-plane`'s
+action-shim builds the frontend (and is the operator-visible IPv6-rejection
+site).
+
+The desired projection's NEW protocol dimension is sourced from a
+listener-bearing fact — `ListenerRow` / the `BackendDiscoveryBridge`
+per-listener projection — **NOT** from `service_backends` (which carries no
+port/proto). This is distinct from `hydrate_desired` reading `service_backends`
+rows for VIP/backends today (line 122): the proto comes from the listener fact,
+never that row, and never a silent `Proto::Tcp` default (C3). See ADR-0060.
+
+```mermaid
+C4Container
+  title Container Diagram annotation — UDP service support
+
+  Person(operator, "Platform Engineer (Ana)", "Submits a udp Service; verifies VIP-source reverse path")
+
+  Container(cli, "overdrive-cli", "Rust binary", "Unchanged — submits Service spec with a udp Listener (shipped #164)")
+  Container(ctrl, "overdrive-control-plane", "Rust crate", "EXTENDED — action-shim builds ServiceFrontend::new (IPv6-reject site, operator-visible Failed row); ServiceMapHydrator desired projection + Action gain the protocol dimension")
+  Container(core, "overdrive-core", "Rust crate", "EXTENDED — NEW ServiceFrontend newtype (dataplane/service_frontend.rs); Dataplane::update_service(frontend, backends); Action::DataplaneUpdateService + ServiceDesired gain proto")
+  Container(dp, "overdrive-dataplane", "adapter-host (Ebpf)", "EXTENDED — EbpfDataplane::update_service Step 4b installs REVERSE_NAT entries per frontend.proto (US-02)")
+  Container(sim, "overdrive-sim", "adapter-sim", "EXTENDED — reverse_nat_keys_for narrows [Tcp,Udp]→frontend.proto; ReverseNatLockstep asserts the per-proto set (Tier 1)")
+  ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "Unchanged shape — service_backends (desired source) + service_hydration_results (Completed/Failed)")
+  System_Ext(kernel, "Linux kernel (BPF)", "REVERSE_NAT_MAP keyed BackendKey{ip,port,proto}")
+
+  Rel(operator, cli, "overdrive job submit dns-resolver.toml (udp/5353)")
+  Rel(cli, ctrl, "ServiceSubmitEvent (NDJSON)")
+  Rel(ctrl, obs, "Reads service_backends → ServiceDesired{vip, port, proto, backends}")
+  Rel(ctrl, core, "Emits Action::DataplaneUpdateService (+ proto); action-shim builds ServiceFrontend::new(vip, port, proto)")
+  Rel(ctrl, dp, "update_service(frontend, backends) [production]")
+  Rel(ctrl, sim, "update_service(frontend, backends) [tests/DST]")
+  Rel(dp, kernel, "Installs REVERSE_NAT (backend_ip, port, frontend.proto) → vip_v4")
+  Rel(ctrl, obs, "Writes service_hydration_results (Completed | Failed{Ipv6Unsupported})")
+```
+
+### C4 Level 3 — `update_service` call-path fan-out (the 8-site blast radius)
+
+The component diagram makes the true blast radius (ADR-0060 D6) visually
+explicit: the protocol dimension is plumbed end-to-end (C3), so it touches
+the Action and the desired projection, not only the trait.
+
+```mermaid
+C4Component
+  title Component Diagram — ServiceFrontend update_service call path
+
+  Container_Boundary(core, "overdrive-core") {
+    Component(frontend, "ServiceFrontend (NEW)", "newtype — dataplane/service_frontend.rs", "(ServiceVip V4-by-construction, NonZeroU16 port, Proto); new() validates IPv4; vip_v4() narrows infallibly; derives Debug,Clone,Copy,PartialEq,Eq")
+    Component(trait_dp, "Dataplane trait (EXTENDED)", "traits/dataplane.rs:101", "update_service(frontend, backends) — contract pins per-proto REVERSE_NAT set + per-proto purge + cross-adapter equality")
+    Component(action, "Action::DataplaneUpdateService (EXTENDED)", "reconcilers/mod.rs:440", "+ protocol dimension; service_id + correlation stay (action-routing, NOT a dataplane key)")
+    Component(desired, "ServiceDesired + obs→desired (EXTENDED)", "reconcilers/service_map_hydrator.rs:40,235,263", "+ protocol dimension carried from observed Listener; emits proto, never defaults to Tcp (C3)")
+    Component(backend_key, "BackendKey (REUSE)", "dataplane/backend_key.rs:137", "REVERSE_NAT key {ip, port, proto}; Proto reused by ServiceFrontend")
+  }
+
+  Container_Boundary(ctrl, "overdrive-control-plane") {
+    Component(shim, "action_shim::dataplane_update_service (EXTENDED)", "action_shim/dataplane_update_service.rs:100,130,160", "Builds ServiceFrontend::new — the operator-visible IPv6-reject site (Failed row); calls update_service(frontend, backends)")
+  }
+
+  Container_Boundary(dp, "overdrive-dataplane (adapter-host)") {
+    Component(ebpf, "EbpfDataplane::update_service (EXTENDED)", "overdrive-dataplane/src/lib.rs", "Step 4b installs REVERSE_NAT per frontend.proto (US-02); narrows infallibly via vip_v4()")
+  }
+
+  Container_Boundary(sim, "overdrive-sim (adapter-sim)") {
+    Component(simdp, "SimDataplane + reverse_nat_keys_for (EXTENDED)", "overdrive-sim/src/adapters/dataplane.rs:266,289", "[Tcp,Udp] hardcode → frontend.proto; per-proto purge via prior.difference(new) ∖ live_keys")
+    Component(lockstep, "ReverseNatLockstep invariant (EXTENDED)", "overdrive-sim/src/invariants/reverse_nat_lockstep.rs", "Tier 1: asserts Sim installs exactly the declared-proto BTreeSet<BackendKey>")
+  }
+
+  Rel(desired, action, "Emits with proto dimension")
+  Rel(action, shim, "Dispatched (destructure service_id, correlation, vip, +proto)")
+  Rel(shim, frontend, "ServiceFrontend::new(vip, port, proto) — IPv6 → Failed row")
+  Rel(shim, trait_dp, "update_service(frontend, backends)")
+  Rel(trait_dp, ebpf, "production binding")
+  Rel(trait_dp, simdp, "test/DST binding")
+  Rel(ebpf, backend_key, "Derives REVERSE_NAT key per frontend.proto")
+  Rel(simdp, backend_key, "Derives REVERSE_NAT key per frontend.proto")
+  Rel(lockstep, simdp, "Drives + asserts per-proto set equality")
+  Rel(frontend, backend_key, "Reuses Proto; port→u16 via .get()")
+```
+
+Four properties the diagram makes explicit:
+
+1. **The protocol is plumbed end-to-end, never defaulted** (C3). The
+   `ServiceDesired` → `Action` → `ServiceFrontend` chain carries `proto`
+   from the observed `Listener`; there is no edge on which `Proto::Tcp` is
+   synthesised as a default. This is the correction to the DISCUSS "hydrator
+   unchanged" claim.
+2. **`service_id`/`correlation` are NOT in the dataplane key.** They stay on
+   `Action::DataplaneUpdateService` (action-routing); `ServiceFrontend`
+   carries only `(vip, port, proto)`. The trait surface has no `service_id`
+   edge.
+3. **IPv6 rejection stays operator-visible.** The only construction site for
+   `ServiceFrontend` is the action-shim's `new()`, which is the existing
+   `ipv4_from_vip` rejection point (Failed observation row). Adapters narrow
+   infallibly — no late opaque `DataplaneError`.
+4. **The three-tier gate is the equivalence guard.** `ReverseNatLockstep`
+   (Tier 1, Sim) + the Ebpf `bpftool` acceptance (Tier 3) + the
+   `BPF_PROG_TEST_RUN` triptych (Tier 2) meet at the shared `BackendKey`
+   set; there is no single-process two-adapter DST because the real adapter
+   needs a kernel + bpffs.
+

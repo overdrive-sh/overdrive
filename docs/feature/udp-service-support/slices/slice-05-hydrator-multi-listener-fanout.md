@@ -11,7 +11,7 @@
 
 ## Goal the operator can verify
 
-Ana runs `overdrive job submit edge.toml` (tcp/8080 + udp/8081); the
+Ana runs `overdrive deploy edge.toml` (tcp/8080 + udp/8081); the
 accepted line shows both listeners; the ServiceMapHydrator emits one
 `update_service` per listener with the spec-declared proto; and BOTH the
 TCP forward+reverse path AND the UDP forward+reverse path work on real

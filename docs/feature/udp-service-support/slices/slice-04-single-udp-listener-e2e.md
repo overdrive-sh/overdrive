@@ -12,7 +12,7 @@ every backbone activity; the operator-verifiable proof.
 
 ## Goal the operator can verify
 
-Ana runs `overdrive job submit dns-resolver.toml` (single udp/5353
+Ana runs `overdrive deploy dns-resolver.toml` (single udp/5353
 listener), sends a real UDP datagram to the VIP, and a `tcpdump` capture
 on the client veth shows the reply sourced from `10.96.0.10:5353` (the
 VIP) — NOT the backend `10.244.0.20`.

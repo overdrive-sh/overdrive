@@ -81,7 +81,7 @@ ServiceMapHydrator  ──►  ServiceFrontend newtype (vip,port,proto) + backen
 ### Step 1 — submit a UDP service (happy path)
 
 ```
-+-- $ overdrive job submit dns-resolver.toml -----------------------------+
++-- $ overdrive deploy dns-resolver.toml ---------------------------------+
 | Accepted: service 'dns-resolver' (1 listener)                           |
 |   listener[0]  udp/5353  -> vip 10.96.0.10:5353                          |
 | Reconciling... allocation alloc-dns-resolver-0 -> Running                |
@@ -115,7 +115,7 @@ ServiceMapHydrator  ──►  ServiceFrontend newtype (vip,port,proto) + backen
 ### Multi-listener case (TCP 8080 + UDP 8081, the ServiceMapHydrator fan-out slice)
 
 ```
-+-- $ overdrive job submit edge.toml -------------------------------------+
++-- $ overdrive deploy edge.toml -----------------------------------------+
 | Accepted: service 'edge' (2 listeners)                                  |
 |   listener[0]  tcp/8080  -> vip 10.96.0.11:8080                          |
 |   listener[1]  udp/8081  -> vip 10.96.0.11:8081                          |
@@ -131,7 +131,7 @@ ServiceMapHydrator  ──►  ServiceFrontend newtype (vip,port,proto) + backen
 
 | Failure | What Ana sees | Recovery |
 |---|---|---|
-| Proto unsupported (e.g. `protocol = "sctp"`) | Parse-time reject at `job submit`: `error: listener[0]: unsupported protocol 'sctp' (supported: tcp, udp)` — exit 1 | Edit the spec; #164 already validates supported protos. (Confirms the boundary; no new work — but the journey acknowledges it.) |
+| Proto unsupported (e.g. `protocol = "sctp"`) | Parse-time reject at `deploy`: `error: listener[0]: unsupported protocol 'sctp' (supported: tcp, udp)` — exit 1 | Edit the spec; #164 already validates supported protos. (Confirms the boundary; no new work — but the journey acknowledges it.) |
 | Reverse-path asymmetry (the #163 bug, pre-fix) | Nothing at submit time — `Accepted` + `Running` + `stable`. The bug is invisible until a real UDP client times out. | This is exactly why Step 4's lockstep gate exists: the asymmetry is converted into a **PR-time CI failure** so an operator never reaches this state. |
 | Lockstep divergence reintroduced later | CI: `ReverseNatLockstep` / Tier 3 acceptance FAILS — `REVERSE_NAT key sets differ: Sim has (10.244.0.20:5353/udp), Ebpf missing it` | The author fixes the adapter before merge. Structural defense. |
 

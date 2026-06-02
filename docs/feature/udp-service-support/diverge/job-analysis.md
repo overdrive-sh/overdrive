@@ -49,7 +49,7 @@ protocol, so a forward/reverse asymmetry cannot reach production
 undetected.
 
 **Emotional:** Relief from the *anxiety of silent asymmetry* — the worst
-class of dataplane defect, where `job submit` succeeds, `alloc status`
+class of dataplane defect, where `deploy` succeeds, `alloc status`
 shows Running, and the failure surfaces only when a real client times out.
 
 **Social:** The dataplane author is seen as shipping a surface that future
