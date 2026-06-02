@@ -1,5 +1,4 @@
   --- serve_deploy.out (tail) ---
-
 # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
 { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
 { echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
@@ -15,16 +14,15 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary (single compile shared by serve+deploy)
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.Frda0b data=/tmp/od-o03-data.0etBEz
-# serve ready: trust triple written at /tmp/od-o03-cfg.Frda0b/.overdrive/config (pid 3256907)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.ZGKVHG data=/tmp/od-o03-data.KJcQ3j
+# serve ready: trust triple written at /tmp/od-o03-cfg.ZGKVHG/.overdrive/config (pid 3286142)
 # deploy exit: 0
+# alloc status exit: 0
 INNER_DONE serve_status=ready deploy_rc=0
   [PASS] no-leak: probe_before_loopback shows HEALTHY loopback
   [PASS] no-leak: probe_post_teardown_loopback shows HEALTHY loopback
   [PASS] no-leak: post-teardown shows no XDP programs attached
   [PASS] sub-claim 1: deploy exited 0
   [PASS] 'deploy_dns_resolver.out' contains: Accepted.
-  [pending] sub-claim 3: listener protocol (Proto::Udp) is not rendered
-            on any operator read surface — no black-box proof available.
-            See deploy_udp_walking_skeleton.rs for the crate-internal witness.
-O03 sub-claim aggregate exit: 0  (sub-claim 3 deferred -> pending)
+  [PASS] 'alloc_status_dns_resolver.out' contains: 5353/udp
+O03 sub-claim aggregate exit: 0

@@ -193,6 +193,17 @@ OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" deploy "\$SPEC" \
 echo "# exit:    \$DEPLOY_RC" >> "\$EVID/deploy_dns_resolver.meta"
 echo "# deploy exit: \$DEPLOY_RC"
 
+# ---- alloc status: capture the listener-protocol render (sub-claim 3) --------
+# A Service's listeners are projected from the persisted WorkloadIntent::Service
+# aggregate (not the allocation), so \`alloc status\` renders each listener as
+# <port>/<protocol> IMMEDIATELY after deploy-accept — before any convergence to
+# a Running allocation. This is the operator-surface proof that the accepted
+# intent carries Proto::Udp (closing sub-claim 3 black-box).
+ALLOC_RC=0
+OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" alloc status --job dns-resolver \
+  > "\$EVID/alloc_status_dns_resolver.out" 2>&1 || ALLOC_RC=\$?
+echo "# alloc status exit: \$ALLOC_RC"
+
 # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
 { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "\$EVID/probe_after_xdp.txt"      2>&1
 { echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "\$EVID/probe_after_loopback.txt" 2>&1
@@ -273,16 +284,24 @@ else
   rc=1
 fi
 
-# Sub-claim 3: listener protocol (Proto::Udp) — documented operator gap.
-# The deploy-accept render (render::workload_submit_accepted) emits Workload ID
-# / Intent key / Spec digest / Outcome / Endpoint / Next — it does NOT render
-# the listener protocol, and no black-box read surface (`od job list`,
-# `od alloc status`) renders it back. The 01-05 test proves Proto::Udp via a
-# crate back-door (LocalIntentStore read) unavailable to a black-box runner.
-echo "  [pending] sub-claim 3: listener protocol (Proto::Udp) is not rendered"
-echo "            on any operator read surface — no black-box proof available."
-echo "            See deploy_udp_walking_skeleton.rs for the crate-internal witness."
+# Sub-claim 3: listener protocol (Proto::Udp) rendered at the operator surface.
+# `overdrive alloc status --job dns-resolver` renders each Service listener as
+# <port>/<protocol>, projected from the persisted WorkloadIntent::Service
+# aggregate (commit 7e79007f) — so the udp/5353 listener surfaces as `5353/udp`.
+# This is the black-box operator-surface proof that the accepted intent carries
+# Proto::Udp (never coerced to Tcp): a tcp coercion would render `5353/tcp`.
+if [[ -f "$EVIDENCE_DIR/alloc_status_dns_resolver.out" ]]; then
+  evidence_contains alloc_status_dns_resolver "5353/udp" || rc=1
+  # Negative guard: the udp listener must NOT be rendered as tcp.
+  if grep -q '5353/tcp' "$EVIDENCE_DIR/alloc_status_dns_resolver.out"; then
+    echo "  [FAIL] sub-claim 3: listener rendered as 5353/tcp — Proto coerced to Tcp"
+    rc=1
+  fi
+else
+  echo "  [FAIL] sub-claim 3: no alloc status output captured"
+  rc=1
+fi
 
 [[ "$leak_rc" -eq 0 ]] || rc=1
-echo "O03 sub-claim aggregate exit: $rc  (sub-claim 3 deferred -> pending)"
+echo "O03 sub-claim aggregate exit: $rc"
 exit "$rc"

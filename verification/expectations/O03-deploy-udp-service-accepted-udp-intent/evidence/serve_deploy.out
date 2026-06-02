@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
      Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
 EVID="/Users/marcus/conductor/workspaces/helios/luxembourg-v2/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence"
 REPO="/Users/marcus/conductor/workspaces/helios/luxembourg-v2"
@@ -142,6 +142,16 @@ OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" deploy "$SPEC"   > "$EVID/deploy_dns_reso
 echo "# exit:    $DEPLOY_RC" >> "$EVID/deploy_dns_resolver.meta"
 echo "# deploy exit: $DEPLOY_RC"
 
+# ---- alloc status: capture the listener-protocol render (sub-claim 3) --------
+# A Service'\''s listeners are projected from the persisted WorkloadIntent::Service
+# aggregate (not the allocation), so `alloc status` renders each listener as
+# <port>/<protocol> IMMEDIATELY after deploy-accept — before any convergence to
+# a Running allocation. This is the operator-surface proof that the accepted
+# intent carries Proto::Udp (closing sub-claim 3 black-box).
+ALLOC_RC=0
+OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" alloc status --job dns-resolver   > "$EVID/alloc_status_dns_resolver.out" 2>&1 || ALLOC_RC=$?
+echo "# alloc status exit: $ALLOC_RC"
+
 # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
 { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
 { echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
@@ -157,7 +167,8 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary (single compile shared by serve+deploy)
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.Frda0b data=/tmp/od-o03-data.0etBEz
-# serve ready: trust triple written at /tmp/od-o03-cfg.Frda0b/.overdrive/config (pid 3256907)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.ZGKVHG data=/tmp/od-o03-data.KJcQ3j
+# serve ready: trust triple written at /tmp/od-o03-cfg.ZGKVHG/.overdrive/config (pid 3286142)
 # deploy exit: 0
+# alloc status exit: 0
 INNER_DONE serve_status=ready deploy_rc=0

@@ -1,28 +1,32 @@
 # O03 — `overdrive deploy <udp-spec>` is accepted and the intent carries the UDP protocol
 
-**Surface:** O (operator CLI) · **KPI:** K1 (deploy half) · **Status:** `partial`
+**Surface:** O (operator CLI) · **KPI:** K1 (deploy half) · **Status:** `satisfied`
 
-<!-- Status rationale (2026-06-02, SHA 7eea73cc, SEED=1, executed_in_lima: true,
-runner_exit_code: 0). Sub-claims 1+2 are now CAPTURED BLACK-BOX and SATISFIED;
-sub-claim 3 remains an honest operator-surface gap (pending). What changed: the
-`single-node-dataplane-wiring` fix (ADR-0061) landed. Production `overdrive serve`
-no longer attaches both XDP programs to `lo` (which collided EBUSY / failed
-generic-SKB attach on this VM and aborted boot). It now provisions a dedicated
-host-netns veth pair (`ovd-veth-cli`/`ovd-veth-bk`) at boot and attaches the two
-distinct XDP programs to the two distinct veth ifaces. serve therefore BINDS
-(`evidence/serve.log`: "control plane listening endpoint=https://127.0.0.1:7443/"),
-writes the trust triple, and the black-box deploy reaches it. The ephemeral
-trap-guarded serve (single Lima invocation, EXIT-trap sweep, before+after no-leak
-probes) captured: deploy exit 0 (sub-claim 1) + `Accepted.` render (sub-claim 2).
+<!-- Status rationale (2026-06-02, SHA e9cec107, SEED=1, executed_in_lima: true,
+runner_exit_code: 0). All three sub-claims captured black-box and satisfied,
+confirmed by a different-fox adversarial evidence audit (executed not narrated,
+SHA current, no dodged sub-claim, no 5353/tcp coercion).
+
+Two fixes unblocked the full capture:
+1. single-node-dataplane-wiring (ADR-0061): production `overdrive serve` under
+   the default config now provisions a dedicated veth pair (ovd-veth-cli/
+   ovd-veth-bk) at boot and attaches the two XDP programs to the two distinct
+   veth ifaces (not lo, which collided EBUSY / failed generic-SKB attach and
+   aborted boot). serve therefore BINDS (evidence/serve.log: "control plane
+   listening endpoint=https://127.0.0.1:7443/"), so the black-box deploy reaches
+   it — sub-claims 1+2 (deploy exit 0 + `Accepted.`).
+2. alloc-status listener rendering (commit 7e79007f handler/response + e9cec107
+   the live-path render fix): `overdrive alloc status` now renders each Service
+   listener as <port>/<protocol>, projected from the persisted
+   WorkloadIntent::Service aggregate — INDEPENDENT of convergence. So a deployed
+   UDP Service renders `5353/udp` immediately at 0 allocations (pre-convergence),
+   which is the operator-surface proof that the accepted intent carries
+   Proto::Udp, never coerced to Tcp (a coercion would render `5353/tcp`) —
+   sub-claim 3.
+
 The before+post-teardown probes both show a HEALTHY loopback and zero XDP/cgroup
-residue — and because the fix moves XDP off `lo` entirely, the loopback-leak hazard
-is structurally gone. Verified by a different-fox adversarial evidence audit (no
-narration, SHA current, no dodged sub-claim). Sub-claim 3 (listener protocol
-rendered black-box) stays `pending`: the deploy-accept render carries no proto
-field and no operator read surface renders it — the `what, forever` witness is the
-direct-handler test deploy_udp_walking_skeleton.rs (crate back-door LocalIntentStore
-read). Overall `partial` because the expectation requires all three sub-claims for
-`satisfied` and sub-claim 3 is an unrenderable structural gap, not yet captured. -->
+residue; the fix moves XDP off lo entirely, so the loopback-leak hazard is
+structurally gone. -->
 
 
 ## Expectation
@@ -54,72 +58,69 @@ invocation, with an EXIT-trap teardown sweep on every exit path (kill serve,
 cgroup mass-kill+rmdir, XDP detach across ifaces) and before+after no-leak
 probes (XDP attachment, loopback sanity, workload cgroups) written into
 `evidence/` as proof the shared VM is left clean. Serve lifetime is seconds:
-boot → deploy → capture → teardown. It uses the production default config —
-post-ADR-0061 serve auto-provisions the `ovd-veth-cli`/`ovd-veth-bk` veth pair
-and attaches XDP to it (NOT `lo`, NOT `eth0`); no SimDataplane override (that is
-test-only, not black-box). Leaked cgroups/XDP across runs are a documented hazard
-(`.claude/rules/{testing,debugging}.md`).
+boot → deploy → `alloc status` → capture → teardown. It uses the production
+default config — post-ADR-0061 serve auto-provisions the `ovd-veth-cli`/
+`ovd-veth-bk` veth pair and attaches XDP to it (NOT `lo`, NOT `eth0`); no
+SimDataplane override (test-only, not black-box). Leaked cgroups/XDP across runs
+are a documented hazard (`.claude/rules/{testing,debugging}.md`).
 
 The runner deploys a UDP `dns-resolver.toml` (udp/5353 listener + a real
 `/usr/bin/socat` UDP-echo backend present in the Lima VM) against the built
-binary and captures the deploy command's stdout/stderr and exit code verbatim.
-Sub-claims:
+binary, then runs `overdrive alloc status --job dns-resolver`, capturing both
+commands' stdout/stderr and exit codes verbatim. Sub-claims:
 
 1. The deploy command exits `0`.
-2. Stdout contains `Accepted.` (the `workload_submit_accepted` render shape).
+2. Deploy stdout contains `Accepted.` (the `workload_submit_accepted` render shape).
 3. The accepted intent carries the udp listener protocol — observable at the
-   operator surface as `Proto::Udp` on the submitted `ServiceFrontend`
-   (never `Tcp`). The runner observes this via the deploy/accept output or a
-   follow-up read of the submitted intent; if the operator surface does not
-   yet expose the proto for inspection, the runner captures sub-claims 1–2
-   and leaves sub-claim 3 `pending` (rather than narrating it).
+   operator surface as `5353/udp` in `overdrive alloc status` (the Service's
+   `Listeners:` section, projected from the persisted `WorkloadIntent::Service`
+   aggregate). A `5353/tcp` line would be a `Proto` coercion to `Tcp` and fails
+   the sub-claim. Because the listeners come from the intent (not the
+   allocation), they render at 0 allocations — no convergence required.
 
-`satisfied` requires all three, on a Lima run, with the SHA + seed pinned
-in `evidence/verification.yaml`. Sub-claims 1+2 are captured and satisfied;
-sub-claim 3 is an unrenderable operator-surface gap, so the expectation is
-`partial`. The `what, forever` witness for the deploy-accepted contract is
-the direct-handler test landed under roadmap 01-05; this expectation is its
+`satisfied` requires all three, on a Lima run, with the SHA + seed pinned in
+`evidence/verification.yaml`. All three are captured. The `what, forever`
+witness for the deploy-accepted + `Proto::Udp`-threaded contract is the
+direct-handler test landed under roadmap 01-05; this expectation is its
 human-readable operator-surface companion.
 
 ## Evidence
 
 Captured under `evidence/` by `harness/run-expectation.sh O03` (SHA
-`7eea73cc`, `SEED=1`, `executed_in_lima: true`, `runner_exit_code: 0` — see
+`e9cec107`, `SEED=1`, `executed_in_lima: true`, `runner_exit_code: 0` — see
 `evidence/verification.yaml`). Adversarially reviewed by a different-fox audit
-(read-only, evidence-only): sub-claims 1+2 CONFIRMED executed (not narrated),
-SHA current, sub-claim 3 correctly left pending.
+(read-only, evidence-only): all three sub-claims CONFIRMED executed (not
+narrated), SHA current, no `5353/tcp` coercion, no dodged sub-claim.
 
-- `evidence/serve.log` — the ephemeral `overdrive serve` the runner started.
-  Post-ADR-0061 it BOUND: `control plane listening
-  endpoint=https://127.0.0.1:7443/`. serve provisioned the veth pair and
-  attached the two XDP programs to `ovd-veth-cli`/`ovd-veth-bk` (not `lo`), then
-  bound the TLS listener and wrote the trust triple — so the deploy had an
-  endpoint to reach.
+- `evidence/serve.log` — the ephemeral `overdrive serve` BOUND: `control plane
+  listening endpoint=https://127.0.0.1:7443/`. serve provisioned the veth pair
+  and attached the two XDP programs to `ovd-veth-cli`/`ovd-veth-bk` (not `lo`),
+  then bound TLS and wrote the trust triple.
 - `evidence/deploy_dns_resolver.out` — the verbatim accept render: `Accepted.`
-  followed by Workload ID `dns-resolver` / Intent key `workloads/dns-resolver`
-  / Spec digest / Outcome `created` / Endpoint `https://127.0.0.1:7443/` / Next.
+  + Workload ID `dns-resolver` / Intent key / Spec digest / Outcome `created` /
+  Endpoint `https://127.0.0.1:7443/` / Next.
 - `evidence/deploy_dns_resolver.meta` — `# exit: 0`.
+- `evidence/alloc_status_dns_resolver.out` — `overdrive alloc status --job
+  dns-resolver` render including a `Listeners:` section with the line
+  `  5353/udp` (and NO `5353/tcp`). The operator-surface proof of `Proto::Udp`.
 - `evidence/build.log` — the single `cargo build -p overdrive-cli --bin
-  overdrive` the serve+deploy share (succeeded).
-- `evidence/probe_after_xdp.txt` — `bpftool prog show` lists the two distinct
-  XDP programs `xdp_service_map` + `xdp_reverse_nat` loaded (on the veth pair).
-- `evidence/probe_before_{loopback,xdp,cgroups}.txt` — clean start: loopback
-  `HEALTHY` (refused fast), no XDP programs, no `alloc-*.scope`.
-- `evidence/probe_post_teardown_{loopback,xdp,cgroups}.txt` — written by the
-  EXIT-trap sweep: loopback `HEALTHY`, no XDP programs (`(none)`), no
-  `alloc-*.scope`. The bring-up left the shared VM clean.
-- `evidence/serve_deploy.out` — verbatim guest-side narration of the
-  single-Lima-invocation bring-up (`INNER_DONE serve_status=ready deploy_rc=0`).
+  overdrive` the serve+deploy+status share (succeeded).
+- `evidence/probe_before_{loopback,xdp,cgroups}.txt` /
+  `evidence/probe_post_teardown_{loopback,xdp,cgroups}.txt` — loopback `HEALTHY`
+  before+after, no XDP programs (`(none)`), no `alloc-*.scope`: the bring-up
+  left the shared VM clean.
+- `evidence/serve_deploy.out` — verbatim guest-side narration
+  (`INNER_DONE serve_status=ready deploy_rc=0`, `# alloc status exit: 0`).
 
 Per-sub-claim verdict:
 
 | # | Sub-claim | Verdict | Reason |
 |---|---|---|---|
-| 1 | deploy exits `0` | `satisfied` | `deploy_dns_resolver.meta`: `# exit: 0`; `serve_deploy.out`: `INNER_DONE serve_status=ready deploy_rc=0`. serve bound (veth-attached XDP, ADR-0061) so the deploy reached a live endpoint. |
-| 2 | stdout contains `Accepted.` | `satisfied` | `deploy_dns_resolver.out` line 1 is literally `Accepted.`, followed by the full `workload_submit_accepted` render (Workload ID / Intent key / Spec digest / Outcome / Endpoint / Next). |
-| 3 | accepted intent carries `Proto::Udp` | `pending` (structural gap) | the deploy-accept render does NOT render the listener protocol, and no read surface (`od job list`, `od alloc status`) renders it. The 01-05 direct-handler test proves it via a crate back-door (`LocalIntentStore` read) unavailable to a black-box runner. `crates/overdrive-cli/tests/integration/deploy_udp_walking_skeleton.rs` is the `what, forever` witness. A read surface that renders the proto would close this gap. |
+| 1 | deploy exits `0` | `satisfied` | `deploy_dns_resolver.meta`: `# exit: 0`; serve bound (veth-attached XDP, ADR-0061) so the deploy reached a live endpoint. |
+| 2 | deploy stdout `Accepted.` | `satisfied` | `deploy_dns_resolver.out` line 1 is literally `Accepted.`, followed by the full `workload_submit_accepted` render. |
+| 3 | accepted intent carries `Proto::Udp` | `satisfied` | `alloc_status_dns_resolver.out` renders `Listeners:` + `5353/udp` (and no `5353/tcp`), projected from the persisted Service intent — visible pre-convergence at 0 allocations. |
 
-Sub-claim 3 stays `pending` until an operator surface renders the listener
-protocol (an honest gap, not a failure); until then the authoritative proof of
-`Proto::Udp`-threaded is the direct-handler test `deploy_udp_walking_skeleton.rs`,
-which spawns serve with an injected SimDataplane and never touches XDP.
+The proto render landed in two commits: `7e79007f` added the `listeners`
+projection to `AllocStatusResponse` + the handler; `e9cec107` rendered it on the
+live `overdrive alloc status` path (`render::alloc_status`). The crate-internal
+`what, forever` witness remains `deploy_udp_walking_skeleton.rs`.
