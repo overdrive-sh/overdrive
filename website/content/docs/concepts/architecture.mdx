@@ -155,6 +155,14 @@ Five reconcilers run today:
 Adding a behavior to the control plane means adding a reconciler, not threading
 logic through the loop. The loop does not know what the reconcilers do.
 
+The same shape makes the loop self-heal. A reconciler recomputes the gap between
+desired and actual every time it runs, so it never assumes a past action took
+effect — it checks. A half-finished operation is just a gap the next pass
+closes: an allocation that crashed partway through starting is started again, a
+veth pair left half-provisioned by an interrupted boot is completed rather than
+adopted as-is. The control plane converges toward the declared state or keeps
+trying; it does not strand half-applied state for someone to fix by hand.
+
 ## The worker runs processes under cgroups
 
 The shipped workload driver is `ExecDriver`: it runs a Linux process with
