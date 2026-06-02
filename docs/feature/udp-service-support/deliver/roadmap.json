@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "udp-service-support",
     "created_at": "2026-06-02T08:40:31Z",
-    "total_steps": 4
+    "total_steps": 5
   },
   "phases": [
     {
@@ -63,6 +63,17 @@
           ],
           "test_file": "crates/overdrive-dataplane/tests/integration/multi_listener_tcp_udp_e2e.rs",
           "scenario_name": "S-05-A"
+        },
+        {
+          "id": "01-05",
+          "name": "S-04-A driving-adapter companion: `overdrive deploy <udp-spec>` accepted via direct-handler test (the deploy half 01-03 scoped out)",
+          "criteria": [
+            "Given a dns-resolver.toml declaring a udp listener on 5353 and a backend bound on 5353, invoking the deploy command handler directly (the in-process handler behind `overdrive deploy <SPEC>` — `commands::job::submit` / `SubmitArgs` per the CLI verb rename, exercised via the `exec_spec_walking_skeleton` direct-handler precedent, NOT `Command::spawn`; overdrive-cli/CLAUDE.md § 'Integration tests — no subprocess' forbids subprocess tests) over the udp spec returns the accepted outcome and renders the `workload_submit_accepted` shape (\"Accepted.\")",
+            "The deploy handler reads the udp protocol token from the spec's listener and the submitted intent carries proto Udp — asserted via the accepted render / submitted JobSpec, with no Proto::Tcp literal reached on the spec->handler->intent path for that service (C3 guard at the driving-adapter boundary, the mirror of 01-01's intent->hydrator C3 guard)",
+            "The companion test is wired into `crates/overdrive-cli/tests/integration.rs` under the inline `mod integration` block and gated behind `integration-tests`, following the `exec_spec_walking_skeleton` placement; together with 01-03's dataplane wire half (REVERSE_NAT_MAP dump + VIP-sourced reply) this closes the full S-04-A walking-skeleton acceptance criterion (deploy-accepted + reverse-path-VIP-sourced)"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/deploy_udp_walking_skeleton.rs",
+          "scenario_name": "S-04-A (driving-adapter half)"
         }
       ]
     }

@@ -37,14 +37,17 @@
 //! Linux-only (real veth + bpffs + kernel). The whole `tests/integration`
 //! binary is gated in `tests/integration.rs`.
 
+// Fixture-wide allows: these lints fire pervasively across the netns /
+// veth / subprocess plumbing helpers and the long Tier-3 scenario
+// bodies; scoping each to a line would add ~30 annotations of pure
+// noise. The cast lints are deliberately NOT listed — this file has no
+// numeric casts, so listing them would suppress a future cast silently;
+// leaving them off means a cast added later surfaces its lint.
 #![allow(
     clippy::missing_panics_doc,
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::print_stderr,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
     clippy::doc_markdown,
     clippy::items_after_statements,
     clippy::too_many_lines,
@@ -285,27 +288,49 @@ fn wait_with_timeout(
 }
 
 /// Result of a UDP round-trip: how many of the `count` datagrams the
-/// client received an echoed reply for.
+/// client received an echoed reply for, plus the source IPs of every
+/// reply datagram (source port 5353) observed on the client veth.
 ///
-/// **The observable that proves the VIP source rewrite is
-/// `replies_received`, not a pcap parse.** `nc -u <VIP> 5353` *connects*
-/// the client UDP socket to `VIP:5353`; the kernel then delivers to the
-/// application ONLY datagrams whose source is exactly `VIP:5353` and
-/// silently drops any other source before `nc` can read it. The
-/// backend's raw reply is sourced from `BACKEND_IP:5353`; it reaches
-/// `nc` ONLY because the kernel `xdp_reverse_nat_lookup` rewrote the
-/// source 5-tuple to `(VIP, 5353)`. So an echoed reply landing in `nc`'s
-/// stdout is a kernel-enforced proof that the reverse-NAT source rewrite
-/// to the VIP succeeded — a stronger, more reliable observable than
-/// parsing tcpdump (which cannot see `XDP_REDIRECT`-delivered frames on
-/// the client veth — debugging.md § 3, inspection-tool gap). This
-/// mirrors the TCP precedent (`reverse_nat_e2e.rs`), which asserts on
-/// `client_stdout.contains(PAYLOAD)`, not on a pcap.
+/// **Two complementary observables, one primary, one load-bearing-for-C:**
+///
+/// 1. `replies_received` — the PRIMARY observable for the rewritten
+///    (XDP) path (S-04-A / S-04-B). `nc -u <VIP> 5353` *connects* the
+///    client UDP socket to `VIP:5353`; the kernel then delivers to the
+///    application ONLY datagrams whose source is exactly `VIP:5353` and
+///    silently drops any other source before `nc` can read it. The
+///    backend's raw reply is sourced from `BACKEND_IP:5353`; it reaches
+///    `nc` ONLY because the kernel `xdp_reverse_nat_lookup` rewrote the
+///    source 5-tuple to `(VIP, 5353)`. So an echoed reply landing in
+///    `nc`'s stdout is a kernel-enforced proof that the reverse-NAT
+///    source rewrite to the VIP succeeded. This stays primary for the
+///    XDP path because the rewritten reply is delivered into the client
+///    veth via `XDP_REDIRECT`/`XDP_TX`, which an in-netns `tcpdump`
+///    cannot reliably observe (debugging.md § 3, inspection-tool gap).
+///    Mirrors the TCP precedent (`reverse_nat_e2e.rs`), which asserts on
+///    `client_stdout.contains(PAYLOAD)`, not on a pcap.
+///
+/// 2. `reply_source_ips` — the source IP of every reply datagram
+///    (source port 5353) captured by an **any-source** `tcpdump` on the
+///    client veth. This is LOAD-BEARING for S-04-C: a *non-rewritten*
+///    backend-sourced reply (the #163 defect) is an ordinary
+///    normal-stack frame on the client veth, NOT an `XDP_REDIRECT`
+///    frame, so the any-source capture reliably sees it. A positive
+///    control (`target/probe/probe_capture.sh`, plain-routed UDP) has
+///    been run and confirms the any-source client-veth capture surfaces
+///    reply datagrams with their real source IP — so for S-04-C, the
+///    ABSENCE of any reply datagram is a genuine, falsifiable
+///    distinguisher: it would FAIL if a backend-sourced reply arrived.
 struct RoundTripResult {
     /// Number of datagrams (of `count` sent) for which the client read
     /// back the echoed reply — i.e. the reply that survived the
     /// connected-socket source filter because its source was the VIP.
     replies_received: usize,
+    /// Source IPs of every reply datagram (source port 5353) seen on the
+    /// client veth by the any-source capture. For the rewritten XDP path
+    /// this may be empty even on success (XDP_REDIRECT invisibility); for
+    /// the backend-down / non-rewritten path it reliably reflects what
+    /// actually landed on the wire. S-04-C asserts this is empty.
+    reply_source_ips: Vec<Ipv4Addr>,
 }
 
 struct UdpFixture {
@@ -425,10 +450,15 @@ fn run_round_trips(
 ) -> RoundTripResult {
     use threeiface_ips::VIP;
 
-    // Best-effort capture on the client veth for an informational
-    // reply-source diagnostic. NOT load-bearing — tcpdump cannot reliably
-    // see `XDP_REDIRECT`-delivered frames here; the assertion is the
-    // connected-socket reply count.
+    // Any-source capture on the client veth. For the rewritten XDP path
+    // (S-04-A/B) this is a best-effort diagnostic — `XDP_REDIRECT`-
+    // delivered reply frames may be invisible to an in-netns tcpdump, so
+    // the load-bearing observable there is `replies_received`. For the
+    // backend-down / non-rewritten path (S-04-C) the capture is
+    // LOAD-BEARING: any reply that DID arrive would be an ordinary
+    // normal-stack frame the capture reliably sees, so an empty
+    // `reply_source_ips` is a genuine "no reply on the wire" distinguisher
+    // (positive control: target/probe/probe_capture.sh).
     let pcap = pcap_dir.join("client.pcap");
     let mut tcpdump = Command::new("ip")
         .args([
@@ -494,16 +524,15 @@ fn run_round_trips(
         let _ = t.wait();
     }
 
-    // Best-effort wire-level diagnostic. tcpdump cannot reliably see
-    // `XDP_REDIRECT`-delivered reply frames on the client veth, so this
-    // is informational only — the load-bearing assertion is
-    // `replies_received` (the connected-socket source filter). When the
-    // capture DOES surface reply datagrams, every one must be VIP-sourced.
+    // Parse the any-source client-veth capture for reply datagrams
+    // (source port 5353). For the rewritten XDP path this may be empty
+    // even on success (XDP_REDIRECT invisibility). For the backend-down
+    // path it reliably reflects the wire — S-04-C asserts it is empty,
+    // which would FAIL if a backend-sourced reply (the #163 defect) had
+    // arrived.
     let reply_source_ips = parse_pcap_udp_sources(&fixture.topo.client_ns.name, &pcap);
-    eprintln!(
-        "[diag] client pcap reply source IPs (best-effort; XDP_REDIRECT may hide them) = {reply_source_ips:?}"
-    );
-    RoundTripResult { replies_received }
+    eprintln!("[diag] client veth any-source reply source IPs = {reply_source_ips:?}");
+    RoundTripResult { replies_received, reply_source_ips }
 }
 
 /// Parse the UDP datagrams arriving at the client veth from `VIP:5353`
@@ -663,16 +692,33 @@ fn every_udp_reply_independently_source_rewritten() {
     let _ = fixture;
 }
 
-/// S-04-C — a missing-backend response (no reply) is distinguished from
-/// a wrong-source response.
+/// S-04-C — a missing-backend response (genuinely no reply on the wire)
+/// is distinguished from a wrong-source response (a backend-sourced
+/// reply, the #163 defect).
 ///
-/// The backend is NOT bound on the listener port: no `nc -u -l` runs.
-/// A datagram to the VIP therefore produces NO reply. The test asserts
-/// "no response" (empty capture) — which is correct backend-down
-/// behaviour — and is explicitly distinguished from the failure mode
-/// the other scenarios guard against: a reply that arrives but carries
-/// the BACKEND source (the #163 defect). Only the latter is a bug; "no
-/// response" is not.
+/// The backend is NOT bound on the listener port: no echo server runs.
+/// A datagram to the VIP therefore produces NO reply. The distinguisher
+/// is made genuinely falsifiable by observing replies REGARDLESS of
+/// source via an any-source `tcpdump` on the client veth: the test
+/// asserts that ZERO reply datagrams (source port 5353) arrive from ANY
+/// source.
+///
+/// Why the any-source capture is reliable HERE specifically (where it is
+/// only best-effort for S-04-A/B): a #163-defect reply is a
+/// *non-rewritten* backend-sourced frame that traverses the normal
+/// kernel stack into the client veth — NOT an `XDP_REDIRECT`-delivered
+/// frame — so the in-netns capture reliably sees it. A positive control
+/// (`target/probe/probe_capture.sh`, plain-routed UDP with no XDP) has
+/// been run and confirms the any-source client-veth capture surfaces
+/// reply datagrams with their real source IP.
+///
+/// Falsifiability: if a backend-sourced reply DID arrive (the #163
+/// defect surfacing through some spurious path), `reply_source_ips`
+/// would be non-empty and this test would FAIL — which is exactly the
+/// "wrong-source response" the scenario name promises to catch. The
+/// connected-socket `replies_received == 0` assertion is kept as a
+/// secondary belt-and-suspenders check (it alone could not see a
+/// backend-sourced reply, since the connected socket silently drops it).
 #[test]
 fn missing_backend_response_distinguished_from_wrong_source() {
     if !require_root_or_skip("S-04-C") {
@@ -691,21 +737,31 @@ fn missing_backend_response_distinguished_from_wrong_source() {
     drop(stubs);
     drop(dataplane);
 
-    // The distinguisher: backend-down ⇒ NO reply at all. With no
-    // listener bound, no datagram is echoed, so the connected socket
-    // reads nothing — the correct observable is the ABSENCE of a reply
-    // ("no response" / backend-down), which is NOT the #163 defect. The
-    // #163 defect is a DIFFERENT failure: a reply that DOES arrive but
-    // carries the backend source. This test pins that the not-bound case
-    // is silent rather than being misreported as a source-rewrite
-    // failure (a backend-sourced reply would have been silently dropped
-    // by the connected-socket filter anyway, but here there is no reply
-    // to misclassify in the first place).
+    // PRIMARY distinguisher (load-bearing, genuinely falsifiable): the
+    // any-source client-veth capture must show NO reply datagram from
+    // ANY source. With no backend bound, nothing is echoed, so nothing
+    // lands on the wire. A backend-sourced reply (the #163 defect) is a
+    // normal-stack frame the any-source capture reliably observes — so a
+    // non-empty `reply_source_ips` here would FAIL the test, which is
+    // precisely the "wrong-source response" this scenario distinguishes
+    // from genuine "no response".
+    assert!(
+        result.reply_source_ips.is_empty(),
+        "with no backend bound, the client veth must see NO reply datagram from any source — \
+         a captured reply would be the wrong-source (#163) failure this scenario distinguishes \
+         from 'no response'. Captured reply sources = {:?}. pcaps: {}",
+        result.reply_source_ips,
+        pcap_dir.display()
+    );
+
+    // SECONDARY belt-and-suspenders: the connected socket also reads
+    // nothing. (This alone could not catch a backend-sourced reply — the
+    // connected-socket filter silently drops it — so it is not the
+    // distinguisher; the any-source capture above is.)
     assert_eq!(
         result.replies_received,
         0,
-        "with no backend bound on the listener port, the client must receive NO reply — this \
-         is 'no response' / backend-down, NOT a source-rewrite failure. Got {} replies. \
+        "with no backend bound, the connected socket must read no reply. Got {} replies. \
          pcaps: {}",
         result.replies_received,
         pcap_dir.display()
