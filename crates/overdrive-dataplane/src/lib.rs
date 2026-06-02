@@ -503,6 +503,12 @@ impl EbpfDataplane {
                 })?
             }
             AttachOutcome::Propagate(e) => {
+                // Classify EBUSY into the honest slot-collision
+                // diagnostic (ADR-0061 § 5 / D3) before falling
+                // through to the masking DRV_MODE string.
+                if let Some(busy) = classify_iface_xdp_slot_busy(&e, client_iface) {
+                    return Err(busy);
+                }
                 return Err(DataplaneError::LoadFailed(format!(
                     "xdp_service_map_lookup.attach({client_iface}, DRV_MODE): {e}"
                 )));
@@ -548,6 +554,12 @@ impl EbpfDataplane {
                 })?
             }
             AttachOutcome::Propagate(e) => {
+                // Classify EBUSY into the honest slot-collision
+                // diagnostic (ADR-0061 § 5 / D3) before falling
+                // through to the masking DRV_MODE string.
+                if let Some(busy) = classify_iface_xdp_slot_busy(&e, backend_iface) {
+                    return Err(busy);
+                }
                 return Err(DataplaneError::LoadFailed(format!(
                     "xdp_reverse_nat_lookup.attach({backend_iface}, DRV_MODE): {e}"
                 )));
@@ -1208,6 +1220,43 @@ fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> 
     }
 }
 
+/// Classify an `aya::programs::Xdp::attach` error into the honest
+/// `EBUSY`-slot-collision diagnostic (ADR-0061 § 5 / D3), or `None`
+/// when the error is something else.
+///
+/// The kernel permits exactly one XDP program per netdev XDP hook;
+/// attaching a second program to an occupied hook returns `EBUSY`.
+/// The single-node default (`DataplaneConfig::loopback()`) points both
+/// the forward (`client_iface`) and reverse (`backend_iface`) programs
+/// at `lo`, so the second attach hits this until 01-03 makes the
+/// collision unreachable on the default path. An operator who points
+/// both ifaces at one real NIC still hits it.
+///
+/// Returns `Some(DataplaneError::IfaceXdpSlotBusy { iface })` only when
+/// the attach error is a `SyscallError` whose `io_error` carries the
+/// `EBUSY` errno; every other error (`EOPNOTSUPP` fallback, `EPERM`,
+/// `ENODEV`, non-syscall errors) returns `None` so the caller falls
+/// through to its existing `LoadFailed`/`DRV_MODE` handling. This is
+/// the same `raw_os_error()` reach `should_fallback_to_generic` uses,
+/// swapping `EOPNOTSUPP` for `libc::EBUSY` — and the same
+/// pure-function shape, so the default-lane unit tests below drive it
+/// against synthetic `SyscallError` values without a real attach (Lima
+/// virtio-net never produces a real `EBUSY` here; 01-04's Tier 3 path
+/// does).
+fn classify_iface_xdp_slot_busy(
+    error: &aya::programs::ProgramError,
+    iface: &str,
+) -> Option<DataplaneError> {
+    use aya::programs::ProgramError;
+
+    match error {
+        ProgramError::SyscallError(se) if se.io_error.raw_os_error() == Some(libc::EBUSY) => {
+            Some(DataplaneError::IfaceXdpSlotBusy { iface: iface.to_owned() })
+        }
+        _ => None,
+    }
+}
+
 #[async_trait]
 #[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
@@ -1639,6 +1688,8 @@ mod tests {
     //! Unit tests for the native→generic fallback classification
     //! helper (S-2.2-02) and the `classify_attach_result` dispatcher.
 
+    use super::DataplaneError;
+
     /// Classification — `EOPNOTSUPP` from `bpf_link_create` /
     /// `netlink_set_xdp_fd` is the canonical "driver does not
     /// support native XDP" signal. Trigger fallback to generic
@@ -1794,5 +1845,100 @@ mod tests {
             super::AttachOutcome::Propagate(_) => {}
             other => panic!("expected AttachOutcome::Propagate(_), got {other:?}"),
         }
+    }
+
+    // ----- EBUSY → IfaceXdpSlotBusy classification (ADR-0061 § 5 / D3) -----
+    //
+    // The kernel permits exactly one XDP program per netdev XDP hook.
+    // When the single-node default points both the forward
+    // (`client_iface`) and reverse (`backend_iface`) attaches at one
+    // netdev, the second attach returns `EBUSY`. The pre-fix loader
+    // wrapped that in `DataplaneError::LoadFailed(format!("...DRV_MODE:
+    // {e}"))`, masking the real cause behind a misleading "native
+    // attach failed" string. `classify_iface_xdp_slot_busy` is the pure
+    // classifier that recovers the EBUSY case BEFORE the masking
+    // fallthrough — same `raw_os_error()` reach as
+    // `should_fallback_to_generic`, swapping EOPNOTSUPP for EBUSY.
+    //
+    // Tier 3 (01-04) exercises a real EBUSY attach; these default-lane
+    // unit tests drive the classifier against synthetic
+    // `ProgramError::SyscallError` values — no real attach.
+
+    /// Acceptance-shaped: an `EBUSY` attach failure on `client_iface`
+    /// surfaces as [`DataplaneError::IfaceXdpSlotBusy`] carrying that
+    /// iface — NOT a masking `LoadFailed`/`DRV_MODE` string. This is
+    /// the scenario the variant fixes: the operator gets the honest
+    /// cause (the XDP slot is already taken) and the remediation,
+    /// instead of a misleading "native attach failed".
+    #[test]
+    fn ebusy_attach_surfaces_as_iface_xdp_slot_busy_not_masking_load_failed() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_link_create",
+            io_error: io::Error::from_raw_os_error(libc::EBUSY),
+        });
+        let classified = super::classify_iface_xdp_slot_busy(&err, "client0");
+        match classified {
+            Some(DataplaneError::IfaceXdpSlotBusy { iface }) => {
+                assert_eq!(iface, "client0");
+            }
+            other => {
+                panic!("expected Some(IfaceXdpSlotBusy {{ iface: \"client0\" }}), got {other:?}")
+            }
+        }
+    }
+
+    /// `EPERM` is a permissions failure, not a slot collision — it must
+    /// NOT classify as `IfaceXdpSlotBusy`. The classifier returns
+    /// `None`, so the caller falls through to the existing
+    /// `LoadFailed`/`DRV_MODE` path (which `EPERM` legitimately wants).
+    #[test]
+    fn eperm_attach_does_not_classify_as_iface_xdp_slot_busy() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_link_create",
+            io_error: io::Error::from_raw_os_error(libc::EPERM),
+        });
+        assert!(super::classify_iface_xdp_slot_busy(&err, "client0").is_none());
+    }
+
+    /// `ENODEV` (interface gone) is likewise not a slot collision and
+    /// must fall through. Pairs with the EBUSY test to kill the errno
+    /// guard mutant: flipping `code == EBUSY` to match ENODEV would
+    /// classify this case, firing the assertion.
+    #[test]
+    fn enodev_attach_does_not_classify_as_iface_xdp_slot_busy() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "netlink_set_xdp_fd",
+            io_error: io::Error::from_raw_os_error(libc::ENODEV),
+        });
+        assert!(super::classify_iface_xdp_slot_busy(&err, "backend0").is_none());
+    }
+
+    /// The `IfaceXdpSlotBusy` Display contract (ADR-0061 § 5): names
+    /// the iface, names the real cause (`EBUSY`), and carries the
+    /// `client_iface != backend_iface` remediation hint so the
+    /// operator knows the single-node default expects a dedicated
+    /// veth pair.
+    #[test]
+    fn iface_xdp_slot_busy_display_names_iface_ebusy_and_remediation() {
+        let rendered =
+            DataplaneError::IfaceXdpSlotBusy { iface: "veth-client".to_owned() }.to_string();
+        assert!(rendered.contains("veth-client"), "Display must name the iface: {rendered}");
+        assert!(rendered.contains("EBUSY"), "Display must name the real cause EBUSY: {rendered}");
+        assert!(
+            rendered.contains("client_iface != backend_iface"),
+            "Display must carry the client_iface != backend_iface remediation hint: {rendered}"
+        );
     }
 }

@@ -68,6 +68,25 @@ pub enum DataplaneError {
     /// "wire then probe then use" invariant per ADR-0052 § 3.
     #[error("LOCAL_BACKEND_MAP probe round-trip failed: {message}")]
     LocalBackendProbe { message: String },
+    /// An XDP program attach returned `EBUSY` — the kernel permits
+    /// exactly one program per netdev XDP hook, and that hook on
+    /// `iface` is already occupied (ADR-0061 § 5 / D3). Surfaces when
+    /// the loader's forward (`client_iface`) and reverse
+    /// (`backend_iface`) attaches both target one netdev — the
+    /// single-node default `DataplaneConfig::loopback()` does exactly
+    /// this until 01-03 lands. Distinct variant per
+    /// `.claude/rules/development.md` § Errors: collapsing `EBUSY`
+    /// into `LoadFailed(String)` would mask the real cause behind a
+    /// misleading "native attach failed" / `DRV_MODE` string and
+    /// prescribe the wrong remediation.
+    #[error(
+        "XDP slot on interface '{iface}' is already occupied (EBUSY): the kernel \
+         permits exactly one XDP program per netdev hook. The single-node default \
+         expects a dedicated veth pair — verify client_iface != backend_iface, and \
+         detach any stale Overdrive XDP program with `ip link show {iface}` (see \
+         debugging.md § \"Leftover XDP attachments across runs\")"
+    )]
+    IfaceXdpSlotBusy { iface: String },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.
