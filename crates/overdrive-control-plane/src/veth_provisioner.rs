@@ -189,11 +189,11 @@ pub fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
         // re-address, leave any pre-existing route in place.
         return Ok(());
     }
-    // `ip link show` returns exit 1 with "does not exist" on stderr when
-    // the iface is absent — the normal create path. Any other failure
-    // (e.g. EPERM) is a genuine error.
+    // `ip link show` returns a non-zero exit with an "absent" phrase on
+    // stderr when the iface does not exist — the normal create path. Any
+    // other failure (e.g. EPERM) is a genuine error.
     let show_stderr = String::from_utf8_lossy(&show.stderr);
-    if !show_stderr.contains("does not exist") {
+    if !link_absent(&show_stderr) {
         return Err(VethProvisionError::LinkShowFailed {
             iface: plan.client_iface.clone(),
             stderr: show_stderr.trim().to_owned(),
@@ -285,10 +285,26 @@ fn link_up(iface: &str) -> Result<(), VethProvisionError> {
     })
 }
 
+/// True when `ip link show <iface>` stderr indicates the interface is
+/// simply ABSENT (the normal first-boot create path), as opposed to a
+/// genuine failure (e.g. permission denied, `RTNETLINK answers: ...`).
+///
+/// iproute2 stderr phrasing is not stable across versions: newer
+/// emits `Device "<iface>" does not exist.`, while older iproute2
+/// (common in Alpine/minimal container images) emits
+/// `Cannot find device "<iface>"`. Both mean the same thing — absent —
+/// so the create path must accept either. Matching only the newer
+/// phrase made first-boot provisioning fail with
+/// [`VethProvisionError::LinkShowFailed`] on hosts shipping the older
+/// iproute2.
+fn link_absent(stderr: &str) -> bool {
+    stderr.contains("does not exist") || stderr.contains("Cannot find device")
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
 mod tests {
-    use super::{VethProvisionPlan, derive_veth_plan};
+    use super::{VethProvisionPlan, derive_veth_plan, link_absent};
     use ipnet::{IpAdd, Ipv4Net};
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
@@ -323,6 +339,38 @@ mod tests {
         let plan = derive_veth_plan("client0", "backend0", range);
         assert_eq!(plan.client_iface, "client0");
         assert_eq!(plan.backend_iface, "backend0");
+    }
+
+    /// Regression: `link_absent` must classify BOTH iproute2 absence
+    /// phrasings as "absent" (the normal create path) while still
+    /// rejecting genuine errors so they surface as
+    /// [`super::VethProvisionError::LinkShowFailed`]. iproute2 phrasing
+    /// varies across versions — newer prints `... does not exist`, older
+    /// (Alpine/minimal images) prints `Cannot find device "..."`. The
+    /// single-phrase predecessor accepted only the former, which made
+    /// first-boot provisioning fail on the older phrasing.
+    ///
+    /// Input variations of the same behaviour (Mandate 5) — one
+    /// parametrised assertion over the classification table.
+    #[test]
+    fn link_absent_accepts_both_iproute2_phrasings_and_rejects_real_errors() {
+        let cases: &[(&str, bool)] = &[
+            // newer iproute2 — absent
+            (r#"Device "ovd-veth-cli" does not exist."#, true),
+            // older iproute2 (Alpine/minimal images) — absent; the case
+            // the single-phrase predecessor regressed.
+            (r#"Cannot find device "ovd-veth-cli""#, true),
+            // a genuine unrelated failure — must NOT be treated as absent,
+            // so it still surfaces as LinkShowFailed (no real-error swallow).
+            ("RTNETLINK answers: Operation not permitted", false),
+        ];
+        for (stderr, expected_absent) in cases {
+            assert_eq!(
+                link_absent(stderr),
+                *expected_absent,
+                "link_absent({stderr:?}) should be {expected_absent}",
+            );
+        }
     }
 
     proptest! {
