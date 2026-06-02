@@ -168,6 +168,27 @@ impl VipRange {
         })
     }
 
+    /// The first configured CIDR range, in operator-supplied order.
+    ///
+    /// `VipRange::new` admits only non-empty `ranges` (a zero-range
+    /// input yields `total == 0`, which trips `ZeroCapacity`), so
+    /// `ranges[0]` is always present — the `unwrap_or_else` documents
+    /// that invariant rather than introducing a fallible return.
+    ///
+    /// Used by the single-node veth provisioner (ADR-0061 § 3, step
+    /// 01-03) to derive the on-link gateway + `<vip_range> dev
+    /// <client_iface>` route from the first range. Returns the range
+    /// CIDR (network + prefix), which `allocatable_addrs` /
+    /// `nth_allocatable` cannot reconstruct — they yield host addresses,
+    /// not the prefix length the route needs.
+    #[must_use]
+    pub fn first_range(&self) -> Ipv4Net {
+        self.ranges
+            .first()
+            .copied()
+            .unwrap_or_else(|| unreachable!("VipRange::new rejects empty ranges (ZeroCapacity)"))
+    }
+
     /// Returns `true` if `addr` is contained in any configured range
     /// AND not reserved. Used by Earned Trust probes (step 01-03) to
     /// verify persisted entries still project into the live range.

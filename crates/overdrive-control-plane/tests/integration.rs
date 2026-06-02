@@ -34,6 +34,15 @@ mod integration {
     //! `per_entry_commit_index` module was deleted in step 01-04 of
     //! `redesign-drop-commit-index` — the per-entry index assertion
     //! has no consumer on the post-ADR-0020 wire shape.
+
+    // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
+    // `lo`-named `DataplaneConfig` helper for SimDataplane-override
+    // fixtures. `#[path]`-included (each `tests/*.rs` is its own crate
+    // root) so the same SSOT source backs both the acceptance and
+    // integration binaries and the `lo`/`lo` shape cannot drift.
+    #[path = "../common/dataplane_lo.rs"]
+    pub mod dataplane_lo;
+
     mod concurrent_submit_toctou;
     /// Action-shim `deregister_local_backend::dispatch` mutation kill
     /// per ADR-0053 § 3 — asserts the post-dispatch observable state

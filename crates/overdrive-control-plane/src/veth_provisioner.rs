@@ -36,6 +36,25 @@
 use ipnet::Ipv4Net;
 use std::net::Ipv4Addr;
 
+/// Default client-facing veth name for the single-node host-netns pair
+/// (ADR-0061 § 1). This is the SSOT consumed BOTH by
+/// [`crate::dataplane_config::DataplaneConfig::single_node_veth`] (the
+/// boot/test default config) AND by the serve-boot provision gate in
+/// [`crate::run_server_with_obs_and_driver`] (step 01-03): provision
+/// fires only when the configured ifaces equal these two names, so an
+/// operator who names real NICs skips provision entirely. Both sites
+/// reference these consts so the config default and the gate cannot
+/// drift.
+pub const DEFAULT_CLIENT_IFACE: &str = "ovd-veth-cli";
+
+/// Default backend-facing veth peer name for the single-node host-netns
+/// pair (ADR-0061 § 1). SSOT — see [`DEFAULT_CLIENT_IFACE`]. Distinct
+/// from `DEFAULT_CLIENT_IFACE` by construction: a veth pair's two ends
+/// MUST have different names, which is what makes the `EBUSY`
+/// "attach two XDP programs to the same iface" failure structurally
+/// unreachable (feature-delta § 6.4).
+pub const DEFAULT_BACKEND_IFACE: &str = "ovd-veth-bk";
+
 /// Derived plan for the single-node veth pair. A plain value object —
 /// carries the literal interface names from config (not hardcoded), the
 /// client-side on-link gateway address, the optional backend-side

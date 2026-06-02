@@ -89,6 +89,13 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         dataplane_override: Some(std::sync::Arc::new(
             overdrive_sim::adapters::dataplane::SimDataplane::new(),
         )),
+        // ADR-0061 § 1 (step 01-03): the default `ServerConfig.dataplane`
+        // is now the veth-named single-node shape, whose `client_iface`
+        // (`ovd-veth-cli`) does not exist in the test VM. This fixture
+        // injects `SimDataplane` (no XDP attach) but still resolves
+        // `host_ipv4` from `client_iface` at boot, so it names `lo` via
+        // the shared SSOT helper.
+        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         ..Default::default()
     };
     let handle =

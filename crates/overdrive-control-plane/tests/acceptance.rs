@@ -18,6 +18,17 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
+    // `lo`-named `DataplaneConfig` helper for SimDataplane-override
+    // fixtures (the `job_stop_*` acceptance tests boot `run_server`).
+    // `#[path]`-included (each `tests/*.rs` is its own crate root) so
+    // the same SSOT source backs both the acceptance and integration
+    // binaries and the `lo`/`lo` shape cannot drift. Gated behind
+    // `integration-tests` — its only consumers (`job_stop_*`) are.
+    #[cfg(feature = "integration-tests")]
+    #[path = "../common/dataplane_lo.rs"]
+    pub mod dataplane_lo;
+
     // S-CP-09 — AllocStatusRow rkyv round-trip with the new
     // `reason: Option<TransitionReason>` and `detail: Option<String>`
     // fields per ADR-0032 §3 (Amendment 2026-04-30) and §4.

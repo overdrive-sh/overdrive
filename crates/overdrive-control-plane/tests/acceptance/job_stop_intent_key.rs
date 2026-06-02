@@ -74,6 +74,10 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         dataplane_override: Some(std::sync::Arc::new(
             overdrive_sim::adapters::dataplane::SimDataplane::new(),
         )),
+        // ADR-0061 § 1 (step 01-03): default `dataplane` is now veth-named
+        // (`ovd-veth-cli` absent in the test VM); name `lo` so the boot
+        // `host_ipv4` resolution succeeds. SimDataplane skips XDP attach.
+        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         ..Default::default()
     };
     let handle =

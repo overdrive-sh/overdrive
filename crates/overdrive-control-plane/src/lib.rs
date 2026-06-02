@@ -384,8 +384,8 @@ pub struct ServerConfig {
     /// [`dataplane_config::parse_dataplane_section`], whose return
     /// shape is `Result<DataplaneConfig, ControlPlaneError>`. The
     /// CLI threads `Some(parsed)` here; test fixtures default to
-    /// `Some(DataplaneConfig::loopback())` via the `Default` impl
-    /// below so existing `..Default::default()` rest-pattern
+    /// `Some(DataplaneConfig::single_node_veth())` via the `Default`
+    /// impl below so existing `..Default::default()` rest-pattern
     /// construction continues to work without touching every
     /// fixture's TOML.
     ///
@@ -523,13 +523,15 @@ impl Default for ServerConfig {
             clock: Arc::new(overdrive_host::SystemClock),
             node: overdrive_worker::NodeConfig::default(),
             vip_range: VipRange::default(),
-            // Per step 02-01: `Default` populates the loopback
-            // `[dataplane]` shape so existing test fixtures using
-            // `..Default::default()` rest-pattern construction
-            // continue to work. Production callers go through
-            // `parse_dataplane_section` and overwrite this with the
-            // operator-supplied value.
-            dataplane: Some(dataplane_config::DataplaneConfig::loopback()),
+            // ADR-0061 § 1 (step 01-03): `Default` populates the
+            // veth-named single-node `[dataplane]` shape (two DISTINCT
+            // ifaces `ovd-veth-cli` / `ovd-veth-bk`, NOT `lo`/`lo`) so
+            // existing test fixtures using `..Default::default()`
+            // rest-pattern construction and the production boot default
+            // both carry the shape the serve-boot provisioner expects.
+            // Production callers reading an operator TOML go through
+            // `parse_dataplane_section` and overwrite this value.
+            dataplane: Some(dataplane_config::DataplaneConfig::single_node_veth()),
             // Step 02-02: `None` means production default
             // (`/sys/fs/bpf/overdrive`). Tests override to a per-test
             // tempdir for SERVICE_MAP pin isolation.
@@ -1034,96 +1036,136 @@ pub async fn run_server_with_obs_and_driver(
                 .to_owned(),
             field: Some("dataplane".to_owned()),
         })?;
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        if let Some(overridden) = config.dataplane_override.clone() {
-            overridden
-        } else {
-            // ADR-0053 § 7: resolve cgroup_attach_path with the
-            // production default when unset.
-            let cgroup_attach_path: std::path::PathBuf =
-                config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
-                    std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
-                });
-            #[allow(unused_mut)] // mut needed only under cfg(test|integration-tests)
-            let mut ebpf_dataplane = config
-                .dataplane_pin_dir
-                .as_deref()
-                .map_or_else(
-                    || {
-                        overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
-                            &dataplane_cfg.client_iface,
-                            &dataplane_cfg.backend_iface,
-                            std::path::Path::new(overdrive_dataplane::DEFAULT_PIN_DIR),
-                            cgroup_attach_path.as_path(),
-                        )
-                    },
-                    |pin_dir| {
-                        overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
-                            &dataplane_cfg.client_iface,
-                            &dataplane_cfg.backend_iface,
-                            pin_dir,
-                            cgroup_attach_path.as_path(),
-                        )
-                    },
-                )
-                .map_err(|source| error::DataplaneBootError::Construct {
-                    client_iface: dataplane_cfg.client_iface.clone(),
-                    backend_iface: dataplane_cfg.backend_iface.clone(),
-                    source,
-                })?;
-
-            // Step 02-03: Apply the test-only probe-fault seam BEFORE
-            // running the probe. Production builds compile both the
-            // field and this branch out entirely. The seam is
-            // `String`-shaped at the `ServerConfig` boundary (see the
-            // field docstring) and reconstructed into
-            // `DataplaneError::LoadFailed` here — the variant
-            // S-BDB-14's assertion (`matches!(... LoadFailed(_))`)
-            // expects.
-            //
-            // Gated on `feature = "integration-tests"` (NOT also
-            // `cfg(test)`) so the gate matches the upstream
-            // `EbpfDataplane::set_probe_fault` symbol's cfg —
-            // `cargo test --no-run -p overdrive-control-plane`
-            // without `--features integration-tests` would otherwise
-            // enable this branch (test-of-control-plane sets
-            // `cfg(test)` for control-plane) while leaving the
-            // dataplane dep compiled without the feature, so the
-            // method would be missing. The integration-tests feature
-            // forwards via the Cargo.toml dep — see this crate's
-            // `[features]` block.
-            #[cfg(feature = "integration-tests")]
-            if let Some(fault_msg) = config.dataplane_probe_fault.clone() {
-                ebpf_dataplane.set_probe_fault(
-                    overdrive_core::traits::dataplane::DataplaneError::LoadFailed(fault_msg),
-                );
-            }
-
-            // Step 02-03: Earned-Trust probe per architecture.md § 5.4
-            // and CLAUDE.md principle 12. Composition-root invariant
-            // "wire then probe then use" — the probe runs AFTER
-            // `new()` succeeds and BEFORE the first dataplane operation.
-            // On failure we emit a structured `health.startup.refused`
-            // event with `reason = "dataplane.probe"` and refuse to
-            // boot. The `?` causes `ebpf_dataplane` to drop, which
-            // detaches XDP and unlinks the SERVICE_MAP pin via the
-            // `EbpfDataplane::Drop` impl.
-            if let Err(source) = ebpf_dataplane.probe().await {
+    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> = if let Some(overridden) =
+        config.dataplane_override.clone()
+    {
+        overridden
+    } else {
+        // ADR-0061 § 3 (step 01-03): single-node serve-boot
+        // auto-provisions the host-netns veth pair BEFORE
+        // `EbpfDataplane::new`, extending the ADR-0052
+        // parse->construct->probe->use sequence ADDITIVELY to
+        // provision->construct->probe->use.
+        //
+        // CRITICAL GATING (ADR-0061 § 1 / feature-delta § 6.4): the
+        // provisioner fires ONLY when the configured ifaces are the
+        // DEFAULT veth names (`ovd-veth-cli` / `ovd-veth-bk`). When
+        // an operator names REAL NICs (any other names) we SKIP
+        // provision entirely — the existing two-NIC boot resolution
+        // is unchanged and must not regress (an `ip addr add`
+        // VIP-gateway onto a real NIC + `ip route add` over it would
+        // be wrong). The default-veth-name check IS the implicit
+        // gate; the explicit `[dataplane] provision = "veth"|"none"`
+        // opt-out knob is deferred to issue #194.
+        let is_default_veth = dataplane_cfg.client_iface == veth_provisioner::DEFAULT_CLIENT_IFACE
+            && dataplane_cfg.backend_iface == veth_provisioner::DEFAULT_BACKEND_IFACE;
+        if is_default_veth {
+            let plan = veth_provisioner::derive_veth_plan(
+                &dataplane_cfg.client_iface,
+                &dataplane_cfg.backend_iface,
+                config.vip_range.first_range(),
+            );
+            if let Err(source) = veth_provisioner::provision(&plan) {
                 tracing::warn!(
                     name: "health.startup.refused",
-                    reason = "dataplane.probe",
+                    reason = "dataplane.provision",
                     client_iface = %dataplane_cfg.client_iface,
                     backend_iface = %dataplane_cfg.backend_iface,
                     error = %source,
-                    "Earned-Trust probe failed; refusing to boot"
+                    "single-node veth provisioning failed; refusing to boot"
                 );
                 return Err(error::ControlPlaneError::DataplaneBoot(
-                    error::DataplaneBootError::Probe { source },
+                    error::DataplaneBootError::Provision { source },
                 ));
             }
+        }
 
-            Arc::new(ebpf_dataplane)
-        };
+        // ADR-0053 § 7: resolve cgroup_attach_path with the
+        // production default when unset.
+        let cgroup_attach_path: std::path::PathBuf =
+            config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
+                std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
+            });
+        #[allow(unused_mut)] // mut needed only under cfg(test|integration-tests)
+        let mut ebpf_dataplane = config
+            .dataplane_pin_dir
+            .as_deref()
+            .map_or_else(
+                || {
+                    overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
+                        &dataplane_cfg.client_iface,
+                        &dataplane_cfg.backend_iface,
+                        std::path::Path::new(overdrive_dataplane::DEFAULT_PIN_DIR),
+                        cgroup_attach_path.as_path(),
+                    )
+                },
+                |pin_dir| {
+                    overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
+                        &dataplane_cfg.client_iface,
+                        &dataplane_cfg.backend_iface,
+                        pin_dir,
+                        cgroup_attach_path.as_path(),
+                    )
+                },
+            )
+            .map_err(|source| error::DataplaneBootError::Construct {
+                client_iface: dataplane_cfg.client_iface.clone(),
+                backend_iface: dataplane_cfg.backend_iface.clone(),
+                source,
+            })?;
+
+        // Step 02-03: Apply the test-only probe-fault seam BEFORE
+        // running the probe. Production builds compile both the
+        // field and this branch out entirely. The seam is
+        // `String`-shaped at the `ServerConfig` boundary (see the
+        // field docstring) and reconstructed into
+        // `DataplaneError::LoadFailed` here — the variant
+        // S-BDB-14's assertion (`matches!(... LoadFailed(_))`)
+        // expects.
+        //
+        // Gated on `feature = "integration-tests"` (NOT also
+        // `cfg(test)`) so the gate matches the upstream
+        // `EbpfDataplane::set_probe_fault` symbol's cfg —
+        // `cargo test --no-run -p overdrive-control-plane`
+        // without `--features integration-tests` would otherwise
+        // enable this branch (test-of-control-plane sets
+        // `cfg(test)` for control-plane) while leaving the
+        // dataplane dep compiled without the feature, so the
+        // method would be missing. The integration-tests feature
+        // forwards via the Cargo.toml dep — see this crate's
+        // `[features]` block.
+        #[cfg(feature = "integration-tests")]
+        if let Some(fault_msg) = config.dataplane_probe_fault.clone() {
+            ebpf_dataplane.set_probe_fault(
+                overdrive_core::traits::dataplane::DataplaneError::LoadFailed(fault_msg),
+            );
+        }
+
+        // Step 02-03: Earned-Trust probe per architecture.md § 5.4
+        // and CLAUDE.md principle 12. Composition-root invariant
+        // "wire then probe then use" — the probe runs AFTER
+        // `new()` succeeds and BEFORE the first dataplane operation.
+        // On failure we emit a structured `health.startup.refused`
+        // event with `reason = "dataplane.probe"` and refuse to
+        // boot. The `?` causes `ebpf_dataplane` to drop, which
+        // detaches XDP and unlinks the SERVICE_MAP pin via the
+        // `EbpfDataplane::Drop` impl.
+        if let Err(source) = ebpf_dataplane.probe().await {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "dataplane.probe",
+                client_iface = %dataplane_cfg.client_iface,
+                backend_iface = %dataplane_cfg.backend_iface,
+                error = %source,
+                "Earned-Trust probe failed; refusing to boot"
+            );
+            return Err(error::ControlPlaneError::DataplaneBoot(
+                error::DataplaneBootError::Probe { source },
+            ));
+        }
+
+        Arc::new(ebpf_dataplane)
+    };
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on

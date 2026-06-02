@@ -294,6 +294,29 @@ pub enum DataplaneBootError {
         source: overdrive_core::traits::dataplane::DataplaneError,
     },
 
+    /// The single-node veth provisioner (ADR-0061 § 3, step 01-03)
+    /// failed to stand up the host-netns veth pair before
+    /// `EbpfDataplane::new`. Reached only on the production
+    /// (non-`dataplane_override`) boot branch AND only when the
+    /// configured ifaces are the default veth names — an operator who
+    /// names real NICs skips provision entirely, so this variant cannot
+    /// fire on the two-NIC path.
+    ///
+    /// Pass-through `#[from]` per `.claude/rules/development.md`
+    /// § "Never flatten a typed error to Internal(String)": the
+    /// underlying [`crate::veth_provisioner::VethProvisionError`]
+    /// carries a distinct variant per failing `ip(8)` step
+    /// (link-show / link-add / addr-add / link-up / route-add), so the
+    /// CLI / §12 investigation agent can branch on which provisioning
+    /// step failed without `Display`-grepping. Mirrors the `Construct`
+    /// / `Probe` precedent above.
+    #[error("single-node veth provisioning failed: {source}")]
+    Provision {
+        /// Underlying typed provisioner failure.
+        #[from]
+        source: crate::veth_provisioner::VethProvisionError,
+    },
+
     /// `iface::resolve_iface_ipv4` failed for the configured
     /// `client_iface`. Two sub-cases collapse into one variant
     /// because the operator remediation (`ip -4 addr show <iface>`)
