@@ -24,7 +24,7 @@ do not rewrite prior sections without a corresponding ADR marked
 
 | Section | Owner | Status |
 |---|---|---|
-| System Architecture | Titan (future) | placeholder |
+| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted)** |
 | Domain Model | Hera (future) | placeholder |
 | Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060)** |
 
@@ -32,10 +32,59 @@ do not rewrite prior sections without a corresponding ADR marked
 
 ## System Architecture
 
-*Placeholder for Titan.* System-level decisions that apply to the whole cluster
-topology (per-region Raft vs global CRDT, role declaration at bootstrap, mesh
-VPN underlay, etc.) live here. For now, read `docs/whitepaper.md` §2-§4 as the
-authoritative source.
+System-level decisions that apply to the whole cluster topology (per-region
+Raft vs global CRDT, role declaration at bootstrap, mesh VPN underlay, etc.)
+live here. For the broader cluster-scale topology not yet decided, read
+`docs/whitepaper.md` §2-§4 as the authoritative source. Decisions recorded so
+far:
+
+### Single-node dataplane interface wiring (ADR-0061, 2026-06-02)
+
+**Decision.** Single-node `overdrive serve` attaches its two XDP programs
+(forward `xdp_service_map_lookup`, reverse `xdp_reverse_nat_lookup`) to a
+**dedicated host-netns veth pair** (`ovd-veth-cli` ↔ `ovd-veth-bk`),
+auto-provisioned at boot — **not** to `lo`.
+
+**Why.** The kernel permits exactly one program per netdev XDP hook, so
+pointing both ifaces at `lo` (the prior `DataplaneConfig::loopback()` default)
+returned `EBUSY` on the second attach and aborted boot. `lo` additionally has
+no native XDP driver, forcing generic/SKB mode, which can bypass cloned skbs
+(TCP retransmit path) and silently miss traffic. A veth pair restores the
+two-distinct-iface invariant (no `EBUSY`) **and** native veth XDP (correct
+cloned-skb handling), with zero kernel-side / BPF change.
+
+**Provisioning is idempotent detect-and-reuse, and OS-image-adoptable.**
+Serve-boot provisioning is the single-node default, but it detects and
+adopts a pre-existing veth pair rather than recreating or failing — so an
+OS image (**Yocto**) or VM-boot provisioner (**Lima**, which already
+provisions its veth/networking at VM boot) can own the interface lifecycle
+and `serve` reuses what it finds. The two mechanisms are interchangeable
+by construction because reuse is idempotent; the same property persists
+the pair across serve restarts (mirrors bpffs-pin persistence per
+ADR-0052 § 3).
+
+**Topology (G-4 steering).** The single host plays all three roles the
+Tier-3 `ThreeIfaceTopology` (ADR-0043) splits across `client-ns`/`lb-ns`/
+`backend-ns`, collapsed into the host network namespace. A host route
+(`ip route add <vip_range> dev ovd-veth-cli`) makes the platform-issued VIP
+range (ADR-0049) on-link via the client-side veth; a connection to
+`<vip>:<port>` routes out `ovd-veth-cli`, where the forward program does the
+SERVICE_MAP lookup + `bpf_fib_lookup` + `bpf_redirect` across the pair to the
+backend. The cross-iface `bpf_redirect` datapath (ADR-0045) is **preserved
+verbatim** — it is the reason the two programs must stay on two distinct
+ifaces (a merged single-hook program has no second iface to redirect to).
+
+**Boundaries.** Two-NIC / multi-NIC production deployments override
+`client_iface`/`backend_iface` with real NIC names and skip auto-provisioning
+— the existing path is unchanged. The explicit `[dataplane] provision =
+"veth" | "none"` opt-out knob is deferred to issue **#194**. A typed
+`DataplaneError::IfaceXdpSlotBusy` variant replaces the prior
+`DRV_MODE`-masking error string for the residual same-iface collision case.
+The datapath is **IPv4-only**; IPv6 / AF_INET6 single-node veth steering is
+deferred to issue **#195** (depends on IPv6 dataplane forwarding, #155).
+
+See ADR-0061 (Accepted 2026-06-02) and
+`docs/feature/single-node-dataplane-wiring/feature-delta.md`.
 
 ---
 
