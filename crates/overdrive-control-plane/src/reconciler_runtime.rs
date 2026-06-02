@@ -1748,6 +1748,16 @@ async fn gather_service_listener_facts(
         // `workloads/<id>/kind` sub-keys.
         let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
         let suffix = &key_str["workloads/".len()..];
+        // mutants: skip — equivalent mutant (`||` → `&&`): this guard is a
+        // fast-path skip; the `from_store_bytes` decode + `Service` match
+        // below rejects sub-keys identically. The only non-canonical keys
+        // under `workloads/` are `/stop` (empty payload) and `/kind`
+        // (single discriminator byte); neither passes rkyv bytecheck for a
+        // full `WorkloadIntentEnvelope::Service`, so both `continue` at the
+        // decode regardless of whether this guard fired. The canonical
+        // `workloads/<id>` key has an empty suffix (no '/'), so it is never
+        // skipped under either operator. The facts vector is byte-identical
+        // — no test can distinguish the variants.
         if suffix.is_empty() || suffix.contains('/') {
             continue;
         }

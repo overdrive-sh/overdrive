@@ -440,3 +440,107 @@ fn should_dispatch(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::id::SpiffeId;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+
+    fn spiffe(suffix: &str) -> SpiffeId {
+        let raw = format!("spiffe://overdrive.local/job/svc/alloc/{suffix}");
+        SpiffeId::new(&raw).expect("derived SpiffeId is valid by construction")
+    }
+
+    fn backend(addr: SocketAddr) -> Backend {
+        Backend { alloc: spiffe("a"), addr, weight: 1, healthy: true }
+    }
+
+    fn service_id() -> ServiceId {
+        ServiceId::new(42).expect("ServiceId accepts any u64")
+    }
+
+    fn spec_hash() -> ContentHash {
+        ContentHash::of(b"service-map-hydrator-test-spec")
+    }
+
+    /// A valid local IPv4 backend yields exactly one
+    /// `Action::RegisterLocalBackend` carrying the service identity, VIP,
+    /// the backend's own port as `vip_port`, the narrowed `SocketAddrV4`,
+    /// and the `register-local-backend` correlation. Default-lane proxy
+    /// for the Tier-3 reverse-NAT registration path — pins the emission
+    /// the body owns so mutating the body to a no-op is caught here, not
+    /// only behind the real-veth gate.
+    #[test]
+    fn push_register_local_backend_emits_action_for_valid_local_backend() {
+        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
+        let target = "service/42";
+        let hash = spec_hash();
+        let backend_v4 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 8080);
+        let local = backend(SocketAddr::V4(backend_v4));
+        let local_refs: Vec<&Backend> = vec![&local];
+
+        let mut actions = Vec::new();
+        push_register_local_backend_actions(
+            &mut actions,
+            &local_refs,
+            service_id(),
+            vip_v4,
+            target,
+            &hash,
+        );
+
+        assert_eq!(
+            actions.len(),
+            1,
+            "exactly one RegisterLocalBackend must be emitted for a valid local backend"
+        );
+        let expected_correlation = CorrelationKey::derive(target, &hash, "register-local-backend");
+        match &actions[0] {
+            Action::RegisterLocalBackend {
+                service_id: sid,
+                vip,
+                vip_port,
+                backend: emitted,
+                correlation,
+            } => {
+                assert_eq!(*sid, service_id(), "service_id must be threaded through");
+                assert_eq!(*vip, vip_v4, "vip must be the host VIP");
+                assert_eq!(*vip_port, 8080, "vip_port is the backend's own port");
+                assert_eq!(*emitted, backend_v4, "backend must be the narrowed SocketAddrV4");
+                assert_eq!(
+                    *correlation, expected_correlation,
+                    "correlation must derive from (target, spec_hash, purpose)"
+                );
+            }
+            other => panic!("expected RegisterLocalBackend, got {other:?}"),
+        }
+    }
+
+    /// IPv6 and guard-rejected (loopback) backends are skipped — the fn
+    /// emits nothing. Pins the two `continue` arms so a body that drops
+    /// the guard cannot silently register a loopback or IPv6 backend.
+    #[test]
+    fn push_register_local_backend_skips_ipv6_and_guard_rejected() {
+        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
+        let hash = spec_hash();
+        let v6 = backend(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0)));
+        let loopback = backend(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080)));
+        let local_refs: Vec<&Backend> = vec![&v6, &loopback];
+
+        let mut actions = Vec::new();
+        push_register_local_backend_actions(
+            &mut actions,
+            &local_refs,
+            service_id(),
+            vip_v4,
+            "service/42",
+            &hash,
+        );
+
+        assert!(
+            actions.is_empty(),
+            "IPv6 and guard-rejected backends must not produce RegisterLocalBackend actions"
+        );
+    }
+}
