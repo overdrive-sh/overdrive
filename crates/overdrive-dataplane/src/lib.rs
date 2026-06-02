@@ -663,20 +663,16 @@ impl EbpfDataplane {
     }
 
     /// Returns `true` if REVERSE_NAT_MAP contains an entry for the
-    /// given `(backend_ip, backend_port)` keyed under TCP only.
+    /// given `(backend_ip, backend_port)` keyed under TCP.
     ///
     /// Observability surface — companion to [`Self::reverse_nat_map_size`].
-    /// Phase 2.2 hardcodes proto = TCP; UDP support follows in a
-    /// future slice when the trait surface gains the field (GH #163).
-    ///
-    /// **Sim-vs-production divergence**: `SimDataplane::update_service`
-    /// writes reverse-NAT entries for both `Proto::Tcp` and `Proto::Udp`
-    /// (via `reverse_nat_keys_for`), and the `ReverseNatLockstep` DST
-    /// invariant asserts on both protos. This production helper — and
-    /// `EbpfDataplane::update_service` — only populate / query TCP keys.
-    /// Tier 3 tests using this helper to verify lockstep correctness will
-    /// miss UDP-only gaps; use `reverse_nat_map_size` for a proto-agnostic
-    /// count or iterate the map directly when both protos matter.
+    /// Fixes `proto = TCP`; the per-proto variant is
+    /// [`Self::reverse_nat_map_has_backend_proto`]. Since ADR-0060
+    /// (GH #163) `EbpfDataplane::update_service` populates the
+    /// REVERSE_NAT key with the `ServiceFrontend`'s proto byte, so a UDP
+    /// service installs a proto=17 key this TCP-keyed helper will MISS —
+    /// pass `Proto::Udp` to `reverse_nat_map_has_backend_proto`, or use
+    /// `reverse_nat_map_size` for a proto-agnostic count.
     ///
     /// # Errors
     ///
@@ -688,13 +684,40 @@ impl EbpfDataplane {
         ip: Ipv4Addr,
         port: u16,
     ) -> Result<bool, DataplaneError> {
-        use crate::maps::BackendKeyPod;
         use overdrive_core::dataplane::backend_key::Proto;
+        self.reverse_nat_map_has_backend_proto(ip, port, Proto::Tcp)
+    }
+
+    /// Returns `true` if REVERSE_NAT_MAP contains an entry for the
+    /// given `(backend_ip, backend_port, proto)` 3-tuple key.
+    ///
+    /// Observability surface — the proto-aware companion to
+    /// [`Self::reverse_nat_map_has_backend`] (which fixes `proto = TCP`).
+    /// Per ADR-0060 D7 the REVERSE_NAT key carries the per-service L4
+    /// protocol byte (6 = tcp, 17 = udp); a UDP service installs a
+    /// proto=17 key that a TCP-keyed lookup would MISS. Tier 3 e2e tests
+    /// that exercise the UDP reverse-NAT path (US-04) use this accessor
+    /// to assert the `(backend_ip, 5353, udp)` key is present — the
+    /// observable side-effect of the source rewrite the kernel
+    /// `xdp_reverse_nat_lookup` performs on proto=17 responses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
+    /// the lookup with anything other than `KeyNotFound` (the
+    /// `Ok(false)` path).
+    pub fn reverse_nat_map_has_backend_proto(
+        &self,
+        ip: Ipv4Addr,
+        port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
+    ) -> Result<bool, DataplaneError> {
+        use crate::maps::BackendKeyPod;
 
         let key = BackendKeyPod {
             ip_host: u32::from(ip),
             port_host: port,
-            proto: Proto::Tcp.as_u8(),
+            proto: proto.as_u8(),
             _pad: 0,
         };
         let map = self.reverse_nat_map.lock();
