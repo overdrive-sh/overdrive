@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
      Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
 EVID="/Users/marcus/conductor/workspaces/helios/luxembourg-v2/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence"
 REPO="/Users/marcus/conductor/workspaces/helios/luxembourg-v2"
@@ -167,8 +167,8 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary (single compile shared by serve+deploy)
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.ZGKVHG data=/tmp/od-o03-data.KJcQ3j
-# serve ready: trust triple written at /tmp/od-o03-cfg.ZGKVHG/.overdrive/config (pid 3286142)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.eBFdce data=/tmp/od-o03-data.WZtAQ3
+# serve ready: trust triple written at /tmp/od-o03-cfg.eBFdce/.overdrive/config (pid 3291723)
 # deploy exit: 0
 # alloc status exit: 0
 INNER_DONE serve_status=ready deploy_rc=0

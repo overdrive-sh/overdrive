@@ -14,8 +14,8 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary (single compile shared by serve+deploy)
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.ZGKVHG data=/tmp/od-o03-data.KJcQ3j
-# serve ready: trust triple written at /tmp/od-o03-cfg.ZGKVHG/.overdrive/config (pid 3286142)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.eBFdce data=/tmp/od-o03-data.WZtAQ3
+# serve ready: trust triple written at /tmp/od-o03-cfg.eBFdce/.overdrive/config (pid 3291723)
 # deploy exit: 0
 # alloc status exit: 0
 INNER_DONE serve_status=ready deploy_rc=0
@@ -24,5 +24,5 @@ INNER_DONE serve_status=ready deploy_rc=0
   [PASS] no-leak: post-teardown shows no XDP programs attached
   [PASS] sub-claim 1: deploy exited 0
   [PASS] 'deploy_dns_resolver.out' contains: Accepted.
-  [PASS] 'alloc_status_dns_resolver.out' contains: 5353/udp
+  [PASS] 'alloc_status_dns_resolver.out' contains: 15353/udp
 O03 sub-claim aggregate exit: 0

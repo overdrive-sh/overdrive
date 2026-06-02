@@ -1,7 +1,7 @@
 Accepted.
 Workload ID:   dns-resolver
 Intent key:    workloads/dns-resolver
-Spec digest:   d7b885a886e4c97bbfab0c390eba85eab105fd9483869563196f16950f29408e
+Spec digest:   38080643ea47bfe84478b34daad3830389d313754eb0bd86133c2a7f8a0a535e
 Outcome:       created
 Endpoint:      https://127.0.0.1:7443/
 Next: overdrive alloc status --job dns-resolver

@@ -33,13 +33,13 @@ This expectation is the design-time `why` that test guards. -->
 
 A single-UDP-listener service deployed end-to-end through a real control
 plane and a real kernel completes a UDP round-trip whose **reply is sourced
-from the VIP (`10.96.0.10:5353`), not the backend IP**. The reverse path
+from the VIP (`10.96.0.10:15353`), not the backend IP**. The reverse path
 rewrites the connectionless UDP datagram's source the same way the TCP path
 does — closing the #163 defect class where a UDP backend reply leaked its
 own address.
 
 This is the **full K1 proof** of the S-04-A walking skeleton: deploy →
-`REVERSE_NAT_MAP` carries the `(backend_ip, 5353, udp)`→VIP key → the wire
+`REVERSE_NAT_MAP` carries the `(backend_ip, 15353, udp)`→VIP key → the wire
 capture shows the VIP source. It is the qualitative, human-readable `why`
 for the regression alarm that already exists as the passing Tier-3 test
 `crates/overdrive-dataplane/tests/integration/reverse_nat_udp_e2e.rs` — per
@@ -81,10 +81,10 @@ Sub-claims:
 
 1. The deploy exits `0` and prints `Accepted.` (the precondition — proven
    black-box by **O03**, now `satisfied`; not re-proven here).
-2. `bpftool map dump REVERSE_NAT_MAP` shows the `(backend_ip, 5353, udp)`
+2. `bpftool map dump REVERSE_NAT_MAP` shows the `(backend_ip, 15353, udp)`
    key mapping to the VIP — the remote-path D (dataplane/kernel) sub-claim.
 3. The wire capture on the client veth shows the backend's reply **sourced
-   from the VIP (`10.96.0.10:5353`)**, never the backend IP (the #163 defect
+   from the VIP (`10.96.0.10:15353`)**, never the backend IP (the #163 defect
    guard) — the remote-path E sub-claim.
 
 `satisfied` requires sub-claims 2 and 3 on a Lima run with a **remote-backend
@@ -120,8 +120,8 @@ Per-sub-claim verdict:
 | # | Sub-claim | Verdict | Reason |
 |---|---|---|---|
 | 1 | deploy exits `0` + `Accepted.` (precondition) | `satisfied` (via O03) | proven black-box by O03; serve boots + accepts post-ADR-0061. |
-| 2 | `REVERSE_NAT_MAP` shows `(backend_ip,5353,udp)`→VIP | `pending` (remote-path) | single-node steers via `LOCAL_BACKEND_MAP`/`cgroup_connect4`; `REVERSE_NAT_MAP` is empty by design without a non-host backend. Needs a multi-node topology. |
-| 3 | wire reply sourced from VIP `10.96.0.10:5353`, not backend IP | `pending` (remote-path) | the VIP source-rewrite is a remote-path property; not exercised single-node. The wire capture needs `ThreeIfaceTopology` (a test tier the runner won't rebuild). |
+| 2 | `REVERSE_NAT_MAP` shows `(backend_ip,15353,udp)`→VIP | `pending` (remote-path) | single-node steers via `LOCAL_BACKEND_MAP`/`cgroup_connect4`; `REVERSE_NAT_MAP` is empty by design without a non-host backend. Needs a multi-node topology. |
+| 3 | wire reply sourced from VIP `10.96.0.10:15353`, not backend IP | `pending` (remote-path) | the VIP source-rewrite is a remote-path property; not exercised single-node. The wire capture needs `ThreeIfaceTopology` (a test tier the runner won't rebuild). |
 
 The `what, forever` witness for sub-claims 2+3 (and the #163 VIP-source guard)
 is `crates/overdrive-dataplane/tests/integration/reverse_nat_udp_e2e.rs`, which

@@ -287,14 +287,14 @@ fi
 # Sub-claim 3: listener protocol (Proto::Udp) rendered at the operator surface.
 # `overdrive alloc status --job dns-resolver` renders each Service listener as
 # <port>/<protocol>, projected from the persisted WorkloadIntent::Service
-# aggregate (commit 7e79007f) — so the udp/5353 listener surfaces as `5353/udp`.
+# aggregate (commit 7e79007f) — so the udp/15353 listener surfaces as `15353/udp`.
 # This is the black-box operator-surface proof that the accepted intent carries
-# Proto::Udp (never coerced to Tcp): a tcp coercion would render `5353/tcp`.
+# Proto::Udp (never coerced to Tcp): a tcp coercion would render `15353/tcp`.
 if [[ -f "$EVIDENCE_DIR/alloc_status_dns_resolver.out" ]]; then
-  evidence_contains alloc_status_dns_resolver "5353/udp" || rc=1
+  evidence_contains alloc_status_dns_resolver "15353/udp" || rc=1
   # Negative guard: the udp listener must NOT be rendered as tcp.
-  if grep -q '5353/tcp' "$EVIDENCE_DIR/alloc_status_dns_resolver.out"; then
-    echo "  [FAIL] sub-claim 3: listener rendered as 5353/tcp — Proto coerced to Tcp"
+  if grep -q '15353/tcp' "$EVIDENCE_DIR/alloc_status_dns_resolver.out"; then
+    echo "  [FAIL] sub-claim 3: listener rendered as 15353/tcp — Proto coerced to Tcp"
     rc=1
   fi
 else

@@ -1,6 +1,4 @@
 # probe: XDP attachments BEFORE run
-Device "ovd-veth-bk@ovd-veth-cli" does not exist.
-Device "ovd-veth-cli@ovd-veth-bk" does not exist.
 Device "vbk27f8@vcli27f8" does not exist.
 Device "vcli27f8@vbk27f8" does not exist.
 Device "vbka2985@vclia2985" does not exist.

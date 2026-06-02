@@ -1,18 +1,7 @@
+ M crates/overdrive-cli/examples/dns-resolver.toml
  M docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
  M docs/feature/udp-service-support/deliver/execution-log.json
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out
- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml
  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
 ?? docs/feature/single-node-dataplane-wiring/deliver/.develop-progress.json
 ?? docs/feature/udp-service-support/deliver/.develop-progress.json
-?? verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/alloc_status_dns_resolver.out
