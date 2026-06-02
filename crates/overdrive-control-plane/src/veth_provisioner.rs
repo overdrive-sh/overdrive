@@ -178,7 +178,6 @@ pub fn derive_veth_plan(
 /// Returns a distinct [`VethProvisionError`] variant per failing `ip(8)`
 /// step (link-show, link-add, addr-add, link-up, route-add) so the
 /// caller can branch on which boot step failed.
-#[cfg(target_os = "linux")]
 pub fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
     use std::process::Command;
 
@@ -260,7 +259,6 @@ pub fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 fn addr_add(iface: &str, cidr: &str) -> Result<(), VethProvisionError> {
     let out =
         std::process::Command::new("ip").args(["addr", "add", cidr, "dev", iface]).output()?;
@@ -275,7 +273,6 @@ fn addr_add(iface: &str, cidr: &str) -> Result<(), VethProvisionError> {
     })
 }
 
-#[cfg(target_os = "linux")]
 fn link_up(iface: &str) -> Result<(), VethProvisionError> {
     let out = std::process::Command::new("ip").args(["link", "set", iface, "up"]).output()?;
     if out.status.success() {
