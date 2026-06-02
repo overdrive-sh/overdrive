@@ -354,6 +354,7 @@ impl Reconciler for ServiceMapHydrator {
                     &local,
                     *service_id,
                     vip_v4,
+                    desired_svc.port.get(),
                     &target_str,
                     &spec_hash,
                 );
@@ -385,11 +386,20 @@ impl Reconciler for ServiceMapHydrator {
 /// IPv6 address or a guard-rejected IPv4 (loopback / link-local /
 /// multicast / broadcast / reserved) are skipped with a structured warn.
 /// Extracted from `reconcile` to keep that method under the 100-line cap.
+///
+/// `vip_port` is the service's declared VIP listener port (the port a
+/// client uses in `connect(vip:vip_port)`), NOT the backend's own
+/// listening port. The `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP`
+/// on `(vip, vip_port)` and rewrites matching connects to the backend's
+/// real address (ADR-0053 § 3); a service with VIP:53 → backend:5353
+/// must register the entry under port 53 or the client's connect never
+/// hits the map. See the `Dataplane::register_local_backend` contract.
 fn push_register_local_backend_actions(
     actions: &mut Vec<Action>,
     local: &[&Backend],
     service_id: ServiceId,
     vip_v4: std::net::Ipv4Addr,
+    vip_port: u16,
     target_str: &str,
     spec_hash: &ContentHash,
 ) {
@@ -403,7 +413,7 @@ fn push_register_local_backend_actions(
                 name: "service_map_hydrator.register_local_backend.rejected",
                 service_id = %service_id,
                 vip = %vip_v4,
-                vip_port = backend_v4.port(),
+                vip_port = vip_port,
                 backend = %backend_v4,
                 reason = %reason,
                 "skipping RegisterLocalBackend: backend address rejected by classifier"
@@ -413,7 +423,7 @@ fn push_register_local_backend_actions(
         actions.push(Action::RegisterLocalBackend {
             service_id,
             vip: vip_v4,
-            vip_port: backend.addr.port(),
+            vip_port,
             backend: backend_v4,
             correlation: CorrelationKey::derive(target_str, spec_hash, "register-local-backend"),
         });
@@ -466,8 +476,10 @@ mod tests {
 
     /// A valid local IPv4 backend yields exactly one
     /// `Action::RegisterLocalBackend` carrying the service identity, VIP,
-    /// the backend's own port as `vip_port`, the narrowed `SocketAddrV4`,
-    /// and the `register-local-backend` correlation. Default-lane proxy
+    /// the declared VIP listener port as `vip_port`, the narrowed
+    /// `SocketAddrV4`, and the `register-local-backend` correlation.
+    /// Here the declared port (8080) and the backend's own port coincide;
+    /// the VIP≠backend-port case is pinned separately below. Default-lane proxy
     /// for the Tier-3 reverse-NAT registration path — pins the emission
     /// the body owns so mutating the body to a no-op is caught here, not
     /// only behind the real-veth gate.
@@ -486,6 +498,7 @@ mod tests {
             &local_refs,
             service_id(),
             vip_v4,
+            8080,
             target,
             &hash,
         );
@@ -506,11 +519,67 @@ mod tests {
             } => {
                 assert_eq!(*sid, service_id(), "service_id must be threaded through");
                 assert_eq!(*vip, vip_v4, "vip must be the host VIP");
-                assert_eq!(*vip_port, 8080, "vip_port is the backend's own port");
+                assert_eq!(
+                    *vip_port, 8080,
+                    "vip_port is the declared VIP listener port (here == backend port)"
+                );
                 assert_eq!(*emitted, backend_v4, "backend must be the narrowed SocketAddrV4");
                 assert_eq!(
                     *correlation, expected_correlation,
                     "correlation must derive from (target, spec_hash, purpose)"
+                );
+            }
+            other => panic!("expected RegisterLocalBackend, got {other:?}"),
+        }
+    }
+
+    /// Regression (bugfix): when the service's declared VIP listener
+    /// port differs from the backend's own listening port (e.g. a DNS
+    /// service VIP:53 → backend:5353), the emitted `vip_port` MUST be
+    /// the declared listener port (53), NOT the backend port (5353).
+    /// The `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP` on the port
+    /// a client connects to (the declared VIP port); registering under
+    /// the backend port leaves every `connect(vip:53)` a lookup miss
+    /// with no rewrite. Pins the threading of `desired_svc.port`
+    /// through to the action so a body that reverts to
+    /// `backend.addr.port()` is caught here.
+    #[test]
+    fn push_register_local_backend_uses_declared_vip_port_not_backend_port() {
+        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
+        let declared_vip_port: u16 = 53;
+        let backend_port: u16 = 5353;
+        let target = "service/42";
+        let hash = spec_hash();
+        let backend_v4 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), backend_port);
+        let local = backend(SocketAddr::V4(backend_v4));
+        let local_refs: Vec<&Backend> = vec![&local];
+
+        let mut actions = Vec::new();
+        push_register_local_backend_actions(
+            &mut actions,
+            &local_refs,
+            service_id(),
+            vip_v4,
+            declared_vip_port,
+            target,
+            &hash,
+        );
+
+        assert_eq!(actions.len(), 1, "exactly one RegisterLocalBackend must be emitted");
+        match &actions[0] {
+            Action::RegisterLocalBackend { vip_port, backend: emitted, .. } => {
+                assert_eq!(
+                    *vip_port, declared_vip_port,
+                    "vip_port must be the declared VIP listener port (53), not the backend port"
+                );
+                assert_ne!(
+                    *vip_port, backend_port,
+                    "vip_port must NOT carry the backend's own port (5353)"
+                );
+                assert_eq!(
+                    emitted.port(),
+                    backend_port,
+                    "the backend address still carries the backend's own port"
                 );
             }
             other => panic!("expected RegisterLocalBackend, got {other:?}"),
@@ -534,6 +603,7 @@ mod tests {
             &local_refs,
             service_id(),
             vip_v4,
+            8080,
             "service/42",
             &hash,
         );
