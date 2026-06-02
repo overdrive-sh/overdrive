@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
      Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
 EVID="/Users/marcus/conductor/workspaces/helios/luxembourg-v2/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence"
 REPO="/Users/marcus/conductor/workspaces/helios/luxembourg-v2"
@@ -157,23 +157,7 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary (single compile shared by serve+deploy)
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.d9aij2 data=/tmp/od-o03-data.0lglbV
-SERVE_NOT_READY: trust-triple config never appeared at /tmp/od-o03-cfg.d9aij2/.overdrive/config
---- serve.log tail ---
-[2m2026-06-02T14:03:52.064963Z[0m [33m WARN[0m native XDP attach not supported by driver; falling back to generic (SKB) mode [3miface[0m[2m=[0mlo [3msyscall[0m[2m=[0mbpf_link_create
-Error: 
-   0: [91mfailed to reach overdrive control plane at https://127.0.0.1:7443: EbpfDataplane construction failed (client_iface=lo, backend_iface=lo): program failed to load: xdp_reverse_nat_lookup.attach(lo, DRV_MODE): `bpf_link_create` failed
-
-      Try:
-      - `ip link show <iface>` to verify the interface exists.
-      - `mount | grep bpffs` to verify /sys/fs/bpf is mounted.
-      - `dmesg | tail` for kernel-side BPF verifier errors.
-      - Confirm CAP_SYS_ADMIN / CAP_BPF for the running process.
-      hint: check that the server is running and the endpoint is correct[0m
-
-Location:
-   [35mcrates/overdrive-cli/src/main.rs[0m:[35m186[0m
-
-Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
-Run with RUST_BACKTRACE=full to include source snippets.
-INNER_DONE serve_status=not-ready deploy_rc=n/a
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.Frda0b data=/tmp/od-o03-data.0etBEz
+# serve ready: trust triple written at /tmp/od-o03-cfg.Frda0b/.overdrive/config (pid 3256907)
+# deploy exit: 0
+INNER_DONE serve_status=ready deploy_rc=0

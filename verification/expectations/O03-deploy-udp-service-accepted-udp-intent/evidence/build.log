@@ -1,1 +1,16 @@
-[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+[1m[92m   Compiling[0m ring v0.17.14
+[1m[92m   Compiling[0m overdrive-core v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-core)
+[1m[92m   Compiling[0m overdrive-host v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-host)
+[1m[92m   Compiling[0m overdrive-dataplane v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-dataplane)
+[1m[92m   Compiling[0m overdrive-store-local v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-store-local)
+[1m[92m   Compiling[0m overdrive-worker v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-worker)
+[1m[92m   Compiling[0m rustls v0.23.39
+[1m[92m   Compiling[0m rustls-webpki v0.103.13
+[1m[92m   Compiling[0m rcgen v0.13.2
+[1m[92m   Compiling[0m tokio-rustls v0.26.4
+[1m[92m   Compiling[0m hyper-rustls v0.27.9
+[1m[92m   Compiling[0m axum-server v0.7.3
+[1m[92m   Compiling[0m overdrive-control-plane v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-control-plane)
+[1m[92m   Compiling[0m reqwest v0.12.28
+[1m[92m   Compiling[0m overdrive-cli v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-cli)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 10.94s

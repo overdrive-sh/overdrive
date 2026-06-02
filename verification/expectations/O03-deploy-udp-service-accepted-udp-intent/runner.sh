@@ -14,17 +14,19 @@
 # XDP-attachment surface + loopback + cgroups and writes both into evidence/ as
 # proof of no leak. Serve lifetime is seconds: boot -> deploy -> capture -> down.
 #
-# IMPORTANT environment finding (captured 2026-06-02, see evidence/serve.log):
-# production `overdrive serve` constructs the real `EbpfDataplane`, which
-# ATTACHES XDP to the configured `client_iface` (default `lo`) at boot, BEFORE
-# it binds the TLS listener. On this Lima VM that attach fails —
-# `xdp_reverse_nat_lookup.attach(lo, DRV_MODE): bpf_link_create failed` (generic
-# SKB-mode fallback also fails). serve therefore never binds and never writes
-# the trust triple, so a black-box deploy cannot reach it here. The runner
-# detects this and exits `pending` with the serve.log as the executed reason —
-# it does NOT attach XDP to `eth0` (the VM's only real NIC, shared across
-# workspaces — touching it is the exact hazard this discipline forbids) and
-# does NOT fall back to a test-only SimDataplane (not black-box reachable).
+# BOOT MODEL (post-ADR-0061, single-node-dataplane-wiring fix): production
+# `overdrive serve` under the default config no longer attaches both XDP
+# programs to `lo` (which collided EBUSY / failed generic-SKB attach on this VM
+# and aborted boot). It now auto-provisions a dedicated host-netns veth pair
+# (`ovd-veth-cli`/`ovd-veth-bk`) at boot and attaches the two distinct XDP
+# programs to the two distinct veth ifaces, THEN binds the TLS listener and
+# writes the trust triple. So serve BINDS here and the black-box deploy reaches
+# it (evidence/serve.log: "control plane listening endpoint=..."). The runner
+# still never touches `eth0` (the VM's only real NIC, shared across workspaces —
+# the forbidden hazard) and never uses a test-only SimDataplane (not black-box
+# reachable). The `not-ready` path below is kept as a defensive fallback: if a
+# future change re-breaks boot, the runner classifies it `pending` with
+# serve.log as the executed reason rather than fabricating a deploy result.
 #
 # Black-box only: the surface is the built `overdrive` binary (CLI) and what the
 # kernel exposes (`ip link`, `bpftool`, cgroupfs). No overdrive-* crate is linked.
@@ -239,14 +241,16 @@ fi
 serve_status="$(sed -n 's/.*serve_status=\([a-z-]*\).*/\1/p' "$EVIDENCE_DIR/serve_deploy.out" | tail -1)"
 if [[ "$serve_status" != "ready" ]]; then
   echo "  [pending] black-box serve did not bind (serve_status='${serve_status:-unknown}')."
-  echo "            Cause (executed, see evidence/serve.log): production serve's"
-  echo "            EbpfDataplane attaches XDP to lo at boot and the attach fails on"
-  echo "            this VM (xdp_reverse_nat_lookup.attach(lo, DRV_MODE): bpf_link_create"
-  echo "            failed; generic SKB fallback also fails). No deploy could reach it."
-  echo "            Attaching to eth0 (the VM's only NIC, shared across workspaces) is the"
-  echo "            forbidden hazard; a SimDataplane override is test-only, not black-box."
-  echo "            Sub-claims 1+2 stay 'pending'. The 'what, forever' witness is the"
-  echo "            direct-handler test deploy_udp_walking_skeleton.rs (SimDataplane serve)."
+  echo "            Post-ADR-0061, serve is EXPECTED to bind (it provisions the"
+  echo "            ovd-veth-cli/ovd-veth-bk pair and attaches XDP to the veth ifaces,"
+  echo "            not lo). A not-ready result here is a REGRESSION — inspect"
+  echo "            evidence/serve.log for the actual cause (veth provisioning failed,"
+  echo "            CAP_NET_ADMIN missing, a stale XDP program on ovd-veth-cli forcing"
+  echo "            EBUSY -> sweep per debugging.md, or a boot regression). The runner"
+  echo "            does NOT touch eth0 (shared NIC, forbidden) or a SimDataplane"
+  echo "            override (test-only). Sub-claims 1+2 stay 'pending' until boot is"
+  echo "            restored; the 'what, forever' witness is the direct-handler test"
+  echo "            deploy_udp_walking_skeleton.rs (SimDataplane serve)."
   # serve-not-ready is DATA, not a runner crash; but a real leak is a hard fail.
   exit "$leak_rc"
 fi

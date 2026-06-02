@@ -1,33 +1,30 @@
   --- serve_deploy.out (tail) ---
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.d9aij2 data=/tmp/od-o03-data.0lglbV
-SERVE_NOT_READY: trust-triple config never appeared at /tmp/od-o03-cfg.d9aij2/.overdrive/config
---- serve.log tail ---
-[2m2026-06-02T14:03:52.064963Z[0m [33m WARN[0m native XDP attach not supported by driver; falling back to generic (SKB) mode [3miface[0m[2m=[0mlo [3msyscall[0m[2m=[0mbpf_link_create
-Error: 
-   0: [91mfailed to reach overdrive control plane at https://127.0.0.1:7443: EbpfDataplane construction failed (client_iface=lo, backend_iface=lo): program failed to load: xdp_reverse_nat_lookup.attach(lo, DRV_MODE): `bpf_link_create` failed
 
-      Try:
-      - `ip link show <iface>` to verify the interface exists.
-      - `mount | grep bpffs` to verify /sys/fs/bpf is mounted.
-      - `dmesg | tail` for kernel-side BPF verifier errors.
-      - Confirm CAP_SYS_ADMIN / CAP_BPF for the running process.
-      hint: check that the server is running and the endpoint is correct[0m
+# ---- AFTER probes (steady state the run produced, pre-teardown) -------------
+{ echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
+{ echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups AFTER deploy"; probe_cgroups; }                 > "$EVID/probe_after_cgroups.txt"  2>&1
 
-Location:
-   [35mcrates/overdrive-cli/src/main.rs[0m:[35m186[0m
+# Stop serve explicitly (the on_exit trap also covers abnormal exits + writes
+# the post-teardown no-leak proof).
+kill "$SERVE_PID" 2>/dev/null
+wait "$SERVE_PID" 2>/dev/null
 
-Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
-Run with RUST_BACKTRACE=full to include source snippets.
-INNER_DONE serve_status=not-ready deploy_rc=n/a
+echo "INNER_DONE serve_status=ready deploy_rc=$DEPLOY_RC"
+exit 0'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+# building overdrive binary (single compile shared by serve+deploy)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.Frda0b data=/tmp/od-o03-data.0etBEz
+# serve ready: trust triple written at /tmp/od-o03-cfg.Frda0b/.overdrive/config (pid 3256907)
+# deploy exit: 0
+INNER_DONE serve_status=ready deploy_rc=0
   [PASS] no-leak: probe_before_loopback shows HEALTHY loopback
   [PASS] no-leak: probe_post_teardown_loopback shows HEALTHY loopback
   [PASS] no-leak: post-teardown shows no XDP programs attached
-  [pending] black-box serve did not bind (serve_status='not-ready').
-            Cause (executed, see evidence/serve.log): production serve's
-            EbpfDataplane attaches XDP to lo at boot and the attach fails on
-            this VM (xdp_reverse_nat_lookup.attach(lo, DRV_MODE): bpf_link_create
-            failed; generic SKB fallback also fails). No deploy could reach it.
-            Attaching to eth0 (the VM's only NIC, shared across workspaces) is the
-            forbidden hazard; a SimDataplane override is test-only, not black-box.
-            Sub-claims 1+2 stay 'pending'. The 'what, forever' witness is the
-            direct-handler test deploy_udp_walking_skeleton.rs (SimDataplane serve).
+  [PASS] sub-claim 1: deploy exited 0
+  [PASS] 'deploy_dns_resolver.out' contains: Accepted.
+  [pending] sub-claim 3: listener protocol (Proto::Udp) is not rendered
+            on any operator read surface — no black-box proof available.
+            See deploy_udp_walking_skeleton.rs for the crate-internal witness.
+O03 sub-claim aggregate exit: 0  (sub-claim 3 deferred -> pending)
