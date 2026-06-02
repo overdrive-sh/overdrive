@@ -6,6 +6,30 @@ Accepted. 2026-06-02. Decision-makers: Titan (system-design, proposing);
 ratified by the user 2026-06-02. Tags: phase-2, dataplane, single-node,
 production-boot, xdp, bug-fix.
 
+**Amended 2026-06-03 (idempotent converge-on-boot)** — § 3 / § 3.1 and
+DQ-4 reframed from **"detect-and-reuse / adopt untouched"** to
+**"idempotent, per-resource desired-vs-actual converge-on-boot"**. The
+prior "adopt untouched" semantics returned early on `ip link show`
+success and left a half-provisioned pair — created by a serve boot that
+crashed *after* the atomic `ip link add` but *before*
+address/link-up/route assignment — incomplete, surfacing two layers
+downstream as a misleading `iface::resolve_iface_ipv4` /
+`IfaceAddrResolution` error. Because Overdrive's single-node target is a
+Yocto-built immutable appliance image with **no SSH and no operator
+shell** (Talos-style), the originally-floated "fail loud, tell the
+operator to run `ip link del <cli>` and retry" remediation has no
+operator to action it. The corrected model — validated by Talos Linux's
+network controllers (`docs/research/dataplane/talos-network-reconciliation-self-healing.md`,
+confidence High) — converges each resource independently against
+observed kernel state and repairs partial state in place with zero
+human intervention. The full continuous network-reconciler model (port
+trait + Sim adapter + observed-state hydration + continuous tick) is the
+deferred direction-of-travel tracked in **issue #197**; one-shot
+converge-on-boot is the correct Phase-1 single-node minimum (research
+R7). This is a **refinement** of the § 3 idempotence intent and a narrow
+clarification of DQ-4 — not a reversal of the veth-pair / two-iface
+decision (§ 1, § 2), which stands verbatim.
+
 **Companion ADRs**: ADR-0043 (XDP L4LB three-iface transit test
 topology), ADR-0045 (`bpf_redirect_neigh` / cross-iface datapath —
 **preserved, not reversed**), ADR-0052 (backend discovery bridge +
@@ -107,33 +131,99 @@ correctness, and preserves the landed datapath.
 
 `overdrive serve` provisions the veth pair, addresses, and route at boot,
 **before** `EbpfDataplane::new`, in the host network namespace
-(single-node — no netns boundary). The provisioner:
+(single-node — no netns boundary).
 
-1. Checks for `ovd-veth-cli` / `ovd-veth-bk` (`ip link show`);
-   **idempotent — detect-and-reuse if present**, adopting a pre-existing
-   pair rather than recreating or failing (DQ-4; mirrors the Tier-3
-   fixture's best-effort-cleanup-then-create discipline and the
-   bpffs-pin persistence of ADR-0052 § 3).
-2. If absent: `ip link add ovd-veth-cli type veth peer name ovd-veth-bk`;
-   assign the VIP-range gateway IP to `ovd-veth-cli` and a backend-range
-   gateway to `ovd-veth-bk`; bring both up.
-3. `ip route add <vip_range> dev ovd-veth-cli` so the VIP range is
-   on-link via the client-side veth. (Idempotent — a pre-existing route
-   is left in place.)
+**§ 3.1 — Idempotent converge-on-boot (amended 2026-06-03).** The
+provisioner does **not** short-circuit on the presence of the client
+iface. It performs a one-shot, per-resource desired-vs-actual converge
+against observed kernel state, repairing whatever the last (possibly
+crashed) boot left partial. Each resource is converged independently
+(research Finding 2.3 / 3.4 / R2 — *"a MISSING address on an EXISTING
+link is a normal `Address.New()`, and `EEXIST` is explicitly swallowed
+(idempotent)"*):
+
+1. **veth pair** — `ip link show <client_iface>`; if absent,
+   `ip link add <client_iface> type veth peer name <backend_iface>`
+   (atomic — creates both ends together); if present, noop.
+2. **client address** — assign the VIP-range gateway IP to
+   `<client_iface>` if missing; swallow `EEXIST` (already-assigned is the
+   success case, not a failure).
+3. **backend address** — when a backend gateway is derived (the range
+   has a second usable host), assign it to `<backend_iface>` if missing;
+   swallow `EEXIST`.
+4. **both ends UP** — `ip link set <iface> up` for each end; idempotent
+   (re-upping an already-up link is a noop).
+5. **on-link route** — `ip route add <vip_range> dev <client_iface>` so
+   the VIP range is on-link via the client-side veth; swallow the
+   `File exists` collision (the code already does — the connected route
+   the kernel auto-creates on address assignment legitimately collides
+   here).
+
+Re-running the converge over an **already-complete** pair is a silent
+noop at every step. Re-running over a **half-provisioned** pair — the
+crash-mid-provision case — completes the missing resources in place. The
+provisioner therefore tolerates being interrupted at any point and
+re-run from the top across reboots (research R7: converge-on-boot gives
+self-healing across reboots without a continuous controller). This is
+the **same idempotence the original § 3 intended**, sharpened from "adopt
+the present pair untouched" to "converge each resource to its desired
+state" so a partial pair is *completed*, not adopted incomplete.
+
+**§ 3.2 — The genuinely-corrupted edge: client iface present, peer
+absent (amended 2026-06-03).** The crash-mid-provision case is fully
+covered by § 3.1: `ip link add ... peer ...` is **atomic** and creates
+both ends together, so a crash after it can only leave a pair that is
+*present but under-addressed* — which § 3.1 completes. The one residual
+corrupted shape is **client iface present but its veth peer absent**.
+This is only reachable if the peer was *separately* deleted or moved to
+another netns after creation — never the crash-mid-provision path.
+
+**Ruling: recreate the pair (option a).** When `<client_iface>` is
+present but `<backend_iface>` (its declared peer) is absent, the
+provisioner deletes the orphaned client end and recreates the pair from
+scratch, then converges addresses/up/route per § 3.1. Rationale: the
+default-veth-name gate (§ 3.3 below) guarantees this path is reachable
+**only** for Overdrive-owned ifaces — a half-pair carrying the default
+veth names is Overdrive's by construction, since an operator naming real
+NICs skips provision entirely. An appliance OS with no operator shell
+must self-heal a corrupted resource it owns; refusing (option b) would
+strand a Yocto image at a `serve`-refuses-to-boot state with no human to
+clear it — the same dead-end the "fail loud, run `ip link del`"
+remediation hit. The alternative (b — refuse with a distinct
+`VethPeerMissing` error) is **rejected** for the single-node appliance
+target precisely because there is no operator to action the refusal;
+it would be the correct ruling only on a host where unowned ifaces could
+plausibly collide with the default names, which the gate forecloses.
+This is a **narrow refinement of DQ-4's "never tear down"**, not a
+reversal: DQ-4 governs a *usable* pair (no teardown on shutdown / for
+reuse); recreating a *corrupted, Overdrive-owned* half-pair to make it
+usable is the self-heal an appliance OS requires.
+
+**§ 3.3 — Own only what you declare.** Convergence (including the § 3.2
+recreate) touches **only** the configured default veth ifaces. The
+serve-boot provision gate fires solely when the configured ifaces equal
+the `DEFAULT_CLIENT_IFACE` / `DEFAULT_BACKEND_IFACE` SSOT consts; an
+operator who names real NICs skips provision entirely (unchanged from §
+3 original). This mirrors Talos's discipline — *"Own only what you
+declare; do not clobber foreign interfaces … Talos does not prune
+unowned links"* (research R6 / Finding 3.5). The recreate in § 3.2 is
+not link-pruning of foreign state; it is repair of a declared, owned
+resource.
 
 Provision-at-serve-boot is the **single-node default**, but it is **not
-the only** owner of the interface lifecycle. Because step 1 detects and
-adopts a pre-existing pair, an **OS image (Yocto) or VM-boot provisioner
-(Lima)** can stand the veth pair up at OS-init time — exactly how the
-current Lima dev VM provisions its veth/networking at VM boot — and
-`serve` will reuse it untouched. The two mechanisms are **interchangeable
-by construction** because reuse is idempotent: the same detect-and-adopt
-property that makes a serve **restart** cheap (DQ-4) is the property that
-lets an external provisioner own the interface (DQ-1). One property
-serves both cases. The provisioner therefore never tears the pair down on
-shutdown (leave-and-reuse), so whichever entity created it — `serve`, a
-Yocto image, or the Lima VM boot — retains ownership across the process
-lifetime.
+the only** owner of the interface lifecycle. Because the converge is
+idempotent and completes partial state, an **OS image (Yocto) or VM-boot
+provisioner (Lima)** can stand the veth pair up at OS-init time — exactly
+how the current Lima dev VM provisions its veth/networking at VM boot —
+and `serve` will converge over it (a noop when complete, a completion
+when partial). The two mechanisms are **interchangeable by construction**
+because the converge is idempotent: the same converge-and-complete
+property that makes a serve **restart** (or crash-recovery) cheap (DQ-4)
+is the property that lets an external provisioner own the interface
+(DQ-1). One property serves both cases. The provisioner therefore never
+tears down a **usable** pair on shutdown (leave-and-reuse), so whichever
+entity created it — `serve`, a Yocto image, or the Lima VM boot —
+retains ownership across the process lifetime.
 
 The provisioner is a **new `adapter-host` component** (in
 `overdrive-worker` or `overdrive-host`), NOT in `overdrive-testing`
@@ -249,26 +339,37 @@ who name real NICs (they skip auto-provision).
 - **Honest diagnostics.** `IfaceXdpSlotBusy` replaces the masking
   `DRV_MODE` string for the residual collision case.
 - **OS-image / VM-boot provisioning is compatible by construction
-  (Yocto, Lima).** Serve-boot provisioning detects and adopts a
-  pre-existing veth pair rather than recreating or failing, so an
-  external provisioner that owns interface setup at OS-init time — the
-  future **Yocto OS image**, or the current **Lima dev VM** that already
+  (Yocto, Lima).** Serve-boot provisioning converges a pre-existing veth
+  pair to its desired state (completing partial state, noop when already
+  complete) rather than failing or adopting it incomplete, so an external
+  provisioner that owns interface setup at OS-init time — the future
+  **Yocto OS image**, or the current **Lima dev VM** that already
   provisions its veth/networking at VM boot — slots in transparently.
-  `serve` finds the pair and reuses it untouched. Serve-boot
-  auto-provisioning and OS-image pre-provisioning are **interchangeable**
-  because the reuse is idempotent; there is no "did the OS already set
-  this up?" branch to maintain. This is the **same idempotent-reuse
-  property** as the restart case (DQ-4) — one property covers both
-  serve-restart and OS-pre-provisioned ownership, so no second mechanism
-  is needed.
+  `serve` converges over the pair it finds. Serve-boot auto-provisioning
+  and OS-image pre-provisioning are **interchangeable** because the
+  converge is idempotent; there is no "did the OS already set this up?"
+  branch to maintain. This is the **same idempotent-converge property**
+  as the restart / crash-recovery case (DQ-4) — one property covers
+  serve-restart, crash-mid-provision recovery, and OS-pre-provisioned
+  ownership, so no second mechanism is needed. *(Amended 2026-06-03 —
+  "adopts untouched / reuses untouched" sharpened to "converges to
+  desired state"; see § 3.1.)*
+- **Appliance self-heal with no operator (amended 2026-06-03).** On the
+  Yocto immutable appliance target (no SSH, no operator shell), the
+  provisioner repairs a partial or corrupted-owned pair in place across
+  reboots with zero human intervention — the property a Talos-style
+  appliance OS requires (research, confidence High). The rejected "fail
+  loud, run `ip link del` and retry" remediation had no operator to
+  action it.
 
 ### Negative
 
 - **`serve` gains a boot-time veth-provisioning step.** New `adapter-host`
-  component + `CAP_NET_ADMIN` use (already required). Idempotent reuse
-  keeps restart cheap; teardown is leave-and-reuse (mirrors bpffs-pin
-  persistence per ADR-0052 § 3 Drop) — manual cleanup documented in
-  debugging.md (DQ-4, resolved: idempotent reuse).
+  component + `CAP_NET_ADMIN` use (already required). Idempotent
+  converge-on-boot keeps restart cheap and recovers a crash-mid-provision
+  half-pair (§ 3.1); teardown is leave-a-usable-pair (mirrors bpffs-pin
+  persistence per ADR-0052 § 3 Drop) — manual cleanup of a stale pair
+  documented in debugging.md (DQ-4, resolved: idempotent converge).
 - **Single-node steering is IPv4-only**, matching the IPv4-only datapath
   today. IPv6 single-node veth steering for AF_INET6 VIPs is **deferred
   to issue #195** (DQ-3); it depends on IPv6 dataplane forwarding (issue
@@ -277,6 +378,21 @@ who name real NICs (they skip auto-provision).
   The default-veth-names gate (vs an explicit `provision` knob) is the
   fix's posture; the explicit `[dataplane] provision = "veth" | "none"`
   opt-out knob is **deferred to issue #194** (DQ-2).
+- **One-shot converge-on-boot only; no continuous reconciler (amended
+  2026-06-03).** The provisioner converges once per boot, before
+  `EbpfDataplane::new`. This self-heals across *reboots* (each boot
+  re-diffs and completes whatever the last, possibly-crashed boot left
+  partial — research R7), which fully resolves the partial-provision
+  bug. It does **not** repair *runtime* drift — an address deleted by
+  something else *while serve is up* is not restored until the next
+  boot. Per research R7 and Phase-1 single-node scope, runtime drift is
+  **not in the threat model**: the veth pair is provisioned once and not
+  externally perturbed. The full continuous network-reconciler model
+  (a `NetworkProvisioner` port trait + `Sim` adapter + observed-state
+  hydration + continuous tick, in the §18 reconciler shape) is the
+  deferred direction-of-travel tracked in **issue #197** — a forward
+  pointer to that tracked design decision, **not** planned or imminent
+  Phase-1 work.
 
 ### Quality-attribute impact
 
@@ -307,10 +423,17 @@ who name real NICs (they skip auto-provision).
   provisioning gets a default (not a hard refusal); hard refusal stays
   reserved for cgroup delegation.
 - **`.claude/rules/development.md`** — § Errors (distinct failure mode →
-  distinct variant), § Persist inputs not derived state (gateway/route
-  derived at provision time), § Shared real-infra fixtures
-  (`overdrive-testing` stays dev-dep-only; production provisioner is a
-  separate `adapter-host` component).
+  distinct variant: the per-`ip(8)`-step `VethProvisionError` variants,
+  plus the `VethPeerMissing` shape considered and rejected in § 3.2),
+  § Persist inputs not derived state (gateway/route derived at provision
+  time), § Shared real-infra fixtures (`overdrive-testing` stays
+  dev-dep-only; production provisioner is a separate `adapter-host`
+  component).
+- **Idempotent converge-on-boot (amended 2026-06-03)** — § 3.1 / § 3.2
+  follow the Talos-validated per-resource desired-vs-actual model
+  (research Findings 2.3 / 3.4 / 3.5; R2 / R6 / R7). Add-if-missing with
+  `EEXIST` / `File exists` swallowed; recreate only a corrupted,
+  Overdrive-owned half-pair; touch only declared default-veth ifaces.
 
 ## Changed assumptions / design constraint — OS-image-adoptable provisioning
 
@@ -319,22 +442,27 @@ A load-bearing constraint added at ratification, beyond the original
 
 > **Serve-boot provisioning MUST be idempotent and compatible with
 > OS-image pre-provisioning.** Provision-at-serve-boot is the single-node
-> default; it detects-and-reuses a pre-existing veth pair so an OS image
-> (Yocto) or VM-boot provisioner (Lima) can own the interface lifecycle
-> instead. The two mechanisms are interchangeable by construction because
-> reuse is idempotent.
+> default; it converges a pre-existing veth pair to its desired state
+> (completing any partial state, noop when already complete) so an OS
+> image (Yocto) or VM-boot provisioner (Lima) can own the interface
+> lifecycle instead. The two mechanisms are interchangeable by
+> construction because the converge is idempotent.
 
-This sharpens § 3 from "create the pair, reuse on restart" to "adopt the
-pair whoever created it." The Phase-1 expectation is that the **Yocto OS
-image** will set up networking at OS-init time — the same shape the
-**Lima dev VM** already uses to provision its veth/networking at VM boot.
-Serve-boot provisioning therefore must never assume it is the creator: it
-checks first (`ip link show`), adopts what it finds, and only creates the
-pair when nothing pre-exists. The constraint is satisfied by the **same
-idempotent-reuse property** DQ-4 requires for serve restarts — one
-property, two callers (a restarting `serve`; an external OS/VM
-provisioner). No separate "OS-provisioned mode" branch exists or is
-needed.
+This sharpens § 3 from "create the pair, reuse on restart" to "converge
+the pair to desired state whoever created it" *(amended 2026-06-03 —
+was "adopt the pair whoever created it"; "adopt untouched" left a
+crash-mid-provision half-pair incomplete, see § 3.1)*. The Phase-1
+expectation is that the **Yocto OS image** will set up networking at
+OS-init time — the same shape the **Lima dev VM** already uses to
+provision its veth/networking at VM boot. Serve-boot provisioning
+therefore must never assume it is the creator: it checks each resource
+(`ip link show`, address presence, link state, route presence),
+completes whatever is missing, and only creates the pair from scratch
+when nothing pre-exists. The constraint is satisfied by the **same
+idempotent-converge property** DQ-4 requires for serve restarts and
+crash recovery — one property, two callers (a restarting / recovering
+`serve`; an external OS/VM provisioner). No separate "OS-provisioned
+mode" branch exists or is needed.
 
 ## Open questions — resolved at ratification (2026-06-02)
 
@@ -343,14 +471,26 @@ existing GitHub issues; neither is created by this ADR.
 
 - **DQ-1** (provisioning owner) — **resolved: serve-boot auto-provision
   (option a)**, made adoptable by an OS-image / VM-boot provisioner via
-  the idempotent detect-and-reuse property (§ 3). The Yocto OS image and
-  the Lima dev VM can own interface setup at OS-init time; serve-boot
-  reuses a pre-existing pair. Serve-boot and OS-image provisioning are
-  interchangeable by construction.
-- **DQ-4** (teardown semantics) — **resolved: idempotent reuse**, never
-  tear down on shutdown (mirrors bpffs-pin persistence per ADR-0052 § 3).
-  This is the single property that makes both DQ-1's OS-image adoption
-  and the serve-restart case work.
+  the idempotent converge-on-boot property (§ 3.1). The Yocto OS image
+  and the Lima dev VM can own interface setup at OS-init time; serve-boot
+  converges a pre-existing pair (noop when complete, completion when
+  partial). Serve-boot and OS-image provisioning are interchangeable by
+  construction. *(Amended 2026-06-03 — "reuses a pre-existing pair"
+  sharpened to "converges a pre-existing pair"; see § 3.1.)*
+- **DQ-4** (teardown semantics) — **resolved: idempotent converge,
+  never tear down a usable pair** on shutdown (mirrors bpffs-pin
+  persistence per ADR-0052 § 3). This is the single property that makes
+  both DQ-1's OS-image adoption and the serve-restart / crash-recovery
+  case work. *(Amended 2026-06-03 — "idempotent reuse" sharpened to
+  "idempotent converge"; "never tear down" refined to "never tear down a
+  **usable** pair" — § 3.2 recreates a genuinely-corrupted,
+  Overdrive-owned half-pair (client present, peer absent) to self-heal
+  it, which is repair of a declared resource, not a teardown-for-reuse.)*
+- **DQ-5** (continuous network reconciler) — **deferred to issue #197.**
+  One-shot converge-on-boot is the Phase-1 single-node minimum (research
+  R7); a continuous reconciler that repairs runtime drift while serve is
+  up is the deferred direction-of-travel, not Phase-1 scope. #197 is a
+  forward pointer to that tracked design decision. *(Added 2026-06-03.)*
 - **DQ-2** (explicit `[dataplane] provision = "veth" | "none"` opt-out
   knob) — **deferred to issue #194.** The fix ships implicit-by-default
   veth names + idempotent reuse; the explicit operator-tunable knob is
@@ -363,6 +503,16 @@ existing GitHub issues; neither is created by this ADR.
 
 - `docs/research/dataplane/xdp-multiprog-same-iface-aya-research.md` —
   five-option analysis; recommends E (+B); Gap G-4.
+- `docs/research/dataplane/talos-network-reconciliation-self-healing.md`
+  — (amended 2026-06-03) Talos-validated idempotent per-resource
+  converge model; Findings 2.3 / 3.4 / 3.5; recommendations R2 (swallow
+  `EEXIST`), R6 (own only what you declare), R7 (one-shot
+  converge-on-boot sufficient for single-node, continuous reconciler not
+  required). Confidence High, 9 trusted sources.
+- **GitHub issue #197** — deferred continuous network-reconciler model
+  (`NetworkProvisioner` port trait + Sim adapter + observed-state
+  hydration + continuous tick). Direction-of-travel beyond Phase-1
+  converge-on-boot; not planned/imminent work (amended 2026-06-03).
 - `docs/research/dataplane/aya-rs-usage-comprehensive-research.md` §B.1 —
   aya 0.13.x XDP attach surface + native→SKB fallback.
 - ADR-0043 — XDP L4LB three-iface transit test topology.
