@@ -75,6 +75,15 @@ mod integration {
     /// Asserts `Reconciler::NAME` is a compile-time anchor and that
     /// `write_through_bytes` accepts `&'static str` directly.
     mod redb_view_store_no_leak;
+    /// single-node-dataplane-wiring step 01-04 (ADR-0061 § 8 / § 5) —
+    /// Tier-3 regression for the serve-boot dataplane wiring. Drives the
+    /// real `provision` + `EbpfDataplane::new_with_pin_dir` seam: (HAPPY)
+    /// default veth config attaches TWO DISTINCT XDP programs to TWO
+    /// distinct veth ifaces with NO `DataplaneBootError`, asserted via
+    /// observable kernel state (`ip link show prog/xdp id`); (DIAGNOSTIC)
+    /// both ifaces = one real iface surfaces the typed
+    /// `DataplaneError::IfaceXdpSlotBusy` on a REAL `EBUSY`.
+    mod serve_boot_provisions_veth;
     mod server_lifecycle;
     /// phase-2-xdp-service-map Slice 08 (US-08) — service-map
     /// hydrator dispatch RED scaffold per
