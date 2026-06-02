@@ -14,7 +14,9 @@
 //!       witness).
 
 use overdrive_cli::commands::alloc::AllocStatusOutput;
-use overdrive_control_plane::api::AllocStatusResponse;
+use overdrive_control_plane::api::{
+    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, ResourcesBody,
+};
 use overdrive_core::aggregate::Listener;
 use overdrive_core::dataplane::Proto;
 use std::num::NonZeroU16;
@@ -246,5 +248,114 @@ fn render_alloc_status_renders_no_listeners_section_when_empty() {
         !rendered.contains("Listeners:"),
         "a workload with no declared listeners must NOT render a 'Listeners:' section; \
          got:\n{rendered}",
+    );
+}
+
+// -------------------------------------------------------------------
+// (h) Failed/terminal allocation surfaces state + error on the LIVE path.
+//
+// RCA finding S-A4 (root-cause-analysis-convergence-dataplane-gap.md):
+// when a backend process fails to start (e.g. `bind(): Address already
+// in use`), the allocation goes terminal/Failed but `overdrive alloc
+// status` read as a healthy bare `Allocations: 1` with NO per-row state
+// or error. An operator could not distinguish a healthy Running workload
+// from one whose process died on startup. The live renderer
+// (`render::alloc_status`, the function `main.rs:158` actually calls)
+// MUST surface each allocation's state, and render a Failed allocation
+// prominently with its captured failure detail.
+// -------------------------------------------------------------------
+
+/// Build a minimal `AllocStatusRowBody` for the given state, error, and
+/// exit code. Other fields carry inert defaults — they are not the
+/// subject of these assertions.
+fn row_with_state(
+    alloc_id: &str,
+    state: AllocStateWire,
+    error: Option<&str>,
+    exit_code: Option<i32>,
+) -> AllocStatusRowBody {
+    AllocStatusRowBody {
+        alloc_id: alloc_id.to_string(),
+        workload_id: "dns-resolver".to_string(),
+        node_id: "node-a".to_string(),
+        state,
+        reason: None,
+        resources: ResourcesBody { cpu_milli: 100, memory_bytes: 1024 },
+        started_at: None,
+        exit_code,
+        last_transition: None,
+        error: error.map(str::to_owned),
+    }
+}
+
+/// A Failed allocation whose backend crashed on `bind(): Address already
+/// in use` must read as Failed WITH its captured error on the live path.
+/// The bare `Allocations: 1` line is no longer the only signal.
+#[test]
+fn render_alloc_status_surfaces_failed_allocation_state_and_error() {
+    let snapshot = AllocStatusResponse {
+        rows: vec![row_with_state(
+            "alloc-dns-resolver-0",
+            AllocStateWire::Failed,
+            Some("bind: Address already in use"),
+            Some(1),
+        )],
+        ..Default::default()
+    };
+
+    let out = AllocStatusOutput {
+        workload_id: "dns-resolver".to_string(),
+        spec_digest: "d7b885".to_string() + &"0".repeat(58),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot,
+    };
+
+    let rendered = overdrive_cli::render::alloc_status(&out);
+
+    assert!(
+        rendered.contains("Failed"),
+        "a Failed allocation must read as Failed on the live alloc_status path — \
+         the bare 'Allocations: 1' line must not be the only signal; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("bind: Address already in use"),
+        "the Failed allocation's captured error detail must be surfaced so the \
+         operator sees the cause; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("alloc-dns-resolver-0"),
+        "the failing allocation's id must be rendered so the operator can locate \
+         it; got:\n{rendered}",
+    );
+}
+
+/// A healthy Running allocation must NOT read as Failed — no false
+/// failure signal on the live path.
+#[test]
+fn render_alloc_status_running_allocation_does_not_read_as_failed() {
+    let snapshot = AllocStatusResponse {
+        rows: vec![row_with_state("alloc-dns-resolver-0", AllocStateWire::Running, None, None)],
+        ..Default::default()
+    };
+
+    let out = AllocStatusOutput {
+        workload_id: "dns-resolver".to_string(),
+        spec_digest: "d7b885".to_string() + &"0".repeat(58),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot,
+    };
+
+    let rendered = overdrive_cli::render::alloc_status(&out);
+
+    assert!(
+        rendered.contains("Running"),
+        "a healthy Running allocation must surface its Running state; got:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("Failed"),
+        "a healthy Running allocation must NOT read as Failed — no false failure \
+         signal; got:\n{rendered}",
     );
 }

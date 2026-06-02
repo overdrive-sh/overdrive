@@ -174,12 +174,48 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
     if out.allocations_total == 0 && !out.empty_state_message.is_empty() {
         let _ = writeln!(s, "{}", out.empty_state_message);
     }
+    // Per-allocation state lines. The bare `Allocations: N` count is not
+    // enough for an operator to distinguish a healthy Running workload
+    // from one whose backend process died on startup (RCA finding S-A4):
+    // a Failed allocation must read as Failed WITH its captured cause.
+    // Renders each row's state, its structured `reason`, and the verbatim
+    // driver `error` detail (e.g. `bind: Address already in use`).
+    render_allocation_rows(&mut s, &out.snapshot.rows);
     // Listeners are an INTENT property carried on the snapshot envelope,
     // independent of allocations/convergence — render them at ANY
     // allocation count (including 0) so a pre-convergence UDP Service
     // surfaces `5353/udp`. Gated only on listener presence.
     render_listeners_section(&mut s, &out.snapshot.listeners);
     s
+}
+
+/// Append a per-allocation state block to `out`, one row per allocation.
+///
+/// Each allocation renders its `alloc_id`, its `state` (so a terminal /
+/// Failed allocation reads as Failed, not as a healthy bare count — RCA
+/// finding S-A4), and, when present, the structured transition `reason`
+/// and the verbatim driver `error` detail that captures the failure
+/// cause (e.g. `bind: Address already in use`). `exit_code` is surfaced
+/// when the allocation carries one. Shares `state_label` /
+/// `TransitionReason::human_readable()` with `alloc_snapshot` so the live
+/// and snapshot paths cannot drift on state vocabulary.
+fn render_allocation_rows(
+    out: &mut String,
+    rows: &[overdrive_control_plane::api::AllocStatusRowBody],
+) {
+    use std::fmt::Write as _;
+    for row in rows {
+        let _ = writeln!(out, "  {}: {}", row.alloc_id, state_label(row.state));
+        if let Some(reason) = &row.reason {
+            let _ = writeln!(out, "    reason: {}", reason.human_readable());
+        }
+        if let Some(error) = &row.error {
+            let _ = writeln!(out, "    error: {error}");
+        }
+        if let Some(code) = row.exit_code {
+            let _ = writeln!(out, "    exit code: {code}");
+        }
+    }
 }
 
 /// Append the operator-facing `Listeners:` section to `out` IFF the
