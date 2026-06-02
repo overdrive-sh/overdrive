@@ -334,6 +334,21 @@ components:
             description: |-
               Workload-kind discriminator per ADR-0047 §1 / step 02-02 [D4].
               The CLI render layer branches on this field.
+        listeners:
+          type: array
+          items:
+            $ref: '#/components/schemas/Listener'
+          description: |-
+            Operator-declared listeners in declaration order — `(port,
+            protocol)` only, reusing the typed `overdrive_core::aggregate::
+            Listener` wire shape. Populated for `WorkloadKind::Service` reads
+            (projected from the persisted `WorkloadIntent::Service` aggregate's
+            `listeners`); empty for `Job` / `Schedule` reads (those carry no
+            listeners). The CLI render layer renders each as `<port>/<protocol>`
+            so a UDP service's `Proto::Udp` is operator-visible.
+
+            Additive-safe: `skip_serializing_if = "Vec::is_empty"` keeps the
+            JSON wire backward-compatible for non-Service reads.
         replicas_desired:
           type: integer
           format: int32

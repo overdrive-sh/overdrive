@@ -788,7 +788,7 @@ pub async fn alloc_status(
     // Per ADR-0050 / step 02-03d — project per-variant identity,
     // resource envelope, replica count, and (Service-only) allocated
     // VIP from the typed `WorkloadIntent`.
-    let (resources_body, replicas_desired, response_vip) = match &intent {
+    let (resources_body, replicas_desired, response_vip, listeners) = match &intent {
         WorkloadIntent::Job(job) => (
             api::ResourcesBody {
                 cpu_milli: job.resources.cpu_milli,
@@ -796,6 +796,9 @@ pub async fn alloc_status(
             },
             job.replicas.get(),
             None,
+            // Job carries no listeners — the operator-facing surface
+            // renders no Listeners section for non-Service kinds.
+            Vec::new(),
         ),
         WorkloadIntent::Service(svc) => {
             // Service-arm VIP resolution per ADR-0049 (amended
@@ -815,6 +818,12 @@ pub async fn alloc_status(
                 },
                 svc.replicas.get(),
                 vip.map(|v| v.get().to_string()),
+                // Project the persisted Service intent's listeners
+                // (port + Proto) onto the wire response in declaration
+                // order. Persist-inputs discipline: project the actual
+                // intent listeners, never synthesise. The CLI render
+                // layer renders each as `<port>/<protocol>`.
+                svc.listeners.clone(),
             )
         }
         WorkloadIntent::Schedule(sched) => (
@@ -824,6 +833,7 @@ pub async fn alloc_status(
             },
             sched.job.replicas.get(),
             None,
+            Vec::new(),
         ),
     };
 
@@ -880,6 +890,7 @@ pub async fn alloc_status(
         restart_budget: Some(restart_budget),
         kind: Some(kind),
         vip: response_vip,
+        listeners,
     }))
 }
 

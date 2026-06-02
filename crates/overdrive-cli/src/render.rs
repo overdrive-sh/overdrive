@@ -704,6 +704,19 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
                     since,
                 );
             }
+            // Listeners section — Service-only, rendered IFF the
+            // intent declared at least one listener. Each listener is
+            // rendered as `<port>/<protocol>` using the protocol enum's
+            // canonical lowercase `as_str()` (per `.claude/rules/
+            // development.md` § "Label enums own their string
+            // representation"). This is the black-box surface that
+            // makes a UDP service's `Proto::Udp` operator-visible.
+            if !out.listeners.is_empty() {
+                let _ = writeln!(s, "Listeners:");
+                for listener in &out.listeners {
+                    let _ = writeln!(s, "  {}/{}", listener.port.get(), listener.protocol.as_str());
+                }
+            }
             s
         }
         WorkloadKind::Job => {
