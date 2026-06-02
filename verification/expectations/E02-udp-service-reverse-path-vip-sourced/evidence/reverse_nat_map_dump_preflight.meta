@@ -1,0 +1,4 @@
+# command: in_lima bpftool map dump name REVERSE_NAT_MAP
+# seed:    1
+# started: 2026-06-02T14:06:30Z
+# exit:    1

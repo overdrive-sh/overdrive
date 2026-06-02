@@ -1,0 +1,2 @@
+# probe: loopback BEFORE run
+HEALTHY: loopback refused fast (no leaked XDP swallowing lo traffic)

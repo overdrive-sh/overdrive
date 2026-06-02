@@ -1,0 +1,115 @@
+diff --git a/docs/feature/udp-service-support/deliver/execution-log.json b/docs/feature/udp-service-support/deliver/execution-log.json
+index 44d8fb9b..31a8a7ea 100644
+--- a/docs/feature/udp-service-support/deliver/execution-log.json
++++ b/docs/feature/udp-service-support/deliver/execution-log.json
+@@ -99,6 +99,83 @@
+       "s": "EXECUTED",
+       "d": "PASS",
+       "t": "2026-06-02T10:51:22Z"
++    },
++    {
++      "sid": "01-03",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T10:52:43Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "PREPARE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:24:51Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "RED_ACCEPTANCE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:28:55Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "RED_UNIT",
++      "s": "SKIPPED",
++      "d": "NOT_APPLICABLE: Tier-3 real-kernel AT is the unit-level exercise; per-listener REVERSE_NAT keys (each proto-byte distinguished) are observability surface asserted directly by the AT via reverse_nat_map_has_backend_proto map dump; the lockstep universe guard is Tier-1, landed 01-01. No separate PBT/unit layer needed to reach GREEN.",
++      "t": "2026-06-02T12:28:55Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:28:55Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:30:17Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "PREPARE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:42:33Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "RED_ACCEPTANCE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:43:55Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "RED_UNIT",
++      "s": "SKIPPED",
++      "d": "NOT_APPLICABLE: Tier-3 driving-adapter walking skeleton \u2014 the acceptance test directly asserts the observable proto-carried-through-intent surface via the commands::job::submit driving port + back-door IntentStore read; no separate unit layer is needed to reach GREEN (mirrors 01-02/01-03/01-04 RED_UNIT SKIPPED)",
++      "t": "2026-06-02T12:43:55Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:47:09Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:47:47Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
+index dcad63f9..f8a58ac0 100644
+--- a/verification/expectations/INDEX.md
++++ b/verification/expectations/INDEX.md
+@@ -8,12 +8,21 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+ | [O01](O01-kind-rejection-guidance/) | O | Job/Schedule + probe rejected with actionable guidance | K5 | S-SHCP-PARSE-05/06, CLI-12..14 | `pending` |
+ | [O02](O02-alloc-status-probes-section/) | O | `alloc status` renders a Probes section for a Service | K4 | S-SHCP-CLI-01..06 | `pending` |
+ | [E01](E01-coinflip-service-honest-early-exit/) | E | coinflip-as-Service honest EarlyExit, never `(took live)` | K1 | S-SHCP-RECON-04, INT-CLI-01, CLI-07..11 | `pending` |
++| [O03](O03-deploy-udp-service-accepted-udp-intent/) | O | `overdrive deploy <udp-spec>` accepted; intent carries `Proto::Udp` | K1 | S-04-A, roadmap 01-05, ADR-0060, US-04 | `pending` |
++| [E02](E02-udp-service-reverse-path-vip-sourced/) | E | deployed UDP service's reply sourced from VIP, not backend IP | K1 | S-04-A, K1, roadmap 01-03, ADR-0060, US-04 | `pending` |
+ 
+ ## Feature coverage
+ 
+ - **service-health-check-probes** — O01, O02, E01 (operator + e2e surfaces).
+   The in-process behaviour is covered by the four test tiers; these capture
+   the operator-observable and qualitative slice those tiers under-serve.
++- **udp-service-support** — O03 (deploy-accepted + udp-intent), E02 (the K1
++  reverse-path-VIP-source proof). The in-process logic and the Tier-3 wire
++  path are covered by the test tiers (notably the passing
++  `reverse_nat_udp_e2e.rs`); these capture the operator-observable deploy
++  half and the qualitative end-to-end #163-guard slice those tiers
++  under-serve. E02 is the design-time `why` for the
++  `reverse_nat_udp_e2e.rs` regression alarm (Stabilize doctrine).
+ 
+ ## Adding an expectation
+ 

@@ -1,0 +1,3 @@
+# probe: XDP attachments BEFORE run
+--- bpftool prog show (xdp/sched_cls only) ---
+(none)

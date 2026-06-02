@@ -1,0 +1,13 @@
+expectation_id: "E02"
+date_utc: "2026-06-02T14:06:30Z"
+overdrive_sha: "ea3c86f68b959235391cd3977014b5de0d5ddc0c"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "470f98ede22c5620b08f3737cd47b93b4de5313a"
+harness_invocation: "verification/harness/run-expectation.sh E02"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["S-04-A (`docs/feature/udp-service-support/distill/test-scenarios.md` — reverse path carries the VIP source; `bpftool` dump + wire capture)","K1 — UDP reverse-path success (`docs/feature/udp-service-support/feature-delta.md` § Outcome KPIs, 0%→100%; test-scenarios.md K-mapping: "K1 → S-04-A (wire capture source==VIP + `bpftool` dump)")","roadmap 01-03 (`docs/feature/udp-service-support/deliver/roadmap.json` — "Tier 3 walking skeleton: single UDP listener forward+reverse e2e via real `overdrive deploy` subprocess")","ADR-0060 (`docs/product/architecture/adr-0060-service-frontend-update-service-signature.md` — both adapters derive REVERSE_NAT keys from the same typed `ServiceFrontend`; proto=udp flows to the kernel rewrite)","US-04 (`docs/feature/udp-service-support/feature-delta.md` § Walking skeleton)"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

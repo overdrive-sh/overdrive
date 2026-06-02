@@ -1,0 +1,13 @@
+expectation_id: "O03"
+date_utc: "2026-06-02T14:03:50Z"
+overdrive_sha: "ea3c86f68b959235391cd3977014b5de0d5ddc0c"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "470f98ede22c5620b08f3737cd47b93b4de5313a"
+harness_invocation: "verification/harness/run-expectation.sh O03"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["S-04-A (`docs/feature/udp-service-support/distill/test-scenarios.md` — walking skeleton: deploy exits 0 + prints `Accepted.`)","roadmap 01-05 (`docs/feature/udp-service-support/deliver/roadmap.json` — "S-04-A driving-adapter companion: `overdrive deploy <udp-spec>` accepted via direct-handler test")","ADR-0060 (`docs/product/architecture/adr-0060-service-frontend-update-service-signature.md` — `ServiceFrontend(vip, port, proto)` carries the L4 protocol; proto is never positionally reconstructed)","US-04 (`docs/feature/udp-service-support/feature-delta.md` § Walking skeleton — single UDP listener forward + reverse e2e)"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.
