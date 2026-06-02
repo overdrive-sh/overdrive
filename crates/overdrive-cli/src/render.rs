@@ -174,7 +174,30 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
     if out.allocations_total == 0 && !out.empty_state_message.is_empty() {
         let _ = writeln!(s, "{}", out.empty_state_message);
     }
+    // Listeners are an INTENT property carried on the snapshot envelope,
+    // independent of allocations/convergence — render them at ANY
+    // allocation count (including 0) so a pre-convergence UDP Service
+    // surfaces `5353/udp`. Gated only on listener presence.
+    render_listeners_section(&mut s, &out.snapshot.listeners);
     s
+}
+
+/// Append the operator-facing `Listeners:` section to `out` IFF the
+/// intent declared at least one listener. Each listener renders as
+/// `<port>/<protocol>` using the protocol enum's canonical lowercase
+/// `as_str()` (per `.claude/rules/development.md` § "Label enums own
+/// their string representation"). Shared by both `alloc_status` (the
+/// live command renderer) and `alloc_status_kind_aware` so the two
+/// paths cannot drift.
+fn render_listeners_section(out: &mut String, listeners: &[overdrive_core::aggregate::Listener]) {
+    use std::fmt::Write as _;
+    if listeners.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "Listeners:");
+    for listener in listeners {
+        let _ = writeln!(out, "  {}/{}", listener.port.get(), listener.protocol.as_str());
+    }
 }
 
 /// Render a typed [`AllocStatusResponse`] as the journey TUI mockup
@@ -705,18 +728,12 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
                 );
             }
             // Listeners section — Service-only, rendered IFF the
-            // intent declared at least one listener. Each listener is
-            // rendered as `<port>/<protocol>` using the protocol enum's
-            // canonical lowercase `as_str()` (per `.claude/rules/
-            // development.md` § "Label enums own their string
-            // representation"). This is the black-box surface that
-            // makes a UDP service's `Proto::Udp` operator-visible.
-            if !out.listeners.is_empty() {
-                let _ = writeln!(s, "Listeners:");
-                for listener in &out.listeners {
-                    let _ = writeln!(s, "  {}/{}", listener.port.get(), listener.protocol.as_str());
-                }
-            }
+            // intent declared at least one listener. Shares
+            // `render_listeners_section` with `alloc_status` (the live
+            // command renderer) so the two paths cannot drift. This is
+            // the black-box surface that makes a UDP service's
+            // `Proto::Udp` operator-visible.
+            render_listeners_section(&mut s, &out.listeners);
             s
         }
         WorkloadKind::Job => {
