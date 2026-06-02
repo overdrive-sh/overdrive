@@ -314,12 +314,23 @@ fn wait_with_timeout(
 ///    client veth. This is LOAD-BEARING for S-04-C: a *non-rewritten*
 ///    backend-sourced reply (the #163 defect) is an ordinary
 ///    normal-stack frame on the client veth, NOT an `XDP_REDIRECT`
-///    frame, so the any-source capture reliably sees it. A positive
-///    control (`target/probe/probe_capture.sh`, plain-routed UDP) has
-///    been run and confirms the any-source client-veth capture surfaces
-///    reply datagrams with their real source IP — so for S-04-C, the
+///    frame, so the any-source capture reliably sees it. For S-04-C, the
 ///    ABSENCE of any reply datagram is a genuine, falsifiable
-///    distinguisher: it would FAIL if a backend-sourced reply arrived.
+///    distinguisher: it would FAIL if a backend-sourced reply arrived —
+///    BUT only because the capture is proven live by observable (3)
+///    below. (The standalone `target/probe/probe_capture.sh` /
+///    `probe_query_witness.sh` plain-routed-UDP probes additionally
+///    confirm, out-of-test, that the any-source client-veth capture
+///    surfaces both reply and query datagrams with their real
+///    addresses.)
+///
+/// 3. `query_datagrams_captured` — the INTRINSIC POSITIVE CONTROL. The
+///    client's outbound query (dport 5353, client -> VIP) is the
+///    in-test liveness witness for the very same capture that observable
+///    (2) trusts: a non-zero count proves tcpdump observed live traffic,
+///    so an empty `reply_source_ips` is genuine silence rather than a
+///    vacuous pass on a silently-failed capture. S-04-C asserts this is
+///    non-empty BEFORE trusting the empty reply-source set.
 struct RoundTripResult {
     /// Number of datagrams (of `count` sent) for which the client read
     /// back the echoed reply — i.e. the reply that survived the
@@ -331,6 +342,28 @@ struct RoundTripResult {
     /// the backend-down / non-rewritten path it reliably reflects what
     /// actually landed on the wire. S-04-C asserts this is empty.
     reply_source_ips: Vec<Ipv4Addr>,
+    /// Number of OUTBOUND query datagrams (destination port 5353,
+    /// client -> VIP) seen on the client veth by the same any-source
+    /// capture. This is the INTRINSIC POSITIVE CONTROL for S-04-C: the
+    /// client sends a query unconditionally on every round-trip
+    /// (regardless of backend state), and that query egresses the client
+    /// veth as `<CLIENT_IP>.<ephemeral> > <VIP>.5353` BEFORE the forward
+    /// XDP rewrite — so it is reliably captured. A non-zero count here
+    /// PROVES the capture is live (tcpdump started, the pcap is writable,
+    /// the wire was observed). Without this witness, an empty
+    /// `reply_source_ips` could mean EITHER "the wire was genuinely
+    /// silent" (the correct backend-down case) OR "tcpdump silently
+    /// failed to capture" (a vacuous pass that would mask a real
+    /// backend-sourced #163 reply). The query witness disambiguates:
+    /// `reply_source_ips.is_empty()` means "no reply on the wire" ONLY
+    /// when this count is non-zero (debugging.md § 3 — an empty capture
+    /// is negative evidence only if the tool is proven to see live
+    /// traffic; § 8 — do not let a swallowed setup degrade the signal).
+    /// Empirically verified (target/probe/probe_query_witness.sh, real
+    /// Lima, backend-down) to render as
+    /// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...` and to be reliably
+    /// present.
+    query_datagrams_captured: usize,
 }
 
 struct UdpFixture {
@@ -460,13 +493,27 @@ fn run_round_trips(
     // `reply_source_ips` is a genuine "no reply on the wire" distinguisher
     // (positive control: target/probe/probe_capture.sh).
     let pcap = pcap_dir.join("client.pcap");
+    // `-U` (immediate mode: write each captured packet to the `-w` file
+    // as it arrives, no output buffering) is LOAD-BEARING here. The test
+    // stops the capture with `Child::kill()` (SIGKILL), which gives
+    // tcpdump no chance to flush its default write buffer — without `-U`
+    // the `-w` pcap is left 0 bytes ("truncated dump file; tried to read
+    // 4 file header bytes, only got 0") even when packets flowed, so
+    // every parse below silently returns empty and the test passes
+    // vacuously. `-U` writes the pcap header + each packet immediately,
+    // so a SIGKILL still leaves a complete, readable capture. Verified on
+    // a real Lima run (target/probe/probe_query_witness.sh and a direct
+    // SIGKILL probe) that `-U` survives SIGKILL with the query datagram
+    // present. (debugging.md § 3 — an empty capture from a SIGKILL'd
+    // unbuffered tcpdump is a tool gap masquerading as negative evidence,
+    // not genuine silence.)
     let mut tcpdump = Command::new("ip")
         .args([
             "netns",
             "exec",
             &fixture.topo.client_ns.name,
             "tcpdump",
-            "-l",
+            "-U",
             "-n",
             "-i",
             fixture.topo.client_veth.as_str(),
@@ -531,8 +578,13 @@ fn run_round_trips(
     // which would FAIL if a backend-sourced reply (the #163 defect) had
     // arrived.
     let reply_source_ips = parse_pcap_udp_sources(&fixture.topo.client_ns.name, &pcap);
-    eprintln!("[diag] client veth any-source reply source IPs = {reply_source_ips:?}");
-    RoundTripResult { replies_received, reply_source_ips }
+    let query_datagrams_captured =
+        parse_pcap_udp_query_witness(&fixture.topo.client_ns.name, &pcap);
+    eprintln!(
+        "[diag] client veth any-source: reply source IPs = {reply_source_ips:?}, \
+         outbound query witness datagrams (dport {UDP_PORT}) = {query_datagrams_captured}"
+    );
+    RoundTripResult { replies_received, reply_source_ips, query_datagrams_captured }
 }
 
 /// Parse the UDP datagrams arriving at the client veth from `VIP:5353`
@@ -571,6 +623,60 @@ fn parse_pcap_udp_sources(ns_name: &str, pcap: &std::path::Path) -> Vec<Ipv4Addr
         }
     }
     sources
+}
+
+/// Count the OUTBOUND query datagrams (client -> VIP) captured on the
+/// client veth — i.e. UDP datagrams whose DESTINATION port is the
+/// listener port (5353). This is the intrinsic positive control for
+/// S-04-C: the client always sends a query, and that query egresses the
+/// client veth BEFORE the forward XDP rewrite, so it is reliably
+/// captured regardless of backend state. A non-zero return proves the
+/// capture is live (tcpdump ran, the pcap is readable, the wire was
+/// observed) — which is the precondition that makes an empty
+/// reply-source set (see `parse_pcap_udp_sources`) a genuine "no reply
+/// on the wire" signal rather than a vacuous pass on a silent capture
+/// failure.
+///
+/// We read the capture back via `tcpdump -r` and parse the same
+/// `IP <src>.<sport> > <dst>.<dport>` lines, this time keeping the
+/// datagrams whose DESTINATION port (the token after `>`) is the
+/// listener port. Empirically (target/probe/probe_query_witness.sh,
+/// real Lima) such lines render as
+/// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...` — note tcpdump applies
+/// its DNS dissector to port-5353 traffic, so a trailing `:` plus a
+/// decode tail follows the destination token; the parse strips the `:`
+/// and splits the last `.` (port) off, so the decode tail is ignored.
+fn parse_pcap_udp_query_witness(ns_name: &str, pcap: &std::path::Path) -> usize {
+    let out = Command::new("ip")
+        .args(["netns", "exec", ns_name, "tcpdump", "-n", "-r", pcap.to_str().unwrap_or(""), "udp"])
+        .output();
+    let Ok(out) = out else {
+        return 0;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut count = 0usize;
+    for line in text.lines() {
+        // Lines look like:
+        //   12:00:00.000000 IP 10.0.0.10.43450 > 10.0.0.1.5353: ...
+        let Some(ip_idx) = line.find(" IP ") else { continue };
+        let rest = &line[ip_idx + 4..];
+        let Some(gt) = rest.find(" > ") else { continue };
+        // Destination side: everything after " > ", up to the first
+        // whitespace (the decode tail). For the example above this is
+        // "10.0.0.1.5353:".
+        let dst_field = &rest[gt + 3..];
+        let dst = dst_field.split_whitespace().next().unwrap_or("");
+        // Strip a trailing ':' that tcpdump appends before the payload
+        // decode, then split the LAST '.' (port) off "<ip>.<port>".
+        let dst = dst.strip_suffix(':').unwrap_or(dst);
+        let Some(dot) = dst.rfind('.') else { continue };
+        let port_str = &dst[dot + 1..];
+        // Keep only outbound queries (destination port == listener port).
+        if port_str.trim() == UDP_PORT.to_string() {
+            count += 1;
+        }
+    }
+    count
 }
 
 /// S-04-A (WALKING SKELETON) — real UDP round-trip carries the VIP source.
@@ -707,10 +813,21 @@ fn every_udp_reply_independently_source_rewritten() {
 /// only best-effort for S-04-A/B): a #163-defect reply is a
 /// *non-rewritten* backend-sourced frame that traverses the normal
 /// kernel stack into the client veth — NOT an `XDP_REDIRECT`-delivered
-/// frame — so the in-netns capture reliably sees it. A positive control
-/// (`target/probe/probe_capture.sh`, plain-routed UDP with no XDP) has
-/// been run and confirms the any-source client-veth capture surfaces
-/// reply datagrams with their real source IP.
+/// frame — so the in-netns capture reliably sees it.
+///
+/// INTRINSIC POSITIVE CONTROL (closes the vacuous-pass gap): an empty
+/// `reply_source_ips` is trustworthy ONLY if the capture is proven live.
+/// This test makes that proof part of the test itself: the client's
+/// outbound query (dport 5353, client -> VIP) is sent unconditionally on
+/// every round-trip and egresses the client veth before the forward XDP
+/// rewrite, so the same any-source capture MUST witness it. The test
+/// asserts `query_datagrams_captured > 0` FIRST — if tcpdump silently
+/// failed (did not start in time, empty/unwritable pcap, killed early),
+/// that assertion FAILS with a "capture failed — cannot trust the
+/// silence" message instead of letting an empty reply-source set pass
+/// vacuously. The shape of the witness line was empirically verified on
+/// a real Lima run (target/probe/probe_query_witness.sh, backend-down):
+/// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...`.
 ///
 /// Falsifiability: if a backend-sourced reply DID arrive (the #163
 /// defect surfacing through some spurious path), `reply_source_ips`
@@ -737,19 +854,48 @@ fn missing_backend_response_distinguished_from_wrong_source() {
     drop(stubs);
     drop(dataplane);
 
-    // PRIMARY distinguisher (load-bearing, genuinely falsifiable): the
-    // any-source client-veth capture must show NO reply datagram from
-    // ANY source. With no backend bound, nothing is echoed, so nothing
-    // lands on the wire. A backend-sourced reply (the #163 defect) is a
-    // normal-stack frame the any-source capture reliably observes — so a
-    // non-empty `reply_source_ips` here would FAIL the test, which is
-    // precisely the "wrong-source response" this scenario distinguishes
-    // from genuine "no response".
+    // POSITIVE CONTROL (intrinsic, MUST fire FIRST): prove the capture is
+    // LIVE before trusting its silence. The client sends a query datagram
+    // (client -> VIP:5353) unconditionally on every round-trip, and that
+    // query egresses the client veth as
+    // `<CLIENT_IP>.<ephemeral> > <VIP>.5353` BEFORE the forward XDP
+    // rewrite — so an honest any-source capture MUST see it. If zero
+    // query datagrams were captured, tcpdump saw nothing live on the
+    // wire (it did not start in time, the pcap is unwritable/empty, or it
+    // was killed early) — the capture cannot be trusted, so the empty
+    // reply-source set below is MEANINGLESS and the test must FAIL here
+    // rather than pass vacuously. This closes the
+    // vacuous-pass-on-silent-tcpdump-failure gap (debugging.md § 3 —
+    // tool gaps look like negative evidence; § 8 — a swallowed setup
+    // failure must not degrade the signal).
+    assert!(
+        result.query_datagrams_captured > 0,
+        "CAPTURE FAILED / tcpdump saw nothing — cannot trust the silence. The client sends a \
+         query (dport {UDP_PORT}, client -> VIP) on every round-trip; it egresses the client \
+         veth before the forward XDP rewrite, so an honest capture MUST witness >= 1 such \
+         datagram. Zero captured means the any-source tcpdump did not observe live traffic \
+         (did not start, pcap empty/unwritable, or killed early), so the empty reply-source \
+         set below proves nothing — refusing to pass vacuously. pcaps: {}",
+        pcap_dir.display()
+    );
+
+    // PRIMARY distinguisher (load-bearing, genuinely falsifiable, now
+    // meaningful BECAUSE the capture is proven live by the witness
+    // above): the any-source client-veth capture must show NO reply
+    // datagram from ANY source. With no backend bound, nothing is echoed,
+    // so nothing lands on the wire. A backend-sourced reply (the #163
+    // defect) is a normal-stack frame the any-source capture reliably
+    // observes — so a non-empty `reply_source_ips` here would FAIL the
+    // test, which is precisely the "wrong-source response" this scenario
+    // distinguishes from genuine "no response".
     assert!(
         result.reply_source_ips.is_empty(),
         "with no backend bound, the client veth must see NO reply datagram from any source — \
          a captured reply would be the wrong-source (#163) failure this scenario distinguishes \
-         from 'no response'. Captured reply sources = {:?}. pcaps: {}",
+         from 'no response'. The capture is proven live ({} query witness datagram(s) seen), so \
+         this silence is genuine, not a capture failure. Captured reply sources = {:?}. \
+         pcaps: {}",
+        result.query_datagrams_captured,
         result.reply_source_ips,
         pcap_dir.display()
     );
