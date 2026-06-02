@@ -290,6 +290,81 @@ delegation.
 
 ---
 
+## 11. An empty collection is a downstream symptom — confirm the surface, then trace the producer
+
+An empty map / table / queue / result set at the *consumer* is not
+evidence the consumer or its wiring is broken. It is almost always a
+*downstream symptom*: either the producer never ran, or you are
+reading the wrong surface for this configuration. "X is empty ⇒ X is
+broken" inverts the evidence. Before concluding the consumer is at
+fault, walk one step upstream and confirm you are even looking at the
+surface this configuration writes.
+
+Two failure modes compound, and they did in the same investigation
+(`docs/analysis/root-cause-analysis-convergence-dataplane-gap.md` —
+"single-node UDP service programs no dataplane maps"):
+
+**A — wrong surface for the configuration.** The same logical
+operation routes to different concrete surfaces depending on config.
+A single-node *local* backend programs `LOCAL_BACKEND_MAP` (via the
+`cgroup_connect4` hook); `REVERSE_NAT_MAP` / `SERVICE_MAP` are the
+*remote*-backend XDP-redirect path and are **empty by design** on
+single-node localhost. Dumping the remote-path maps, reading `Found 0
+elements`, and concluding "the dataplane is dead" was the inversion —
+the surface this path actually writes (`LOCAL_BACKEND_MAP`) was
+non-empty. The shape generalises beyond BPF maps: a shard you didn't
+query, a partition the row didn't hash to, a cache tier the value
+skipped, an index the write didn't touch. Enumerate *all* candidate
+surfaces (`bpftool map show`, not just `dump name X`; every shard, not
+the one you guessed) and confirm which one this configuration uses
+before reading absence as failure.
+
+**B — a green count at one layer hides a failure below it.** A success
+metric at the orchestration layer is not a substitute for observing
+the lowest layer that can fail. `alloc status` read `Allocations: 1`
+while the `socat` backend *inside* that allocation had already crashed
+on `bind(): Address already in use` and the alloc was cycling terminal.
+"1 allocation" / "Running" / "deployed" at the control layer says
+nothing about the health of the process the allocation wraps. Per § 7,
+the question "did the backend actually bind?" is answered at the
+process layer (`ss -ulnp`, the workload's own stderr), never at the
+alloc-count layer.
+
+**The compounding shape.** Both fired at once: the producer failed
+(B — backend never bound) AND the investigator watched the wrong
+consumer (A — dumped the remote-path maps). Two independent reasons the
+map was empty, *neither* of which was "the wiring is broken." Comparing
+populations (§ 5) isolated both at once — TCP-vs-UDP and occupied-port-
+vs-free-port: UDP on a *free* port programmed the map byte-identically
+to TCP, falsifying "UDP-specific bug," and the only remaining
+differentiator was the fixture's port.
+
+**Check** — when a collection is empty, before blaming the consumer or
+its wiring:
+
+1. **Is this the surface this configuration writes?** Single-node vs
+   multi-node, local vs remote, this shard / pin path / map name vs
+   another. List every candidate surface and confirm the path under
+   test targets the one you're inspecting. An empty *wrong* surface is
+   not evidence about the right one.
+2. **Did the producer run?** Walk one step upstream — the process, the
+   row the reconciler reads, the allocation's *actual* state, not its
+   count. A green count is not a healthy producer.
+3. **Does a shared dev VM service own the resource the fixture needs?**
+   `ss -ulnp` / `ss -tlnp` for port ownership before blaming code:
+   `systemd-resolved` owns UDP 5353 in the Lima VM, so a fixture
+   binding 5353 fails `bind(): Address already in use` and the workload
+   never starts — surfacing two layers downstream as an empty map.
+
+This rule is the consumer-side companion to § 2 (an empty dump is
+taxonomy — "nothing here" — not mechanism — "why nothing got here"),
+§ 3 (an absence on the wrong surface is the canonical inspection-tool
+gap masquerading as negative evidence), § 5 (the population diff that
+isolates producer-failure from wrong-surface), and § 7 (probe the layer
+that can actually fail, not the aggregate above it).
+
+---
+
 ## Real-kernel debugging — `pwru`
 
 The pre-merge tiers gate regressions; they do not explain *why* a
