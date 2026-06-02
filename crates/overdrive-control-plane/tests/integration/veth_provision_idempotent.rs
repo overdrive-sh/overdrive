@@ -22,6 +22,7 @@
 #![allow(clippy::print_stderr)]
 
 use ipnet::Ipv4Net;
+use overdrive_control_plane::iface::resolve_iface_ipv4;
 use overdrive_control_plane::veth_provisioner::{
     VethProvisionError, VethProvisionPlan, derive_veth_plan, provision,
 };
@@ -82,22 +83,23 @@ fn provision_creates_pair_when_absent() {
     }
 }
 
-/// `provision` ADOPTS a pre-existing pair WITHOUT recreating it —
-/// idempotent detect-and-reuse per ADR-0061 § 3.1. A second provision
-/// against an already-present pair returns Ok and leaves the same pair
-/// in place (the link is still present; no EEXIST failure).
+/// `provision` over an ALREADY-COMPLETE pair converges to a silent
+/// idempotent success — the pair is still present and still resolves its
+/// gateway IPv4, and no step errors (the route `File exists` collision is
+/// swallowed). Guards against the converge falsely erroring on, or
+/// destructively re-doing work over, a good pair (ADR-0061 § 3.1).
 #[test]
-fn provision_adopts_preexisting_pair_without_recreating() {
+fn provision_complete_pair_converges_to_silent_success() {
     let (client, backend) = iface_names('a');
     delete_pair(&client);
 
     let plan = plan_for(&client, &backend, "10.97.0.0/24");
-    // First provision creates the pair (or skips on no privilege).
+    // First provision creates + fully converges the pair (or skips).
     match provision(&plan) {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
-                "SKIP provision_adopts_preexisting_pair_without_recreating: CAP_NET_ADMIN required ({err})"
+                "SKIP provision_complete_pair_converges_to_silent_success: CAP_NET_ADMIN required ({err})"
             );
             return;
         }
@@ -105,10 +107,129 @@ fn provision_adopts_preexisting_pair_without_recreating() {
     }
     assert!(link_present(&client), "pair must exist after first provision");
 
-    // Second provision must ADOPT the existing pair: Ok, no recreate,
-    // no EEXIST. The link is still present afterwards.
-    provision(&plan).expect("second provision must adopt the pre-existing pair without error");
-    assert!(link_present(&client), "pair must still exist after adopt");
+    // Second provision over the now-complete pair must be an all-noop
+    // converge: Ok, no error, pair still present, gateway still resolves.
+    provision(&plan).expect("second provision over a complete pair must converge silently");
+    assert!(link_present(&client), "pair must still exist after re-converge");
+    assert_eq!(
+        resolve_iface_ipv4(&client).expect("client iface must still resolve its gateway IPv4"),
+        plan.client_gateway,
+        "re-converge must not disturb the assigned client gateway address",
+    );
 
     delete_pair(&client);
+}
+
+/// REGRESSION (the bug this fix closes): a HALF-PROVISIONED pair — both
+/// ends created by `ip link add` but NO address, NO up, NO route (a serve
+/// boot that crashed mid-provision) — must be COMPLETED in place by
+/// `provision`, so the client iface afterwards resolves its gateway IPv4.
+/// The old adopt-untouched branch returned `Ok(())` here and left the
+/// pair address-less, surfacing two layers downstream as an
+/// `IfaceAddrResolution` error.
+#[test]
+fn provision_completes_half_provisioned_pair() {
+    let (client, backend) = iface_names('h');
+    delete_pair(&client);
+
+    // Construct the partial state directly: create the pair and STOP —
+    // no addr, no up, no route. This is exactly the crash-mid-provision
+    // shape (atomic `ip link add` ran; nothing after it did).
+    let add = Command::new("ip")
+        .args(["link", "add", &client, "type", "veth", "peer", "name", &backend])
+        .output()
+        .expect("spawn ip link add");
+    if !add.status.success() {
+        let stderr = String::from_utf8_lossy(&add.stderr);
+        if stderr.contains("Operation not permitted") || stderr.contains("Permission denied") {
+            eprintln!("SKIP provision_completes_half_provisioned_pair: CAP_NET_ADMIN required");
+            return;
+        }
+        panic!("could not construct half-provisioned pair: {stderr}");
+    }
+    assert!(link_present(&client), "precondition: half-provisioned pair created");
+
+    let plan = plan_for(&client, &backend, "10.98.0.0/24");
+    match provision(&plan) {
+        Ok(()) => {
+            // The regression assertion: the address the old path skipped
+            // is now assigned, so the iface resolves its gateway IPv4 —
+            // NOT the IfaceAddrResolution error the bug produced.
+            let resolved = resolve_iface_ipv4(&client)
+                .expect("converge must complete the half-provisioned pair's client address");
+            assert_eq!(
+                resolved, plan.client_gateway,
+                "converge must assign the derived client gateway to the half-provisioned iface",
+            );
+            delete_pair(&client);
+        }
+        Err(err) if is_cap_skip(&err) => {
+            eprintln!(
+                "SKIP provision_completes_half_provisioned_pair: CAP_NET_ADMIN required ({err})"
+            );
+            delete_pair(&client);
+        }
+        Err(err) => {
+            delete_pair(&client);
+            panic!("provision failed to complete half-provisioned pair: {err}");
+        }
+    }
+}
+
+/// § 3.2 corrupted edge: client iface present but its declared peer
+/// ABSENT (the peer was separately deleted). `provision` must RECREATE
+/// the pair from scratch and converge it — afterwards both ends exist and
+/// the client resolves its gateway IPv4.
+#[test]
+fn provision_recreates_pair_when_peer_absent() {
+    let (client, backend) = iface_names('p');
+    delete_pair(&client);
+
+    let plan = plan_for(&client, &backend, "10.99.0.0/24");
+    // Bring up a complete pair first (or skip on no privilege).
+    match provision(&plan) {
+        Ok(()) => {}
+        Err(err) if is_cap_skip(&err) => {
+            eprintln!(
+                "SKIP provision_recreates_pair_when_peer_absent: CAP_NET_ADMIN required ({err})"
+            );
+            return;
+        }
+        Err(err) => panic!("initial provision failed: {err}"),
+    }
+    // Corrupt it into the § 3.2 shape "client present, declared peer
+    // absent". Deleting a veth end reaps BOTH ends, so we cannot just
+    // `ip link del <backend>`. Instead we move the peer into a throwaway
+    // network namespace: the peer leaves the host netns (so the declared
+    // `<backend>` name is absent in the host netns the provisioner reads)
+    // while the client end stays present in the host netns. This is the
+    // exact "peer separately moved to another netns" reachable shape
+    // ADR-0061 § 3.2 names.
+    let stash_ns = format!("ovd-stash-{}", std::process::id() & 0xffff);
+    let _ = Command::new("ip").args(["netns", "add", &stash_ns]).output();
+    let moved = Command::new("ip").args(["link", "set", &backend, "netns", &stash_ns]).output();
+    let corrupted = link_present(&client) && !link_present(&backend);
+    if !corrupted {
+        // Could not construct the corrupted shape on this kernel/runner —
+        // skip rather than assert a precondition we cannot establish.
+        eprintln!(
+            "SKIP provision_recreates_pair_when_peer_absent: could not move peer to netns ({moved:?})"
+        );
+        let _ = Command::new("ip").args(["netns", "del", &stash_ns]).output();
+        delete_pair(&client);
+        return;
+    }
+
+    // Converge: must recreate the pair and fully provision it.
+    provision(&plan).expect("provision must recreate a corrupted client-present/peer-absent pair");
+    assert!(link_present(&client), "client end must exist after recreate");
+    assert!(link_present(&backend), "peer end must exist after recreate");
+    assert_eq!(
+        resolve_iface_ipv4(&client).expect("recreated client must resolve its gateway IPv4"),
+        plan.client_gateway,
+    );
+
+    delete_pair(&client);
+    // The stashed orphan peer dies with its netns.
+    let _ = Command::new("ip").args(["netns", "del", &stash_ns]).output();
 }

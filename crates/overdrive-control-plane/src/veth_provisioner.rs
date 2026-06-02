@@ -20,13 +20,18 @@
 //!   `.claude/rules/development.md` § "Persist inputs not derived
 //!   state": the plan is derived at provision time from the range and is
 //!   never persisted.
+//! - [`converge_steps`] — **pure** per-resource desired-vs-actual diff
+//!   (default lane, no I/O). Maps an [`ObservedVeth`] snapshot of actual
+//!   kernel state to the minimal ordered [`VethStep`] set that converges
+//!   the pair to its desired complete shape per ADR-0061 § 3.1 / § 3.2.
 //! - [`provision`] — the real `ip(8)` shell-out (`#[cfg(target_os =
-//!   "linux")]` production). Idempotent detect-and-reuse per ADR-0061
-//!   § 3.1: `ip link show <cli>` FIRST; if the pair pre-exists (created
-//!   by a prior serve boot, an OS image, or a Lima/Yocto provisioner)
-//!   ADOPT it untouched. Only create the pair + assign addresses + bring
-//!   both up + add the route when the pair is ABSENT. Never tear down
-//!   (DQ-4 leave-and-reuse).
+//!   "linux")]` production). **Idempotent converge-on-boot** per ADR-0061
+//!   § 3.1: OBSERVE actual kernel state, compute [`converge_steps`], then
+//!   EXECUTE each step idempotently (swallowing `EEXIST` / `File exists`
+//!   on address/route add). A complete pair converges to all-noop; a
+//!   half-provisioned pair (the crash-mid-provision case) is COMPLETED in
+//!   place; a corrupted pair (client present, peer absent — § 3.2) is
+//!   RECREATED. Never tears down a usable pair (DQ-4 leave-and-reuse).
 //!
 //! Single-node runs entirely in the host netns — there is no netns
 //! machinery here (no `ip netns add`, no `ip link set <if> netns <ns>`).
@@ -109,6 +114,11 @@ pub enum VethProvisionError {
     /// `ip addr add <cidr> dev <iface>` failed.
     #[error("`ip addr add {cidr} dev {iface}` failed (status={status:?}): {stderr}")]
     AddrAddFailed { iface: String, cidr: String, stderr: String, status: Option<i32> },
+    /// `ip link del <iface>` failed (the § 3.2 RecreatePair teardown of a
+    /// corrupted, Overdrive-owned half-pair). An "absent" failure is
+    /// benign (already gone) and is swallowed before this surfaces.
+    #[error("`ip link del {iface}` failed (status={status:?}): {stderr}")]
+    LinkDelFailed { iface: String, stderr: String, status: Option<i32> },
     /// `ip link set <iface> up` failed.
     #[error("`ip link set {iface} up` failed (status={status:?}): {stderr}")]
     LinkUpFailed { iface: String, stderr: String, status: Option<i32> },
@@ -157,16 +167,151 @@ pub fn derive_veth_plan(
     }
 }
 
+/// Observed actual kernel state of the single-node veth pair — the
+/// input to the pure [`converge_steps`] diff. Each field is a single
+/// observable fact the thin observer reads from the kernel
+/// (`ip link show` for presence/up-state, `getifaddrs(3)` for address
+/// presence) per ADR-0061 § 3.1. Modeling the actual state as a plain
+/// value object keeps the converge diff pure and exhaustively
+/// unit-testable in the default lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "six independent observed kernel facts (presence/addr/up × client/peer); \
+              a flag-per-fact value object is the clearest model of the converge input \
+              and is the shape ADR-0061 § 3.1 prescribes"
+)]
+pub struct ObservedVeth {
+    /// `<client_iface>` exists as a netdev.
+    pub client_present: bool,
+    /// `<backend_iface>` (the declared peer) exists as a netdev.
+    pub peer_present: bool,
+    /// `<client_iface>` carries the desired client gateway IPv4 address.
+    pub client_addr_present: bool,
+    /// `<backend_iface>` carries the desired backend gateway IPv4 address
+    /// (only meaningful when the plan has a `backend_gateway`).
+    pub backend_addr_present: bool,
+    /// `<client_iface>` is administratively UP.
+    pub client_up: bool,
+    /// `<backend_iface>` is administratively UP.
+    pub backend_up: bool,
+}
+
+/// A single idempotent convergence action the executor applies via
+/// `ip(8)`. The ordered `Vec<VethStep>` from [`converge_steps`] is the
+/// minimal set of steps that brings an [`ObservedVeth`] to the desired
+/// complete shape. Ordering is load-bearing: the pair must exist before
+/// addresses can be assigned, and (re)creating the pair subsumes every
+/// downstream step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VethStep {
+    /// Delete the orphaned client end and recreate the pair from scratch
+    /// — the § 3.2 corrupted edge (client present, peer absent). Deleting
+    /// one end reaps both; the recreate restores the atomic pair.
+    RecreatePair,
+    /// `ip link add <client> type veth peer name <backend>` — the pair
+    /// is wholly absent (first boot).
+    CreatePair,
+    /// `ip addr add <client_gateway>/<prefix> dev <client>`.
+    AddClientAddr,
+    /// `ip addr add <backend_gateway>/<prefix> dev <backend>` (only when
+    /// the plan derives a backend gateway).
+    AddBackendAddr,
+    /// `ip link set <client> up`.
+    SetClientUp,
+    /// `ip link set <backend> up`.
+    SetBackendUp,
+    /// `ip route add <route_cidr> dev <client>` — always attempted
+    /// idempotently (the connected route the kernel auto-creates on
+    /// address assignment legitimately collides with `File exists`).
+    AddRoute,
+}
+
+/// Compute the minimal ordered set of [`VethStep`]s that converges the
+/// veth pair from its `observed` actual state to the desired complete
+/// shape the `plan` describes (ADR-0061 § 3.1 / § 3.2).
+///
+/// PURE — no I/O, deterministic (same inputs → same step vec). This is
+/// the per-resource desired-vs-actual diff at the heart of the
+/// converge-on-boot model; the thin executor in [`provision`] applies
+/// the returned steps in order.
+///
+/// Convergence rules:
+///
+/// - **Pair wholly absent** → `[CreatePair, …]` then every downstream
+///   step (a freshly created pair has no addresses and is down).
+/// - **Client present but peer absent** (§ 3.2 corrupted edge) →
+///   `[RecreatePair, …]` then every downstream step (the recreate
+///   produces a clean pair that needs full address/up/route convergence).
+/// - **Pair present** → add only the MISSING resources: `AddClientAddr`
+///   when the client address is absent, `AddBackendAddr` when the plan
+///   has a backend gateway and that address is absent, `SetClientUp` /
+///   `SetBackendUp` when an end is down.
+/// - **Route** → `AddRoute` is ALWAYS emitted (the executor swallows the
+///   `File exists` collision), so a complete pair still converges to
+///   exactly `[AddRoute]` — a single idempotent noop — rather than an
+///   empty vec. This keeps the route reachable even if a prior boot
+///   created the addresses but not the explicit route.
+#[must_use]
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the desired-vs-actual diff signature `(&plan, &observed)` is the reconciler-shaped \
+              contract ADR-0061 § 3.1 prescribes and a stepping-stone to the issue #197 port trait; \
+              ObservedVeth is borrowed for symmetry with the plan and to stay stable if facts grow"
+)]
+pub fn converge_steps(plan: &VethProvisionPlan, observed: &ObservedVeth) -> Vec<VethStep> {
+    let mut steps = Vec::new();
+
+    // Pair-level shape first. A (re)create produces a clean pair, so the
+    // downstream address/up steps are unconditionally needed afterwards.
+    let recreated = match (observed.client_present, observed.peer_present) {
+        (false, _) => {
+            steps.push(VethStep::CreatePair);
+            true
+        }
+        (true, false) => {
+            // § 3.2: client present, declared peer absent — recreate.
+            steps.push(VethStep::RecreatePair);
+            true
+        }
+        (true, true) => false,
+    };
+
+    // Client address: needed when freshly (re)created OR when missing.
+    if recreated || !observed.client_addr_present {
+        steps.push(VethStep::AddClientAddr);
+    }
+    // Backend address: only when the plan derives a backend gateway, and
+    // needed when freshly (re)created OR when missing.
+    if plan.backend_gateway.is_some() && (recreated || !observed.backend_addr_present) {
+        steps.push(VethStep::AddBackendAddr);
+    }
+    // Bring ends up: needed when freshly (re)created OR when down.
+    if recreated || !observed.client_up {
+        steps.push(VethStep::SetClientUp);
+    }
+    if recreated || !observed.backend_up {
+        steps.push(VethStep::SetBackendUp);
+    }
+    // Route is always attempted idempotently.
+    steps.push(VethStep::AddRoute);
+
+    steps
+}
+
 /// Provision the single-node veth pair in the host netns from `plan`.
 ///
-/// **Idempotent detect-and-reuse** (ADR-0061 § 3.1): runs
-/// `ip link show <client_iface>` FIRST. If the pair already exists
-/// (created by a prior serve boot, an OS image, or a Lima/Yocto
-/// provisioner) it is ADOPTED untouched — no recreate, no failure, a
-/// pre-existing route is left in place. Only when the pair is ABSENT
-/// does it create the pair, assign the gateway address(es), bring both
-/// ends up, and add the on-link route. Never tears down (DQ-4
-/// leave-and-reuse).
+/// **Idempotent converge-on-boot** (ADR-0061 § 3.1 / § 3.2): OBSERVE the
+/// actual kernel state ([`observe`]), compute the per-resource diff
+/// ([`converge_steps`]), then EXECUTE each step idempotently. A complete
+/// pair converges to an all-noop (`AddRoute` swallows `File exists`); a
+/// half-provisioned pair — created by a serve boot that crashed after
+/// `ip link add` but before address/up/route assignment — is COMPLETED
+/// in place; a corrupted pair (client present, declared peer absent —
+/// § 3.2) is RECREATED. Never tears down a *usable* pair (DQ-4
+/// leave-and-reuse). The provisioner therefore tolerates being
+/// interrupted at any point and re-run from the top across reboots
+/// (research R7 self-heal).
 ///
 /// Synchronous (`std::process::Command`) — provisioning is a boot-time
 /// one-shot, so the sync shape (matching `ThreeIfaceTopology::create`)
@@ -176,33 +321,112 @@ pub fn derive_veth_plan(
 /// # Errors
 ///
 /// Returns a distinct [`VethProvisionError`] variant per failing `ip(8)`
-/// step (link-show, link-add, addr-add, link-up, route-add) so the
-/// caller can branch on which boot step failed.
+/// step (link-show, link-add, link-del, addr-add, link-up, route-add) so
+/// the caller can branch on which boot step failed. `EEXIST` /
+/// `File exists` on address and route add is swallowed (already-present
+/// is the success case, not a failure).
 pub fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
-    use std::process::Command;
+    let observed = observe(plan)?;
+    for step in converge_steps(plan, &observed) {
+        execute_step(plan, step)?;
+    }
+    Ok(())
+}
 
-    // Detect: does the client-side veth already exist? `ip link show`
-    // exits 0 when present, non-zero ("does not exist") when absent.
-    let show = Command::new("ip").args(["link", "show", &plan.client_iface]).output()?;
+/// Read the actual kernel state of the pair into an [`ObservedVeth`].
+///
+/// Presence + up-state come from `ip link show <iface>` (exit 0 +
+/// `state UP` / `UP` flag); address presence comes from
+/// [`crate::iface::resolve_iface_ipv4`] matching the desired gateway —
+/// the same `getifaddrs(3)` walk the downstream boot path uses, so the
+/// observer and the consumer agree on what "address present" means.
+fn observe(plan: &VethProvisionPlan) -> Result<ObservedVeth, VethProvisionError> {
+    let (client_present, client_up) = link_state(&plan.client_iface)?;
+    let (peer_present, backend_up) = link_state(&plan.backend_iface)?;
+
+    let client_addr_present =
+        client_present && iface_has_addr(&plan.client_iface, plan.client_gateway);
+    // No backend gateway derived (e.g. /31) → the address is "present" by
+    // vacuous truth so converge never emits AddBackendAddr.
+    let backend_addr_present = plan
+        .backend_gateway
+        .is_none_or(|gw| peer_present && iface_has_addr(&plan.backend_iface, gw));
+
+    Ok(ObservedVeth {
+        client_present,
+        peer_present,
+        client_addr_present,
+        backend_addr_present,
+        client_up,
+        backend_up,
+    })
+}
+
+/// `ip link show <iface>` → `(present, up)`. Absent (either iproute2
+/// phrasing) → `(false, false)`; any other non-zero exit (e.g. EPERM)
+/// → [`VethProvisionError::LinkShowFailed`].
+fn link_state(iface: &str) -> Result<(bool, bool), VethProvisionError> {
+    let show = std::process::Command::new("ip").args(["link", "show", iface]).output()?;
     if show.status.success() {
-        // Adopt the pre-existing pair untouched — no recreate, no
-        // re-address, leave any pre-existing route in place.
-        return Ok(());
+        let stdout = String::from_utf8_lossy(&show.stdout);
+        // `ip link show` prints the admin flags between angle brackets,
+        // e.g. `<BROADCAST,MULTICAST,UP,LOWER_UP>`, and `state UP`.
+        let up = stdout.contains(",UP,")
+            || stdout.contains("<UP,")
+            || stdout.contains(",UP>")
+            || stdout.contains("state UP");
+        return Ok((true, up));
     }
-    // `ip link show` returns a non-zero exit with an "absent" phrase on
-    // stderr when the iface does not exist — the normal create path. Any
-    // other failure (e.g. EPERM) is a genuine error.
-    let show_stderr = String::from_utf8_lossy(&show.stderr);
-    if !link_absent(&show_stderr) {
-        return Err(VethProvisionError::LinkShowFailed {
-            iface: plan.client_iface.clone(),
-            stderr: show_stderr.trim().to_owned(),
-            status: show.status.code(),
-        });
+    let stderr = String::from_utf8_lossy(&show.stderr);
+    if link_absent(&stderr) {
+        return Ok((false, false));
     }
+    Err(VethProvisionError::LinkShowFailed {
+        iface: iface.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: show.status.code(),
+    })
+}
 
-    // Absent — create the pair in the host netns (no `netns` flags).
-    let add = Command::new("ip")
+/// True when `iface` carries `want` as a bound IPv4 address. Reuses the
+/// production `getifaddrs(3)` walk so observer and consumer agree.
+fn iface_has_addr(iface: &str, want: Ipv4Addr) -> bool {
+    crate::iface::resolve_iface_ipv4(iface).is_ok_and(|got| got == want)
+}
+
+/// Apply a single [`VethStep`] via `ip(8)`. Idempotent: `EEXIST` /
+/// `File exists` on address and route add is swallowed; `ip link set up`
+/// is idempotent at the kernel.
+fn execute_step(plan: &VethProvisionPlan, step: VethStep) -> Result<(), VethProvisionError> {
+    match step {
+        VethStep::RecreatePair => {
+            link_del(&plan.client_iface)?;
+            link_add(plan)
+        }
+        VethStep::CreatePair => link_add(plan),
+        VethStep::AddClientAddr => {
+            let cidr = format!("{}/{}", plan.client_gateway, plan.route_cidr.prefix_len());
+            addr_add(&plan.client_iface, &cidr)
+        }
+        VethStep::AddBackendAddr => {
+            // Only emitted when backend_gateway is Some — unreachable
+            // otherwise per converge_steps.
+            let gw = plan.backend_gateway.unwrap_or_else(|| {
+                unreachable!("AddBackendAddr emitted only when backend_gateway is Some")
+            });
+            let cidr = format!("{}/{}", gw, plan.route_cidr.prefix_len());
+            addr_add(&plan.backend_iface, &cidr)
+        }
+        VethStep::SetClientUp => link_up(&plan.client_iface),
+        VethStep::SetBackendUp => link_up(&plan.backend_iface),
+        VethStep::AddRoute => add_route(plan),
+    }
+}
+
+/// `ip link add <client> type veth peer name <backend>` (atomic pair
+/// creation).
+fn link_add(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
+    let add = std::process::Command::new("ip")
         .args([
             "link",
             "add",
@@ -214,61 +438,82 @@ pub fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
             &plan.backend_iface,
         ])
         .output()?;
-    if !add.status.success() {
-        return Err(VethProvisionError::LinkAddFailed {
-            client_iface: plan.client_iface.clone(),
-            backend_iface: plan.backend_iface.clone(),
-            stderr: String::from_utf8_lossy(&add.stderr).trim().to_owned(),
-            status: add.status.code(),
-        });
+    if add.status.success() {
+        return Ok(());
     }
-
-    // Assign the client-side gateway address + bring both ends up.
-    let client_cidr = format!("{}/{}", plan.client_gateway, plan.route_cidr.prefix_len());
-    addr_add(&plan.client_iface, &client_cidr)?;
-    if let Some(backend_gw) = plan.backend_gateway {
-        let backend_cidr = format!("{}/{}", backend_gw, plan.route_cidr.prefix_len());
-        addr_add(&plan.backend_iface, &backend_cidr)?;
-    }
-    link_up(&plan.client_iface)?;
-    link_up(&plan.backend_iface)?;
-
-    // On-link route: <vip_range> dev <client_iface>. Idempotent — a
-    // pre-existing route for this CIDR is left in place (ADR-0061
-    // § 3.1). Assigning the client/backend gateway address(es) above
-    // also auto-creates a kernel `proto kernel scope link` connected
-    // route for the same /N, so `ip route add` here can legitimately
-    // collide with `File exists`; that is the "already reachable" case,
-    // not a failure.
-    let route_cidr = plan.route_cidr.to_string();
-    let route = Command::new("ip")
-        .args(["route", "add", &route_cidr, "dev", &plan.client_iface])
-        .output()?;
-    if !route.status.success() {
-        let stderr = String::from_utf8_lossy(&route.stderr);
-        if !stderr.contains("File exists") {
-            return Err(VethProvisionError::RouteAddFailed {
-                cidr: route_cidr,
-                iface: plan.client_iface.clone(),
-                stderr: stderr.trim().to_owned(),
-                status: route.status.code(),
-            });
-        }
-    }
-
-    Ok(())
+    Err(VethProvisionError::LinkAddFailed {
+        client_iface: plan.client_iface.clone(),
+        backend_iface: plan.backend_iface.clone(),
+        stderr: String::from_utf8_lossy(&add.stderr).trim().to_owned(),
+        status: add.status.code(),
+    })
 }
 
+/// `ip link del <iface>` — deletes the orphaned client end (which reaps
+/// both ends of a veth pair). Used only by [`VethStep::RecreatePair`]
+/// (§ 3.2). A "does not exist" failure is benign (already gone) and
+/// swallowed; any other failure surfaces as
+/// [`VethProvisionError::LinkDelFailed`].
+fn link_del(iface: &str) -> Result<(), VethProvisionError> {
+    let out = std::process::Command::new("ip").args(["link", "del", iface]).output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if link_absent(&stderr) {
+        // Already gone — recreate proceeds.
+        return Ok(());
+    }
+    Err(VethProvisionError::LinkDelFailed {
+        iface: iface.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// On-link route `<vip_range> dev <client_iface>`. Idempotent —
+/// assigning the gateway address also auto-creates a kernel connected
+/// route for the same /N, so `ip route add` here can legitimately
+/// collide with `File exists`; that is the "already reachable" case,
+/// not a failure (ADR-0061 § 3.1).
+fn add_route(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
+    let route_cidr = plan.route_cidr.to_string();
+    let route = std::process::Command::new("ip")
+        .args(["route", "add", &route_cidr, "dev", &plan.client_iface])
+        .output()?;
+    if route.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&route.stderr);
+    if stderr.contains("File exists") {
+        return Ok(());
+    }
+    Err(VethProvisionError::RouteAddFailed {
+        cidr: route_cidr,
+        iface: plan.client_iface.clone(),
+        stderr: stderr.trim().to_owned(),
+        status: route.status.code(),
+    })
+}
+
+/// `ip addr add <cidr> dev <iface>`. Idempotent — swallows `EEXIST` /
+/// `File exists` (already-assigned is the converge success case, not a
+/// failure, per ADR-0061 § 3.1).
 fn addr_add(iface: &str, cidr: &str) -> Result<(), VethProvisionError> {
     let out =
         std::process::Command::new("ip").args(["addr", "add", cidr, "dev", iface]).output()?;
     if out.status.success() {
         return Ok(());
     }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("File exists") {
+        // Already assigned — the idempotent converge success case.
+        return Ok(());
+    }
     Err(VethProvisionError::AddrAddFailed {
         iface: iface.to_owned(),
         cidr: cidr.to_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        stderr: stderr.trim().to_owned(),
         status: out.status.code(),
     })
 }
@@ -304,10 +549,123 @@ fn link_absent(stderr: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
 mod tests {
-    use super::{VethProvisionPlan, derive_veth_plan, link_absent};
+    use super::{
+        ObservedVeth, VethProvisionPlan, VethStep, converge_steps, derive_veth_plan, link_absent,
+    };
     use ipnet::{IpAdd, Ipv4Net};
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
+
+    /// A complete (all-present, both-up) observation — the baseline the
+    /// converge tests mutate one field at a time.
+    fn complete_observed() -> ObservedVeth {
+        ObservedVeth {
+            client_present: true,
+            peer_present: true,
+            client_addr_present: true,
+            backend_addr_present: true,
+            client_up: true,
+            backend_up: true,
+        }
+    }
+
+    fn plan_24() -> VethProvisionPlan {
+        let range: Ipv4Net = "10.96.0.0/24".parse().expect("valid /24");
+        derive_veth_plan("ovd-veth-cli", "ovd-veth-bk", range)
+    }
+
+    /// REGRESSION (the bug this fix closes): a half-provisioned pair —
+    /// both ends present but the client address ABSENT (a serve boot
+    /// crashed after `ip link add` but before address assignment) —
+    /// must converge by COMPLETING the missing address, NOT be adopted
+    /// untouched. The old `provision` returned `Ok(())` here, leaving the
+    /// pair incomplete; `converge_steps` must instead emit `AddClientAddr`
+    /// (the address step the old path skipped).
+    #[test]
+    fn converge_completes_half_provisioned_pair_missing_client_addr() {
+        let plan = plan_24();
+        let observed = ObservedVeth { client_addr_present: false, ..complete_observed() };
+
+        let steps = converge_steps(&plan, &observed);
+
+        assert!(
+            steps.contains(&VethStep::AddClientAddr),
+            "half-provisioned pair (client addr absent) must emit AddClientAddr, got {steps:?}"
+        );
+        // It must NOT recreate or create — the pair is present, only the
+        // address is missing.
+        assert!(
+            !steps.contains(&VethStep::CreatePair),
+            "must not recreate a present pair: {steps:?}"
+        );
+        assert!(!steps.contains(&VethStep::RecreatePair), "peer present → no recreate: {steps:?}");
+    }
+
+    /// § 3.2 corrupted edge: client iface present but its declared peer
+    /// ABSENT → recreate the pair from scratch, then converge fully.
+    #[test]
+    fn converge_recreates_pair_when_peer_absent() {
+        let plan = plan_24();
+        let observed = ObservedVeth { peer_present: false, ..complete_observed() };
+
+        let steps = converge_steps(&plan, &observed);
+
+        assert_eq!(
+            steps,
+            vec![
+                VethStep::RecreatePair,
+                VethStep::AddClientAddr,
+                VethStep::AddBackendAddr,
+                VethStep::SetClientUp,
+                VethStep::SetBackendUp,
+                VethStep::AddRoute,
+            ],
+            "peer-absent corrupted pair must recreate then converge every downstream resource"
+        );
+    }
+
+    /// Wholly-absent pair (first boot) → create then converge everything.
+    #[test]
+    fn converge_creates_pair_when_wholly_absent() {
+        let plan = plan_24();
+        let observed = ObservedVeth {
+            client_present: false,
+            peer_present: false,
+            client_addr_present: false,
+            backend_addr_present: false,
+            client_up: false,
+            backend_up: false,
+        };
+
+        let steps = converge_steps(&plan, &observed);
+
+        assert_eq!(
+            steps,
+            vec![
+                VethStep::CreatePair,
+                VethStep::AddClientAddr,
+                VethStep::AddBackendAddr,
+                VethStep::SetClientUp,
+                VethStep::SetBackendUp,
+                VethStep::AddRoute,
+            ],
+            "absent pair must create then converge every downstream resource"
+        );
+    }
+
+    /// A fully-complete pair converges to a single idempotent
+    /// `AddRoute` noop — never re-creating, re-addressing, or re-upping
+    /// (guards against the converge falsely re-doing work on a good pair).
+    #[test]
+    fn converge_complete_pair_is_route_only_noop() {
+        let plan = plan_24();
+        let steps = converge_steps(&plan, &complete_observed());
+        assert_eq!(
+            steps,
+            vec![VethStep::AddRoute],
+            "complete pair must converge to exactly [AddRoute] (idempotent noop), got {steps:?}"
+        );
+    }
 
     /// Acceptance anchor (readable golden): the provisioner derives the
     /// on-link gateway + route from the first VIP range. `10.96.0.0/24`
@@ -374,6 +732,47 @@ mod tests {
     }
 
     proptest! {
+        /// Property: over the full present-pair partial-state space
+        /// (each of the four converge-relevant facts independently
+        /// present/absent), `converge_steps`
+        ///   (a) never emits Create/Recreate for a present pair with a
+        ///       present peer;
+        ///   (b) emits `AddClientAddr` iff the client addr is absent;
+        ///   (c) emits `AddBackendAddr` iff the backend addr is absent
+        ///       (the plan_24 backend gateway is always Some);
+        ///   (d) emits `SetClientUp` / `SetBackendUp` iff the respective
+        ///       end is down;
+        ///   (e) always ends with `AddRoute`.
+        /// This is the exhaustive desired-vs-actual invariant for the
+        /// completion path — the regression class the old adopt-untouched
+        /// branch violated for every absent sub-resource.
+        #[test]
+        fn converge_present_pair_emits_exactly_the_missing_resources(
+            client_addr in any::<bool>(),
+            backend_addr in any::<bool>(),
+            client_up in any::<bool>(),
+            backend_up in any::<bool>(),
+        ) {
+            let plan = plan_24();
+            let observed = ObservedVeth {
+                client_present: true,
+                peer_present: true,
+                client_addr_present: client_addr,
+                backend_addr_present: backend_addr,
+                client_up,
+                backend_up,
+            };
+            let steps = converge_steps(&plan, &observed);
+
+            prop_assert!(!steps.contains(&VethStep::CreatePair));
+            prop_assert!(!steps.contains(&VethStep::RecreatePair));
+            prop_assert_eq!(steps.contains(&VethStep::AddClientAddr), !client_addr);
+            prop_assert_eq!(steps.contains(&VethStep::AddBackendAddr), !backend_addr);
+            prop_assert_eq!(steps.contains(&VethStep::SetClientUp), !client_up);
+            prop_assert_eq!(steps.contains(&VethStep::SetBackendUp), !backend_up);
+            prop_assert_eq!(steps.last(), Some(&VethStep::AddRoute));
+        }
+
         /// Property (Hebert ch.3 invariant + generalized-example): for
         /// any /24../30 VIP range,
         ///   (a) the derived client gateway is the first usable host of
