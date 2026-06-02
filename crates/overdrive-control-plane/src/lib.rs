@@ -78,6 +78,12 @@ pub mod reconciler_runtime;
 pub mod reconcilers;
 pub mod streaming;
 pub mod tls_bootstrap;
+// single-node-dataplane-wiring step 01-02 — single-node veth provisioner
+// (adapter-host) per ADR-0061 § 3. Pure `derive_veth_plan` (default
+// lane) + idempotent `provision` (`#[cfg(target_os = "linux")]`
+// production, NOT integration-tests-gated). Wired into serve boot in
+// step 01-03.
+pub mod veth_provisioner;
 // reconciler-memory-redb step 01-03 — `ViewStore` port + error types
 // per ADR-0035 §2. Wired into `ReconcilerRuntime` in step 01-06.
 // service-vip-allocator step 02-02 — `[dataplane.vip_allocator]` TOML

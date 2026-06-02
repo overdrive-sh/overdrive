@@ -80,6 +80,11 @@ mod integration {
     /// surfaces is structurally impossible.
     mod terminal_propagation;
     mod tls_bootstrap;
+    /// single-node-dataplane-wiring step 01-02 — Tier-3 idempotent
+    /// veth provision (ADR-0061 § 3.1). Drives real `ip(8)` through
+    /// `veth_provisioner::provision`: creates-when-absent +
+    /// adopts-pre-existing-without-recreating.
+    mod veth_provision_idempotent;
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads
