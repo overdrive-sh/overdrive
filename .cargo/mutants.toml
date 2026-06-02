@@ -385,6 +385,30 @@ exclude_re = [
     # legitimate mutation descriptions for arithmetic flips,
     # comparison flips, or `Vec::new()`/`()` body replacements.
     "Default::default",
+
+    # `gather_service_listener_facts` `||` → `&&` (udp-service-support,
+    # ADR-0060 site #8 / C3). The guard
+    # `if suffix.is_empty() || suffix.contains('/') { continue; }` is a
+    # fast-path skip of the `workloads/<id>/stop` and `workloads/<id>/kind`
+    # sub-keys before the `from_store_bytes` decode below. Flipping to
+    # `&&` makes the early-skip never fire, but the downstream
+    # `let Ok(intent) = WorkloadIntent::from_store_bytes(...) else { continue }`
+    # + `WorkloadIntent::Service(..)` match rejects those sub-keys
+    # identically: `/stop` carries an empty payload (`b""`) and `/kind` a
+    # single discriminator byte, neither of which passes rkyv bytecheck
+    # for a full `WorkloadIntentEnvelope::Service` (which embeds
+    # `String`/`Vec` fields needing a valid trailing root region). The
+    # canonical `workloads/<id>` key has a non-empty suffix without `/`,
+    # so it is never skipped under either operator. The returned
+    # `Vec<ListenerRow>` is byte-identical for both operators — a genuine
+    # equivalent mutant, no test can distinguish them. The source-level
+    # `// mutants: skip` comment above the guard in
+    # `crates/overdrive-control-plane/src/reconciler_runtime.rs` carries
+    # the same rationale as documentation; this regex is the actual
+    # suppression mechanism (same shape as the `ProbeRunner::probe` and
+    # `evaluate_reconciler_is_pure` entries above — comment-skip does not
+    # fire for a mid-body expression mutation).
+    "replace \\|\\| with && in gather_service_listener_facts",
 ]
 
 # ---------------------------------------------------------------------------
