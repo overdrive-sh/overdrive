@@ -1,0 +1,230 @@
+{
+  "roadmap": {
+    "project_id": "reconciler-listener-fact-view",
+    "created_at": "2026-06-03T00:00:00Z",
+    "total_steps": 4,
+    "phases": 1
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Listener-fact in-memory view (ADR-0062 — hydration-layer efficiency fix)",
+      "description": "Replace ServiceMapHydrator's per-tick cluster scan with an in-memory ListenerFactStore maintained on the intent-change edge. Bottom-up, green bar at every COMMIT: store type + unit contract; AppState + boot rebuild; edge maintenance in handlers; hydrator read-path switch + DST invariants A/B/C + behaviour-equivalence pins. Per feature-delta.md locked sub-decisions 1-5.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "ListenerFactStore type + boot-rebuild projection + unit contract (U1-U6, invariant B)",
+          "description": "CREATE NEW `crates/overdrive-control-plane/src/listener_facts.rs` per feature-delta.md Component Decomposition + ADR-0062 § Decision. (1) `ListenerFactStore` struct holding TWO `BTreeMap`s (NOT `HashMap`, per `.claude/rules/development.md` § \"Ordered-collection choice\" — both maps are iterated by the boot rebuild and observed by DST invariants; iteration order must be seed-deterministic): primary `BTreeMap<ServiceId, ListenerRow>` (the read-path key) and secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` (cleanup index for stop; inner Vec in insertion/ServiceId order). `ListenerRow` is the existing type at `overdrive-core/src/traits/observation_store.rs:321`. (2) `upsert(&mut self, workload_id: WorkloadId, vip: &ServiceVip, listeners: &[Listener])` — for EACH listener compute `ServiceId::derive(&vip, listener.port, \"service-map\")` (the exact call `hydrate_bridge_desired_listeners` uses at `reconciler_runtime.rs:1705`; signature `ServiceId::derive(vip: &ServiceVip, port: NonZeroU16, purpose: &str)` at `overdrive-core/src/id.rs:825`), insert `ServiceId -> ListenerRow { vip: Some(vip), port, protocol }` into primary AND append the `ServiceId` to the workload's `Vec` in secondary. One primary entry per listener. (3) `remove_workload(&mut self, workload_id: &WorkloadId)` — look up the workload's `Vec<ServiceId>` in secondary, remove each from primary, then drop the secondary entry. (4) `fact_for(&self, service_id: &ServiceId) -> Option<ListenerRow>` — O(1) keyed read returning a clone of the small value. (5) `rebuild_from_intent(state: &AppState) -> Result<Self, ConvergenceError>` (async) — RELOCATE the body of `gather_service_listener_facts` (`reconciler_runtime.rs:1733-1796`) here, renamed to reflect \"boot rebuild\" not \"per-tick gather\": scan `workloads/`, skip `/stop` + `/kind` sub-keys (`suffix.is_empty() || suffix.contains('/')`), decode each `WorkloadIntent::Service(_)`, join the allocator VIP via `state.allocator.lock().await.get(&digest_bytes)` then DROP the guard before any `.await` (sub-decision 4 lock discipline), skip services with no allocator memo (`let Some(assigned_vip) = ... else { continue }`), and for EACH listener populate BOTH maps (deriving the same `ServiceId`). Does NOT delete the old `gather_service_listener_facts` yet — that relocation+per-tick-caller-delete happens in 01-04 to keep this step's bar green. (6) Unit tests in `#[cfg(test)] mod tests` cover U1-U6 from distill + invariant B (byte-equivalence edge-vs-rebuild, multi-listener, proptest). Add `pub mod listener_facts;` to `lib.rs`.",
+          "criteria": "Invariant B (`edge_maintained_store_byte_equivalent_to_rebuild`, multi-listener proptest, ≥1 service with ≥2 listeners): the store built incrementally via upsert equals `rebuild_from_intent` over the same intent set entry-for-entry (both maps incl. secondary inner-Vec order); seed printed on failure. B-ex (`edge_maintained_store_byte_equivalent_to_rebuild_three_listener_example`): web with (80,Tcp)(443,Tcp)(53,Udp) @ 10.96.0.7 yields 3 primary entries + a 3-element secondary Vec via both paths. U1 (`upsert_multi_listener_creates_one_primary_entry_per_listener`): L listeners -> L primary entries keyed by `ServiceId::derive(&vip, port, \"service-map\")` + secondary Vec of length L in listener order. U2 (`remove_workload_evicts_only_target_service_ids`): remove evicts exactly that workload's ServiceIds; other workload untouched. U3 (`fact_for_returns_row_for_present_and_none_for_absent`): Some for present, None for absent. U4 (`rebuild_from_intent_projects_service_intents_only`): only Service intents WITH allocator VIP contribute; Job/Schedule/no-VIP/sub-keys contribute nothing. U5 (`listener_fact_store_iteration_order_is_seed_deterministic`): both maps are BTreeMap, iterate in Ord order; grep returns zero `HashMap`/`HashSet` in the file. U6 (`conflict_release_does_not_insert_facts`): a path that does not call upsert leaves both maps unchanged. `cargo xtask lima run -- cargo check -p overdrive-control-plane --features integration-tests` clean; clippy -D warnings clean; rustdoc on every public item.",
+          "test_file": "crates/overdrive-control-plane/src/listener_facts.rs",
+          "scenario_name": "Acceptance: B (listener_fact_byte_equivalence_invariant.rs), B-ex | Unit tests (src/listener_facts.rs mod tests): upsert_multi_listener_creates_one_primary_entry_per_listener (U1), remove_workload_evicts_only_target_service_ids (U2), fact_for_returns_row_for_present_and_none_for_absent (U3), rebuild_from_intent_projects_service_intents_only (U4), listener_fact_store_iteration_order_is_seed_deterministic (U5), conflict_release_does_not_insert_facts (U6), edge_maintained_store_byte_equivalent_to_rebuild (B), edge_maintained_store_byte_equivalent_to_rebuild_three_listener_example (B-ex)",
+          "effort_hours": 6,
+          "dependencies": [],
+          "implementation_notes": "TDD 3-phase RED->GREEN->COMMIT (ADR-025). RED scaffolds use `#[should_panic(expected = \"RED scaffold\")]` on the test body per `.claude/rules/testing.md` § \"RED scaffolds\" (NO `.feature` files, NO pytest-bdd — Rust `#[test]`/`#[tokio::test]` only). Lima/nextest discipline (crafter's concern): minimum gate is `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` to compile, plus a Lima run for the proptest/DST cases (`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane`). proptest generators live next to the types they produce (`Proto`/`NonZeroU16`/`ServiceVip` strategies — reuse existing `Arbitrary` impls if present, else add local strategies in the test module) per `.claude/rules/testing.md` § \"Property-based testing\". The `rebuild_from_intent` body is the relocated `gather_service_listener_facts` projection VERBATIM in logic (same skip rules, same VIP-join, same per-listener emission) but populating both maps and deriving the ServiceId during the scan — the byte-equivalence (B) is what pins that the relocation did not drift. Do NOT delete the original `gather_service_listener_facts` in this step (the per-tick caller still exists until 01-04); the boot path is the surviving caller after 01-04. Per `feedback_single_cut_greenfield_migrations.md` the deletion lands with the read-path switch (01-04), not here. TEST PARADIGM: unit tests for the store contract use proptest `@property` where the surface supports it (U1, B, BE-3-shaped) per distill; U2/U3/U6 are named examples; U4 is a fixed-intent-set example (skip semantics). No Hypothesis/state-delta machinery — this is Rust; proptest is the project PBT tool.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-control-plane/src/listener_facts.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "files_to_delete": []
+          },
+          "acceptance_scenarios": [
+            "B|listener_fact_byte_equivalence_invariant.rs",
+            "B-ex",
+            "U1",
+            "U2",
+            "U3",
+            "U4",
+            "U5",
+            "U6"
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "AppState.listener_facts field + boot rebuild at startup wiring",
+          "description": "Wire the ListenerFactStore onto AppState and construct it at boot, mirroring the allocator's lifecycle per feature-delta.md sub-decision 1 + ADR-0062 § Decision (1). (1) Add `listener_facts: Arc<tokio::sync::Mutex<ListenerFactStore>>` field to `AppState` (`crates/overdrive-control-plane/src/lib.rs:203,285` per feature-delta.md Reuse Analysis), placed beside the existing `allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>` field. `tokio::sync::Mutex` (NOT `parking_lot`) because the guard is acquired in async hydrate/edge paths and the rebuild is async (per `.claude/rules/development.md` § \"Concurrency & async\"). (2) `AppState::new` (and/or the AppState constructor used by `serve_with_config` / `run_server_*`) gains a mandatory `listener_facts` parameter — NOT defaulted in the constructor body, per `.claude/rules/development.md` § \"Port-trait dependencies\" (required at the call site, so a forgotten wiring fails to compile). (3) At the startup wiring site, immediately after the existing `PersistentServiceVipAllocator::bulk_load` block (the allocator boot rebuild — same site feature-delta.md sub-decision 3 names), construct `let listener_facts = Arc::new(Mutex::new(ListenerFactStore::rebuild_from_intent(&state_or_inputs).await?));` and thread it into AppState. The rebuild reads the same `IntentStore` + allocator the allocator's `bulk_load` just populated, so the allocator MUST be constructed/bulk-loaded BEFORE the listener-fact rebuild (the rebuild joins allocator VIPs). (4) Migrate every `AppState::new(...)` / AppState-constructing test fixture call site to pass the new field (tests build it via `rebuild_from_intent` over their seeded intent set, the same shape `service_backends_hydrate_desired.rs` uses for the allocator). (5) NO handler edge-maintenance yet (01-03); NO read-path switch yet (01-04). After this step the store exists, is boot-rebuilt, and is held on AppState but is not yet mutated on the edge nor read by the hydrator — the bar stays green because the existing per-tick gather still drives hydration.",
+          "criteria": "`AppState` has a `listener_facts: Arc<tokio::sync::Mutex<ListenerFactStore>>` field beside `allocator`. `AppState::new` (and the constructor `serve_with_config`/`run_server_*` calls) takes `listener_facts` as a mandatory parameter (no default in the body). At the startup wiring site, `ListenerFactStore::rebuild_from_intent(...)` is invoked once, AFTER the allocator `bulk_load`, and its result is wrapped `Arc::new(Mutex::new(...))` and threaded into AppState. Every AppState-constructing test fixture call site is migrated to pass the field (built via `rebuild_from_intent` over the fixture's intent set). Unit/wiring tests cover: (a) boot rebuild over a fixture intent set populates `listener_facts` with the expected primary entries (one per listener of each VIP-allocated Service); (b) AppState construction with an empty intent set yields an empty store (both maps empty). `cargo xtask lima run -- cargo check -p overdrive-control-plane --features integration-tests` clean; clippy -D warnings clean; `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` compiles.",
+          "test_file": "crates/overdrive-control-plane/src/lib.rs",
+          "scenario_name": "Acceptance: (boot-wiring prerequisite for A/BE-1/BE-2 — exercised end-to-end in 01-04; AppState test builder per distill § Pre-requisites) | Unit tests (src/lib.rs / src/listener_facts.rs mod tests): app_state_boot_rebuilds_listener_facts_from_intent, app_state_empty_intent_yields_empty_store",
+          "effort_hours": 4,
+          "dependencies": [
+            "01-01"
+          ],
+          "implementation_notes": "TDD 3-phase RED->GREEN->COMMIT. The AppState test builder is the `build_app_state(tmp, obs)` shape from `service_backends_hydrate_desired.rs` (Sim adapters + LocalIntentStore + TempDir) extended to construct `listener_facts` via `rebuild_from_intent` next to the allocator `bulk_load` — exactly the wiring the production `run_server_*` path adds (distill § Pre-requisites \"AppState test builder\"). Ordering is load-bearing: allocator bulk_load BEFORE listener-fact rebuild (rebuild joins allocator VIPs; a service with no allocator memo is skipped). Per `feedback_single_cut_greenfield_migrations.md` the ~N AppState fixture call-site migration lands in this single commit (no feature flag, no parallel constructor). Lima discipline: `--no-run` compile gate on macOS plus a Lima nextest run for the wiring tests. TEST PARADIGM: these are wiring/example tests (verify boot composition, not invariants) — single-example is correct here; the invariant coverage (A/B/C) lands in 01-01 (B) and 01-04 (A/C). EXEMPT FROM PARADIGM: boot-composition wiring verifies the construction graph, not a quantifiable property; compensated by invariant B (01-01) which property-checks the rebuild output the wiring depends on.",
+          "implementation_scope": {
+            "files_to_create": [],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "files_to_delete": []
+          },
+          "acceptance_scenarios": [
+            "(boot-wiring prerequisite for A, BE-1, BE-2)"
+          ]
+        },
+        {
+          "id": "01-03",
+          "name": "Edge maintenance in handlers: upsert on Inserted, remove on stop/conflict-release",
+          "description": "Maintain the ListenerFactStore on the intent-change write edge in `crates/overdrive-control-plane/src/handlers.rs` per feature-delta.md sub-decision 2 + ADR-0062 § Decision (2) — the writer-bumped-invalidation discipline. (1) On submit, in the `PutOutcome::Inserted` branch (`handlers.rs:361-381`, AFTER the intent `put_if_absent` commits and AFTER the kind discriminator persist — intent SSOT committed first, mirroring the allocator's fsync-then-memory ordering): when the intent is `WorkloadIntent::Service(service_v1)` AND `service_vip` is `Some(vip)` (the VIP allocated at `handlers.rs:323-331`), acquire the `listener_facts` guard, call `upsert(workload_id.clone(), &vip, &service_v1.listeners)`, DROP the guard before any subsequent `.await` (sub-decision 4 lock discipline — the edge and the hydrate read contend on the same mutex). Job/Schedule intents (no VIP) do not upsert. (2) On conflict release (`handlers.rs:424-432`, the `KeyExists { existing }` non-identical branch where the VIP is released): do NOT insert facts — the insert happens only on `Inserted`, symmetric with the VIP which is allocated-then-released on conflict (no `remove_workload` needed because nothing was upserted for the rejected spec). (3) On stop (`stop_workload`, `handlers.rs:642-681`): after writing the stop sentinel, acquire the `listener_facts` guard, call `remove_workload(&workload_id)` (evicts every ServiceId the secondary index maps for that workload via the cleanup index — `stop_workload` holds only the `WorkloadId`, not the ServiceIds or the VIP, so the secondary index is what makes eviction possible without an intent decode or allocator lock), DROP the guard before any `.await`. (4) NO read-path switch yet (01-04) — the hydrator still uses the per-tick gather; this step makes the store track the edge so that 01-04 can flip the read to it and pass invariant B end-to-end (the boot rebuild + edge maintenance must agree).",
+          "criteria": "Submit `Inserted` path: for a Service intent with `service_vip = Some(vip)`, the handler calls `listener_facts.lock().await.upsert(workload_id, &vip, &service_v1.listeners)` AFTER the intent commit, and DROPS the guard before any further `.await`. Job/Schedule submits do not upsert. Conflict-release path (`KeyExists` non-identical): the store is NOT mutated (U6 end-to-end: a conflict leaves both maps unchanged). Stop path: `stop_workload` calls `listener_facts.lock().await.remove_workload(&workload_id)` and drops the guard before any `.await`. Acceptance/integration tests via `AppState` cover: submit-then-store-holds-facts (primary contains one entry per listener keyed by `ServiceId::derive`); conflict-release leaves the store unchanged (`conflict_release_does_not_insert_facts` end-to-end); stop evicts exactly that workload's entries (`remove_workload` via the edge). `cargo xtask lima run -- cargo check -p overdrive-control-plane --features integration-tests` clean; clippy -D warnings clean. No `listener_facts` guard binding is held across an `.await` in either handler (the acquire->clone/mutate->drop shape, mirroring `hydrate_bridge_desired_listeners:1686-1691`).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/listener_fact_byte_equivalence_invariant.rs",
+          "scenario_name": "Acceptance: B (edge-maintained == boot-rebuild — the edge path this step adds is half of B), U6 end-to-end (conflict_release_does_not_insert_facts via handler) | Unit/integration tests (via AppState): submit_inserted_upserts_listener_facts, conflict_release_leaves_store_unchanged, stop_removes_workload_facts",
+          "effort_hours": 5,
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_notes": "TDD 3-phase RED->GREEN->COMMIT. Lock discipline is DST invariant C (closed in 01-04) but the SHAPE must be correct here: acquire `listener_facts.lock().await` -> mutate -> `drop(guard)` BEFORE any subsequent `.await`, exactly mirroring the allocator-guard pattern at `handlers.rs:325-327` (submit) and `handlers.rs:426-431` (conflict-release) and `hydrate_bridge_desired_listeners:1686-1691` (hydrate). Ordering: the upsert happens AFTER `put_if_absent` returns `Inserted` (intent SSOT first) — on a crash between intent-commit and fact-insert, the next boot's `rebuild_from_intent` re-projects from the committed intent, so no fact is lost (ADR-0062 § Consequences crash-consistency). The conflict-release branch is a deliberate NO-OP on the store (symmetric with the VIP) — do NOT add a `remove_workload` there (nothing was upserted). `stop_workload` does NOT decode the intent or hold the VIP — `remove_workload(&workload_id)` uses the secondary cleanup index only. Lima: `--no-run` compile gate plus a Lima nextest run for the AppState-driven integration tests. TEST PARADIGM: the edge-maintenance behaviour is verified via single-example AppState integration tests (they verify wiring of the edge, not an invariant); the property coverage is invariant B (01-01 store-level + this step's edge contributes the incremental-build half asserted end-to-end in 01-04). EXEMPT FROM PARADIGM: handler edge wiring is single-shot intent-write flow; compensated by invariant B property test on the store contract.",
+          "implementation_scope": {
+            "files_to_create": [],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "files_to_delete": []
+          },
+          "acceptance_scenarios": [
+            "B|edge-maintenance half",
+            "U6|conflict_release end-to-end"
+          ]
+        },
+        {
+          "id": "01-04",
+          "name": "Hydrator read-path switch + delete per-tick gather + invariants A/C + behaviour-equivalence pins (BE-1/BE-2/BE-3)",
+          "description": "Flip the ServiceMapHydrator hydrate arm to the O(1) keyed read, DELETE the per-tick scan, and close DST invariants A + C plus the behaviour-equivalence pins per feature-delta.md sub-decisions 3-5 + ADR-0062 § Decision (3). (1) In the `AnyReconciler::ServiceMapHydrator(_)` hydrate arm (`reconciler_runtime.rs:1322-1364`): REPLACE the cluster-wide `let listeners = gather_service_listener_facts(state).await?;` (line 1335) with a per-row keyed read of the in-memory store — for each `row` in `service_backends_rows`, read `state.listener_facts.lock().await` then clone `store.fact_for(&row.service_id)` and DROP the guard before any `.await` (sub-decision 4 lock discipline). The per-row `vip == row.vip` scan over a cluster-wide `Vec<ListenerRow>` (inside `project_service_desired`) is ELIMINATED, not relocated: the keyed read directly yields the `(port, protocol)` for `row.service_id`. (2) PRESERVE the ADR-0060 C3 guard VERBATIM: a row whose `ServiceId` has no fact (`fact_for` returns `None`) skips the service and emits the `tracing::warn!(name: \"service_map_hydrator.desired.unresolvable_proto\", service_id = %row.service_id, ...)` event (lines 1349-1357) — never defaulting to `Proto::Tcp`. (3) DELETE the per-tick caller and the now-orphaned scan function: per `.claude/rules/development.md` § \"Deletion discipline\" + feature-delta.md sub-decision 3, DELETE `gather_service_listener_facts` (`reconciler_runtime.rs:1733-1796`) entirely (its projection body was relocated to `ListenerFactStore::rebuild_from_intent` in 01-01) AND delete any test asserting the per-tick scan behaviour (do NOT salvage-rename — the boot-rebuild behaviour is re-asserted fresh as U4 in 01-01, a genuinely different requirement). The function does not become dead code because the boot path (01-01/01-02) is its surviving exercised caller. (4) Close invariant A (zero steady-state scan_prefix) via a counting `IntentStore` decorator over `&dyn IntentStore` (records `scan_prefix` calls — `scan_prefix` is trait-public at `overdrive-core/src/traits/intent_store.rs:255`, decoratable with no new sim surface): submit S services (1..=8, each 1..=3 listeners), boot-rebuild once, run N ticks (1..=10) through `hydrate_desired_for_test`, assert the post-boot `scan_prefix` counter is exactly 0. (5) Close invariant C (guard never across `.await`) via the DST contention scenario: concurrent hydrate read + submit upsert + stop remove on the same `Arc<Mutex<ListenerFactStore>>` under turmoil/multi-task; `assert_eventually!(all ops complete)` — a guard held across `.await` deadlocks/stalls and fails the assertion (the behavioural gate; structural acquire->clone->drop shape is the advisory backstop per distill § C honesty note). (6) Behaviour-equivalence pins via `hydrate_desired_for_test` (`reconciler_runtime.rs:1599`): BE-1 (row WITH a fact carries the right `(port, protocol)`, identical to the pre-change cluster-gather + `project_service_desired` result); BE-2 (row whose ServiceId has NO fact -> service skipped, `unresolvable_proto` emitted, no defaulted-Tcp `update_service` — C3 preserved); BE-3 (distinct VIPs derive distinct ServiceIds, no collision, primary entry count == total listener count). (7) Add the four new acceptance files as `mod <name>;` inside the `mod acceptance { ... }` block in `crates/overdrive-control-plane/tests/acceptance.rs` (per ADR-0005 inline-mod layout).",
+          "criteria": "Invariant A (`hydrator_issues_zero_scan_prefix_in_steady_state`, proptest S in 1..=8 / N in 1..=10): the counting-decorator `scan_prefix` counter sampled AFTER boot rebuild is exactly 0 across all (S, N, listener-shape); seed printed on failure. Invariant C (`listener_fact_guard_never_held_across_await_under_contention`): under concurrent read+submit+stop on the shared mutex (turmoil DST), no deadlock and `assert_eventually!` each op completes within the DST budget. BE-1 (`hydrate_desired_with_fact_matches_pre_change_projection`): `desired[Sx]` carries `(port=P, protocol=Pr)` identical to the pre-change gather+project result. BE-2 (`hydrate_desired_unresolvable_proto_skips_and_emits_no_tcp_default`): row with no fact -> `desired` omits Sz, `service_map_hydrator.desired.unresolvable_proto` emitted with `service_id=Sz`, no defaulted-`Proto::Tcp` entry (ADR-0060 C3 verbatim). BE-3 (`distinct_service_vips_derive_distinct_service_ids_no_collision`): distinct VIPs -> distinct ServiceIds for equal ports; no overwrite; primary count == total listener count. DELETION: `gather_service_listener_facts` no longer exists in `reconciler_runtime.rs` (grep returns zero matches); the per-tick caller at line 1335 is gone; any per-tick-scan-behaviour test is deleted in the same commit. The hydrate arm reads `state.listener_facts.lock().await` then drops the guard before any `.await`; no `scan_prefix` is called from the hydrate path. Four new files wired into `tests/acceptance.rs` `mod acceptance` block. `cargo xtask lima run -- cargo check -p overdrive-control-plane --features integration-tests` clean; clippy -D warnings clean; `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` green (A/C/BE-1/BE-2/BE-3 all pass).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/listener_fact_zero_scan_invariant.rs",
+          "scenario_name": "Acceptance: A (listener_fact_zero_scan_invariant.rs: hydrator_issues_zero_scan_prefix_in_steady_state), C (listener_fact_lock_discipline_invariant.rs: listener_fact_guard_never_held_across_await_under_contention), BE-1/BE-2/BE-3 (listener_fact_hydrate_equivalence.rs: hydrate_desired_with_fact_matches_pre_change_projection, hydrate_desired_unresolvable_proto_skips_and_emits_no_tcp_default, distinct_service_vips_derive_distinct_service_ids_no_collision)",
+          "effort_hours": 7,
+          "dependencies": [
+            "01-03"
+          ],
+          "implementation_notes": "TDD 3-phase RED->GREEN->COMMIT. This is the keystone step: the read-path flip, the deletion, and the A/C/BE invariants land together so the bar transitions from \"scan-driven hydration\" to \"store-driven hydration\" atomically (single-cut per `feedback_single_cut_greenfield_migrations.md`). The keyed read mirrors `hydrate_bridge_desired_listeners` (`reconciler_runtime.rs:1646-1715`): acquire `listener_facts.lock().await` -> clone the small `Option<ListenerRow>` -> `drop(guard)` BEFORE any `.await`. The C3 guard logic (skip + `unresolvable_proto` warn, no Tcp default) moves with the read but is otherwise UNCHANGED — BE-2 pins it verbatim. Counting `IntentStore` decorator (invariant A): a thin wrapper over `&dyn IntentStore`/`Arc<dyn IntentStore>` incrementing an `Arc<AtomicUsize>` on `scan_prefix` and delegating everything else; lives in `tests/acceptance/` (or `tests/common/`); test-only, default lane, no new sim trait surface (distill § Pre-requisites). The counter is read as a delta/reset at the post-boot boundary (scans DURING rebuild are expected and excluded — the assertion is \"zero STEADY-STATE scans\"). Invariant C primary observable is BEHAVIOURAL (turmoil contention -> assert_eventually all complete); the structural acquire->clone->drop check is advisory only (distill § C honesty note — there is no portable runtime hook for \"guard crossed an await\"). Deletion discipline: `project_service_desired` (`overdrive-core/src/reconcilers/service_map_hydrator.rs:97`) may stay if other callers exist, but if the per-row VIP-scan it performed is now dead, simplify it in-scope (do not gate or salvage). Lima: `--no-run` compile gate on macOS plus a full Lima nextest run for the DST/proptest invariants (turmoil + proptest must run on Linux). Per `.claude/rules/testing.md`, flaky DST/proptest is a bug — fix the generator or code, never rerun. TEST PARADIGM: A and BE-3 are `@property` proptest (quantified over S/N/VIP-sets); C is a DST contention scenario (behavioural); BE-1/BE-2 are named regression-pin examples (exact projection equivalence + exact tracing-event assertion). Universe for A is the decorator's port-observable scan count; universe for BE-1/BE-2 is the desired-map keys + emitted tracing event — never private struct fields.",
+          "implementation_scope": {
+            "files_to_create": [
+              "crates/overdrive-control-plane/tests/acceptance/listener_fact_zero_scan_invariant.rs",
+              "crates/overdrive-control-plane/tests/acceptance/listener_fact_lock_discipline_invariant.rs",
+              "crates/overdrive-control-plane/tests/acceptance/listener_fact_hydrate_equivalence.rs"
+            ],
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/tests/acceptance.rs"
+            ],
+            "files_to_delete": []
+          },
+          "acceptance_scenarios": [
+            "A|listener_fact_zero_scan_invariant.rs",
+            "C|listener_fact_lock_discipline_invariant.rs",
+            "BE-1|listener_fact_hydrate_equivalence.rs",
+            "BE-2|listener_fact_hydrate_equivalence.rs",
+            "BE-3|listener_fact_hydrate_equivalence.rs"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-control-plane/src/listener_facts.rs",
+      "crates/overdrive-control-plane/src/lib.rs",
+      "crates/overdrive-control-plane/src/handlers.rs",
+      "crates/overdrive-control-plane/src/reconciler_runtime.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "crates/overdrive-bpf/**"
+    ]
+  },
+  "metadata": {
+    "feature_id": "reconciler-listener-fact-view",
+    "wave": "DELIVER",
+    "paradigm": "OOP (Rust)",
+    "crafter_agent": "nw-software-crafter",
+    "tdd_canon": "3-phase RED->GREEN->COMMIT (ADR-025)",
+    "decomposition_ratio": {
+      "steps": 4,
+      "production_files": 4,
+      "ratio": 1.0,
+      "target": 2.5,
+      "production_files_list": [
+        "crates/overdrive-control-plane/src/listener_facts.rs",
+        "crates/overdrive-control-plane/src/lib.rs",
+        "crates/overdrive-control-plane/src/handlers.rs",
+        "crates/overdrive-control-plane/src/reconciler_runtime.rs"
+      ]
+    },
+    "implementation_scope": [
+      "crates/overdrive-control-plane/src/listener_facts.rs",
+      "crates/overdrive-control-plane/src/lib.rs",
+      "crates/overdrive-control-plane/src/handlers.rs",
+      "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+      "crates/overdrive-control-plane/tests/acceptance.rs",
+      "crates/overdrive-control-plane/tests/acceptance/listener_fact_zero_scan_invariant.rs",
+      "crates/overdrive-control-plane/tests/acceptance/listener_fact_byte_equivalence_invariant.rs",
+      "crates/overdrive-control-plane/tests/acceptance/listener_fact_lock_discipline_invariant.rs",
+      "crates/overdrive-control-plane/tests/acceptance/listener_fact_hydrate_equivalence.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/src/listener_facts.rs",
+      "crates/overdrive-control-plane/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "crates/overdrive-bpf/**"
+    ],
+    "graduated_dst_invariants": [
+      "A — zero steady-state scan_prefix (listener_fact_zero_scan_invariant.rs, step 01-04)",
+      "B + B-ex — multi-listener byte-equivalence edge-vs-rebuild (listener_fact_byte_equivalence_invariant.rs, step 01-01 store-level + 01-03 edge half)",
+      "C — guard never held across .await (listener_fact_lock_discipline_invariant.rs, step 01-04)"
+    ],
+    "scenario_coverage": {
+      "total_scenarios": 13,
+      "mapped": 13,
+      "orphans": [],
+      "mapping": {
+        "A": "01-04",
+        "B": "01-01 (store) + 01-03 (edge half) + 01-04 (read-path end-to-end)",
+        "B-ex": "01-01",
+        "C": "01-04",
+        "U1": "01-01",
+        "U2": "01-01",
+        "U3": "01-01",
+        "U4": "01-01",
+        "U5": "01-01",
+        "U6": "01-01 (store) + 01-03 (handler end-to-end)",
+        "BE-1": "01-04",
+        "BE-2": "01-04",
+        "BE-3": "01-04"
+      }
+    },
+    "adr_references": [
+      "docs/product/architecture/adr-0062-listener-fact-in-memory-view.md",
+      "ADR-0035 (zero steady-state durable reads — extended without a persisted View)",
+      "ADR-0042 (ServiceMapHydrator desired-hydration source amended)",
+      "ADR-0049 (allocator boot-rebuild + edge-maintain lifecycle imitated, NOT extended)",
+      "ADR-0060 (C3 unresolvable-proto guard preserved verbatim)",
+      "ADR-0005 (tests/acceptance/<scenario>.rs inline-mod layout)",
+      "ADR-025 (3-phase TDD canon)"
+    ],
+    "deferrals": [],
+    "notes": [
+      "Mutation gate (per-feature >=80%) is a later DELIVER phase per task instruction — intentionally NOT a roadmap step.",
+      "NO .feature files — all tests are Rust #[test]/#[tokio::test]/DST per .claude/rules/testing.md (no pytest-bdd, no nwave_ai.state_delta; proptest is the project PBT tool).",
+      "Both ListenerFactStore maps are BTreeMap (no HashMap) per .claude/rules/development.md § Ordered-collection choice.",
+      "Deletion discipline (01-04): per-tick gather_service_listener_facts caller + the function body + any per-tick-scan-behaviour test deleted in the same commit; projection body relocated to ListenerFactStore::rebuild_from_intent (01-01).",
+      "Lima/nextest discipline is the crafter's per-step concern (noted in implementation_notes): --no-run compile gate on macOS minimum + a Lima nextest run for DST/proptest, not a separate roadmap step.",
+      "No deferrals surfaced — feature-delta.md § Open Questions and ADR-0062 confirm none require a GitHub issue; the counting-store decorator (invariant A) is in-scope, feasibility verified (scan_prefix is trait-public)."
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-06-03",
+    "notes": "APPROVED. All 8 review checks pass: 13/13 scenario coverage (0 orphans); green bar at each COMMIT (bottom-up store->AppState->edge->read-switch); deletion discipline correctly deferred to 01-04 (single-cut); invariants A/B/C faithfully encoded; project conventions honored (no .feature, BTreeMap both maps, 3-phase TDD, Lima/nextest noted, mutation not a step). 01-01 sizing (8 scenarios) is advisory/cohesive (one new type + its unit contract), non-blocking. Non-blocking suggestions: name the AppState test builder extension in 01-02; add a crash-consistency note. Roadmap authored by nw-solution-architect from feature-delta.md sub-decisions 1-5, distill/test-scenarios.md (13 scenarios), ADR-0062."
+  }
+}

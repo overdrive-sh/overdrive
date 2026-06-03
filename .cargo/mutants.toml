@@ -386,8 +386,16 @@ exclude_re = [
     # comparison flips, or `Vec::new()`/`()` body replacements.
     "Default::default",
 
-    # `gather_service_listener_facts` `||` → `&&` (udp-service-support,
-    # ADR-0060 site #8 / C3). The guard
+    # `ListenerFactStore::rebuild_from_intent` `||` → `&&` (ADR-0062 /
+    # reconciler-listener-fact-view; ADR-0060 site #8 / C3). NOTE: this
+    # equivalent-mutant guard was RELOCATED here from the now-deleted
+    # `gather_service_listener_facts` (`crates/overdrive-control-plane/
+    # src/reconciler_runtime.rs`) when the per-tick cluster scan was
+    # replaced by the boot-rebuilt in-memory ListenerFactStore (step
+    # 01-04 deleted the old fn; step 01-01 relocated its projection body
+    # to `rebuild_from_intent`). The old description-regex no longer
+    # matches because the function was renamed; this is the updated entry.
+    # The guard
     # `if suffix.is_empty() || suffix.contains('/') { continue; }` is a
     # fast-path skip of the `workloads/<id>/stop` and `workloads/<id>/kind`
     # sub-keys before the `from_store_bytes` decode below. Flipping to
@@ -399,16 +407,16 @@ exclude_re = [
     # for a full `WorkloadIntentEnvelope::Service` (which embeds
     # `String`/`Vec` fields needing a valid trailing root region). The
     # canonical `workloads/<id>` key has a non-empty suffix without `/`,
-    # so it is never skipped under either operator. The returned
-    # `Vec<ListenerRow>` is byte-identical for both operators — a genuine
+    # so it is never skipped under either operator. Both maps the rebuild
+    # populates are byte-identical for both operators — a genuine
     # equivalent mutant, no test can distinguish them. The source-level
     # `// mutants: skip` comment above the guard in
-    # `crates/overdrive-control-plane/src/reconciler_runtime.rs` carries
-    # the same rationale as documentation; this regex is the actual
+    # `crates/overdrive-control-plane/src/listener_facts.rs` carries the
+    # same rationale as documentation; this regex is the actual
     # suppression mechanism (same shape as the `ProbeRunner::probe` and
     # `evaluate_reconciler_is_pure` entries above — comment-skip does not
     # fire for a mid-body expression mutation).
-    "replace \\|\\| with && in gather_service_listener_facts",
+    "replace \\|\\| with && in ListenerFactStore::rebuild_from_intent",
 ]
 
 # ---------------------------------------------------------------------------

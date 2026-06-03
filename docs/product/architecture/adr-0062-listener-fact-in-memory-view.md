@@ -264,14 +264,37 @@ keyed to the read path's `ServiceId`.
   next rebuild.
 
 **Testability (DELIVER gates):**
-- **Invariant A (zero-scan):** `ServiceMapHydrator::hydrate_desired` issues zero
-  `scan_prefix` calls in steady state — assertable via a counting `IntentStore`
-  decorator (sim) over N ticks across S services. **`scan_prefix` is a public
-  method on the `IntentStore` trait** (`overdrive-core/src/traits/intent_store.rs:255`:
-  `async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Bytes, Bytes)>, IntentStoreError>`),
-  so a counting decorator wraps `&dyn IntentStore` directly — no new sim trait
-  surface, no host-adapter detail to expose. This is a verified fact, not a
-  DELIVER-time contingency.
+- **Invariant A (zero steady-state intent-store dependence):**
+  `ServiceMapHydrator::hydrate_desired` must not depend on the intent store in
+  steady state — the property is unchanged; the *mechanism* below is corrected
+  to reflect what DELIVER found feasible and shipped.
+
+  **Mechanism originally specified (counting `scan_prefix` decorator) — DOES NOT
+  WORK.** The original design asserted a counting `IntentStore` decorator over
+  `&dyn IntentStore` recording steady-state `scan_prefix` calls, justified as
+  feasible because `scan_prefix` is a public trait method
+  (`overdrive-core/src/traits/intent_store.rs:255`). `scan_prefix` IS
+  trait-public — but that is irrelevant: the seam the hydrate path reads is
+  `AppState.store`, a **concrete `Arc<LocalIntentStore>`**, not
+  `Arc<dyn IntentStore>`. A counting decorator cannot be injected at that field
+  without widening `AppState.store` to a trait object, which is out of scope for
+  this fix. The decorator seam the original claim assumed simply does not exist;
+  trait-method visibility cannot substitute for a concrete-typed field.
+
+  **Mechanism shipped (delete-intent-then-tick behavioral proof) —
+  equivalent-or-stronger.** The DELIVER test
+  (`crates/overdrive-control-plane/tests/acceptance/listener_fact_zero_scan_invariant.rs`)
+  establishes the keyed fact + `service_backends` row, then **removes the intent
+  record**, then runs N hydrate ticks asserting a correct non-empty `desired`
+  every tick. The OLD scan path would resolve nothing once the intent is gone
+  (empty desired); the NEW keyed read resolves from the in-memory
+  `ListenerFactStore`. A correct non-empty `desired` across N ticks is reachable
+  ONLY if hydrate reads memory, not the intent store. Reverting the read-switch
+  makes the test RED. This is **equivalent-or-stronger** than a scan counter: a
+  counter proves "no scan call was made"; the delete-intent proof proves the
+  stronger property that the intent record is **entirely unnecessary** in steady
+  state — hydrate produces the correct desired even with the record absent.
+  proptest over S × L × N.
 - **Invariant B (byte-equivalence, multi-listener):** the edge-maintained store
   (both the primary `BTreeMap<ServiceId, ListenerRow>` AND the secondary
   `BTreeMap<WorkloadId, Vec<ServiceId>>`) is byte-equivalent to
