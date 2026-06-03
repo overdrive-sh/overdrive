@@ -54,13 +54,15 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
+    ObservationSubscription, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
 };
+use std::net::Ipv4Addr;
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
 /// this count before a subscriber polls cause that subscriber to miss
@@ -108,6 +110,11 @@ struct PeerState {
     /// One row per service carrying the full current backend set.
     /// GH #160.
     by_service_backends: Mutex<BTreeMap<ServiceId, ServiceBackendRow>>,
+    /// `reconcile_conflict` LWW index — keyed on `(service_id, vip,
+    /// port, proto)` (the conflicting map slot) per Fix C. `BTreeMap`
+    /// for deterministic iteration across seeds (dst-lint /
+    /// `.claude/rules/development.md` § "Ordered-collection choice").
+    by_reconcile_conflict: Mutex<BTreeMap<(ServiceId, Ipv4Addr, u16, Proto), ReconcileConflictRow>>,
     /// `probe_results` LWW index — keyed on `(alloc_id, probe_idx)`
     /// per ADR-0054 §5. One row per `(alloc_id, probe_idx)` carrying
     /// the latest observed outcome; LWW resolution on
@@ -131,6 +138,7 @@ impl PeerState {
             by_node: Mutex::new(HashMap::new()),
             by_service_hydration: Mutex::new(BTreeMap::new()),
             by_service_backends: Mutex::new(BTreeMap::new()),
+            by_reconcile_conflict: Mutex::new(BTreeMap::new()),
             by_probe_results: Mutex::new(BTreeMap::new()),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
@@ -145,6 +153,7 @@ impl PeerState {
             ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
             ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
             ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
+            ObservationRow::ReconcileConflict(incoming) => self.apply_reconcile_conflict(incoming),
         };
 
         if accepted {
@@ -190,6 +199,26 @@ impl PeerState {
             }
             Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_sb.insert(key, incoming.clone());
+                true
+            }
+            Some(_) => false,
+        }
+    }
+
+    /// LWW merge for `reconcile_conflict`. Keyed on `(service_id, vip,
+    /// port, proto)` — the conflicting map slot. Same slot on a later
+    /// tick wins under [`LogicalTimestamp::dominates`]. Mirrors
+    /// [`apply_service_hydration`]. Fix C.
+    fn apply_reconcile_conflict(&self, incoming: &ReconcileConflictRow) -> bool {
+        let key = (incoming.service_id, incoming.vip, incoming.port, incoming.proto);
+        let mut by_rc = self.by_reconcile_conflict.lock();
+        match by_rc.get(&key) {
+            None => {
+                by_rc.insert(key, incoming.clone());
+                true
+            }
+            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
+                by_rc.insert(key, incoming.clone());
                 true
             }
             Some(_) => false,
@@ -438,6 +467,22 @@ impl ObservationStore for SimObservationStore {
         // row per service — keyed by `ServiceId` alone.
         let by_sb = self.inner.by_service_backends.lock();
         Ok(by_sb.get(service_id).cloned().into_iter().collect())
+    }
+
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
+        // LWW winners only, filtered by `service_id`. Iteration is
+        // deterministic via the `(ServiceId, Ipv4Addr, u16, Proto)` key
+        // on the underlying `BTreeMap`. Mirrors
+        // `service_hydration_results_rows`.
+        let by_rc = self.inner.by_reconcile_conflict.lock();
+        Ok(by_rc
+            .iter()
+            .filter(|((sid, ..), _)| sid == service_id)
+            .map(|(_, row)| row.clone())
+            .collect())
     }
 
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {

@@ -112,28 +112,24 @@ fn happy_path_distinct_vips_and_noops_pass() {
     );
 }
 
-/// Cgroup-vs-XDP conflict — the canonical defect class. A buggy
-/// reconciler emits BOTH `Action::DataplaneUpdateService` (XDP path
-/// — `SERVICE_MAP`) AND `Action::RegisterLocalBackend` (cgroup path
-/// — `LOCAL_BACKEND_MAP`) targeting the SAME VIP in one tick. The
-/// dataplane post-state becomes non-deterministic: a packet to the
-/// VIP could traverse the XDP path or the cgroup path depending on
-/// which map was written second. The validator must reject this.
+/// ADR-0053 § 4 dual-path — an XDP `SERVICE_MAP` write AND a cgroup
+/// `LOCAL_BACKEND_MAP` write for the SAME VIP in one tick is the
+/// BLESSED mixed local+remote dual-path, NOT a conflict (RCA
+/// `fix-mixed-backend-dispatch-spin` Fix A1; ADR-0053 revision
+/// 2026-06-03). The two routes are disjoint kernel maps consumed by
+/// different hooks with no precedence race. The validator MUST accept
+/// it. (This integration-side test was flipped from a cross-route
+/// rejection to an acceptance alongside the 01-04 `service_id`
+/// threading — its unit-side sibling was flipped in step 01-01; the
+/// integration sibling was missed there and is corrected here per
+/// deletion/test discipline.)
 #[test]
-fn cgroup_vs_xdp_conflict_on_same_vip_rejected() {
+fn cgroup_and_xdp_on_same_vip_accepted() {
     let actions = vec![update_service(1), register(vip(1), 8080)];
-    let err = validate_reconcile_output(&actions)
-        .expect_err("XDP + cgroup writes on same VIP must conflict");
-    let ReconcilerOutputViolation::ConflictingServiceWrites {
-        vip: conflict_vip,
-        vip_port,
-        first_route,
-        second_route,
-    } = err;
-    assert_eq!(conflict_vip, vip(1));
-    assert_eq!(vip_port, None, "cross-route conflict is per-VIP, not per-(vip, port)");
-    assert_eq!(first_route, WriteRoute::Xdp);
-    assert_eq!(second_route, WriteRoute::Cgroup);
+    assert!(
+        validate_reconcile_output(&actions).is_ok(),
+        "XDP + cgroup writes on same VIP are the ADR-0053 § 4 dual-path, not a conflict"
+    );
 }
 
 /// S-02-01 — two XDP `DataplaneUpdateService` writes for the SAME VIP
@@ -183,12 +179,16 @@ fn xdp_identical_vip_port_proto_rejected() {
     let err = validate_reconcile_output(&actions)
         .expect_err("identical (vip,port,proto) XDP writes must conflict");
     let ReconcilerOutputViolation::ConflictingServiceWrites {
+        service_id: conflict_sid,
         vip: conflict_vip,
         vip_port,
+        proto: conflict_proto,
         first_route,
         second_route,
     } = err;
+    assert_eq!(conflict_sid, service_id());
     assert_eq!(conflict_vip, vip(5));
+    assert_eq!(conflict_proto, Proto::Tcp);
     assert_eq!(vip_port, Some(8080), "XDP-vs-XDP conflict now reports the shared port");
     assert_eq!(first_route, WriteRoute::Xdp);
     assert_eq!(second_route, WriteRoute::Xdp);
@@ -205,12 +205,16 @@ fn register_vs_deregister_on_same_key_rejected() {
     let err = validate_reconcile_output(&actions)
         .expect_err("register+deregister at same (vip, port) must conflict");
     let ReconcilerOutputViolation::ConflictingServiceWrites {
+        service_id: conflict_sid,
         vip: conflict_vip,
         vip_port,
+        proto: conflict_proto,
         first_route,
         second_route,
     } = err;
+    assert_eq!(conflict_sid, service_id());
     assert_eq!(conflict_vip, vip(7));
+    assert_eq!(conflict_proto, overdrive_core::dataplane::backend_key::Proto::Tcp);
     assert_eq!(vip_port, Some(5000));
     assert_eq!(first_route, WriteRoute::Cgroup);
     assert_eq!(second_route, WriteRoute::Cgroup);
@@ -245,12 +249,16 @@ fn cgroup_identical_vip_port_proto_rejected() {
     let err = validate_reconcile_output(&actions)
         .expect_err("identical (vip,port,proto) cgroup writes must conflict");
     let ReconcilerOutputViolation::ConflictingServiceWrites {
+        service_id: conflict_sid,
         vip: conflict_vip,
         vip_port,
+        proto: conflict_proto,
         first_route,
         second_route,
     } = err;
+    assert_eq!(conflict_sid, service_id());
     assert_eq!(conflict_vip, vip(9));
+    assert_eq!(conflict_proto, Proto::Tcp);
     assert_eq!(vip_port, Some(53), "cgroup-vs-cgroup conflict reports the shared port");
     assert_eq!(first_route, WriteRoute::Cgroup);
     assert_eq!(second_route, WriteRoute::Cgroup);

@@ -240,4 +240,12 @@ mod acceptance {
     mod listener_fact_hydrate_equivalence;
     mod listener_fact_lock_discipline_invariant;
     mod listener_fact_zero_scan_invariant;
+
+    // fix-mixed-backend-dispatch-spin step 01-04 (Fix C) — a genuine
+    // same-slot reconcile-output conflict (two cgroup writes to one
+    // `(vip, port, proto)` slot) makes `run_convergence_tick` write a
+    // queryable `reconcile_conflict` observation row alongside the
+    // `reconciler.output.invariant_violation` tracing event, skip
+    // dispatch, persist the View, and NOT stop (surface-then-continue).
+    mod reconcile_conflict_observation;
 }

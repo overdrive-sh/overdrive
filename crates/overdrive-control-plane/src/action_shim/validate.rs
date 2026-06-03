@@ -72,12 +72,24 @@
 //! # Fail-safe semantics
 //!
 //! On violation, the caller [`run_convergence_tick`](crate::reconciler_runtime::run_convergence_tick)
-//! skips action dispatch for the tick and logs a structured
-//! `reconciler.output.invariant_violation` tracing event. The View
-//! still persists (reconciler memory is independent of dispatch
-//! success); convergence retries the next tick. The control-plane
-//! does NOT panic on a buggy reconciler — the violation is a soft
-//! failure surfaced to operators.
+//! skips action dispatch for the tick and surfaces the violation on two
+//! channels (Kubernetes Events model — a machine-queryable control
+//! signal distinct from a best-effort human signal):
+//!
+//! - a queryable `reconcile_conflict` observation row written through
+//!   the `ObservationStore` (the durable, machine-queryable surface —
+//!   operators query
+//!   [`ObservationStore::reconcile_conflict_rows`](overdrive_core::traits::observation_store::ObservationStore::reconcile_conflict_rows)
+//!   for the conflicting `(service_id, vip, port, proto)` slot and the
+//!   two routes), AND
+//! - a structured `reconciler.output.invariant_violation` tracing event
+//!   (the supplemental best-effort human signal).
+//!
+//! The View still persists (reconciler memory is independent of
+//! dispatch success); convergence retries the next tick. The
+//! control-plane does NOT panic on a buggy reconciler — the violation
+//! is a soft failure surfaced to operators (RCA
+//! `fix-mixed-backend-dispatch-spin` § Fix C).
 //!
 //! Per `.claude/rules/development.md` § "Distinct failure modes get
 //! distinct error variants": the validator returns a typed
@@ -95,6 +107,7 @@ use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
 use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::id::ServiceId;
 use overdrive_core::reconcilers::Action;
 
 /// Route the action would take through the dataplane port boundary.
@@ -135,6 +148,13 @@ pub enum ReconcilerOutputViolation {
         "conflicting service-LB writes at vip={vip} port={vip_port:?}: first={first_route:?}, second={second_route:?}"
     )]
     ConflictingServiceWrites {
+        /// Identity of the service both writes target. Carried so the
+        /// dispatch-boundary caller can populate the queryable
+        /// `reconcile_conflict` observation row's primary key without
+        /// re-deriving it from the VIP (Fix C, RCA
+        /// `fix-mixed-backend-dispatch-spin`). The two conflicting
+        /// actions both carry this `service_id`.
+        service_id: ServiceId,
         /// Virtual IP both writes target.
         vip: Ipv4Addr,
         /// VIP port both writes target. Always `Some(port)` in Phase 1
@@ -143,6 +163,11 @@ pub enum ReconcilerOutputViolation {
         /// `Option<u16>` to avoid churning the variant + downstream
         /// `matches!` if a future port-less conflict class lands.
         vip_port: Option<u16>,
+        /// L4 protocol of the conflicting `(vip, port, proto)` slot.
+        /// Carried so the dispatch-boundary caller can populate the
+        /// queryable `reconcile_conflict` observation row's slot key
+        /// directly, without re-deriving it from the action list (Fix C).
+        proto: Proto,
         /// Route the FIRST emitted action takes.
         first_route: WriteRoute,
         /// Route the SECOND (conflicting) emitted action takes.
@@ -191,7 +216,9 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
     let mut cgroup_keys: BTreeSet<(Ipv4Addr, u16, Proto)> = BTreeSet::new();
 
     for action in actions {
-        let Some(WriteKey { vip, port_opt, proto_opt, route }) = service_write_key(action) else {
+        let Some(WriteKey { service_id, vip, port_opt, proto_opt, route }) =
+            service_write_key(action)
+        else {
             continue;
         };
         match (route, port_opt, proto_opt) {
@@ -202,8 +229,10 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
                 if xdp_keys.contains(&(vip, port, proto)) =>
             {
                 return Err(ReconcilerOutputViolation::ConflictingServiceWrites {
+                    service_id,
                     vip,
                     vip_port: Some(port),
+                    proto,
                     first_route: WriteRoute::Xdp,
                     second_route: WriteRoute::Xdp,
                 });
@@ -226,8 +255,10 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
                 if cgroup_keys.contains(&(vip, port, proto)) =>
             {
                 return Err(ReconcilerOutputViolation::ConflictingServiceWrites {
+                    service_id,
                     vip,
                     vip_port: Some(port),
+                    proto,
                     first_route: WriteRoute::Cgroup,
                     second_route: WriteRoute::Cgroup,
                 });
@@ -252,6 +283,7 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
 /// return so the match-on-route below reads as named bindings rather
 /// than `.0` / `.1` / `.2`.
 struct WriteKey {
+    service_id: ServiceId,
     vip: Ipv4Addr,
     port_opt: Option<u16>,
     proto_opt: Option<Proto>,
@@ -281,21 +313,25 @@ struct WriteKey {
 /// surface will need a parallel IPv6 key class.
 fn service_write_key(action: &Action) -> Option<WriteKey> {
     match action {
-        Action::DataplaneUpdateService { vip, port, proto, .. } => {
+        Action::DataplaneUpdateService { service_id, vip, port, proto, .. } => {
             vip.try_as_ipv4().map(|v4| WriteKey {
+                service_id: *service_id,
                 vip: v4,
                 port_opt: Some(port.get()),
                 proto_opt: Some(*proto),
                 route: WriteRoute::Xdp,
             })
         }
-        Action::RegisterLocalBackend { vip, vip_port, proto, .. }
-        | Action::DeregisterLocalBackend { vip, vip_port, proto, .. } => Some(WriteKey {
-            vip: *vip,
-            port_opt: Some(*vip_port),
-            proto_opt: Some(*proto),
-            route: WriteRoute::Cgroup,
-        }),
+        Action::RegisterLocalBackend { service_id, vip, vip_port, proto, .. }
+        | Action::DeregisterLocalBackend { service_id, vip, vip_port, proto, .. } => {
+            Some(WriteKey {
+                service_id: *service_id,
+                vip: *vip,
+                port_opt: Some(*vip_port),
+                proto_opt: Some(*proto),
+                route: WriteRoute::Cgroup,
+            })
+        }
         _ => None,
     }
 }
@@ -400,13 +436,17 @@ mod tests {
             .expect_err("register+deregister at same (vip, port) must conflict");
         match err {
             ReconcilerOutputViolation::ConflictingServiceWrites {
+                service_id: sid,
                 vip,
                 vip_port,
+                proto,
                 first_route,
                 second_route,
             } => {
+                assert_eq!(sid, service_id());
                 assert_eq!(vip, vip_v4(7));
                 assert_eq!(vip_port, Some(5000));
+                assert_eq!(proto, Proto::Tcp);
                 assert_eq!(first_route, WriteRoute::Cgroup);
                 assert_eq!(second_route, WriteRoute::Cgroup);
             }
@@ -422,13 +462,17 @@ mod tests {
         let actions = vec![update_service(2), update_service(2)];
         match validate_reconcile_output(&actions) {
             Err(ReconcilerOutputViolation::ConflictingServiceWrites {
+                service_id: sid,
                 vip,
                 vip_port,
+                proto,
                 first_route,
                 second_route,
             }) => {
+                assert_eq!(sid, service_id());
                 assert_eq!(vip, vip_v4(2));
                 assert_eq!(vip_port, Some(8080), "XDP-vs-XDP now reports the shared port");
+                assert_eq!(proto, Proto::Tcp);
                 assert_eq!(first_route, WriteRoute::Xdp);
                 assert_eq!(second_route, WriteRoute::Xdp);
             }
@@ -490,13 +534,17 @@ mod tests {
         ];
         match validate_reconcile_output(&actions) {
             Err(ReconcilerOutputViolation::ConflictingServiceWrites {
+                service_id: sid,
                 vip,
                 vip_port,
+                proto,
                 first_route,
                 second_route,
             }) => {
+                assert_eq!(sid, service_id());
                 assert_eq!(vip, vip_v4(1));
                 assert_eq!(vip_port, Some(53), "cgroup-vs-cgroup reports the shared port");
+                assert_eq!(proto, Proto::Tcp);
                 assert_eq!(first_route, WriteRoute::Cgroup);
                 assert_eq!(second_route, WriteRoute::Cgroup);
             }

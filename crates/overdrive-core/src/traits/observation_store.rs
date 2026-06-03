@@ -518,6 +518,15 @@ pub enum ObservationRow {
     /// service. Read by the `ServiceMapHydrator` reconciler to
     /// hydrate `desired` state (GH #160).
     ServiceBackend(ServiceBackendRow),
+    /// `reconcile_conflict` row — written by `run_convergence_tick` on
+    /// a genuine same-slot reconcile-output invariant violation (Fix C,
+    /// RCA `fix-mixed-backend-dispatch-spin`). The machine-queryable
+    /// control signal that pairs with the supplemental
+    /// `reconciler.output.invariant_violation` tracing event (the
+    /// Kubernetes Events model: best-effort human signal distinct from
+    /// the durable observation row). Read via
+    /// [`ObservationStore::reconcile_conflict_rows`].
+    ReconcileConflict(ReconcileConflictRow),
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +980,17 @@ pub enum ReconcileConflictRowEnvelope {
     V1(ReconcileConflictRowV1),
 }
 
+/// Public payload alias for the `reconcile_conflict` observation row,
+/// per the UI-02 alias-to-payload amendment (mirrors
+/// [`ServiceHydrationResultRow`]). Callers construct
+/// `ReconcileConflictRow { .. }` directly; the persistence boundary
+/// wraps via [`ReconcileConflictRowEnvelope::latest`] and projects via
+/// [`ReconcileConflictRowEnvelope::into_latest`].
+pub type ReconcileConflictRow = ReconcileConflictRowV1;
+
+/// Documentation alias for "the latest payload shape" of the
+/// `reconcile_conflict` row. Re-aliased alongside
+/// [`ReconcileConflictRow`] at every schema version bump.
 pub type ReconcileConflictRowLatest = ReconcileConflictRowV1;
 
 // `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
@@ -1172,6 +1192,26 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
+    /// Read every LWW-winner `reconcile_conflict` row for the given
+    /// [`ServiceId`]. The machine-queryable surface for genuine
+    /// same-slot reconcile-output conflicts written by
+    /// `run_convergence_tick` (Fix C, RCA
+    /// `fix-mixed-backend-dispatch-spin`). Operators query this instead
+    /// of grepping the supplemental
+    /// `reconciler.output.invariant_violation` tracing event.
+    ///
+    /// Iteration order is deterministic — keyed by `(service_id, vip,
+    /// port, proto)` under the adapter's storage shape (e.g.
+    /// [`std::collections::BTreeMap`]). One row may exist per
+    /// `(service_id, vip, port, proto)` slot; the same `service_id` with
+    /// a different slot lives in a distinct row. LWW resolution uses
+    /// [`LogicalTimestamp::dominates`] on `updated_at`, mirroring the
+    /// `service_hydration_results` reader.
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError>;
 
     /// Write a single [`ProbeResultRow`] — the latest observed
     /// outcome of one probe for one allocation.

@@ -52,6 +52,9 @@ use overdrive_core::reconcilers::{
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::observation_store::{
+    ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
+};
 use parking_lot::Mutex;
 
 use crate::AppState;
@@ -989,6 +992,19 @@ fn service_lifecycle_canonical_name() -> ReconcilerName {
     .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
 }
 
+/// Map the dispatch-boundary [`action_shim::validate::WriteRoute`] onto
+/// the core-side [`ConflictRoute`] the observation row records. The two
+/// enums are intentionally separate (`WriteRoute` lives at the dispatch
+/// boundary; `ConflictRoute` is the core-side data mirror — an
+/// `overdrive-core → overdrive-control-plane` dep would invert the
+/// crate layering). Fix C, RCA `fix-mixed-backend-dispatch-spin`.
+const fn write_route_to_conflict_route(route: action_shim::validate::WriteRoute) -> ConflictRoute {
+    match route {
+        action_shim::validate::WriteRoute::Xdp => ConflictRoute::Xdp,
+        action_shim::validate::WriteRoute::Cgroup => ConflictRoute::Cgroup,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // phase-1-first-workload — slice 3 (US-03) — runtime convergence tick loop
 //
@@ -1138,6 +1154,65 @@ pub async fn run_convergence_tick(
     // reconciler is fixed, normal dispatch resumes. The control-plane
     // does NOT panic on a buggy reconciler.
     if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
+        // Surface-then-continue (`.claude/rules/reconcilers.md` self-heal
+        // posture; RCA `fix-mixed-backend-dispatch-spin` § Fix C). On a
+        // genuine same-slot conflict we surface the violation on TWO
+        // channels — the Kubernetes Events model: a machine-queryable
+        // control signal distinct from a best-effort human signal — then
+        // skip dispatch this tick, persist the View, and retry next
+        // tick. NO stop / early-return: the appliance OS has no operator
+        // shell, so the system must self-heal.
+        //
+        // Channel 1 (machine-queryable control signal): a durable
+        // `reconcile_conflict` observation row keyed on the conflicting
+        // `(service_id, vip, port, proto)` slot. Operators query it via
+        // `ObservationStore::reconcile_conflict_rows`. Best-effort write
+        // — a write failure must NOT abort the tick (the tracing signal
+        // below still fires and convergence retries), so we log + drop
+        // the error rather than propagate.
+        let action_shim::validate::ReconcilerOutputViolation::ConflictingServiceWrites {
+            service_id,
+            vip,
+            vip_port,
+            proto,
+            first_route,
+            second_route,
+        } = &violation;
+        let (service_id, vip, vip_port, proto, first_route, second_route) =
+            (*service_id, *vip, *vip_port, *proto, *first_route, *second_route);
+        // `vip_port` is `Some(_)` for every surviving conflict class in
+        // Phase 1 (same-route same-slot carries the shared port); the
+        // `Option` exists only to avoid churning the variant if a future
+        // port-less conflict class lands. Fall back to 0 if ever `None`.
+        let port = vip_port.unwrap_or(0);
+        let conflict_row = ReconcileConflictRow {
+            service_id,
+            vip,
+            port,
+            proto,
+            first_route: write_route_to_conflict_route(first_route),
+            second_route: write_route_to_conflict_route(second_route),
+            // LWW timestamp matching the action-shim convention
+            // (`counter = tick.tick + 1`, `writer = node_id`) — see
+            // `ServiceHydrationResultRowV1::updated_at`.
+            updated_at: LogicalTimestamp {
+                counter: tick.tick.saturating_add(1),
+                writer: state.node_id.clone(),
+            },
+        };
+        if let Err(err) = state.obs.write(ObservationRow::ReconcileConflict(conflict_row)).await {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "reconciler.output.conflict_row_write_failed",
+                reconciler = %reconciler_name,
+                target = %target.as_str(),
+                error = %err,
+                "failed to write reconcile_conflict observation row; the tracing \
+                 signal still fired and convergence will retry next tick"
+            );
+        }
+        // Channel 2 (supplemental human signal): the structured tracing
+        // event. KEPT alongside the observation row, never replaced.
         tracing::error!(
             target: "overdrive::reconciler",
             name = "reconciler.output.invariant_violation",
