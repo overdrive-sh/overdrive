@@ -101,7 +101,29 @@ impl ListenerFactStore {
     /// exactly those `ServiceId`s in listener order. An empty
     /// `listeners` slice records an empty secondary `Vec` for the
     /// workload and inserts no primary entries.
+    ///
+    /// A re-upsert of the same `workload_id` fully REPLACES its prior
+    /// facts: any `ServiceId` from a superseded set (a changed `vip`,
+    /// port, or protocol) is evicted from the primary map before the new
+    /// set is inserted, so no orphan survives that `remove_workload`
+    /// — which keys eviction off the secondary index — could no longer
+    /// reach. For an unchanged set this is a no-op delta (the same ids
+    /// are evicted then re-inserted), so cross-call idempotency holds.
     pub fn upsert(&mut self, workload_id: WorkloadId, vip: &ServiceVip, listeners: &[Listener]) {
+        // Replace pre-pass: evict any primary entries this workload
+        // registered on a prior `upsert` before inserting the new set.
+        // The secondary `Vec` is overwritten wholesale below, so without
+        // this the `ServiceId`s of a superseded set (changed vip / port /
+        // proto) would be unreachable orphans — `remove_workload` keys
+        // eviction off the secondary index and would only ever clean the
+        // latest set. Evicting up-front honours the "or replace" half of
+        // the contract; for an unchanged set the same ids are removed and
+        // re-inserted (a no-op delta), preserving idempotency.
+        if let Some(old_ids) = self.secondary.get(&workload_id) {
+            for id in old_ids {
+                self.primary.remove(id);
+            }
+        }
         let mut ids = Vec::with_capacity(listeners.len());
         for listener in listeners {
             let service_id =
@@ -116,11 +138,13 @@ impl ListenerFactStore {
             // that bypassed admission — not a legitimate runtime state.
             //
             // The check is scoped to THIS call's accumulated `ids`, NOT
-            // `self.primary`: `upsert` is idempotent across calls (a
-            // re-upsert of the same workload re-inserts the same
-            // ServiceIds), so consulting `self.primary` would false-fire
-            // on every legitimate re-upsert. Only a duplicate WITHIN one
-            // `listeners` slice is the invariant violation.
+            // `self.primary`. The replace pre-pass at the top already
+            // evicted this workload's prior primary entries, so any
+            // entries left in `self.primary` belong to OTHER workloads;
+            // consulting it would false-fire on a legitimate
+            // cross-workload `ServiceId` reuse rather than catch the real
+            // violation. Only a duplicate WITHIN one `listeners` slice is
+            // the invariant violation.
             //
             // `debug_assert!` fails loud in tests / debug builds; the
             // `tracing::warn!` surfaces it in release without panicking
@@ -614,6 +638,64 @@ mod tests {
 
         assert_eq!(after_first, after_second, "re-upsert of same workload is idempotent");
         assert_eq!(after_second.service_facts.len(), 2, "still exactly two distinct facts");
+    }
+
+    /// REG (latent contract gap) — a re-upsert of the SAME workload with
+    /// a CHANGED listener set (different VIP and/or port/proto) must
+    /// fully REPLACE the prior facts, not leak orphans. Before the
+    /// replace pre-pass, `upsert` overwrote the secondary `Vec` but never
+    /// evicted the primary entries keyed by the OLD set's `ServiceId`s —
+    /// so the superseded entry stayed in `primary` forever, and
+    /// `remove_workload` (which keys eviction off the now-overwritten
+    /// secondary index) could no longer reach it. The docstring promised
+    /// "Record (or replace)"; this test pins the "replace" half.
+    ///
+    /// Not reachable through the current submit handler (a changed spec
+    /// at the same workload id is rejected with 409 before any upsert),
+    /// so this guards the contract for the moment an in-place spec-update
+    /// path lands rather than a live production leak.
+    #[test]
+    fn re_upsert_changed_set_replaces_and_does_not_orphan_old_facts() {
+        let v_old = vip("10.96.0.7");
+        let v_new = vip("10.96.0.8");
+        let wid = workload("web");
+
+        let mut store = ListenerFactStore::new();
+        store.upsert(wid.clone(), &v_old, &[listener(80, Proto::Tcp)]);
+        let (old_sid, _) = derived(&v_old, 80, Proto::Tcp);
+        assert!(store.fact_for(old_sid).is_some(), "precondition: old fact present");
+
+        // Re-upsert the SAME workload with a CHANGED VIP + port — a
+        // spec-update shape. The OLD ServiceId must NOT survive.
+        store.upsert(wid.clone(), &v_new, &[listener(443, Proto::Tcp)]);
+
+        assert_eq!(
+            store.fact_for(old_sid),
+            None,
+            "superseded primary entry from the prior set must be evicted on replace",
+        );
+        let (new_sid, new_row) = derived(&v_new, 443, Proto::Tcp);
+        assert_eq!(store.fact_for(new_sid), Some(new_row), "new fact present after replace");
+
+        let snapshot = store.snapshot();
+        assert_eq!(
+            snapshot.service_facts.len(),
+            1,
+            "exactly one primary entry — the old set was fully replaced, no orphan",
+        );
+        assert_eq!(
+            snapshot.workload_index.iter().find(|(w, _)| w == &wid).map(|(_, ids)| ids.len()),
+            Some(1),
+            "secondary Vec carries only the new set's single ServiceId",
+        );
+
+        // And the cleanup index is now consistent: `remove_workload`
+        // fully drains the workload with no orphan left behind.
+        store.remove_workload(&wid);
+        assert!(
+            store.snapshot().service_facts.is_empty(),
+            "remove_workload fully cleans up after a changed-set replace",
+        );
     }
 
     /// Defensive-invariant guard: two listeners with the SAME
