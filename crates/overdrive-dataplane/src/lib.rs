@@ -1170,6 +1170,46 @@ fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
     io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP)
 }
 
+/// Select the `SERVICE_MAP` outer-map slots an empty-backend
+/// `update_service(frontend, [])` must purge.
+///
+/// The purge is scoped to the **single frontend identity**
+/// `(vip, port, proto)` — exactly the [`crate::maps::ServiceKey`] the
+/// non-empty path keys on. A co-resident listener on the same VIP under
+/// a different `(port, proto)` — e.g. CoreDNS `udp/53` alongside
+/// `tcp/53`, installed by a *separate* per-listener `update_service`
+/// call — keeps its outer-map slot, its `BACKEND_MAP` entries, and its
+/// `REVERSE_NAT_MAP` keys. This is the **per-proto purge** the
+/// [`Dataplane`] trait contract mandates (ADR-0060 D4; the trait
+/// docstring in `overdrive-core`: *"REVERSE_NAT keys for other
+/// protocols of the same VIP are not removed"*), and the behaviour
+/// `SimDataplane::update_service` already implements.
+///
+/// Selecting by `vip_host` alone is the bug this guards against: it
+/// would pick every listener registered on the VIP, transiently
+/// deleting a live listener's outer slot so XDP `XDP_PASS`es packets it
+/// should forward. The selected set then drives all three cleanup
+/// passes (outer-slot delete, `BACKEND_MAP` orphan-GC, `REVERSE_NAT`
+/// purge), so an over-broad selection over-purges every map.
+///
+/// Lives at module scope rather than inline in `update_service` so the
+/// unit tests in `mod tests` can exercise the selection without
+/// constructing a full `EbpfDataplane` (mirrors
+/// [`should_fallback_to_generic`]).
+fn empty_backend_purge_keys<'a>(
+    tracked_keys: impl Iterator<Item = &'a crate::maps::ServiceKey>,
+    frontend_key: crate::maps::ServiceKey,
+) -> Vec<crate::maps::ServiceKey> {
+    tracked_keys
+        .filter(|k| {
+            k.vip_host == frontend_key.vip_host
+                && k.port_host == frontend_key.port_host
+                && k.proto == frontend_key.proto
+        })
+        .copied()
+        .collect()
+}
+
 /// Verdict from classifying an `aya::programs::Xdp::attach` result
 /// against the native→generic fallback policy. Wraps the three
 /// outcomes the loader's two attach call sites (forward-path on
@@ -1329,16 +1369,26 @@ impl Dataplane for EbpfDataplane {
         let vip = frontend.vip_v4();
         let svc_proto = frontend.proto();
 
-        // Empty backend set — remove this VIP from all maps so XDP
-        // returns XDP_PASS. Collect ALL ServiceKeys matching the VIP
-        // IP (the same VIP may be registered on multiple ports via
-        // separate update_service calls).
+        // Empty backend set — remove THIS frontend's slot from all maps
+        // so XDP returns XDP_PASS for it. The purge is scoped to the
+        // single `(vip, port, proto)` identity (per-proto purge,
+        // ADR-0060 D4): the same VIP may carry several listeners
+        // installed by separate `update_service` calls (CoreDNS
+        // `tcp/53` + `udp/53`), and an empty-backend update for one MUST
+        // leave the others' outer-map slots intact. `frontend.port()`
+        // is the listener port — `backends` is empty here, so the
+        // non-empty path's `backends[0].addr.port()` is unavailable.
         if backends.is_empty() {
-            let vip_host = u32::from(vip);
+            let frontend_key = crate::maps::wire::ServiceKey {
+                vip_host: u32::from(vip),
+                port_host: frontend.port().get(),
+                proto: svc_proto.as_u8(),
+                _pad: 0,
+            };
 
             let matching_keys: Vec<crate::maps::wire::ServiceKey> = {
                 let tracker = self.service_backends.lock();
-                tracker.keys().filter(|k| k.vip_host == vip_host).copied().collect()
+                empty_backend_purge_keys(tracker.keys(), frontend_key)
             };
 
             if matching_keys.is_empty() {
@@ -1711,6 +1761,58 @@ mod tests {
     //! helper (S-2.2-02) and the `classify_attach_result` dispatcher.
 
     use super::DataplaneError;
+
+    /// Regression — empty-backend purge must be scoped to the single
+    /// frontend identity `(vip, port, proto)`, NOT VIP-wide.
+    ///
+    /// Reproduces the defect where `update_service(frontend, [])`
+    /// selected every `ServiceKey` matching only `vip_host`, so an
+    /// empty-backend update for one listener (`tcp/53`) deleted the
+    /// co-resident `udp/53` outer-map slot — and cascaded the
+    /// `BACKEND_MAP`/`REVERSE_NAT` purge — for every other listener on
+    /// the same VIP. The `Dataplane` trait contract mandates a
+    /// per-`(vip, port, proto)` purge (ADR-0060 D4); `SimDataplane`
+    /// already honours it, so the buggy `EbpfDataplane` diverged from
+    /// the sim and from the documented contract.
+    ///
+    /// The tracker below carries four co-resident slots: the target
+    /// `tcp/53`, a same-VIP+port other-proto `udp/53`, a same-VIP+proto
+    /// other-port `tcp/853`, and a different VIP entirely. An
+    /// empty-backend update for `tcp/53` must select ONLY the `tcp/53`
+    /// slot; the other three survive.
+    #[test]
+    fn empty_backend_purge_is_scoped_to_frontend_not_vip_wide() {
+        use std::net::Ipv4Addr;
+
+        use crate::maps::ServiceKey;
+
+        // IANA L4 proto bytes (`Proto::as_u8`): TCP = 6, UDP = 17.
+        const TCP: u8 = 6;
+        const UDP: u8 = 17;
+
+        let vip = u32::from(Ipv4Addr::new(10, 0, 0, 1));
+        let target = ServiceKey { vip_host: vip, port_host: 53, proto: TCP, _pad: 0 };
+        let other_proto = ServiceKey { vip_host: vip, port_host: 53, proto: UDP, _pad: 0 };
+        let other_port = ServiceKey { vip_host: vip, port_host: 853, proto: TCP, _pad: 0 };
+        let other_vip = ServiceKey {
+            vip_host: u32::from(Ipv4Addr::new(10, 0, 0, 2)),
+            port_host: 53,
+            proto: TCP,
+            _pad: 0,
+        };
+
+        let tracked = [target, other_proto, other_port, other_vip];
+
+        let purge = super::empty_backend_purge_keys(tracked.iter(), target);
+
+        assert_eq!(
+            purge,
+            vec![target],
+            "empty-backend purge must select ONLY the frontend's own \
+             (vip, port, proto) slot — co-resident listeners differing by \
+             proto or port, and other VIPs, must survive"
+        );
+    }
 
     /// Classification — `EOPNOTSUPP` from `bpf_link_create` /
     /// `netlink_set_xdp_fd` is the canonical "driver does not
