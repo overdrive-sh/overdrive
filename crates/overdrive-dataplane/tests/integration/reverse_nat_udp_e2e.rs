@@ -318,11 +318,10 @@ fn wait_with_timeout(
 ///    ABSENCE of any reply datagram is a genuine, falsifiable
 ///    distinguisher: it would FAIL if a backend-sourced reply arrived —
 ///    BUT only because the capture is proven live by observable (3)
-///    below. (The standalone `target/probe/probe_capture.sh` /
-///    `probe_query_witness.sh` plain-routed-UDP probes additionally
-///    confirm, out-of-test, that the any-source client-veth capture
-///    surfaces both reply and query datagrams with their real
-///    addresses.)
+///    below, and because `run_round_trips` blocks on tcpdump's
+///    "listening on" readiness banner before sending — so the AF_PACKET
+///    socket is provably bound when the (single, un-retransmitted) query
+///    egresses.
 ///
 /// 3. `query_datagrams_captured` — the INTRINSIC POSITIVE CONTROL. The
 ///    client's outbound query (dport 5353, client -> VIP) is the
@@ -359,10 +358,13 @@ struct RoundTripResult {
     /// when this count is non-zero (debugging.md § 3 — an empty capture
     /// is negative evidence only if the tool is proven to see live
     /// traffic; § 8 — do not let a swallowed setup degrade the signal).
-    /// Empirically verified (target/probe/probe_query_witness.sh, real
-    /// Lima, backend-down) to render as
-    /// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...` and to be reliably
-    /// present.
+    /// The witness is captured deterministically because
+    /// `run_round_trips` waits for tcpdump's "listening on" banner before
+    /// the first send (a fixed pre-roll sleep previously raced the socket
+    /// bind and dropped the single datagram — see
+    /// docs/analysis/root-cause-analysis-udp-e2e-capture-positive-control.md).
+    /// On a live capture the line renders as
+    /// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...`.
     query_datagrams_captured: usize,
 }
 
@@ -491,7 +493,10 @@ fn run_round_trips(
     // LOAD-BEARING: any reply that DID arrive would be an ordinary
     // normal-stack frame the capture reliably sees, so an empty
     // `reply_source_ips` is a genuine "no reply on the wire" distinguisher
-    // (positive control: target/probe/probe_capture.sh).
+    // — trustworthy because the capture is proven live by the
+    // `query_datagrams_captured` positive control below, which in turn is
+    // made deterministic by waiting for tcpdump's "listening on" banner
+    // before the first send.
     let pcap = pcap_dir.join("client.pcap");
     // `-U` (immediate mode: write each captured packet to the `-w` file
     // as it arrives, no output buffering) is LOAD-BEARING here. The test
@@ -501,12 +506,26 @@ fn run_round_trips(
     // 4 file header bytes, only got 0") even when packets flowed, so
     // every parse below silently returns empty and the test passes
     // vacuously. `-U` writes the pcap header + each packet immediately,
-    // so a SIGKILL still leaves a complete, readable capture. Verified on
-    // a real Lima run (target/probe/probe_query_witness.sh and a direct
-    // SIGKILL probe) that `-U` survives SIGKILL with the query datagram
-    // present. (debugging.md § 3 — an empty capture from a SIGKILL'd
-    // unbuffered tcpdump is a tool gap masquerading as negative evidence,
-    // not genuine silence.)
+    // so a SIGKILL still leaves a complete, readable capture.
+    // (debugging.md § 3 — an empty capture from a SIGKILL'd unbuffered
+    // tcpdump is a tool gap masquerading as negative evidence, not genuine
+    // silence.)
+    // Spawn the capture and BLOCK until tcpdump is actually listening
+    // before any datagram is sent. tcpdump prints
+    // `… listening on <iface>, link-type …` to stderr the instant its
+    // AF_PACKET socket is bound; gating on that banner — rather than a
+    // blind `sleep` — makes the capture deterministically live before the
+    // single, un-retransmitted UDP query egresses. The previous fixed
+    // 300 ms pre-roll raced the socket bind under CI load and missed that
+    // one datagram, zeroing the witness and tripping the S-04-C positive
+    // control (RCA:
+    // docs/analysis/root-cause-analysis-udp-e2e-capture-positive-control.md;
+    // debugging.md § 3 inspection-tool gap, § 8 no swallowed setup).
+    //
+    // `.expect()` on spawn (not `.ok()`) and a piped (not null) stderr are
+    // load-bearing: a missing/failed tcpdump now fails LOUDLY with a named
+    // precondition instead of degrading into a silent empty capture
+    // indistinguishable from the startup race (debugging.md § 8).
     let mut tcpdump = Command::new("ip")
         .args([
             "netns",
@@ -522,10 +541,38 @@ fn run_round_trips(
             "udp",
         ])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .ok();
-    std::thread::sleep(Duration::from_millis(300));
+        .expect("spawn client-veth tcpdump (capture is load-bearing for S-04-C)");
+
+    // Drain tcpdump's stderr on a background thread and surface the
+    // "listening on" readiness banner through a channel. Draining keeps
+    // the pipe from filling; the channel lets the main thread block on
+    // readiness with a bounded timeout. The thread is detached — it ends
+    // when tcpdump is killed and the pipe closes.
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+    let tcpdump_stderr = tcpdump.stderr.take().expect("tcpdump stderr piped");
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut signalled = false;
+        for line in std::io::BufReader::new(tcpdump_stderr).lines().map_while(Result::ok) {
+            if !signalled && line.contains("listening on") {
+                let _ = ready_tx.send(());
+                signalled = true;
+            }
+            // keep draining until tcpdump exits / the pipe closes
+        }
+    });
+    // Block until the capture socket is bound, or fail loudly. 5 s is far
+    // above observed bind latency even on a loaded CI runner. A timeout or
+    // a disconnected channel (tcpdump exited before printing the banner —
+    // e.g. binary missing) is a real capture-setup failure, surfaced here
+    // with a named precondition rather than as a downstream empty pcap.
+    ready_rx.recv_timeout(Duration::from_secs(5)).expect(
+        "tcpdump did not report 'listening on' within 5s — the client-veth capture never \
+         became live (tcpdump missing, iface gone, or exec failed). The witness/silence below \
+         cannot be trusted; failing at the capture-setup precondition (debugging.md § 8).",
+    );
 
     let mut replies_received: usize = 0;
     for i in 0..count {
@@ -566,10 +613,8 @@ fn run_round_trips(
     }
 
     std::thread::sleep(Duration::from_millis(300));
-    if let Some(mut t) = tcpdump.take() {
-        let _ = t.kill();
-        let _ = t.wait();
-    }
+    let _ = tcpdump.kill();
+    let _ = tcpdump.wait();
 
     // Parse the any-source client-veth capture for reply datagrams
     // (source port 5353). For the rewritten XDP path this may be empty
@@ -640,8 +685,7 @@ fn parse_pcap_udp_sources(ns_name: &str, pcap: &std::path::Path) -> Vec<Ipv4Addr
 /// We read the capture back via `tcpdump -r` and parse the same
 /// `IP <src>.<sport> > <dst>.<dport>` lines, this time keeping the
 /// datagrams whose DESTINATION port (the token after `>`) is the
-/// listener port. Empirically (target/probe/probe_query_witness.sh,
-/// real Lima) such lines render as
+/// listener port. Such lines render as
 /// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...` — note tcpdump applies
 /// its DNS dissector to port-5353 traffic, so a trailing `:` plus a
 /// decode tail follows the destination token; the parse strips the `:`
@@ -825,8 +869,9 @@ fn every_udp_reply_independently_source_rewritten() {
 /// failed (did not start in time, empty/unwritable pcap, killed early),
 /// that assertion FAILS with a "capture failed — cannot trust the
 /// silence" message instead of letting an empty reply-source set pass
-/// vacuously. The shape of the witness line was empirically verified on
-/// a real Lima run (target/probe/probe_query_witness.sh, backend-down):
+/// vacuously. The capture is made live deterministically by waiting for
+/// tcpdump's "listening on" banner before the first send (see
+/// `run_round_trips`); on a live capture the witness line renders as
 /// `10.0.0.10.<ephemeral> > 10.0.0.1.5353: ...`.
 ///
 /// Falsifiability: if a backend-sourced reply DID arrive (the #163

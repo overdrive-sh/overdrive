@@ -1275,11 +1275,11 @@ fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> 
 ///
 /// The kernel permits exactly one XDP program per netdev XDP hook;
 /// attaching a second program to an occupied hook returns `EBUSY`.
-/// The single-node default (`DataplaneConfig::loopback()`) points both
-/// the forward (`client_iface`) and reverse (`backend_iface`) programs
-/// at `lo`, so the second attach hits this until 01-03 makes the
-/// collision unreachable on the default path. An operator who points
-/// both ifaces at one real NIC still hits it.
+/// The single-node default (`DataplaneConfig::single_node_veth()`)
+/// gives the forward (`client_iface`) and reverse (`backend_iface`)
+/// programs two distinct veth names, so the collision is structurally
+/// unreachable on the default path (ADR-0061 § 1). An operator who
+/// points both ifaces at one real NIC still hits it.
 ///
 /// Returns `Some(DataplaneError::IfaceXdpSlotBusy { iface })` only when
 /// the attach error is a `SyscallError` whose `io_error` carries the

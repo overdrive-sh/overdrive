@@ -396,6 +396,21 @@ impl Reconciler for ServiceMapHydrator {
     }
 }
 
+/// Per-service emission context for [`push_register_local_backend_actions`].
+/// Groups the service-scoped fields (identity, VIP, declared port +
+/// proto, correlation inputs) so the helper stays under the
+/// `clippy::too_many_arguments` bar after step 02-02 added the proto
+/// dimension. All fields are sourced from the listener-bearing
+/// `ServiceDesired` the hydrator is reconciling.
+struct LocalBackendEmit<'a> {
+    service_id: ServiceId,
+    vip_v4: std::net::Ipv4Addr,
+    vip_port: u16,
+    proto: crate::dataplane::backend_key::Proto,
+    target_str: &'a str,
+    spec_hash: &'a ContentHash,
+}
+
 /// Emit one `Action::RegisterLocalBackend` per local backend whose
 /// address passes the ADR-0053 § 4 classifier guard. Backends with an
 /// IPv6 address or a guard-rejected IPv4 (loopback / link-local /
@@ -415,21 +430,6 @@ impl Reconciler for ServiceMapHydrator {
 /// VIP:53 → backend:5353 must register the entry under port 53 or the
 /// client's connect never hits the map. See the
 /// `Dataplane::register_local_backend` contract.
-/// Per-service emission context for [`push_register_local_backend_actions`].
-/// Groups the service-scoped fields (identity, VIP, declared port +
-/// proto, correlation inputs) so the helper stays under the
-/// `clippy::too_many_arguments` bar after step 02-02 added the proto
-/// dimension. All fields are sourced from the listener-bearing
-/// `ServiceDesired` the hydrator is reconciling.
-struct LocalBackendEmit<'a> {
-    service_id: ServiceId,
-    vip_v4: std::net::Ipv4Addr,
-    vip_port: u16,
-    proto: crate::dataplane::backend_key::Proto,
-    target_str: &'a str,
-    spec_hash: &'a ContentHash,
-}
-
 fn push_register_local_backend_actions(
     actions: &mut Vec<Action>,
     local: &[&Backend],
