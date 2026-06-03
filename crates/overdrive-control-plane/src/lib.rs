@@ -1176,10 +1176,29 @@ pub async fn run_server_with_obs_and_driver(
     // backend-discovery-bridge-service-reachability step 02-01 —
     // require the `[dataplane]` config section per architecture.md
     // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
-    // operator-supplied `client_iface`. The `Ipv4Addr::LOCALHOST`
-    // placeholder from 01-04 is removed in the same commit per
-    // `feedback_single_cut_greenfield_migrations.md`.
-    let host_ipv4 = resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?;
+    // operator-supplied `client_iface`.
+    //
+    // `host_ipv4` follows the SAME override branch as the dataplane
+    // construction above. The production path (`dataplane_override =
+    // None`) provisions the single-node veth pair (ADR-0061 § 3) and
+    // then resolves the host address off the now-provisioned
+    // `client_iface`, refusing the boot via
+    // `DataplaneBootError::IfaceAddrResolution` if it is absent.
+    //
+    // The SimDataplane-override path (DST / CLI integration tests that
+    // inject `config.dataplane_override`) does NOT provision a veth —
+    // the `client_iface` (`ovd-veth-cli` in the default config) is
+    // never created, so resolving it would fail at boot. Those boots
+    // are not exercising the real dataplane attach path; `host_ipv4`
+    // only seeds the bridge / hydrator reconcilers' local-backend
+    // socket addresses, for which `LOCALHOST` is correct. This matches
+    // the value these boots resolved before the default `client_iface`
+    // moved from `lo` (→ 127.0.0.1) to the veth name (step 01-03).
+    let host_ipv4 = if config.dataplane_override.is_some() {
+        std::net::Ipv4Addr::LOCALHOST
+    } else {
+        resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?
+    };
     // Service-health-check-probes — the `ProbeRunner` Earned-Trust
     // gate and the threading of `Arc<ProbeRunner>` into the
     // production `ExecDriver` now live at the binary composition
