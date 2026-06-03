@@ -957,15 +957,18 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
     let _ = topo;
 }
 
-/// Regression: `update_service(vip, vec![])` must purge ALL ports
-/// registered on the same VIP IP, not just the first. The prior code
-/// used `Iterator::find` (first match by `vip_host`) which left the
-/// second port's SERVICE_MAP slot, BACKEND_MAP entries, and
-/// REVERSE_NAT_MAP entries alive — XDP continued forwarding on the
-/// un-purged port.
+/// Regression: `update_service(frontend, vec![])` is scoped to the
+/// single `(vip, port, proto)` frontend — purging one listener on a VIP
+/// MUST leave a co-resident listener on the same VIP under a different
+/// port alive (its SERVICE_MAP outer slot, BACKEND_MAP entries, and
+/// REVERSE_NAT_MAP keys survive). VIP-wide purge is the bug
+/// `empty_backend_purge_keys` and ADR-0060 D4 guard against; this
+/// exercises that contract through the real BPF maps (the selector
+/// logic itself is unit-tested by
+/// `empty_backend_purge_is_scoped_to_frontend_not_vip_wide`).
 #[test]
-fn empty_backend_purge_removes_all_ports_for_same_vip() {
-    if !require_root_or_skip("multi-port-purge") {
+fn empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive() {
+    if !require_root_or_skip("frontend-scoped-purge") {
         return;
     }
 
@@ -1057,32 +1060,53 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
         "BACKEND_MAP must contain 2 entries (one per port)"
     );
 
-    // Step 3: purge the VIP with empty backends — must remove BOTH ports.
+    // Step 3: purge ONLY the port-80 frontend with empty backends.
+    // Frontend-scoped purge (ADR-0060 D4) must remove the (VIP, 80, Tcp)
+    // slot and leave the co-resident (VIP, 443, Tcp) frontend untouched.
     runtime
-        .block_on(dataplane.update_service(tcp_frontend(VIP, VIP_PORT), vec![]))
-        .expect("update_service empty");
+        .block_on(dataplane.update_service(tcp_frontend(VIP, port_80), vec![]))
+        .expect("update_service empty (port 80)");
 
-    // Verify: SERVICE_MAP has no entries for either port.
+    // Verify: the purged port-80 frontend is gone from every map.
     assert!(
         !dataplane
             .service_map_contains(VIP, port_80, Proto::Tcp)
             .expect("contains port 80 after purge"),
-        "SERVICE_MAP must NOT contain VIP:80 after empty-backend purge"
+        "SERVICE_MAP must NOT contain VIP:80 after its frontend's empty-backend purge"
     );
     assert!(
         !dataplane
+            .reverse_nat_map_has_backend(BACKEND_IP, port_80)
+            .expect("has_backend port 80 after purge"),
+        "port 80's REVERSE_NAT entry must be purged"
+    );
+
+    // Verify: the co-resident port-443 frontend SURVIVES — its slot,
+    // BACKEND_MAP entry, and REVERSE_NAT entry are all intact. This is
+    // the frontend-scoped contract: a sibling frontend's empty-backend
+    // purge must not touch it (the VIP-wide over-purge bug).
+    assert!(
+        dataplane
             .service_map_contains(VIP, port_443, Proto::Tcp)
             .expect("contains port 443 after purge"),
-        "SERVICE_MAP must NOT contain VIP:443 after empty-backend purge"
+        "SERVICE_MAP must STILL contain VIP:443 — a different-port frontend must \
+         survive a sibling frontend's purge (frontend-scoped, not VIP-wide)"
     );
     assert!(
-        dataplane.backend_map_keys().expect("backend_map_keys after purge").is_empty(),
-        "BACKEND_MAP must be empty after orphan-GC sweep"
+        dataplane
+            .reverse_nat_map_has_backend(BACKEND_IP, port_443)
+            .expect("has_backend port 443 after purge"),
+        "port 443's REVERSE_NAT entry must survive the port-80 purge"
+    );
+    assert_eq!(
+        dataplane.backend_map_keys().expect("backend_map_keys after purge").len(),
+        1,
+        "BACKEND_MAP must retain exactly port 443's entry after the port-80 purge"
     );
     assert_eq!(
         dataplane.reverse_nat_map_size().expect("rnat size after purge"),
-        0,
-        "REVERSE_NAT_MAP must be empty after purge"
+        1,
+        "REVERSE_NAT_MAP must retain exactly port 443's entry after the port-80 purge"
     );
 
     drop(_ns_guard);
