@@ -903,7 +903,9 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
 
     // Verify: SERVICE_MAP has the entry.
     assert!(
-        dataplane.service_map_contains(VIP, VIP_PORT).expect("service_map_contains after install"),
+        dataplane
+            .service_map_contains(VIP, VIP_PORT, Proto::Tcp)
+            .expect("service_map_contains after install"),
         "SERVICE_MAP must contain VIP entry after install"
     );
     assert_eq!(
@@ -924,7 +926,9 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
 
     // Verify: all maps are cleaned up.
     assert!(
-        !dataplane.service_map_contains(VIP, VIP_PORT).expect("service_map_contains after removal"),
+        !dataplane
+            .service_map_contains(VIP, VIP_PORT, Proto::Tcp)
+            .expect("service_map_contains after removal"),
         "SERVICE_MAP outer slot must be deleted after empty-backend update"
     );
     assert_eq!(
@@ -1034,11 +1038,11 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
 
     // Verify: SERVICE_MAP has entries for both ports.
     assert!(
-        dataplane.service_map_contains(VIP, port_80).expect("contains port 80"),
+        dataplane.service_map_contains(VIP, port_80, Proto::Tcp).expect("contains port 80"),
         "SERVICE_MAP must contain VIP:80 after install"
     );
     assert!(
-        dataplane.service_map_contains(VIP, port_443).expect("contains port 443"),
+        dataplane.service_map_contains(VIP, port_443, Proto::Tcp).expect("contains port 443"),
         "SERVICE_MAP must contain VIP:443 after install"
     );
     assert_eq!(
@@ -1054,11 +1058,15 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
 
     // Verify: SERVICE_MAP has no entries for either port.
     assert!(
-        !dataplane.service_map_contains(VIP, port_80).expect("contains port 80 after purge"),
+        !dataplane
+            .service_map_contains(VIP, port_80, Proto::Tcp)
+            .expect("contains port 80 after purge"),
         "SERVICE_MAP must NOT contain VIP:80 after empty-backend purge"
     );
     assert!(
-        !dataplane.service_map_contains(VIP, port_443).expect("contains port 443 after purge"),
+        !dataplane
+            .service_map_contains(VIP, port_443, Proto::Tcp)
+            .expect("contains port 443 after purge"),
         "SERVICE_MAP must NOT contain VIP:443 after empty-backend purge"
     );
     assert!(

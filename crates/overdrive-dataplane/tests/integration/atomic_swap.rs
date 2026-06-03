@@ -269,6 +269,7 @@ fn swap_inner_map_distributes_traffic_across_new_backend_set() {
     let service_key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(vip_octets)),
         port_host: vip_port,
+        proto: 6, // TCP (IANA) — this test forwards TCP SYNs (step 02-01 key widening)
         _pad: 0,
     };
 
@@ -1129,6 +1130,7 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
     let service_key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(vip_octets)),
         port_host: vip_port,
+        proto: 6, // TCP (IANA) — this test forwards TCP SYNs (step 02-01 key widening)
         _pad: 0,
     };
 

@@ -267,7 +267,8 @@ fn tcp_checksum(src_ip: &[u8], dst_ip: &[u8], tcp: &[u8]) -> u16 {
 struct ServiceKey {
     vip_host: u32,
     port_host: u16,
-    _pad: u16,
+    proto: u8,
+    _pad: u8,
 }
 // SAFETY: repr(C); we always set `_pad = 0`; no padding-uninit
 // concerns. `aya::Pod` is the marker aya needs to permit raw access.
@@ -603,6 +604,7 @@ fn populate_service_map(
     let key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
         port_host: VIP_PORT,
+        proto: 6, // TCP (IANA) — this test forwards TCP SYNs (step 02-01 key widening)
         _pad: 0,
     };
     outer_map_set(outer_fd, &key, &inner_fd);

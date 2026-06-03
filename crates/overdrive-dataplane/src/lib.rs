@@ -776,11 +776,13 @@ impl EbpfDataplane {
     }
 
     /// Returns `true` if SERVICE_MAP contains an outer slot for the
-    /// given `(vip, port)` key.
+    /// given `(vip, port, proto)` key.
     ///
     /// Observability surface — used by Tier 3 integration tests to
     /// verify the empty-backend cleanup path removes the outer HoM
-    /// slot.
+    /// slot. Step 02-01 widened the key with `proto`, so the diagnostic
+    /// queries the exact `(vip, port, proto)` slot rather than a
+    /// proto-agnostic one.
     ///
     /// # Errors
     ///
@@ -790,10 +792,12 @@ impl EbpfDataplane {
         &self,
         vip: std::net::Ipv4Addr,
         port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<bool, DataplaneError> {
         use crate::maps::wire::ServiceKey;
 
-        let key = ServiceKey { vip_host: u32::from(vip), port_host: port, _pad: 0 };
+        let key =
+            ServiceKey { vip_host: u32::from(vip), port_host: port, proto: proto.as_u8(), _pad: 0 };
         let key_bytes = unsafe {
             core::slice::from_raw_parts(
                 (&raw const key).cast::<u8>(),
@@ -1400,7 +1404,16 @@ impl Dataplane for EbpfDataplane {
         }
 
         let vip_port = backends[0].addr.port();
-        let service_key = ServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        // Step 02-01: proto sourced from the `ServiceFrontend` (ADR-0060
+        // site #7) — NO `Proto::Tcp` literal on the action→handle→key
+        // path, so a UDP service keys a distinct outer-map slot (C3
+        // guard).
+        let service_key = ServiceKey {
+            vip_host: u32::from(vip),
+            port_host: vip_port,
+            proto: svc_proto.as_u8(),
+            _pad: 0,
+        };
 
         // Step 1 — Upsert each backend into BACKEND_MAP. BackendId
         // is assigned by the monotonic-counter allocator per ADR-0046.

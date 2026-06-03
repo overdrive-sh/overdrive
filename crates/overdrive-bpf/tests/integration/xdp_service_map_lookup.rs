@@ -220,15 +220,27 @@ fn tcp_checksum(src_ip: &[u8], dst_ip: &[u8], tcp: &[u8]) -> u16 {
 }
 
 /// Outer-map key matching the `ServiceKey` struct in
-/// `crates/overdrive-dataplane/src/maps/service_map_handle.rs` —
-/// 8-byte host-order POD: vip_host (u32) + port_host (u16) + _pad (u16).
+/// `crates/overdrive-bpf/src/maps/service_map.rs` — 8-byte host-order
+/// POD: vip_host (u32) + port_host (u16) + proto (u8) + _pad (u8).
+/// Step 02-01 widened the outer key from `(vip, port)` to
+/// `(vip, port, proto)` IPVS-style (ADR-0040 rev 2026-06-03): `proto`
+/// absorbs one of the two reserved `_pad` bytes; the struct stays
+/// 8 bytes and the trailing pad stays zeroed so logically-equal keys
+/// hash to the same BPF slot.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 struct ServiceKey {
     vip_host: u32,
     port_host: u16,
-    _pad: u16,
+    proto: u8,
+    _pad: u8,
 }
+
+/// IANA proto byte for TCP — matches the IPv4 header `proto` field the
+/// kernel-side program parses (`IPV4_PROTO_TCP`).
+const PROTO_TCP: u8 = 6;
+/// IANA proto byte for UDP.
+const PROTO_UDP: u8 = 17;
 // SAFETY: repr(C), no padding-uninit issues for our writes (we
 // always set _pad to 0); `aya::Pod` is the marker aya needs to
 // permit raw map access.
@@ -538,6 +550,7 @@ fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
     let key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
         port_host: VIP_PORT,
+        proto: PROTO_TCP,
         _pad: 0,
     };
     outer_map_set(&outer_fd, &key, &inner_fd);
@@ -593,6 +606,117 @@ fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
     assert_eq!(tcp_csum_recomputed, 0, "TCP checksum invalid after rewrite");
 }
 
+/// S-02-01 — proto is part of the SERVICE_MAP outer key. A packet
+/// whose IPv4 proto byte does NOT match the proto the slot was keyed
+/// on MISSES the outer map (→ `XDP_PASS`, no rewrite), even when
+/// `(vip, port)` match exactly. This is the IPVS-style co-location
+/// unlock: tcp/8080 and udp/8080 are distinct outer slots.
+///
+/// The dispositive observation is a `(vip, port)`-matching TCP SYN
+/// against a slot keyed for UDP: the dest IP in `data_out` is
+/// UNCHANGED (no backend rewrite happened) because the proto-mismatched
+/// key missed the outer HoM. Before 02-01 the outer key ignored proto,
+/// so this same TCP packet would hit the slot and rewrite the dst IP —
+/// the falsifying difference this test pins.
+#[test]
+#[serial(env)]
+fn proto_mismatched_packet_misses_service_map() {
+    let LoadedTestBpf { mut bpf, prog_fd, outer_fd, _pin_dir_guard } = load_service_map_program();
+
+    const BID_ONE: u32 = 1;
+
+    // SETUP: full happy-path populate for (VIP, VIP_PORT) — but keyed
+    // on UDP. The PKTGEN packet below is TCP, so the proto byte differs.
+    {
+        let mut bm: HashMap<_, u32, BackendEntry> =
+            HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP not found"))
+                .expect("BACKEND_MAP HashMap::try_from");
+        let value = BackendEntry {
+            ipv4_host: u32::from(std::net::Ipv4Addr::from(BACKEND_OCTETS)),
+            port_host: BACKEND_PORT,
+            weight: 1,
+            healthy: 1,
+            _pad: [0; 3],
+        };
+        bm.insert(BID_ONE, value, 0).expect("BACKEND_MAP insert");
+    }
+    let inner_fd = create_inner_array_filled(BID_ONE);
+    // Slot keyed for UDP — the TCP packet must NOT find it.
+    let udp_key = ServiceKey {
+        vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+        port_host: VIP_PORT,
+        proto: PROTO_UDP,
+        _pad: 0,
+    };
+    outer_map_set(&outer_fd, &udp_key, &inner_fd);
+
+    // PKTGEN: TCP SYN to VIP:VIP_PORT (proto = TCP = 6).
+    let pkt = synthesise_tcp_syn(VIP_OCTETS, VIP_PORT);
+    let mut out = vec![0u8; pkt.len()];
+
+    // CHECK: proto-mismatched lookup misses → XDP_PASS, no rewrite.
+    let (action, _) =
+        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
+    assert_eq!(
+        action, XDP_PASS,
+        "proto-mismatched (tcp pkt vs udp slot) must miss → XDP_PASS, got {action}"
+    );
+    // The miss path commits no rewrite — dst IP is still the VIP.
+    let ip_dst = &out[ETH_HDR_LEN + 16..ETH_HDR_LEN + 20];
+    assert_eq!(
+        ip_dst, &VIP_OCTETS,
+        "proto-mismatched miss must NOT rewrite dst IP (it would on a hit)"
+    );
+}
+
+/// S-02-01 — proto-matched packet HITS. The same `(vip, port)` keyed
+/// on TCP, with a TCP packet, resolves and rewrites the dst IP to the
+/// backend. The mirror of `proto_mismatched_packet_misses_service_map`
+/// — together they pin that proto is a load-bearing key component, not
+/// ignored padding.
+#[test]
+#[serial(env)]
+fn proto_matched_packet_hits_service_map() {
+    let LoadedTestBpf { mut bpf, prog_fd, outer_fd, _pin_dir_guard } = load_service_map_program();
+
+    const BID_ONE: u32 = 1;
+
+    {
+        let mut bm: HashMap<_, u32, BackendEntry> =
+            HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP not found"))
+                .expect("BACKEND_MAP HashMap::try_from");
+        let value = BackendEntry {
+            ipv4_host: u32::from(std::net::Ipv4Addr::from(BACKEND_OCTETS)),
+            port_host: BACKEND_PORT,
+            weight: 1,
+            healthy: 1,
+            _pad: [0; 3],
+        };
+        bm.insert(BID_ONE, value, 0).expect("BACKEND_MAP insert");
+    }
+    let inner_fd = create_inner_array_filled(BID_ONE);
+    // Slot keyed for TCP — the TCP packet must find it.
+    let tcp_key = ServiceKey {
+        vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+        port_host: VIP_PORT,
+        proto: PROTO_TCP,
+        _pad: 0,
+    };
+    outer_map_set(&outer_fd, &tcp_key, &inner_fd);
+
+    let pkt = synthesise_tcp_syn(VIP_OCTETS, VIP_PORT);
+    let mut out = vec![0u8; pkt.len()];
+
+    let (_action, out_len) =
+        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
+    // Verdict is FIB-environment-dependent (see hit test docstring); the
+    // load-bearing Tier 2 observation is the rewrite committed BEFORE the
+    // FIB lookup, identical to `service_map_hit_rewrites_*`.
+    assert_eq!(out_len, pkt.len(), "output frame length mismatch");
+    let ip_dst = &out[ETH_HDR_LEN + 16..ETH_HDR_LEN + 20];
+    assert_eq!(ip_dst, &BACKEND_OCTETS, "proto-matched hit must rewrite dst IP to backend");
+}
+
 /// S-2.2-05 — `SERVICE_MAP` miss returns `XDP_PASS`, no rewrite.
 ///
 /// Slice 03 restructure: SERVICE_MAP outer HoM has no entry for
@@ -608,6 +732,7 @@ fn service_map_miss_returns_xdp_pass_no_rewrite() {
     let key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
         port_host: VIP_PORT,
+        proto: PROTO_TCP,
         _pad: 0,
     };
     outer_map_delete(&outer_fd, &key);
@@ -670,6 +795,7 @@ fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
     let key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
         port_host: VIP_PORT,
+        proto: PROTO_TCP,
         _pad: 0,
     };
     outer_map_set(&outer_fd, &key, &inner_fd);

@@ -64,11 +64,19 @@ fn deregister(v: Ipv4Addr, port: u16) -> Action {
 }
 
 fn update_service(o1: u8) -> Action {
+    update_service_proto_port(o1, overdrive_core::dataplane::backend_key::Proto::Tcp, 8080)
+}
+
+fn update_service_proto_port(
+    o1: u8,
+    proto: overdrive_core::dataplane::backend_key::Proto,
+    port: u16,
+) -> Action {
     Action::DataplaneUpdateService {
         service_id: service_id(),
         vip: service_vip_for(o1),
-        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
-        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+        port: std::num::NonZeroU16::new(port).expect("non-zero"),
+        proto,
         backends: vec![],
         correlation: correlation("update-service"),
     }
@@ -116,6 +124,64 @@ fn cgroup_vs_xdp_conflict_on_same_vip_rejected() {
     assert_eq!(vip_port, None, "cross-route conflict is per-VIP, not per-(vip, port)");
     assert_eq!(first_route, WriteRoute::Xdp);
     assert_eq!(second_route, WriteRoute::Cgroup);
+}
+
+/// S-02-01 — two XDP `DataplaneUpdateService` writes for the SAME VIP
+/// but DIFFERENT ports (tcp/8080 + tcp/8081) now return `Ok`. Before
+/// 02-01 the XDP write-key was VIP-only, so these falsely conflicted
+/// as `ConflictingServiceWrites`. The map key is now `(vip, port, proto)`
+/// — distinct ports are distinct slots.
+#[test]
+fn xdp_same_vip_different_ports_pass() {
+    use overdrive_core::dataplane::backend_key::Proto;
+    let actions = vec![
+        update_service_proto_port(1, Proto::Tcp, 8080),
+        update_service_proto_port(1, Proto::Tcp, 8081),
+    ];
+    assert!(
+        validate_reconcile_output(&actions).is_ok(),
+        "same VIP, different ports must NOT conflict (distinct (vip,port,proto) slots)"
+    );
+}
+
+/// S-02-01 — the DNS co-location case: two XDP writes for the SAME
+/// `(vip, port)` but DIFFERENT proto (tcp/53 + udp/53) return `Ok`.
+/// Distinct proto → distinct outer-map slot → no conflict.
+#[test]
+fn xdp_same_vip_port_different_proto_pass() {
+    use overdrive_core::dataplane::backend_key::Proto;
+    let actions = vec![
+        update_service_proto_port(1, Proto::Tcp, 53),
+        update_service_proto_port(1, Proto::Udp, 53),
+    ];
+    assert!(
+        validate_reconcile_output(&actions).is_ok(),
+        "same (vip,port), different proto must NOT conflict (DNS co-location)"
+    );
+}
+
+/// S-02-01 — genuine duplicate-slot collisions are STILL caught. Two
+/// XDP writes for IDENTICAL `(vip, port, proto)` (tcp/8080 twice)
+/// remain a `ConflictingServiceWrites` error.
+#[test]
+fn xdp_identical_vip_port_proto_rejected() {
+    use overdrive_core::dataplane::backend_key::Proto;
+    let actions = vec![
+        update_service_proto_port(5, Proto::Tcp, 8080),
+        update_service_proto_port(5, Proto::Tcp, 8080),
+    ];
+    let err = validate_reconcile_output(&actions)
+        .expect_err("identical (vip,port,proto) XDP writes must conflict");
+    let ReconcilerOutputViolation::ConflictingServiceWrites {
+        vip: conflict_vip,
+        vip_port,
+        first_route,
+        second_route,
+    } = err;
+    assert_eq!(conflict_vip, vip(5));
+    assert_eq!(vip_port, Some(8080), "XDP-vs-XDP conflict now reports the shared port");
+    assert_eq!(first_route, WriteRoute::Xdp);
+    assert_eq!(second_route, WriteRoute::Xdp);
 }
 
 /// Register-vs-Deregister conflict — two cgroup-path writes to the
