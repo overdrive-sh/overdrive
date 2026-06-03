@@ -571,3 +571,231 @@ captures the SHAPE; the crafter implements.
 | Date | Change |
 |---|---|
 | 2026-05-07 (later) | Q2 reopened: TC-egress reverse-NAT + kernel IP-forward in the data path superseded by ADR-0045's `bpf_redirect_neigh` datapath. Empirical falsification chain in `docs/analysis/e1-bpftrace-results.md` probes 1–7. Tracked under GH #159. — Morgan. |
+
+---
+
+## Revision 2026-06-03 — SERVICE_MAP outer key gains L4 protocol (`(VIP, port)` → `(VIP, port, proto)`)
+
+### Status
+
+Amendment. 2026-06-03. Decision-maker: Morgan; user-locked
+(resolves P2-Q4 on the `udp-service-support` feature — "do
+`(vip, port, proto)` as IPVS"). Tags: phase-2, dataplane,
+service-map, l4-proto-keying, ipvs-alignment, udp-service-support.
+
+**Feature SSOT**: `docs/feature/udp-service-support/feature-delta.md`
+§ "Wave: DESIGN / [REF] P2-Q4 resolution — proto in the service-LB
+map keys". **Decision record**:
+`docs/feature/udp-service-support/design/wave-decisions.md` (P2-Q4).
+**Evidence base**:
+`docs/research/dataplane/service-map-l4-proto-keying-research.md`
+(Nova, 2026-06-03, High confidence, 13 trusted-domain sources).
+
+### Why this amendment
+
+Decision 1 above locked the `SERVICE_MAP` outer-map key as
+`(ServiceVip, u16 port)` — **proto-less**. That shape cannot
+represent two services that share a VIP **and** a port but differ in
+L4 protocol — the canonical case being DNS (`tcp/53 + udp/53` on one
+VIP) and the fast-growing HTTP/3 case (`443/tcp` HTTPS alongside
+`443/udp` QUIC). Both listeners hash to a single outer-map slot under
+a proto-less key; the second listener overwrites the first.
+
+The research is decisive that proto-less keying is the wrong
+architecture, not merely an under-optimisation:
+
+- **Linux IPVS keys every virtual service on `{protocol, addr, port}`
+  natively** (UAPI `struct ip_vs_service_user`: `__u16 protocol;
+  __be32 addr; __be16 port;`). Protocol is a *keying* field, not a
+  config option. kube-proxy's iptables mode emits per-protocol rule
+  chains. In the two oldest, most-deployed Kubernetes dataplanes,
+  proto is in the service key by construction (research § Q2).
+- **Cilium's eBPF `lb4_key` now carries `__u8 proto` and treats
+  omitting it as the defect it spent ~5.5 years closing** — issue
+  #9207 (opened 2019-09-16, "do not differentiate between UDP and TCP
+  services") → PR #37164 (merged 2025-01-23). The `proto` byte sat
+  reserved-but-unused (`IPPROTO_ANY`/0) the entire time; during that
+  window Cilium could not place TCP and UDP services on the same port
+  — the exact CoreDNS case (research § Q1). Proto-less was a known
+  bug, not a valid long-term model anywhere.
+- **Kubernetes treats TCP+UDP-on-same-port as first-class** — the
+  `MixedProtocolLBService` feature gate, the canonical CoreDNS
+  Service shape (`name: dns-tcp / dns-udp`, both `port: 53`), and the
+  AWS/Istio/Emissary dual-listener-on-443 pattern (research § Q4).
+- **Widening a HASH_OF_MAPS outer key is structurally free** — the
+  kernel docs place no size penalty on a composite POD outer key
+  (research § Q3), and Overdrive's `ServiceKey` is already an 8-byte
+  `#[repr(C)]` POD with a zeroed 2-byte `_pad`; the proto byte
+  consumes one already-reserved pad byte with **no change to the
+  map's byte width** (mirrors Cilium's own `__u8 proto; __u8 scope;
+  __u8 pad[2]` tail).
+
+This amendment is the SERVICE_MAP-forward-key half of the proto
+dimension. Its companion — proto in the **REVERSE_NAT** key, the #163
+response-path surface — is already locked by ADR-0060 (`BackendKey {
+ip, port, proto }`), and proto is already present at the dataplane
+boundary via `ServiceFrontend { vip, port, proto }` (ADR-0060). This
+amendment threads that same proto into the SERVICE_MAP **forward**
+key, closing the OQ-1 / D8 deferral that ADR-0060 left open.
+
+### Amendment
+
+Decision 1's `SERVICE_MAP` row is amended. The outer-map key changes
+from `(ServiceVip, u16 port)` to `(ServiceVip, u16 port, Proto)`:
+
+| Map | Type | Key (amended) | Value | Purpose |
+|---|---|---|---|---|
+| `SERVICE_MAP` | `BPF_MAP_TYPE_HASH_OF_MAPS` (outer) | **`(ServiceVip, u16 port, Proto)`** | inner-map fd | `(VIP, port, proto)`-to-inner-map indirection. A TCP listener and a UDP listener on the same `(VIP, port)` occupy **two distinct outer-map slots**. |
+
+`BACKEND_MAP` (keyed by `BackendId`) and `MAGLEV_MAP` (keyed by
+`ServiceId`) are **unchanged** — neither is keyed by the wire
+`(VIP, port)` tuple, so neither needs proto. The proto dimension is
+purely a SERVICE_MAP-outer-key concern on this map-split.
+
+#### Struct layout — absorb the pad byte, keep 8 bytes, keep deterministic hashing
+
+The kernel-side `ServiceKey`
+(`crates/overdrive-bpf/src/maps/service_map.rs:74-78`) and its
+userspace mirror
+(`crates/overdrive-dataplane/src/maps/service_map_handle.rs:59-66`)
+both carry a trailing `_pad: u16`. The proto byte consumes one of the
+two pad bytes; the struct **stays 8 bytes**:
+
+```rust
+// from-state (proto-less, 8 bytes)
+#[repr(C)]
+pub struct ServiceKey {
+    pub vip_host: u32,
+    pub port_host: u16,
+    pub _pad: u16,        // 2 reserved bytes, zeroed
+}
+
+// to-state (proto in key, still 8 bytes — mirrors Cilium's
+// `__u8 proto; __u8 scope; __u8 pad[2]` tail)
+#[repr(C)]
+pub struct ServiceKey {
+    pub vip_host: u32,
+    pub port_host: u16,
+    pub proto: u8,        // IANA L4 proto: IPPROTO_TCP=6 / IPPROTO_UDP=17
+    pub _pad: u8,         // 1 trailing pad byte, MUST stay zeroed
+}
+```
+
+Two load-bearing layout disciplines, both grounded in the research's
+implementation note (§ Q3):
+
+1. **The trailing `_pad: u8` MUST be deterministically zero-initialised**
+   (the existing codebase convention already zeroes `_pad`). BPF hash
+   maps key on the raw struct bytes; a non-zero or uninitialised pad
+   byte makes two logically-equal keys hash to different slots. This
+   is a one-line discipline (`_pad: 0` in every constructor), not a
+   structural obstacle — and the codebase already does it for the
+   `u16` pad.
+2. **`proto` is lowered to the kernel `u8` at the map-write edge** —
+   the userspace handle accepts the typed `Proto` enum (ADR-0060's
+   `overdrive_core::dataplane::backend_key::Proto`, IANA-valued via
+   `Proto::as_u8()` → 6/17) and writes the `u8` discriminant into the
+   key struct. The kernel-side `xdp_service_map_lookup` already reads
+   `proto` from the IPv4 header
+   (`crates/overdrive-bpf/src/programs/xdp_service_map.rs:247`) and
+   builds the key at `:268`; the proto byte slots into the existing
+   key construction with no new packet parsing.
+
+### Migration — single-cut, reconciler-repopulated; no shim
+
+Per `feedback_single_cut_greenfield_migrations.md` and
+`.claude/rules/reconcilers.md`: the `SERVICE_MAP` is repopulated from
+intent on agent boot by the `ServiceMapHydrator` reconciler
+(ADR-0042). The migration is therefore "**the key struct changes;
+the map is recreated on next boot**" — there is **NO** live in-place
+migration, **NO** dual-key compatibility shim, **NO** deprecation
+path, and **NO** generation-counter cutover. The research (§ Q5)
+contrasts this explicitly with Cilium, whose proto cutover was
+hazardous *because* of live in-place upgrade with established
+connections (issue #13529); Overdrive's reconciler-repopulated,
+single-cut posture removes that hazard entirely. DELIVER must NOT
+build a migration shim — the key struct edit + the hydrator's
+existing repopulation IS the migration.
+
+### What this amendment supersedes vs preserves
+
+| Original decision | Status |
+|---|---|
+| Decision 1 — three-map split (SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP) | **Preserved in shape.** Only the SERVICE_MAP *outer-key tuple* widens; the map *types*, the inner-map structure, and the BACKEND_MAP / MAGLEV_MAP keys are unchanged. |
+| Decision 1 — SERVICE_MAP outer key `(ServiceVip, u16 port)` | **Amended** to `(ServiceVip, u16 port, Proto)`. |
+| Decision 2 — atomic swap via HASH_OF_MAPS outer-fd replacement | **Preserved verbatim.** The atomic-swap primitive is per-outer-slot; a wider outer key means more slots, not a different swap mechanism. The research (§ Q3) confirms outer-key widening is independent of nesting/value mechanics. |
+| Q1=A (kernel-helper checksum), Q3=C (sanity prologue, ingress-only), Q5=A (inner-map size 256), Q7=B (6 DropClass slots) | **Preserved.** None interacts with the outer-key tuple. |
+| Q2 (datapath shape; reopened, superseded by ADR-0045) | **Unaffected.** The forward/response datapath is orthogonal to the outer-key tuple. |
+
+### Consequences
+
+**Positive.**
+
+- The DNS case (`tcp/53 + udp/53` on one VIP) and the HTTP/3 case
+  (`443/tcp + 443/udp`) are representable on day one — the SERVICE_MAP
+  forward path installs two distinct outer-map slots, one per proto.
+- Aligns the forward key with IPVS / kube-proxy (proto-in-key) and
+  with Cilium's post-#37164 `lb4_key` — removes Overdrive's exposure
+  to "we are the only L4 LB keying proto-less."
+- Symmetry with the response path: the REVERSE_NAT key already carries
+  proto (ADR-0060 `BackendKey { ip, port, proto }`); the forward key
+  now matches. The `(VIP, port, proto)` frontend and the
+  `(ip, port, proto)` backend key share one proto dimension end-to-end.
+- Zero byte-width cost: 8-byte key before and after; one reserved pad
+  byte is consumed.
+
+**Negative / accepted.**
+
+- The kernel-side and userspace `ServiceKey` structs change layout
+  (proto byte at offset 6, pad narrows to 1 byte). Single-cut per the
+  migration section; the endianness-lockstep proptest
+  (`service_map_handle.rs:262-314`), the Tier 2 lookup test
+  (`crates/overdrive-bpf/tests/integration/xdp_service_map_lookup.rs`),
+  and the Tier 3 forward/swap tests
+  (`service_map_forward.rs`, `atomic_swap.rs`,
+  `multi_listener_tcp_udp_e2e.rs`) update in the same PR. These are
+  DELIVER concerns, noted here for blast-radius visibility, not
+  authored by this ADR.
+- `OQ-1` / `D8` (SERVICE_MAP forward-key granularity — VIP-only per
+  the shipped `validate.rs:218` vs `(VIP, port)` per architecture.md
+  § 5 Drift-3) is **subsumed** by this amendment: the forward key is
+  now unambiguously `(VIP, port, proto)`. The `validate.rs` write-key
+  classifier (`port_opt: None`) must widen to carry port **and** proto
+  to match; that is a DELIVER site, flagged in the feature-delta.
+
+### Endianness note
+
+No new endianness discipline (consistent with ADR-0060 § "Endianness
+note (D7)"). `proto` is a single IANA byte (`Proto::as_u8()` → 6/17)
+with no byte-order concern. The § 11 host-order/network-order lockstep
+continues to govern `vip_host` and `port_host` only. The kernel-side
+program reads the IPv4-header proto byte directly (no swap needed for
+a single byte); userspace writes the `u8` discriminant directly.
+
+### Cross-references
+
+- `docs/research/dataplane/service-map-l4-proto-keying-research.md`
+  — the citable evidence base (Cilium #9207/#37164/#13529, IPVS
+  `ip_vs_service_user`, Kubernetes `MixedProtocolLBService`, kernel
+  `map_of_maps` docs).
+- ADR-0060 (`ServiceFrontend { vip, port, proto }` at the dataplane
+  boundary; REVERSE_NAT key carries proto) — the companion that put
+  proto on the boundary; this amendment threads it into the
+  SERVICE_MAP forward key. ADR-0060 § "Flagged for US-05 (D8)" is the
+  deferral this amendment closes.
+- ADR-0053 (LOCAL_BACKEND_MAP) — its companion 2026-06-03 amendment
+  threads the same proto dimension into the same-host cgroup path.
+- ADR-0042 (`ServiceMapHydrator`) — the reconciler that repopulates
+  SERVICE_MAP on boot; the migration mechanism.
+- `crates/overdrive-bpf/src/maps/service_map.rs:74-78` (kernel key),
+  `crates/overdrive-dataplane/src/maps/service_map_handle.rs:59-66`
+  (userspace mirror), `:73-84` (`from_vip_port` builder — gains a
+  proto param),
+  `crates/overdrive-bpf/src/programs/xdp_service_map.rs:247,268`
+  (proto already read; key built).
+
+### Changelog (Revision 2026-06-03)
+
+| Date | Change |
+|---|---|
+| 2026-06-03 | SERVICE_MAP outer key `(ServiceVip, u16 port)` → `(ServiceVip, u16 port, Proto)`, IPVS-style. Proto byte absorbs one of the two reserved `_pad` bytes; struct stays 8 bytes; trailing pad stays zeroed for deterministic hashing. Single-cut reconciler-repopulated migration; no shim. Resolves P2-Q4 (`udp-service-support`) and subsumes OQ-1/D8. Evidence: `service-map-l4-proto-keying-research.md`. — Morgan (user-locked). |

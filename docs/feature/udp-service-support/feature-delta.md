@@ -1059,8 +1059,110 @@ type / backend-side key respectively).
 
 | ID | Question | Owner | Status |
 |---|---|---|---|
-| OQ-1 | `SERVICE_MAP` forward-key granularity: VIP-only (`validate.rs:218`) vs `(VIP, port)` (architecture.md §5 Drift-3). | US-05 DESIGN | OPEN (D8 — flagged in ADR-0060, not resolved here). |
+| OQ-1 | `SERVICE_MAP` forward-key granularity: VIP-only (`validate.rs:218`) vs `(VIP, port)` (architecture.md §5 Drift-3). | US-05 DESIGN | **RESOLVED 2026-06-03 (P2-Q4):** forward key is `(VIP, port, proto)` — see § "Wave: DESIGN / [REF] P2-Q4 resolution" below + ADR-0040 revision 2026-06-03. `validate.rs:218` write-key classifier widens to carry port+proto (DELIVER site). |
 | OQ-2 | Action payload shape for the proto dimension: two scalar fields `(port, proto)` vs an embedded per-listener frontend payload. | US-01 DELIVER | OPEN (dimension locked; encoding is an implementation detail). |
+| OQ-3 | Unconnected-UDP (`sendto(VIP, ...)` without `connect()`) needs a separate `sendmsg4` (`BPF_CGROUP_UDP4_SENDMSG`) hook — not implemented; connect4 path covers TCP + connected-UDP only. | user / orchestrator | DEFERRED — tracked as [#200](https://github.com/overdrive-sh/overdrive/issues/200). See ADR-0053 amendment § "Out of scope". |
+
+---
+
+## Wave: DESIGN / [REF] P2-Q4 resolution — proto in the service-LB map keys
+
+**Date:** 2026-06-03 · **Architect:** Morgan · **Mode:** Propose
+(core decision **user-locked**; only struct-layout / proto-source /
+test-surface sub-choices are recommendations). **Resolves:** P2-Q4
+(the open question slice-05 owned) and subsumes OQ-1/D8.
+
+**Locked decision.** L4 protocol enters **both** eBPF service-LB map
+keys, IPVS-style:
+- `SERVICE_MAP` outer key `(ServiceVip, port)` → `(ServiceVip, port,
+  Proto)` (wire-boundary XDP forward path; ADR-0040 revision
+  2026-06-03).
+- `LOCAL_BACKEND_MAP` key `(VIP, vip_port)` → `(VIP, vip_port, proto)`
+  (same-host cgroup `connect4` path; ADR-0053 revision 2026-06-03).
+
+**User rationale (verbatim):** *"we don't want to fix incorrect
+architecture — do `(vip, port, proto)` as IPVS."*
+
+**Relationship to the existing US-01 DESIGN (ADR-0060).** ADR-0060 put
+proto on the **dataplane boundary** (`ServiceFrontend { vip, port,
+proto }`) and into the **REVERSE_NAT** response-path key (`BackendKey
+{ ip, port, proto }`). It explicitly **deferred** the SERVICE_MAP
+*forward*-key granularity to US-05 (D8 / OQ-1). P2-Q4 closes that
+deferral: the same proto dimension now also keys the forward maps. One
+proto dimension, three maps (SERVICE_MAP forward, REVERSE_NAT response,
+LOCAL_BACKEND_MAP same-host), end-to-end.
+
+### [REF] Decisions table delta
+
+| ID | Decision | Disposition |
+|---|---|---|
+| P2-Q4 | `SERVICE_MAP` outer key + `LOCAL_BACKEND_MAP` key both gain `proto` (IPVS `{protocol, addr, port}` shape). Proto byte absorbs one reserved `_pad` byte; 8-byte structs unchanged in width; trailing pad stays zeroed for deterministic BPF hashing. | LOCKED (user) |
+| P2-Q4-a | cgroup_connect4 proto source = `bpf_sock_addr.protocol` (IANA byte, zero-translation; `bpf_sock_addr.type` SOCK_*→IPPROTO_* as documented fallback). Verified present in in-tree UAPI. | LOCKED (recommendation) |
+| P2-Q4-b | `Action::DataplaneUpdateService` + `RegisterLocalBackend`/`DeregisterLocalBackend` carry `Proto`, sourced from a listener-bearing fact (ADR-0060 site #8), NEVER a `Tcp` default (C3). | LOCKED |
+| P2-Q4-c | Migration = single-cut, reconciler-repopulated (key structs change, maps recreated on boot). No live migration, no dual-key shim, no deprecation. | LOCKED |
+| P2-Q4-d | Unconnected-UDP (`sendmsg4`) is a separate undelivered hook — OUT of scope; tracked as OQ-3 deferral / [#200](https://github.com/overdrive-sh/overdrive/issues/200). | DEFERRED |
+
+### [REF] Component decomposition delta (all EXTEND — zero CREATE NEW)
+
+| Component | Path | Disposition | Change |
+|---|---|---|---|
+| `ServiceKey` (kernel) | `crates/overdrive-bpf/src/maps/service_map.rs:74-78` | EXTEND | `_pad: u16` → `proto: u8` + `_pad: u8`; 8 bytes unchanged. |
+| `ServiceKey` (userspace mirror) | `crates/overdrive-dataplane/src/maps/service_map_handle.rs:59-66` | EXTEND | Mirror the proto byte; `from_vip_port` (`:73-84`) gains a `proto` param. |
+| `xdp_service_map_lookup` | `crates/overdrive-bpf/src/programs/xdp_service_map.rs:247,268` | EXTEND | `proto` already read from the IPv4 header (`:247`); slot it into the key (`:268`). No new packet parse. |
+| `LocalServiceKey` (kernel) | `crates/overdrive-bpf/src/maps/local_backend_map.rs:27-34` | EXTEND | `_pad: u16` → `proto: u8` + `_pad: u8`; 8 bytes unchanged. |
+| `cgroup_connect4_service` | `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs:56-76` | EXTEND | Read `bpf_sock_addr.protocol`; key `LOCAL_BACKEND_MAP` on `(vip, port, proto)`. |
+| `LocalBackendMapHandle` | `crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs` | EXTEND | `upsert`/`remove` gain `proto: Proto`. |
+| `Action::DataplaneUpdateService` | `crates/overdrive-core/src/reconcilers/mod.rs:440` | EXTEND | + proto (already covered by ADR-0060 site #7; the forward-key amendment confirms the consumer). |
+| `Action::RegisterLocalBackend` / `DeregisterLocalBackend` | `crates/overdrive-core/src/reconcilers/mod.rs:485-509` | EXTEND | + `proto: Proto` field. |
+| `ServiceMapHydrator` classifier | `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs` | EXTEND | Thread per-listener proto into both forward (`DataplaneUpdateService`) and same-host (`RegisterLocalBackend`) actions. |
+| `validate.rs` write-key classifier | `crates/overdrive-control-plane/src/action_shim/validate.rs:218` | EXTEND | Forward write-key widens from VIP-only (`port_opt: None`) to carry port + proto (closes OQ-1). |
+| `Proto` | `crates/overdrive-core/src/dataplane/backend_key.rs:66` | REUSE | IANA enum (`as_u8()` → 6/17); reused, not modified. |
+
+### [REF] Reuse Analysis (HARD GATE) — P2-Q4
+
+| Touched component | Existing alternative considered | Decision | Justification |
+|---|---|---|---|
+| SERVICE_MAP / LOCAL_BACKEND_MAP key structs | (a) new proto-keyed map alongside the proto-less one; (b) widen the existing key in place | **EXTEND (widen in place)** | (a) A parallel map duplicates the lookup surface and forces the XDP/cgroup programs to consult two maps — strictly worse, and the single-cut posture makes the parallel-map "compat" benefit moot. (b) Widening the existing 8-byte POD by consuming a reserved pad byte is free (no byte-width change) and matches Cilium's own `lb4_key` tail. EXTEND. |
+| `cgroup_connect4_service` proto read | new program / new hook | **EXTEND** | The existing connect4 program already reads `bpf_sock_addr`; adding a `.protocol` read is one field, not a new program. |
+| `Proto` type | new `L4Proto` enum | **REUSE** | ADR-0060's `backend_key::Proto` already models tcp/udp with IANA `as_u8()`; a second enum would fork the vocabulary. REUSE. |
+| `Action` variants | new proto-carrying action kinds | **EXTEND** | Add a `proto` field to the existing variants; a parallel action kind would duplicate dispatch. |
+
+**Zero CREATE NEW.** Every P2-Q4 touched component EXTENDs an existing
+map/struct/program/handle/action or REUSEs `Proto`. This is the
+expected disposition: the feature widens existing keys to carry a
+dimension that already exists at the boundary (ADR-0060), not a new
+capability needing new structure.
+
+### [REF] C4 — no diagram
+
+P2-Q4 changes **map key tuples**, not the component topology: the same
+SERVICE_MAP / LOCAL_BACKEND_MAP, the same XDP / cgroup programs, the
+same hydrator → action-shim → adapter flow. No container or component
+boundary moves. The existing US-01 C4 (L1/L2/L3 in
+`design/c4-diagrams.md`) remains accurate. A new C4 diagram for "the
+key got one byte wider" would be redundant — **explicitly not drawn**
+per the deliverable instruction.
+
+### [REF] Contradiction check vs ADR-0040 / 0053 / 0060
+
+- **ADR-0040 Decision 1** (`SERVICE_MAP (VIP, port)`): the 2026-06-03
+  amendment widens the key; no contradiction (amendment supersedes the
+  tuple, preserves the map split + atomic-swap). ✓
+- **ADR-0053 Decision 1** (`LOCAL_BACKEND_MAP (VIP, vip_port)`): the
+  2026-06-03 amendment widens the key; preserves the cgroup mechanism.
+  Decision 1's "SENDMSG/RECVMSG out of scope" is preserved & sharpened
+  (connected-UDP in, unconnected-UDP out). ✓
+- **ADR-0060** (`ServiceFrontend { vip, port, proto }`; REVERSE_NAT
+  proto; D8 deferral): **no contradiction — complementary.** ADR-0060
+  deferred the forward-key granularity (D8/OQ-1) explicitly; P2-Q4
+  resolves it consistently (same `Proto`, same listener-bearing
+  source, same C3 no-`Tcp`-default rule). ADR-0060 needs **no edit**. ✓
+- **C3** (proto never defaulted to `Tcp`): honored — proto sourced from
+  a listener-bearing fact on every path. ✓
+- **C6** (single-cut migration): honored — key structs + maps recreated
+  on boot, no shim. ✓
+
+No contradiction found across ADR-0040 / 0053 / 0060.
 
 No outcome-registry collision check (no `docs/product/outcomes/registry.yaml`
 — Outcome Collision Check skipped, confirmed).

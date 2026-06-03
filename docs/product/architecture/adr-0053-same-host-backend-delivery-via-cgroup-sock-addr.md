@@ -822,6 +822,305 @@ different job.
 - `feedback_phase1_single_node_scope.md`.
 - `feedback_single_cut_greenfield_migrations.md`.
 
+## Revision 2026-06-03 — LOCAL_BACKEND_MAP key gains L4 protocol (`(VIP, vip_port)` → `(VIP, vip_port, proto)`)
+
+### Status
+
+Amendment. 2026-06-03. Decision-maker: Morgan; user-locked (resolves
+P2-Q4 on the `udp-service-support` feature — "do `(vip, port, proto)`
+as IPVS"). Tags: phase-1, dataplane, cgroup-bpf, local-backend,
+l4-proto-keying, udp-service-support.
+
+**Feature SSOT**:
+`docs/feature/udp-service-support/feature-delta.md` § "Wave: DESIGN /
+[REF] P2-Q4 resolution — proto in the service-LB map keys".
+**Decision record**:
+`docs/feature/udp-service-support/design/wave-decisions.md` (P2-Q4).
+**Evidence base**:
+`docs/research/dataplane/service-map-l4-proto-keying-research.md`
+(Nova, 2026-06-03, High confidence). **Companion amendment**:
+ADR-0040 revision 2026-06-03 (the same proto dimension threaded into
+the SERVICE_MAP *wire-boundary* forward key; this amendment threads
+it into the *same-host* cgroup path).
+
+### Why this amendment
+
+Decision 1 above locked `LOCAL_BACKEND_MAP` as "one entry per
+`(VIP, vip_port)`" — proto-less. That shape cannot represent a
+same-host service that listens on both TCP and UDP on the same
+`(VIP, vip_port)`: the canonical DNS case (`tcp/53 + udp/53`) and the
+HTTP/3 case (`443/tcp + 443/udp`). A single `LocalServiceKey {
+vip_host, port_host, _pad }` collapses the two listeners into one
+map slot, so a UDP `connect(VIP:53)` and a TCP `connect(VIP:53)` would
+rewrite to the same backend — losing the per-protocol distinction the
+operator declared.
+
+The same IPVS-alignment rationale that drives the SERVICE_MAP
+amendment (ADR-0040 revision 2026-06-03) applies here: every
+kernel-native L4 LB keys on `{protocol, addr, port}` (IPVS UAPI
+`ip_vs_service_user`); proto-less keying is the defect Cilium spent
+~5.5 years closing (#9207 → #37164). The cgroup same-host path is no
+exception — it is a per-`(VIP, port)` rewrite table and must carry
+proto to distinguish co-located TCP and UDP services.
+
+The cost is the same near-zero widening: `LocalServiceKey`
+(`crates/overdrive-bpf/src/maps/local_backend_map.rs:27-34`) is an
+8-byte `#[repr(C)]` POD with a trailing `_pad: u16`; the proto byte
+absorbs one pad byte and the struct stays 8 bytes.
+
+### Amendment 1 — `LOCAL_BACKEND_MAP` key gains proto
+
+Decision 1's `LOCAL_BACKEND_MAP` key row is amended:
+
+| Field | Type (amended) | Notes |
+|---|---|---|
+| Key | `LocalServiceKey { vip: u32, port: u16, proto: u8, _pad: u8 }` (host order, `#[repr(C)]`, 8 bytes) | The `proto: u8` absorbs one of the two reserved `_pad` bytes — same trick as ADR-0040's `ServiceKey`. The trailing `_pad: u8` **MUST stay deterministically zeroed** (BPF hash maps key on raw bytes). `proto` is the IANA L4 number (IPPROTO_TCP=6 / IPPROTO_UDP=17), lowered from ADR-0060's typed `Proto` at the userspace map-write edge via `Proto::as_u8()`. |
+
+The value (`LocalBackendEntry { backend_ip, backend_port, _pad }`) is
+**unchanged** — proto is a *key* dimension, not a value dimension.
+Capacity (`max_entries = 4096`) is unchanged.
+
+The userspace handle
+(`crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs`)
+gains a `proto` parameter on `upsert` and `remove`:
+
+```rust
+pub fn upsert(&self, vip: Ipv4Addr, vip_port: u16, proto: Proto, backend: SocketAddrV4) -> Result<(), MapError>;
+pub fn remove(&self, vip: Ipv4Addr, vip_port: u16, proto: Proto) -> Result<(), MapError>;
+```
+
+`Proto` is `overdrive_core::dataplane::backend_key::Proto` (ADR-0060),
+reused — NOT a new enum. The typed handle continues to enforce
+IPv4-only via `SocketAddrV4` at the boundary.
+
+### Amendment 2 — cgroup_connect4 proto-source contract
+
+This is the load-bearing contract decision the amendment must pin.
+The `cgroup_connect4_service` program
+(`crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs`)
+today reads only `(user_ip4, user_port)` from `bpf_sock_addr` and
+keys `LOCAL_BACKEND_MAP` on `(vip_host, port_host)`. To key on proto
+it must derive the L4 protocol from the syscall context.
+
+**Verified against the in-tree `bpf_sock_addr` UAPI**
+(`aya-ebpf-bindings-0.1.2/.../bindings.rs:2335-2346`): the
+`bpf_sock_addr` struct exposes **both** of:
+
+```c
+__u32 user_family;
+__u32 user_ip4;
+...
+__u32 user_port;
+__u32 family;
+__u32 type;        // socket type: SOCK_STREAM=1, SOCK_DGRAM=2
+__u32 protocol;    // IANA L4 protocol: IPPROTO_TCP=6, IPPROTO_UDP=17
+...
+```
+
+**The contract: read `bpf_sock_addr.protocol` as the primary proto
+source.** It carries the IANA L4 protocol number directly
+(IPPROTO_TCP=6 / IPPROTO_UDP=17), so it maps 1:1 onto the
+`LocalServiceKey.proto` byte with **no translation table**. This is
+strictly simpler and less error-prone than the socket-type→proto
+mapping the DISCUSS framing hypothesised. Concretely the kernel-side
+key construction becomes:
+
+```rust
+// host-order proto byte, read directly from the syscall context.
+// bpf_sock_addr.protocol is the IANA L4 number; no byte-swap (single
+// byte), no SOCK_*→IPPROTO_* mapping table.
+let proto = unsafe { (*sock_addr).protocol as u8 };   // 6 (TCP) | 17 (UDP)
+let key = LocalServiceKey { vip_host, port_host, proto, _pad: 0 };
+```
+
+**Fallback / robustness clause.** `bpf_sock_addr.type` (SOCK_STREAM=1
+→ IPPROTO_TCP=6, SOCK_DGRAM=2 → IPPROTO_UDP=17) is the documented
+fallback derivation **only if** a kernel in the matrix is observed to
+leave `protocol` zero/unset for `connect4` (no such kernel is known
+on the 5.10+ floor; `protocol` is populated for connect-family hooks).
+The crafter MUST verify `protocol` is populated on the Tier 3 kernel
+matrix; if any matrix kernel leaves it zero, derive proto from `type`
+via the SOCK_*→IPPROTO_* mapping above. Either way the key carries the
+IANA byte — the map key shape is identical. **No Tier 2 backstop
+exists** for `cgroup_sock_addr` (`BPF_PROG_TEST_RUN` returns ENOTSUPP
+for this program type on kernel ≤ 6.8 — see `.claude/rules/development.md`
+§ "`bpf_sock_addr.user_port` — low-16-NBO in a u32"); the proto-source
+correctness is a **Tier 3** verification (real `connect()` through the
+cgroup), not a unit-testable one.
+
+The connect4 hook fires for **both** TCP `connect()` and
+**connected-UDP** `connect()` (a UDP socket that calls `connect(2)`
+to fix its peer before `send()`), exactly as Decision 1 § 1 scoped.
+For both, `bpf_sock_addr.protocol` carries the correct IANA byte, so
+the proto-keyed lookup works for connected-UDP services with no
+additional hook.
+
+### Amendment 3 — `Action::RegisterLocalBackend` / `DeregisterLocalBackend` gain proto
+
+Decision 3's action variants
+(`crates/overdrive-core/src/reconcilers/mod.rs:485-509`) carry no
+proto field today. Both gain one, sourced from the same listener-bearing
+fact ADR-0060 § "True blast radius (D6)" site #8 pins (the `Listener`
+proto, NEVER a silent `Proto::Tcp` default — C3):
+
+```rust
+RegisterLocalBackend {
+    service_id:  ServiceId,
+    vip:         Ipv4Addr,
+    vip_port:    u16,
+    proto:       Proto,        // NEW — per-listener L4 proto (ADR-0060 Proto)
+    backend:     SocketAddrV4,
+    correlation: CorrelationKey,
+},
+DeregisterLocalBackend {
+    service_id:  ServiceId,
+    vip:         Ipv4Addr,
+    vip_port:    u16,
+    proto:       Proto,        // NEW
+    correlation: CorrelationKey,
+},
+```
+
+The `ServiceMapHydrator` (Decision 4) already has proto per-listener
+once ADR-0060's site #8 lands (the desired projection sourced from a
+listener-bearing fact); its Local-vs-Remote classifier threads
+`backend.proto` / the listener proto into `RegisterLocalBackend`
+alongside the existing fields. The action-shim
+(`action_shim/register_local_backend.rs`) and the
+`Dataplane::register_local_backend` / `deregister_local_backend`
+trait methods gain a `proto: Proto` parameter, threaded to
+`LocalBackendMapHandle::upsert` / `remove`.
+
+The `register_local_backend` trait-method rustdoc contract
+(Decision 2) is amended: the per-`(vip, vip_port)` postconditions and
+edge cases now read per-`(vip, vip_port, proto)`. Specifically:
+re-registration with a different `backend` for the same
+`(vip, vip_port, proto)` atomically replaces that entry;
+`deregister_local_backend(vip, vip_port, proto)` removes only that
+proto's entry, leaving a co-located other-proto entry for the same
+`(vip, vip_port)` intact (parity with ADR-0060's per-proto purge for
+the REVERSE_NAT path — D4).
+
+### Amendment 4 — sendmsg4 / unconnected-UDP remains explicitly out of scope (NOT silently assumed in)
+
+Decision 1 § 1 already scoped `SENDMSG` / `RECVMSG` cgroup hooks as
+out of Phase 1 scope ("unconnected-UDP support is a separate
+concern"). This amendment **reaffirms and sharpens** that boundary in
+light of UDP services becoming first-class:
+
+- **In scope (this amendment):** TCP `connect()` and **connected-UDP**
+  `connect()` — both route through `BPF_CGROUP_INET4_CONNECT`
+  (`cgroup_connect4_service`), and both now key on proto. A UDP client
+  that calls `connect(VIP:port)` before `send()` IS handled.
+- **Out of scope (a separate hook, NOT delivered here):**
+  **unconnected-UDP** — a UDP client that calls `sendto(VIP:port, ...)`
+  / `sendmsg()` **without** a prior `connect()`. The kernel does not
+  fire `connect4` for these datagrams; the destination rewrite would
+  need a **`BPF_CGROUP_UDP4_SENDMSG`** program (`sendmsg4`), which is a
+  **separate hook with a separate `bpf_sock_addr`-shaped context** and
+  is **not implemented in this codebase today**. This amendment does
+  NOT silently assume sendmsg4 coverage. It is surfaced as an open
+  question with a recommendation (see below) — the DELIVER scope for
+  proto-keyed UDP covers the *connected*-UDP path only.
+
+This boundary matters operationally: the canonical UDP driver (DNS)
+uses **unconnected** UDP from most resolvers (`sendto` per query, no
+`connect`). So a DNS *server* deployed as an Overdrive service is
+reachable via the connected-UDP path only if the *client* connects
+first — many DNS clients do not. The sendmsg4 hook is what closes
+that gap. It is a real, named follow-up tracked as
+[#200](https://github.com/overdrive-sh/overdrive/issues/200) (see
+§ Out of scope), NOT a hand-wavy forward pointer.
+
+### Migration — single-cut, reconciler-repopulated; no shim
+
+Identical posture to ADR-0040's amendment: `LOCAL_BACKEND_MAP` is
+repopulated from intent on boot by the hydrator's per-backend
+classifier (Decision 4). The migration is "the key struct changes;
+the map is recreated on next boot." NO live in-place migration, NO
+dual-key shim, NO deprecation path. DELIVER must NOT build a migration
+shim — the key struct edit + the hydrator repopulation IS the
+migration. Per `feedback_single_cut_greenfield_migrations.md`.
+
+### What this amendment supersedes vs preserves
+
+| Original decision | Status |
+|---|---|
+| Decision 1 § 1 — adopt `cgroup_sock_addr` connect-time rewrite | **Preserved.** The mechanism is unchanged; only the lookup key widens. |
+| Decision 1 § 1 — `LOCAL_BACKEND_MAP` "one entry per `(VIP, vip_port)`" | **Amended** to "one entry per `(VIP, vip_port, proto)`." |
+| Decision 1 § 1 — connect4 in scope; SENDMSG/RECVMSG out of scope | **Preserved and sharpened** (Amendment 4): connected-UDP `connect4` is in; unconnected-UDP sendmsg4 is explicitly a separate, undelivered hook. |
+| Decision 2 — `register_local_backend` / `deregister_local_backend` trait methods | **Extended** — gain a `proto: Proto` parameter; contract re-pinned per-proto. |
+| Decision 3 — `Action::RegisterLocalBackend` / `DeregisterLocalBackend` | **Extended** — gain a `proto: Proto` field. |
+| Decision 4 — hydrator Local-vs-Remote classifier | **Extended** — threads per-listener proto into `RegisterLocalBackend`; sources proto from the listener-bearing fact (ADR-0060 site #8), never a `Tcp` default. |
+| Decision 5 (XDP programs unchanged), 6 (Earned-Trust probe), 7 (operator config), 8 (walking-skeleton) | **Preserved.** The probe's sentinel upsert gains a proto arg (`(vip=0,port=0,proto=tcp)`); otherwise unchanged. |
+| Out of scope § "IPv6 service VIPs" | **Preserved** — IPv6 + `BPF_CGROUP_INET6_CONNECT` still out of scope (GH #155 territory). |
+
+### Consequences
+
+**Positive.**
+
+- A same-host service with co-located TCP and UDP listeners on one
+  `(VIP, vip_port)` is representable — the cgroup path rewrites each
+  proto's `connect()` to its declared backend.
+- The same-host path aligns with the wire-boundary path: SERVICE_MAP
+  (ADR-0040 amendment), REVERSE_NAT (ADR-0060), and LOCAL_BACKEND_MAP
+  (this amendment) all key on `(…, proto)`. One proto dimension,
+  three maps, consistent.
+- `bpf_sock_addr.protocol` gives a zero-translation proto source —
+  cleaner than the socket-type mapping the DISCUSS framing assumed.
+- Zero byte-width cost: 8-byte key before and after.
+
+**Negative / accepted.**
+
+- `LocalServiceKey` layout changes (proto at offset 6, pad narrows to
+  1 byte) — single-cut; the kernel-side program, the userspace handle,
+  the action variants, the trait methods, and the Tier 3 cgroup test
+  update in the same PR. DELIVER concern, noted for blast-radius.
+- **Unconnected-UDP (`sendto` without `connect`) is not delivered** by
+  this amendment — a real functional gap for UDP clients that do not
+  connect first (DNS being the prominent case). Surfaced as an open
+  question + recommendation, not silently assumed. See § Out of scope.
+
+### Out of scope (explicit, additive to Decision 1's list)
+
+- **Unconnected-UDP via `sendmsg4`.** A `BPF_CGROUP_UDP4_SENDMSG`
+  program to rewrite the destination of `sendto(VIP, ...)` datagrams
+  that never call `connect()`. Separate hook, separate context,
+  **not implemented today**. **Architect recommendation:** this is a
+  genuine follow-up worth a tracked GitHub issue — it is required for
+  unconnected-UDP clients (notably DNS resolvers that `sendto` per
+  query) to reach a same-host UDP service. Tracked:
+  [#200](https://github.com/overdrive-sh/overdrive/issues/200).
+
+### Cross-references
+
+- ADR-0040 revision 2026-06-03 — the companion amendment threading
+  the same proto dimension into the SERVICE_MAP wire-boundary forward
+  key.
+- ADR-0060 — `Proto` reused here; REVERSE_NAT per-proto purge (D4) is
+  the parity the local-backend per-proto deregister mirrors; site #8
+  (proto from a listener-bearing fact, never `Tcp`-default) is the
+  proto source for the `RegisterLocalBackend` action.
+- `docs/research/dataplane/service-map-l4-proto-keying-research.md`
+  — IPVS / Cilium / Kubernetes evidence base.
+- `crates/overdrive-bpf/src/maps/local_backend_map.rs:27-34`
+  (`LocalServiceKey` — gains proto byte),
+  `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs:56-76`
+  (reads `bpf_sock_addr.protocol`; builds the proto-keyed key),
+  `crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs`
+  (handle gains proto param),
+  `crates/overdrive-core/src/reconcilers/mod.rs:485-509`
+  (`Action::RegisterLocalBackend` / `DeregisterLocalBackend` gain
+  proto).
+- `aya-ebpf-bindings-0.1.2` `bpf_sock_addr` UAPI struct (verified:
+  exposes both `protocol` and `type`).
+
+### Changelog (Revision 2026-06-03)
+
+| Date | Change |
+|---|---|
+| 2026-06-03 | LOCAL_BACKEND_MAP key `(VIP, vip_port)` → `(VIP, vip_port, proto)`, IPVS-style. cgroup_connect4 proto-source contract pinned to `bpf_sock_addr.protocol` (IANA byte, zero-translation; `type` as documented fallback). `Action::RegisterLocalBackend`/`DeregisterLocalBackend` + trait methods gain `proto: Proto`. Connected-UDP in scope; unconnected-UDP via sendmsg4 explicitly out of scope (separate undelivered hook, tracked as [#200](https://github.com/overdrive-sh/overdrive/issues/200)). Single-cut reconciler-repopulated migration; no shim. Resolves P2-Q4 (`udp-service-support`) for the same-host path. — Morgan (user-locked). |
+
 ## Changelog
 
 - 2026-05-22 — Initial proposed version. Same-host backend delivery via `cgroup_sock_addr` connect-time destination rewrite. Resolves the walking-skeleton TCP round-trip data-path gap.
