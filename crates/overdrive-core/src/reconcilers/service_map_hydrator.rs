@@ -455,6 +455,20 @@ fn push_register_local_backend_actions(
     }
 }
 
+/// Pure decision: has the attempt-budget backoff window elapsed for
+/// the recorded retry memory at `now`?
+///
+/// Recomputes the deadline `last_failure_seen_at +
+/// backoff_for_attempt(attempts)` from the persisted inputs on every
+/// call (honors `.claude/rules/development.md` § "Persist inputs, not
+/// derived state" — the deadline is never persisted, only its
+/// `attempts` + `last_failure_seen_at` inputs). With no retry memory
+/// the window is vacuously elapsed (never throttle a service that has
+/// never been attempted).
+fn backoff_window_elapsed(retry: Option<&RetryMemory>, now: UnixInstant) -> bool {
+    retry.is_none_or(|r| now >= r.last_failure_seen_at + backoff_for_attempt(r.attempts))
+}
+
 /// Pure decision: dispatch a `DataplaneUpdateService` action this tick?
 fn should_dispatch(
     actual_status: Option<&ServiceHydrationStatus>,
@@ -463,7 +477,20 @@ fn should_dispatch(
     now: UnixInstant,
 ) -> bool {
     match actual_status {
-        None | Some(ServiceHydrationStatus::Pending) => true,
+        // No status row (dispatch suppressed before any result was
+        // written) or a Pending row. Without a backoff gate this arm
+        // spins every tick (RCA §Root cause B). Throttle on the
+        // attempt-budget window ONLY when a prior attempt targeted the
+        // SAME desired fingerprint; a fingerprint change (or no retry
+        // memory) is a level-triggered spec change → dispatch
+        // immediately and let the next emission reset the window
+        // (client-go workqueue precedent, RCA §Fix B).
+        None | Some(ServiceHydrationStatus::Pending) => {
+            match retry.and_then(|r| r.last_attempted_fingerprint) {
+                Some(last) if last == desired_fingerprint => backoff_window_elapsed(retry, now),
+                _ => true,
+            }
+        }
         Some(ServiceHydrationStatus::Completed { fingerprint, .. }) => {
             *fingerprint != desired_fingerprint
         }
@@ -471,7 +498,7 @@ fn should_dispatch(
             if *fingerprint != desired_fingerprint {
                 return true;
             }
-            retry.is_none_or(|r| now >= r.last_failure_seen_at + backoff_for_attempt(r.attempts))
+            backoff_window_elapsed(retry, now)
         }
     }
 }
@@ -647,6 +674,88 @@ mod tests {
         assert!(
             actions.is_empty(),
             "IPv6 and guard-rejected backends must not produce RegisterLocalBackend actions"
+        );
+    }
+
+    // ---- should_dispatch attempt-budget gate (RCA §Fix B) ----
+    //
+    // `should_dispatch` is a pure decision over `(actual_status,
+    // desired_fingerprint, retry, now)`. The fixtures below partition
+    // the `None | Pending` arm by (fingerprint match/mismatch ×
+    // now-vs-backoff-window). Time enters only via `now: UnixInstant`
+    // — no `Instant::now()` (dst-lint stays green).
+
+    /// Base wall-clock instant for the gate fixtures.
+    fn t0() -> UnixInstant {
+        UnixInstant::from_unix_duration(Duration::from_secs(100))
+    }
+
+    /// RCA §Root cause B (closure) / Regression test 2 (B half) — the
+    /// load-bearing RED→GREEN pin. With a prior attempt at the SAME
+    /// fingerprint, no status row (`actual_status = None`), and `now`
+    /// inside the 1s backoff window, the gate must NOT re-dispatch
+    /// (returns `false`). The current `None | Some(Pending) => true`
+    /// arm returns `true` unconditionally → this fails against current
+    /// code and passes after the fix.
+    #[test]
+    fn mixed_backend_does_not_re_dispatch_within_backoff_window_with_no_status_row() {
+        let fingerprint: BackendSetFingerprint = 0xABCD_1234;
+        let retry = RetryMemory {
+            attempts: 1,
+            last_failure_seen_at: t0(),
+            last_attempted_fingerprint: Some(fingerprint),
+        };
+        let now = t0() + Duration::from_millis(500);
+
+        assert!(
+            !should_dispatch(None, fingerprint, Some(&retry), now),
+            "within the backoff window at the same fingerprint, a suppressed dispatch \
+             must NOT re-emit (no spin) — gate returns false"
+        );
+    }
+
+    /// RCA §Fix B — level-triggered reset on spec change. With a prior
+    /// attempt at a DIFFERENT fingerprint (the desired backend set
+    /// changed), the gate dispatches immediately even inside the
+    /// window — the backoff is keyed on the attempt budget for a given
+    /// fingerprint, and a fingerprint change resets it (client-go
+    /// workqueue precedent).
+    #[test]
+    fn mixed_backend_re_dispatches_immediately_on_fingerprint_change() {
+        let old_fingerprint: BackendSetFingerprint = 0x0000_1111;
+        let new_fingerprint: BackendSetFingerprint = 0x0000_2222;
+        let retry = RetryMemory {
+            attempts: 1,
+            last_failure_seen_at: t0(),
+            last_attempted_fingerprint: Some(old_fingerprint),
+        };
+        let now = t0() + Duration::from_millis(1);
+
+        assert!(
+            should_dispatch(None, new_fingerprint, Some(&retry), now),
+            "a desired fingerprint differing from last_attempted_fingerprint must \
+             re-dispatch immediately (spec changed → backoff reset)"
+        );
+    }
+
+    /// RCA §Fix B — once the backoff window elapses for the same
+    /// fingerprint, the gate re-dispatches. Mirrors the `Failed`-arm
+    /// semantics via the shared `backoff_window_elapsed` helper.
+    #[test]
+    fn mixed_backend_re_dispatches_after_window_elapses() {
+        let fingerprint: BackendSetFingerprint = 0xABCD_1234;
+        let attempts = 1;
+        let retry = RetryMemory {
+            attempts,
+            last_failure_seen_at: t0(),
+            last_attempted_fingerprint: Some(fingerprint),
+        };
+        // now is exactly at the window boundary (>= triggers dispatch).
+        let now = t0() + backoff_for_attempt(attempts);
+
+        assert!(
+            should_dispatch(None, fingerprint, Some(&retry), now),
+            "at/after the backoff window boundary the gate must re-dispatch"
         );
     }
 }
