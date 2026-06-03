@@ -3887,6 +3887,17 @@ ADR-0062. Extends ADR-0035; amends ADR-0042; references ADR-0049; preserves
 ADR-0060 C3. **Research:**
 `docs/research/control-plane/reconciler-desired-hydration-efficiency.md`.
 
+**Status: IMPLEMENTED** (shipped 2026-06-03, commits `3bdb3618..99733646`,
+ADR-0062 Accepted). `ListenerFactStore` + boot rebuild + edge maintenance +
+the O(1) keyed hydrator read all landed; invariants A/B/C green (per-feature
+mutation gate 100% kill). See `docs/evolution/2026-06-03-reconciler-listener-fact-view.md`.
+The design prose below records the locked DESIGN; one mechanism was corrected
+in DELIVER — invariant A is proven by a delete-intent-then-tick behavioral
+proof, **not** the counting-`scan_prefix`-decorator the DST/determinism note
+and the 2026-06-03 changelog row describe (the read seam `AppState.store` is a
+concrete `Arc<LocalIntentStore>`, not `dyn`; back-propagated to ADR-0062 §
+Testability + feature-delta § Changed Assumptions).
+
 #### Problem this extension closes
 
 `ServiceMapHydrator`'s desired-hydration helper `gather_service_listener_facts`
