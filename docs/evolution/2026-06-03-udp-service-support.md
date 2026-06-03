@@ -1,9 +1,21 @@
 # Evolution — udp-service-support
 
 **Finalized:** 2026-06-03 · **Wave lifecycle:** DISCUSS → DIVERGE → DESIGN
-→ DISTILL → DELIVER (5 slices, all GREEN) · **Source brief:** GitHub
-issue **#163** — *"REVERSE_NAT_MAP lockstep populates only TCP entries;
-UDP responses silently bypass source rewrite."*
+→ DISTILL → DELIVER · **Source brief:** GitHub issue **#163** —
+*"REVERSE_NAT_MAP lockstep populates only TCP entries; UDP responses
+silently bypass source rewrite."* · **SSOT (preserved):**
+`docs/feature/udp-service-support/feature-delta.md` (lean v3.14 — the
+feature workspace is retained, not archived).
+
+> **This record covers the whole feature in two increments.** Phase 01
+> (5 slices, 2026-06-02) threaded `ServiceFrontend` + per-proto
+> REVERSE_NAT and fixed #163. **Phase 02** (P2-Q4, 2026-06-03 — the
+> increment this finalize emphasizes) threaded L4 proto into **both**
+> service-LB map OUTER keys, IPVS-style: `SERVICE_MAP` and
+> `LOCAL_BACKEND_MAP` are now keyed `(vip, port, proto)`. The two
+> phases share a feature workspace and interleave in the git history.
+> Sections below marked **[Phase 02]** are the proto-in-key increment;
+> all others are the Phase 01 #163 fix.
 
 ## Summary
 
@@ -97,10 +109,85 @@ non-decision-affecting arithmetic erratum corrected at landing).
   (`ListenerRow` / the `BackendDiscoveryBridge` per-listener projection)
   — never the proto-less `service_backends` row; an unresolvable listener
   proto is a structured Failed error, never a silent `Tcp` default.
-- **D8 — deferred** US-05 forward-key granularity (per-`(VIP,port)` vs
-  VIP-only) to a future DESIGN; the shipped validator (VIP-only) and
-  phase-2 §5 Drift-3 (`(VIP,port)`) disagreement is flagged in ADR-0060,
-  not resolved here.
+- **D8 — deferred at Phase 01**, then **subsumed by P2-Q4** (below): the
+  US-05 forward-key granularity question (per-`(VIP,port)` vs VIP-only)
+  is resolved by Phase 02 — the forward key is `(VIP, port, proto)`.
+
+### [Phase 02] P2-Q4 — proto in both service-LB map keys, IPVS-style (user-locked 2026-06-03)
+
+The wider architectural correction beyond #163. Add L4 protocol to
+**both** eBPF service-LB OUTER keys:
+
+- `SERVICE_MAP` outer key `(ServiceVip, port)` → **`(ServiceVip, port, Proto)`**
+  (the wire-boundary XDP forward path).
+- `LOCAL_BACKEND_MAP` key `(VIP, vip_port)` → **`(VIP, vip_port, proto)`**
+  (the same-host cgroup `connect4` path).
+
+So a TCP listener and a UDP listener on the same `(VIP, port)` occupy
+two distinct map slots — the canonical DNS `tcp/53 + udp/53`
+co-location — instead of one overwriting the other.
+
+**Decision: proto-in-key over proto-less.** User rationale (verbatim):
+*"we don't want to fix incorrect architecture — do `(vip, port, proto)`
+as IPVS."* Evidence-weighted by
+`docs/research/dataplane/service-map-l4-proto-keying-research.md` (Nova,
+High confidence, 13 trusted-domain sources):
+
+1. **Linux IPVS keys virtual services on `{protocol, addr, port}`
+   natively** (UAPI `ip_vs_service_user`); kube-proxy iptables mode is
+   per-protocol. Proto-in-key is the default in the two oldest, most
+   deployed k8s dataplanes.
+2. **Cilium carried a proto-less `lb4_key` as a known defect for ~5.5
+   years** — issue #9207 (Sept 2019) → fix PR #37164 (Jan 2025).
+   Proto-less was a half-decade bug, not a valid model.
+3. **Kubernetes treats TCP+UDP-on-same-port as first-class** — CoreDNS
+   `tcp/53 + udp/53`, the `MixedProtocolLBService` gate, HTTP/3 QUIC. A
+   `(vip, port)` key cannot represent the DNS service correctly.
+4. **Widening a HASH_OF_MAPS outer key is structurally free** — the
+   proto byte consumes a reserved `_pad` byte with no byte-width change.
+
+**Design sub-choices:**
+
+- **Struct layout — absorb a pad byte, keep 8 bytes.** Both `ServiceKey`
+  and `LocalServiceKey` become `{ vip: u32, port: u16, proto: u8,
+  _pad: u8 }`, stay 8-byte `#[repr(C)]` PODs with `_pad` deterministically
+  zeroed for stable BPF hashing (mirrors Cilium's
+  `__u8 proto; __u8 scope; __u8 pad[2]`).
+- **cgroup proto-source = `bpf_sock_addr.protocol`.**
+  `cgroup_connect4_service` reads the IANA L4 byte directly
+  (IPPROTO_TCP=6 / IPPROTO_UDP=17 — zero translation, no
+  SOCK_*→IPPROTO_* table, single byte so no byte-swap).
+  `bpf_sock_addr.type` is the documented fallback only if a matrix
+  kernel leaves `protocol` unset. **No Tier-2 backstop** exists for
+  `cgroup_sock_addr` (`BPF_PROG_TEST_RUN` ENOTSUPP ≤6.8) — proto-source
+  correctness is verified at Tier 3 (real connect).
+- **Action proto field.** `Action::DataplaneUpdateService` (forward
+  path) and `Action::RegisterLocalBackend` / `DeregisterLocalBackend`
+  (same-host path) all gain a `Proto` dimension, sourced from a
+  **listener-bearing fact** — NEVER a silent `Proto::Tcp` default (C3).
+- **Validator conflict granularity** — same-route keys widen to
+  `(vip, port, proto)` (the `tcp/53 + udp/53` co-location case no longer
+  false-fires `ConflictingServiceWrites`); genuine identical-tuple
+  duplicate-slot collisions are still caught; the **cross-route**
+  cgroup-vs-XDP conflict check stays VIP-only (the single coupling
+  point between the two map clusters; the hydrator's classifier picks
+  exactly one route per backend and the validator defends that).
+- **Single-cut greenfield migration** — key structs change, maps are
+  recreated from intent on next boot by the `ServiceMapHydrator`. NO
+  dual-key shim, NO proto-less fallback, NO deprecation path; a grep
+  finds no parallel proto-less key struct or `proto: 0`/IPPROTO_ANY
+  branch.
+- **Reuse disposition** — every touched component is EXTEND of an
+  existing map/struct/program/handle; zero CREATE NEW. `Proto` is REUSE
+  (ADR-0060's `backend_key::Proto`). No topology change → no new C4
+  diagram.
+
+**SSOT (amended in place — already permanent, not migrated):**
+ADR-0040 (rev 2026-06-03, SERVICE_MAP outer key), ADR-0053 (rev
+2026-06-03, LOCAL_BACKEND_MAP key + cgroup_connect4 proto-source
+contract + RegisterLocalBackend proto field + sendmsg4 scope note).
+ADR-0060 already carried `ServiceFrontend { vip, port, proto }` at the
+boundary — no change needed.
 
 ### Lockstep pinning (DV4 / H1, resolved at DIVERGE)
 
@@ -135,6 +222,22 @@ reach GREEN (the Tier-1 lockstep universe guard landed in 01-01).
 | **01-04** | US-04 | Single-UDP-listener forward+reverse e2e (Tier 3, walking skeleton) — real round-trip, reply sourced from the VIP. |
 | **01-05** | US-05 | `ServiceMapHydrator` per-listener fan-out; multi-listener TCP+UDP service works on both protocols through the full CLI→control-plane→reconciler→dataplane chain. |
 
+### [Phase 02] Steps completed (proto-in-key)
+
+Both Phase 02 steps reached COMMIT/EXECUTED/PASS (2026-06-03) with full
+5-phase traces (PREPARE / RED_ACCEPTANCE / RED_UNIT / GREEN / COMMIT).
+Decomposed as DECOMP B (two compile-atomic steps — no broken
+intermediate).
+
+| Slice | Outcome |
+|---|---|
+| **02-01** | SERVICE_MAP outer key `(vip,port)`→`(vip,port,proto)` + validator XDP write-key widen. Kernel/userspace `ServiceKey` (8-byte, proto at offset 6, `_pad` zeroed), `xdp_service_map` key build, endianness-lockstep proptest, conflict-validator false-fire fix (same-vip/different-port and `tcp/53 + udp/53` now `Ok`; identical-tuple still `Err`). Compile-atomic boundary: cgroup cluster untouched. |
+| **02-02** | LOCAL_BACKEND_MAP key `(vip,port)`→`(vip,port,proto)` via `cgroup_connect4` `bpf_sock_addr.protocol` + `RegisterLocalBackend`/`DeregisterLocalBackend` gain `proto` + hydrator per-listener proto fan-out + validator cgroup-route & cross-route widen + Tier-3 real-cgroup connect (TCP and UDP `connect(VIP:port)` to the same `(vip,port)` each reach the proto-correct backend). |
+
+DES integrity over the whole deliver tree:
+`des-verify-integrity docs/feature/udp-service-support/deliver` → "All 7
+steps have complete DES traces", **exit 0**.
+
 ### Quality gates
 
 - **Mutation:** `cargo xtask mutants --diff origin/main --features
@@ -151,6 +254,18 @@ reach GREEN (the Tier-1 lockstep universe guard landed in 01-01).
   paths are protected by Tier-1 DST + Tier-3, excluded from the nextest
   mutants lane per `.cargo/mutants.toml`.
 
+### [Phase 02] Quality gates
+
+- **Peer review:** APPROVED (nw-solution-architect-reviewer "Atlas",
+  opus, 2026-06-02 roadmap review). One high finding — Tier-3 black-box
+  criteria asserted white-box internal hydrator call counts — was
+  resolved in-line by rewriting the criteria to an observable proxy
+  (`bpftool map dump REVERSE_NAT_MAP` shows one key per listener, each
+  with its own proto byte) plus dual VIP-sourced wire captures.
+- **Mutation:** 94.7% on the Phase-02 diff; the cross-package coverage
+  gap (below) closed to 100% on the affected file via an extracted pure
+  helper (`75cd13fe`).
+
 ### Verification catalogue (EDD)
 
 Two operator-surface expectations graduated from DISTILL and live in
@@ -163,6 +278,12 @@ Two operator-surface expectations graduated from DISTILL and live in
   proof). Reverse-NAT map dump + cluster preflight captured; the
   end-to-end reverse path depends on single-node veth wiring (ADR-0061,
   below).
+
+> **FINALIZE note (2026-06-03).** The executed-evidence catalogue lives
+> at the repo-root `verification/` (its permanent home) — O03/E02 above.
+> There is **no feature-dir catalogue**
+> (`docs/feature/udp-service-support/verification/` is absent), so there
+> is nothing to archive into `docs/evolution/udp-service-support/verification/`.
 
 ## Issues encountered
 
@@ -193,6 +314,19 @@ Two operator-surface expectations graduated from DISTILL and live in
 - **CLI listener-protocol rendering.** `alloc status` did not surface the
   per-listener protocol on the live path; added `<port>/<protocol>`
   rendering (commits `7e79007f`, `e9cec107`).
+- **[Phase 02] Pre-existing `host_ipv4`-collapses-to-localhost-on-override
+  bug.** During Phase 02 DELIVER a latent control-plane bug surfaced: on
+  real-dataplane override boots, `host_ipv4` collapsed to localhost
+  instead of being resolved from the configured client interface —
+  breaking the backend-discovery → hydrator → `RegisterLocalBackend`
+  path. Root-caused in
+  `docs/analysis/root-cause-analysis-bridge-hydrator-register-local-backend.md`;
+  fixed in `299a7c1b`.
+- **[Phase 02] Cross-package mutation-coverage gap on the override
+  fallback.** The `host_ipv4` override fallback was only reachable from
+  another package's tests, leaving a mutation blind spot. Closed by
+  extracting the decision into a pure helper with an in-package unit
+  test (`75cd13fe`), restoring kill-rate signal on the file.
 
 ## Lessons learned
 
@@ -228,14 +362,39 @@ Two operator-surface expectations graduated from DISTILL and live in
 | Executed-evidence catalogue (O03, E02) | `verification/expectations/{O03-*,E02-*}/` |
 | Implementation | `crates/overdrive-core/src/dataplane/service_frontend.rs`, `crates/overdrive-{sim,dataplane,control-plane,cli}` (see git history 2026-06-02 → 2026-06-03) |
 
+## Open deferral
+
+- **[#200](https://github.com/overdrive-sh/overdrive/issues/200) —
+  unconnected-UDP (`sendto(VIP, ...)` without `connect()`).** NOT
+  delivered; **connected-UDP IS delivered.** Unconnected UDP needs a
+  separate `sendmsg4` (`BPF_CGROUP_UDP4_SENDMSG`) hook, not implemented
+  today (DNS resolvers `sendto` per query without connecting). See
+  ADR-0053 amendment § "Out of scope".
+
 ## What this unblocks
 
-- **SCTP / further L4 protocols** — `ServiceFrontend` carries `Proto`;
-  adding a protocol is a content change to the enum + the per-proto
-  fan-out, not a structural change to the call surface.
-- **Multi-listener forward-key granularity (D8)** — the per-`(VIP,port)`
-  vs VIP-only SERVICE_MAP key question is teed up in ADR-0060 for a future
-  DESIGN once a real multi-listener-on-one-VIP workload needs it.
+- **SCTP / further L4 protocols** — `ServiceFrontend` and both map keys
+  carry `Proto`; adding a protocol is a content change to the enum + the
+  per-proto fan-out, not a structural change to the call/key surface.
+- **Multi-listener forward-key granularity (D8) — RESOLVED by Phase 02.**
+  The SERVICE_MAP forward key is `(VIP, port, proto)`; each listener
+  occupies its own slot. The Phase-01 deferral is closed.
 - **The lockstep gate as a template** — any future cross-adapter dataplane
   invariant follows the Sim(Tier 1) ∪ Ebpf(Tier 2+3)-meeting-at-a-shared-key
   shape proven here.
+
+## Links (whole feature)
+
+- ADR-0040 (rev 2026-06-03) — `docs/product/architecture/adr-0040-service-map-three-map-split-and-hash-of-maps.md`
+- ADR-0053 (rev 2026-06-03) — `docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md`
+- ADR-0060 — `docs/product/architecture/adr-0060-service-frontend-update-service-signature.md`
+- ADR-0061 (sibling) — `docs/product/architecture/adr-0061-single-node-veth-dataplane-wiring.md`
+- Research — `docs/research/dataplane/service-map-l4-proto-keying-research.md`
+- RCA — `docs/analysis/root-cause-analysis-bridge-hydrator-register-local-backend.md`
+- Feature SSOT (preserved) — `docs/feature/udp-service-support/feature-delta.md`
+
+Phase 02 commits: `e8083ce9` (resolve P2-Q4 — proto in service-LB map
+keys), `12611316` (widen SERVICE_MAP outer key — 02-01), `299a7c1b` (fix
+host_ipv4 override), `0876de79` (widen LOCAL_BACKEND_MAP key — 02-02),
+`75cd13fe` (in-package unit test killing the mutation gap), `1e913da2`
+(record Phase 02 DES roadmap + execution-log).
