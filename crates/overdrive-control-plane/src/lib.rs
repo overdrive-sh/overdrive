@@ -1178,26 +1178,34 @@ pub async fn run_server_with_obs_and_driver(
     // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
     // operator-supplied `client_iface`.
     //
-    // `host_ipv4` follows the SAME override branch as the dataplane
-    // construction above. The production path (`dataplane_override =
-    // None`) provisions the single-node veth pair (ADR-0061 § 3) and
-    // then resolves the host address off the now-provisioned
-    // `client_iface`, refusing the boot via
-    // `DataplaneBootError::IfaceAddrResolution` if it is absent.
+    // The loopback default is keyed on *iface-resolution failure*,
+    // never on `dataplane_override` presence. The override knob is too
+    // coarse a proxy for "Sim/loopback boot": it carries TWO cases that
+    // need OPPOSITE host_ipv4 resolution (RCA
+    // docs/analysis/root-cause-analysis-bridge-hydrator-register-local-backend.md):
     //
-    // The SimDataplane-override path (DST / CLI integration tests that
-    // inject `config.dataplane_override`) does NOT provision a veth —
-    // the `client_iface` (`ovd-veth-cli` in the default config) is
-    // never created, so resolving it would fail at boot. Those boots
-    // are not exercising the real dataplane attach path; `host_ipv4`
-    // only seeds the bridge / hydrator reconcilers' local-backend
-    // socket addresses, for which `LOCALHOST` is correct. This matches
-    // the value these boots resolved before the default `client_iface`
-    // moved from `lo` (→ 127.0.0.1) to the veth name (step 01-03).
-    let host_ipv4 = if config.dataplane_override.is_some() {
-        std::net::Ipv4Addr::LOCALHOST
-    } else {
-        resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref())?
+    //   1. Sim/DST/CLI boots inject a SimDataplane override and never
+    //      provision the `client_iface` (`ovd-veth-cli` in the default
+    //      config), or carry no `[dataplane]` section at all. Resolving
+    //      the iface fails → `LOCALHOST` is correct (these boots only
+    //      seed the bridge/hydrator local-backend socket addresses and
+    //      do not exercise the real attach path).
+    //   2. The S-BDB walking-skeletons inject a REAL `EbpfDataplane` on
+    //      a REAL provisioned veth (`10.244.x.1`) through the SAME
+    //      override field. Resolving the iface SUCCEEDS → the real IP is
+    //      correct; collapsing it to `LOCALHOST` makes the bridge write
+    //      a loopback backend that the hydrator's (correct, intended)
+    //      loopback guard then rejects, so no `RegisterLocalBackend` is
+    //      ever emitted.
+    //
+    // Resolve from `client_iface` first; fall back to `LOCALHOST` only
+    // when resolution fails AND an override is present (the Sim/CLI/DST
+    // condition). The production path (no override) still propagates the
+    // error and refuses to boot on an absent/unresolvable iface.
+    let host_ipv4 = match resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref()) {
+        Ok(ip) => ip,
+        Err(_) if config.dataplane_override.is_some() => std::net::Ipv4Addr::LOCALHOST,
+        Err(source) => return Err(source),
     };
     // Service-health-check-probes — the `ProbeRunner` Earned-Trust
     // gate and the threading of `Arc<ProbeRunner>` into the
