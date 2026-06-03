@@ -896,4 +896,186 @@ mod tests {
             "secondary Vec has three elements"
         );
     }
+
+    // -----------------------------------------------------------------
+    // 01-03 handler-edge maintenance — submit upsert / conflict no-op /
+    // stop remove, driven through the public submit_workload /
+    // stop_workload driving ports (port-to-port; the tests would not
+    // flip RED→GREEN if the handler short-circuited around the edge
+    // mutations).
+    // -----------------------------------------------------------------
+
+    use axum::Json;
+    use axum::extract::{Path as AxPath, State};
+    use axum::http::HeaderMap;
+    use axum::response::Response;
+    use overdrive_core::aggregate::JobSpecInput;
+    use overdrive_core::api::submit::{ServiceSpecInput as WireServiceSpec, SubmitSpecInput};
+
+    fn wire_service(id: &str, listeners: &[(u16, Proto)]) -> SubmitSpecInput {
+        SubmitSpecInput::Service(WireServiceSpec {
+            id: id.to_owned(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver: DriverInput::Exec(ExecInput {
+                command: "/bin/serve".to_string(),
+                args: vec![],
+            }),
+            listeners: listeners
+                .iter()
+                .map(|(port, proto)| ListenerInput {
+                    port: *port,
+                    protocol: proto_str(*proto).into(),
+                })
+                .collect(),
+            startup_probes: vec![],
+            readiness_probes: vec![],
+            liveness_probes: vec![],
+        })
+    }
+
+    fn wire_job(id: &str) -> SubmitSpecInput {
+        SubmitSpecInput::Job(JobSpecInput {
+            id: id.to_owned(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            driver: DriverInput::Exec(ExecInput { command: "/bin/run".to_string(), args: vec![] }),
+        })
+    }
+
+    async fn submit_via_handler(
+        state: &AppState,
+        spec: SubmitSpecInput,
+    ) -> Result<Response, crate::error::ControlPlaneError> {
+        crate::handlers::submit_workload(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(crate::api::SubmitWorkloadRequest { spec }),
+        )
+        .await
+    }
+
+    async fn stop_via_handler(state: &AppState, id: &str) {
+        let _response = crate::handlers::stop_workload(State(state.clone()), AxPath(id.to_owned()))
+            .await
+            .expect("stop must succeed");
+    }
+
+    /// Submit a Service whose VIP is allocated on the Inserted edge →
+    /// the handler upserts one primary entry per listener, keyed by the
+    /// derived `ServiceId`, carrying the allocator-issued VIP.
+    #[tokio::test]
+    async fn submit_inserted_upserts_listener_facts() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 21));
+        let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+        submit_via_handler(&state, wire_service("web", &[(80, Proto::Tcp), (53, Proto::Udp)]))
+            .await
+            .expect("Service submit must succeed");
+
+        // The allocator issued the VIP under the same spec_digest the
+        // handler used — recover it the same way the edge / rebuild does.
+        let svc = WorkloadIntent::Service(
+            overdrive_core::aggregate::ServiceV1::from_submit(
+                match wire_service("web", &[(80, Proto::Tcp), (53, Proto::Udp)]) {
+                    SubmitSpecInput::Service(s) => s,
+                    _ => unreachable!(),
+                },
+            )
+            .expect("valid service"),
+        );
+        let digest: [u8; 32] = *svc.spec_digest().expect("digest").as_bytes();
+        let vip = {
+            let guard = state.allocator.lock().await;
+            let v = guard.get(&digest);
+            drop(guard);
+            v.expect("VIP issued on Inserted edge")
+        };
+
+        let (tcp_sid, tcp_row) = derived(&vip, 80, Proto::Tcp);
+        let (udp_sid, udp_row) = derived(&vip, 53, Proto::Udp);
+        let snapshot = { state.listener_facts.lock().await.clone() };
+        assert_eq!(snapshot.fact_for(tcp_sid), Some(tcp_row), "tcp listener fact present");
+        assert_eq!(snapshot.fact_for(udp_sid), Some(udp_row), "udp listener fact present");
+        assert_eq!(snapshot.primary.len(), 2, "exactly two primary entries");
+        assert_eq!(
+            snapshot.secondary.get(&workload("web")).map(Vec::len),
+            Some(2),
+            "secondary Vec has two ServiceIds in listener order",
+        );
+    }
+
+    /// A Job submit allocates no VIP and contributes no listener facts —
+    /// the edge upsert is Service-only.
+    #[tokio::test]
+    async fn submit_job_inserts_no_listener_facts() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 22));
+        let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+        submit_via_handler(&state, wire_job("batch")).await.expect("Job submit must succeed");
+
+        let snapshot = { state.listener_facts.lock().await.clone() };
+        assert_eq!(snapshot, ListenerFactStore::new(), "Job submit leaves the store empty");
+    }
+
+    /// U6 end-to-end — a conflicting submit (KeyExists, non-identical:
+    /// same workload id, different listener set) is rejected with a 409
+    /// AND its VIP is released; the conflict-release branch is a store
+    /// NO-OP, so BOTH maps remain exactly as the first submit left them.
+    #[tokio::test]
+    async fn conflict_release_leaves_store_unchanged() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 23));
+        let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+        submit_via_handler(&state, wire_service("api", &[(9000, Proto::Tcp)]))
+            .await
+            .expect("first Service submit must succeed");
+        let before = { state.listener_facts.lock().await.clone() };
+
+        // Same workload id, different listeners → KeyExists non-identical
+        // → HTTP 409 Conflict, VIP allocated-then-released.
+        let conflict = submit_via_handler(&state, wire_service("api", &[(9001, Proto::Tcp)])).await;
+        assert!(
+            matches!(conflict, Err(crate::error::ControlPlaneError::Conflict { .. })),
+            "non-identical resubmit at the same key must 409",
+        );
+
+        let after = { state.listener_facts.lock().await.clone() };
+        assert_eq!(before, after, "conflict-release branch must be a store NO-OP");
+    }
+
+    /// Submit-then-stop evicts the workload's facts from BOTH the primary
+    /// and secondary maps via the stop edge's `remove_workload`.
+    #[tokio::test]
+    async fn stop_removes_workload_facts() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 24));
+        let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+        submit_via_handler(&state, wire_service("web", &[(80, Proto::Tcp), (443, Proto::Tcp)]))
+            .await
+            .expect("Service submit must succeed");
+        // Non-empty before stop.
+        let before = { state.listener_facts.lock().await.clone() };
+        assert_eq!(before.primary.len(), 2, "two primary entries before stop");
+        assert!(before.secondary.contains_key(&workload("web")), "secondary entry before stop");
+
+        stop_via_handler(&state, "web").await;
+
+        let after = { state.listener_facts.lock().await.clone() };
+        assert!(after.primary.is_empty(), "primary evicted after stop");
+        assert_eq!(
+            after.secondary.get(&workload("web")),
+            None,
+            "secondary entry dropped after stop"
+        );
+        assert_eq!(
+            after,
+            ListenerFactStore::new(),
+            "store empty after the only workload is stopped"
+        );
+    }
 }

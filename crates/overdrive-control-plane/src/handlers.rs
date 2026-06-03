@@ -372,6 +372,33 @@ pub async fn submit_workload(
                 .put(kind_key.as_bytes(), &[workload_kind.discriminator_byte()])
                 .await
                 .map_err(|e| ControlPlaneError::internal("persist workload kind", e))?;
+            // Maintain the in-memory `ListenerFactStore` on the
+            // intent-change write edge per ADR-0062 § Decision (2) /
+            // feature-delta sub-decision 2 ("writer-bumped
+            // invalidation"). The upsert runs AFTER the intent
+            // `put_if_absent` returned `Inserted` AND after the
+            // kind-discriminator persist — the intent SSOT is committed
+            // first, so a crash between intent-commit and fact-insert is
+            // repaired by the next boot's `rebuild_from_intent`
+            // re-projection (ADR-0062 crash-consistency).
+            //
+            // Only `WorkloadIntent::Service(_)` with an allocated VIP
+            // contributes listener facts; Job / Schedule intents allocate
+            // no VIP (`service_vip` is `None`) and upsert nothing.
+            //
+            // Lock discipline (`.claude/rules/development.md` §
+            // "Concurrency & async" → "Never hold a lock across
+            // `.await`"): acquire the `listener_facts` guard, perform the
+            // synchronous `upsert`, and DROP it before the subsequent
+            // `enqueue_workload_lifecycle_eval` (which is itself sync, but
+            // dropping eagerly keeps the no-guard-across-`.await` shape
+            // local and future-proof). Mirrors the allocator-guard
+            // pattern at step 4a above.
+            if let (WorkloadIntent::Service(service_v1), Some(vip)) = (&intent, &service_vip) {
+                let mut facts_guard = state.listener_facts.lock().await;
+                facts_guard.upsert(workload_id.clone(), vip, &service_v1.listeners);
+                drop(facts_guard);
+            }
             // Edge-triggered ingress per whitepaper §18: enqueue an
             // evaluation for the job-lifecycle reconciler so the
             // convergence-loop spawn picks it up on the next tick.
@@ -430,6 +457,15 @@ pub async fn submit_workload(
                         .map_err(|e| ControlPlaneError::internal("release VIP on conflict", e))?;
                     drop(guard);
                 }
+                // `ListenerFactStore` is a deliberate NO-OP on this
+                // branch (ADR-0062 § Decision (2)): the rejected spec
+                // never had its facts upserted — the upsert lives only on
+                // the `Inserted` arm above, which this branch did not
+                // take. There is nothing to remove (symmetric with the
+                // VIP, which was allocated-then-released for the rejected
+                // spec). Adding a `remove_workload` here would evict the
+                // EXISTING workload's facts on a conflicting resubmit —
+                // exactly the corruption U6 guards against.
                 return Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 });
@@ -667,6 +703,25 @@ pub async fn stop_workload(
         PutOutcome::Inserted => StopOutcome::Stopped,
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
     };
+
+    // Evict the workload's listener facts on the stop edge per ADR-0062
+    // § Decision (2). `stop_workload` holds ONLY the `WorkloadId` (not
+    // the ServiceIds or VIP), so the store's secondary cleanup index —
+    // workload → derived ServiceIds — is what makes eviction possible
+    // without an intent decode or an allocator lock. `remove_workload`
+    // is idempotent: a redundant stop (AlreadyStopped) finds no
+    // secondary entry and is a no-op, which is why both outcomes run it
+    // unconditionally.
+    //
+    // Lock discipline (`.claude/rules/development.md` § "Concurrency &
+    // async"): acquire the `listener_facts` guard, perform the
+    // synchronous `remove_workload`, and DROP it before the subsequent
+    // `enqueue_workload_lifecycle_eval`.
+    {
+        let mut facts_guard = state.listener_facts.lock().await;
+        facts_guard.remove_workload(&workload_id);
+        drop(facts_guard);
+    }
 
     // Edge-triggered ingress per whitepaper §18: enqueue an
     // evaluation for the job-lifecycle reconciler so the

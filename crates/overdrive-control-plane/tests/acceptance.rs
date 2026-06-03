@@ -221,4 +221,12 @@ mod acceptance {
     // IPv6 VIP rejected at the action-shim as an operator-visible Failed
     // row via ServiceFrontend::new (NOT a late opaque DataplaneError).
     mod service_frontend_ipv6_rejected;
+
+    // reconciler-listener-fact-view step 01-03 — edge-half of invariant
+    // B (ADR-0062 § Decision (2)). After a sequence of real submissions
+    // through the `submit_workload` driving port, the edge-maintained
+    // `ListenerFactStore` equals a fresh `rebuild_from_intent` over the
+    // same committed intent set + allocator (handler edge agrees with
+    // the boot rebuild).
+    mod listener_fact_byte_equivalence_invariant;
 }
