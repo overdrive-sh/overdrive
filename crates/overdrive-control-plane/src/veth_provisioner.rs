@@ -205,9 +205,15 @@ pub struct ObservedVeth {
 /// downstream step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VethStep {
-    /// Delete the orphaned client end and recreate the pair from scratch
-    /// — the § 3.2 corrupted edge (client present, peer absent). Deleting
-    /// one end reaps both; the recreate restores the atomic pair.
+    /// Delete BOTH ends and recreate the pair from scratch — the corrupted
+    /// edges where exactly one end of the declared pair is present (§ 3.2
+    /// forward: client present, peer absent; OR inverse: client absent,
+    /// peer present). The executor dels the client end then the backend
+    /// end; `link_del` swallows "absent", so whichever end survives is
+    /// reaped before `link_add` restores the atomic pair. Deleting both
+    /// (rather than relying on "del one reaps both") is what clears a
+    /// surviving/colliding peer on the inverse edge and avoids the
+    /// `link_add` "File exists" boot refusal.
     RecreatePair,
     /// `ip link add <client> type veth peer name <backend>` — the pair
     /// is wholly absent (first boot).
@@ -265,12 +271,21 @@ pub fn converge_steps(plan: &VethProvisionPlan, observed: &ObservedVeth) -> Vec<
     // Pair-level shape first. A (re)create produces a clean pair, so the
     // downstream address/up steps are unconditionally needed afterwards.
     let recreated = match (observed.client_present, observed.peer_present) {
-        (false, _) => {
+        (false, false) => {
             steps.push(VethStep::CreatePair);
             true
         }
-        (true, false) => {
-            // § 3.2: client present, declared peer absent — recreate.
+        // Exactly one end present — a corrupted edge:
+        //   (true, false): § 3.2 forward — client present, declared peer
+        //                   absent (peer separately moved/deleted).
+        //   (false, true): inverse — client absent, declared peer present
+        //                   (client moved/renamed, or an unrelated iface
+        //                   collides on the backend name).
+        // Both must RecreatePair, which now dels BOTH ends (see
+        // execute_step) so the surviving/colliding end is reaped before
+        // link_add — avoiding the "File exists" boot refusal a bare
+        // CreatePair would hit on the inverse edge.
+        (true, false) | (false, true) => {
             steps.push(VethStep::RecreatePair);
             true
         }
@@ -401,6 +416,13 @@ fn execute_step(plan: &VethProvisionPlan, step: VethStep) -> Result<(), VethProv
     match step {
         VethStep::RecreatePair => {
             link_del(&plan.client_iface)?;
+            // Also reap the backend end. For the forward corrupted edge
+            // (client present, peer absent) deleting the client reaps both,
+            // so this is a no-op. For the inverse edge (client absent, peer
+            // present) the client del is the no-op and THIS reaps the
+            // surviving/colliding peer — without it, `link_add` would hit
+            // the identical "File exists" failure on the peer name.
+            link_del(&plan.backend_iface)?;
             link_add(plan)
         }
         VethStep::CreatePair => link_add(plan),
@@ -449,11 +471,13 @@ fn link_add(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
     })
 }
 
-/// `ip link del <iface>` — deletes the orphaned client end (which reaps
-/// both ends of a veth pair). Used only by [`VethStep::RecreatePair`]
-/// (§ 3.2). A "does not exist" failure is benign (already gone) and
-/// swallowed; any other failure surfaces as
-/// [`VethProvisionError::LinkDelFailed`].
+/// `ip link del <iface>` — deletes one named end of the veth pair.
+/// Used only by [`VethStep::RecreatePair`] (§ 3.2), which calls it for
+/// BOTH the client and the backend end so whichever end survived a
+/// corrupted edge is reaped before recreate. A "does not exist" failure
+/// is benign (already gone — the common case for the end that does not
+/// exist on a given corrupted edge) and swallowed; any other failure
+/// surfaces as [`VethProvisionError::LinkDelFailed`].
 fn link_del(iface: &str) -> Result<(), VethProvisionError> {
     let out = std::process::Command::new("ip").args(["link", "del", iface]).output()?;
     if out.status.success() {
@@ -621,6 +645,37 @@ mod tests {
                 VethStep::AddRoute,
             ],
             "peer-absent corrupted pair must recreate then converge every downstream resource"
+        );
+    }
+
+    /// REGRESSION (inverse corrupted edge): client iface ABSENT but its
+    /// declared peer PRESENT — e.g. an unrelated interface collides on the
+    /// backend name, or a veth peer survived its partner. The old `(false, _)`
+    /// wildcard routed this to CreatePair, whose `ip link add ... peer name
+    /// ovd-veth-bk` then failed with "File exists" → boot refusal. Must
+    /// instead RecreatePair (which dels both ends, clearing the conflict)
+    /// then converge every downstream resource.
+    #[test]
+    fn converge_recreates_pair_when_client_absent_but_peer_present() {
+        let plan = plan_24();
+        let observed =
+            ObservedVeth { client_present: false, peer_present: true, ..complete_observed() };
+        let steps = converge_steps(&plan, &observed);
+        assert_eq!(
+            steps,
+            vec![
+                VethStep::RecreatePair,
+                VethStep::AddClientAddr,
+                VethStep::AddBackendAddr,
+                VethStep::SetClientUp,
+                VethStep::SetBackendUp,
+                VethStep::AddRoute,
+            ],
+            "inverse corrupted edge must recreate then converge every downstream resource, got {steps:?}"
+        );
+        assert!(
+            !steps.contains(&VethStep::CreatePair),
+            "must NOT CreatePair over a present peer: {steps:?}"
         );
     }
 

@@ -233,3 +233,64 @@ fn provision_recreates_pair_when_peer_absent() {
     // The stashed orphan peer dies with its netns.
     let _ = Command::new("ip").args(["netns", "del", &stash_ns]).output();
 }
+
+/// REGRESSION (inverse corrupted edge): the declared client iface ABSENT
+/// but its declared peer (backend) PRESENT in the host netns — e.g. the
+/// client end was separately moved/renamed, or an unrelated interface
+/// collides on the backend name. The old `(false, _)` wildcard routed
+/// this to `CreatePair`, whose `ip link add <client> type veth peer name
+/// <backend>` then failed with "File exists" on the surviving peer →
+/// boot refusal. `provision` must now RECREATE — dropping the surviving
+/// peer (`RecreatePair` dels BOTH ends) before recreate — so afterwards
+/// both ends exist and the client resolves its gateway IPv4.
+#[test]
+fn provision_recreates_pair_when_client_absent_but_peer_present() {
+    let (client, backend) = iface_names('i');
+    delete_pair(&client);
+
+    let plan = plan_for(&client, &backend, "10.100.0.0/24");
+    // Bring up a complete pair first (or skip on no privilege).
+    match provision(&plan) {
+        Ok(()) => {}
+        Err(err) if is_cap_skip(&err) => {
+            eprintln!(
+                "SKIP provision_recreates_pair_when_client_absent_but_peer_present: CAP_NET_ADMIN required ({err})"
+            );
+            return;
+        }
+        Err(err) => panic!("initial provision failed: {err}"),
+    }
+    // Corrupt it into the inverse shape "client absent, declared peer
+    // present" by moving the CLIENT end into a throwaway netns: the client
+    // leaves the host netns (so `<client>` is absent in the host netns the
+    // provisioner reads) while the backend peer stays present. This is the
+    // exact "client separately moved" reachable shape the inverse edge of
+    // ADR-0061 § 3.2 names — and the surviving `<backend>` is the iface the
+    // bare CreatePair would have collided with on "File exists".
+    let stash_ns = format!("ovd-stshi-{}", std::process::id() & 0xffff);
+    let _ = Command::new("ip").args(["netns", "add", &stash_ns]).output();
+    let moved = Command::new("ip").args(["link", "set", &client, "netns", &stash_ns]).output();
+    let corrupted = !link_present(&client) && link_present(&backend);
+    if !corrupted {
+        eprintln!(
+            "SKIP provision_recreates_pair_when_client_absent_but_peer_present: could not move client to netns ({moved:?})"
+        );
+        let _ = Command::new("ip").args(["netns", "del", &stash_ns]).output();
+        delete_pair(&backend);
+        return;
+    }
+
+    // Converge: must recreate the pair (reaping the surviving peer) and
+    // fully provision it — NOT fail with "File exists" on link_add.
+    provision(&plan).expect("provision must recreate a corrupted client-absent/peer-present pair");
+    assert!(link_present(&client), "client end must exist after recreate");
+    assert!(link_present(&backend), "peer end must exist after recreate");
+    assert_eq!(
+        resolve_iface_ipv4(&client).expect("recreated client must resolve its gateway IPv4"),
+        plan.client_gateway,
+    );
+
+    delete_pair(&client);
+    // The stashed orphan client dies with its netns.
+    let _ = Command::new("ip").args(["netns", "del", &stash_ns]).output();
+}
