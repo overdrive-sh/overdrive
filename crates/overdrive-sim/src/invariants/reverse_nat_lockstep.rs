@@ -57,6 +57,14 @@ use crate::harness::{InvariantResult, InvariantStatus};
 ///    the corresponding `REVERSE_NAT` entries are purged.
 /// 4. Add the backend back via `update_service`; assert the
 ///    `REVERSE_NAT` entries reappear with the matching VIP.
+/// 5. **Dual-proto co-resident purge** — install a VIP carrying TWO
+///    listeners that differ only by L4 proto (the `CoreDNS` `tcp/53` +
+///    `udp/53` shape), then empty-backend one of them and assert the
+///    co-resident other-proto listener's `REVERSE_NAT` keys SURVIVE.
+///    Steps 1–4 declare one proto per VIP, so they never build the
+///    dual-proto VIP that exposes a VIP-wide (rather than per-proto)
+///    purge — the exact divergence the production `EbpfDataplane` once
+///    carried (ADR-0060 D4).
 ///
 /// The lockstep guarantee comes from `SimDataplane`'s implementation:
 /// `services` and `reverse_nat` live inside one `Mutex<ServiceState>`,
@@ -150,7 +158,81 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
         return fail(NAME, format!("after restore: {violation}"));
     }
 
+    // Step 5 — dual-proto co-resident purge regression guard (extracted
+    // to keep this fn under the line budget; see the fn docstring).
+    if let Some(violation) = check_dual_proto_coresident_purge(&dataplane).await {
+        return fail(NAME, violation);
+    }
+
     pass(NAME)
+}
+
+/// Step 5 of `evaluate_reverse_nat_lockstep` — the dual-proto
+/// co-resident purge regression guard.
+///
+/// Installs a VIP carrying TWO listeners that differ only by L4 proto —
+/// the `CoreDNS` `tcp/53` + `udp/53` shape, two separate per-listener
+/// `update_service` calls against the SAME backend addresses, so the two
+/// `REVERSE_NAT` keys differ only in their proto byte. An empty-backend
+/// update for ONE listener MUST purge only that proto's keys; the
+/// co-resident other-proto listener's keys survive (per-proto purge,
+/// ADR-0060 D4; the `Dataplane` trait contract). This is the sim-side
+/// guard for the contract the production `EbpfDataplane` once violated by
+/// purging VIP-wide (filtering on `vip_host` alone) — steps 1–4 declare
+/// one proto per VIP and so never build the dual-proto VIP that exposes
+/// the divergence. Returns `None` on success, `Some(reason)` on the
+/// first violation.
+async fn check_dual_proto_coresident_purge(dataplane: &SimDataplane) -> Option<String> {
+    const DUAL_BACKENDS: u32 = 3;
+
+    let dual_vip = Ipv4Addr::new(10, 0, 0, 200);
+    let dual_backends: Vec<Backend> = (0..DUAL_BACKENDS)
+        .map(|b| backend(99, b, Ipv4Addr::new(10, 9, 0, u8::try_from(b + 1).expect("b < 256")), 53))
+        .collect();
+
+    for proto in [Proto::Tcp, Proto::Udp] {
+        if let Err(e) =
+            dataplane.update_service(frontend(dual_vip, proto), dual_backends.clone()).await
+        {
+            return Some(format!("dual-proto install ({proto:?}) failed: {e}"));
+        }
+    }
+
+    // Pre-purge: both protos' keys present for every backend.
+    for proto in [Proto::Tcp, Proto::Udp] {
+        for b in &dual_backends {
+            let key = backend_key_for(b, proto);
+            if dataplane.reverse_nat_lookup(key) != Some(dual_vip) {
+                return Some(format!("dual-proto pre-purge: reverse_nat[{key}] != {dual_vip}"));
+            }
+        }
+    }
+
+    // Empty-backend update for the TCP listener only.
+    if let Err(e) = dataplane.update_service(frontend(dual_vip, Proto::Tcp), Vec::new()).await {
+        return Some(format!("dual-proto tcp empty-backend update failed: {e}"));
+    }
+
+    // The TCP keys are purged; the co-resident UDP keys (same backend
+    // addresses, distinct proto byte) MUST survive — a VIP-wide purge
+    // would have deleted them.
+    for b in &dual_backends {
+        let tcp_key = backend_key_for(b, Proto::Tcp);
+        if let Some(stale) = dataplane.reverse_nat_lookup(tcp_key) {
+            return Some(format!(
+                "dual-proto: tcp reverse_nat[{tcp_key}] still → {stale}; expected purged"
+            ));
+        }
+        let udp_key = backend_key_for(b, Proto::Udp);
+        if dataplane.reverse_nat_lookup(udp_key) != Some(dual_vip) {
+            return Some(format!(
+                "dual-proto: co-resident udp reverse_nat[{udp_key}] was purged by an \
+                 empty-backend TCP update; per-proto purge (ADR-0060 D4) requires it survive"
+            ));
+        }
+    }
+
+    None
 }
 
 /// Build a `ServiceFrontend` for a VIP under a declared proto. Listener

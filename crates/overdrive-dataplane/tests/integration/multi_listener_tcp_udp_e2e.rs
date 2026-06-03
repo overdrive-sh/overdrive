@@ -806,3 +806,120 @@ fn adding_listener_on_resubmit_converges_without_breaking_existing() {
         fixture.pcap_dir.display()
     );
 }
+
+/// S-05-D (regression — empty-backend purge is per-(vip, port, proto),
+/// NOT VIP-wide). Two co-resident listeners share a VIP AND a port,
+/// differing only by L4 proto — the CoreDNS `tcp/53` + `udp/53` shape.
+/// An empty-backend `update_service` for the TCP listener must purge
+/// ONLY the tcp slot; the co-resident udp listener keeps its
+/// REVERSE_NAT key AND its forward path.
+///
+/// Reproduces the production defect (`EbpfDataplane::update_service`
+/// empty-backend branch selected SERVICE_MAP outer slots by `vip_host`
+/// alone) where the tcp empty-update also deleted the udp outer slot —
+/// and cascaded the BACKEND_MAP/REVERSE_NAT purge — so XDP `XDP_PASS`ed
+/// udp packets it should forward. The `Dataplane` trait contract and
+/// `SimDataplane` mandate a per-proto purge (ADR-0060 D4); this is the
+/// Tier-3 observable proof for `EbpfDataplane`.
+///
+/// SAME port for both listeners (`8080/tcp` + `8080/udp`) is deliberate:
+/// it isolates the PROTO axis of the fix. With distinct ports the
+/// port-equality clause alone would preserve the survivor even if the
+/// proto byte were ignored; sharing the port forces the proto byte to be
+/// the sole discriminator (ADR-0060 D7), so a proto-blind purge fails
+/// this test.
+///
+/// Observable proxy + load-bearing forward-path observable:
+/// (1) post-purge REVERSE_NAT_MAP shows the udp/8080 key present and the
+///     tcp/8080 key absent;
+/// (2) a udp round-trip STILL delivers a VIP-sourced reply — proof the
+///     udp SERVICE_MAP outer slot survived (a deleted slot → XDP_PASS →
+///     `nc -u` drops the non-VIP-sourced reply).
+#[test]
+fn empty_backend_purge_of_one_listener_preserves_co_resident_proto() {
+    if !require_root_or_skip("S-05-D") {
+        return;
+    }
+    use threeiface_ips::{BACKEND_IP, VIP};
+
+    const SHARED_PORT: u16 = 8080;
+    const TCP_MARKER: &str = "ovd-multi-d-tcp";
+    let Some(fixture) = build_multi_listener_service(
+        "d",
+        &[
+            (tcp_frontend(VIP, SHARED_PORT), Proto::Tcp, SHARED_PORT),
+            (udp_frontend(VIP, SHARED_PORT), Proto::Udp, SHARED_PORT),
+        ],
+        TCP_MARKER,
+    ) else {
+        return;
+    };
+
+    // Pre-purge: both per-proto REVERSE_NAT keys present for the shared
+    // (backend, port). The proto-distinguished helper is NOT used here —
+    // both protos legitimately share the backend+port, so the
+    // opposite-proto lookup is *expected* to hit before the purge.
+    {
+        let _ns_guard =
+            enter_netns(&fixture.topo.lb_ns.name).expect("setns lb-ns for pre-purge readback");
+        for proto in [Proto::Tcp, Proto::Udp] {
+            assert!(
+                fixture
+                    .dataplane
+                    .reverse_nat_map_has_backend_proto(BACKEND_IP, SHARED_PORT, proto)
+                    .expect("REVERSE_NAT_MAP pre-purge readback"),
+                "pre-purge: both listeners' REVERSE_NAT keys must exist \
+                 (backend={BACKEND_IP}, {SHARED_PORT}, {proto:?})"
+            );
+        }
+    }
+
+    // Empty-backend update for the TCP listener only — the call the
+    // production chain emits when a listener's backend set goes empty.
+    {
+        let _ns_guard = enter_netns(&fixture.topo.lb_ns.name).expect("setns lb-ns for tcp purge");
+        let runtime =
+            tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
+        runtime
+            .block_on(fixture.dataplane.update_service(tcp_frontend(VIP, SHARED_PORT), Vec::new()))
+            .expect("empty-backend update_service for tcp listener");
+    }
+
+    // (1) Observable proxy: the tcp key is purged, the co-resident udp
+    // key SURVIVES. A VIP-wide purge deletes both.
+    {
+        let _ns_guard =
+            enter_netns(&fixture.topo.lb_ns.name).expect("setns lb-ns for post-purge readback");
+        let tcp_present = fixture
+            .dataplane
+            .reverse_nat_map_has_backend_proto(BACKEND_IP, SHARED_PORT, Proto::Tcp)
+            .expect("REVERSE_NAT_MAP tcp readback");
+        assert!(
+            !tcp_present,
+            "the emptied tcp/{SHARED_PORT} listener's REVERSE_NAT key must be purged"
+        );
+        let udp_present = fixture
+            .dataplane
+            .reverse_nat_map_has_backend_proto(BACKEND_IP, SHARED_PORT, Proto::Udp)
+            .expect("REVERSE_NAT_MAP udp readback");
+        assert!(
+            udp_present,
+            "the co-resident udp/{SHARED_PORT} listener's REVERSE_NAT key MUST survive an \
+             empty-backend update for tcp/{SHARED_PORT} — the purge is per-(vip, port, proto), \
+             not VIP-wide (ADR-0060 D4). A VIP-wide purge deletes it."
+        );
+    }
+
+    // (2) Load-bearing forward-path observable: the udp listener STILL
+    // delivers a VIP-sourced reply — proof its SERVICE_MAP outer slot
+    // survived the tcp empty-update (a deleted slot → XDP_PASS → the
+    // reply is not VIP-sourced and `nc -u` drops it).
+    let udp_ok = run_udp_round_trip(&fixture, SHARED_PORT, "ovd-multi-d-udp");
+    assert!(
+        udp_ok,
+        "the co-resident udp/{SHARED_PORT} listener must STILL deliver a VIP-sourced reply after \
+         an empty-backend update for tcp/{SHARED_PORT}; a VIP-wide purge would have deleted its \
+         SERVICE_MAP outer slot, making XDP XDP_PASS the packet. VIP={VIP}; pcaps: {}",
+        fixture.pcap_dir.display()
+    );
+}
