@@ -12,13 +12,20 @@
 # rewrites; verifier complexity is essentially free (≪ 10% of the
 # per-program ceiling per ADR-0053 § "Consequences" → Positive).
 #
-# Recorded value: 26 instructions — 0.005% of the L1-cache-fits
+# Recorded value: 28 instructions — 0.006% of the L1-cache-fits
 # target, two orders of magnitude below the XDP companions
 # (xdp_reverse_nat_lookup ~153K, xdp_service_map_lookup ~155K).
 # This matches expectations from ADR-0053: "verifier surface is
 # dramatically simpler than XDP."
 #
+# Re-baselined 26 → 28 (2026-06-03): steps 02-01 / 02-02 widened the
+# LOCAL_BACKEND_MAP key from (vip, port) to (vip, port, proto) per
+# ADR-0053 rev 2026-06-03. The cgroup program now reads
+# `bpf_sock_addr.protocol`, truncates to a u8, and stores it in the
+# lookup key — +2 verified insns. The growth is intended; the prior
+# baseline simply predated the proto-key work.
+#
 # Format (one line per program, space-separated key=value pairs;
 # the parser keys off `prog=` and `verified_insns=`).
 
-file=target/bpf/overdrive_bpf.o prog=cgroup_connect4_service verdict=success verified_insns=26
+file=target/bpf/overdrive_bpf.o prog=cgroup_connect4_service verdict=success verified_insns=28
