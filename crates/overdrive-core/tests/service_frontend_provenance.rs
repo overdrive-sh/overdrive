@@ -18,7 +18,7 @@
 //!   structured Failed, NOT a silent `Proto::Tcp`-defaulted action.
 //!
 //! Driving ports:
-//! - `project_service_desired(row, &listeners)` — the obs→desired seam
+//! - `project_service_desired(row, Some(&listener))` — the obs→desired seam
 //!   that sources proto from the listener-bearing fact (C3 sourcing +
 //!   the Failed negative arm).
 //! - `ServiceMapHydrator::reconcile` — the desired→Action emission seam;
@@ -95,9 +95,9 @@ fn proto_sourced_from_listener_fact_not_service_backends() {
     let svc = ServiceId::new(1).expect("valid ServiceId");
     let vip = vip_v4(10);
     let row = backend_row(svc, Ipv4Addr::new(10, 96, 0, 10));
-    let listeners = vec![listener(5353, Proto::Udp, vip)];
+    let fact = listener(5353, Proto::Udp, vip);
 
-    let desired = project_service_desired(&row, &listeners)
+    let desired = project_service_desired(&row, Some(&fact))
         .expect("S-01-D: a resolvable udp listener must project");
 
     assert_eq!(desired.proto, Proto::Udp, "proto must be sourced from the udp listener fact");
@@ -117,8 +117,9 @@ fn udp_listener_protocol_reaches_dataplane_as_udp() {
     let svc = ServiceId::new(1).expect("valid ServiceId");
     let vip = vip_v4(10);
     let row = backend_row(svc, Ipv4Addr::new(10, 96, 0, 10));
-    let listeners = vec![listener(5353, Proto::Udp, vip)];
-    let desired_svc = project_service_desired(&row, &listeners).expect("udp listener must project");
+    let fact = listener(5353, Proto::Udp, vip);
+    let desired_svc =
+        project_service_desired(&row, Some(&fact)).expect("udp listener must project");
 
     let mut desired = BTreeMap::new();
     desired.insert(svc, desired_svc);
@@ -153,10 +154,8 @@ fn udp_listener_protocol_reaches_dataplane_as_udp() {
 fn unresolvable_listener_proto_is_structured_error_not_tcp_default() {
     let svc = ServiceId::new(1).expect("valid ServiceId");
     let row = backend_row(svc, Ipv4Addr::new(10, 96, 0, 10));
-    // No listener facts at all — proto is unresolvable.
-    let listeners: Vec<ListenerRow> = vec![];
-
-    let result = project_service_desired(&row, &listeners);
+    // No listener fact at all — proto is unresolvable.
+    let result = project_service_desired(&row, None);
 
     assert!(
         matches!(result, Err(ServiceProjectionError::NoListenerProto { .. })),
@@ -168,5 +167,31 @@ fn unresolvable_listener_proto_is_structured_error_not_tcp_default() {
     assert!(
         result.is_err(),
         "S-01-E: no ServiceDesired may be silently produced with a Tcp default"
+    );
+}
+
+/// Regression (review of `service_map_hydrator.rs:111`): the projection
+/// takes a SINGLE `Option<&ListenerRow>`, not a `&[ListenerRow]`.
+/// The caller pre-resolves the one fact via
+/// `ListenerFactStore::fact_for(row.service_id)` — an O(1) keyed read on the
+/// full `(vip, port, proto)` identity — so a slice of multiple same-VIP
+/// listeners co-locating protocols (e.g. tcp/53 + udp/53) is structurally
+/// unrepresentable and can no longer be silently mis-resolved to the first
+/// entry. The retained VIP guard rejects a fact handed in for a different
+/// VIP rather than mis-stamping `(port, proto)` onto the projection.
+#[test]
+fn listener_fact_for_a_different_vip_does_not_project() {
+    let svc = ServiceId::new(1).expect("valid ServiceId");
+    let row = backend_row(svc, Ipv4Addr::new(10, 96, 0, 10));
+    // A listener fact whose VIP differs from the row's VIP must NOT be
+    // stamped onto the projection — the guard rejects it as unresolvable
+    // rather than silently sourcing the wrong port/proto.
+    let wrong_vip_fact = listener(53, Proto::Tcp, vip_v4(99));
+
+    let result = project_service_desired(&row, Some(&wrong_vip_fact));
+
+    assert!(
+        matches!(result, Err(ServiceProjectionError::NoListenerProto { .. })),
+        "a listener fact for a different VIP must not mis-stamp (port, proto); got {result:?}"
     );
 }

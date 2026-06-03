@@ -79,38 +79,50 @@ pub enum ServiceProjectionError {
     },
 }
 
-/// Project a `ServiceBackendRow` + its listener-bearing facts into a
+/// Project a `ServiceBackendRow` + its single listener-bearing fact into a
 /// [`ServiceDesired`], sourcing `(port, proto)` from the listener fact.
 ///
 /// Per ADR-0060 site #8 + C3: `ServiceBackendRow` carries neither port
-/// nor proto, so the protocol MUST be sourced from a `ListenerRow` whose
-/// `vip` matches the row's VIP. The first matching listener wins (US-01
-/// is single-listener; US-05 generalises to per-listener fan-out). When
-/// no listener resolves the proto the projection returns
+/// nor proto, so the protocol MUST be sourced from the `ListenerRow` whose
+/// `vip` matches the row's VIP. The caller pre-resolves the one fact for
+/// this service via `ListenerFactStore::fact_for(row.service_id)` — an O(1)
+/// keyed read on the full `(vip, port, proto)` identity — and passes it as
+/// `Option<&ListenerRow>`. Taking a single optional fact (NOT a
+/// `&[ListenerRow]`) makes a multi-listener input structurally
+/// unrepresentable: a service co-locating protocols on one VIP (e.g.
+/// tcp/53 + udp/53) can never have the wrong listener selected by slice
+/// order, because `ServiceBackendRow` carries no proto discriminator the
+/// function could use to disambiguate a slice. Per-listener fan-out
+/// (US-05) derives a distinct `ServiceId` per listener, so each projection
+/// still handles exactly one fact. When the fact is absent or carries a
+/// non-matching VIP the projection returns
 /// [`ServiceProjectionError::NoListenerProto`] — it NEVER defaults to
 /// `Tcp`.
 ///
 /// # Errors
 ///
-/// Returns [`ServiceProjectionError::NoListenerProto`] when no
+/// Returns [`ServiceProjectionError::NoListenerProto`] when no matching
 /// `ListenerRow` resolves the service's protocol.
 pub fn project_service_desired(
     row: &crate::traits::observation_store::ServiceBackendRow,
-    listeners: &[crate::traits::observation_store::ListenerRow],
+    listener: Option<&crate::traits::observation_store::ListenerRow>,
 ) -> Result<ServiceDesired, ServiceProjectionError> {
     let vip = ServiceVip::new(std::net::IpAddr::V4(row.vip)).unwrap_or_else(|_| {
         unreachable!(
             "ServiceBackendRow.vip is a wire-shape Ipv4Addr; ServiceVip::new is total over IPv4"
         )
     });
-    // Source `(port, proto)` from the listener-bearing fact whose `vip`
-    // matches this service's VIP. The fact's SSOT is the Service intent's
-    // listeners (the allocator-issued VIP is stamped onto the fact). When
-    // no fact resolves, fail — refusing to synthesise a `Proto::Tcp`
-    // default (C3).
-    let listener = listeners.iter().find(|l| l.vip == Some(vip)).ok_or(
-        ServiceProjectionError::NoListenerProto { service_id: row.service_id, vip: row.vip },
-    )?;
+    // Source `(port, proto)` from the single listener-bearing fact the
+    // caller pre-resolved for this service. The fact's SSOT is the Service
+    // intent's listeners (the allocator-issued VIP is stamped onto the
+    // fact). The retained VIP guard rejects a fact handed in for a
+    // different VIP rather than mis-stamping; an absent fact fails —
+    // refusing to synthesise a `Proto::Tcp` default (C3).
+    let listener =
+        listener.filter(|l| l.vip == Some(vip)).ok_or(ServiceProjectionError::NoListenerProto {
+            service_id: row.service_id,
+            vip: row.vip,
+        })?;
     let fingerprint = crate::dataplane::fingerprint::fingerprint(&vip, &row.backends);
     Ok(ServiceDesired {
         vip,

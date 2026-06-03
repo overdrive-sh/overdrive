@@ -1426,16 +1426,15 @@ async fn hydrate_desired(
                     fact
                 };
                 // Source `(port, proto)` from the keyed fact via the
-                // existing projection seam (single-element slice — the
-                // projection's VIP match + C3 error path are unchanged).
-                // On an unresolvable proto (no keyed fact), skip the
-                // service — emitting NO `update_service` action carrying a
-                // silently-defaulted `Proto::Tcp` (C3 guard) — and surface
+                // projection seam, passing the single `Option<&ListenerRow>`
+                // directly (the projection's VIP match + C3 error path are
+                // unchanged). On an unresolvable proto (no keyed fact), skip
+                // the service — emitting NO `update_service` action carrying
+                // a silently-defaulted `Proto::Tcp` (C3 guard) — and surface
                 // the structured failure for the operator.
-                let fact_slice: &[overdrive_core::traits::observation_store::ListenerRow] =
-                    fact.as_slice();
                 match overdrive_core::reconcilers::service_map_hydrator::project_service_desired(
-                    &row, fact_slice,
+                    &row,
+                    fact.as_ref(),
                 ) {
                     Ok(desired_svc) => {
                         desired.insert(row.service_id, desired_svc);
