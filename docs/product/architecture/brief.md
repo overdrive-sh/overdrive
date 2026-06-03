@@ -1457,6 +1457,7 @@ Rules to enforce:
 | 0057 | **docs-platform (website)** — in-Worker Orama search now (`createFromSource`) behind a `lib/search.ts` seam shared by `/api/search` and MCP `search_docs`; benchmarked external-search migration trigger (>~5k pages OR ~60–70 MB of the 128 MB isolate — inference, to be benchmarked) | Accepted |
 | 0058 | **docs-platform (website)** — build-time one-index enforcement assertion (Node build step in `website/`, NOT a Rust gate): every `source.getPages()` page has a reachable `.md`, appears in `llms.txt`, and is in the search index; blog joins the same index — makes the C-4 invariant structural | Accepted |
 | 0060 | `ServiceFrontend` newtype on `Dataplane::update_service` — threads per-service `(ServiceVip [V4-by-construction], NonZeroU16 port, Proto)` so the REVERSE_NAT key set is derivable per declared proto (fixes GH #163 UDP reverse-NAT bypass); per-proto purge on empty backends; three-tier `ReverseNatLockstep` gate. Supersedes phase-2 §5 Q-Sig locked-A (paper, never landed); records shipped option-C as true from-state (Phase 2.2 / udp-service-support) | Accepted |
+| 0062 | Listener-fact in-memory view — `ListenerFactStore` (`Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for stop) replaces the O(S²) per-tick `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row `store.get(&row.service_id)` is O(1) and drops the prior `vip == row.vip` listener scan; boot-rebuilt from intent + edge-maintained on submit/stop (key derived via `ServiceId::derive(&vip, port, "service-map")`); steady-state hydrate pays zero redb reads. Not a persisted View (no durable state — intent store is SSOT; honors "persist inputs, not derived state"). Extends 0035; amends 0042; references 0049 (allocator lifecycle imitated, not extended); preserves 0060 C3. Candidate (d) per reconciler-desired-hydration-efficiency research | Accepted |
 
 ---
 
@@ -3878,11 +3879,119 @@ ip/port only).
 
 ---
 
+### 88. Listener-fact in-memory view extension (ADR-0062)
+
+**Source:** `docs/feature/reconciler-listener-fact-view/` (DESIGN 2026-06-03;
+escalation from /nw-bugfix → /nw-research → /nw-design, no DISCUSS). **ADR:**
+ADR-0062. Extends ADR-0035; amends ADR-0042; references ADR-0049; preserves
+ADR-0060 C3. **Research:**
+`docs/research/control-plane/reconciler-desired-hydration-efficiency.md`.
+
+#### Problem this extension closes
+
+`ServiceMapHydrator`'s desired-hydration helper `gather_service_listener_facts`
+(`reconciler_runtime.rs:1733-1796`) does a full `scan_prefix(b"workloads/")` +
+rkyv-decode of every Service intent + an `allocator.lock().await` per intent,
+**once per `ServiceMapHydrator` target per ~100 ms tick** → **O(S²) decodes +
+O(S²) lock acquisitions per active tick** (S = services). The derived
+`ListenerRow { vip, port, protocol }` is stable between operator spec
+submissions; re-deriving it on a timer is the Kubernetes informer-cache
+anti-pattern the research names.
+
+#### Decision (candidate d — locked upstream)
+
+A new in-memory `ListenerFactStore` (`overdrive-control-plane`,
+`src/listener_facts.rs`), `Arc<tokio::sync::Mutex<…>>` on `AppState` beside
+`allocator`, holding two `BTreeMap`s:
+
+- **Primary (read path):** `BTreeMap<ServiceId, ListenerRow>` — keyed by the
+  **same `ServiceId` the hydrator reads by**, one entry per `[[listener]]`.
+- **Secondary (cleanup index):** `BTreeMap<WorkloadId, Vec<ServiceId>>` — used
+  only by the stop/conflict-release path (which holds a `WorkloadId`, not the
+  `ServiceId`s) to find the entries to evict.
+
+The keying is load-bearing: the `ServiceMapHydrator` read path never holds a
+`WorkloadId` — it resolves `service_id` from the target
+(`reconciler_runtime.rs:1323`) and iterates `service_backends_rows`, keying its
+desired map by `row.service_id` (line 1347). Keying the store by `ServiceId`
+makes the read `store.get(&row.service_id)` genuinely O(1) and directly yields
+the `(port, protocol)`, **eliminating** the prior per-row `vip == row.vip` scan
+in `project_service_desired`. The edge derives the key with the exact call the
+bridge already uses — `ServiceId::derive(&vip, listener.port, "service-map")`
+(`id.rs:825`; `reconciler_runtime.rs:1705`) — taking the submit handler's
+`service_vip: Option<ServiceVip>`.
+
+- **Boot-rebuilt** by the relocated `gather_*` body
+  (`ListenerFactStore::rebuild_from_intent`), once, next to
+  `PersistentServiceVipAllocator::bulk_load`; reconstructs **both** maps by
+  deriving each listener's `ServiceId` during the scan. NOT persisted — the
+  intent store is the SSOT; cold boot re-projects (honors "persist inputs, not
+  derived state").
+- **Edge-maintained** in `handlers.rs`: `upsert` after a successful submit
+  (`PutOutcome::Inserted`) — one `ServiceId` entry per listener, plus the
+  secondary-index `Vec`; `remove_workload(&workload_id)` on stop /
+  conflict-release (evicts via the secondary index, no intent decode or
+  allocator lock needed). Co-located with the existing VIP-memo mutation
+  (`handlers.rs:323-331,424-432`). `stop_workload` (`handlers.rs:642-681`) holds
+  only the `WorkloadId` — hence the secondary cleanup index.
+- **Read O(1)** in the `ServiceMapHydrator` hydrate arm
+  (`reconciler_runtime.rs:1322-1364`) — per-row `store.get(&row.service_id)`
+  replaces the cluster-wide scan; guard→clone→drop before any `.await`; C3
+  unresolvable-proto guard preserved.
+
+Steady-state `ServiceMapHydrator` hydrate pays **zero redb reads** and **zero
+per-row listener scan** — restores the ADR-0035 contract without adding a
+persisted View (no durable state to persist).
+
+#### Why not a persisted View / not the VIP allocator
+
+A persisted `ViewStore` View (option i) would technically fit the ADR-0035 View
+contract, but is rejected because (a) the facts are a pure derivation of
+already-persisted inputs — the intent store is the SSOT, so persisting buys zero
+durability and would violate "persist inputs, not derived state"; and (b) a View
+needs an owning reconciler with a `reconcile()`, so hosting edge-maintained facts
+would require a synthetic reconciler-with-no-`reconcile`. Extending
+`PersistentServiceVipAllocator` (option iii) breaks its single-responsibility (VIP
+issuance + range management) and forces an unwanted rkyv version bump. The in-memory
+store *imitates* the allocator's proven boot-rebuild + edge-maintain lifecycle as a
+separate, cohesive type. See ADR-0062 for the full alternatives analysis (incl.
+rejected research candidates a — recomputed-digest cache — and b — once-per-tick
+scan).
+
+#### DST / determinism
+
+`BTreeMap` keying for both maps (§ "Ordered-collection choice"). DELIVER asserts
+three invariants: **(A) zero `scan_prefix` calls in steady-state hydrate** —
+`scan_prefix` is a public method on the `IntentStore` trait
+(`overdrive-core/src/traits/intent_store.rs:255`), so a counting decorator wraps
+`&dyn IntentStore` directly (verified fact, no new sim surface) over N ticks × S
+services; **(B) byte-equivalence of the edge-maintained store (both maps) to a
+fresh `rebuild_from_intent`, asserted over the full set of `ServiceId` entries
+including multi-listener services** — the same drift-defense the allocator
+upholds between `allocate` and `bulk_load`; and **(C) the `ListenerFactStore`
+guard is never held across `.await`** (DST invariant; the read path and the
+submit/stop edge contend on the same mutex, so this is a deadlock hazard, not a
+style note — `.claude/rules/development.md` § "Concurrency & async").
+
+#### C4
+
+System Context / Container / Component (the listener-fact read/write path) live
+in ADR-0062 (Mermaid).
+
+#### Reuse Analysis
+
+1 CREATE NEW (`ListenerFactStore`), 4 EXTEND (`gather_*`→boot rebuild,
+`AppState`, `submit_workload`/`stop_workload`, `ServiceMapHydrator` arm), 2
+DO-NOT-REUSE-with-rationale (ViewStore Views; action-shim). The CREATE NEW is
+justified — no existing structure hosts cluster-wide-keyed listener facts
+without abusing the View contract or the allocator's SRP.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
 | 2026-04-21 | Initial Application Architecture section (Phase 1 foundation) — Morgan. |
+| 2026-06-03 | Listener-fact in-memory view extension (ADR-0062). New `ListenerFactStore` (in-memory `Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator's read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for the stop path) replaces the per-tick cluster-wide `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row read `store.get(&row.service_id)` is O(1) and eliminates the prior `vip == row.vip` listener scan. Boot-rebuilt from intent + edge-maintained on `submit_workload`/`stop_workload` (co-located with the VIP-memo mutation; key derived via `ServiceId::derive(&vip, listener.port, "service-map")`); steady-state hydrate pays zero redb reads (restores ADR-0035 contract without a persisted View). Candidate (d) per `docs/research/control-plane/reconciler-desired-hydration-efficiency.md`. `gather_*` relocated+renamed to `ListenerFactStore::rebuild_from_intent` (boot path; both maps); per-tick caller deleted. DELIVER invariants: (A) zero steady-state `scan_prefix` (counting decorator on the trait-public `IntentStore::scan_prefix`), (B) store byte-equivalent to re-scan over all `ServiceId` entries incl. multi-listener, (C) guard never held across `.await`. Extends ADR-0035; amends ADR-0042; references ADR-0049 (allocator lifecycle imitated, NOT extended); preserves ADR-0060 C3. Reuse: 1 CREATE NEW, 4 EXTEND, 2 DO-NOT-REUSE. — Morgan. (Second-review rekey `WorkloadId`→`ServiceId` + stop-path cleanup index + invariants B/C clarified + `scan_prefix` trait-visibility verified.) |
 | 2026-06-02 | UDP service support extension — `ServiceFrontend` on `update_service`, per-proto reverse-NAT, three-tier lockstep gate (GH #163, ADR-0060) — Morgan. |
 | 2026-04-22 | Review revisions: mutation-testing note in §9 (owned by nw-mutation-test skill); K4 reframed as Phase 2+ commercial guardrail, not Phase 1 CI gate (see upstream-changes.md); row schema versioning deferred to crafter per §6. |
 | 2026-04-23 | Phase 1 control-plane-core extension (§14–§23). Added ADR-0008 (REST + OpenAPI transport), ADR-0009 (OpenAPI via utoipa + CI gate), ADR-0010 (Phase 1 TLS bootstrap via R1–R5), ADR-0011 (aggregates / JobSpec collision), ADR-0012 (SimObservationStore for Phase 1 server), ADR-0013 (reconciler primitive + runtime), ADR-0014 (CLI HTTP client + shared types), ADR-0015 (HTTP error mapping). New crate `overdrive-control-plane`; new workspace deps `axum`, `utoipa`, `utoipa-axum`, `libsql`. C4 container diagram extended; new component diagram for `overdrive-control-plane` (Phase 1). — Morgan. |
