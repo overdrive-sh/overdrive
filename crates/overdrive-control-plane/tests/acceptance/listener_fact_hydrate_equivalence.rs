@@ -183,7 +183,7 @@ proptest! {
                 facts.upsert(wid.clone(), &vip, &listeners);
             }
 
-            let sid = ServiceId::derive(&vip, listener.port, SERVICE_MAP_PURPOSE);
+            let sid = ServiceId::derive(&vip, listener.port, listener.protocol, SERVICE_MAP_PURPOSE);
             let backends = vec![one_backend(workload)];
             let row = ServiceBackendRow {
                 service_id: sid,
@@ -236,7 +236,8 @@ async fn hydrate_desired_unresolvable_proto_skips_and_emits_no_tcp_default() {
         vec![Listener { port: NonZeroU16::new(443).expect("nz"), protocol: Proto::Udp }];
     let vip = persist_and_allocate(&state, workload, &listeners).await;
     let vip_addr = vip.try_as_ipv4().expect("ipv4");
-    let sid = ServiceId::derive(&vip, listeners[0].port, SERVICE_MAP_PURPOSE);
+    let sid =
+        ServiceId::derive(&vip, listeners[0].port, listeners[0].protocol, SERVICE_MAP_PURPOSE);
     let row = ServiceBackendRow {
         service_id: sid,
         vip: vip_addr,
@@ -304,7 +305,7 @@ proptest! {
                     facts.upsert(wid, &vip, listeners);
                 }
                 for l in listeners {
-                    all_ids.insert(ServiceId::derive(&vip, l.port, SERVICE_MAP_PURPOSE));
+                    all_ids.insert(ServiceId::derive(&vip, l.port, l.protocol, SERVICE_MAP_PURPOSE));
                     total_listeners += 1;
                 }
             }

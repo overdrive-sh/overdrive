@@ -141,6 +141,7 @@ async fn persist_service_and_allocate_vip(
     let sid = ServiceId::derive(
         &vip,
         std::num::NonZeroU16::new(listener_port).expect("non-zero"),
+        svc.listeners[0].protocol,
         "service-map",
     );
     (vip, listener_port, sid)

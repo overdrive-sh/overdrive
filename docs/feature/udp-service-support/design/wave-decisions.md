@@ -105,10 +105,19 @@ component diagram warranted (explicitly noted in the deliverables; a
 redundant diagram would add noise, not signal).
 
 **SSOT.** Amended ADRs are the SSOT:
-- **ADR-0040** revision 2026-06-03 — SERVICE_MAP outer key.
+- **ADR-0040** revision 2026-06-03 — SERVICE_MAP outer key
+  (`(VIP, port)` → `(VIP, port, proto)`).
+- **ADR-0040** revision 2026-06-03 (companion) — `ServiceId`
+  derivation + `MAGLEV_MAP` outer-key re-partitioning
+  (`(vip, port, purpose)` → `(vip, port, proto, purpose)`). The
+  control-plane-identity completion of P2-Q4; see "P2-Q4 ServiceId-layer
+  completion — Model A" below.
 - **ADR-0053** revision 2026-06-03 — LOCAL_BACKEND_MAP key +
   cgroup_connect4 proto-source contract + `RegisterLocalBackend`
   proto field + sendmsg4 scope note.
+- **ADR-0052** § 1 — cross-reference brought in line with the amended
+  `ServiceId` derivation (now `(assigned_vip, listener.port,
+  listener.protocol, "service-map")`).
 - **ADR-0060** — already carries `ServiceFrontend { vip, port, proto }`
   at the boundary; **no change needed**; referenced as the companion
   that put proto on the boundary and as the source of the `Proto` type.
@@ -119,6 +128,98 @@ Unconnected-UDP (`sendto(VIP, ...)` without `connect()`) is NOT
 delivered — it needs a separate `sendmsg4` (`BPF_CGROUP_UDP4_SENDMSG`)
 hook, not implemented today (DNS resolvers `sendto` per query without
 connecting). See ADR-0053 amendment § "Out of scope".
+
+## P2-Q4 ServiceId-layer completion — Model A (2026-06-03, user-locked)
+
+**Decision (LOCKED by the user — Model A).** `ServiceId` becomes
+per-`(vip, port, proto)`. The `ServiceId::derive` constructor gains an
+L4-protocol axis: `(vip, port, purpose)` → `(vip, port, proto,
+purpose)`, content-addressing **one dataplane slot per
+`(vip, port, proto)`**. `tcp/53` and `udp/53` derive two distinct
+`ServiceId`s instead of colliding into one. This is the
+control-plane-identity completion of the P2-Q4 proto-in-key decision
+above.
+
+**The gap this closes.** P2-Q4 widened the dataplane *map keys*
+(SERVICE_MAP, LOCAL_BACKEND_MAP) to `(vip, port, proto)`, but
+**`ServiceId` itself stayed proto-less**. `ServiceId` is the
+`MAGLEV_MAP` outer key (ADR-0040 § 1), the `service/<id>`
+`TargetResource`, and the content-addressed identity backing the
+per-listener control-plane projections. With the wire key proto-distinct
+but the identity proto-less, the two listeners collapse to one
+`ServiceId` *before* the dataplane is touched —
+`ListenerFactStore.primary` (`listener_facts.rs:97-108`), the
+`BackendDiscoveryBridge` projection (`reconciler_runtime.rs:1716-1808`),
+and the `service_lifecycle` identity (`reconciler_runtime.rs:1680-1686`)
+each overwrite the first listener with the second. P2-Q4's verbatim
+"no listener overwrites another" guarantee held at the slot layer and
+**broke at the `ServiceId` layer**; the proto-keyed slots P2-Q4 landed
+could not be populated for CoreDNS (`tcp/53 + udp/53`). Model A fixes
+the identity to match the keys.
+
+**New derivation (recorded; not implemented here).**
+
+```text
+ServiceId::derive(vip, port, purpose)        // from
+ServiceId::derive(vip, port, proto, purpose) // to  (proto = backend_key::Proto)
+```
+
+Proto enters the SHA-256 pre-image as a single IANA byte
+(`Proto::as_u8()` → 6/17) at **hash-input field 5** — after the
+`port` separator, before the `purpose` token — zero-separated like the
+existing inputs (per `.claude/rules/development.md` § "Hashing requires
+deterministic serialization"). Pre-image order:
+`vip.Display ∥ 0 ∥ port.be ∥ 0 ∥ proto.as_u8() ∥ 0 ∥ purpose`. The
+full byte-position table is in the ADR-0040 companion revision.
+
+**Model fork (Model A locked; Model B rejected).**
+
+- **Model A (LOCKED):** `ServiceId` = content-address of
+  `(vip, port, proto, purpose)`. One `ServiceId` per slot; the fix is
+  to widen `derive()` + thread `proto` through the three production
+  derive sites; the existing one-listener-per-entry projection shape
+  (`BTreeMap<ServiceId, _>`) stays. Consistent with the already-widened
+  SERVICE_MAP / LOCAL_BACKEND_MAP keys; gives each proto its own
+  `MAGLEV_MAP` table.
+- **Model B (REJECTED):** `ServiceId` stays per-`(vip, port)` (coarser
+  "service") and the projections become one-to-many
+  (`BTreeMap<ServiceId, Vec<ProjectedListener>>` or composite re-key).
+  Rejected: bigger structural change to the projection *data shape*;
+  diverges from the one-`update_service`-per-listener fan-out P2-Q4
+  already assumes; leaves `ServiceId` semantically inconsistent with the
+  proto-keyed dataplane. The `reconcile_conflict` row carrying **both**
+  `service_id` and `(vip, port, proto)` (`reconciler_runtime.rs:1168`)
+  hints at B but does not carry it: under Model A the two are the same
+  conflict slot — the opaque `u64` identity plus its human-readable
+  decode — so the tuple stays as intended operator-facing
+  granularity, not as evidence the identity is coarser.
+
+**Migration.** Single-cut, reconciler-repopulated — `ServiceId` derived
+values change for every service; maps and rows are recreated on next
+boot. NO shim, NO dual-derivation path, NO deprecation (per
+`feedback_single_cut_greenfield_migrations.md`).
+
+**Schema evolution.** `ServiceId` stays a `u64`; the rkyv layout of
+rows embedding it is unchanged — **no envelope version bump**. Only the
+derived value changes; golden fixtures hardcoding a `(vip, port)`-derived
+`ServiceId` are regenerated by the implementing crafter.
+
+**Reuse disposition.** EXTEND of `ServiceId::derive` + thread the
+existing `Listener.protocol: Proto`. Zero CREATE NEW; `Proto` is REUSE
+(`backend_key::Proto`, the same type the keys use).
+
+**Topology.** No topology change — same maps, same identity type, wider
+derivation pre-image. No new C4 diagram warranted.
+
+**SSOT.** The ADR-0040 companion revision (2026-06-03) is the SSOT for
+this decision; ADR-0052 § 1's derivation cross-reference is brought in
+line.
+
+**Implementation predicate (DELIVER, not this wave).** Widen
+`ServiceId::derive`; thread `proto` through `listener_facts.rs:100`,
+`reconciler_runtime.rs:1681`, `:1799`; update the test-side derive
+mirrors and the `reconcile_conflict` observability guard; regenerate
+`ServiceId`-valued golden fixtures. Follows via the bugfix/crafter path.
 
 ## `ServiceFrontend` — final shape
 

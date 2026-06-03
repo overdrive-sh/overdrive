@@ -71,6 +71,7 @@ mod tests {
     use std::num::NonZeroU16;
     use std::sync::Arc;
 
+    use overdrive_core::dataplane::backend_key::Proto;
     use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip};
     use overdrive_core::reconcilers::Action;
     use overdrive_core::traits::observation_store::{
@@ -86,7 +87,7 @@ mod tests {
     fn canonical_row(writer: &NodeId) -> ServiceBackendRow {
         let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid VIP");
         let port = NonZeroU16::new(8080).expect("non-zero port");
-        let service_id = ServiceId::derive(&vip, port, "service-map");
+        let service_id = ServiceId::derive(&vip, port, Proto::Tcp, "service-map");
         ServiceBackendRow {
             service_id,
             vip: Ipv4Addr::new(10, 0, 0, 1),

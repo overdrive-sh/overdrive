@@ -1637,7 +1637,8 @@ const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
 /// branch's `ServiceBackendRow` composition. Mirrors
 /// [`hydrate_bridge_desired_listeners`]'s VIP resolution: compute the
 /// spec digest, consult the allocator memo, derive the `ServiceId`
-/// from the first listener's `(vip, port)` per ADR-0052 § 1.
+/// from the first listener's `(vip, port, protocol)` per ADR-0052 § 1
+/// / ADR-0040 companion revision (proto axis).
 ///
 /// Returns `None` when the Service has no listener (no VIP surface) or
 /// the allocator memo is absent (VIP not yet issued) — in either case
@@ -1677,8 +1678,12 @@ async fn service_dataplane_identity(
     let Some(assigned_vip) = assigned_vip_opt else {
         return Ok(None);
     };
-    let service_id =
-        overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
+    let service_id = overdrive_core::id::ServiceId::derive(
+        &assigned_vip,
+        listener.port,
+        listener.protocol,
+        "service-map",
+    );
     Ok(Some(overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
         service_id,
         vip: assigned_vip,
@@ -1722,7 +1727,8 @@ pub async fn hydrate_actual_for_test(
 /// * `WorkloadIntent::Service(ServiceV1)` — computes `spec_digest`,
 ///   consults `state.allocator.lock().await.get(&digest)` for the
 ///   allocator-issued VIP, projects each listener through
-///   `ServiceId::derive(&vip, port, "service-map")` per ADR-0052 § 1.
+///   `ServiceId::derive(&vip, port, protocol, "service-map")` per
+///   ADR-0052 § 1 / ADR-0040 companion revision (proto axis).
 /// * `WorkloadIntent::Job(_)` / `Schedule(_)` — returns empty map
 ///   (S-BDB-08; only Service has listeners).
 ///
@@ -1795,8 +1801,12 @@ async fn hydrate_bridge_desired_listeners(
     };
     let mut listeners = BTreeMap::new();
     for listener in &service_v1.listeners {
-        let service_id =
-            overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
+        let service_id = overdrive_core::id::ServiceId::derive(
+            &assigned_vip,
+            listener.port,
+            listener.protocol,
+            "service-map",
+        );
         listeners.insert(
             service_id,
             overdrive_core::reconcilers::backend_discovery_bridge::ProjectedListener {
@@ -2654,7 +2664,7 @@ mod tests {
 
         /// S-BDB-10 unit-level proxy: an N-listener Service produces
         /// exactly N (ServiceId, ProjectedListener) entries, each
-        /// keyed by `ServiceId::derive(&assigned_vip, port,
+        /// keyed by `ServiceId::derive(&assigned_vip, port, protocol,
         /// "service-map")` and carrying the allocator-issued VIP.
         #[tokio::test]
         async fn hydrate_desired_service_projects_listeners_with_allocator_vip() {
@@ -2679,8 +2689,8 @@ mod tests {
 
             let port_8080 = NonZeroU16::new(8080).expect("nz");
             let port_8443 = NonZeroU16::new(8443).expect("nz");
-            let sid_8080 = ServiceId::derive(&assigned_vip, port_8080, "service-map");
-            let sid_8443 = ServiceId::derive(&assigned_vip, port_8443, "service-map");
+            let sid_8080 = ServiceId::derive(&assigned_vip, port_8080, Proto::Tcp, "service-map");
+            let sid_8443 = ServiceId::derive(&assigned_vip, port_8443, Proto::Tcp, "service-map");
 
             let pl_8080 = s.desired.listeners.get(&sid_8080).expect("8080 entry");
             assert_eq!(pl_8080.vip, assigned_vip, "vip from allocator memo");

@@ -28,9 +28,13 @@
 //!   entries to evict.
 //!
 //! Per listener the store derives `ServiceId::derive(&vip, port,
-//! "service-map")` — the identical derivation
+//! protocol, "service-map")` — the identical derivation
 //! `hydrate_bridge_desired_listeners` and `gather_service_listener_facts`
-//! use, so the read-path key matches the hydrator's projection.
+//! use, so the read-path key matches the hydrator's projection. The
+//! `protocol` axis (ADR-0040 companion revision 2026-06-03 / ADR-0052
+//! § 1) splits two listeners on the same `(vip, port)` but different L4
+//! protocol (the canonical CoreDNS `tcp/53` + `udp/53` case) into two
+//! distinct primary entries instead of colliding.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -82,10 +86,13 @@ impl ListenerFactStore {
     /// allocator-issued `vip`.
     ///
     /// For EACH listener in `listeners` (declaration order): derives
-    /// `ServiceId::derive(vip, listener.port, "service-map")`, inserts
-    /// a `ListenerRow { vip: Some(vip), port, protocol }` into the
-    /// primary map, and appends the derived `ServiceId` to the
-    /// workload's `Vec` in the secondary map.
+    /// `ServiceId::derive(vip, listener.port, listener.protocol,
+    /// "service-map")`, inserts a `ListenerRow { vip: Some(vip), port,
+    /// protocol }` into the primary map, and appends the derived
+    /// `ServiceId` to the workload's `Vec` in the secondary map. The
+    /// proto axis (ADR-0040 companion / ADR-0052 § 1) keeps two
+    /// same-`(vip, port)` listeners that differ only in protocol as two
+    /// distinct primary entries.
     ///
     /// # Postconditions
     ///
@@ -97,7 +104,45 @@ impl ListenerFactStore {
     pub fn upsert(&mut self, workload_id: WorkloadId, vip: &ServiceVip, listeners: &[Listener]) {
         let mut ids = Vec::with_capacity(listeners.len());
         for listener in listeners {
-            let service_id = ServiceId::derive(vip, listener.port, SERVICE_MAP_PURPOSE);
+            let service_id =
+                ServiceId::derive(vip, listener.port, listener.protocol, SERVICE_MAP_PURPOSE);
+            // Defensive invariant guard (the original bug report's ask,
+            // reframed post-widening). Two listeners IN THIS SAME upsert
+            // call deriving the SAME ServiceId would silently overwrite
+            // one another (last-writer-wins). Admission
+            // (`ServiceV1::from_submit`) already rejects duplicate
+            // `(port, protocol)` listeners, so a collision here is a
+            // STRUCTURAL INVARIANT VIOLATION — a malformed listener set
+            // that bypassed admission — not a legitimate runtime state.
+            //
+            // The check is scoped to THIS call's accumulated `ids`, NOT
+            // `self.primary`: `upsert` is idempotent across calls (a
+            // re-upsert of the same workload re-inserts the same
+            // ServiceIds), so consulting `self.primary` would false-fire
+            // on every legitimate re-upsert. Only a duplicate WITHIN one
+            // `listeners` slice is the invariant violation.
+            //
+            // `debug_assert!` fails loud in tests / debug builds; the
+            // `tracing::warn!` surfaces it in release without panicking
+            // the control plane (last-writer-wins on the duplicate).
+            if ids.contains(&service_id) {
+                debug_assert!(
+                    !ids.contains(&service_id),
+                    "listener_facts: two listeners of workload {workload_id} derived the same \
+                     ServiceId {service_id} within one upsert — admission must reject duplicate \
+                     (port, proto) listeners (ServiceV1::from_submit); a collision here is a \
+                     structural invariant violation"
+                );
+                tracing::warn!(
+                    name: "listener_facts.service_id_collision",
+                    workload_id = %workload_id,
+                    service_id = %service_id,
+                    port = listener.port.get(),
+                    protocol = %listener.protocol,
+                    "two listeners in one upsert derived the same ServiceId; admission should \
+                     reject duplicate (port, proto) listeners — this overwrites the prior fact",
+                );
+            }
             self.primary.insert(
                 service_id,
                 ListenerRow { port: listener.port, protocol: listener.protocol, vip: Some(*vip) },
@@ -341,7 +386,7 @@ mod tests {
     fn derived(v: &ServiceVip, port: u16, proto: Proto) -> (ServiceId, ListenerRow) {
         let nz = NonZeroU16::new(port).expect("non-zero port");
         (
-            ServiceId::derive(v, nz, super::SERVICE_MAP_PURPOSE),
+            ServiceId::derive(v, nz, proto, super::SERVICE_MAP_PURPOSE),
             ListenerRow { port: nz, protocol: proto, vip: Some(*v) },
         )
     }
@@ -480,7 +525,7 @@ mod tests {
         // Secondary Vec holds the derived ids in listener order.
         let expected_ids: Vec<ServiceId> = listeners
             .iter()
-            .map(|l| ServiceId::derive(&v, l.port, super::SERVICE_MAP_PURPOSE))
+            .map(|l| ServiceId::derive(&v, l.port, l.protocol, super::SERVICE_MAP_PURPOSE))
             .collect();
         let snapshot = store.snapshot();
         assert_eq!(
@@ -489,6 +534,106 @@ mod tests {
             "secondary Vec must list every listener's ServiceId in declaration order"
         );
         assert_eq!(snapshot.service_facts.len(), 3, "exactly three primary entries");
+    }
+
+    // -----------------------------------------------------------------
+    // REG — same (vip, port), different proto → two distinct facts
+    //
+    // The reported bug: two listeners on one VIP sharing a port but
+    // differing in L4 protocol (the canonical CoreDNS tcp/53 + udp/53
+    // case) must NOT collide in the primary map. Before the Model A
+    // proto-widening of `ServiceId::derive` (ADR-0040 companion
+    // revision 2026-06-03 / ADR-0052 § 1) both listeners derived the
+    // SAME ServiceId and the udp `insert` silently overwrote the tcp
+    // one (last-writer-wins) — `primary.len()` was 1, and `fact_for`
+    // returned a single UDP row. Post-widening: two distinct entries,
+    // each `fact_for` resolving its own proto.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn upsert_same_port_distinct_proto_yields_two_distinct_facts() {
+        let v = vip("10.96.0.53");
+        // CoreDNS-shape: one VIP, port 53, both tcp and udp.
+        let listeners = vec![listener(53, Proto::Tcp), listener(53, Proto::Udp)];
+        let wid = workload("coredns");
+
+        let mut store = ListenerFactStore::new();
+        store.upsert(wid.clone(), &v, &listeners);
+
+        // Two distinct primary entries — the proto axis splits the
+        // otherwise-identical (vip, port) into two ServiceIds.
+        let (sid_tcp, row_tcp) = derived(&v, 53, Proto::Tcp);
+        let (sid_udp, row_udp) = derived(&v, 53, Proto::Udp);
+        assert_ne!(sid_tcp, sid_udp, "tcp/53 and udp/53 must derive distinct ServiceIds");
+
+        assert_eq!(
+            store.fact_for(sid_tcp),
+            Some(row_tcp),
+            "fact_for(tcp/53) resolves the TCP listener's row"
+        );
+        assert_eq!(
+            store.fact_for(sid_udp),
+            Some(row_udp),
+            "fact_for(udp/53) resolves the UDP listener's row"
+        );
+
+        let snapshot = store.snapshot();
+        assert_eq!(
+            snapshot.service_facts.len(),
+            2,
+            "both listeners populate the primary map — no last-writer-wins collapse"
+        );
+        // The secondary index lists BOTH derived ids for the workload.
+        assert_eq!(
+            snapshot.workload_index.iter().find(|(w, _)| w == &wid).map(|(_, ids)| ids.len()),
+            Some(2),
+            "secondary Vec lists both ServiceIds for the workload"
+        );
+    }
+
+    /// A re-upsert of the SAME workload (same listeners) is idempotent —
+    /// the collision guard checks duplicates WITHIN one call, NOT across
+    /// calls, so re-upserting must NOT fire it. (Guards against the
+    /// regression where the guard consulted `self.primary` and
+    /// false-fired on every legitimate re-upsert — the
+    /// lock-discipline-under-contention acceptance test exercises this
+    /// repeatedly.)
+    #[test]
+    fn re_upsert_same_workload_is_idempotent_and_does_not_trip_collision_guard() {
+        let v = vip("10.96.0.7");
+        let listeners = vec![listener(80, Proto::Tcp), listener(53, Proto::Udp)];
+        let wid = workload("web");
+
+        let mut store = ListenerFactStore::new();
+        store.upsert(wid.clone(), &v, &listeners);
+        let after_first = store.snapshot();
+        // Re-upsert the SAME workload + listeners — must be a no-op
+        // delta (idempotent) and must NOT panic via the guard.
+        store.upsert(wid, &v, &listeners);
+        let after_second = store.snapshot();
+
+        assert_eq!(after_first, after_second, "re-upsert of same workload is idempotent");
+        assert_eq!(after_second.service_facts.len(), 2, "still exactly two distinct facts");
+    }
+
+    /// Defensive-invariant guard: two listeners with the SAME
+    /// `(port, protocol)` in ONE `upsert` call derive the same
+    /// `ServiceId`. Admission (`ServiceV1::from_submit`) rejects such a
+    /// duplicate, so reaching `upsert` with one is a STRUCTURAL
+    /// INVARIANT VIOLATION — the guard's `debug_assert!` fires in debug
+    /// / test builds. We construct the malformed `Listener` set directly
+    /// (bypassing admission) to exercise the guard.
+    #[test]
+    #[should_panic(expected = "derived the same ServiceId")]
+    fn duplicate_port_proto_listeners_in_one_upsert_trip_collision_guard() {
+        let v = vip("10.96.0.7");
+        // Two IDENTICAL (port, proto) listeners — admission would reject
+        // this, but a malformed set that bypasses admission must trip the
+        // guard rather than silently collapse to one fact.
+        let listeners = vec![listener(53, Proto::Udp), listener(53, Proto::Udp)];
+
+        let mut store = ListenerFactStore::new();
+        store.upsert(workload("malformed"), &v, &listeners);
     }
 
     // -----------------------------------------------------------------

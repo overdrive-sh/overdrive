@@ -107,12 +107,14 @@ fn hydrator_reconciler() -> AnyReconciler {
 /// Persist a single-listener Service intent (`udp` on 5353) and allocate
 /// its VIP via the production allocator path, so the hydrator can source
 /// the listener-bearing protocol fact from the intent (ADR-0060 C3).
-/// Returns the allocator-issued VIP + the listener port.
+/// Returns the allocator-issued VIP + the listener port + its
+/// validated [`Proto`] (so the caller derives the `ServiceId` against
+/// the same proto axis the production `upsert` keys on).
 async fn persist_service_and_allocate_vip(
     state: &AppState,
     listener_port: u16,
     protocol: &str,
-) -> (ServiceVip, u16) {
+) -> (ServiceVip, u16, overdrive_core::dataplane::backend_key::Proto) {
     let svc = ServiceV1::from_submit(ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
@@ -147,11 +149,12 @@ async fn persist_service_and_allocate_vip(
     // store for the service's listeners — mirroring the submit-edge
     // `upsert` the handler performs in production.
     let svc_listeners = svc.listeners.clone();
+    let proto = svc_listeners[0].protocol;
     {
         let mut facts = state.listener_facts.lock().await;
         facts.upsert(svc.id.clone(), &vip, &svc_listeners);
     }
-    (vip, listener_port)
+    (vip, listener_port, proto)
 }
 
 #[tokio::test]
@@ -162,9 +165,10 @@ async fn hydrate_desired_projects_service_backends_row() {
 
     // Persist the Service intent (udp:5353) + allocate its VIP — the
     // listener-bearing protocol fact source per ADR-0060 C3.
-    let (vip, port) = persist_service_and_allocate_vip(&state, 5353, "udp").await;
+    let (vip, port, proto) = persist_service_and_allocate_vip(&state, 5353, "udp").await;
     let vip_addr = vip.try_as_ipv4().expect("allocator issues IPv4");
-    let sid = ServiceId::derive(&vip, std::num::NonZeroU16::new(port).expect("nz"), "service-map");
+    let sid =
+        ServiceId::derive(&vip, std::num::NonZeroU16::new(port).expect("nz"), proto, "service-map");
     let backends = sample_backends();
 
     // Write the service_backends row keyed by the derived ServiceId,

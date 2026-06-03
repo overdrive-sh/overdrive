@@ -221,7 +221,8 @@ proptest! {
                 // Write one service_backends row per listener (keyed on the
                 // derived ServiceId, carrying the allocator-issued VIP).
                 for (li, listener) in listeners.iter().enumerate() {
-                    let sid = ServiceId::derive(&vip, listener.port, SERVICE_MAP_PURPOSE);
+                    let sid =
+                        ServiceId::derive(&vip, listener.port, listener.protocol, SERVICE_MAP_PURPOSE);
                     let row = ServiceBackendRow {
                         service_id: sid,
                         vip: vip_addr,

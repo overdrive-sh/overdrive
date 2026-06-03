@@ -165,7 +165,7 @@ async fn listener_fact_guard_never_held_across_await_under_contention() {
     }
     let mut targets = Vec::new();
     for listener in &listeners {
-        let sid = ServiceId::derive(&vip, listener.port, SERVICE_MAP_PURPOSE);
+        let sid = ServiceId::derive(&vip, listener.port, listener.protocol, SERVICE_MAP_PURPOSE);
         let row = ServiceBackendRow {
             service_id: sid,
             vip: vip_addr,

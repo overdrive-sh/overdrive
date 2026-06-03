@@ -28,6 +28,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::dataplane::backend_key::Proto;
+
 // -----------------------------------------------------------------------------
 // Error
 // -----------------------------------------------------------------------------
@@ -795,7 +797,8 @@ impl ServiceId {
     }
 
     /// Derive a content-addressed `ServiceId` from
-    /// `(vip, port, purpose)` per ADR-0052 § 1 / ADR-0040 § 1.
+    /// `(vip, port, proto, purpose)` per ADR-0052 § 1 / ADR-0040
+    /// `## Revision 2026-06-03 (companion)`.
     ///
     /// The bytes hashed are the canonical wire encoding of each
     /// input, separated by zero bytes to avoid ambiguous boundaries
@@ -805,28 +808,40 @@ impl ServiceId {
     ///    impl is the canonical wire form (`IpAddr::fmt`-derived).
     /// 2. `port.get().to_be_bytes()` — big-endian `u16` so the byte
     ///    sequence is stable across host endianness.
-    /// 3. `purpose.as_bytes()` — caller-supplied namespacing token,
+    /// 3. `[proto.as_u8()]` — the IANA L4 protocol byte (TCP=6,
+    ///    UDP=17). This is the **proto axis** added by the Model A
+    ///    widening: two listeners on the same `(vip, port)` but
+    ///    different protocol (the canonical CoreDNS `tcp/53` +
+    ///    `udp/53` case) derive DISTINCT `ServiceId`s instead of
+    ///    colliding. Inserted at field 5 — after the `port`
+    ///    separator, before `purpose` — to match P2-Q4's proto-keyed
+    ///    dataplane slots ([`crate::dataplane::backend_key::Proto`]).
+    /// 4. `purpose.as_bytes()` — caller-supplied namespacing token,
     ///    canonically `"service-map"` for the bridge.
     ///
     /// The first 8 bytes of the SHA-256 digest are interpreted as a
-    /// big-endian `u64` and wrapped in `ServiceId`. The full 64 bits
-    /// give ample collision resistance — `2^32` distinct
-    /// `(vip, port)` pairs collide with probability ~`2^-32` (the
-    /// birthday bound on a 64-bit space), and the project's
+    /// big-endian `u64` and wrapped in `ServiceId` — unchanged by the
+    /// proto-widening, so the rkyv layout of `ServiceId` (a `u64`) is
+    /// untouched and NO envelope version bump is warranted. The full
+    /// 64 bits give ample collision resistance — `2^32` distinct
+    /// `(vip, port, proto)` triples collide with probability ~`2^-32`
+    /// (the birthday bound on a 64-bit space), and the project's
     /// production cardinality is far below that.
     ///
     /// Per `.claude/rules/development.md` § "Hashing requires
     /// deterministic serialization": the inputs are wrapped in a
     /// canonical wire form before hashing — `Display` for `ServiceVip`
     /// (deterministic per `IpAddr::fmt`), big-endian bytes for `u16`,
-    /// raw bytes for the string. No `serde_json::to_string` is in the
-    /// loop.
+    /// the single IANA byte for `Proto`, raw bytes for the string. No
+    /// `serde_json::to_string` is in the loop.
     #[must_use]
-    pub fn derive(vip: &ServiceVip, port: NonZeroU16, purpose: &str) -> Self {
+    pub fn derive(vip: &ServiceVip, port: NonZeroU16, proto: Proto, purpose: &str) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(vip.to_string().as_bytes());
         hasher.update([0u8]);
         hasher.update(port.get().to_be_bytes());
+        hasher.update([0u8]);
+        hasher.update([proto.as_u8()]);
         hasher.update([0u8]);
         hasher.update(purpose.as_bytes());
         let digest: [u8; 32] = hasher.finalize().into();

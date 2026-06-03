@@ -259,12 +259,18 @@ bug at every layer; the bridge consumes the allocator's authoritative
 mapping and nothing else.
 
 `ServiceId` is derived from `(assigned_vip, listener.port,
-"service-map")` per ADR-0040 § 1 — the existing `ServiceId::derive`
-constructor consumes the allocator-issued VIP rather than a spec-side
-field. Per-Service identity is stable across resubmits because
+listener.protocol, "service-map")` per ADR-0040 § 1 (as amended by the
+ADR-0040 2026-06-03 companion revision, which added the L4-protocol
+axis — Model A: one `ServiceId` per `(vip, port, proto)` slot) — the
+existing `ServiceId::derive` constructor consumes the allocator-issued
+VIP rather than a spec-side field, plus the listener's own `proto`.
+Per-Service-slot identity is stable across resubmits because
 `spec_digest` is stable across resubmits (ADR-0049 § 4 — spec digest
 invariance) AND the allocator memo on that digest is stable (ADR-0049
-§ 1 — memo-hit returns the existing VIP).
+§ 1 — memo-hit returns the existing VIP); each listener's `(port,
+proto)` is part of the persisted spec, so a TCP listener and a UDP
+listener on the same `(VIP, port)` derive two distinct, stable
+`ServiceId`s.
 
 ### 2. New action variant `Action::WriteServiceBackendRow`
 
