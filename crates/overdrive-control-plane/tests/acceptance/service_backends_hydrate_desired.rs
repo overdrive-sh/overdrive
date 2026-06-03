@@ -140,6 +140,17 @@ async fn persist_service_and_allocate_vip(
     let mut guard = state.allocator.lock().await;
     let vip = guard.allocate(bytes).await.expect("allocate vip");
     drop(guard);
+
+    // The hydrator now sources the listener-bearing `(port, protocol)`
+    // fact from the in-memory `ListenerFactStore` (step 01-04 read-path
+    // switch), not from a per-tick intent-store scan. Populate the keyed
+    // store for the service's listeners — mirroring the submit-edge
+    // `upsert` the handler performs in production.
+    let svc_listeners = svc.listeners.clone();
+    {
+        let mut facts = state.listener_facts.lock().await;
+        facts.upsert(svc.id.clone(), &vip, &svc_listeners);
+    }
     (vip, listener_port)
 }
 

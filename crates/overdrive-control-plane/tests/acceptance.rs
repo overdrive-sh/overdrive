@@ -229,4 +229,15 @@ mod acceptance {
     // same committed intent set + allocator (handler edge agrees with
     // the boot rebuild).
     mod listener_fact_byte_equivalence_invariant;
+
+    // reconciler-listener-fact-view step 01-04 — the read-path switch
+    // (ADR-0062 § Decision (3); feature-delta sub-decisions 3-5).
+    // Invariant A (steady-state hydrate sources the fact from the
+    // in-memory keyed store, not an intent-store scan), Invariant C
+    // (the hydrate path never holds the `listener_facts` guard across
+    // an `.await`), and the BE-1/BE-2/BE-3 behavior-equivalence pins
+    // for the source change.
+    mod listener_fact_hydrate_equivalence;
+    mod listener_fact_lock_discipline_invariant;
+    mod listener_fact_zero_scan_invariant;
 }
