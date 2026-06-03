@@ -1341,7 +1341,7 @@ pub async fn run_server_with_obs_and_driver(
                     cause = %e,
                     "listener-fact projection rebuild refused; control-plane will not start"
                 );
-                error::ControlPlaneError::ListenerFactRebuild(e.to_string())
+                error::ControlPlaneError::ListenerFactRebuild(Box::new(e))
             })?,
     ));
 

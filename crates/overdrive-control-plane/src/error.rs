@@ -480,21 +480,22 @@ pub enum ControlPlaneError {
     /// allocator's `bulk_load`; if the underlying `IntentStore` scan
     /// fails the control-plane refuses to start.
     ///
-    /// Carries the underlying scan-failure message rather than embedding
-    /// [`crate::reconciler_runtime::ConvergenceError`] by `#[from]`: that
-    /// enum already carries a `ViewPersist(ControlPlaneError)` arm, so a
-    /// `#[from] ConvergenceError` here would form a recursive type cycle
-    /// (`ControlPlaneError` ↔ `ConvergenceError`, E0072). The rebuild's
-    /// only failure mode is `ConvergenceError::IntentRead(String)` — a
-    /// stringly intent-store read error — so no structured fidelity is
-    /// lost by carrying the message directly. This is a discrete, named,
-    /// `matches!`-able variant per `.claude/rules/development.md`
-    /// § "Never flatten a typed error to `Internal(String)`", NOT a
-    /// flatten into [`ControlPlaneError::Internal`]. Same boot-path
-    /// shape as `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the
-    /// listener binds, so the `to_response` arm is exhaustiveness-only.
+    /// Carries the typed [`crate::reconciler_runtime::ConvergenceError`]
+    /// boxed rather than by a bare `#[from]`: that enum already carries a
+    /// `ViewPersist(ControlPlaneError)` arm, so a `#[from] ConvergenceError`
+    /// here would form a recursive type cycle (`ControlPlaneError` ↔
+    /// `ConvergenceError`, E0072). `Box` breaks the cycle by giving the
+    /// variant a fixed size, while PRESERVING the full typed error — no
+    /// fidelity is lost (the previous `String` flatten discarded the
+    /// variant; the boxed `ConvergenceError` keeps it `matches!`-able all
+    /// the way down). This is a discrete, named, `matches!`-able variant
+    /// per `.claude/rules/development.md` § "Never flatten a typed error
+    /// to `Internal(String)`", NOT a flatten into
+    /// [`ControlPlaneError::Internal`]. Same boot-path shape as
+    /// `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the listener
+    /// binds, so the `to_response` arm is exhaustiveness-only.
     #[error("listener-fact projection rebuild failed at boot: {0}")]
-    ListenerFactRebuild(String),
+    ListenerFactRebuild(Box<crate::reconciler_runtime::ConvergenceError>),
 
     #[error("internal: {0}")]
     Internal(String),
@@ -715,15 +716,16 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
-        ControlPlaneError::ListenerFactRebuild(message) => (
+        ControlPlaneError::ListenerFactRebuild(source) => (
             // Same shape as `ViewStoreBoot` / `DataplaneBoot` above: the
             // boot-time listener-fact rebuild happens BEFORE the listener
             // binds, so this arm is exhaustiveness-only. The composition
             // root branches on the typed variant
             // (`matches!(e, ListenerFactRebuild(_))`) for structured
-            // startup diagnostics.
+            // startup diagnostics. The boxed `ConvergenceError`'s own
+            // `Display` carries the underlying cause.
             StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorBody { error: "internal".into(), message, field: None },
+            ErrorBody { error: "internal".into(), message: source.to_string(), field: None },
         ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,

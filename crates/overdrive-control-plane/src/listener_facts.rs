@@ -229,6 +229,47 @@ impl ListenerFactStore {
     }
 }
 
+/// Test-only structural snapshot of a [`ListenerFactStore`]'s two
+/// internal maps, materialised as `Ord`-ordered `Vec`s.
+///
+/// Exists so in-crate unit tests assert on the store's observable
+/// shape through ONE `pub(crate)` accessor rather than reaching into
+/// the private `primary` / `secondary` fields directly. Routing the
+/// asserts through [`ListenerFactStore::snapshot`] keeps the tests
+/// coupled to the store's observable projection (the maps' key/value
+/// contents in deterministic order), not to the field names — a rename
+/// of either field stays GREEN, and the production surface is not
+/// widened (`#[cfg(test)]` strips this from every non-test build).
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListenerFactSnapshot {
+    /// `primary` flattened to `(ServiceId, ListenerRow)` pairs in
+    /// `BTreeMap` (`Ord`-on-`ServiceId`) iteration order.
+    pub service_facts: Vec<(ServiceId, ListenerRow)>,
+    /// `secondary` flattened to `(WorkloadId, Vec<ServiceId>)` pairs in
+    /// `BTreeMap` (`Ord`-on-`WorkloadId`) iteration order.
+    pub workload_index: Vec<(WorkloadId, Vec<ServiceId>)>,
+}
+
+#[cfg(test)]
+impl ListenerFactStore {
+    /// Materialise a [`ListenerFactSnapshot`] of both internal maps.
+    ///
+    /// Clones each map into an `Ord`-ordered `Vec` so a test can assert
+    /// on the store's observable shape (and compare two stores for
+    /// byte-equivalence) without reading the private fields.
+    pub(crate) fn snapshot(&self) -> ListenerFactSnapshot {
+        ListenerFactSnapshot {
+            service_facts: self.primary.iter().map(|(id, row)| (*id, *row)).collect(),
+            workload_index: self
+                .secondary
+                .iter()
+                .map(|(wid, ids)| (wid.clone(), ids.clone()))
+                .collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -428,12 +469,13 @@ mod tests {
             .iter()
             .map(|l| ServiceId::derive(&v, l.port, super::SERVICE_MAP_PURPOSE))
             .collect();
+        let snapshot = store.snapshot();
         assert_eq!(
-            store.secondary.get(&wid),
+            snapshot.workload_index.iter().find(|(w, _)| w == &wid).map(|(_, ids)| ids),
             Some(&expected_ids),
             "secondary Vec must list every listener's ServiceId in declaration order"
         );
-        assert_eq!(store.primary.len(), 3, "exactly three primary entries");
+        assert_eq!(snapshot.service_facts.len(), 3, "exactly three primary entries");
     }
 
     // -----------------------------------------------------------------
@@ -455,8 +497,15 @@ mod tests {
         let (api_sid, api_row) = derived(&vip_api, 9000, Proto::Tcp);
         assert_eq!(store.fact_for(web_sid), None, "web's fact must be evicted");
         assert_eq!(store.fact_for(api_sid), Some(api_row), "api's fact must be untouched");
-        assert_eq!(store.secondary.get(&workload("web")), None, "web's secondary entry dropped");
-        assert!(store.secondary.contains_key(&workload("api")), "api's secondary entry retained");
+        let snapshot = store.snapshot();
+        assert!(
+            !snapshot.workload_index.iter().any(|(w, _)| w == &workload("web")),
+            "web's secondary entry dropped"
+        );
+        assert!(
+            snapshot.workload_index.iter().any(|(w, _)| w == &workload("api")),
+            "api's secondary entry retained"
+        );
 
         // Removing an absent workload is a no-op.
         store.remove_workload(&workload("does-not-exist"));
@@ -534,10 +583,15 @@ mod tests {
         let (web_udp, web_udp_row) = derived(&vip_web, 53, Proto::Udp);
         assert_eq!(store.fact_for(web_tcp), Some(web_tcp_row));
         assert_eq!(store.fact_for(web_udp), Some(web_udp_row));
-        assert_eq!(store.primary.len(), 2, "only the VIP'd Service's listeners contribute");
+        let snapshot = store.snapshot();
         assert_eq!(
-            store.secondary.keys().collect::<Vec<_>>(),
-            vec![&workload("web")],
+            snapshot.service_facts.len(),
+            2,
+            "only the VIP'd Service's listeners contribute"
+        );
+        assert_eq!(
+            snapshot.workload_index.iter().map(|(w, _)| w.clone()).collect::<Vec<_>>(),
+            vec![workload("web")],
             "only web has a secondary entry; novip + batch contribute nothing"
         );
     }
@@ -556,10 +610,12 @@ mod tests {
             &[listener(80, Proto::Tcp), listener(443, Proto::Tcp), listener(53, Proto::Udp)],
         );
 
-        // BTreeMap iterates in Ord(ServiceId) order — collect twice and
+        // BTreeMap iterates in Ord(ServiceId) order — snapshot twice and
         // confirm identical, ascending key order.
-        let order_a: Vec<ServiceId> = store.primary.keys().copied().collect();
-        let order_b: Vec<ServiceId> = store.primary.keys().copied().collect();
+        let order_a: Vec<ServiceId> =
+            store.snapshot().service_facts.into_iter().map(|(id, _)| id).collect();
+        let order_b: Vec<ServiceId> =
+            store.snapshot().service_facts.into_iter().map(|(id, _)| id).collect();
         assert_eq!(order_a, order_b, "iteration order is stable across reads");
         let mut sorted = order_a.clone();
         sorted.sort_unstable();
@@ -569,8 +625,10 @@ mod tests {
         // ascending WorkloadId order across two reads.
         let mut store2 = store.clone();
         store2.upsert(workload("api"), &vip("10.96.0.8"), &[listener(9000, Proto::Tcp)]);
-        let keys_a: Vec<WorkloadId> = store2.secondary.keys().cloned().collect();
-        let keys_b: Vec<WorkloadId> = store2.secondary.keys().cloned().collect();
+        let keys_a: Vec<WorkloadId> =
+            store2.snapshot().workload_index.into_iter().map(|(w, _)| w).collect();
+        let keys_b: Vec<WorkloadId> =
+            store2.snapshot().workload_index.into_iter().map(|(w, _)| w).collect();
         assert_eq!(keys_a, keys_b, "secondary iteration order is stable");
         let mut keys_sorted = keys_a.clone();
         keys_sorted.sort();
@@ -598,8 +656,9 @@ mod tests {
         // A no-op removal of an absent workload is the kind of flow a
         // release path performs — it must not insert anything.
         store.remove_workload(&workload("conflicted"));
-        assert!(store.primary.is_empty(), "primary stays empty without upsert");
-        assert!(store.secondary.is_empty(), "secondary stays empty without upsert");
+        let snapshot = store.snapshot();
+        assert!(snapshot.service_facts.is_empty(), "primary stays empty without upsert");
+        assert!(snapshot.workload_index.is_empty(), "secondary stays empty without upsert");
         assert_eq!(store, ListenerFactStore::new(), "store equals a fresh empty store");
     }
 
@@ -676,7 +735,7 @@ mod tests {
                 facts.fact_for(web_tcp),
                 facts.fact_for(web_udp),
                 facts.fact_for(api_tcp),
-                facts.primary.len(),
+                facts.snapshot().service_facts.len(),
             )
         };
         assert_eq!(web_tcp_got, Some(web_tcp_row), "web tcp listener present");
@@ -698,10 +757,11 @@ mod tests {
 
         // Clone the projection out while holding the lock, then drop the
         // guard before asserting (clippy::significant_drop_tightening).
-        let snapshot = { state.listener_facts.lock().await.clone() };
-        assert!(snapshot.primary.is_empty(), "primary map empty over empty intent set");
-        assert!(snapshot.secondary.is_empty(), "secondary map empty over empty intent set");
-        assert_eq!(snapshot, ListenerFactStore::new(), "store equals a fresh empty store");
+        let store = { state.listener_facts.lock().await.clone() };
+        let snapshot = store.snapshot();
+        assert!(snapshot.service_facts.is_empty(), "primary map empty over empty intent set");
+        assert!(snapshot.workload_index.is_empty(), "secondary map empty over empty intent set");
+        assert_eq!(store, ListenerFactStore::new(), "store equals a fresh empty store");
     }
 
     // -----------------------------------------------------------------
@@ -850,7 +910,7 @@ mod tests {
             // rebuild's `expected` uses over ISSUED vips — both go through
             // `upsert`, so the equivalence under test is rebuilt == expected.
             let _ = build_incremental(&set);
-            prop_assert_eq!(rebuilt, expected);
+            prop_assert_eq!(rebuilt.snapshot(), expected.snapshot());
         }
     }
 
@@ -887,11 +947,20 @@ mod tests {
             &[listener(80, Proto::Tcp), listener(443, Proto::Tcp), listener(53, Proto::Udp)],
         );
 
-        assert_eq!(rebuilt, expected, "rebuild and upsert produce identical stores");
-        // 3 primary entries + a 3-element secondary Vec via the rebuild.
-        assert_eq!(rebuilt.primary.len(), 3, "three primary entries");
         assert_eq!(
-            rebuilt.secondary.get(&workload("web")).map(Vec::len),
+            rebuilt.snapshot(),
+            expected.snapshot(),
+            "rebuild and upsert produce identical stores"
+        );
+        // 3 primary entries + a 3-element secondary Vec via the rebuild.
+        let snapshot = rebuilt.snapshot();
+        assert_eq!(snapshot.service_facts.len(), 3, "three primary entries");
+        assert_eq!(
+            snapshot
+                .workload_index
+                .iter()
+                .find(|(w, _)| w == &workload("web"))
+                .map(|(_, ids)| ids.len()),
             Some(3),
             "secondary Vec has three elements"
         );
@@ -995,12 +1064,17 @@ mod tests {
 
         let (tcp_sid, tcp_row) = derived(&vip, 80, Proto::Tcp);
         let (udp_sid, udp_row) = derived(&vip, 53, Proto::Udp);
-        let snapshot = { state.listener_facts.lock().await.clone() };
-        assert_eq!(snapshot.fact_for(tcp_sid), Some(tcp_row), "tcp listener fact present");
-        assert_eq!(snapshot.fact_for(udp_sid), Some(udp_row), "udp listener fact present");
-        assert_eq!(snapshot.primary.len(), 2, "exactly two primary entries");
+        let store = { state.listener_facts.lock().await.clone() };
+        assert_eq!(store.fact_for(tcp_sid), Some(tcp_row), "tcp listener fact present");
+        assert_eq!(store.fact_for(udp_sid), Some(udp_row), "udp listener fact present");
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.service_facts.len(), 2, "exactly two primary entries");
         assert_eq!(
-            snapshot.secondary.get(&workload("web")).map(Vec::len),
+            snapshot
+                .workload_index
+                .iter()
+                .find(|(w, _)| w == &workload("web"))
+                .map(|(_, ids)| ids.len()),
             Some(2),
             "secondary Vec has two ServiceIds in listener order",
         );
@@ -1059,22 +1133,24 @@ mod tests {
             .await
             .expect("Service submit must succeed");
         // Non-empty before stop.
-        let before = { state.listener_facts.lock().await.clone() };
-        assert_eq!(before.primary.len(), 2, "two primary entries before stop");
-        assert!(before.secondary.contains_key(&workload("web")), "secondary entry before stop");
+        let before = { state.listener_facts.lock().await.clone() }.snapshot();
+        assert_eq!(before.service_facts.len(), 2, "two primary entries before stop");
+        assert!(
+            before.workload_index.iter().any(|(w, _)| w == &workload("web")),
+            "secondary entry before stop"
+        );
 
         stop_via_handler(&state, "web").await;
 
-        let after = { state.listener_facts.lock().await.clone() };
-        assert!(after.primary.is_empty(), "primary evicted after stop");
-        assert_eq!(
-            after.secondary.get(&workload("web")),
-            None,
+        let after = { state.listener_facts.lock().await.clone() }.snapshot();
+        assert!(after.service_facts.is_empty(), "primary evicted after stop");
+        assert!(
+            !after.workload_index.iter().any(|(w, _)| w == &workload("web")),
             "secondary entry dropped after stop"
         );
         assert_eq!(
             after,
-            ListenerFactStore::new(),
+            ListenerFactStore::new().snapshot(),
             "store empty after the only workload is stopped"
         );
     }
