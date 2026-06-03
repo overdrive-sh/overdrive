@@ -53,6 +53,10 @@ mod integration {
     /// phase-2-xdp-service-map Slice 02 (US-02; S-2.2-06) —
     /// SERVICE_MAP forward path through real veth. RED scaffold.
     mod service_map_forward;
+    /// udp-service-support — regression guard: SERVICE_MAP outer slot is
+    /// keyed on the declared VIP port, not the backend listener port
+    /// (VIP:53 → backend:5353).
+    mod service_map_vip_port;
     /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
     /// real-iface XDP attach. RED scaffolds.
     mod veth_attach;

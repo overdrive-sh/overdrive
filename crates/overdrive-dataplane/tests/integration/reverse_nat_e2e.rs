@@ -1010,10 +1010,15 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
     let port_80: u16 = 80;
     let port_443: u16 = 443;
 
-    // Step 1: register VIP on port 80.
+    // Step 1: register VIP on listener port 80. The SERVICE_MAP outer
+    // slot is keyed on the declared frontend port, so the frontend MUST
+    // declare port 80 (not VIP_PORT) for this registration — the
+    // assertions below query the slot at port 80. (The backend listens
+    // on the same port here; the listener-port vs backend-port keying is
+    // exercised directly by `service_map_vip_port.rs`.)
     runtime
         .block_on(dataplane.update_service(
-            tcp_frontend(VIP, VIP_PORT),
+            tcp_frontend(VIP, port_80),
             vec![Backend {
                 alloc: alloc_port80,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_80),
@@ -1023,10 +1028,11 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
         ))
         .expect("update_service port 80");
 
-    // Step 2: register same VIP on port 443.
+    // Step 2: register the same VIP on listener port 443 — a distinct
+    // outer slot keyed on port 443.
     runtime
         .block_on(dataplane.update_service(
-            tcp_frontend(VIP, VIP_PORT),
+            tcp_frontend(VIP, port_443),
             vec![Backend {
                 alloc: alloc_port443,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_443),

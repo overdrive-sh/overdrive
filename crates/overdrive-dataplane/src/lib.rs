@@ -1305,12 +1305,14 @@ impl Dataplane for EbpfDataplane {
     ///    own ref-counting machinery — the kernel reaps the map
     ///    once no XDP program references it (refcount = 0).
     ///
-    /// VIP port note: the `Dataplane` trait passes a single
-    /// `Ipv4Addr` plus a `Vec<Backend>`. Slice 03 derives the VIP
-    /// port from `backends[0].addr.port()` (matches the Slice 02
-    /// convention) — every backend in a set serves the same VIP
-    /// port. Slice 04 lifts a separate VIP-port parameter through
-    /// the trait (architecture.md § 5 D-Sig).
+    /// VIP port note: the VIP port for the SERVICE_MAP `ServiceKey`
+    /// and the reverse-NAT `VipPod` value is sourced from
+    /// `frontend.port()` — the `ServiceFrontend` triple already
+    /// carries the declared `(vip, port, proto)`. It is NOT derived
+    /// from `backends[0].addr.port()`: a backend's listener port may
+    /// differ from the VIP port (e.g. VIP:53 → backend:5353), and the
+    /// XDP program keys the outer slot on the packet's destination
+    /// port (= the VIP port).
     async fn update_service(
         &self,
         frontend: overdrive_core::dataplane::ServiceFrontend,
@@ -1408,7 +1410,7 @@ impl Dataplane for EbpfDataplane {
             return Ok(());
         }
 
-        let vip_port = backends[0].addr.port();
+        let vip_port = frontend.port().get();
         // Step 02-01: proto sourced from the `ServiceFrontend` (ADR-0060
         // site #7) — NO `Proto::Tcp` literal on the action→handle→key
         // path, so a UDP service keys a distinct outer-map slot (C3
