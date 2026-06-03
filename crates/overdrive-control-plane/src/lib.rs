@@ -734,6 +734,33 @@ fn resolve_host_ipv4_from_dataplane_config(
     Ok(host_ipv4)
 }
 
+/// Apply the override-aware `LOCALHOST` fallback to a `host_ipv4`
+/// resolution result.
+///
+/// Production (no dataplane override) propagates a resolution failure
+/// verbatim — the control plane refuses to boot on an absent or
+/// unresolvable client iface. An injected dataplane override
+/// (Sim/DST/CLI with no provisioned veth) falls back to
+/// `Ipv4Addr::LOCALHOST` on resolution failure so those callers can
+/// boot without real network state. A successful resolution is used
+/// as-is on both branches — the override never overrides a real IP.
+///
+/// See ADR-0053 and
+/// `docs/analysis/root-cause-analysis-bridge-hydrator-register-local-backend.md`
+/// for why the override must NOT collapse a successful resolution to
+/// loopback (doing so makes the bridge write a loopback backend the
+/// hydrator's loopback guard then rejects).
+fn host_ipv4_with_override_fallback(
+    resolved: Result<std::net::Ipv4Addr, error::ControlPlaneError>,
+    has_dataplane_override: bool,
+) -> Result<std::net::Ipv4Addr, error::ControlPlaneError> {
+    match resolved {
+        Ok(ip) => Ok(ip),
+        Err(_) if has_dataplane_override => Ok(std::net::Ipv4Addr::LOCALHOST),
+        Err(source) => Err(source),
+    }
+}
+
 async fn bulk_load_service_vip_allocator(
     vip_range: &VipRange,
     store: &Arc<LocalIntentStore>,
@@ -1202,11 +1229,10 @@ pub async fn run_server_with_obs_and_driver(
     // when resolution fails AND an override is present (the Sim/CLI/DST
     // condition). The production path (no override) still propagates the
     // error and refuses to boot on an absent/unresolvable iface.
-    let host_ipv4 = match resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref()) {
-        Ok(ip) => ip,
-        Err(_) if config.dataplane_override.is_some() => std::net::Ipv4Addr::LOCALHOST,
-        Err(source) => return Err(source),
-    };
+    let host_ipv4 = host_ipv4_with_override_fallback(
+        resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref()),
+        config.dataplane_override.is_some(),
+    )?;
     // Service-health-check-probes — the `ProbeRunner` Earned-Trust
     // gate and the threading of `Arc<ProbeRunner>` into the
     // production `ExecDriver` now live at the binary composition
@@ -1538,4 +1564,64 @@ pub fn service_map_hydrator(
     use overdrive_core::reconcilers::{AnyReconciler, ServiceMapHydrator};
 
     AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::host_ipv4_with_override_fallback;
+    use crate::error::ControlPlaneError;
+
+    fn resolution_failure() -> ControlPlaneError {
+        ControlPlaneError::Validation {
+            message: "iface unresolvable".to_owned(),
+            field: Some("dataplane.client_iface".to_owned()),
+        }
+    }
+
+    // A successful resolution is used as-is regardless of the override
+    // flag — the override must NEVER collapse a real IP to loopback
+    // (the ADR-0053 bridge-hydrator bug). Asserted on both branches of
+    // `has_dataplane_override` to pin that the flag is inert on `Ok`.
+    #[test]
+    fn successful_resolution_is_used_as_is_with_override() {
+        let resolved = Ok(Ipv4Addr::new(10, 1, 2, 3));
+        let result = host_ipv4_with_override_fallback(resolved, true);
+        assert_eq!(result.ok(), Some(Ipv4Addr::new(10, 1, 2, 3)));
+    }
+
+    #[test]
+    fn successful_resolution_is_used_as_is_without_override() {
+        let resolved = Ok(Ipv4Addr::new(10, 1, 2, 3));
+        let result = host_ipv4_with_override_fallback(resolved, false);
+        assert_eq!(result.ok(), Some(Ipv4Addr::new(10, 1, 2, 3)));
+    }
+
+    // The fallback arm: resolution FAILED and an override is present
+    // (Sim/DST/CLI with no provisioned veth) → boot with LOCALHOST.
+    // This is precisely the arm the `is_some() -> false` match-guard
+    // mutant breaks: with the guard forced to `false`, a present
+    // override would fall through to `Err(source)` and this assertion
+    // would fail.
+    #[test]
+    fn failed_resolution_with_override_falls_back_to_localhost() {
+        let resolved = Err(resolution_failure());
+        let result = host_ipv4_with_override_fallback(resolved, true);
+        assert_eq!(result.ok(), Some(Ipv4Addr::LOCALHOST));
+    }
+
+    // The production arm: resolution FAILED and no override is present
+    // → propagate the error and refuse to boot. Paired with the test
+    // above, this is what makes flipping the guard to `false` fail:
+    // the two branches must diverge on the same `Err` input.
+    #[test]
+    fn failed_resolution_without_override_propagates_error() {
+        let resolved = Err(resolution_failure());
+        let result = host_ipv4_with_override_fallback(resolved, false);
+        assert!(
+            matches!(result, Err(ControlPlaneError::Validation { .. })),
+            "expected the resolution failure to propagate unchanged, got {result:?}",
+        );
+    }
 }
