@@ -33,13 +33,16 @@
 //! use, so the read-path key matches the hydrator's projection.
 
 use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use overdrive_core::aggregate::{Listener, WorkloadIntent};
 use overdrive_core::id::{ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ListenerRow;
+use overdrive_dataplane::allocators::PersistentServiceVipAllocator;
+use overdrive_store_local::LocalIntentStore;
 
-use crate::AppState;
 use crate::reconciler_runtime::ConvergenceError;
 
 /// `purpose` namespacing token passed to [`ServiceId::derive`]. The
@@ -154,19 +157,36 @@ impl ListenerFactStore {
     /// derivation, but populating the keyed store rather than returning
     /// a flat `Vec<ListenerRow>`.
     ///
+    /// # Parameters
+    ///
+    /// Takes the three boot inputs directly — the `IntentStore`, the
+    /// redb path (for decode-failure remediation messages), and the
+    /// allocator — RATHER than a full `&AppState`. The boot wiring
+    /// constructs the store BEFORE assembling `AppState` (so the
+    /// rebuilt store can be threaded into the constructor as a mandatory
+    /// field), which makes a `&AppState` parameter a construction cycle.
+    /// All three inputs are available at the wiring site immediately
+    /// after the allocator's `bulk_load`. ORDERING IS LOAD-BEARING: the
+    /// allocator must already be bulk-loaded so its `get()` resolves the
+    /// per-Service VIP memo — a Service whose VIP the allocator has not
+    /// issued is skipped.
+    ///
     /// # Errors
     ///
     /// [`ConvergenceError::IntentRead`] when the `IntentStore` scan
     /// fails. A per-record decode failure or a UTF-8-invalid key is
     /// skipped (not fatal) — it is not a listener fact.
-    pub async fn rebuild_from_intent(state: &AppState) -> Result<Self, ConvergenceError> {
-        let rows = state
-            .store
+    pub async fn rebuild_from_intent(
+        store: &Arc<LocalIntentStore>,
+        intent_redb_path: &Path,
+        allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    ) -> Result<Self, ConvergenceError> {
+        let rows = store
             .scan_prefix(b"workloads/")
             .await
             .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
 
-        let mut store = Self::new();
+        let mut facts = Self::new();
         for (key_bytes, value_bytes) in rows {
             // Only the canonical `workloads/<id>` records carry the
             // intent payload — skip the `workloads/<id>/stop` and
@@ -181,7 +201,7 @@ impl ListenerFactStore {
             // failure) is not a listener fact — skip it.
             let Ok(intent) = WorkloadIntent::from_store_bytes(
                 value_bytes.as_ref(),
-                &state.intent_redb_path,
+                intent_redb_path,
                 Some(key_str),
             ) else {
                 continue;
@@ -196,16 +216,16 @@ impl ListenerFactStore {
             // subsequent `.await`. Mirrors
             // `hydrate_bridge_desired_listeners`.
             let assigned_vip_opt = {
-                let guard = state.allocator.lock().await;
+                let guard = allocator.lock().await;
                 let vip = guard.get(&digest_bytes);
                 drop(guard);
                 vip
             };
             let Some(assigned_vip) = assigned_vip_opt else { continue };
 
-            store.upsert(service_v1.id.clone(), &assigned_vip, &service_v1.listeners);
+            facts.upsert(service_v1.id.clone(), &assigned_vip, &service_v1.listeners);
         }
-        Ok(store)
+        Ok(facts)
     }
 }
 
@@ -284,6 +304,12 @@ mod tests {
         let driver: Arc<dyn overdrive_core::traits::driver::Driver> =
             Arc::new(SimDriver::new(DriverType::Exec));
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+        // The fixture seeds intent AFTER construction, so the
+        // boot-rebuild at this point would be empty regardless — pass a
+        // fresh store. Tests that exercise the boot-rebuild path call
+        // `rebuild_from_intent` explicitly after seeding (mirroring the
+        // production wiring's post-`bulk_load` rebuild).
+        let listener_facts = Arc::new(tokio::sync::Mutex::new(ListenerFactStore::new()));
         AppState::new(
             store,
             store_path,
@@ -294,6 +320,7 @@ mod tests {
             Arc::new(SimDataplane::new()),
             node_id("writer-1"),
             allocator,
+            listener_facts,
             std::net::Ipv4Addr::LOCALHOST,
         )
     }
@@ -494,7 +521,13 @@ mod tests {
         // (c) Job intent → contributes nothing.
         persist_job(&state, "batch").await;
 
-        let store = ListenerFactStore::rebuild_from_intent(&state).await.expect("rebuild");
+        let store = ListenerFactStore::rebuild_from_intent(
+            &state.store,
+            &state.intent_redb_path,
+            &state.allocator,
+        )
+        .await
+        .expect("rebuild");
 
         // Only web's two listeners are present.
         let (web_tcp, web_tcp_row) = derived(&vip_web, 80, Proto::Tcp);
@@ -568,6 +601,107 @@ mod tests {
         assert!(store.primary.is_empty(), "primary stays empty without upsert");
         assert!(store.secondary.is_empty(), "secondary stays empty without upsert");
         assert_eq!(store, ListenerFactStore::new(), "store equals a fresh empty store");
+    }
+
+    // -----------------------------------------------------------------
+    // 01-02 wiring — AppState carries a boot-rebuilt ListenerFactStore
+    // -----------------------------------------------------------------
+
+    /// Reassemble `AppState` (mirroring the production boot wiring's
+    /// post-`bulk_load` rebuild) carrying a `listener_facts` field that
+    /// is the boot-rebuilt projection over `state`'s OWN store +
+    /// allocator. Reuses the same `store` / `allocator` Arcs so the
+    /// allocator memo populated by `persist_service_and_allocate_vip`
+    /// is visible to the rebuild — a fresh allocator would have an empty
+    /// memo and skip every Service.
+    async fn reassemble_with_boot_rebuild(state: &AppState) -> AppState {
+        let listener_facts = Arc::new(tokio::sync::Mutex::new(
+            ListenerFactStore::rebuild_from_intent(
+                &state.store,
+                &state.intent_redb_path,
+                &state.allocator,
+            )
+            .await
+            .expect("boot rebuild"),
+        ));
+        AppState::new(
+            Arc::clone(&state.store),
+            state.intent_redb_path.clone(),
+            Arc::clone(&state.obs),
+            Arc::clone(&state.runtime),
+            Arc::clone(&state.driver),
+            Arc::clone(&state.clock),
+            Arc::clone(&state.dataplane),
+            state.node_id.clone(),
+            Arc::clone(&state.allocator),
+            listener_facts,
+            state.host_ipv4,
+        )
+    }
+
+    /// Boot rebuild over a fixture intent set populates `AppState.
+    /// listener_facts` with one primary entry per listener of each
+    /// VIP-allocated Service. This is the wiring contract 01-02 adds:
+    /// the store exists, is boot-rebuilt, and is held on `AppState`.
+    #[tokio::test]
+    async fn app_state_boot_rebuilds_listener_facts_from_intent() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 11));
+
+        // Seed two VIP-allocated Services through the SAME state (its
+        // allocator memo is what the rebuild joins against).
+        let seed_state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+        let vip_web = persist_service_and_allocate_vip(
+            &seed_state,
+            "web",
+            &[(80, Proto::Tcp), (53, Proto::Udp)],
+        )
+        .await;
+        let vip_api =
+            persist_service_and_allocate_vip(&seed_state, "api", &[(9000, Proto::Tcp)]).await;
+
+        // Reassemble AppState with the boot-rebuilt projection over the
+        // SAME store + allocator (production wiring shape).
+        let state = reassemble_with_boot_rebuild(&seed_state).await;
+
+        let (web_tcp, web_tcp_row) = derived(&vip_web, 80, Proto::Tcp);
+        let (web_udp, web_udp_row) = derived(&vip_web, 53, Proto::Udp);
+        let (api_tcp, api_tcp_row) = derived(&vip_api, 9000, Proto::Tcp);
+        // Read the observable values out while holding the lock, then
+        // drop the guard before asserting (clippy::significant_drop_
+        // tightening — don't hold the mutex across the assertion block).
+        let (web_tcp_got, web_udp_got, api_tcp_got, primary_len) = {
+            let facts = state.listener_facts.lock().await;
+            (
+                facts.fact_for(web_tcp),
+                facts.fact_for(web_udp),
+                facts.fact_for(api_tcp),
+                facts.primary.len(),
+            )
+        };
+        assert_eq!(web_tcp_got, Some(web_tcp_row), "web tcp listener present");
+        assert_eq!(web_udp_got, Some(web_udp_row), "web udp listener present");
+        assert_eq!(api_tcp_got, Some(api_tcp_row), "api tcp listener present");
+        assert_eq!(primary_len, 3, "one primary entry per listener of each VIP'd Service");
+    }
+
+    /// AppState construction with an EMPTY intent set yields an empty
+    /// listener-fact store (both maps empty).
+    #[tokio::test]
+    async fn app_state_empty_intent_yields_empty_store() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 12));
+
+        // No intent seeded — the boot rebuild runs over an empty store.
+        let seed_state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+        let state = reassemble_with_boot_rebuild(&seed_state).await;
+
+        // Clone the projection out while holding the lock, then drop the
+        // guard before asserting (clippy::significant_drop_tightening).
+        let snapshot = { state.listener_facts.lock().await.clone() };
+        assert!(snapshot.primary.is_empty(), "primary map empty over empty intent set");
+        assert!(snapshot.secondary.is_empty(), "secondary map empty over empty intent set");
+        assert_eq!(snapshot, ListenerFactStore::new(), "store equals a fresh empty store");
     }
 
     // -----------------------------------------------------------------
@@ -682,7 +816,13 @@ mod tests {
             expected.upsert(wid, &issued, &svc.listeners);
         }
 
-        let rebuilt = ListenerFactStore::rebuild_from_intent(&state).await.expect("rebuild");
+        let rebuilt = ListenerFactStore::rebuild_from_intent(
+            &state.store,
+            &state.intent_redb_path,
+            &state.allocator,
+        )
+        .await
+        .expect("rebuild");
         (rebuilt, expected)
     }
 
@@ -732,7 +872,13 @@ mod tests {
         )
         .await;
 
-        let rebuilt = ListenerFactStore::rebuild_from_intent(&state).await.expect("rebuild");
+        let rebuilt = ListenerFactStore::rebuild_from_intent(
+            &state.store,
+            &state.intent_redb_path,
+            &state.allocator,
+        )
+        .await
+        .expect("rebuild");
 
         let mut expected = ListenerFactStore::new();
         expected.upsert(

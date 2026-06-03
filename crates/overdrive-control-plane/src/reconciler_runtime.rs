@@ -2574,6 +2574,7 @@ mod tests {
             let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
             let allocator =
                 crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            let listener_facts = crate::test_empty_listener_facts();
             AppState::new(
                 store,
                 store_path,
@@ -2584,6 +2585,7 @@ mod tests {
                 Arc::new(SimDataplane::new()),
                 writer_node(),
                 allocator,
+                listener_facts,
                 std::net::Ipv4Addr::LOCALHOST,
             )
         }

@@ -92,6 +92,7 @@ async fn build_state(
         Arc::new(SimDataplane::new()),
         nid("writer-1"),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     )
 }

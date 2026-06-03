@@ -205,6 +205,26 @@ pub struct AppState {
     /// Service-arm `submit_workload` / `alloc_status` consumers land in
     /// 02-03d alongside the six S-VIP acceptance scenarios.
     pub allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    /// In-memory listener-fact projection (ADR-0062 § Decision (1);
+    /// feature-delta sub-decision 1). Mirrors the allocator's lifecycle
+    /// — boot-rebuilt from the intent SSOT (via
+    /// [`ListenerFactStore::rebuild_from_intent`]) and held here for the
+    /// hydration layer's O(1) keyed read — MINUS persistence (the intent
+    /// store is the SSOT; cold boot re-projects). Wrapped in
+    /// `Arc<tokio::sync::Mutex<...>>` because it is acquired across
+    /// `.await` in the async hydrate / submit-edge paths and the rebuild
+    /// itself is async — `tokio::sync::Mutex` rather than `parking_lot`
+    /// per `.claude/rules/development.md` § "Concurrency & async" →
+    /// "Never hold a lock across `.await`".
+    ///
+    /// 01-02 lands this field and the boot-time construction (rebuilt
+    /// immediately AFTER the allocator's `bulk_load` — ordering is
+    /// load-bearing: the rebuild joins allocator-issued VIPs). The
+    /// submit / stop edge maintenance lands in 01-03; the hydrator
+    /// read-path switch lands in 01-04. After this step the store
+    /// exists and is boot-rebuilt but is not yet mutated on the edge nor
+    /// read by the hydrator.
+    pub listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
     /// Host's IPv4 address for the configured `[dataplane]
     /// client_iface`. Resolved once at boot by
     /// [`iface::resolve_iface_ipv4`] and threaded through to the
@@ -244,6 +264,23 @@ pub fn test_default_allocator(
     )))
 }
 
+/// Test-only helper: build an empty
+/// [`listener_facts::ListenerFactStore`] wrapped in
+/// `Arc<tokio::sync::Mutex<...>>` for the `AppState` shape. Used by the
+/// crate's `tests/acceptance/*` and `tests/integration/*` fixtures that
+/// seed intent AFTER constructing `AppState` — for those the boot
+/// rebuild would project an empty store regardless, so a fresh empty
+/// store is the correct construction-time value. Fixtures that
+/// specifically exercise the boot-rebuild path call
+/// [`listener_facts::ListenerFactStore::rebuild_from_intent`] explicitly
+/// after seeding (mirroring the production wiring's post-`bulk_load`
+/// rebuild). Production callers go through `rebuild_from_intent` in
+/// `run_server_with_obs_and_driver` directly.
+#[must_use]
+pub fn test_empty_listener_facts() -> Arc<tokio::sync::Mutex<listener_facts::ListenerFactStore>> {
+    Arc::new(tokio::sync::Mutex::new(listener_facts::ListenerFactStore::new()))
+}
+
 /// Default capacity for the lifecycle-event broadcast channel.
 ///
 /// Phase 1 has at most one streaming subscriber per request, so 256
@@ -272,10 +309,18 @@ impl AppState {
     /// production wall-clock behaviour by forgetting to override.
     /// Production passes `Arc::new(overdrive_host::SystemClock)`; tests
     /// pass `Arc::new(overdrive_sim::adapters::clock::SimClock::new())`.
+    ///
+    /// The `listener_facts` parameter is likewise required at
+    /// construction (no default, no builder) per the same rule: the boot
+    /// wiring MUST rebuild it from the intent SSOT after the allocator's
+    /// `bulk_load`, and making it mandatory means a forgotten rebuild
+    /// fails to compile. Test fixtures that seed intent AFTER
+    /// construction pass an empty
+    /// `Arc::new(tokio::sync::Mutex::new(ListenerFactStore::new()))`.
     #[must_use]
     #[allow(
         clippy::too_many_arguments,
-        reason = "Port-trait dependencies (Clock, Driver, Dataplane, ObservationStore, IntentStore) are required at construction per .claude/rules/development.md § Port-trait dependencies; bundling them into a builder would make individual deps optional and defeat the explicit-injection invariant."
+        reason = "Port-trait dependencies (Clock, Driver, Dataplane, ObservationStore, IntentStore) plus the boot-rebuilt allocator + listener-fact projections are required at construction per .claude/rules/development.md § Port-trait dependencies; bundling them into a builder would make individual deps optional and defeat the explicit-injection invariant."
     )]
     pub fn new(
         store: Arc<LocalIntentStore>,
@@ -287,6 +332,7 @@ impl AppState {
         dataplane: Arc<dyn Dataplane>,
         node_id: NodeId,
         allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+        listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
         host_ipv4: std::net::Ipv4Addr,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
@@ -302,6 +348,7 @@ impl AppState {
             dataplane,
             node_id,
             allocator,
+            listener_facts,
             host_ipv4,
         }
     }
@@ -1277,6 +1324,27 @@ pub async fn run_server_with_obs_and_driver(
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
 
+    // ORDERING IS LOAD-BEARING (ADR-0062 § Decision (1)): the
+    // listener-fact projection is boot-rebuilt from the intent SSOT
+    // IMMEDIATELY AFTER the allocator's `bulk_load`, because the rebuild
+    // joins each Service's allocator-issued VIP — a Service whose VIP the
+    // allocator has not yet issued is skipped. Building the store here,
+    // before assembling `AppState`, lets it be threaded into the
+    // constructor as a mandatory field (no default, no post-hoc set).
+    let listener_facts = Arc::new(tokio::sync::Mutex::new(
+        listener_facts::ListenerFactStore::rebuild_from_intent(&store, &store_path, &allocator)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    target: "overdrive::health",
+                    event = "health.startup.refused",
+                    cause = %e,
+                    "listener-fact projection rebuild refused; control-plane will not start"
+                );
+                error::ControlPlaneError::ListenerFactRebuild(e.to_string())
+            })?,
+    ));
+
     let state: AppState = AppState::new(
         store,
         store_path,
@@ -1287,6 +1355,7 @@ pub async fn run_server_with_obs_and_driver(
         dataplane,
         node_id,
         allocator,
+        listener_facts,
         host_ipv4,
     );
 

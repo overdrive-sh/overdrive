@@ -66,6 +66,7 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
         Arc::new(SimDataplane::new()),
         node_id("writer-1"),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     )
 }

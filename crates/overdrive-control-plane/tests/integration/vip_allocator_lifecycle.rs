@@ -132,6 +132,7 @@ fn build_state_with_range(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
     (state, allocator)
@@ -568,6 +569,7 @@ async fn build_state_with_range_and_reconciler(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
     (state, allocator)

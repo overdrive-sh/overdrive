@@ -69,6 +69,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     )
 }

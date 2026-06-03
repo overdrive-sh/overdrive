@@ -473,6 +473,29 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     ProbeRunnerBoot(#[from] ProbeRunnerBootError),
 
+    /// Boot-time listener-fact projection rebuild failure (ADR-0062
+    /// § Decision (1); reconciler-listener-fact-view step 01-02). The
+    /// boot wiring rebuilds the in-memory [`crate::listener_facts::
+    /// ListenerFactStore`] from the intent SSOT immediately after the
+    /// allocator's `bulk_load`; if the underlying `IntentStore` scan
+    /// fails the control-plane refuses to start.
+    ///
+    /// Carries the underlying scan-failure message rather than embedding
+    /// [`crate::reconciler_runtime::ConvergenceError`] by `#[from]`: that
+    /// enum already carries a `ViewPersist(ControlPlaneError)` arm, so a
+    /// `#[from] ConvergenceError` here would form a recursive type cycle
+    /// (`ControlPlaneError` ↔ `ConvergenceError`, E0072). The rebuild's
+    /// only failure mode is `ConvergenceError::IntentRead(String)` — a
+    /// stringly intent-store read error — so no structured fidelity is
+    /// lost by carrying the message directly. This is a discrete, named,
+    /// `matches!`-able variant per `.claude/rules/development.md`
+    /// § "Never flatten a typed error to `Internal(String)`", NOT a
+    /// flatten into [`ControlPlaneError::Internal`]. Same boot-path
+    /// shape as `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the
+    /// listener binds, so the `to_response` arm is exhaustiveness-only.
+    #[error("listener-fact projection rebuild failed at boot: {0}")]
+    ListenerFactRebuild(String),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -691,6 +714,16 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // exists only for enum exhaustiveness.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::ListenerFactRebuild(message) => (
+            // Same shape as `ViewStoreBoot` / `DataplaneBoot` above: the
+            // boot-time listener-fact rebuild happens BEFORE the listener
+            // binds, so this arm is exhaustiveness-only. The composition
+            // root branches on the typed variant
+            // (`matches!(e, ListenerFactRebuild(_))`) for structured
+            // startup diagnostics.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message, field: None },
         ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,

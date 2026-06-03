@@ -72,6 +72,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     )
 }
@@ -263,6 +264,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
 
@@ -468,6 +470,7 @@ async fn stop_after_failed_alloc_drains_broker() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
 
@@ -745,6 +748,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
 
@@ -1034,6 +1038,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
 
