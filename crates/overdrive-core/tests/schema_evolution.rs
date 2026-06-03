@@ -24,6 +24,7 @@ mod schema_evolution {
     mod harness;
     mod node_health_row;
     mod probe_result_row;
+    mod reconcile_conflict_row;
     mod service_backend_row;
     mod service_hydration_result_row;
     mod service_spec;
