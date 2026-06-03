@@ -22,20 +22,24 @@
 //! Two write actions conflict when either:
 //!
 //! 1. **Same route, same slot** — two cgroup writes to the same
-//!    `LOCAL_BACKEND_MAP` `(vip, vip_port)` slot, or two XDP writes
-//!    to the same `SERVICE_MAP` `(vip, port, proto)` slot. The second
-//!    write silently overwrites the first; the reconciler emitting
-//!    both in one tick is non-deterministic in its intent. Step 02-01
-//!    widened the XDP slot from VIP-only to `(vip, port, proto)`
-//!    IPVS-style — distinct ports (tcp/8080 + tcp/8081) and distinct
-//!    proto (tcp/53 + udp/53) are distinct slots and do NOT conflict.
+//!    `LOCAL_BACKEND_MAP` `(vip, vip_port, proto)` slot, or two XDP
+//!    writes to the same `SERVICE_MAP` `(vip, port, proto)` slot. The
+//!    second write silently overwrites the first; the reconciler
+//!    emitting both in one tick is non-deterministic in its intent.
+//!    Step 02-01 widened the XDP slot from VIP-only to
+//!    `(vip, port, proto)` IPVS-style; step 02-02 widened the cgroup
+//!    slot the same way. Distinct ports (tcp/8080 + tcp/8081) and
+//!    distinct proto (tcp/53 + udp/53) are distinct slots on EITHER
+//!    route and do NOT conflict.
 //! 2. **Cross-route on the same VIP** — an XDP `SERVICE_MAP` write
 //!    AND a cgroup `LOCAL_BACKEND_MAP` write for the same VIP. The
-//!    cross-route check stays VIP-only because the cgroup path carries
-//!    no proto yet (step 02-02); a backend served by both paths is
+//!    cross-route check stays VIP-only by design: the invariant it
+//!    defends is "a backend is local XOR remote per ADR-0053 § 2" —
+//!    the hydrator picks exactly one route per backend, and a VIP
+//!    appearing on BOTH routes is the original-defect silhouette
+//!    regardless of proto. A backend served by both paths is
 //!    reachable via two distinct kernel-side maps with
-//!    non-deterministic precedence — the silhouette of the original
-//!    defect.
+//!    non-deterministic precedence.
 //!
 //! # Fail-safe semantics
 //!
@@ -72,8 +76,9 @@ pub enum WriteRoute {
     /// (step 02-01 widened from VIP-only).
     Xdp,
     /// `Action::RegisterLocalBackend` / `Action::DeregisterLocalBackend`
-    /// — cgroup `connect4` rewrite path, keyed on `(vip, vip_port)`
-    /// at the kernel-side program.
+    /// — cgroup `connect4` rewrite path, keyed on `(vip, vip_port, proto)`
+    /// at the kernel-side program (step 02-02 widened from
+    /// `(vip, vip_port)`).
     Cgroup,
 }
 
@@ -89,10 +94,11 @@ pub enum ReconcilerOutputViolation {
     /// Two write actions in the same `reconcile()` return target the
     /// same service slot. `vip_port` is `Some(port)` for same-route
     /// conflicts that carry a port — cgroup-vs-cgroup (the shared
-    /// `(vip, port)`) and, since step 02-01, XDP-vs-XDP (the shared
-    /// `(vip, port, proto)` slot). It is `None` for CROSS-route
-    /// conflicts (cgroup-vs-XDP), which are matched VIP-only because
-    /// the cgroup path carries no proto yet.
+    /// `(vip, port, proto)`, since step 02-02) and XDP-vs-XDP (the
+    /// shared `(vip, port, proto)` slot, since step 02-01). It is
+    /// `None` for CROSS-route conflicts (cgroup-vs-XDP), which are
+    /// matched VIP-only because the cross-route invariant ("a backend
+    /// is local XOR remote") is per-VIP, not per-slot.
     /// `first_route` is the route the FIRST-emitted action took;
     /// `second_route` is the offending (later-emitted) action's route.
     /// Both are captured so the operator-visible tracing event names
@@ -103,10 +109,11 @@ pub enum ReconcilerOutputViolation {
     ConflictingServiceWrites {
         /// Virtual IP both writes target.
         vip: Ipv4Addr,
-        /// VIP port both writes target. `Some(port)` for two cgroup
-        /// writes to the same `(vip, port)` map slot; `None` for any
-        /// conflict that includes an XDP-route write (which has no
-        /// port).
+        /// VIP port both writes target. `Some(port)` for same-route
+        /// conflicts (two cgroup writes to the same
+        /// `(vip, port, proto)` slot, or two XDP writes to the same
+        /// `(vip, port, proto)` slot); `None` for cross-route
+        /// conflicts, which are matched VIP-only.
         vip_port: Option<u16>,
         /// Route the FIRST emitted action takes.
         first_route: WriteRoute,
@@ -151,7 +158,7 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
     //     cross-route check.
     let mut xdp_keys: BTreeSet<(Ipv4Addr, u16, Proto)> = BTreeSet::new();
     let mut xdp_vips: BTreeSet<Ipv4Addr> = BTreeSet::new();
-    let mut cgroup_keys: BTreeSet<(Ipv4Addr, u16)> = BTreeSet::new();
+    let mut cgroup_keys: BTreeSet<(Ipv4Addr, u16, Proto)> = BTreeSet::new();
     let mut cgroup_vips: BTreeSet<Ipv4Addr> = BTreeSet::new();
 
     for action in actions {
@@ -173,7 +180,10 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
                 });
             }
             // XDP-after-cgroup at same VIP — cross-route conflict stays
-            // VIP-only (cgroup carries no proto in step 02-01).
+            // VIP-only. The cross-route invariant is "a backend is local
+            // XOR remote per ADR-0053 § 2"; the hydrator picks exactly
+            // one route per backend, and a VIP appearing on BOTH routes
+            // is the original defect silhouette regardless of proto.
             (WriteRoute::Xdp, _, _) if cgroup_vips.contains(&vip) => {
                 return Err(ReconcilerOutputViolation::ConflictingServiceWrites {
                     vip,
@@ -192,8 +202,14 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
                      route; None here indicates a regression in service_write_key"
                 );
             }
-            // Cgroup-vs-cgroup at same (vip, port).
-            (WriteRoute::Cgroup, Some(port), _) if cgroup_keys.contains(&(vip, port)) => {
+            // Cgroup-vs-cgroup at same (vip, port, proto) — step 02-02
+            // widened the cgroup slot to carry proto, mirroring the
+            // LOCAL_BACKEND_MAP key. Two writes only conflict when ALL
+            // THREE match; tcp/53 + udp/53 are distinct slots (same-host
+            // DNS unlocked) and do NOT conflict.
+            (WriteRoute::Cgroup, Some(port), Some(proto))
+                if cgroup_keys.contains(&(vip, port, proto)) =>
+            {
                 return Err(ReconcilerOutputViolation::ConflictingServiceWrites {
                     vip,
                     vip_port: Some(port),
@@ -210,14 +226,15 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
                     second_route: WriteRoute::Cgroup,
                 });
             }
-            (WriteRoute::Cgroup, Some(port), _) => {
-                cgroup_keys.insert((vip, port));
+            (WriteRoute::Cgroup, Some(port), Some(proto)) => {
+                cgroup_keys.insert((vip, port, proto));
                 cgroup_vips.insert(vip);
             }
-            (WriteRoute::Cgroup, None, _) => {
+            (WriteRoute::Cgroup, _, _) => {
                 unreachable!(
-                    "service_write_key always returns Some(port) for the Cgroup route; \
-                     None here indicates a regression in service_write_key"
+                    "service_write_key always returns Some(port) + Some(proto) for the Cgroup \
+                     route (step 02-02 widened the key); None here indicates a regression in \
+                     service_write_key"
                 );
             }
         }
@@ -246,8 +263,10 @@ struct WriteKey {
 /// proto are distinct outer-map slots.
 ///
 /// `Action::RegisterLocalBackend` / `DeregisterLocalBackend` carry
-/// `vip` + `vip_port` only — the cgroup path carries no proto yet
-/// (step 02-02), so `proto_opt = None` for that route.
+/// `vip` + `vip_port` + `proto` — step 02-02 widened the cgroup
+/// write-key to the full `(vip, vip_port, proto)` tuple matching the
+/// widened `LOCAL_BACKEND_MAP` key. Two such writes only conflict when
+/// all three match; tcp/53 + udp/53 are distinct slots.
 ///
 /// IPv6 VIPs (`ServiceVip::try_as_ipv4() == None`) are out of scope
 /// for the cgroup path per ADR-0053 § 1 and structurally unreachable
@@ -265,11 +284,11 @@ fn service_write_key(action: &Action) -> Option<WriteKey> {
                 route: WriteRoute::Xdp,
             })
         }
-        Action::RegisterLocalBackend { vip, vip_port, .. }
-        | Action::DeregisterLocalBackend { vip, vip_port, .. } => Some(WriteKey {
+        Action::RegisterLocalBackend { vip, vip_port, proto, .. }
+        | Action::DeregisterLocalBackend { vip, vip_port, proto, .. } => Some(WriteKey {
             vip: *vip,
             port_opt: Some(*vip_port),
-            proto_opt: None,
+            proto_opt: Some(*proto),
             route: WriteRoute::Cgroup,
         }),
         _ => None,
@@ -281,6 +300,7 @@ fn service_write_key(action: &Action) -> Option<WriteKey> {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 
+    use overdrive_core::dataplane::backend_key::Proto;
     use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
     use overdrive_core::reconcilers::Action;
 
@@ -304,10 +324,15 @@ mod tests {
     }
 
     fn register(vip: Ipv4Addr, vip_port: u16) -> Action {
+        register_proto(vip, vip_port, Proto::Tcp)
+    }
+
+    fn register_proto(vip: Ipv4Addr, vip_port: u16, proto: Proto) -> Action {
         Action::RegisterLocalBackend {
             service_id: service_id(),
             vip,
             vip_port,
+            proto,
             backend: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 9090),
             correlation: correlation("register-local-backend"),
         }
@@ -318,6 +343,7 @@ mod tests {
             service_id: service_id(),
             vip,
             vip_port,
+            proto: Proto::Tcp,
             correlation: correlation("deregister-local-backend"),
         }
     }
@@ -479,6 +505,46 @@ mod tests {
             validate_reconcile_output(&actions).is_ok(),
             "same (vip,port) different proto must not conflict"
         );
+    }
+
+    /// S-02-02 — cgroup DNS co-location: same `(vip, port)`, DIFFERENT
+    /// proto via the cgroup path now passes (tcp/53 + udp/53). Step
+    /// 02-02 widened the cgroup write-key to `(vip, port, proto)`.
+    #[test]
+    fn validate_accepts_cgroup_same_vip_port_different_proto() {
+        let actions = vec![
+            register_proto(vip_v4(1), 53, Proto::Tcp),
+            register_proto(vip_v4(1), 53, Proto::Udp),
+        ];
+        assert!(
+            validate_reconcile_output(&actions).is_ok(),
+            "same (vip,port) different proto on the cgroup path must not conflict"
+        );
+    }
+
+    /// S-02-02 — genuine cgroup duplicate slot is STILL caught. Two
+    /// `RegisterLocalBackend` for IDENTICAL `(vip, port, proto)` remain
+    /// a conflict reporting the shared port.
+    #[test]
+    fn validate_rejects_cgroup_identical_vip_port_proto() {
+        let actions = vec![
+            register_proto(vip_v4(1), 53, Proto::Tcp),
+            register_proto(vip_v4(1), 53, Proto::Tcp),
+        ];
+        match validate_reconcile_output(&actions) {
+            Err(ReconcilerOutputViolation::ConflictingServiceWrites {
+                vip,
+                vip_port,
+                first_route,
+                second_route,
+            }) => {
+                assert_eq!(vip, vip_v4(1));
+                assert_eq!(vip_port, Some(53), "cgroup-vs-cgroup reports the shared port");
+                assert_eq!(first_route, WriteRoute::Cgroup);
+                assert_eq!(second_route, WriteRoute::Cgroup);
+            }
+            other => panic!("expected cgroup-vs-cgroup conflict, got {other:?}"),
+        }
     }
 
     /// Empty action vec is trivially valid — no writes, no

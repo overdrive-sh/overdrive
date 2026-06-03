@@ -48,13 +48,13 @@ pub async fn dispatch(
     action: &Action,
     dataplane: &dyn Dataplane,
 ) -> Result<(), DeregisterLocalBackendDispatchError> {
-    let Action::DeregisterLocalBackend { vip, vip_port, .. } = action else {
+    let Action::DeregisterLocalBackend { vip, vip_port, proto, .. } = action else {
         panic!(
             "action_shim::deregister_local_backend::dispatch invoked with \
              wrong Action variant — caller is the action shim's match \
              arm and is the sole expected caller"
         );
     };
-    dataplane.deregister_local_backend(*vip, *vip_port).await?;
+    dataplane.deregister_local_backend(*vip, *vip_port, *proto).await?;
     Ok(())
 }

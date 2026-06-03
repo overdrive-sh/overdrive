@@ -352,11 +352,14 @@ impl Reconciler for ServiceMapHydrator {
                 push_register_local_backend_actions(
                     &mut actions,
                     &local,
-                    *service_id,
-                    vip_v4,
-                    desired_svc.port.get(),
-                    &target_str,
-                    &spec_hash,
+                    &LocalBackendEmit {
+                        service_id: *service_id,
+                        vip_v4,
+                        vip_port: desired_svc.port.get(),
+                        proto: desired_svc.proto,
+                        target_str: &target_str,
+                        spec_hash: &spec_hash,
+                    },
                 );
 
                 let _ = (local_is_empty, remote_is_empty);
@@ -389,19 +392,36 @@ impl Reconciler for ServiceMapHydrator {
 ///
 /// `vip_port` is the service's declared VIP listener port (the port a
 /// client uses in `connect(vip:vip_port)`), NOT the backend's own
-/// listening port. The `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP`
-/// on `(vip, vip_port)` and rewrites matching connects to the backend's
-/// real address (ADR-0053 § 3); a service with VIP:53 → backend:5353
-/// must register the entry under port 53 or the client's connect never
-/// hits the map. See the `Dataplane::register_local_backend` contract.
-fn push_register_local_backend_actions(
-    actions: &mut Vec<Action>,
-    local: &[&Backend],
+/// listening port. `proto` is the service's declared L4 protocol,
+/// threaded from the listener-bearing fact (`desired_svc.proto`) —
+/// NEVER defaulted to `Tcp` (C3, ADR-0060 site #8). The
+/// `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP` on
+/// `(vip, vip_port, proto)` and rewrites matching connects to the
+/// backend's real address (ADR-0053 § 3 rev 2026-06-03); a service
+/// co-locating tcp/53 + udp/53 emits two `RegisterLocalBackend` with
+/// distinct proto, neither overwriting the other. A service with
+/// VIP:53 → backend:5353 must register the entry under port 53 or the
+/// client's connect never hits the map. See the
+/// `Dataplane::register_local_backend` contract.
+/// Per-service emission context for [`push_register_local_backend_actions`].
+/// Groups the service-scoped fields (identity, VIP, declared port +
+/// proto, correlation inputs) so the helper stays under the
+/// `clippy::too_many_arguments` bar after step 02-02 added the proto
+/// dimension. All fields are sourced from the listener-bearing
+/// `ServiceDesired` the hydrator is reconciling.
+struct LocalBackendEmit<'a> {
     service_id: ServiceId,
     vip_v4: std::net::Ipv4Addr,
     vip_port: u16,
-    target_str: &str,
-    spec_hash: &ContentHash,
+    proto: crate::dataplane::backend_key::Proto,
+    target_str: &'a str,
+    spec_hash: &'a ContentHash,
+}
+
+fn push_register_local_backend_actions(
+    actions: &mut Vec<Action>,
+    local: &[&Backend],
+    ctx: &LocalBackendEmit<'_>,
 ) {
     for backend in local {
         let backend_v4 = match backend.addr {
@@ -411,9 +431,9 @@ fn push_register_local_backend_actions(
         if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
             tracing::warn!(
                 name: "service_map_hydrator.register_local_backend.rejected",
-                service_id = %service_id,
-                vip = %vip_v4,
-                vip_port = vip_port,
+                service_id = %ctx.service_id,
+                vip = %ctx.vip_v4,
+                vip_port = ctx.vip_port,
                 backend = %backend_v4,
                 reason = %reason,
                 "skipping RegisterLocalBackend: backend address rejected by classifier"
@@ -421,11 +441,16 @@ fn push_register_local_backend_actions(
             continue;
         }
         actions.push(Action::RegisterLocalBackend {
-            service_id,
-            vip: vip_v4,
-            vip_port,
+            service_id: ctx.service_id,
+            vip: ctx.vip_v4,
+            vip_port: ctx.vip_port,
+            proto: ctx.proto,
             backend: backend_v4,
-            correlation: CorrelationKey::derive(target_str, spec_hash, "register-local-backend"),
+            correlation: CorrelationKey::derive(
+                ctx.target_str,
+                ctx.spec_hash,
+                "register-local-backend",
+            ),
         });
     }
 }
@@ -496,11 +521,14 @@ mod tests {
         push_register_local_backend_actions(
             &mut actions,
             &local_refs,
-            service_id(),
-            vip_v4,
-            8080,
-            target,
-            &hash,
+            &LocalBackendEmit {
+                service_id: service_id(),
+                vip_v4,
+                vip_port: 8080,
+                proto: Proto::Tcp,
+                target_str: target,
+                spec_hash: &hash,
+            },
         );
 
         assert_eq!(
@@ -514,11 +542,13 @@ mod tests {
                 service_id: sid,
                 vip,
                 vip_port,
+                proto,
                 backend: emitted,
                 correlation,
             } => {
                 assert_eq!(*sid, service_id(), "service_id must be threaded through");
                 assert_eq!(*vip, vip_v4, "vip must be the host VIP");
+                assert_eq!(*proto, Proto::Tcp, "proto must be threaded through (the declared L4)");
                 assert_eq!(
                     *vip_port, 8080,
                     "vip_port is the declared VIP listener port (here == backend port)"
@@ -558,11 +588,14 @@ mod tests {
         push_register_local_backend_actions(
             &mut actions,
             &local_refs,
-            service_id(),
-            vip_v4,
-            declared_vip_port,
-            target,
-            &hash,
+            &LocalBackendEmit {
+                service_id: service_id(),
+                vip_v4,
+                vip_port: declared_vip_port,
+                proto: Proto::Tcp,
+                target_str: target,
+                spec_hash: &hash,
+            },
         );
 
         assert_eq!(actions.len(), 1, "exactly one RegisterLocalBackend must be emitted");
@@ -601,11 +634,14 @@ mod tests {
         push_register_local_backend_actions(
             &mut actions,
             &local_refs,
-            service_id(),
-            vip_v4,
-            8080,
-            "service/42",
-            &hash,
+            &LocalBackendEmit {
+                service_id: service_id(),
+                vip_v4,
+                vip_port: 8080,
+                proto: Proto::Tcp,
+                target_str: "service/42",
+                spec_hash: &hash,
+            },
         );
 
         assert!(

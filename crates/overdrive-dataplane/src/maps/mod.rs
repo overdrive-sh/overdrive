@@ -210,11 +210,14 @@ pub mod wire {
     // `_pad`); aya needs the marker for raw map access.
     unsafe impl aya::Pod for VipPod {}
 
-    /// `LOCAL_BACKEND_MAP` outer-key POD per ADR-0053 § 1.
+    /// `LOCAL_BACKEND_MAP` outer-key POD per ADR-0053 § 1
+    /// (rev 2026-06-03).
     ///
-    /// 8-byte host-order tuple `(vip, vip_port, _pad)`. Matches
+    /// 8-byte host-order tuple `(vip, vip_port, proto, _pad)`. Matches
     /// `crates/overdrive-bpf/src/maps/local_backend_map.rs`'s
-    /// kernel `LocalServiceKey` byte-for-byte.
+    /// kernel `LocalServiceKey` byte-for-byte. Step 02-02 widened the
+    /// key with the IANA proto byte (TCP=6, UDP=17) absorbing one
+    /// reserved pad byte; the 8-byte envelope is preserved.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[repr(C)]
     pub struct LocalServiceKey {
@@ -222,8 +225,10 @@ pub mod wire {
         pub vip_host: u32,
         /// VIP port, host-order.
         pub port_host: u16,
+        /// IANA L4 protocol byte — TCP=6, UDP=17 (`Proto::as_u8()`).
+        pub proto: u8,
         /// Padding to 8-byte alignment. Always zero.
-        pub _pad: u16,
+        pub _pad: u8,
     }
 
     // SAFETY: repr(C), `_pad` always 0, all fields fully

@@ -45,10 +45,19 @@ fn service_vip_for(o1: u8) -> ServiceVip {
 }
 
 fn register(v: Ipv4Addr, port: u16) -> Action {
+    register_proto(v, port, overdrive_core::dataplane::backend_key::Proto::Tcp)
+}
+
+fn register_proto(
+    v: Ipv4Addr,
+    port: u16,
+    proto: overdrive_core::dataplane::backend_key::Proto,
+) -> Action {
     Action::RegisterLocalBackend {
         service_id: service_id(),
         vip: v,
         vip_port: port,
+        proto,
         backend: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 9090),
         correlation: correlation("register-local-backend"),
     }
@@ -59,6 +68,7 @@ fn deregister(v: Ipv4Addr, port: u16) -> Action {
         service_id: service_id(),
         vip: v,
         vip_port: port,
+        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
         correlation: correlation("deregister-local-backend"),
     }
 }
@@ -202,6 +212,46 @@ fn register_vs_deregister_on_same_key_rejected() {
     } = err;
     assert_eq!(conflict_vip, vip(7));
     assert_eq!(vip_port, Some(5000));
+    assert_eq!(first_route, WriteRoute::Cgroup);
+    assert_eq!(second_route, WriteRoute::Cgroup);
+}
+
+/// S-02-02 — same-host DNS unlock: two cgroup `RegisterLocalBackend`
+/// writes for the SAME `(vip, port)` but DISTINCT proto (tcp/53 +
+/// udp/53) now return `Ok`. Step 02-02 widened the cgroup write-key
+/// from `(vip, port)` to `(vip, port, proto)` mirroring the
+/// `LOCAL_BACKEND_MAP` key — distinct proto → distinct slot → no
+/// conflict, the same co-location the XDP path already permits.
+#[test]
+fn cgroup_same_vip_port_different_proto_pass() {
+    use overdrive_core::dataplane::backend_key::Proto;
+    let actions =
+        vec![register_proto(vip(8), 53, Proto::Tcp), register_proto(vip(8), 53, Proto::Udp)];
+    assert!(
+        validate_reconcile_output(&actions).is_ok(),
+        "same (vip,port) different proto on the cgroup path must NOT conflict (DNS co-location)"
+    );
+}
+
+/// S-02-02 — genuine duplicate cgroup slot is STILL caught. Two
+/// `RegisterLocalBackend` for IDENTICAL `(vip, port, proto)` (tcp/53
+/// twice) remain a `ConflictingServiceWrites` error reporting the
+/// shared port.
+#[test]
+fn cgroup_identical_vip_port_proto_rejected() {
+    use overdrive_core::dataplane::backend_key::Proto;
+    let actions =
+        vec![register_proto(vip(9), 53, Proto::Tcp), register_proto(vip(9), 53, Proto::Tcp)];
+    let err = validate_reconcile_output(&actions)
+        .expect_err("identical (vip,port,proto) cgroup writes must conflict");
+    let ReconcilerOutputViolation::ConflictingServiceWrites {
+        vip: conflict_vip,
+        vip_port,
+        first_route,
+        second_route,
+    } = err;
+    assert_eq!(conflict_vip, vip(9));
+    assert_eq!(vip_port, Some(53), "cgroup-vs-cgroup conflict reports the shared port");
     assert_eq!(first_route, WriteRoute::Cgroup);
     assert_eq!(second_route, WriteRoute::Cgroup);
 }

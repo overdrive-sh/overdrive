@@ -23,6 +23,11 @@ mod integration {
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;
+    /// udp-service-support step 02-02 (S-02-02; ADR-0053 rev) —
+    /// `LOCAL_BACKEND_MAP` keys on `(vip, vip_port, proto)`: TCP +
+    /// UDP connect to the same `(vip, port)` reach proto-correct
+    /// backends via the cgroup_connect4 path.
+    mod local_backend_proto_connect;
     /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
     /// Maglev real-distribution under XDP traffic on real veth.
     mod maglev_real;

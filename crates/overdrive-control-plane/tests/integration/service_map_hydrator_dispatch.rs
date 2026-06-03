@@ -69,6 +69,7 @@ impl Dataplane for FailingUpdateService {
         _vip: Ipv4Addr,
         _vip_port: u16,
         _backend: std::net::SocketAddrV4,
+        _proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
         Ok(())
     }
@@ -77,6 +78,7 @@ impl Dataplane for FailingUpdateService {
         &self,
         _vip: Ipv4Addr,
         _vip_port: u16,
+        _proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
         Ok(())
     }

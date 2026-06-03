@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::SpiffeId;
 use crate::dataplane::ServiceFrontend;
+use crate::dataplane::backend_key::Proto;
 
 #[derive(Debug, Error)]
 pub enum DataplaneError {
@@ -229,11 +230,23 @@ pub trait Dataplane: Send + Sync + 'static {
     ///   cgroup path consumes the second. The classifier in
     ///   `ServiceMapHydrator` (ADR-0053 § 4) is responsible for
     ///   choosing exactly one per backend.
+    /// # `proto` (ADR-0053 rev 2026-06-03)
+    /// The `LOCAL_BACKEND_MAP` key is `(vip, vip_port, proto)`. `proto`
+    /// is sourced from the listener-bearing fact and lowered to its
+    /// IANA byte at the adapter's write edge; the kernel cgroup hook
+    /// reads `bpf_sock_addr.protocol` and keys the same dimension.
+    /// Registering tcp/53 and udp/53 on the SAME `(vip, vip_port)`
+    /// installs TWO distinct entries — a subsequent `connect(vip:53)`
+    /// over TCP reaches the tcp backend, over UDP the udp backend;
+    /// neither overwrites the other. Re-registration with the same
+    /// `(vip, vip_port, proto)` but a different `backend` atomically
+    /// replaces only that proto's entry.
     async fn register_local_backend(
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
         backend: SocketAddrV4,
+        proto: Proto,
     ) -> Result<(), DataplaneError>;
 
     /// Remove the local backend registration for `(vip, vip_port)`
@@ -260,10 +273,16 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - Concurrent `register_local_backend(vip, vip_port, b1)` +
     ///   `deregister_local_backend(vip, vip_port)` is not defined
     ///   to interleave at the adapter — callers must serialise.
+    /// # `proto` (ADR-0053 rev 2026-06-03)
+    /// Removes only the `(vip, vip_port, proto)` entry. Deregistering
+    /// tcp/53 leaves a co-located udp/53 entry intact — a subsequent
+    /// `connect(vip:53)` over UDP still rewrites; over TCP it no longer
+    /// does.
     async fn deregister_local_backend(
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: Proto,
     ) -> Result<(), DataplaneError>;
 }
 

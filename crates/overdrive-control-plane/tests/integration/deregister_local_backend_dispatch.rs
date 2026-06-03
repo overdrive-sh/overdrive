@@ -25,6 +25,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use overdrive_control_plane::action_shim::deregister_local_backend;
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId};
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::dataplane::Dataplane;
@@ -41,9 +42,12 @@ async fn deregister_local_backend_dispatch_removes_entry_from_dataplane() {
     // deregister has something to remove. The trait method is the same
     // surface the matching `register_local_backend::dispatch` shim
     // invokes.
-    dataplane.register_local_backend(vip, vip_port, backend).await.expect("register precondition");
+    dataplane
+        .register_local_backend(vip, vip_port, backend, Proto::Tcp)
+        .await
+        .expect("register precondition");
     assert_eq!(
-        dataplane.local_backend_for(vip, vip_port),
+        dataplane.local_backend_for(vip, vip_port, Proto::Tcp),
         Some(backend),
         "fixture sanity: backend must be registered before dispatch",
     );
@@ -59,7 +63,13 @@ async fn deregister_local_backend_dispatch_removes_entry_from_dataplane() {
     // ContentHash construction is deterministic.
     let spec_hash = ContentHash::of(0_u64.to_le_bytes());
     let correlation = CorrelationKey::derive(&target, &spec_hash, "deregister-local-backend");
-    let action = Action::DeregisterLocalBackend { service_id, vip, vip_port, correlation };
+    let action = Action::DeregisterLocalBackend {
+        service_id,
+        vip,
+        vip_port,
+        proto: Proto::Tcp,
+        correlation,
+    };
 
     // Drive the dispatch fn directly — this is the function whose
     // body is mutated. With the mutation "body replaced with Ok(())"
@@ -71,7 +81,7 @@ async fn deregister_local_backend_dispatch_removes_entry_from_dataplane() {
     // longer carries the entry. This is the assertion the mutation
     // kills.
     assert_eq!(
-        dataplane.local_backend_for(vip, vip_port),
+        dataplane.local_backend_for(vip, vip_port, Proto::Tcp),
         None,
         "deregister dispatch MUST remove the (vip, vip_port) entry; \
          observed entry still present, indicating the dispatch body \

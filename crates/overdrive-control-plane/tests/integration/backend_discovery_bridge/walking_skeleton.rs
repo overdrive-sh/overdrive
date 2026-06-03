@@ -291,9 +291,17 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
     //    5s gives 50 ticks of budget — generous against Lima FS
     //    contention.
     let local_present = poll_until(Duration::from_secs(5), Duration::from_millis(50), || async {
-        dataplane.local_backend_for(assigned_vip, listener_port).ok().flatten().filter(|e| {
-            e.backend_ip_host == u32::from(host_ipv4) && e.backend_port_host == listener_port
-        })
+        dataplane
+            .local_backend_for(
+                assigned_vip,
+                listener_port,
+                overdrive_core::dataplane::backend_key::Proto::Tcp,
+            )
+            .ok()
+            .flatten()
+            .filter(|e| {
+                e.backend_ip_host == u32::from(host_ipv4) && e.backend_port_host == listener_port
+            })
     })
     .await;
     assert!(
@@ -477,9 +485,17 @@ async fn bridge_to_hydrator_handoff_dispatches_register_local_backend() {
     // — observable via LOCAL_BACKEND_MAP carrying
     // (assigned_vip, listener_port) → (host_ipv4, listener_port).
     let local_present = poll_until(Duration::from_secs(5), Duration::from_millis(50), || async {
-        dataplane.local_backend_for(assigned_vip, listener_port).ok().flatten().filter(|e| {
-            e.backend_ip_host == u32::from(host_ipv4) && e.backend_port_host == listener_port
-        })
+        dataplane
+            .local_backend_for(
+                assigned_vip,
+                listener_port,
+                overdrive_core::dataplane::backend_key::Proto::Tcp,
+            )
+            .ok()
+            .flatten()
+            .filter(|e| {
+                e.backend_ip_host == u32::from(host_ipv4) && e.backend_port_host == listener_port
+            })
     })
     .await;
     assert!(

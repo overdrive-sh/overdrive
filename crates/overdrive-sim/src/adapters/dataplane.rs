@@ -103,7 +103,7 @@ pub struct SimDataplane {
     /// `BTreeMap` per `.claude/rules/development.md` §
     /// "Ordered-collection choice" — DST observers walk the
     /// map and require deterministic iteration order.
-    local_backends: Mutex<BTreeMap<(Ipv4Addr, u16), SocketAddrV4>>,
+    local_backends: Mutex<BTreeMap<(Ipv4Addr, u16, Proto), SocketAddrV4>>,
 }
 
 impl SimDataplane {
@@ -137,8 +137,13 @@ impl SimDataplane {
     /// not part of the `Dataplane` trait. Existence here is a testing
     /// convenience, not a trait-contract violation.
     #[must_use]
-    pub fn local_backend_for(&self, vip: Ipv4Addr, vip_port: u16) -> Option<SocketAddrV4> {
-        self.local_backends.lock().get(&(vip, vip_port)).copied()
+    pub fn local_backend_for(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        proto: Proto,
+    ) -> Option<SocketAddrV4> {
+        self.local_backends.lock().get(&(vip, vip_port, proto)).copied()
     }
 
     /// Snapshot every `(vip, port, backend)` triple currently in the
@@ -156,8 +161,8 @@ impl SimDataplane {
     /// Existence here is a testing convenience, not a trait-contract
     /// violation.
     #[must_use]
-    pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, SocketAddrV4)> {
-        self.local_backends.lock().iter().map(|(&(v, p), &b)| (v, p, b)).collect()
+    pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, Proto, SocketAddrV4)> {
+        self.local_backends.lock().iter().map(|(&(v, p, pr), &b)| (v, p, pr, b)).collect()
     }
 
     /// Record a kernel-side drop event for `class`. Increments the
@@ -390,12 +395,15 @@ impl Dataplane for SimDataplane {
         vip: Ipv4Addr,
         vip_port: u16,
         backend: SocketAddrV4,
+        proto: Proto,
     ) -> Result<(), DataplaneError> {
-        // Single-map point write per ADR-0053 § 2 — overwrites any
-        // pre-existing entry for `(vip, vip_port)` atomically (the
-        // mutex acquisition IS the atomicity boundary; observers see
-        // either the prior backend or the new one, never a mix).
-        self.local_backends.lock().insert((vip, vip_port), backend);
+        // Single-map point write per ADR-0053 § 2 (rev 2026-06-03) —
+        // keyed on `(vip, vip_port, proto)` so a co-located tcp/53 +
+        // udp/53 install two distinct entries, observably-equivalent
+        // to `EbpfDataplane`'s `LOCAL_BACKEND_MAP` (vip, port, proto)
+        // key. Overwrites any pre-existing entry for the SAME quadruple
+        // atomically (the mutex acquisition IS the atomicity boundary).
+        self.local_backends.lock().insert((vip, vip_port, proto), backend);
         Ok(())
     }
 
@@ -403,10 +411,13 @@ impl Dataplane for SimDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: Proto,
     ) -> Result<(), DataplaneError> {
         // Idempotent per ADR-0053 § 2 — removing an entry that does
-        // not exist is `Ok(())`, never `KeyNotFound`.
-        self.local_backends.lock().remove(&(vip, vip_port));
+        // not exist is `Ok(())`, never `KeyNotFound`. Removes only the
+        // `(vip, vip_port, proto)` entry; a co-located other-proto
+        // entry on the same `(vip, vip_port)` is left intact.
+        self.local_backends.lock().remove(&(vip, vip_port, proto));
         Ok(())
     }
 }

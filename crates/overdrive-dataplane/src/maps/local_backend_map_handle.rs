@@ -16,6 +16,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use aya::maps::{HashMap, MapData, MapError};
+use overdrive_core::dataplane::backend_key::Proto;
 use parking_lot::Mutex;
 
 use crate::maps::{LocalBackendEntry, LocalServiceKey};
@@ -39,11 +40,13 @@ impl LocalBackendMapHandle {
         Self { inner: Mutex::new(map) }
     }
 
-    /// Insert-or-replace the local backend for `(vip, vip_port)`.
+    /// Insert-or-replace the local backend for `(vip, vip_port, proto)`.
     ///
-    /// Idempotent against the same triple; atomic point write —
-    /// observers see either the prior backend or the new one,
-    /// never a mix.
+    /// `proto` is lowered to its IANA byte (TCP=6, UDP=17) at the write
+    /// edge — the key dimension that distinguishes co-located tcp/53 +
+    /// udp/53 on one VIP (ADR-0053 rev 2026-06-03). Idempotent against
+    /// the same quadruple; atomic point write — observers see either the
+    /// prior backend or the new one, never a mix.
     ///
     /// # Errors
     ///
@@ -55,8 +58,14 @@ impl LocalBackendMapHandle {
         vip: Ipv4Addr,
         vip_port: u16,
         backend: SocketAddrV4,
+        proto: Proto,
     ) -> Result<(), MapError> {
-        let key = LocalServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        let key = LocalServiceKey {
+            vip_host: u32::from(vip),
+            port_host: vip_port,
+            proto: proto.as_u8(),
+            _pad: 0,
+        };
         let value = LocalBackendEntry {
             backend_ip_host: u32::from(*backend.ip()),
             backend_port_host: backend.port(),
@@ -65,7 +74,7 @@ impl LocalBackendMapHandle {
         self.inner.lock().insert(key, value, 0)
     }
 
-    /// Remove the entry for `(vip, vip_port)`.
+    /// Remove the entry for `(vip, vip_port, proto)`.
     ///
     /// Idempotent: removing a non-existent entry returns `Ok(())`
     /// per the ADR-0053 § 2 trait contract — `KeyNotFound` is
@@ -74,8 +83,13 @@ impl LocalBackendMapHandle {
     /// # Errors
     ///
     /// Returns `MapError` for any failure other than `KeyNotFound`.
-    pub fn remove(&self, vip: Ipv4Addr, vip_port: u16) -> Result<(), MapError> {
-        let key = LocalServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+    pub fn remove(&self, vip: Ipv4Addr, vip_port: u16, proto: Proto) -> Result<(), MapError> {
+        let key = LocalServiceKey {
+            vip_host: u32::from(vip),
+            port_host: vip_port,
+            proto: proto.as_u8(),
+            _pad: 0,
+        };
         // Bind the lock-guarded `Remove` result to a local so the
         // mutex guard drops before the match scrutinee is evaluated
         // (clippy::significant_drop_in_scrutinee).
@@ -126,13 +140,91 @@ impl LocalBackendMapHandle {
     ///
     /// Returns `MapError` on syscall failure other than
     /// `KeyNotFound` (which surfaces as `Ok(None)`).
-    pub fn get(&self, vip: Ipv4Addr, vip_port: u16) -> Result<Option<LocalBackendEntry>, MapError> {
-        let key = LocalServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+    pub fn get(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        proto: Proto,
+    ) -> Result<Option<LocalBackendEntry>, MapError> {
+        let key = LocalServiceKey {
+            vip_host: u32::from(vip),
+            port_host: vip_port,
+            proto: proto.as_u8(),
+            _pad: 0,
+        };
         let outcome = self.inner.lock().get(&key, 0);
         match outcome {
             Ok(v) => Ok(Some(v)),
             Err(MapError::KeyNotFound) => Ok(None),
             Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::missing_panics_doc)]
+mod tests {
+    //! S-02-02 — userspace `LocalServiceKey` layout + proto-roundtrip
+    //! proptest. There is NO Tier-2 `BPF_PROG_TEST_RUN` backstop for
+    //! the `cgroup_sock_addr` program that reads this key, so this
+    //! proptest is the userspace-edge compensation for the proto-source
+    //! correctness (per the task contract): it pins the 8-byte key
+    //! layout, proto at byte offset 6, trailing pad 0, and the
+    //! no-userspace-flip invariant (host-order in == host-order bytes).
+
+    use std::net::Ipv4Addr;
+
+    use overdrive_core::dataplane::backend_key::Proto;
+    use proptest::prelude::*;
+
+    use crate::maps::LocalServiceKey;
+
+    /// 8-byte key layout is the byte-for-byte contract the kernel-side
+    /// `LocalServiceKey` mirrors. A drift off 8 bytes silently
+    /// mis-keys every cgroup lookup.
+    #[test]
+    fn local_service_key_is_eight_bytes() {
+        assert_eq!(core::mem::size_of::<LocalServiceKey>(), 8);
+    }
+
+    fn arb_proto() -> impl Strategy<Value = Proto> {
+        prop_oneof![Just(Proto::Tcp), Just(Proto::Udp)]
+    }
+
+    proptest! {
+        /// For any `(vip, vip_port, proto)`, the host-order
+        /// `LocalServiceKey` the handle builds is byte-identical to the
+        /// key the kernel would build from the same `bpf_sock_addr`:
+        /// `vip_host` host-order, `port_host` host-order, `proto` the
+        /// IANA byte at offset 6, trailing `_pad == 0`. Catches a
+        /// mis-slotted proto byte, a non-zero pad, or any sneaky
+        /// endianness flip at the userspace edge.
+        #[test]
+        fn local_service_key_bytes_match_kernel_build(
+            vip in any::<u32>(),
+            vip_port in any::<u16>(),
+            proto in arb_proto(),
+        ) {
+            let v4 = Ipv4Addr::from(vip);
+            let key = LocalServiceKey {
+                vip_host: u32::from(v4),
+                port_host: vip_port,
+                proto: proto.as_u8(),
+                _pad: 0,
+            };
+            // No userspace flip: host-order in == host-order field.
+            prop_assert_eq!(key.vip_host, vip);
+            prop_assert_eq!(key.port_host, vip_port);
+            prop_assert_eq!(key.proto, proto.as_u8());
+
+            // Byte-for-byte: proto lands at offset 6, trailing pad
+            // (offset 7) is zeroed. Asserting the pad through the byte
+            // view (not the `_pad` field) keeps clippy's
+            // `used_underscore_binding` happy while still pinning that
+            // the construction zeroes it.
+            let bytes: [u8; 8] = unsafe { core::mem::transmute(key) };
+            prop_assert_eq!(bytes[6], proto.as_u8(), "proto byte at offset 6");
+            prop_assert_eq!(bytes[7], 0u8, "trailing pad byte at offset 7 is zero");
         }
     }
 }

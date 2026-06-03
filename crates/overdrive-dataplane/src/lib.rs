@@ -1009,29 +1009,33 @@ impl EbpfDataplane {
         let sentinel_vip = Ipv4Addr::UNSPECIFIED;
         let sentinel_vip_port: u16 = 0;
         let sentinel_backend = std::net::SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+        // Sentinel proto is arbitrary — the round-trip only confirms the
+        // map is programmable end-to-end. TCP is the conventional choice.
+        let sentinel_proto = overdrive_core::dataplane::backend_key::Proto::Tcp;
 
-        self.local_backend_map.upsert(sentinel_vip, sentinel_vip_port, sentinel_backend).map_err(
-            |e| DataplaneError::LocalBackendProbe {
+        self.local_backend_map
+            .upsert(sentinel_vip, sentinel_vip_port, sentinel_backend, sentinel_proto)
+            .map_err(|e| DataplaneError::LocalBackendProbe {
                 message: format!("LOCAL_BACKEND_MAP sentinel insert: {e}"),
-            },
-        )?;
+            })?;
 
-        let got = self.local_backend_map.get(sentinel_vip, sentinel_vip_port).map_err(|e| {
-            DataplaneError::LocalBackendProbe {
+        let got = self
+            .local_backend_map
+            .get(sentinel_vip, sentinel_vip_port, sentinel_proto)
+            .map_err(|e| DataplaneError::LocalBackendProbe {
                 message: format!("LOCAL_BACKEND_MAP sentinel get: {e}"),
-            }
-        })?;
+            })?;
         if got.is_none() {
             return Err(DataplaneError::LocalBackendProbe {
                 message: "LOCAL_BACKEND_MAP sentinel round-trip missed: got None".to_string(),
             });
         }
 
-        self.local_backend_map.remove(sentinel_vip, sentinel_vip_port).map_err(|e| {
-            DataplaneError::LocalBackendProbe {
+        self.local_backend_map.remove(sentinel_vip, sentinel_vip_port, sentinel_proto).map_err(
+            |e| DataplaneError::LocalBackendProbe {
                 message: format!("LOCAL_BACKEND_MAP sentinel delete: {e}"),
-            }
-        })?;
+            },
+        )?;
 
         Ok(())
     }
@@ -1067,9 +1071,10 @@ impl EbpfDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<Option<crate::maps::LocalBackendEntry>, DataplaneError> {
         self.local_backend_map
-            .get(vip, vip_port)
+            .get(vip, vip_port, proto)
             .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP get: {e}")))
     }
 
@@ -1673,8 +1678,9 @@ impl Dataplane for EbpfDataplane {
         vip: Ipv4Addr,
         vip_port: u16,
         backend: std::net::SocketAddrV4,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
-        self.local_backend_map.upsert(vip, vip_port, backend).map_err(|e| {
+        self.local_backend_map.upsert(vip, vip_port, backend, proto).map_err(|e| {
             DataplaneError::LocalBackendInsert {
                 source: std::io::Error::other(format!("aya HashMap::insert: {e}")),
             }
@@ -1687,8 +1693,9 @@ impl Dataplane for EbpfDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
-        self.local_backend_map.remove(vip, vip_port).map_err(|e| {
+        self.local_backend_map.remove(vip, vip_port, proto).map_err(|e| {
             DataplaneError::LocalBackendDelete {
                 source: std::io::Error::other(format!("aya HashMap::remove: {e}")),
             }
