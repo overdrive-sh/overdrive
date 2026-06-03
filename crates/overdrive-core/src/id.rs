@@ -949,6 +949,7 @@ impl FromStr for BackendId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn label_rejects_empty() {
@@ -1014,5 +1015,74 @@ mod tests {
         assert_eq!(json, "\"payments\"");
         let back: WorkloadId = serde_json::from_str(&json).unwrap();
         assert_eq!(id, back);
+    }
+
+    // -------------------------------------------------------------------------
+    // `as_str` getters return the exact canonical bytes the constructor stored.
+    //
+    // These pin the *real* returned string against each type's stored
+    // canonical form (SpiffeId lowercases; CertSerial / CorrelationKey echo
+    // a verbatim valid input). Property framing over the constructor's input
+    // space — rather than a single fixture — is the natural shape: the
+    // invariant is "`as_str()` == what `new` stored" for every valid input,
+    // and the generated values are never `""` nor any fixed sentinel.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn spiffe_as_str_is_lowercased_canonical_for_mixed_case_input() {
+        // Mixed-case input → `new` lowercases the whole string; `as_str`
+        // must echo that lowercased canonical verbatim, scheme included.
+        let id = SpiffeId::new("SPIFFE://Overdrive.Local/Job/Payments").unwrap();
+        assert_eq!(id.as_str(), "spiffe://overdrive.local/job/payments");
+    }
+
+    proptest! {
+        /// `SpiffeId::as_str()` returns the lowercased canonical form of any
+        /// valid input — i.e. exactly `raw.to_ascii_lowercase()`. The body
+        /// returning `""` or any constant cannot satisfy this across the
+        /// generated input space.
+        #[test]
+        fn spiffe_as_str_equals_lowercased_input(
+            trust in "[a-zA-Z][a-zA-Z0-9.-]{0,30}\\.[a-zA-Z]{2,6}",
+            path in "[a-zA-Z0-9][a-zA-Z0-9/._-]{0,40}",
+        ) {
+            let raw = format!("spiffe://{trust}/{path}");
+            let id = SpiffeId::new(&raw).unwrap();
+            prop_assert_eq!(id.as_str(), raw.to_ascii_lowercase());
+        }
+
+        /// `CertSerial::as_str()` echoes the (already-canonical, lowercase,
+        /// even-length hex) input verbatim. Generated from arbitrary bytes
+        /// rendered as lowercase hex, so the asserted value varies per case
+        /// and is never a fixed string.
+        #[test]
+        fn cert_serial_as_str_echoes_canonical_input(
+            bytes in proptest::collection::vec(any::<u8>(), 1..=CERT_SERIAL_MAX_BYTES),
+        ) {
+            let canonical = hex::encode(&bytes); // lowercase, even length
+            let serial = CertSerial::new(&canonical).unwrap();
+            prop_assert_eq!(serial.as_str(), canonical);
+        }
+
+        /// `CorrelationKey::new(raw).as_str()` echoes a valid non-empty
+        /// bounded input verbatim.
+        #[test]
+        fn correlation_key_new_as_str_echoes_input(
+            raw in "[a-zA-Z0-9:/_.-]{1,64}",
+        ) {
+            let key = CorrelationKey::new(&raw).unwrap();
+            prop_assert_eq!(key.as_str(), raw);
+        }
+    }
+
+    #[test]
+    fn correlation_key_derive_as_str_is_non_empty_and_well_formed() {
+        // Bonus: the derived form is also surfaced through `as_str` — it
+        // carries the `target:purpose/<hex>` shape and is never empty.
+        let h = ContentHash::of(b"spec");
+        let key = CorrelationKey::derive("payments", &h, "register");
+        let s = key.as_str();
+        assert!(s.starts_with("payments:register/"));
+        assert!(s.len() > "payments:register/".len());
     }
 }
