@@ -193,17 +193,19 @@ impl ListenerFactStore {
             // `workloads/<id>/kind` sub-keys.
             let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
             let suffix = &key_str["workloads/".len()..];
-            // mutants: skip — equivalent mutant (`||` → `&&`): with `&&`
-            // the guard never fires (an empty suffix cannot contain '/'),
-            // so the `workloads/<id>/stop` and `workloads/<id>/kind`
-            // sub-keys are not fast-skipped here — but they then fail the
+            // Equivalent mutant note (`||` → `&&`): with `&&` the guard
+            // never fires (an empty suffix cannot contain '/'), so the
+            // `workloads/<id>/stop` and `workloads/<id>/kind` sub-keys are
+            // not fast-skipped here — but they then fail the
             // `WorkloadIntent::from_store_bytes` decode + `Service(_)` match
             // below (a stop sentinel / 1-byte kind discriminator does not
             // bytecheck as a Service envelope) and `continue` regardless.
             // The canonical `workloads/<id>` key (non-empty, no '/') is
             // never skipped under either operator. Facts are byte-identical;
-            // no test can distinguish the variants. Annotation relocated
-            // here from the per-tick gather during the 01-01 rebuild move.
+            // no test can distinguish the variants. cargo-mutants only
+            // honors the marker on the immediately-adjacent line, so the
+            // bare token must sit directly above the `if`.
+            // mutants: skip
             if suffix.is_empty() || suffix.contains('/') {
                 continue;
             }
