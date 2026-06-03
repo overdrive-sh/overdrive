@@ -1121,6 +1121,169 @@ migration. Per `feedback_single_cut_greenfield_migrations.md`.
 |---|---|
 | 2026-06-03 | LOCAL_BACKEND_MAP key `(VIP, vip_port)` → `(VIP, vip_port, proto)`, IPVS-style. cgroup_connect4 proto-source contract pinned to `bpf_sock_addr.protocol` (IANA byte, zero-translation; `type` as documented fallback). `Action::RegisterLocalBackend`/`DeregisterLocalBackend` + trait methods gain `proto: Proto`. Connected-UDP in scope; unconnected-UDP via sendmsg4 explicitly out of scope (separate undelivered hook, tracked as [#200](https://github.com/overdrive-sh/overdrive/issues/200)). Single-cut reconciler-repopulated migration; no shim. Resolves P2-Q4 (`udp-service-support`) for the same-host path. — Morgan (user-locked). |
 
+## Revision 2026-06-03 — dispatch-boundary conflict granularity is `(route, key-tuple)`, NOT the shared VIP (cross-route dual-path is blessed, not a conflict)
+
+### Status
+
+Amendment. 2026-06-03. Decision-maker: Morgan. This amendment does NOT
+change the architecture — it states authoritatively a property that
+Decisions 2, 4, and 5 above already imply, because a later artifact
+(the `validate_reconcile_output` runtime validator) contradicted it
+and misattributed its provenance. This is a correction of the
+design-artifact surface so the next reader does not re-derive the
+over-broad rule.
+
+**Triggering RCA**: a completed root-cause analysis found that
+`validate_reconcile_output` in
+`crates/overdrive-control-plane/src/action_shim/validate.rs` rejects a
+reconcile output that emits BOTH a `DataplaneUpdateService` (XDP
+`SERVICE_MAP` write) AND a `RegisterLocalBackend` (cgroup
+`LOCAL_BACKEND_MAP` write) for the same VIP in one tick — calling it a
+"cross-route conflict" (its "Conflict class 2") and citing "the Phase
+16 D11 finding." Both the rule and the citation are wrong against this
+ADR.
+
+**Evidence base**:
+`docs/research/reconcilers/dispatch-boundary-validation-and-attempt-budget-backoff.md`
+(Nova, 2026-06-03, High confidence) — Kubernetes Server-Side Apply
+field-manager conflict granularity (conflict = collision on an owned
+field, never co-residence on the shared parent object) and Cilium
+socket-LB (`cgroup connect4`) ⊥ XDP/tc datapath as complementary,
+explicitly "transparent" surfaces for one ClusterIP.
+
+### The property this ADR already establishes
+
+Three load-bearing statements above pin that cross-route writes on one
+VIP are the **intended dual-path**, not a conflict:
+
+- **Decision 2 (observable invariant, lines ~295–300):** *"`update_service(vip, ...)`
+  and `register_local_backend(vip, port, ...)` for the same VIP are not
+  mutually exclusive at the adapter — the XDP path consumes the first,
+  the cgroup path consumes the second. The classifier in
+  `ServiceMapHydrator` (§ 4) is responsible for choosing exactly one
+  per backend."*
+- **Decision 4 (mixed-backend emission, lines ~390–394):** *"A service
+  with mixed local and remote backends (a Phase 2+ shape) emits both
+  action kinds for the same `service_id`. The two dataplane paths are
+  independent and the trait contract permits this concurrent dual-path."*
+- **Decision 5 (no precedence race, lines ~408–413):** *"Traffic that
+  would match a backend's IP never traverses XDP because the cgroup
+  rewrite happens before the kernel routes the SYN."* `cgroup_connect4`
+  fires at `connect(2)` time, before the SYN exists; XDP fires at wire
+  ingress. Two disjoint kernel maps, two hooks, disjoint backend sets
+  (local vs remote). There is no shared slot and no precedence
+  ambiguity.
+
+### Amendment — the dispatch-boundary invariant, stated authoritatively
+
+The runtime validator at the action-shim dispatch boundary (ADR-0023)
+MUST detect reconcile-output conflicts at **`(route, key-tuple)`
+granularity, never at the shared-VIP level**:
+
+1. **Genuine conflicts — same route, same key-tuple (a real
+   last-writer-wins overwrite of one map slot):**
+   - **XDP-vs-XDP:** two `DataplaneUpdateService` writes to the same
+     `SERVICE_MAP` key `(vip, port, proto)` (per ADR-0040 revision
+     2026-06-03; pre-02-01 this key was VIP-only). *Conflict.*
+   - **Cgroup-vs-cgroup:** two `RegisterLocalBackend` /
+     `DeregisterLocalBackend` writes to the same `LOCAL_BACKEND_MAP`
+     key `(vip, vip_port, proto)` (per this ADR's revision 2026-06-03;
+     pre-02-02 this key was `(vip, vip_port)`). *Conflict.*
+2. **NOT a conflict — cross-route on the same VIP:** an XDP
+   `SERVICE_MAP` write AND a cgroup `LOCAL_BACKEND_MAP` write for the
+   same VIP in one tick. **This is the blessed dual-path of Decisions
+   2/4/5 above.** The two routes are disjoint kernel maps consumed by
+   different hooks with no precedence race; the backend sets are
+   disjoint (local XOR remote per backend, chosen by the §4
+   classifier). A VIP appearing on both routes is the *correct* shape
+   for a mixed local+remote service, not a defect. The validator MUST
+   NOT reject it.
+
+The key tuples are the *actual map keys* (post-2026-06-03 amendments:
+XDP `(vip, port, proto)`, cgroup `(vip, vip_port, proto)`). Disjoint
+ports and disjoint proto are distinct slots on either route and do not
+conflict — the same per-`(…, proto)` granularity the SERVICE_MAP /
+REVERSE_NAT / LOCAL_BACKEND_MAP amendments established.
+
+### External precedent (from the evidence-base research)
+
+- **Kubernetes Server-Side Apply** keys conflict detection on the
+  individual owned field, never on the whole object: two managers on
+  disjoint fields of one object never conflict (conflict is the *set
+  intersection* of owned field paths, computed by
+  `sigs.k8s.io/structured-merge-diff`). The owned leaf — the
+  `(map, key)` slot here — is the unit of conflict, not the shared
+  parent (the VIP). Source: https://kubernetes.io/docs/reference/using-api/server-side-apply/
+  (accessed 2026-06-03).
+- **Cilium** runs socket-LB (`cgroup/connect4`) and the wire-time
+  XDP/tc datapath as complementary surfaces for the same service
+  ClusterIP: *"The socket-level loadbalancer acts transparent to
+  Cilium's lower layer datapath."* The connect-time rewrite happens
+  before any XDP ingress decision, so the two paths cannot race on the
+  same key — the dataplane-specific instance of the SSA principle and
+  the direct analogue to Overdrive's `RegisterLocalBackend` (cgroup,
+  local) + `DataplaneUpdateService` (XDP, remote) pair. Source:
+  https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
+  (accessed 2026-06-03).
+
+### Why this lives here and not in a new ADR
+
+The validator is not a new architectural decision — it is a *runtime
+enforcement* of an invariant this ADR already specifies (Decisions
+2/4/5) plus the same-class observation-row finding D11 (see below).
+Its correct conflict granularity is therefore an amendment to this
+ADR's existing contract, not a standalone decision record. No new ADR
+is warranted; opening one would imply a fresh option-space that does
+not exist — the option-space was settled when Decisions 2/4/5 landed.
+
+### D11 provenance correction
+
+The validator cites *"the Phase 16 D11 finding"* as the authority for
+its cross-route rule. **The citation is misattributed.** The real D11
+finding (`docs/evolution/2026-05-23-backend-discovery-bridge-service-reachability.md`
+§ "Reconcile-output invariant at the action_shim boundary (D11,
+`6d62afe6`)") is about two **same-class** `WriteServiceBackendRow`
+Actions (observation-row writes) targeting one VIP with *conflicting
+backend sets* — a genuine last-writer-wins overwrite of one
+observation slot. D11 says nothing about XDP+cgroup cross-route
+composition. The validator generalised a same-slot-overwrite finding
+into a cross-route rule that contradicts this ADR. D11 governs
+**same-route same-key** overwrites only (conflict class 1); it does
+NOT authorise the cross-route rule (the rejected non-conflict, class
+2). The evolution doc carries a matching clarifying note as of
+2026-06-03.
+
+### What this amendment changes vs preserves
+
+| Element | Status |
+|---|---|
+| Decisions 2 / 4 / 5 (cross-route dual-path is intended) | **Preserved and restated authoritatively.** No change; this amendment makes the already-implied property explicit so the validator can be brought into line. |
+| `validate_reconcile_output` conflict granularity | **Corrected (code fix is a separate `/nw-deliver`).** Conflict at `(route, key-tuple)`; cross-route-on-same-VIP rule removed. The architect provides the corrected module-doc prose; the code change is out of this amendment's scope. |
+| D11 provenance citation in `validate.rs` | **Corrected.** D11 governs same-class observation-row write conflicts only; the cross-route rule is not derived from it. |
+
+### Cross-references
+
+- `docs/research/reconcilers/dispatch-boundary-validation-and-attempt-budget-backoff.md`
+  — SSA field-manager + Cilium socket-LB/XDP evidence base.
+- `docs/evolution/2026-05-23-backend-discovery-bridge-service-reachability.md`
+  § D11 — the same-class observation-row finding the validator
+  misattributed (carries a matching clarifying note as of 2026-06-03).
+- `crates/overdrive-control-plane/src/action_shim/validate.rs` — the
+  validator whose conflict granularity is corrected by the companion
+  `/nw-deliver` code fix.
+- ADR-0040 revision 2026-06-03 (SERVICE_MAP `(vip, port, proto)` key) /
+  this ADR's revision 2026-06-03 (LOCAL_BACKEND_MAP `(vip, vip_port,
+  proto)` key) — the actual map key tuples the `(route, key-tuple)`
+  granularity refers to.
+- ADR-0023 (action-shim dispatch boundary) — the layer the validator
+  runs at.
+
+### Changelog (Revision 2026-06-03 — dispatch-boundary granularity)
+
+| Date | Change |
+|---|---|
+| 2026-06-03 | State authoritatively: cross-route writes (XDP-for-remote + cgroup-for-local) on the same VIP are the blessed dual-path of Decisions 2/4/5 and are explicitly NOT a conflict. The only genuine reconcile-output conflicts are same-route same-key overwrites: two XDP writes to `(vip, port, proto)`, or two cgroup writes to `(vip, vip_port, proto)`. Dispatch-boundary validator MUST detect conflicts at `(route, key-tuple)` granularity, never at the shared VIP. Cite SSA field-manager + Cilium socket-LB/XDP precedent. Correct the validator's D11 misattribution (D11 governs same-class observation-row write conflicts only). Code fix is a separate `/nw-deliver`. — Morgan. |
+
 ## Changelog
 
 - 2026-05-22 — Initial proposed version. Same-host backend delivery via `cgroup_sock_addr` connect-time destination rewrite. Resolves the walking-skeleton TCP round-trip data-path gap.

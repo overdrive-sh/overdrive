@@ -353,6 +353,38 @@ desired/actual state. The validator generalises — it is the home for
 future "this set of actions must satisfy property X" invariants the
 reconciler trait surface cannot express in types alone.
 
+> **Scope clarification (added 2026-06-03).** D11 is about
+> **same-class** write conflicts only: two `WriteServiceBackendRow`
+> Actions (observation-row writes) targeting one VIP with conflicting
+> backend sets — a genuine last-writer-wins overwrite of one
+> observation slot. The invariant D11 establishes is "no two writes to
+> the **same map slot** in one tick." Phrased here as "the same service
+> VIP" because at the time of writing the only write surface in play was
+> the single-keyed observation row.
+>
+> D11 does **NOT** authorise a *cross-route* conflict rule. A later
+> artifact — `validate_reconcile_output` in
+> `crates/overdrive-control-plane/src/action_shim/validate.rs` —
+> generalised D11 into a "cross-route on the same VIP" rejection
+> (its "Conflict class 2"): it rejects a tick that emits BOTH an XDP
+> `DataplaneUpdateService` (SERVICE_MAP write) AND a cgroup
+> `RegisterLocalBackend` (LOCAL_BACKEND_MAP write) for one VIP. **That
+> generalisation is wrong** — it contradicts ADR-0053 Decisions 2/4/5,
+> where the XDP-for-remote + cgroup-for-local dual-path on one VIP is
+> the *intended* shape (two disjoint kernel maps, two hooks, disjoint
+> local-XOR-remote backend sets, `cgroup_connect4` rewriting before the
+> kernel routes the SYN so there is no precedence race). The correct
+> conflict granularity is `(route, key-tuple)` — XDP keyed on
+> `(vip, port, proto)`, cgroup keyed on `(vip, vip_port, proto)` —
+> never the shared parent VIP. See ADR-0053 revision 2026-06-03
+> ("dispatch-boundary conflict granularity is `(route, key-tuple)`")
+> and the evidence base at
+> `docs/research/reconcilers/dispatch-boundary-validation-and-attempt-budget-backoff.md`
+> (Kubernetes Server-Side Apply field-manager granularity + Cilium
+> socket-LB ⊥ XDP datapath). The next reader must not re-derive the
+> over-broad invariant from D11. The validator's code + citation fix is
+> a separate `/nw-deliver`.
+
 ### Phase 1 boundary clarifications (load-bearing for ADR-0053)
 
 The TCP RCA forced the Phase 1 boundaries to be re-stated as
