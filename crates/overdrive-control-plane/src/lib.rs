@@ -61,6 +61,10 @@ pub mod handlers;
 // `Ipv4Addr` through `AppState.host_ipv4` to the
 // `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
 pub mod iface;
+// reconciler-listener-fact-view step 01-01 — in-memory listener-fact
+// projection (ADR-0062) replacing the `ServiceMapHydrator`'s O(S²)
+// per-tick cluster scan with an O(1) keyed read off a maintained view.
+pub mod listener_facts;
 pub mod observation_wiring;
 // `cargo openapi-{gen,check}` library — pure deterministic YAML render
 // + drift detection. Paired with the `openapi` binary in `src/bin/`.
