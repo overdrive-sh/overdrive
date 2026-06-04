@@ -8,6 +8,6 @@
 
 pub mod alloc;
 pub mod cluster;
-pub mod job;
+pub mod deploy;
 pub mod node;
 pub mod serve;

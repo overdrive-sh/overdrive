@@ -83,16 +83,17 @@ top-level `Command::Deploy { spec, detach }` in
 the real command until commit `17f633e2` ("refactor: rename
 job-specific identifiers to workload-generic naming", May 11 2026),
 which promoted it to top-level `overdrive deploy`. The `Job` subcommand
-now carries only `list` and `stop`. The internal handler is still named
-`commands::job::submit` / `SubmitArgs` and there is a
-`tests/integration/job_submit.rs` — so the stale `job submit` phrasing
-is still discoverable in the code surface and keeps leaking into docs
-(it did in the udp-service-support DISCUSS/DIVERGE artifacts). When
-writing operator-facing docs, journeys, or examples, the only correct
-verb is `overdrive deploy <SPEC>`. Do not copy `job submit` from older
-phase docs or from the handler name. The internal-surface rename that
-removes this trap is tracked in
-[#193](https://github.com/overdrive-sh/overdrive/issues/193).
+now carries only `list` and `stop`. The internal handler surface was
+renamed to track the verb in #193: the module is
+`crates/overdrive-cli/src/commands/deploy.rs` (`commands::deploy`), the
+handlers are `deploy` / `deploy_streaming` (plus the per-workload-kind
+`deploy_streaming_job` / `deploy_streaming_service`), the arg/output
+types are `DeployArgs` / `DeployOutput` / `DeployStreamingOutput`, and
+the integration tests live in `tests/integration/deploy.rs`. No
+`job::submit` / `SubmitArgs` surface remains in the crate. When writing
+operator-facing docs, journeys, or examples, the only correct verb is
+`overdrive deploy <SPEC>`. Do not copy `job submit` from older phase
+docs.
 
 ## Mutation Testing Strategy
 

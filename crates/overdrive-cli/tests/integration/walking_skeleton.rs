@@ -9,7 +9,7 @@
 //!
 //!   WS-1 (§1.1) — `serve::run` spawns an in-process axum+rustls server
 //!     on an ephemeral port AND writes the resolved-port trust triple to
-//!     disk; `job::submit` POSTs `payments.toml`; the server returns
+//!     disk; `deploy::deploy` POSTs `payments.toml`; the server returns
 //!     `outcome = Inserted` and a `spec_digest` BYTE-IDENTICAL to a
 //!     locally-computed
 //!     `ContentHash::of(rkyv::to_bytes(&Job::from_submit(...)))`.
@@ -18,7 +18,7 @@
 //!     (`{mode, region, reconcilers, broker}`); `broker.dispatched > 0`
 //!     after a tick proves the reconciler runtime is alive (the ADR-0020
 //!     wiring witness — there is no `commit_index` line).
-//!   WS-3 (§1.3) — `job::submit` of a byte-identical spec returns
+//!   WS-3 (§1.3) — `deploy::deploy` of a byte-identical spec returns
 //!     `outcome = Unchanged` and `spec_digest` equal to the first
 //!     submit's digest. A different spec at the same intent key is a
 //!     conflict (HTTP 409), with an actionable error message that does
@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 use overdrive_cli::commands::alloc::{AllocStatusOutput, StatusArgs};
 use overdrive_cli::commands::cluster::StatusArgs as ClusterStatusArgs;
-use overdrive_cli::commands::job::SubmitArgs;
+use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
@@ -153,12 +153,12 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     // Post-ADR-0020 the submit response carries
     // `{workload_id, spec_digest, outcome}` — no `commit_index`.
     let spec_path = write_toml(server_tmp.path(), "payments.toml", payments_toml_spec_str());
-    let submit_output = overdrive_cli::commands::job::submit(SubmitArgs {
+    let submit_output = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: spec_path.clone(),
         config_path: server_cfg.clone(),
     })
     .await
-    .expect("job::submit");
+    .expect("deploy::deploy");
     assert_eq!(submit_output.workload_id, "payments");
     assert_eq!(submit_output.intent_key, "workloads/payments");
 
@@ -255,12 +255,12 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     // same `spec_digest`. A different spec at the same intent key is
     // a conflict (HTTP 409), with an actionable error message that
     // does NOT leak a raw Rust panic / reqwest format.
-    let resubmit_output = overdrive_cli::commands::job::submit(SubmitArgs {
+    let resubmit_output = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: spec_path,
         config_path: server_cfg.clone(),
     })
     .await
-    .expect("job::submit (resubmit)");
+    .expect("deploy::deploy (resubmit)");
     assert_eq!(
         resubmit_output.outcome,
         IdempotencyOutcome::Unchanged,
@@ -277,7 +277,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
 
     let altered_path =
         write_toml(server_tmp.path(), "payments-altered.toml", payments_altered_toml_spec_str());
-    let conflict_err = overdrive_cli::commands::job::submit(SubmitArgs {
+    let conflict_err = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: altered_path,
         config_path: server_cfg,
     })

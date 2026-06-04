@@ -81,15 +81,15 @@ async fn run(cli: Cli) -> Result<()> {
             // `tests/acceptance/submit_pipe_autodetect.rs` exercises
             // it directly with fake probes.
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::job::SubmitArgs { spec, config_path };
-            let probe = overdrive_cli::commands::job::RealStdoutTerminal;
-            let stream = overdrive_cli::commands::job::should_stream(
+            let args = overdrive_cli::commands::deploy::DeployArgs { spec, config_path };
+            let probe = overdrive_cli::commands::deploy::RealStdoutTerminal;
+            let stream = overdrive_cli::commands::deploy::should_stream(
                 detach,
-                overdrive_cli::commands::job::StdoutTerminalProbe::is_terminal(&probe),
+                overdrive_cli::commands::deploy::StdoutTerminalProbe::is_terminal(&probe),
             );
             if stream {
                 // Streaming-default lane — slice 02 step 02-04 shape.
-                match overdrive_cli::commands::job::submit_streaming(args).await {
+                match overdrive_cli::commands::deploy::deploy_streaming(args).await {
                     Ok(out) => {
                         // The streaming summary already includes the
                         // operator-facing block — print it verbatim.
@@ -119,7 +119,7 @@ async fn run(cli: Cli) -> Result<()> {
                 // Detached / non-TTY lane — JSON ack only, no NDJSON
                 // consumer engaged. Fires when `--detach` is set OR
                 // stdout is redirected (pipe / file / non-TTY).
-                match overdrive_cli::commands::job::submit(args).await {
+                match overdrive_cli::commands::deploy::deploy(args).await {
                     Ok(out) => {
                         print!("{}", overdrive_cli::render::workload_submit_accepted(&out));
                         // Exit code 0 on `Inserted`/`Unchanged` per the
@@ -138,8 +138,8 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::Job(JobCommand::Stop { id }) => {
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::job::StopArgs { id, config_path };
-            match overdrive_cli::commands::job::stop(args).await {
+            let args = overdrive_cli::commands::deploy::StopArgs { id, config_path };
+            match overdrive_cli::commands::deploy::stop(args).await {
                 Ok(out) => {
                     print!("{}", overdrive_cli::render::workload_stop_accepted(&out));
                     Ok(())

@@ -5,13 +5,13 @@
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md`: tests call command handlers
 //! directly with injected adapters (NOT subprocess). The kind-
-//! rejection fires inside `job::submit` at spec-parse time, BEFORE any
+//! rejection fires inside `deploy::deploy` at spec-parse time, BEFORE any
 //! HTTP call (`ApiClient::from_config` is step 4; parse is step 2), so
 //! these tests need no running server — the `config_path` is never
 //! reached on the rejection path.
 //!
 //! Universe (observable surface of the driving port): the `Result`
-//! returned by `job::submit` — its `CliError` variant, the wrapped
+//! returned by `deploy::deploy` — its `CliError` variant, the wrapped
 //! `ParseError`'s `kind` / `guidance` fields, the rendered multi-line
 //! error string, and the `cli_error_to_exit_code` mapping. None of the
 //! assertions reach into handler internals.
@@ -27,7 +27,7 @@
 
 use std::path::PathBuf;
 
-use overdrive_cli::commands::job::{self, SubmitArgs};
+use overdrive_cli::commands::deploy::{self, DeployArgs};
 use overdrive_cli::http_client::CliError;
 use overdrive_cli::render::cli_error_to_exit_code;
 use overdrive_core::aggregate::{
@@ -104,7 +104,7 @@ port = 8080
 "#;
 
 /// S-SHCP-CLI-12 (US-07 / K5) — Job + `[[health_check.startup]]`
-/// submitted via the `job::submit` driving port returns
+/// submitted via the `deploy::deploy` driving port returns
 /// `CliError::ParseError(ProbesNotAllowedOnKind { kind: "job",
 /// guidance: <job guidance> })`, the rendered error contains the job
 /// guidance text, and the exit-code mapping is 1.
@@ -117,9 +117,9 @@ port = 8080
 #[tokio::test]
 async fn given_job_with_probe_section_when_submit_then_named_error_with_job_guidance_exit_one() {
     let (spec, _tmp) = write_fixture(JOB_WITH_STARTUP_PROBE);
-    let args = SubmitArgs { spec, config_path: PathBuf::from("/nonexistent/config") };
+    let args = DeployArgs { spec, config_path: PathBuf::from("/nonexistent/config") };
 
-    let err = job::submit(args).await.expect_err("Job + probe must be rejected");
+    let err = deploy::deploy(args).await.expect_err("Job + probe must be rejected");
     match &err {
         CliError::ParseError(ParseError::ProbesNotAllowedOnKind { kind, guidance }) => {
             assert_eq!(*kind, "job");
@@ -143,9 +143,9 @@ async fn given_job_with_probe_section_when_submit_then_named_error_with_job_guid
 #[tokio::test]
 async fn given_schedule_with_probe_section_when_submit_then_named_error_with_schedule_guidance() {
     let (spec, _tmp) = write_fixture(SCHEDULE_WITH_READINESS_PROBE);
-    let args = SubmitArgs { spec, config_path: PathBuf::from("/nonexistent/config") };
+    let args = DeployArgs { spec, config_path: PathBuf::from("/nonexistent/config") };
 
-    let err = job::submit(args).await.expect_err("Schedule + probe must be rejected");
+    let err = deploy::deploy(args).await.expect_err("Schedule + probe must be rejected");
     match &err {
         CliError::ParseError(ParseError::ProbesNotAllowedOnKind { kind, guidance }) => {
             assert_eq!(*kind, "schedule");
@@ -164,7 +164,7 @@ async fn given_schedule_with_probe_section_when_submit_then_named_error_with_sch
 /// `[[health_check.readiness]]` is ACCEPTED: the kind-discriminating
 /// parser does NOT raise `ProbesNotAllowedOnKind`. Asserted at the
 /// parse driving port (`WorkloadSpecInput::from_toml_str`) — a full
-/// `job::submit` would fall through to the legacy flat-`JobSpecInput`
+/// `deploy::deploy` would fall through to the legacy flat-`JobSpecInput`
 /// path and fail on the unrelated absence of flat job fields, which
 /// would conflate "kind rejection" with "wrong legacy shape". The
 /// regression this guards is precisely "Service probes must NOT trip

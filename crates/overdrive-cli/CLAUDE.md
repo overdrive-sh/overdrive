@@ -13,9 +13,9 @@ not runtime-tunable per command.
 
 - `Cli` has no `endpoint` field — only `command`.
 - `ApiClient::from_config(config_path)` is the only constructor.
-- Handler arg structs (`SubmitArgs`, `StatusArgs`, `ListArgs`) carry
+- Handler arg structs (`DeployArgs`, `StatusArgs`, `ListArgs`) carry
   `config_path: PathBuf` — no endpoint field.
-- `SubmitOutput.endpoint` and the `CliError::Transport` rendering
+- `DeployOutput.endpoint` and the `CliError::Transport` rendering
   both read from `ApiClient::base_url()` — the endpoint the trust
   triple names is the only source.
 - `overdrive serve` writes the trust triple *after* binding the
@@ -84,8 +84,8 @@ in-memory config.
 
 ```rust
 // Good — direct call, injected sim adapters, typed assertion
-let output = overdrive_cli::commands::job::submit(
-    SubmitArgs { spec: spec_path, config_path: cfg_path },
+let output = overdrive_cli::commands::deploy::deploy(
+    DeployArgs { spec: spec_path, config_path: cfg_path },
     &SimClock::new(),
     &SimTransport::new(),
 ).await?;

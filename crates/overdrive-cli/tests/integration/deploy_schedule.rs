@@ -25,12 +25,12 @@
 //! # Sequencing note
 //!
 //! The slice 05 surface is render-side + `IntentStore`-side. The
-//! production `submit_streaming` parser is still legacy
+//! production `deploy_streaming` parser is still legacy
 //! `JobSpecInput`; slice 02 wires the `WorkloadSpec` discriminator
-//! into `submit_streaming`. These tests therefore exercise the slice
+//! into `deploy_streaming`. These tests therefore exercise the slice
 //! 05 surfaces directly (render functions, `IntentKey` derivation,
 //! `IntentStore` persistence helper) — not the legacy
-//! `submit_streaming` path. The matching slice-02 wiring covers the
+//! `deploy_streaming` path. The matching slice-02 wiring covers the
 //! end-to-end CLI flow later.
 
 use overdrive_cli::render::schedule::{
@@ -231,7 +231,7 @@ cron = "0 2 * * *"
 /// operator-supplied cron expression.
 ///
 /// Slice 05 ships the persistence helper at the `IntentStore`
-/// boundary; slice 02 wires it through `submit_streaming`. This
+/// boundary; slice 02 wires it through `deploy_streaming`. This
 /// test asserts the persistence-side contract directly.
 #[tokio::test]
 async fn schedule_05_05_schedule_submit_persists_to_intent_store() {

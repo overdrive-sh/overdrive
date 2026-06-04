@@ -4,10 +4,10 @@
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` § *Integration tests — no
 //! subprocess*: this test calls
-//! `overdrive_cli::commands::job::submit(SubmitArgs { ... })` directly
+//! `overdrive_cli::commands::deploy::deploy(DeployArgs { ... })` directly
 //! as a Rust async function — the in-process handler behind
 //! `overdrive deploy <SPEC>` in the detached / non-TTY (JSON-ack) lane
-//! (`main.rs` `Command::Deploy` → `commands::job::submit` →
+//! (`main.rs` `Command::Deploy` → `commands::deploy::submit` →
 //! `render::workload_submit_accepted`). NO
 //! `Command::new(env!("CARGO_BIN_EXE_overdrive"))`.
 //!
@@ -37,7 +37,7 @@
 //! the driving-adapter mirror of 01-01's intent→hydrator C3 guard. If
 //! the call site that wires the listener protocol through to the
 //! persisted intent were reverted (e.g. dropping the Service arm in
-//! `submit`, or hard-coding `Proto::Tcp`), this test goes RED.
+//! `deploy`, or hard-coding `Proto::Tcp`), this test goes RED.
 //!
 //! Together with 01-03's dataplane wire half (`REVERSE_NAT_MAP` dump +
 //! VIP-sourced reply) this closes the full S-04-A walking-skeleton
@@ -47,7 +47,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use overdrive_cli::commands::job::SubmitArgs;
+use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
@@ -122,12 +122,12 @@ async fn deploy_udp_service_is_accepted_and_persisted_intent_carries_proto_udp()
     // via the direct handler (the JSON-ack lane behind
     // `overdrive deploy <SPEC>`).
     let spec_path = write_toml(server_tmp.path(), "dns-resolver.toml", dns_resolver_udp_toml());
-    let submit_output = overdrive_cli::commands::job::submit(SubmitArgs {
+    let submit_output = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: spec_path,
         config_path: server_cfg.clone(),
     })
     .await
-    .expect("job::submit must accept the single-UDP-listener Service spec end-to-end");
+    .expect("deploy::deploy must accept the single-UDP-listener Service spec end-to-end");
 
     // Phase 2 — AC #1: the deploy is accepted and renders the
     // `workload_submit_accepted` shape ("Accepted."). This is exactly

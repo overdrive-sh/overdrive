@@ -14,7 +14,7 @@
 //!
 //! This test pins that contract: stand up a real in-process TLS server
 //! on an ephemeral port, rewrite the operator config so its `endpoint`
-//! field names that ephemeral port, invoke `job::submit` without any
+//! field names that ephemeral port, invoke `deploy::deploy` without any
 //! endpoint argument (because the field no longer exists), and assert
 //! the POST reaches the server — proving the client read the endpoint
 //! from the config rather than from a hardcoded default.
@@ -25,7 +25,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use overdrive_cli::commands::job::{SubmitArgs, SubmitOutput};
+use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
 use tempfile::TempDir;
@@ -80,7 +80,7 @@ args = []
     path
 }
 
-/// When the operator config names the server's endpoint, `job::submit`
+/// When the operator config names the server's endpoint, `deploy::deploy`
 /// — invoked WITHOUT any endpoint argument — reads that endpoint from
 /// the config and the POST reaches the server.
 ///
@@ -94,25 +94,25 @@ async fn job_submit_reads_endpoint_from_config_when_no_override_is_provided() {
     let cfg = config_path(tmp.path());
 
     let spec_path = write_valid_payments_toml(tmp.path());
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
 
-    let output: SubmitOutput =
-        overdrive_cli::commands::job::submit(args).await.expect("job::submit");
+    let output: DeployOutput =
+        overdrive_cli::commands::deploy::deploy(args).await.expect("deploy::deploy");
 
     // The POST reached the server: the server assigned `workload_id`
     // `payments` and a fresh-insert outcome (per ADR-0020 the
     // per-write witness is `outcome` + `spec_digest`).
-    assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
+    assert_eq!(output.workload_id, "payments", "DeployOutput.workload_id must be 'payments'");
     assert_eq!(
         output.outcome,
         IdempotencyOutcome::Inserted,
-        "SubmitOutput.outcome must be `Inserted` on a fresh submit; got {:?}",
+        "DeployOutput.outcome must be `Inserted` on a fresh submit; got {:?}",
         output.outcome,
     );
     assert_eq!(
         output.spec_digest.len(),
         64,
-        "SubmitOutput.spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        "DeployOutput.spec_digest must be 64 hex chars (SHA-256); got {} chars",
         output.spec_digest.len(),
     );
 
@@ -123,7 +123,7 @@ async fn job_submit_reads_endpoint_from_config_when_no_override_is_provided() {
     assert_eq!(
         output.endpoint,
         *handle.endpoint(),
-        "SubmitOutput.endpoint must echo the endpoint recorded in the operator config",
+        "DeployOutput.endpoint must echo the endpoint recorded in the operator config",
     );
 
     handle.shutdown().await.expect("clean shutdown");

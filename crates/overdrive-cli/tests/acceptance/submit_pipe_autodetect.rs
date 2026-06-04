@@ -30,7 +30,7 @@
 //! boundary); Tier 1 wires fakes returning `false` (S-CLI-02) or `true`
 //! (S-CLI-06).
 
-use overdrive_cli::commands::job::{StdoutTerminalProbe, should_stream};
+use overdrive_cli::commands::deploy::{StdoutTerminalProbe, should_stream};
 
 // ---------------------------------------------------------------------
 // Fakes — the IsTerminal probe seam.
@@ -67,8 +67,8 @@ fn pipe_redirected_stdout_without_detach_selects_json_lane() {
     // Then: the dispatch decision is the JSON-ack lane (Detached).
     // The wire-level Accept-header pinning happens at
     // `ApiClient::submit_workload` (set to `application/json`); the
-    // `should_stream == false` branch causes main.rs to call `submit`
-    // (one-shot ack), not `submit_streaming`. The JSON-ack handler is
+    // `should_stream == false` branch causes main.rs to call `deploy`
+    // (one-shot ack), not `deploy_streaming`. The JSON-ack handler is
     // already exercised end-to-end by
     // `tests/integration/job_submit.rs::submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command`,
     // which is the wire witness for the `Accept: application/json`
@@ -98,7 +98,7 @@ fn tty_stdout_without_detach_selects_ndjson_lane() {
     // The wire-level Accept-header pinning happens at
     // `ApiClient::submit_workload_streaming` (set to `application/x-ndjson`);
     // the `should_stream == true` branch causes main.rs to call
-    // `submit_streaming` and engage the line-delimited consumer. The
+    // `deploy_streaming` and engage the line-delimited consumer. The
     // NDJSON handler is exercised end-to-end by
     // `tests/integration/streaming_submit_happy_path.rs` (Tier 3
     // Linux-gated).

@@ -1,8 +1,8 @@
-//! `overdrive job submit`.
+//! `overdrive deploy <SPEC>`.
 //!
 //! Reads a TOML job spec from disk, runs `Job::from_submit` locally for
 //! fast-fail validation, POSTs the typed `SubmitWorkloadRequest` to the
-//! control plane, and returns a typed [`SubmitOutput`] carrying the
+//! control plane, and returns a typed [`DeployOutput`] carrying the
 //! `workload_id`, derived `intent_key`, canonical `spec_digest`, idempotency
 //! `outcome`, endpoint, and operator next-command hint.
 //!
@@ -108,7 +108,7 @@ impl StdoutTerminalProbe for RealStdoutTerminal {
 ///
 /// This is the SSOT for the dispatch decision — `main.rs` calls
 /// `should_stream(detach, probe.is_terminal())` and branches between
-/// `submit_streaming` (true) and `submit` (false). Acceptance tests
+/// `deploy_streaming` (true) and `deploy` (false). Acceptance tests
 /// at `tests/acceptance/submit_pipe_autodetect.rs` exercise this
 /// pure function directly; the wire-level Accept-header pinning is
 /// covered by the existing JSON-ack and streaming integration suites.
@@ -117,13 +117,13 @@ pub const fn should_stream(detach: bool, is_terminal: bool) -> bool {
     !detach && is_terminal
 }
 
-/// Arguments to [`submit`].
+/// Arguments to [`deploy`].
 ///
 /// `spec` is the path to a TOML file containing a `JobSpecInput`-shaped
 /// document; `config_path` locates the operator trust triple, which is
 /// the sole source of the control-plane endpoint per whitepaper §8.
 #[derive(Debug, Clone)]
-pub struct SubmitArgs {
+pub struct DeployArgs {
     /// Path to the TOML job spec on disk.
     pub spec: PathBuf,
     /// Path to the Talos-shape trust triple on disk. The endpoint
@@ -131,7 +131,7 @@ pub struct SubmitArgs {
     pub config_path: PathBuf,
 }
 
-/// Typed output of a successful `job submit`.
+/// Typed output of a successful `overdrive deploy`.
 ///
 /// Carries the server's assigned `workload_id`, the derived `intent_key`
 /// (`jobs/<id>`), the canonical `spec_digest`, the idempotency
@@ -145,7 +145,7 @@ pub struct SubmitArgs {
 /// Handlers never render output themselves; the binary wrapper passes
 /// this value to [`crate::render::workload_submit_accepted`].
 #[derive(Debug, Clone)]
-pub struct SubmitOutput {
+pub struct DeployOutput {
     /// Job ID echoed by the server — matches the `id` field of the
     /// input spec after validation.
     pub workload_id: String,
@@ -177,7 +177,7 @@ pub struct SubmitOutput {
 /// * [`CliError::Transport`] — the control plane is unreachable.
 /// * [`CliError::HttpStatus`] — the server returned 4xx / 5xx.
 /// * [`CliError::BodyDecode`] — the 2xx response body failed to parse.
-pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
+pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
     // 1. Read TOML from disk. Missing / unreadable files map to
     //    InvalidSpec with field="spec" so the operator can fix the path.
     let toml_str = std::fs::read_to_string(&args.spec).map_err(|e| CliError::InvalidSpec {
@@ -186,11 +186,11 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     })?;
 
     // 2. Try the kind-discriminated parser first (same detection as
-    //    `submit_streaming`). If the TOML carries a `[job]` section,
+    //    `deploy_streaming`). If the TOML carries a `[job]` section,
     //    translate to the wire shape via `JobSpecInput`. A `[service]`
     //    body (with `[[listener]]` blocks) routes to the Service-kind
     //    deploy lane below — this is the non-streaming (JSON-ack)
-    //    companion to `submit_streaming_service`, used by the detached /
+    //    companion to `deploy_streaming_service`, used by the detached /
     //    non-TTY `overdrive deploy` path (`main.rs` `Command::Deploy`).
     //    Flat TOMLs fall through to the legacy `JobSpecInput` parser.
     //    Per ADR-0051 the wire-side discriminator lives inside
@@ -216,7 +216,7 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
         // "missing field `id`" — the gap udp-service-support step 01-05
         // closes (the deploy half of S-04-A).
         Ok(WorkloadSpecInput::Service(service_spec)) => {
-            return submit_service(args, service_spec).await;
+            return deploy_service(args, service_spec).await;
         }
         // Slice 07 / US-07 — surface the kind-rejection verbatim with
         // its per-kind guidance. Without this explicit arm the error
@@ -254,7 +254,7 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     let workload_id = parse_response_job_id(&resp.workload_id)?;
     let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
     let next_command = format!("overdrive alloc status --job {}", resp.workload_id);
-    Ok(SubmitOutput {
+    Ok(DeployOutput {
         workload_id: resp.workload_id,
         intent_key,
         spec_digest: resp.spec_digest,
@@ -265,7 +265,7 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
 }
 
 /// Service-kind deploy in the JSON-ack (non-streaming) lane — the
-/// companion to [`submit_streaming_service`] for the detached / non-TTY
+/// companion to [`deploy_streaming_service`] for the detached / non-TTY
 /// `overdrive deploy` path.
 ///
 /// Projects the parser-side [`ServiceSpec`] (carries `Listener` with a
@@ -277,14 +277,14 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
 /// `Proto`, so the persisted `WorkloadIntent::Service(ServiceV1)`
 /// carries the operator's declared protocol verbatim.
 ///
-/// Returns the same [`SubmitOutput`] shape as the Job lane so the
+/// Returns the same [`DeployOutput`] shape as the Job lane so the
 /// caller renders `workload_submit_accepted` identically across kinds.
-async fn submit_service(
-    args: SubmitArgs,
+async fn deploy_service(
+    args: DeployArgs,
     service_spec: ServiceSpec,
-) -> Result<SubmitOutput, CliError> {
+) -> Result<DeployOutput, CliError> {
     // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`,
-    // mirroring `submit_streaming_service`. The listener `(NonZeroU16,
+    // mirroring `deploy_streaming_service`. The listener `(NonZeroU16,
     // Proto)` pair projects to `(u16, String)`; the protocol's canonical
     // lowercase render (`Proto::as_str`) is what the server re-parses.
     let listeners: Vec<ListenerInput> = service_spec
@@ -323,7 +323,7 @@ async fn submit_service(
     let workload_id = parse_response_job_id(&resp.workload_id)?;
     let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
     let next_command = format!("overdrive alloc status --job {}", resp.workload_id);
-    Ok(SubmitOutput {
+    Ok(DeployOutput {
         workload_id: resp.workload_id,
         intent_key,
         spec_digest: resp.spec_digest,
@@ -336,7 +336,7 @@ async fn submit_service(
 /// Parse a `workload_id` string echoed back in a successful 2xx control-plane
 /// response into a typed [`WorkloadId`].
 ///
-/// On `WorkloadId::new` failure, the call site at [`submit`] is *post-HTTP*:
+/// On `WorkloadId::new` failure, the call site at [`deploy`] is *post-HTTP*:
 /// the server returned a 200 OK whose `workload_id` field cannot be parsed by
 /// the same validating constructor the spec went through. Per the
 /// rustdoc on [`CliError::InvalidSpec`] (client-side spec validation
@@ -361,7 +361,7 @@ pub struct StopArgs {
     /// `WorkloadId::new` before any HTTP call so operators see the
     /// offending byte without a round-trip.
     pub id: String,
-    /// Path to the trust triple. Same conventions as [`SubmitArgs`].
+    /// Path to the trust triple. Same conventions as [`DeployArgs`].
     pub config_path: PathBuf,
 }
 
@@ -401,12 +401,12 @@ pub async fn stop(args: StopArgs) -> Result<StopOutput, CliError> {
 }
 
 // ---------------------------------------------------------------------------
-// `overdrive job submit` — streaming NDJSON consumer (Slice 02 step 02-04).
+// `overdrive deploy` — streaming NDJSON consumer (Slice 02 step 02-04).
 // ---------------------------------------------------------------------------
 
-/// Typed output of a successful streaming `job submit`.
+/// Typed output of a successful streaming `overdrive deploy`.
 ///
-/// Per slice 02 step 02-04 acceptance criteria, `submit_streaming`
+/// Per slice 02 step 02-04 acceptance criteria, `deploy_streaming`
 /// consumes the `application/x-ndjson` stream until a terminal
 /// `Succeeded` or `Failed` event arrives. The handler
 /// returns this typed shape carrying:
@@ -428,7 +428,7 @@ pub async fn stop(args: StopArgs) -> Result<StopOutput, CliError> {
 /// short-circuit BEFORE this struct is constructed and surface as
 /// `Err(CliError)` per [`crate::http_client::CliError`].
 #[derive(Debug, Clone)]
-pub struct SubmitStreamingOutput {
+pub struct DeployStreamingOutput {
     /// Job ID echoed by the server's `Accepted` event.
     pub workload_id: String,
     /// Derived intent-store key — `jobs/<workload_id>` per ADR-0011.
@@ -480,11 +480,11 @@ pub struct SubmitStreamingOutput {
 ///
 /// # Errors
 ///
-/// Same shapes as [`submit`] — pre-Accepted failures bubble up as
+/// Same shapes as [`deploy`] — pre-Accepted failures bubble up as
 /// [`CliError`] variants. Once `Accepted` arrives this function does
 /// not return `Err` for terminal failures: a `Failed` event
 /// is a successful termination of the stream that maps to a non-zero
-/// exit code via [`SubmitStreamingOutput::exit_code`].
+/// exit code via [`DeployStreamingOutput::exit_code`].
 ///
 /// # Panics
 ///
@@ -492,7 +492,7 @@ pub struct SubmitStreamingOutput {
 /// is unreachable — `from_config` returns `Err(CliError::ConfigLoad)`
 /// on URL-parse failure, never returning a client whose base URL is
 /// absent.
-pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput, CliError> {
+pub async fn deploy_streaming(args: DeployArgs) -> Result<DeployStreamingOutput, CliError> {
     // 1. Read TOML from disk — same as the one-shot lane.
     let toml_str = std::fs::read_to_string(&args.spec).map_err(|e| CliError::InvalidSpec {
         field: "spec".to_string(),
@@ -505,16 +505,16 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
     //    step 01-03e3-fix the dispatch is per-kind: each arm wraps its
     //    own typed payload into the matching `SubmitSpecInput::*` variant
     //    and routes to a per-kind streaming consumer (Job →
-    //    `submit_streaming_job` → `JobSubmitEvent` arms; Service →
-    //    `submit_streaming_service` → `ServiceSubmitEvent` arms). The
+    //    `deploy_streaming_job` → `JobSubmitEvent` arms; Service →
+    //    `deploy_streaming_service` → `ServiceSubmitEvent` arms). The
     //    legacy "fall through to flat `JobSpecInput` + wrap in
     //    `SubmitSpecInput::Job`" path was the gap that produced the
     //    cross-routing bug 01-03e3-fix closes: Service-kind TOML must
     //    NEVER be wrapped in `SubmitSpecInput::Job(_)`.
     match WorkloadSpecInput::from_toml_str(&toml_str) {
-        Ok(WorkloadSpecInput::Job(job_spec)) => submit_streaming_job(args, job_spec).await,
+        Ok(WorkloadSpecInput::Job(job_spec)) => deploy_streaming_job(args, job_spec).await,
         Ok(WorkloadSpecInput::Service(service_spec)) => {
-            submit_streaming_service(args, service_spec).await
+            deploy_streaming_service(args, service_spec).await
         }
         Ok(WorkloadSpecInput::Schedule(_)) => Err(CliError::InvalidSpec {
             field: "spec.kind".to_string(),
@@ -533,10 +533,10 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
 /// terminal; the terminal verdict is `Succeeded` (exit 0) or
 /// `Failed` (non-zero exit code or backoff exhausted). The CLI
 /// process exit code equals the workload's kernel-observed exit code.
-async fn submit_streaming_job(
-    args: SubmitArgs,
+async fn deploy_streaming_job(
+    args: DeployArgs,
     job_spec: JobSpec,
-) -> Result<SubmitStreamingOutput, CliError> {
+) -> Result<DeployStreamingOutput, CliError> {
     // Translate the kind-discriminated `JobSpec` to the legacy
     // `JobSpecInput` wire shape the server's spec-ingest still
     // expects (server-side `WorkloadSpec` ingest is the next slice's
@@ -586,7 +586,7 @@ async fn submit_streaming_job(
 }
 
 /// Submit a Service-kind spec via the streaming NDJSON lane and consume
-/// to terminal. Mirrors [`submit_streaming_job`] for the Service kind
+/// to terminal. Mirrors [`deploy_streaming_job`] for the Service kind
 /// per ADR-0047 §3 [D2] / [D7] and step 01-03e3-fix: routes to the
 /// `ServiceSubmitEvent` consumer surface (`Accepted / Stable / Failed /
 /// Stopped`), NOT the `JobSubmitEvent` surface.
@@ -595,10 +595,10 @@ async fn submit_streaming_job(
 /// `NonZeroU16` port and `Proto` enum) to the wire-side
 /// [`ServiceSpecInput`] (carries `ListenerInput` with `u16` port and
 /// `String` protocol) and POSTs as `SubmitSpecInput::Service(_)`.
-async fn submit_streaming_service(
-    args: SubmitArgs,
+async fn deploy_streaming_service(
+    args: DeployArgs,
     service_spec: ServiceSpec,
-) -> Result<SubmitStreamingOutput, CliError> {
+) -> Result<DeployStreamingOutput, CliError> {
     // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`.
     // The parser-side `Listener` carries `(NonZeroU16, Proto)`; the
     // wire-side `ListenerInput` carries `(u16, String)` for JSON
@@ -665,7 +665,7 @@ async fn consume_stream(
     response: reqwest::Response,
     endpoint: Url,
     validated_job_id: String,
-) -> Result<SubmitStreamingOutput, CliError> {
+) -> Result<DeployStreamingOutput, CliError> {
     use overdrive_control_plane::streaming::ServiceSubmitEvent;
 
     let mut stream = response.bytes_stream();
@@ -719,7 +719,7 @@ async fn consume_stream(
                         &witness,
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
-                    return Ok(SubmitStreamingOutput {
+                    return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
                         spec_digest: acc.spec_digest,
@@ -755,7 +755,7 @@ async fn consume_stream(
                         early_exit_timing,
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
-                    return Ok(SubmitStreamingOutput {
+                    return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
                         spec_digest: acc.spec_digest,
@@ -778,7 +778,7 @@ async fn consume_stream(
                         by,
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
-                    return Ok(SubmitStreamingOutput {
+                    return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
                         spec_digest: acc.spec_digest,
@@ -835,7 +835,7 @@ async fn consume_stream_job(
     endpoint: Url,
     validated_job_id: String,
     submit_echo: String,
-) -> Result<SubmitStreamingOutput, CliError> {
+) -> Result<DeployStreamingOutput, CliError> {
     let mut stream = response.bytes_stream();
     let mut buf = BytesMut::new();
     let stream_started = std::time::Instant::now();
@@ -921,7 +921,7 @@ async fn consume_stream_job(
                         attempts,
                     ));
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
-                    return Ok(SubmitStreamingOutput {
+                    return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
                         spec_digest: acc.spec_digest,
@@ -958,7 +958,7 @@ async fn consume_stream_job(
                         attempts,
                     ));
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
-                    return Ok(SubmitStreamingOutput {
+                    return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
                         spec_digest: acc.spec_digest,
@@ -991,7 +991,7 @@ async fn consume_stream_job(
                         &stderr_str,
                     ));
                     let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
-                    return Ok(SubmitStreamingOutput {
+                    return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
                         spec_digest: acc.spec_digest,
@@ -1020,7 +1020,7 @@ async fn consume_stream_job(
 }
 
 /// Internal accumulator for the streaming `Accepted` event fields, used to
-/// build [`SubmitStreamingOutput`] when the terminal event arrives.
+/// build [`DeployStreamingOutput`] when the terminal event arrives.
 struct AcceptedFields {
     workload_id: String,
     intent_key: String,

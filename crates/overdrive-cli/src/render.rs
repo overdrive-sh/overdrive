@@ -34,7 +34,7 @@ pub mod schedule;
 
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
-use crate::commands::job::{StopOutput, SubmitOutput};
+use crate::commands::deploy::{DeployOutput, StopOutput};
 use crate::commands::node::NodeListOutput;
 use crate::http_client::CliError;
 
@@ -110,7 +110,7 @@ pub fn node_list(out: &NodeListOutput) -> String {
 /// follow-up command so the operator can continue without consulting
 /// the docs.
 #[must_use]
-pub fn workload_submit_accepted(out: &SubmitOutput) -> String {
+pub fn workload_submit_accepted(out: &DeployOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     let _ = writeln!(s, "Accepted.");
@@ -374,7 +374,7 @@ pub fn cli_error(err: &CliError) -> String {
 /// outcomes (`Succeeded` / `Failed`) are emitted on the
 /// streaming success path and map to exit 0 / the workload's non-zero
 /// exit code respectively (see
-/// [`crate::commands::job::submit_streaming`]); they never flow through
+/// [`crate::commands::deploy::deploy_streaming`]); they never flow through
 /// this function.
 ///
 /// A non-zero streaming exit signals the workload reached the server
