@@ -1,0 +1,262 @@
+schema_version: 1
+
+# Product-level UNCONNECTED-UDP same-host reachability journey.
+#
+# SIBLING of submit-a-udp-service.yaml, NOT an extension of it. The two
+# journeys cover DIFFERENT KERNEL PATHS and must not be conflated:
+#
+#   submit-a-udp-service.yaml  — the CONNECTED-UDP / XDP wire path.
+#       Remote backends. Forward XDP SERVICE_MAP rewrite + reverse-NAT
+#       source rewrite over REVERSE_NAT_MAP, keyed (backend_ip,
+#       backend_port, proto) -> vip. Fires for the client that calls
+#       connect() (TCP and connected-UDP). GH #163 / udp-service-support.
+#
+#   reach-an-unconnected-udp-service.yaml (THIS FILE) — the UNCONNECTED-UDP
+#       / SAME-HOST cgroup path. Local backends on the same host. Forward
+#       cgroup/sendmsg4 rewrite (VIP -> backend) over LOCAL_BACKEND_MAP +
+#       reply-source cgroup/recvmsg4 rewrite (backend -> VIP) over a NEW
+#       REVERSE_LOCAL_MAP. Fires for the client that NEVER calls connect()
+#       — the canonical DNS resolver idiom (sendto(VIP) per query).
+#       GH #200 / unconnected-udp-sendmsg4. ADR-0053's connect4 path does
+#       NOT intercept these datagrams (connect4 fires at connect() time,
+#       which an unconnected sendto never reaches).
+#
+# Why a separate journey rather than a branch inside submit-a-udp-service:
+# that journey's central artifact is REVERSE_NAT_MAP (the XDP remote-backend
+# wire path); this journey's central artifact is LOCAL_BACKEND_MAP +
+# REVERSE_LOCAL_MAP (the cgroup same-host path). A reader who conflates
+# "UDP reverse path" across the two will install the wrong map on the wrong
+# hook. The distinction is load-bearing, so it gets its own journey with the
+# cross-reference made explicit at both ends.
+#
+# Feature origin: unconnected-udp-sendmsg4 DISCUSS wave (2026-06-05, GH #200).
+# DIVERGE recommendation: Option 2 (sendmsg4 + recvmsg4), score 4.65, accepted.
+
+journey:
+  name: "Reach an unconnected-UDP same-host service from a client that never connects"
+  goal: >
+    An operator declares a UDP `[[listener]]` on a Service-kind workload
+    with a same-host (local) backend, submits it via `overdrive deploy
+    <spec>`, and a client that uses the UNCONNECTED `sendto(VIP)` idiom —
+    the canonical DNS resolver pattern (dig, glibc getaddrinfo, musl: a
+    sendto per query, no connect()) — reaches a healthy backend AND
+    receives a reply whose source address is the VIP, never the backend
+    IP. The reply passing the client's source validation is the whole
+    point: a backend-sourced reply is discarded by every DNS resolver.
+    Closes the gap ADR-0053 Amendment 4 left open and #200 tracks:
+    connect4 fires only at connect() time, so an unconnected sendto is
+    never intercepted, LOCAL_BACKEND_MAP is never consulted, and the
+    same-host UDP service is unreachable from the dominant resolver.
+  persona: >
+    Ana, Overdrive platform engineer (docs/product/personas/
+    ana-platform-engineer.yaml). Runs UDP-bearing services and does NOT
+    control the clients — they are third-party DNS resolvers she cannot
+    rewrite to call connect() first. She has been bitten by silent
+    dataplane asymmetry where the forward path works and the reverse path
+    fails invisibly, which is the hardest class of bug to diagnose because
+    `overdrive deploy` succeeds and `alloc status` shows Running.
+    Secondary: the dataplane author (rides J-PLAT-004) who needs Sim and
+    the real kernel path provably equivalent on the reply-path source
+    identity, so a forward-only / asymmetric fix cannot reach production
+    undetected.
+  job_id: [J-OPS-004, J-PLAT-004]
+
+  emotional_arc:
+    start: >
+      Confident-but-cautious — "TCP and connected-UDP work. But the
+      clients I care about send UNCONNECTED datagrams (sendto per query,
+      no connect), and connect4 never sees those. Unconnected-UDP
+      reachability bugs are invisible until a real resolver times out."
+    middle: >
+      Focused-then-uneasy — deploy is Accepted, the service reaches
+      Running, and a first unconnected `sendto(VIP)` even reaches the
+      backend (sendmsg4 forward rewrite). But the forward path alone is a
+      TRAP: the reply comes back sourced from the BACKEND IP, and the
+      resolver — which validates that the reply source matches what it
+      sent to — silently discards it. `dig @<vip>` hangs. This is the
+      half-working service, and it is worse than a clean failure because
+      everything UPSTREAM of the reply looks healthy.
+    end: >
+      Trusting (happy path) — `dig @<vip> example.com` returns a correct
+      answer; a Tier-3 wire capture shows the reply sourced from the VIP
+      (recvmsg4 reverse-rewrote backend -> VIP via REVERSE_LOCAL_MAP), so
+      the resolver's source validation accepts it.
+      OR Reassured (sad path, pre-fix) — the Sim≡kernel reply-path
+      equivalence invariant FAILS LOUDLY at PR time, so a forward-only or
+      asymmetric regression is caught before any operator ever deploys a
+      half-working service.
+
+steps:
+  - id: 1
+    name: "Declare a same-host UDP listener and deploy"
+    command: "overdrive deploy dns-resolver.toml"
+    summary: >
+      Submit + Stable lifecycle per submit-a-service.yaml (the single
+      source for the submit / Stable / witness detail) and the proto
+      threading per submit-a-udp-service.yaml step 1 (the `[[listener]]`
+      carries protocol = "udp", `Proto::Udp` threaded into the
+      ServiceFrontend newtype, never defaulted to TCP). This journey
+      picks up where those leave off: the backend is a LOCAL (same-host)
+      backend, so the hydrator emits `RegisterLocalBackend` — the SAME
+      action the connected-UDP / connect4 path already uses today
+      (UNCHANGED; the new hooks consume the existing forward map). The
+      delta this journey introduces is downstream of the action, in the
+      kernel-side hook set + the reverse map.
+    emotional_state:
+      entry: "Confident-but-cautious"
+      exit: "Focused — Accepted landed, the local UDP backend is registered in LOCAL_BACKEND_MAP."
+
+  - id: 2
+    name: "register_local_backend writes the forward AND reverse map entries atomically"
+    command: "(internal — observable via bpftool map dump LOCAL_BACKEND_MAP and REVERSE_LOCAL_MAP)"
+    summary: >
+      The `register_local_backend` action (already proto-carrying
+      `(vip, vip_port, proto, backend)` per ADR-0053 Amd 3, UNCHANGED for
+      the forward leg) now writes TWO map entries in one logical write:
+      the forward LOCAL_BACKEND_MAP entry keyed `(vip, vip_port,
+      proto=UDP)` -> backend (the connect4/sendmsg4 forward lookup), AND a
+      new REVERSE_LOCAL_MAP entry keyed by the backend identity -> VIP (the
+      recvmsg4 reverse lookup). The reverse entry is derived from the SAME
+      action, NOT from a conntrack table — UDP is connectionless; there is
+      no per-flow state to reuse. Single-write consistency is what keeps
+      the Sim≡kernel equivalence (J-PLAT-004) tractable: the two entries
+      either both exist or neither does. Whether the reverse store is a
+      second map vs a reverse scan is a DESIGN detail (the architect's call
+      in the ADR-0053 amendment); the journey pins only the observable
+      contract: a reverse mapping exists, written atomically with the
+      forward one.
+    emotional_state:
+      entry: "Focused"
+      exit: "Focused — forward and reverse entries are present together."
+
+  - id: 3
+    name: "sendmsg4 rewrites the unconnected request VIP -> backend"
+    command: "(internal — observable via Tier 3: the backend receives the datagram on its real address)"
+    summary: >
+      A same-host client calls `sendto(VIP:port, ...)` WITHOUT a prior
+      connect(). The `cgroup/sendmsg4` (BPF_CGROUP_UDP4_SENDMSG, since
+      4.18) program attached to `overdrive.slice` fires, reads proto
+      zero-translation from `bpf_sock_addr.protocol` (ADR-0053 Amd 2),
+      looks up LOCAL_BACKEND_MAP keyed `(vip, vip_port, proto=UDP)`, and
+      rewrites `user_ip4` / `user_port` to the backend. The datagram
+      reaches a healthy backend. CARE-POINT: `user_port` is low-16-NBO in
+      a u32 (`.claude/rules/development.md`) — the same hazard connect4
+      already handles; the read/write must cast to u16 then to_be/from_be,
+      never byte-swap the full u32. This step ALONE is a trap (see step 4):
+      the forward rewrite is necessary but not sufficient.
+    emotional_state:
+      entry: "Focused"
+      exit: "Uneasy — the request arrived, but will the reply be accepted?"
+
+  - id: 4
+    name: "recvmsg4 rewrites the reply source backend -> VIP so the resolver accepts it"
+    command: "dig @<vip> example.com   (the operator-visible proof)"
+    summary: >
+      The backend sends its reply. Without recvmsg4 the reply's source is
+      the BACKEND IP, and a source-validating client (every DNS resolver)
+      DISCARDS it — kernel commit 983695fa6765 is the documented proof
+      (nslookup rejects a reply that appears to come from 8.8.8.8's backend
+      rather than the address it queried). The `cgroup/recvmsg4`
+      (BPF_CGROUP_UDP4_RECVMSG, since 4.20) program fires on the
+      unconnected `recvfrom` (non-NULL msg_name), looks up REVERSE_LOCAL_MAP
+      by the backend identity, and rewrites the source `sockaddr` the app
+      sees back to the VIP. The resolver's source validation passes; `dig
+      @<vip> example.com` returns a correct answer. `recvfrom` reports the
+      VIP as the source — MORE VIP-preserving than the connect4 path's
+      ClusterIP semantic, and deliberately so: an unconnected datagram
+      reply must LOOK like it came from the VIP or the client drops it.
+    emotional_state:
+      entry: "Uneasy"
+      exit: "Trusting — dig answers; the reply is VIP-sourced; the service is real."
+
+  - id: 5
+    name: "Sim≡kernel reply-path equivalence cannot silently regress"
+    command: "(CI — Tier-1 SimDataplane unconnected-UDP invariant + Tier-3 real-kernel acceptance)"
+    summary: >
+      The correctness is pinned two ways meeting at the shared backend
+      identity, because there is NO Tier-2 BPF_PROG_TEST_RUN backstop for
+      cgroup_sock_addr (ENOTSUPP <= 6.8, `.claude/rules/development.md`).
+      Tier-1: a SimDataplane invariant asserts the unconnected-UDP forward
+      rewrite AND the reply-path source identity (sim must rewrite the reply
+      source to the VIP, not the backend) — the J-PLAT-004 equivalence twin.
+      Tier-3: a real unconnected sendto/recvfrom round-trip through
+      `overdrive.slice` (ideally a real stub resolver), asserting `bpftool
+      map dump` shows both LOCAL_BACKEND_MAP and REVERSE_LOCAL_MAP entries
+      and a `tcpdump` capture shows the reply sourced from the VIP. A future
+      change that drops the reply-path rewrite from the Sim adapter fails
+      Tier 1, or from the kernel path fails Tier 3 — the silent-asymmetry
+      class (O3 / #163-class) is structurally impossible to reintroduce
+      undetected. Tier-3 fixture MUST avoid the systemd-resolved UDP 5353
+      collision (`.claude/rules/debugging.md` § 11).
+    emotional_state:
+      entry: "Cautious"
+      exit: "Reassured — the reply-path symmetry is guarded forever."
+
+integration_validation:
+  shared_artifacts_summary:
+    - >
+      local_backend_key — the `(vip, vip_port, proto)` -> backend forward
+      tuple stored in LOCAL_BACKEND_MAP. Single source of truth is the
+      ServiceFrontend newtype `(ServiceVip, port, Proto)`. UNCHANGED by
+      this feature on the forward leg — connect4 and the new sendmsg4 hook
+      both consume it. proto read zero-translation from
+      bpf_sock_addr.protocol (ADR-0053 Amd 2); MUST NOT be defaulted to TCP.
+    - >
+      reverse_local_key — THE central NEW shared artifact of this feature.
+      The reverse mapping (backend identity -> VIP) stored in the new
+      REVERSE_LOCAL_MAP, consumed by recvmsg4 to rewrite the reply source.
+      Single source of truth: written ATOMICALLY alongside the forward
+      LOCAL_BACKEND_MAP entry by the SAME `register_local_backend` action
+      (one logical write, two entries) — NOT a conntrack table (UDP is
+      stateless). Both the SimDataplane equivalence invariant and the
+      production kernel path MUST derive the reverse entry from the same
+      forward registration, so the reply source is provably the VIP in both.
+      Second-map-vs-reverse-scan is a DESIGN detail; the SSOT contract is
+      "reverse mapping exists, written atomically with the forward one."
+    - >
+      service_proto — the per-service L4 protocol. Source of truth is the
+      intent-side Listener.protocol (Proto enum), threaded
+      intent -> hydrator -> ServiceFrontend -> register_local_backend ->
+      both map entries' proto byte. Same SSOT as submit-a-udp-service.yaml;
+      MUST NOT be defaulted to TCP on this path.
+
+related_features:
+  - id: unconnected-udp-sendmsg4
+    role: "Ships the implementation of this journey (GH #200). DIVERGE Option 2 (sendmsg4 + recvmsg4)."
+  - id: udp-service-support
+    role: >
+      Sibling feature (GH #163). Owns the CONNECTED-UDP / XDP
+      REVERSE_NAT_MAP wire path in submit-a-udp-service.yaml. DIFFERENT
+      kernel path from this journey (XDP remote-backend vs cgroup
+      same-host). Shares the service_proto SSOT and the ServiceFrontend
+      newtype, NOT the reverse map.
+
+related_journeys:
+  - id: submit-a-udp-service
+    relationship: >
+      SIBLING, not parent. submit-a-udp-service.yaml is the connected-UDP /
+      XDP REVERSE_NAT_MAP wire path (remote backends, forward XDP + reverse
+      NAT). THIS journey is the unconnected-UDP / same-host cgroup
+      sendmsg4+recvmsg4 path (local backends, LOCAL_BACKEND_MAP +
+      REVERSE_LOCAL_MAP). They cover different kernel paths and different
+      reverse maps; do not conflate them. Cross-referenced at both ends.
+
+changelog:
+  - date: 2026-06-05
+    feature: unconnected-udp-sendmsg4
+    change: >
+      Initial product-level journey for UNCONNECTED-UDP same-host
+      reachability via cgroup/sendmsg4 (forward VIP->backend over
+      LOCAL_BACKEND_MAP) + cgroup/recvmsg4 (reply backend->VIP over a new
+      REVERSE_LOCAL_MAP). Created as a SIBLING of submit-a-udp-service.yaml
+      (the connected-UDP / XDP REVERSE_NAT path) rather than a branch
+      inside it, because the central artifact differs (LOCAL_BACKEND_MAP +
+      REVERSE_LOCAL_MAP vs REVERSE_NAT_MAP) and conflating the two would
+      route the wrong reverse map onto the wrong hook. Rides J-OPS-004
+      (operator-trust reachability) + J-PLAT-004 (Sim≡kernel equivalence);
+      no new job. Walking skeleton is the single same-host unconnected
+      round-trip e2e slice (one DNS-shape UDP service, one
+      sendto/recvfrom round-trip, reply sourced from the VIP). DIVERGE
+      recommended Option 2; recvmsg4 found load-bearing for
+      source-validating clients via kernel commit 983695fa6765. See
+      docs/feature/unconnected-udp-sendmsg4/.

@@ -163,6 +163,20 @@ integration_validation:
       `ServiceFrontend`. Validated by the scoped DIVERGE (Option 6,
       4.17); see feature-delta.md D1 + recommendation.md.
 
+related_journeys:
+  - id: reach-an-unconnected-udp-service
+    relationship: >
+      SIBLING, not child. THIS journey is the CONNECTED-UDP / XDP
+      REVERSE_NAT_MAP wire path (remote backends, forward XDP SERVICE_MAP
+      rewrite + reverse-NAT source rewrite over REVERSE_NAT_MAP keyed
+      (backend_ip, backend_port, proto) -> vip; fires for the client that
+      calls connect()). reach-an-unconnected-udp-service.yaml is the
+      UNCONNECTED-UDP / SAME-HOST cgroup path (local backends, forward
+      cgroup/sendmsg4 over LOCAL_BACKEND_MAP + reply cgroup/recvmsg4 over a
+      new REVERSE_LOCAL_MAP; fires for the canonical DNS-resolver client
+      that NEVER calls connect()). DIFFERENT kernel paths, DIFFERENT reverse
+      maps — do NOT conflate them. GH #200 / unconnected-udp-sendmsg4.
+
 related_features:
   - id: udp-service-support
     role: "Ships the implementation of this journey (GH #163)."
@@ -202,3 +216,13 @@ changelog:
       Sim set-equality + Tier-3 Ebpf acceptance) since the in-process
       both-adapter retarget is infeasible (H1). See feature-delta.md D1 +
       recommendation.md.
+  - date: 2026-06-05
+    feature: unconnected-udp-sendmsg4
+    change: >
+      Added a related_journeys cross-reference to the new sibling journey
+      reach-an-unconnected-udp-service.yaml (GH #200), making the
+      connected-UDP / XDP-REVERSE_NAT (this journey) vs unconnected-UDP /
+      same-host-cgroup (sibling) distinction explicit at this end. No
+      behavioural change to this journey; the cross-ref prevents a reader
+      from conflating REVERSE_NAT_MAP (here) with REVERSE_LOCAL_MAP (the
+      sibling's same-host cgroup reply path).
