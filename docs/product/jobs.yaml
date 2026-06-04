@@ -134,7 +134,7 @@ jobs:
       can inspect current probe state via `overdrive alloc status
       --job <id>`. Extends J-OPS-003 to the Service workload kind
       with operator-declared liveness contracts.
-    source: GH #170; RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment)
+    source: GH #170; RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment); GH #200 / unconnected-udp-sendmsg4 (spans unconnected-UDP same-host wire-path reachability — a same-host UDP service must be reachable from the canonical unconnected `sendto` client, with the reply sourced from the VIP)
     served_by_phase: 1
     status: active
 
@@ -281,3 +281,20 @@ changelog:
       pulls grounded Overdrive docs via MCP), and J-DOCS-003 (the docs
       maintainer prioritises from MCP/search analytics evidence). Existing
       entries unmodified.
+  - date: 2026-06-05
+    change: >
+      DIVERGE for unconnected-udp-sendmsg4 (GH #200) extracted the
+      same-host UNCONNECTED-UDP reachability job and elevated it under the
+      existing J-OPS-004 (operator-trust reachability) + J-PLAT-004
+      (Sim≡kernel equivalence) — NO new job minted (per the
+      udp-service-support D5 precedent: one job spans the protocol/syscall-
+      idiom dimension; a per-idiom job would fragment J-OPS-004). The job:
+      a same-host client's datagram to a service VIP must reach a healthy
+      backend, and the reply must appear to come from the VIP, REGARDLESS
+      of whether the client connected first — the canonical DNS-resolver
+      idiom (sendto(VIP) per query, no connect()) that ADR-0053's connect4
+      path does not intercept. J-OPS-004 source annotated to cite #200 /
+      unconnected-udp-sendmsg4. The DIVERGE recommended Option 2 (sendmsg4
+      + recvmsg4 bidirectional rewrite); recvmsg4 found load-bearing for
+      source-validating clients via kernel commit 983695fa6765. See
+      docs/feature/unconnected-udp-sendmsg4/.
