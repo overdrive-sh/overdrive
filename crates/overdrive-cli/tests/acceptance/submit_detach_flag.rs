@@ -22,7 +22,7 @@
 //! header on the reqwest client, exit code 0 on `Inserted`, KPI-05
 //! wall-clock ≤ 200ms p95) is exercised by the integration suite that
 //! already covers the JSON-ack path
-//! (`tests/integration/job_submit.rs::submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command`)
+//! (`tests/integration/deploy.rs::submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command`)
 //! — the `--detach` flag dispatches to that same path through main.rs's
 //! match arm, so the existing JSON-path coverage is the wire-level
 //! witness.

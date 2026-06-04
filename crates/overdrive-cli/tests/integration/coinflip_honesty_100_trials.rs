@@ -19,7 +19,7 @@
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` § *Integration tests — no
 //! subprocess*: the test calls
-//! `overdrive_cli::commands::deploy::submit_streaming` directly as a
+//! `overdrive_cli::commands::deploy::deploy_streaming` directly as a
 //! Rust async function. No `Command::spawn`.
 //!
 //! The `examples/coinflip.toml` workload picks a pseudo-random branch

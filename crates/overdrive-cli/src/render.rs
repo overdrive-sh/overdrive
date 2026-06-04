@@ -803,7 +803,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
         }
         WorkloadKind::Schedule => {
             // Schedule branch — minimal Phase-1 rendering. Slice 05
-            // (job_submit_schedule) provides the deferral surface;
+            // (deploy_schedule) provides the deferral surface;
             // here we name the kind so the dispatcher is exhaustive.
             let mut s = String::new();
             let _ = writeln!(s, "Schedule '{workload_name}' (kind: Schedule)");

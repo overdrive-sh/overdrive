@@ -70,7 +70,7 @@ fn pipe_redirected_stdout_without_detach_selects_json_lane() {
     // `should_stream == false` branch causes main.rs to call `deploy`
     // (one-shot ack), not `deploy_streaming`. The JSON-ack handler is
     // already exercised end-to-end by
-    // `tests/integration/job_submit.rs::submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command`,
+    // `tests/integration/deploy.rs::submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command`,
     // which is the wire witness for the `Accept: application/json`
     // header path.
     assert!(

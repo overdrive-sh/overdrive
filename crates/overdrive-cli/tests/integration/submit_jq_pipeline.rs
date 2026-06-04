@@ -27,12 +27,12 @@
 //!    `LocalIntentStore`, real `LocalObservationStore`, real
 //!    `ExecDriver`) — same shape as
 //!    `streaming_submit_happy_path.rs` and the JSON-ack
-//!    `job_submit.rs`.
+//!    `deploy.rs`.
 //! 2. Driving the dispatch decision through `should_stream(detach=false,
 //!    is_terminal=false)` — `false` simulates the pipe-redirected
 //!    stdout the real shell pipeline produces. This is the same
 //!    decision main.rs makes; the pure function is the SSOT.
-//! 3. Calling `commands::deploy::submit` (the JSON-ack lane) — the lane
+//! 3. Calling `commands::deploy::deploy` (the JSON-ack lane) — the lane
 //!    `should_stream == false` selects.
 //! 4. Asserting on the typed `DeployOutput.spec_digest` — a 64-char
 //!    lowercase-hex SHA-256 — which is what `jq -r .spec_digest` would
@@ -125,7 +125,7 @@ async fn pipe_redirected_submit_emits_64_char_hex_spec_digest_via_json_lane() {
     // This IS what main.rs would do under
     //   `overdrive deploy ./payments.toml | jq -r .spec_digest`
     // — the pipe makes stdout non-TTY, `should_stream` returns false,
-    // and main.rs invokes `commands::deploy::submit` (which sets
+    // and main.rs invokes `commands::deploy::deploy` (which sets
     // `Accept: application/json` on the request).
     let output: DeployOutput =
         overdrive_cli::commands::deploy::deploy(DeployArgs { spec: spec_path, config_path: cfg })

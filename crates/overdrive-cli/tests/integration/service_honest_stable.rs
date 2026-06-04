@@ -101,7 +101,7 @@ async fn submit_service_and_collect_events(
     };
 
     // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`,
-    // mirroring `commands::deploy::submit_streaming_service`. The wire
+    // mirroring `commands::deploy::deploy_streaming_service`. The wire
     // shape preserves probe descriptors verbatim (including the
     // ADR-0058 default-TCP probe synthesised at parse time when the
     // TOML omits `[[health_check.startup]]`).

@@ -1,4 +1,4 @@
-//! Integration tests for `overdrive_cli::commands::deploy::submit` —
+//! Integration tests for `overdrive_cli::commands::deploy::deploy` —
 //! step 05-04.
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` these call the handler directly

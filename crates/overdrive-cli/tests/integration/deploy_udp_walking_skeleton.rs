@@ -7,7 +7,7 @@
 //! `overdrive_cli::commands::deploy::deploy(DeployArgs { ... })` directly
 //! as a Rust async function — the in-process handler behind
 //! `overdrive deploy <SPEC>` in the detached / non-TTY (JSON-ack) lane
-//! (`main.rs` `Command::Deploy` → `commands::deploy::submit` →
+//! (`main.rs` `Command::Deploy` → `commands::deploy::deploy` →
 //! `render::workload_submit_accepted`). NO
 //! `Command::new(env!("CARGO_BIN_EXE_overdrive"))`.
 //!
