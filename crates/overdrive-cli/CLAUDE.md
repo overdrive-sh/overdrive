@@ -96,7 +96,7 @@ assert_eq!(output.spec_digest, expected_digest);
 ```rust
 // Bad — subprocess; rejected
 let out = Command::new(env!("CARGO_BIN_EXE_overdrive"))
-    .args(["job", "submit", "payments.toml"])
+    .args(["deploy", "payments.toml"])
     .output()?;
 assert!(out.status.success());
 ```
