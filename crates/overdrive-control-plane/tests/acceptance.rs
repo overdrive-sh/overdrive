@@ -18,6 +18,17 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
+    // `lo`-named `DataplaneConfig` helper for SimDataplane-override
+    // fixtures (the `job_stop_*` acceptance tests boot `run_server`).
+    // `#[path]`-included (each `tests/*.rs` is its own crate root) so
+    // the same SSOT source backs both the acceptance and integration
+    // binaries and the `lo`/`lo` shape cannot drift. Gated behind
+    // `integration-tests` — its only consumers (`job_stop_*`) are.
+    #[cfg(feature = "integration-tests")]
+    #[path = "../common/dataplane_lo.rs"]
+    pub mod dataplane_lo;
+
     // S-CP-09 — AllocStatusRow rkyv round-trip with the new
     // `reason: Option<TransitionReason>` and `detail: Option<String>`
     // fields per ADR-0032 §3 (Amendment 2026-04-30) and §4.
@@ -205,4 +216,36 @@ mod acceptance {
     // S-SHCP-WIRE-15 cover the production dispatch path from
     // handlers.rs:498 through build_service_stream end-to-end.
     mod service_submit_dispatch_wiring;
+
+    // udp-service-support US-01 / S-01-F (ADR-0060 D1a) — RED scaffold.
+    // IPv6 VIP rejected at the action-shim as an operator-visible Failed
+    // row via ServiceFrontend::new (NOT a late opaque DataplaneError).
+    mod service_frontend_ipv6_rejected;
+
+    // reconciler-listener-fact-view step 01-03 — edge-half of invariant
+    // B (ADR-0062 § Decision (2)). After a sequence of real submissions
+    // through the `submit_workload` driving port, the edge-maintained
+    // `ListenerFactStore` equals a fresh `rebuild_from_intent` over the
+    // same committed intent set + allocator (handler edge agrees with
+    // the boot rebuild).
+    mod listener_fact_byte_equivalence_invariant;
+
+    // reconciler-listener-fact-view step 01-04 — the read-path switch
+    // (ADR-0062 § Decision (3); feature-delta sub-decisions 3-5).
+    // Invariant A (steady-state hydrate sources the fact from the
+    // in-memory keyed store, not an intent-store scan), Invariant C
+    // (the hydrate path never holds the `listener_facts` guard across
+    // an `.await`), and the BE-1/BE-2/BE-3 behavior-equivalence pins
+    // for the source change.
+    mod listener_fact_hydrate_equivalence;
+    mod listener_fact_lock_discipline_invariant;
+    mod listener_fact_zero_scan_invariant;
+
+    // fix-mixed-backend-dispatch-spin step 01-04 (Fix C) — a genuine
+    // same-slot reconcile-output conflict (two cgroup writes to one
+    // `(vip, port, proto)` slot) makes `run_convergence_tick` write a
+    // queryable `reconcile_conflict` observation row alongside the
+    // `reconciler.output.invariant_violation` tracing event, skip
+    // dispatch, persist the View, and NOT stop (surface-then-continue).
+    mod reconcile_conflict_observation;
 }

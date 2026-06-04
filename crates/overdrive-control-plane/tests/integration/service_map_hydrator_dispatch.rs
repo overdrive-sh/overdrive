@@ -54,7 +54,7 @@ impl Dataplane for FailingUpdateService {
 
     async fn update_service(
         &self,
-        _vip: Ipv4Addr,
+        _frontend: overdrive_core::dataplane::ServiceFrontend,
         _backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
         Err(DataplaneError::Busy)
@@ -69,6 +69,7 @@ impl Dataplane for FailingUpdateService {
         _vip: Ipv4Addr,
         _vip_port: u16,
         _backend: std::net::SocketAddrV4,
+        _proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
         Ok(())
     }
@@ -77,6 +78,7 @@ impl Dataplane for FailingUpdateService {
         &self,
         _vip: Ipv4Addr,
         _vip_port: u16,
+        _proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
         Ok(())
     }
@@ -112,8 +114,14 @@ fn sample_action() -> (ServiceId, ServiceVip, Vec<Backend>, CorrelationKey) {
 #[tokio::test]
 async fn dispatch_writes_completed_row_on_dataplane_ok() {
     let (service_id, vip, backends, correlation) = sample_action();
-    let action =
-        Action::DataplaneUpdateService { service_id, vip, backends: backends.clone(), correlation };
+    let action = Action::DataplaneUpdateService {
+        service_id,
+        vip,
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+        backends: backends.clone(),
+        correlation,
+    };
     let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
     let writer_node = NodeId::new("writer-1").expect("NodeId");
     let obs: Arc<dyn ObservationStore> =
@@ -150,8 +158,14 @@ async fn dispatch_writes_completed_row_on_dataplane_ok() {
 #[tokio::test]
 async fn dispatch_writes_failed_row_on_dataplane_err() {
     let (service_id, vip, backends, correlation) = sample_action();
-    let action =
-        Action::DataplaneUpdateService { service_id, vip, backends: backends.clone(), correlation };
+    let action = Action::DataplaneUpdateService {
+        service_id,
+        vip,
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+        backends: backends.clone(),
+        correlation,
+    };
     let dataplane: Arc<dyn Dataplane> = Arc::new(FailingUpdateService);
     let writer_node = NodeId::new("writer-1").expect("NodeId");
     let obs: Arc<dyn ObservationStore> =
@@ -214,6 +228,8 @@ async fn dispatch_rejects_ipv6_vip_with_failed_row() {
     let action = Action::DataplaneUpdateService {
         service_id,
         vip: ipv6_vip,
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
         backends: backends.clone(),
         correlation,
     };

@@ -236,6 +236,18 @@ pub struct AllocStatusResponse {
     /// only; the Service-level VIP lives at this top-level field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vip: Option<String>,
+    /// Operator-declared listeners in declaration order — `(port,
+    /// protocol)` only, reusing the typed `overdrive_core::aggregate::
+    /// Listener` wire shape. Populated for `WorkloadKind::Service` reads
+    /// (projected from the persisted `WorkloadIntent::Service` aggregate's
+    /// `listeners`); empty for `Job` / `Schedule` reads (those carry no
+    /// listeners). The CLI render layer renders each as `<port>/<protocol>`
+    /// so a UDP service's `Proto::Udp` is operator-visible.
+    ///
+    /// Additive-safe: `skip_serializing_if = "Vec::is_empty"` keeps the
+    /// JSON wire backward-compatible for non-Service reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub listeners: Vec<overdrive_core::aggregate::Listener>,
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01

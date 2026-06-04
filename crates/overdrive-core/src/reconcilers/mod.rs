@@ -436,12 +436,22 @@ pub enum Action {
         terminal: Option<TerminalCondition>,
     },
 
-    /// Replace the backend set for a service VIP in the kernel-side maps.
+    /// Replace the backend set for a service frontend
+    /// `(vip, port, proto)` in the kernel-side maps.
     DataplaneUpdateService {
         /// Identity of the service.
         service_id: crate::id::ServiceId,
-        /// Virtual IP.
+        /// Virtual IP. Carried as `ServiceVip` (IPv6-admitting) so the
+        /// action-shim performs the operator-visible IPv4 validation via
+        /// `ServiceFrontend::new` (ADR-0060 D1a); the dataplane never
+        /// sees an IPv6 VIP.
         vip: crate::id::ServiceVip,
+        /// Service listener port. Sourced from a listener-bearing fact;
+        /// projected to `BackendKey`'s `u16` via `.get()` at the adapter.
+        port: std::num::NonZeroU16,
+        /// L4 protocol. Sourced from a listener-bearing fact — NEVER
+        /// defaulted to `Tcp` (ADR-0060 C3).
+        proto: crate::dataplane::backend_key::Proto,
         /// Backend set, in deterministic iteration order.
         backends: Vec<crate::traits::dataplane::Backend>,
         /// Cause-to-response linkage.
@@ -472,7 +482,7 @@ pub enum Action {
         target: TargetResource,
     },
 
-    /// Register the local backend for `(vip, vip_port)`.
+    /// Register the local backend for `(vip, vip_port, proto)`.
     RegisterLocalBackend {
         /// Identity of the service.
         service_id: crate::id::ServiceId,
@@ -480,13 +490,18 @@ pub enum Action {
         vip: std::net::Ipv4Addr,
         /// VIP port the listener accepts on.
         vip_port: u16,
+        /// L4 protocol the listener serves (ADR-0053 rev Amendment 3).
+        /// Sourced from the listener-bearing fact, NEVER defaulted to
+        /// `Tcp` (C3) — a service co-locating tcp/53 + udp/53 emits
+        /// two `RegisterLocalBackend` with distinct proto.
+        proto: crate::dataplane::backend_key::Proto,
         /// Resolved local backend `(IPv4, port)`.
         backend: std::net::SocketAddrV4,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },
 
-    /// Deregister the local backend for `(vip, vip_port)`.
+    /// Deregister the local backend for `(vip, vip_port, proto)`.
     DeregisterLocalBackend {
         /// Identity of the service.
         service_id: crate::id::ServiceId,
@@ -494,6 +509,8 @@ pub enum Action {
         vip: std::net::Ipv4Addr,
         /// VIP port whose entry to remove.
         vip_port: u16,
+        /// L4 protocol whose entry to remove (ADR-0053 rev Amendment 3).
+        proto: crate::dataplane::backend_key::Proto,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },

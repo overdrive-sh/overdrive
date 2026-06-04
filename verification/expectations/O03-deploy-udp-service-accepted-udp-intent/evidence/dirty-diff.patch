@@ -1,0 +1,1323 @@
+diff --git a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+index 7f90d171..604a3287 100644
+--- a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
++++ b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+@@ -106,6 +106,48 @@
+       "s": "EXECUTED",
+       "d": "PASS",
+       "t": "2026-06-02T16:17:38Z"
++    },
++    {
++      "sid": "01-03",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T16:19:56Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "PREPARE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T16:23:13Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "RED_ACCEPTANCE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T16:26:16Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "RED_UNIT",
++      "s": "SKIPPED",
++      "d": "NOT_APPLICABLE: Tier-3 regression test step \u2014 no unit-level tests; kernel-observable assertions only",
++      "t": "2026-06-02T16:26:16Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T16:26:16Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T16:28:10Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/docs/feature/udp-service-support/deliver/execution-log.json b/docs/feature/udp-service-support/deliver/execution-log.json
+index 44d8fb9b..31a8a7ea 100644
+--- a/docs/feature/udp-service-support/deliver/execution-log.json
++++ b/docs/feature/udp-service-support/deliver/execution-log.json
+@@ -99,6 +99,83 @@
+       "s": "EXECUTED",
+       "d": "PASS",
+       "t": "2026-06-02T10:51:22Z"
++    },
++    {
++      "sid": "01-03",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T10:52:43Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "PREPARE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:24:51Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "RED_ACCEPTANCE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:28:55Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "RED_UNIT",
++      "s": "SKIPPED",
++      "d": "NOT_APPLICABLE: Tier-3 real-kernel AT is the unit-level exercise; per-listener REVERSE_NAT keys (each proto-byte distinguished) are observability surface asserted directly by the AT via reverse_nat_map_has_backend_proto map dump; the lockstep universe guard is Tier-1, landed 01-01. No separate PBT/unit layer needed to reach GREEN.",
++      "t": "2026-06-02T12:28:55Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:28:55Z"
++    },
++    {
++      "sid": "01-04",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:30:17Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "PREPARE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:42:33Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "RED_ACCEPTANCE",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:43:55Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "RED_UNIT",
++      "s": "SKIPPED",
++      "d": "NOT_APPLICABLE: Tier-3 driving-adapter walking skeleton \u2014 the acceptance test directly asserts the observable proto-carried-through-intent surface via the commands::job::submit driving port + back-door IntentStore read; no separate unit layer is needed to reach GREEN (mirrors 01-02/01-03/01-04 RED_UNIT SKIPPED)",
++      "t": "2026-06-02T12:43:55Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:47:09Z"
++    },
++    {
++      "sid": "01-05",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-06-02T12:47:47Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/crates/overdrive-cli/examples/dns-resolver.toml b/examples/dns-resolver.toml
+similarity index 100%
+rename from crates/overdrive-cli/examples/dns-resolver.toml
+rename to examples/dns-resolver.toml
+diff --git a/verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh b/verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh
+index dcef9a86..a48a3ebe 100755
+--- a/verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh
++++ b/verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh
+@@ -16,8 +16,8 @@
+ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
+ 
+ VIP="10.96.0.10"
+-VIP_PORT="5353"
+-SPEC="crates/overdrive-cli/examples/dns-resolver.toml"
++VIP_PORT="15353"
++SPEC="examples/dns-resolver.toml"
+ 
+ if [[ ! -f "$REPO_ROOT/$SPEC" ]]; then
+   echo "  [pending] fixture missing: $SPEC"
+diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+index faf58b29..7d574676 100644
+--- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
++++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+@@ -1,1130 +0,0 @@
+-diff --git a/crates/overdrive-cli/examples/dns-resolver.toml b/crates/overdrive-cli/examples/dns-resolver.toml
+-index 0f463138..5f477fde 100644
+---- a/crates/overdrive-cli/examples/dns-resolver.toml
+-+++ b/crates/overdrive-cli/examples/dns-resolver.toml
+-@@ -2,17 +2,27 @@
+- #
+- # A single-UDP-listener Service spec the `overdrive deploy <SPEC>` handler
+- # accepts. The load-bearing element is the `protocol = "udp"` listener on
+--# 5353: it proves the operator's udp token threads spec -> handler -> intent
+-+# 15353: it proves the operator's udp token threads spec -> handler -> intent
+- # without a Proto::Tcp substitution (the S-04-A walking-skeleton deploy half).
+- #
+-+# Port choice — 15353, NOT 5353. The dev Lima VM's `systemd-resolved` already
+-+# owns UDP 5353 (mDNS); a backend binding 5353 fails `bind(): Address already
+-+# in use`, exits 1, and the allocation never reaches Running — which on a
+-+# convergence capture reads (misleadingly) as an empty dataplane map. See the
+-+# RCA `docs/analysis/root-cause-analysis-convergence-dataplane-gap.md`. 15353 is
+-+# a free, unprivileged port in the VM (verified via `ss -uln`), so the socat
+-+# backend binds and the Service can actually converge.
+-+#
+- # The accepted `[service]`/`[exec]`/`[resources]`/`[[listener]]` shape matches
+- # the 01-05 direct-handler test
+- # `crates/overdrive-cli/tests/integration/deploy_udp_walking_skeleton.rs`
+--# (`dns_resolver_udp_toml()`), so this checked-in fixture parses through the
+--# same `WorkloadSpecInput::from_toml_str` -> Service path the test exercises.
+-+# (`dns_resolver_udp_toml()`) — that in-process test asserts `Proto::Udp` and
+-+# never binds a socket, so its port value is irrelevant to it; this checked-in
+-+# fixture parses through the same `WorkloadSpecInput::from_toml_str` -> Service
+-+# path the test exercises.
+- #
+--# Backend: `socat` UDP echo bound on 5353 — a real binary present in the Lima
+--# dev VM (/usr/bin/socat), not a phantom path. `UDP-RECVFROM:5353,fork`
+-+# Backend: `socat` UDP echo bound on 15353 — a real binary present in the Lima
+-+# dev VM (/usr/bin/socat), not a phantom path. `UDP-RECVFROM:15353,fork`
+- # accepts a datagram, forks a handler, and `PIPE` echoes the payload back to
+- # the sender — a connectionless reply service whose reverse path E02 inspects
+- # (the reply's source is rewritten to the VIP, not the backend IP). For O03
+-@@ -31,12 +41,12 @@ replicas = 1
+- 
+- [exec]
+- command = "/usr/bin/socat"
+--args    = ["-T15", "UDP-RECVFROM:5353,fork", "PIPE"]
+-+args    = ["-T15", "UDP-RECVFROM:15353,fork", "PIPE"]
+- 
+- [resources]
+- cpu_milli = 250
+- memory_bytes = 67108864
+- 
+- [[listener]]
+--port = 5353
+-+port = 15353
+- protocol = "udp"
+-diff --git a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+-index 7f90d171..604a3287 100644
+---- a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+-+++ b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+-@@ -106,6 +106,48 @@
+-       "s": "EXECUTED",
+-       "d": "PASS",
+-       "t": "2026-06-02T16:17:38Z"
+-+    },
+-+    {
+-+      "sid": "01-03",
+-+      "p": "COMMIT",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T16:19:56Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "PREPARE",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T16:23:13Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "RED_ACCEPTANCE",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T16:26:16Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "RED_UNIT",
+-+      "s": "SKIPPED",
+-+      "d": "NOT_APPLICABLE: Tier-3 regression test step \u2014 no unit-level tests; kernel-observable assertions only",
+-+      "t": "2026-06-02T16:26:16Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "GREEN",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T16:26:16Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "COMMIT",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T16:28:10Z"
+-     }
+-   ]
+- }
+-\ No newline at end of file
+-diff --git a/docs/feature/udp-service-support/deliver/execution-log.json b/docs/feature/udp-service-support/deliver/execution-log.json
+-index 44d8fb9b..31a8a7ea 100644
+---- a/docs/feature/udp-service-support/deliver/execution-log.json
+-+++ b/docs/feature/udp-service-support/deliver/execution-log.json
+-@@ -99,6 +99,83 @@
+-       "s": "EXECUTED",
+-       "d": "PASS",
+-       "t": "2026-06-02T10:51:22Z"
+-+    },
+-+    {
+-+      "sid": "01-03",
+-+      "p": "COMMIT",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T10:52:43Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "PREPARE",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:24:51Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "RED_ACCEPTANCE",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:28:55Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "RED_UNIT",
+-+      "s": "SKIPPED",
+-+      "d": "NOT_APPLICABLE: Tier-3 real-kernel AT is the unit-level exercise; per-listener REVERSE_NAT keys (each proto-byte distinguished) are observability surface asserted directly by the AT via reverse_nat_map_has_backend_proto map dump; the lockstep universe guard is Tier-1, landed 01-01. No separate PBT/unit layer needed to reach GREEN.",
+-+      "t": "2026-06-02T12:28:55Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "GREEN",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:28:55Z"
+-+    },
+-+    {
+-+      "sid": "01-04",
+-+      "p": "COMMIT",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:30:17Z"
+-+    },
+-+    {
+-+      "sid": "01-05",
+-+      "p": "PREPARE",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:42:33Z"
+-+    },
+-+    {
+-+      "sid": "01-05",
+-+      "p": "RED_ACCEPTANCE",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:43:55Z"
+-+    },
+-+    {
+-+      "sid": "01-05",
+-+      "p": "RED_UNIT",
+-+      "s": "SKIPPED",
+-+      "d": "NOT_APPLICABLE: Tier-3 driving-adapter walking skeleton \u2014 the acceptance test directly asserts the observable proto-carried-through-intent surface via the commands::job::submit driving port + back-door IntentStore read; no separate unit layer is needed to reach GREEN (mirrors 01-02/01-03/01-04 RED_UNIT SKIPPED)",
+-+      "t": "2026-06-02T12:43:55Z"
+-+    },
+-+    {
+-+      "sid": "01-05",
+-+      "p": "GREEN",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:47:09Z"
+-+    },
+-+    {
+-+      "sid": "01-05",
+-+      "p": "COMMIT",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-06-02T12:47:47Z"
+-     }
+-   ]
+- }
+-\ No newline at end of file
+-diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+-index eca43fcf..43ad5db4 100644
+---- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+-+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+-@@ -1,882 +0,0 @@
+--diff --git a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+--index 7f90d171..604a3287 100644
+----- a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+--+++ b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+--@@ -106,6 +106,48 @@
+--       "s": "EXECUTED",
+--       "d": "PASS",
+--       "t": "2026-06-02T16:17:38Z"
+--+    },
+--+    {
+--+      "sid": "01-03",
+--+      "p": "COMMIT",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T16:19:56Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "PREPARE",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T16:23:13Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "RED_ACCEPTANCE",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T16:26:16Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "RED_UNIT",
+--+      "s": "SKIPPED",
+--+      "d": "NOT_APPLICABLE: Tier-3 regression test step \u2014 no unit-level tests; kernel-observable assertions only",
+--+      "t": "2026-06-02T16:26:16Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "GREEN",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T16:26:16Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "COMMIT",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T16:28:10Z"
+--     }
+--   ]
+-- }
+--\ No newline at end of file
+--diff --git a/docs/feature/udp-service-support/deliver/execution-log.json b/docs/feature/udp-service-support/deliver/execution-log.json
+--index 44d8fb9b..31a8a7ea 100644
+----- a/docs/feature/udp-service-support/deliver/execution-log.json
+--+++ b/docs/feature/udp-service-support/deliver/execution-log.json
+--@@ -99,6 +99,83 @@
+--       "s": "EXECUTED",
+--       "d": "PASS",
+--       "t": "2026-06-02T10:51:22Z"
+--+    },
+--+    {
+--+      "sid": "01-03",
+--+      "p": "COMMIT",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T10:52:43Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "PREPARE",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:24:51Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "RED_ACCEPTANCE",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:28:55Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "RED_UNIT",
+--+      "s": "SKIPPED",
+--+      "d": "NOT_APPLICABLE: Tier-3 real-kernel AT is the unit-level exercise; per-listener REVERSE_NAT keys (each proto-byte distinguished) are observability surface asserted directly by the AT via reverse_nat_map_has_backend_proto map dump; the lockstep universe guard is Tier-1, landed 01-01. No separate PBT/unit layer needed to reach GREEN.",
+--+      "t": "2026-06-02T12:28:55Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "GREEN",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:28:55Z"
+--+    },
+--+    {
+--+      "sid": "01-04",
+--+      "p": "COMMIT",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:30:17Z"
+--+    },
+--+    {
+--+      "sid": "01-05",
+--+      "p": "PREPARE",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:42:33Z"
+--+    },
+--+    {
+--+      "sid": "01-05",
+--+      "p": "RED_ACCEPTANCE",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:43:55Z"
+--+    },
+--+    {
+--+      "sid": "01-05",
+--+      "p": "RED_UNIT",
+--+      "s": "SKIPPED",
+--+      "d": "NOT_APPLICABLE: Tier-3 driving-adapter walking skeleton \u2014 the acceptance test directly asserts the observable proto-carried-through-intent surface via the commands::job::submit driving port + back-door IntentStore read; no separate unit layer is needed to reach GREEN (mirrors 01-02/01-03/01-04 RED_UNIT SKIPPED)",
+--+      "t": "2026-06-02T12:43:55Z"
+--+    },
+--+    {
+--+      "sid": "01-05",
+--+      "p": "GREEN",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:47:09Z"
+--+    },
+--+    {
+--+      "sid": "01-05",
+--+      "p": "COMMIT",
+--+      "s": "EXECUTED",
+--+      "d": "PASS",
+--+      "t": "2026-06-02T12:47:47Z"
+--     }
+--   ]
+-- }
+--\ No newline at end of file
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log
+--index e22e0980..273d2247 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log
+--@@ -1,16 +1,3 @@
+---[1m[92m   Compiling[0m ring v0.17.14
+---[1m[92m   Compiling[0m overdrive-core v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-core)
+---[1m[92m   Compiling[0m overdrive-host v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-host)
+---[1m[92m   Compiling[0m overdrive-dataplane v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-dataplane)
+---[1m[92m   Compiling[0m overdrive-store-local v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-store-local)
+---[1m[92m   Compiling[0m overdrive-worker v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-worker)
+---[1m[92m   Compiling[0m rustls v0.23.39
+---[1m[92m   Compiling[0m rustls-webpki v0.103.13
+---[1m[92m   Compiling[0m rcgen v0.13.2
+---[1m[92m   Compiling[0m tokio-rustls v0.26.4
+---[1m[92m   Compiling[0m hyper-rustls v0.27.9
+---[1m[92m   Compiling[0m axum-server v0.7.3
+-- [1m[92m   Compiling[0m overdrive-control-plane v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-control-plane)
+---[1m[92m   Compiling[0m reqwest v0.12.28
+-- [1m[92m   Compiling[0m overdrive-cli v0.0.0 (/Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-cli)
+---[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 10.94s
+--+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 3.83s
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta
+--index 64ec4d58..e821731e 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta
+--@@ -1,4 +1,4 @@
+-- # command: overdrive deploy /Users/marcus/conductor/workspaces/helios/luxembourg-v2/crates/overdrive-cli/examples/dns-resolver.toml
+-- # seed:    1
+---# started: 2026-06-02T16:48:36Z
+--+# started: 2026-06-02T17:09:14Z
+-- # exit:    0
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+--index 806702d1..f70dbb73 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+--@@ -1,277 +0,0 @@
+---diff --git a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+---index 7f90d171..604a3287 100644
+------ a/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+---+++ b/docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+---@@ -106,6 +106,48 @@
+---       "s": "EXECUTED",
+---       "d": "PASS",
+---       "t": "2026-06-02T16:17:38Z"
+---+    },
+---+    {
+---+      "sid": "01-03",
+---+      "p": "COMMIT",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T16:19:56Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "PREPARE",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T16:23:13Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "RED_ACCEPTANCE",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T16:26:16Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "RED_UNIT",
+---+      "s": "SKIPPED",
+---+      "d": "NOT_APPLICABLE: Tier-3 regression test step \u2014 no unit-level tests; kernel-observable assertions only",
+---+      "t": "2026-06-02T16:26:16Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "GREEN",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T16:26:16Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "COMMIT",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T16:28:10Z"
+---     }
+---   ]
+--- }
+---\ No newline at end of file
+---diff --git a/docs/feature/udp-service-support/deliver/execution-log.json b/docs/feature/udp-service-support/deliver/execution-log.json
+---index 44d8fb9b..31a8a7ea 100644
+------ a/docs/feature/udp-service-support/deliver/execution-log.json
+---+++ b/docs/feature/udp-service-support/deliver/execution-log.json
+---@@ -99,6 +99,83 @@
+---       "s": "EXECUTED",
+---       "d": "PASS",
+---       "t": "2026-06-02T10:51:22Z"
+---+    },
+---+    {
+---+      "sid": "01-03",
+---+      "p": "COMMIT",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T10:52:43Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "PREPARE",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:24:51Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "RED_ACCEPTANCE",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:28:55Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "RED_UNIT",
+---+      "s": "SKIPPED",
+---+      "d": "NOT_APPLICABLE: Tier-3 real-kernel AT is the unit-level exercise; per-listener REVERSE_NAT keys (each proto-byte distinguished) are observability surface asserted directly by the AT via reverse_nat_map_has_backend_proto map dump; the lockstep universe guard is Tier-1, landed 01-01. No separate PBT/unit layer needed to reach GREEN.",
+---+      "t": "2026-06-02T12:28:55Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "GREEN",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:28:55Z"
+---+    },
+---+    {
+---+      "sid": "01-04",
+---+      "p": "COMMIT",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:30:17Z"
+---+    },
+---+    {
+---+      "sid": "01-05",
+---+      "p": "PREPARE",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:42:33Z"
+---+    },
+---+    {
+---+      "sid": "01-05",
+---+      "p": "RED_ACCEPTANCE",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:43:55Z"
+---+    },
+---+    {
+---+      "sid": "01-05",
+---+      "p": "RED_UNIT",
+---+      "s": "SKIPPED",
+---+      "d": "NOT_APPLICABLE: Tier-3 driving-adapter walking skeleton \u2014 the acceptance test directly asserts the observable proto-carried-through-intent surface via the commands::job::submit driving port + back-door IntentStore read; no separate unit layer is needed to reach GREEN (mirrors 01-02/01-03/01-04 RED_UNIT SKIPPED)",
+---+      "t": "2026-06-02T12:43:55Z"
+---+    },
+---+    {
+---+      "sid": "01-05",
+---+      "p": "GREEN",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:47:09Z"
+---+    },
+---+    {
+---+      "sid": "01-05",
+---+      "p": "COMMIT",
+---+      "s": "EXECUTED",
+---+      "d": "PASS",
+---+      "t": "2026-06-02T12:47:47Z"
+---     }
+---   ]
+--- }
+---\ No newline at end of file
+---diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+---index eb0b1196..e69de29b 100644
+------ a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+---+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+---@@ -1,115 +0,0 @@
+----diff --git a/docs/feature/udp-service-support/deliver/execution-log.json b/docs/feature/udp-service-support/deliver/execution-log.json
+----index 44d8fb9b..31a8a7ea 100644
+------- a/docs/feature/udp-service-support/deliver/execution-log.json
+----+++ b/docs/feature/udp-service-support/deliver/execution-log.json
+----@@ -99,6 +99,83 @@
+----       "s": "EXECUTED",
+----       "d": "PASS",
+----       "t": "2026-06-02T10:51:22Z"
+----+    },
+----+    {
+----+      "sid": "01-03",
+----+      "p": "COMMIT",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T10:52:43Z"
+----+    },
+----+    {
+----+      "sid": "01-04",
+----+      "p": "PREPARE",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:24:51Z"
+----+    },
+----+    {
+----+      "sid": "01-04",
+----+      "p": "RED_ACCEPTANCE",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:28:55Z"
+----+    },
+----+    {
+----+      "sid": "01-04",
+----+      "p": "RED_UNIT",
+----+      "s": "SKIPPED",
+----+      "d": "NOT_APPLICABLE: Tier-3 real-kernel AT is the unit-level exercise; per-listener REVERSE_NAT keys (each proto-byte distinguished) are observability surface asserted directly by the AT via reverse_nat_map_has_backend_proto map dump; the lockstep universe guard is Tier-1, landed 01-01. No separate PBT/unit layer needed to reach GREEN.",
+----+      "t": "2026-06-02T12:28:55Z"
+----+    },
+----+    {
+----+      "sid": "01-04",
+----+      "p": "GREEN",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:28:55Z"
+----+    },
+----+    {
+----+      "sid": "01-04",
+----+      "p": "COMMIT",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:30:17Z"
+----+    },
+----+    {
+----+      "sid": "01-05",
+----+      "p": "PREPARE",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:42:33Z"
+----+    },
+----+    {
+----+      "sid": "01-05",
+----+      "p": "RED_ACCEPTANCE",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:43:55Z"
+----+    },
+----+    {
+----+      "sid": "01-05",
+----+      "p": "RED_UNIT",
+----+      "s": "SKIPPED",
+----+      "d": "NOT_APPLICABLE: Tier-3 driving-adapter walking skeleton \u2014 the acceptance test directly asserts the observable proto-carried-through-intent surface via the commands::job::submit driving port + back-door IntentStore read; no separate unit layer is needed to reach GREEN (mirrors 01-02/01-03/01-04 RED_UNIT SKIPPED)",
+----+      "t": "2026-06-02T12:43:55Z"
+----+    },
+----+    {
+----+      "sid": "01-05",
+----+      "p": "GREEN",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:47:09Z"
+----+    },
+----+    {
+----+      "sid": "01-05",
+----+      "p": "COMMIT",
+----+      "s": "EXECUTED",
+----+      "d": "PASS",
+----+      "t": "2026-06-02T12:47:47Z"
+----     }
+----   ]
+---- }
+----\ No newline at end of file
+----diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
+----index dcad63f9..f8a58ac0 100644
+------- a/verification/expectations/INDEX.md
+----+++ b/verification/expectations/INDEX.md
+----@@ -8,12 +8,21 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+---- | [O01](O01-kind-rejection-guidance/) | O | Job/Schedule + probe rejected with actionable guidance | K5 | S-SHCP-PARSE-05/06, CLI-12..14 | `pending` |
+---- | [O02](O02-alloc-status-probes-section/) | O | `alloc status` renders a Probes section for a Service | K4 | S-SHCP-CLI-01..06 | `pending` |
+---- | [E01](E01-coinflip-service-honest-early-exit/) | E | coinflip-as-Service honest EarlyExit, never `(took live)` | K1 | S-SHCP-RECON-04, INT-CLI-01, CLI-07..11 | `pending` |
+----+| [O03](O03-deploy-udp-service-accepted-udp-intent/) | O | `overdrive deploy <udp-spec>` accepted; intent carries `Proto::Udp` | K1 | S-04-A, roadmap 01-05, ADR-0060, US-04 | `pending` |
+----+| [E02](E02-udp-service-reverse-path-vip-sourced/) | E | deployed UDP service's reply sourced from VIP, not backend IP | K1 | S-04-A, K1, roadmap 01-03, ADR-0060, US-04 | `pending` |
+---- 
+---- ## Feature coverage
+---- 
+---- - **service-health-check-probes** — O01, O02, E01 (operator + e2e surfaces).
+----   The in-process behaviour is covered by the four test tiers; these capture
+----   the operator-observable and qualitative slice those tiers under-serve.
+----+- **udp-service-support** — O03 (deploy-accepted + udp-intent), E02 (the K1
+----+  reverse-path-VIP-source proof). The in-process logic and the Tier-3 wire
+----+  path are covered by the test tiers (notably the passing
+----+  `reverse_nat_udp_e2e.rs`); these capture the operator-observable deploy
+----+  half and the qualitative end-to-end #163-guard slice those tiers
+----+  under-serve. E02 is the design-time `why` for the
+----+  `reverse_nat_udp_e2e.rs` regression alarm (Stabilize doctrine).
+---- 
+---- ## Adding an expectation
+---- 
+---diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+---index 4c875d68..21934fbd 100644
+------ a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+---+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+---@@ -1,6 +1,5 @@
+---+ M docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+---  M docs/feature/udp-service-support/deliver/execution-log.json
+---- M verification/expectations/INDEX.md
+----?? crates/overdrive-cli/examples/
+---+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+---+?? docs/feature/single-node-dataplane-wiring/deliver/.develop-progress.json
+--- ?? docs/feature/udp-service-support/deliver/.develop-progress.json
+----?? verification/expectations/E02-udp-service-reverse-path-vip-sourced/
+----?? verification/expectations/O03-deploy-udp-service-accepted-udp-intent/
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+--index 21934fbd..b61dba28 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+--@@ -1,5 +1,18 @@
+--  M docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+--  M docs/feature/udp-service-support/deliver/execution-log.json
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+--  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml
+--+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+-- ?? docs/feature/single-node-dataplane-wiring/deliver/.develop-progress.json
+-- ?? docs/feature/udp-service-support/deliver/.develop-progress.json
+--+?? verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/alloc_status_dns_resolver.out
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt
+--index e003d35c..3fe1db9e 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt
+--@@ -1,2 +1,2 @@
+-- # probe: workload cgroups AFTER deploy
+---(no alloc-*.scope)
+--+alloc-dns-resolver-0.scope
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt
+--index 36417975..a1a05aab 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt
+--@@ -6,5 +6,5 @@ Device "vcli27f8@vbk27f8" does not exist.
+-- Device "vbka2985@vclia2985" does not exist.
+-- Device "vclia2985@vbka2985" does not exist.
+-- --- bpftool prog show (xdp/sched_cls only) ---
+---39117: xdp  name xdp_service_map  tag 4a2a53950024617d  gpl
+---39118: xdp  name xdp_reverse_nat  tag 2a8f6be27062f6f1  gpl
+--+39247: xdp  name xdp_service_map  tag 4a2a53950024617d  gpl
+--+39248: xdp  name xdp_reverse_nat  tag 2a8f6be27062f6f1  gpl
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt
+--index 0e6461a1..f0b2cc9a 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt
+--@@ -1,2 +1,208 @@
+-- # probe: workload cgroups BEFORE run
+---(no alloc-*.scope)
+--+alloc-coinflip-0.scope
+--+alloc-coinflip-000-0.scope
+--+alloc-coinflip-001-0.scope
+--+alloc-coinflip-002-0.scope
+--+alloc-coinflip-003-0.scope
+--+alloc-coinflip-004-0.scope
+--+alloc-coinflip-005-0.scope
+--+alloc-coinflip-006-0.scope
+--+alloc-coinflip-007-0.scope
+--+alloc-coinflip-008-0.scope
+--+alloc-coinflip-009-0.scope
+--+alloc-coinflip-010-0.scope
+--+alloc-coinflip-011-0.scope
+--+alloc-coinflip-012-0.scope
+--+alloc-coinflip-013-0.scope
+--+alloc-coinflip-014-0.scope
+--+alloc-coinflip-015-0.scope
+--+alloc-coinflip-016-0.scope
+--+alloc-coinflip-017-0.scope
+--+alloc-coinflip-018-0.scope
+--+alloc-coinflip-019-0.scope
+--+alloc-coinflip-020-0.scope
+--+alloc-coinflip-021-0.scope
+--+alloc-coinflip-022-0.scope
+--+alloc-coinflip-023-0.scope
+--+alloc-coinflip-024-0.scope
+--+alloc-coinflip-025-0.scope
+--+alloc-coinflip-026-0.scope
+--+alloc-coinflip-027-0.scope
+--+alloc-coinflip-028-0.scope
+--+alloc-coinflip-029-0.scope
+--+alloc-coinflip-030-0.scope
+--+alloc-coinflip-031-0.scope
+--+alloc-coinflip-032-0.scope
+--+alloc-coinflip-033-0.scope
+--+alloc-coinflip-034-0.scope
+--+alloc-coinflip-035-0.scope
+--+alloc-coinflip-036-0.scope
+--+alloc-coinflip-037-0.scope
+--+alloc-coinflip-038-0.scope
+--+alloc-coinflip-039-0.scope
+--+alloc-coinflip-040-0.scope
+--+alloc-coinflip-041-0.scope
+--+alloc-coinflip-042-0.scope
+--+alloc-coinflip-043-0.scope
+--+alloc-coinflip-044-0.scope
+--+alloc-coinflip-045-0.scope
+--+alloc-coinflip-046-0.scope
+--+alloc-coinflip-047-0.scope
+--+alloc-coinflip-048-0.scope
+--+alloc-coinflip-049-0.scope
+--+alloc-coinflip-050-0.scope
+--+alloc-coinflip-051-0.scope
+--+alloc-coinflip-052-0.scope
+--+alloc-coinflip-053-0.scope
+--+alloc-coinflip-054-0.scope
+--+alloc-coinflip-055-0.scope
+--+alloc-coinflip-056-0.scope
+--+alloc-coinflip-057-0.scope
+--+alloc-coinflip-058-0.scope
+--+alloc-coinflip-059-0.scope
+--+alloc-coinflip-060-0.scope
+--+alloc-coinflip-061-0.scope
+--+alloc-coinflip-062-0.scope
+--+alloc-coinflip-063-0.scope
+--+alloc-coinflip-064-0.scope
+--+alloc-coinflip-065-0.scope
+--+alloc-coinflip-066-0.scope
+--+alloc-coinflip-067-0.scope
+--+alloc-coinflip-068-0.scope
+--+alloc-coinflip-069-0.scope
+--+alloc-coinflip-070-0.scope
+--+alloc-coinflip-071-0.scope
+--+alloc-coinflip-072-0.scope
+--+alloc-coinflip-073-0.scope
+--+alloc-coinflip-074-0.scope
+--+alloc-coinflip-075-0.scope
+--+alloc-coinflip-076-0.scope
+--+alloc-coinflip-077-0.scope
+--+alloc-coinflip-078-0.scope
+--+alloc-coinflip-079-0.scope
+--+alloc-coinflip-080-0.scope
+--+alloc-coinflip-081-0.scope
+--+alloc-coinflip-082-0.scope
+--+alloc-coinflip-083-0.scope
+--+alloc-coinflip-084-0.scope
+--+alloc-coinflip-085-0.scope
+--+alloc-coinflip-086-0.scope
+--+alloc-coinflip-087-0.scope
+--+alloc-coinflip-088-0.scope
+--+alloc-coinflip-089-0.scope
+--+alloc-coinflip-090-0.scope
+--+alloc-coinflip-091-0.scope
+--+alloc-coinflip-092-0.scope
+--+alloc-coinflip-093-0.scope
+--+alloc-coinflip-094-0.scope
+--+alloc-coinflip-095-0.scope
+--+alloc-coinflip-096-0.scope
+--+alloc-coinflip-097-0.scope
+--+alloc-coinflip-098-0.scope
+--+alloc-coinflip-099-0.scope
+--+alloc-coinflip-svc-000-0.scope
+--+alloc-coinflip-svc-001-0.scope
+--+alloc-coinflip-svc-002-0.scope
+--+alloc-coinflip-svc-003-0.scope
+--+alloc-coinflip-svc-004-0.scope
+--+alloc-coinflip-svc-005-0.scope
+--+alloc-coinflip-svc-006-0.scope
+--+alloc-coinflip-svc-007-0.scope
+--+alloc-coinflip-svc-008-0.scope
+--+alloc-coinflip-svc-009-0.scope
+--+alloc-coinflip-svc-010-0.scope
+--+alloc-coinflip-svc-011-0.scope
+--+alloc-coinflip-svc-012-0.scope
+--+alloc-coinflip-svc-013-0.scope
+--+alloc-coinflip-svc-014-0.scope
+--+alloc-coinflip-svc-015-0.scope
+--+alloc-coinflip-svc-016-0.scope
+--+alloc-coinflip-svc-017-0.scope
+--+alloc-coinflip-svc-018-0.scope
+--+alloc-coinflip-svc-019-0.scope
+--+alloc-coinflip-svc-020-0.scope
+--+alloc-coinflip-svc-021-0.scope
+--+alloc-coinflip-svc-022-0.scope
+--+alloc-coinflip-svc-023-0.scope
+--+alloc-coinflip-svc-024-0.scope
+--+alloc-coinflip-svc-025-0.scope
+--+alloc-coinflip-svc-026-0.scope
+--+alloc-coinflip-svc-027-0.scope
+--+alloc-coinflip-svc-028-0.scope
+--+alloc-coinflip-svc-029-0.scope
+--+alloc-coinflip-svc-030-0.scope
+--+alloc-coinflip-svc-031-0.scope
+--+alloc-coinflip-svc-032-0.scope
+--+alloc-coinflip-svc-033-0.scope
+--+alloc-coinflip-svc-034-0.scope
+--+alloc-coinflip-svc-035-0.scope
+--+alloc-coinflip-svc-036-0.scope
+--+alloc-coinflip-svc-037-0.scope
+--+alloc-coinflip-svc-038-0.scope
+--+alloc-coinflip-svc-039-0.scope
+--+alloc-coinflip-svc-040-0.scope
+--+alloc-coinflip-svc-041-0.scope
+--+alloc-coinflip-svc-042-0.scope
+--+alloc-coinflip-svc-043-0.scope
+--+alloc-coinflip-svc-044-0.scope
+--+alloc-coinflip-svc-045-0.scope
+--+alloc-coinflip-svc-046-0.scope
+--+alloc-coinflip-svc-047-0.scope
+--+alloc-coinflip-svc-048-0.scope
+--+alloc-coinflip-svc-049-0.scope
+--+alloc-coinflip-svc-050-0.scope
+--+alloc-coinflip-svc-051-0.scope
+--+alloc-coinflip-svc-052-0.scope
+--+alloc-coinflip-svc-053-0.scope
+--+alloc-coinflip-svc-054-0.scope
+--+alloc-coinflip-svc-055-0.scope
+--+alloc-coinflip-svc-056-0.scope
+--+alloc-coinflip-svc-057-0.scope
+--+alloc-coinflip-svc-058-0.scope
+--+alloc-coinflip-svc-059-0.scope
+--+alloc-coinflip-svc-060-0.scope
+--+alloc-coinflip-svc-061-0.scope
+--+alloc-coinflip-svc-062-0.scope
+--+alloc-coinflip-svc-063-0.scope
+--+alloc-coinflip-svc-064-0.scope
+--+alloc-coinflip-svc-065-0.scope
+--+alloc-coinflip-svc-066-0.scope
+--+alloc-coinflip-svc-067-0.scope
+--+alloc-coinflip-svc-068-0.scope
+--+alloc-coinflip-svc-069-0.scope
+--+alloc-coinflip-svc-070-0.scope
+--+alloc-coinflip-svc-071-0.scope
+--+alloc-coinflip-svc-072-0.scope
+--+alloc-coinflip-svc-073-0.scope
+--+alloc-coinflip-svc-074-0.scope
+--+alloc-coinflip-svc-075-0.scope
+--+alloc-coinflip-svc-076-0.scope
+--+alloc-coinflip-svc-077-0.scope
+--+alloc-coinflip-svc-078-0.scope
+--+alloc-coinflip-svc-079-0.scope
+--+alloc-coinflip-svc-080-0.scope
+--+alloc-coinflip-svc-081-0.scope
+--+alloc-coinflip-svc-082-0.scope
+--+alloc-coinflip-svc-083-0.scope
+--+alloc-coinflip-svc-084-0.scope
+--+alloc-coinflip-svc-085-0.scope
+--+alloc-coinflip-svc-086-0.scope
+--+alloc-coinflip-svc-087-0.scope
+--+alloc-coinflip-svc-088-0.scope
+--+alloc-coinflip-svc-089-0.scope
+--+alloc-coinflip-svc-090-0.scope
+--+alloc-coinflip-svc-091-0.scope
+--+alloc-coinflip-svc-092-0.scope
+--+alloc-coinflip-svc-093-0.scope
+--+alloc-coinflip-svc-094-0.scope
+--+alloc-coinflip-svc-095-0.scope
+--+alloc-coinflip-svc-096-0.scope
+--+alloc-coinflip-svc-097-0.scope
+--+alloc-coinflip-svc-098-0.scope
+--+alloc-coinflip-svc-099-0.scope
+--+alloc-job-dispatch-1-0.scope
+--+alloc-never-binds-0.scope
+--+alloc-non-term-0.scope
+--+alloc-quick-bind-0.scope
+--+alloc-stopper-0.scope
+--+PRE-EXISTING LEAK detected at runner start; cleaning before serve.
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt
+--index 0a84cc13..bd74077a 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt
+--@@ -1,4 +1,6 @@
+-- # probe: XDP attachments BEFORE run
+--+Device "ovd-veth-bk@ovd-veth-cli" does not exist.
+--+Device "ovd-veth-cli@ovd-veth-bk" does not exist.
+-- Device "vbk27f8@vcli27f8" does not exist.
+-- Device "vcli27f8@vbk27f8" does not exist.
+-- Device "vbka2985@vclia2985" does not exist.
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log
+--index 30ec5d67..0a14a2c5 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log
+--@@ -1,5 +1,4 @@
+--   --- serve_deploy.out (tail) ---
+---
+-- # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
+-- { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
+-- { echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
+--@@ -15,16 +14,15 @@ exit 0'`
+-- /opt/homebrew/bin/limactl
+-- xtask: running limactl shell <cmd>
+-- # building overdrive binary (single compile shared by serve+deploy)
+---# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.Frda0b data=/tmp/od-o03-data.0etBEz
+---# serve ready: trust triple written at /tmp/od-o03-cfg.Frda0b/.overdrive/config (pid 3256907)
+--+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.a6xy9q data=/tmp/od-o03-data.aa2pom
+--+# serve ready: trust triple written at /tmp/od-o03-cfg.a6xy9q/.overdrive/config (pid 3281281)
+-- # deploy exit: 0
+--+# alloc status exit: 0
+-- INNER_DONE serve_status=ready deploy_rc=0
+--   [PASS] no-leak: probe_before_loopback shows HEALTHY loopback
+--   [PASS] no-leak: probe_post_teardown_loopback shows HEALTHY loopback
+--   [PASS] no-leak: post-teardown shows no XDP programs attached
+--   [PASS] sub-claim 1: deploy exited 0
+--   [PASS] 'deploy_dns_resolver.out' contains: Accepted.
+---  [pending] sub-claim 3: listener protocol (Proto::Udp) is not rendered
+---            on any operator read surface — no black-box proof available.
+---            See deploy_udp_walking_skeleton.rs for the crate-internal witness.
+---O03 sub-claim aggregate exit: 0  (sub-claim 3 deferred -> pending)
+--+  [FAIL] 'alloc_status_dns_resolver.out' missing: 5353/udp
+--+O03 sub-claim aggregate exit: 1
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log
+--index 0b2a7564..cafb3602 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log
+--@@ -1 +1 @@
+---[2m2026-06-02T16:48:35.834576Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7443/
+--+[2m2026-06-02T17:09:13.980587Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7443/
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out
+--index 083ada9a..ec112378 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out
+--@@ -1,4 +1,4 @@
+---    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+--+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+--      Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
+-- EVID="/Users/marcus/conductor/workspaces/helios/luxembourg-v2/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence"
+-- REPO="/Users/marcus/conductor/workspaces/helios/luxembourg-v2"
+--@@ -142,6 +142,16 @@ OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" deploy "$SPEC"   > "$EVID/deploy_dns_reso
+-- echo "# exit:    $DEPLOY_RC" >> "$EVID/deploy_dns_resolver.meta"
+-- echo "# deploy exit: $DEPLOY_RC"
+-- 
+--+# ---- alloc status: capture the listener-protocol render (sub-claim 3) --------
+--+# A Service'\''s listeners are projected from the persisted WorkloadIntent::Service
+--+# aggregate (not the allocation), so `alloc status` renders each listener as
+--+# <port>/<protocol> IMMEDIATELY after deploy-accept — before any convergence to
+--+# a Running allocation. This is the operator-surface proof that the accepted
+--+# intent carries Proto::Udp (closing sub-claim 3 black-box).
+--+ALLOC_RC=0
+--+OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" alloc status --job dns-resolver   > "$EVID/alloc_status_dns_resolver.out" 2>&1 || ALLOC_RC=$?
+--+echo "# alloc status exit: $ALLOC_RC"
+--+
+-- # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
+-- { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
+-- { echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
+--@@ -157,7 +167,8 @@ exit 0'`
+-- /opt/homebrew/bin/limactl
+-- xtask: running limactl shell <cmd>
+-- # building overdrive binary (single compile shared by serve+deploy)
+---# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.Frda0b data=/tmp/od-o03-data.0etBEz
+---# serve ready: trust triple written at /tmp/od-o03-cfg.Frda0b/.overdrive/config (pid 3256907)
+--+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.a6xy9q data=/tmp/od-o03-data.aa2pom
+--+# serve ready: trust triple written at /tmp/od-o03-cfg.a6xy9q/.overdrive/config (pid 3281281)
+-- # deploy exit: 0
+--+# alloc status exit: 0
+-- INNER_DONE serve_status=ready deploy_rc=0
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml
+--index 1f25bad3..33c5e528 100644
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml
+--@@ -1,13 +1,13 @@
+-- expectation_id: "O03"
+---date_utc: "2026-06-02T16:48:23Z"
+---overdrive_sha: "7eea73cca27636a8c8520f1a5dd404d916e7bf28"
+--+date_utc: "2026-06-02T17:09:08Z"
+--+overdrive_sha: "7e79007fbf64c177d57081fe0ac0a1af07f9e4b2"
+-- working_tree_dirty: true
+-- dst_seed: 1
+---harness_sha: "bffab42a73cc6a12dbf4ad68aa1ae7e92b48a4ec"
+--+harness_sha: "8ea0c0495fca510efa0a6764cfa13769a15d2005"
+-- harness_invocation: "verification/harness/run-expectation.sh O03"
+-- executed_in_lima: true
+---runner_exit_code: "0"
+---anchors: ["S-04-A (`docs/feature/udp-service-support/distill/test-scenarios.md` — walking skeleton: deploy exits 0 + prints `Accepted.`)","roadmap 01-05 (`docs/feature/udp-service-support/deliver/roadmap.json` — "S-04-A driving-adapter companion: `overdrive deploy <udp-spec>` accepted via direct-handler test")","ADR-0060 (`docs/product/architecture/adr-0060-service-frontend-update-service-signature.md` — `ServiceFrontend(vip, port, proto)` carries the L4 protocol; proto is never positionally reconstructed)","US-04 (`docs/feature/udp-service-support/feature-delta.md` § Walking skeleton — single UDP listener forward + reverse e2e)"]
+--+runner_exit_code: "1"
+--+anchors: ["S-04-A (`docs/feature/udp-service-support/distill/test-scenarios.md` — walking skeleton: deploy exits 0 + prints `Accepted.`)","roadmap 01-05 (`docs/feature/udp-service-support/deliver/roadmap.json` — "S-04-A driving-adapter companion: `overdrive deploy <udp-spec>` accepted via direct-handler test")","ADR-0060 (`docs/product/architecture/adr-0060-service-frontend-update-service-signature.md` — `ServiceFrontend(vip, port, proto)` carries the L4 protocol; proto is never positionally reconstructed)","ADR-0061 (`docs/product/architecture/adr-0061-single-node-veth-dataplane-wiring.md` — single-node serve provisions a veth pair + attaches the two XDP programs to two distinct ifaces; the boot fix that lets this capture reach a bound serve)","US-04 (`docs/feature/udp-service-support/feature-delta.md` § Walking skeleton — single UDP listener forward + reverse e2e)"]
+-- anchor_status: "present"
+-- # NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+-- # adversarial review of the captured evidence below — never auto-stamped here.
+--diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+--index 8fcb8563..09f22e82 100755
+----- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+--+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+--@@ -193,6 +193,17 @@ OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" deploy "\$SPEC" \
+-- echo "# exit:    \$DEPLOY_RC" >> "\$EVID/deploy_dns_resolver.meta"
+-- echo "# deploy exit: \$DEPLOY_RC"
+-- 
+--+# ---- alloc status: capture the listener-protocol render (sub-claim 3) --------
+--+# A Service's listeners are projected from the persisted WorkloadIntent::Service
+--+# aggregate (not the allocation), so \`alloc status\` renders each listener as
+--+# <port>/<protocol> IMMEDIATELY after deploy-accept — before any convergence to
+--+# a Running allocation. This is the operator-surface proof that the accepted
+--+# intent carries Proto::Udp (closing sub-claim 3 black-box).
+--+ALLOC_RC=0
+--+OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" alloc status --job dns-resolver \
+--+  > "\$EVID/alloc_status_dns_resolver.out" 2>&1 || ALLOC_RC=\$?
+--+echo "# alloc status exit: \$ALLOC_RC"
+--+
+-- # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
+-- { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "\$EVID/probe_after_xdp.txt"      2>&1
+-- { echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "\$EVID/probe_after_loopback.txt" 2>&1
+--@@ -273,16 +284,24 @@ else
+--   rc=1
+-- fi
+-- 
+---# Sub-claim 3: listener protocol (Proto::Udp) — documented operator gap.
+---# The deploy-accept render (render::workload_submit_accepted) emits Workload ID
+---# / Intent key / Spec digest / Outcome / Endpoint / Next — it does NOT render
+---# the listener protocol, and no black-box read surface (`od job list`,
+---# `od alloc status`) renders it back. The 01-05 test proves Proto::Udp via a
+---# crate back-door (LocalIntentStore read) unavailable to a black-box runner.
+---echo "  [pending] sub-claim 3: listener protocol (Proto::Udp) is not rendered"
+---echo "            on any operator read surface — no black-box proof available."
+---echo "            See deploy_udp_walking_skeleton.rs for the crate-internal witness."
+--+# Sub-claim 3: listener protocol (Proto::Udp) rendered at the operator surface.
+--+# `overdrive alloc status --job dns-resolver` renders each Service listener as
+--+# <port>/<protocol>, projected from the persisted WorkloadIntent::Service
+--+# aggregate (commit 7e79007f) — so the udp/5353 listener surfaces as `5353/udp`.
+--+# This is the black-box operator-surface proof that the accepted intent carries
+--+# Proto::Udp (never coerced to Tcp): a tcp coercion would render `5353/tcp`.
+--+if [[ -f "$EVIDENCE_DIR/alloc_status_dns_resolver.out" ]]; then
+--+  evidence_contains alloc_status_dns_resolver "5353/udp" || rc=1
+--+  # Negative guard: the udp listener must NOT be rendered as tcp.
+--+  if grep -q '5353/tcp' "$EVIDENCE_DIR/alloc_status_dns_resolver.out"; then
+--+    echo "  [FAIL] sub-claim 3: listener rendered as 5353/tcp — Proto coerced to Tcp"
+--+    rc=1
+--+  fi
+--+else
+--+  echo "  [FAIL] sub-claim 3: no alloc status output captured"
+--+  rc=1
+--+fi
+-- 
+-- [[ "$leak_rc" -eq 0 ]] || rc=1
+---echo "O03 sub-claim aggregate exit: $rc  (sub-claim 3 deferred -> pending)"
+--+echo "O03 sub-claim aggregate exit: $rc"
+-- exit "$rc"
+-diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+-index b61dba28..f22be95e 100644
+---- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+-+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+-@@ -1,18 +1,7 @@
+-+ M crates/overdrive-cli/examples/dns-resolver.toml
+-  M docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+-  M docs/feature/udp-service-support/deliver/execution-log.json
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/build.log
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/deploy_dns_resolver.meta
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-diff.patch
+-  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_cgroups.txt
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_after_xdp.txt
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_cgroups.txt
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/probe_before_xdp.txt
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/run.log
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve.log
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/serve_deploy.out
+-- M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/verification.yaml
+-  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+- ?? docs/feature/single-node-dataplane-wiring/deliver/.develop-progress.json
+- ?? docs/feature/udp-service-support/deliver/.develop-progress.json
+--?? verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/alloc_status_dns_resolver.out
+-diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+-index 09f22e82..36f0d7f0 100755
+---- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+-+++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+-@@ -287,14 +287,14 @@ fi
+- # Sub-claim 3: listener protocol (Proto::Udp) rendered at the operator surface.
+- # `overdrive alloc status --job dns-resolver` renders each Service listener as
+- # <port>/<protocol>, projected from the persisted WorkloadIntent::Service
+--# aggregate (commit 7e79007f) — so the udp/5353 listener surfaces as `5353/udp`.
+-+# aggregate (commit 7e79007f) — so the udp/15353 listener surfaces as `15353/udp`.
+- # This is the black-box operator-surface proof that the accepted intent carries
+--# Proto::Udp (never coerced to Tcp): a tcp coercion would render `5353/tcp`.
+-+# Proto::Udp (never coerced to Tcp): a tcp coercion would render `15353/tcp`.
+- if [[ -f "$EVIDENCE_DIR/alloc_status_dns_resolver.out" ]]; then
+--  evidence_contains alloc_status_dns_resolver "5353/udp" || rc=1
+-+  evidence_contains alloc_status_dns_resolver "15353/udp" || rc=1
+-   # Negative guard: the udp listener must NOT be rendered as tcp.
+--  if grep -q '5353/tcp' "$EVIDENCE_DIR/alloc_status_dns_resolver.out"; then
+--    echo "  [FAIL] sub-claim 3: listener rendered as 5353/tcp — Proto coerced to Tcp"
+-+  if grep -q '15353/tcp' "$EVIDENCE_DIR/alloc_status_dns_resolver.out"; then
+-+    echo "  [FAIL] sub-claim 3: listener rendered as 15353/tcp — Proto coerced to Tcp"
+-     rc=1
+-   fi
+- else
+diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+index f22be95e..220bab35 100644
+--- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
++++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+@@ -1,6 +1,7 @@
+- M crates/overdrive-cli/examples/dns-resolver.toml
+  M docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+  M docs/feature/udp-service-support/deliver/execution-log.json
++R  crates/overdrive-cli/examples/dns-resolver.toml -> examples/dns-resolver.toml
++ M verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh
+  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+  M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+ ?? docs/feature/single-node-dataplane-wiring/deliver/.develop-progress.json
+diff --git a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+index 36f0d7f0..358d4bb7 100755
+--- a/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
++++ b/verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+@@ -32,7 +32,7 @@
+ # kernel exposes (`ip link`, `bpftool`, cgroupfs). No overdrive-* crate is linked.
+ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
+ 
+-SPEC="crates/overdrive-cli/examples/dns-resolver.toml"
++SPEC="examples/dns-resolver.toml"
+ if [[ ! -f "$REPO_ROOT/$SPEC" ]]; then
+   echo "  [pending] fixture missing: $SPEC"
+   exit 0

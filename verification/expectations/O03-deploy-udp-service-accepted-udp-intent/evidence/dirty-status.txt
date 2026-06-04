@@ -1,0 +1,8 @@
+ M docs/feature/single-node-dataplane-wiring/deliver/execution-log.json
+ M docs/feature/udp-service-support/deliver/execution-log.json
+R  crates/overdrive-cli/examples/dns-resolver.toml -> examples/dns-resolver.toml
+ M verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh
+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/evidence/dirty-status.txt
+ M verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+?? docs/feature/single-node-dataplane-wiring/deliver/.develop-progress.json
+?? docs/feature/udp-service-support/deliver/.develop-progress.json

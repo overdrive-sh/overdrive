@@ -24,8 +24,10 @@
 //! re-exports the public surface.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU16;
 use std::time::Duration;
 
+use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use crate::traits::dataplane::Backend;
@@ -41,11 +43,94 @@ pub struct ServiceDesired {
     /// Virtual IP the kernel-side XDP program matches incoming packets
     /// against.
     pub vip: ServiceVip,
+    /// Service listener port — sourced from a listener-bearing fact
+    /// (ADR-0060 site #8), never synthesised.
+    pub port: NonZeroU16,
+    /// L4 protocol — sourced from a listener-bearing fact, NEVER
+    /// defaulted to `Tcp` (ADR-0060 C3).
+    pub proto: Proto,
     /// Backend set, in deterministic `BTreeMap<BackendId, Backend>`
     /// iteration order.
     pub backends: Vec<Backend>,
     /// Content-hash of the `(vip, backends)` pair.
     pub fingerprint: BackendSetFingerprint,
+}
+
+/// Failure of the observation→desired projection
+/// ([`project_service_desired`]). Per ADR-0060 C3 an unresolvable
+/// listener protocol is a structured error — NEVER a silent `Proto::Tcp`
+/// default.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ServiceProjectionError {
+    /// No listener-bearing fact resolves the service's L4 protocol.
+    /// `ServiceBackendRow` carries neither port nor proto, so the proto
+    /// MUST come from a `ListenerRow` (or `BackendDiscoveryBridge`
+    /// per-listener projection); when none is resolvable the projection
+    /// fails rather than defaulting to `Tcp` (C3 guard).
+    #[error(
+        "no listener-bearing protocol fact for service {service_id} (vip {vip}); \
+         refusing to default to Tcp (ADR-0060 C3)"
+    )]
+    NoListenerProto {
+        /// Service whose proto could not be resolved.
+        service_id: ServiceId,
+        /// The service VIP, for operator-facing diagnostics.
+        vip: std::net::Ipv4Addr,
+    },
+}
+
+/// Project a `ServiceBackendRow` + its single listener-bearing fact into a
+/// [`ServiceDesired`], sourcing `(port, proto)` from the listener fact.
+///
+/// Per ADR-0060 site #8 + C3: `ServiceBackendRow` carries neither port
+/// nor proto, so the protocol MUST be sourced from the `ListenerRow` whose
+/// `vip` matches the row's VIP. The caller pre-resolves the one fact for
+/// this service via `ListenerFactStore::fact_for(row.service_id)` — an O(1)
+/// keyed read on the full `(vip, port, proto)` identity — and passes it as
+/// `Option<&ListenerRow>`. Taking a single optional fact (NOT a
+/// `&[ListenerRow]`) makes a multi-listener input structurally
+/// unrepresentable: a service co-locating protocols on one VIP (e.g.
+/// tcp/53 + udp/53) can never have the wrong listener selected by slice
+/// order, because `ServiceBackendRow` carries no proto discriminator the
+/// function could use to disambiguate a slice. Per-listener fan-out
+/// (US-05) derives a distinct `ServiceId` per listener, so each projection
+/// still handles exactly one fact. When the fact is absent or carries a
+/// non-matching VIP the projection returns
+/// [`ServiceProjectionError::NoListenerProto`] — it NEVER defaults to
+/// `Tcp`.
+///
+/// # Errors
+///
+/// Returns [`ServiceProjectionError::NoListenerProto`] when no matching
+/// `ListenerRow` resolves the service's protocol.
+pub fn project_service_desired(
+    row: &crate::traits::observation_store::ServiceBackendRow,
+    listener: Option<&crate::traits::observation_store::ListenerRow>,
+) -> Result<ServiceDesired, ServiceProjectionError> {
+    let vip = ServiceVip::new(std::net::IpAddr::V4(row.vip)).unwrap_or_else(|_| {
+        unreachable!(
+            "ServiceBackendRow.vip is a wire-shape Ipv4Addr; ServiceVip::new is total over IPv4"
+        )
+    });
+    // Source `(port, proto)` from the single listener-bearing fact the
+    // caller pre-resolved for this service. The fact's SSOT is the Service
+    // intent's listeners (the allocator-issued VIP is stamped onto the
+    // fact). The retained VIP guard rejects a fact handed in for a
+    // different VIP rather than mis-stamping; an absent fact fails —
+    // refusing to synthesise a `Proto::Tcp` default (C3).
+    let listener =
+        listener.filter(|l| l.vip == Some(vip)).ok_or(ServiceProjectionError::NoListenerProto {
+            service_id: row.service_id,
+            vip: row.vip,
+        })?;
+    let fingerprint = crate::dataplane::fingerprint::fingerprint(&vip, &row.backends);
+    Ok(ServiceDesired {
+        vip,
+        port: listener.port,
+        proto: listener.protocol,
+        backends: row.backends.clone(),
+        fingerprint,
+    })
 }
 
 /// Hydrator state — split into `desired` and `actual` projections
@@ -235,6 +320,8 @@ impl Reconciler for ServiceMapHydrator {
                         actions.push(Action::DataplaneUpdateService {
                             service_id: *service_id,
                             vip: desired_svc.vip,
+                            port: desired_svc.port,
+                            proto: desired_svc.proto,
                             backends: desired_svc.backends.clone(),
                             correlation: CorrelationKey::derive(
                                 &target_str,
@@ -263,6 +350,8 @@ impl Reconciler for ServiceMapHydrator {
                     actions.push(Action::DataplaneUpdateService {
                         service_id: *service_id,
                         vip: desired_svc.vip,
+                        port: desired_svc.port,
+                        proto: desired_svc.proto,
                         backends: remote.into_iter().cloned().collect(),
                         correlation: CorrelationKey::derive(
                             &target_str,
@@ -272,35 +361,18 @@ impl Reconciler for ServiceMapHydrator {
                     });
                 }
 
-                for backend in &local {
-                    let backend_v4 = match backend.addr {
-                        std::net::SocketAddr::V4(s4) => s4,
-                        std::net::SocketAddr::V6(_) => continue,
-                    };
-                    if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
-                        tracing::warn!(
-                            name: "service_map_hydrator.register_local_backend.rejected",
-                            service_id = %service_id,
-                            vip = %vip_v4,
-                            vip_port = backend_v4.port(),
-                            backend = %backend_v4,
-                            reason = %reason,
-                            "skipping RegisterLocalBackend: backend address rejected by classifier"
-                        );
-                        continue;
-                    }
-                    actions.push(Action::RegisterLocalBackend {
+                push_register_local_backend_actions(
+                    &mut actions,
+                    &local,
+                    &LocalBackendEmit {
                         service_id: *service_id,
-                        vip: vip_v4,
-                        vip_port: backend.addr.port(),
-                        backend: backend_v4,
-                        correlation: CorrelationKey::derive(
-                            &target_str,
-                            &spec_hash,
-                            "register-local-backend",
-                        ),
-                    });
-                }
+                        vip_v4,
+                        vip_port: desired_svc.port.get(),
+                        proto: desired_svc.proto,
+                        target_str: &target_str,
+                        spec_hash: &spec_hash,
+                    },
+                );
 
                 let _ = (local_is_empty, remote_is_empty);
 
@@ -324,6 +396,91 @@ impl Reconciler for ServiceMapHydrator {
     }
 }
 
+/// Per-service emission context for [`push_register_local_backend_actions`].
+/// Groups the service-scoped fields (identity, VIP, declared port +
+/// proto, correlation inputs) so the helper stays under the
+/// `clippy::too_many_arguments` bar after step 02-02 added the proto
+/// dimension. All fields are sourced from the listener-bearing
+/// `ServiceDesired` the hydrator is reconciling.
+struct LocalBackendEmit<'a> {
+    service_id: ServiceId,
+    vip_v4: std::net::Ipv4Addr,
+    vip_port: u16,
+    proto: crate::dataplane::backend_key::Proto,
+    target_str: &'a str,
+    spec_hash: &'a ContentHash,
+}
+
+/// Emit one `Action::RegisterLocalBackend` per local backend whose
+/// address passes the ADR-0053 § 4 classifier guard. Backends with an
+/// IPv6 address or a guard-rejected IPv4 (loopback / link-local /
+/// multicast / broadcast / reserved) are skipped with a structured warn.
+/// Extracted from `reconcile` to keep that method under the 100-line cap.
+///
+/// `vip_port` is the service's declared VIP listener port (the port a
+/// client uses in `connect(vip:vip_port)`), NOT the backend's own
+/// listening port. `proto` is the service's declared L4 protocol,
+/// threaded from the listener-bearing fact (`desired_svc.proto`) —
+/// NEVER defaulted to `Tcp` (C3, ADR-0060 site #8). The
+/// `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP` on
+/// `(vip, vip_port, proto)` and rewrites matching connects to the
+/// backend's real address (ADR-0053 § 3 rev 2026-06-03); a service
+/// co-locating tcp/53 + udp/53 emits two `RegisterLocalBackend` with
+/// distinct proto, neither overwriting the other. A service with
+/// VIP:53 → backend:5353 must register the entry under port 53 or the
+/// client's connect never hits the map. See the
+/// `Dataplane::register_local_backend` contract.
+fn push_register_local_backend_actions(
+    actions: &mut Vec<Action>,
+    local: &[&Backend],
+    ctx: &LocalBackendEmit<'_>,
+) {
+    for backend in local {
+        let backend_v4 = match backend.addr {
+            std::net::SocketAddr::V4(s4) => s4,
+            std::net::SocketAddr::V6(_) => continue,
+        };
+        if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
+            tracing::warn!(
+                name: "service_map_hydrator.register_local_backend.rejected",
+                service_id = %ctx.service_id,
+                vip = %ctx.vip_v4,
+                vip_port = ctx.vip_port,
+                backend = %backend_v4,
+                reason = %reason,
+                "skipping RegisterLocalBackend: backend address rejected by classifier"
+            );
+            continue;
+        }
+        actions.push(Action::RegisterLocalBackend {
+            service_id: ctx.service_id,
+            vip: ctx.vip_v4,
+            vip_port: ctx.vip_port,
+            proto: ctx.proto,
+            backend: backend_v4,
+            correlation: CorrelationKey::derive(
+                ctx.target_str,
+                ctx.spec_hash,
+                "register-local-backend",
+            ),
+        });
+    }
+}
+
+/// Pure decision: has the attempt-budget backoff window elapsed for
+/// the recorded retry memory at `now`?
+///
+/// Recomputes the deadline `last_failure_seen_at +
+/// backoff_for_attempt(attempts)` from the persisted inputs on every
+/// call (honors `.claude/rules/development.md` § "Persist inputs, not
+/// derived state" — the deadline is never persisted, only its
+/// `attempts` + `last_failure_seen_at` inputs). With no retry memory
+/// the window is vacuously elapsed (never throttle a service that has
+/// never been attempted).
+fn backoff_window_elapsed(retry: Option<&RetryMemory>, now: UnixInstant) -> bool {
+    retry.is_none_or(|r| now >= r.last_failure_seen_at + backoff_for_attempt(r.attempts))
+}
+
 /// Pure decision: dispatch a `DataplaneUpdateService` action this tick?
 fn should_dispatch(
     actual_status: Option<&ServiceHydrationStatus>,
@@ -332,7 +489,20 @@ fn should_dispatch(
     now: UnixInstant,
 ) -> bool {
     match actual_status {
-        None | Some(ServiceHydrationStatus::Pending) => true,
+        // No status row (dispatch suppressed before any result was
+        // written) or a Pending row. Without a backoff gate this arm
+        // spins every tick (RCA §Root cause B). Throttle on the
+        // attempt-budget window ONLY when a prior attempt targeted the
+        // SAME desired fingerprint; a fingerprint change (or no retry
+        // memory) is a level-triggered spec change → dispatch
+        // immediately and let the next emission reset the window
+        // (client-go workqueue precedent, RCA §Fix B).
+        None | Some(ServiceHydrationStatus::Pending) => {
+            match retry.and_then(|r| r.last_attempted_fingerprint) {
+                Some(last) if last == desired_fingerprint => backoff_window_elapsed(retry, now),
+                _ => true,
+            }
+        }
         Some(ServiceHydrationStatus::Completed { fingerprint, .. }) => {
             *fingerprint != desired_fingerprint
         }
@@ -340,7 +510,264 @@ fn should_dispatch(
             if *fingerprint != desired_fingerprint {
                 return true;
             }
-            retry.is_none_or(|r| now >= r.last_failure_seen_at + backoff_for_attempt(r.attempts))
+            backoff_window_elapsed(retry, now)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::id::SpiffeId;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+
+    fn spiffe(suffix: &str) -> SpiffeId {
+        let raw = format!("spiffe://overdrive.local/job/svc/alloc/{suffix}");
+        SpiffeId::new(&raw).expect("derived SpiffeId is valid by construction")
+    }
+
+    fn backend(addr: SocketAddr) -> Backend {
+        Backend { alloc: spiffe("a"), addr, weight: 1, healthy: true }
+    }
+
+    fn service_id() -> ServiceId {
+        ServiceId::new(42).expect("ServiceId accepts any u64")
+    }
+
+    fn spec_hash() -> ContentHash {
+        ContentHash::of(b"service-map-hydrator-test-spec")
+    }
+
+    /// A valid local IPv4 backend yields exactly one
+    /// `Action::RegisterLocalBackend` carrying the service identity, VIP,
+    /// the declared VIP listener port as `vip_port`, the narrowed
+    /// `SocketAddrV4`, and the `register-local-backend` correlation.
+    /// Here the declared port (8080) and the backend's own port coincide;
+    /// the VIP≠backend-port case is pinned separately below. Default-lane proxy
+    /// for the Tier-3 reverse-NAT registration path — pins the emission
+    /// the body owns so mutating the body to a no-op is caught here, not
+    /// only behind the real-veth gate.
+    #[test]
+    fn push_register_local_backend_emits_action_for_valid_local_backend() {
+        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
+        let target = "service/42";
+        let hash = spec_hash();
+        let backend_v4 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 8080);
+        let local = backend(SocketAddr::V4(backend_v4));
+        let local_refs: Vec<&Backend> = vec![&local];
+
+        let mut actions = Vec::new();
+        push_register_local_backend_actions(
+            &mut actions,
+            &local_refs,
+            &LocalBackendEmit {
+                service_id: service_id(),
+                vip_v4,
+                vip_port: 8080,
+                proto: Proto::Tcp,
+                target_str: target,
+                spec_hash: &hash,
+            },
+        );
+
+        assert_eq!(
+            actions.len(),
+            1,
+            "exactly one RegisterLocalBackend must be emitted for a valid local backend"
+        );
+        let expected_correlation = CorrelationKey::derive(target, &hash, "register-local-backend");
+        match &actions[0] {
+            Action::RegisterLocalBackend {
+                service_id: sid,
+                vip,
+                vip_port,
+                proto,
+                backend: emitted,
+                correlation,
+            } => {
+                assert_eq!(*sid, service_id(), "service_id must be threaded through");
+                assert_eq!(*vip, vip_v4, "vip must be the host VIP");
+                assert_eq!(*proto, Proto::Tcp, "proto must be threaded through (the declared L4)");
+                assert_eq!(
+                    *vip_port, 8080,
+                    "vip_port is the declared VIP listener port (here == backend port)"
+                );
+                assert_eq!(*emitted, backend_v4, "backend must be the narrowed SocketAddrV4");
+                assert_eq!(
+                    *correlation, expected_correlation,
+                    "correlation must derive from (target, spec_hash, purpose)"
+                );
+            }
+            other => panic!("expected RegisterLocalBackend, got {other:?}"),
+        }
+    }
+
+    /// Regression (bugfix): when the service's declared VIP listener
+    /// port differs from the backend's own listening port (e.g. a DNS
+    /// service VIP:53 → backend:5353), the emitted `vip_port` MUST be
+    /// the declared listener port (53), NOT the backend port (5353).
+    /// The `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP` on the port
+    /// a client connects to (the declared VIP port); registering under
+    /// the backend port leaves every `connect(vip:53)` a lookup miss
+    /// with no rewrite. Pins the threading of `desired_svc.port`
+    /// through to the action so a body that reverts to
+    /// `backend.addr.port()` is caught here.
+    #[test]
+    fn push_register_local_backend_uses_declared_vip_port_not_backend_port() {
+        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
+        let declared_vip_port: u16 = 53;
+        let backend_port: u16 = 5353;
+        let target = "service/42";
+        let hash = spec_hash();
+        let backend_v4 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), backend_port);
+        let local = backend(SocketAddr::V4(backend_v4));
+        let local_refs: Vec<&Backend> = vec![&local];
+
+        let mut actions = Vec::new();
+        push_register_local_backend_actions(
+            &mut actions,
+            &local_refs,
+            &LocalBackendEmit {
+                service_id: service_id(),
+                vip_v4,
+                vip_port: declared_vip_port,
+                proto: Proto::Tcp,
+                target_str: target,
+                spec_hash: &hash,
+            },
+        );
+
+        assert_eq!(actions.len(), 1, "exactly one RegisterLocalBackend must be emitted");
+        match &actions[0] {
+            Action::RegisterLocalBackend { vip_port, backend: emitted, .. } => {
+                assert_eq!(
+                    *vip_port, declared_vip_port,
+                    "vip_port must be the declared VIP listener port (53), not the backend port"
+                );
+                assert_ne!(
+                    *vip_port, backend_port,
+                    "vip_port must NOT carry the backend's own port (5353)"
+                );
+                assert_eq!(
+                    emitted.port(),
+                    backend_port,
+                    "the backend address still carries the backend's own port"
+                );
+            }
+            other => panic!("expected RegisterLocalBackend, got {other:?}"),
+        }
+    }
+
+    /// IPv6 and guard-rejected (loopback) backends are skipped — the fn
+    /// emits nothing. Pins the two `continue` arms so a body that drops
+    /// the guard cannot silently register a loopback or IPv6 backend.
+    #[test]
+    fn push_register_local_backend_skips_ipv6_and_guard_rejected() {
+        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
+        let hash = spec_hash();
+        let v6 = backend(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0)));
+        let loopback = backend(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080)));
+        let local_refs: Vec<&Backend> = vec![&v6, &loopback];
+
+        let mut actions = Vec::new();
+        push_register_local_backend_actions(
+            &mut actions,
+            &local_refs,
+            &LocalBackendEmit {
+                service_id: service_id(),
+                vip_v4,
+                vip_port: 8080,
+                proto: Proto::Tcp,
+                target_str: "service/42",
+                spec_hash: &hash,
+            },
+        );
+
+        assert!(
+            actions.is_empty(),
+            "IPv6 and guard-rejected backends must not produce RegisterLocalBackend actions"
+        );
+    }
+
+    // ---- should_dispatch attempt-budget gate (RCA §Fix B) ----
+    //
+    // `should_dispatch` is a pure decision over `(actual_status,
+    // desired_fingerprint, retry, now)`. The fixtures below partition
+    // the `None | Pending` arm by (fingerprint match/mismatch ×
+    // now-vs-backoff-window). Time enters only via `now: UnixInstant`
+    // — no `Instant::now()` (dst-lint stays green).
+
+    /// Base wall-clock instant for the gate fixtures.
+    fn t0() -> UnixInstant {
+        UnixInstant::from_unix_duration(Duration::from_secs(100))
+    }
+
+    /// RCA §Root cause B (closure) / Regression test 2 (B half) — the
+    /// load-bearing RED→GREEN pin. With a prior attempt at the SAME
+    /// fingerprint, no status row (`actual_status = None`), and `now`
+    /// inside the 1s backoff window, the gate must NOT re-dispatch
+    /// (returns `false`). The current `None | Some(Pending) => true`
+    /// arm returns `true` unconditionally → this fails against current
+    /// code and passes after the fix.
+    #[test]
+    fn mixed_backend_does_not_re_dispatch_within_backoff_window_with_no_status_row() {
+        let fingerprint: BackendSetFingerprint = 0xABCD_1234;
+        let retry = RetryMemory {
+            attempts: 1,
+            last_failure_seen_at: t0(),
+            last_attempted_fingerprint: Some(fingerprint),
+        };
+        let now = t0() + Duration::from_millis(500);
+
+        assert!(
+            !should_dispatch(None, fingerprint, Some(&retry), now),
+            "within the backoff window at the same fingerprint, a suppressed dispatch \
+             must NOT re-emit (no spin) — gate returns false"
+        );
+    }
+
+    /// RCA §Fix B — level-triggered reset on spec change. With a prior
+    /// attempt at a DIFFERENT fingerprint (the desired backend set
+    /// changed), the gate dispatches immediately even inside the
+    /// window — the backoff is keyed on the attempt budget for a given
+    /// fingerprint, and a fingerprint change resets it (client-go
+    /// workqueue precedent).
+    #[test]
+    fn mixed_backend_re_dispatches_immediately_on_fingerprint_change() {
+        let old_fingerprint: BackendSetFingerprint = 0x0000_1111;
+        let new_fingerprint: BackendSetFingerprint = 0x0000_2222;
+        let retry = RetryMemory {
+            attempts: 1,
+            last_failure_seen_at: t0(),
+            last_attempted_fingerprint: Some(old_fingerprint),
+        };
+        let now = t0() + Duration::from_millis(1);
+
+        assert!(
+            should_dispatch(None, new_fingerprint, Some(&retry), now),
+            "a desired fingerprint differing from last_attempted_fingerprint must \
+             re-dispatch immediately (spec changed → backoff reset)"
+        );
+    }
+
+    /// RCA §Fix B — once the backoff window elapses for the same
+    /// fingerprint, the gate re-dispatches. Mirrors the `Failed`-arm
+    /// semantics via the shared `backoff_window_elapsed` helper.
+    #[test]
+    fn mixed_backend_re_dispatches_after_window_elapses() {
+        let fingerprint: BackendSetFingerprint = 0xABCD_1234;
+        let attempts = 1;
+        let retry = RetryMemory {
+            attempts,
+            last_failure_seen_at: t0(),
+            last_attempted_fingerprint: Some(fingerprint),
+        };
+        // now is exactly at the window boundary (>= triggers dispatch).
+        let now = t0() + backoff_for_attempt(attempts);
+
+        assert!(
+            should_dispatch(None, fingerprint, Some(&retry), now),
+            "at/after the backoff window boundary the gate must re-dispatch"
+        );
     }
 }

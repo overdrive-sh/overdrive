@@ -1,0 +1,28 @@
+  --- serve_deploy.out (tail) ---
+# ---- AFTER probes (steady state the run produced, pre-teardown) -------------
+{ echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
+{ echo "# probe: loopback AFTER deploy";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups AFTER deploy"; probe_cgroups; }                 > "$EVID/probe_after_cgroups.txt"  2>&1
+
+# Stop serve explicitly (the on_exit trap also covers abnormal exits + writes
+# the post-teardown no-leak proof).
+kill "$SERVE_PID" 2>/dev/null
+wait "$SERVE_PID" 2>/dev/null
+
+echo "INNER_DONE serve_status=ready deploy_rc=$DEPLOY_RC"
+exit 0'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+# building overdrive binary (single compile shared by serve+deploy)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o03-cfg.W8JHal data=/tmp/od-o03-data.2mUL7h
+# serve ready: trust triple written at /tmp/od-o03-cfg.W8JHal/.overdrive/config (pid 3291930)
+# deploy exit: 0
+# alloc status exit: 0
+INNER_DONE serve_status=ready deploy_rc=0
+  [PASS] no-leak: probe_before_loopback shows HEALTHY loopback
+  [PASS] no-leak: probe_post_teardown_loopback shows HEALTHY loopback
+  [PASS] no-leak: post-teardown shows no XDP programs attached
+  [PASS] sub-claim 1: deploy exited 0
+  [PASS] 'deploy_dns_resolver.out' contains: Accepted.
+  [PASS] 'alloc_status_dns_resolver.out' contains: 15353/udp
+O03 sub-claim aggregate exit: 0

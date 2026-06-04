@@ -195,7 +195,7 @@ pub async fn evaluate_sanity_checks_fire_before_service_map() -> InvariantResult
     }];
 
     // Pre-load the dataplane via the async Dataplane trait.
-    if let Err(e) = dataplane.update_service(vip, backends.clone()).await {
+    if let Err(e) = dataplane.update_service(super::tcp_frontend(vip), backends.clone()).await {
         return fail(NAME, format!("pre-load update_service failed: {e}"));
     }
 

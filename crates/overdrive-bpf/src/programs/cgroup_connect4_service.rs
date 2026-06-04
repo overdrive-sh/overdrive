@@ -5,7 +5,7 @@
 //! `/sys/fs/cgroup/overdrive.slice` — both the control plane and
 //! every workload spawned via `ExecDriver` live as descendants).
 //! Intercepts every IPv4 `connect(2)` from a process inside the
-//! cgroup, looks up `(user_ip4, user_port)` against
+//! cgroup, looks up `(user_ip4, user_port, protocol)` against
 //! `LOCAL_BACKEND_MAP`, and either:
 //!
 //! - Miss: returns 1 (allow connect unchanged; non-service traffic).
@@ -62,6 +62,15 @@ fn try_cgroup_connect4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
     // UAPI. Convert to host-order for the map key.
     let user_ip4_nbo = unsafe { (*sock_addr).user_ip4 };
     let user_port_nbo = unsafe { (*sock_addr).user_port };
+    // `bpf_sock_addr.protocol` carries the IANA L4 proto number
+    // (IPPROTO_TCP=6, IPPROTO_UDP=17) as a kernel-internal u32 in
+    // host byte order — NOT network-order, and NOT a SOCK_* type
+    // (that lives in `.type`). Zero translation: truncate the low
+    // byte straight into the map key. No SOCK_*→IPPROTO_* table; a
+    // single byte so no endianness swap. `connect4` fires for TCP
+    // `connect()` and connected-UDP `connect()`; unconnected-UDP
+    // `sendmsg4` is out of scope (GH #200).
+    let proto = unsafe { (*sock_addr).protocol };
 
     let vip_host = u32::from_be(user_ip4_nbo);
     // `user_port` is a u32 in `bpf_sock_addr` whose LOW 16 bits carry
@@ -72,8 +81,10 @@ fn try_cgroup_connect4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
     // would swap the whole u32 and then take the wrong half — always 0.
     #[allow(clippy::cast_possible_truncation)]
     let port_host = u16::from_be(user_port_nbo as u16);
+    #[allow(clippy::cast_possible_truncation)]
+    let proto_byte = proto as u8;
 
-    let key = LocalServiceKey { vip_host, port_host, _pad: 0 };
+    let key = LocalServiceKey { vip_host, port_host, proto: proto_byte, _pad: 0 };
 
     // SAFETY: `LOCAL_BACKEND_MAP.get(...)` is the canonical
     // verifier-readable aya-ebpf map access shape. The verifier

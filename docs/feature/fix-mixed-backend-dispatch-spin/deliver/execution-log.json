@@ -1,0 +1,181 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-mixed-backend-dispatch-spin",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:19:37Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:20:18Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: deletion-shaped change, no new unit-level seam",
+      "t": "2026-06-03T12:20:18Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:25:07Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:26:39Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:32:16Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:32:41Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:32:41Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:37:17Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:39:13Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:43:31Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T12:44:58Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: schema-evolution golden-bytes step; roundtrip+triangulation+unknown-version tests are the full surface",
+      "t": "2026-06-03T12:44:58Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:00:45Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:00:45Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:04:31Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 01-03 landed ReconcileConflictRowV1 type+envelope+fixture but NOT the transport surface \u2014 ObservationRow has no ReconcileConflict variant and ObservationStore has no reconcile_conflict read method, so state.obs write/read-back is uncompilable. Wiring it requires editing overdrive-core trait + ObservationRow enum + SimObservationStore + LocalObservationStore, all outside this step's allowed file set. Surfaced to user as a blocker.",
+      "t": "2026-06-03T13:05:13Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 01-03 landed ReconcileConflictRowV1 type+envelope+fixture but NOT the transport surface \u2014 ObservationRow has no ReconcileConflict variant and ObservationStore has no reconcile_conflict read method, so state.obs write/read-back is uncompilable. Wiring it requires editing overdrive-core trait + ObservationRow enum + SimObservationStore + LocalObservationStore, all outside this step's allowed file set. Surfaced to user as a blocker.",
+      "t": "2026-06-03T13:05:13Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 01-03 landed ReconcileConflictRowV1 type+envelope+fixture but NOT the transport surface \u2014 ObservationRow has no ReconcileConflict variant and ObservationStore has no reconcile_conflict read method, so state.obs write/read-back is uncompilable. Wiring it requires editing overdrive-core trait + ObservationRow enum + SimObservationStore + LocalObservationStore, all outside this step's allowed file set. Surfaced to user as a blocker.",
+      "t": "2026-06-03T13:05:13Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 01-03 landed ReconcileConflictRowV1 type+envelope+fixture but NOT the transport surface \u2014 ObservationRow has no ReconcileConflict variant and ObservationStore has no reconcile_conflict read method, so state.obs write/read-back is uncompilable. Wiring it requires editing overdrive-core trait + ObservationRow enum + SimObservationStore + LocalObservationStore, all outside this step's allowed file set. Surfaced to user as a blocker.",
+      "t": "2026-06-03T13:05:13Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:13:07Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:24:29Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:24:29Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:30:08Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-03T13:32:54Z"
+    }
+  ]
+}

@@ -265,7 +265,12 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     // handle stores `vip_host = u32::from(Ipv4Addr::new(a,b,c,d))`,
     // which is the same numeric value as `u32::from_be_bytes([a,b,c,d])`
     // — see architecture.md § 11.
-    let key = ServiceKey { vip_host: dst_ip, port_host: dst_port, _pad: 0 };
+    //
+    // Step 02-01: `proto` is the IANA L4 byte already parsed from the
+    // IPv4 header at (1) above — slotted into the key directly, no new
+    // packet parse. A proto-mismatched packet (e.g. TCP to a UDP-only
+    // service slot) builds a different key and misses the outer map.
+    let key = ServiceKey { vip_host: dst_ip, port_host: dst_port, proto, _pad: 0 };
 
     // (6) Two-step HoM lookup per kernel.org map_of_maps doc + research
     // § D.6:

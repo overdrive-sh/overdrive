@@ -42,6 +42,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 
 use overdrive_core::dataplane::DropClass;
+use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
@@ -54,8 +55,19 @@ use overdrive_core::traits::dataplane::{
 /// pre-update or the post-update view of BOTH maps, never a mixed
 /// state.
 struct ServiceState {
-    /// Forward-path: VIP → backend set.
-    services: BTreeMap<Ipv4Addr, Vec<Backend>>,
+    /// Forward-path: `(VIP, port, proto) → backend set`. Keyed on the
+    /// full frontend identity `(vip, port, proto)` — matching the host
+    /// `EbpfDataplane`'s `SERVICE_MAP` `ServiceKey { vip_host, port_host,
+    /// proto }` and the `ServiceFrontend` the `Dataplane` trait takes —
+    /// so two listeners on the same VIP differing by port AND/OR proto
+    /// (installed by separate per-listener `update_service` calls) are
+    /// distinct entries and purge independently (ADR-0060 D4). Keying on
+    /// `(vip, proto)` and dropping the port was a sim-only divergence
+    /// from the host frontend identity: same-proto-different-port
+    /// co-location (tcp/80 + tcp/443) collapsed to one slot, so the
+    /// second install evicted the first. Guarded by
+    /// `tests/sim_dataplane_forward_frontend_scoped.rs`.
+    services: BTreeMap<(Ipv4Addr, u16, Proto), Vec<Backend>>,
     /// Reverse-path: `(backend_ip, backend_port, proto) → original
     /// VIP`. The egress reverse-NAT path uses this to rewrite the
     /// source 5-tuple of a backend response packet back to the VIP
@@ -99,7 +111,7 @@ pub struct SimDataplane {
     /// `BTreeMap` per `.claude/rules/development.md` §
     /// "Ordered-collection choice" — DST observers walk the
     /// map and require deterministic iteration order.
-    local_backends: Mutex<BTreeMap<(Ipv4Addr, u16), SocketAddrV4>>,
+    local_backends: Mutex<BTreeMap<(Ipv4Addr, u16, Proto), SocketAddrV4>>,
 }
 
 impl SimDataplane {
@@ -133,8 +145,13 @@ impl SimDataplane {
     /// not part of the `Dataplane` trait. Existence here is a testing
     /// convenience, not a trait-contract violation.
     #[must_use]
-    pub fn local_backend_for(&self, vip: Ipv4Addr, vip_port: u16) -> Option<SocketAddrV4> {
-        self.local_backends.lock().get(&(vip, vip_port)).copied()
+    pub fn local_backend_for(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        proto: Proto,
+    ) -> Option<SocketAddrV4> {
+        self.local_backends.lock().get(&(vip, vip_port, proto)).copied()
     }
 
     /// Snapshot every `(vip, port, backend)` triple currently in the
@@ -152,8 +169,8 @@ impl SimDataplane {
     /// Existence here is a testing convenience, not a trait-contract
     /// violation.
     #[must_use]
-    pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, SocketAddrV4)> {
-        self.local_backends.lock().iter().map(|(&(v, p), &b)| (v, p, b)).collect()
+    pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, Proto, SocketAddrV4)> {
+        self.local_backends.lock().iter().map(|(&(v, p, pr), &b)| (v, p, pr, b)).collect()
     }
 
     /// Record a kernel-side drop event for `class`. Increments the
@@ -211,10 +228,44 @@ impl SimDataplane {
         self.policy.lock().get(key).copied()
     }
 
-    /// Read the backend set currently stored for a service VIP.
+    /// Read the backend set currently stored for a service VIP, across
+    /// every protocol registered for it (the forward map is keyed
+    /// per-`(vip, proto)` per ADR-0060 D4; this accessor unions the
+    /// per-proto entries in deterministic proto order). Returns `None`
+    /// when no protocol of the VIP is registered.
     #[must_use]
     pub fn service_backends(&self, vip: Ipv4Addr) -> Option<Vec<Backend>> {
-        self.state.lock().services.get(&vip).cloned()
+        let state = self.state.lock();
+        let mut merged: Vec<Backend> = Vec::new();
+        for ((v, _port, _proto), backends) in &state.services {
+            if *v == vip {
+                merged.extend(backends.iter().cloned());
+            }
+        }
+        drop(state);
+        if merged.is_empty() { None } else { Some(merged) }
+    }
+
+    /// Read the backend set stored for one exact frontend
+    /// `(vip, port, proto)`, or `None` when that frontend is not
+    /// registered. Mirrors the host `EbpfDataplane::service_map_contains`
+    /// observability surface (the host returns a `bool` from a fallible
+    /// BPF-map read; the sim returns the backend set directly, infallibly)
+    /// so cross-adapter equivalence tests can assert on the same
+    /// per-frontend forward-map slot the host exposes.
+    ///
+    /// Not part of the `Dataplane` trait — a test/DST accessor. Distinct
+    /// from [`Self::service_backends`], which unions every port/proto on a
+    /// VIP; this keys on the full frontend identity so co-resident
+    /// listeners differing only by port are independently addressable.
+    #[must_use]
+    pub fn service_backends_for(
+        &self,
+        vip: Ipv4Addr,
+        port: u16,
+        proto: Proto,
+    ) -> Option<Vec<Backend>> {
+        self.state.lock().services.get(&(vip, port, proto)).cloned()
     }
 
     /// Enumerate every VIP currently registered, in `Ord` order on
@@ -227,7 +278,11 @@ impl SimDataplane {
     /// the stored map's iteration order directly.
     #[must_use]
     pub fn service_vip_keys(&self) -> Vec<Ipv4Addr> {
-        self.state.lock().services.keys().copied().collect()
+        let state = self.state.lock();
+        let mut vips: Vec<Ipv4Addr> = state.services.keys().map(|(v, _port, _proto)| *v).collect();
+        drop(state);
+        vips.dedup();
+        vips
     }
 
     /// Read the original VIP recorded in the reverse-NAT map for the
@@ -256,27 +311,22 @@ impl Default for SimDataplane {
     }
 }
 
-/// Derive every reverse-NAT key the lockstep contract installs for a
-/// backend, given its forward-path VIP. Phase 2.2 supports two L4
-/// protocols (TCP / UDP, architecture.md § 6); the lockstep set is
-/// one entry per backend per supported proto. The forward-path
-/// `Backend` does not carry proto today — it is a property of the
-/// listener, not the backend address — so the sim installs entries
-/// for every supported proto in lockstep with the backend record.
-fn reverse_nat_keys_for(backend: &Backend) -> impl Iterator<Item = BackendKey> + '_ {
-    // Only IPv4 backends are routable through the Phase 2.2 LB —
-    // IPv6 / ICMP / SCTP are GH #155 / future-phase deferrals
-    // (architecture.md § 6). Non-IPv4 backends are silently skipped
-    // here; the production EbpfDataplane will surface this as a
-    // typed error variant in the slice that adds the egress program.
-    let ipv4 = match backend.addr.ip() {
-        std::net::IpAddr::V4(v4) => Some(v4),
+/// Derive the reverse-NAT key the lockstep contract installs for a
+/// backend under a **single declared L4 protocol** (ADR-0060 D4 — the
+/// `[Tcp, Udp]` hardcode is narrowed to `proto`, the protocol the
+/// `ServiceFrontend` declares). The forward-path `Backend` does not
+/// carry proto — it is a property of the listener, not the backend
+/// address — so the proto is threaded from the `ServiceFrontend`.
+///
+/// Only IPv4 backends are routable through the Phase 2.2 LB — IPv6 /
+/// ICMP / SCTP are GH #155 / future-phase deferrals. Non-IPv4 backends
+/// contribute no key (silently skipped, parity with the production
+/// `EbpfDataplane`).
+const fn reverse_nat_key_for(backend: &Backend, proto: Proto) -> Option<BackendKey> {
+    match backend.addr.ip() {
+        std::net::IpAddr::V4(v4) => Some(BackendKey::new(v4, backend.addr.port(), proto)),
         std::net::IpAddr::V6(_) => None,
-    };
-    let port = backend.addr.port();
-    [Proto::Tcp, Proto::Udp]
-        .into_iter()
-        .filter_map(move |proto| ipv4.map(|ip| BackendKey::new(ip, port, proto)))
+    }
 }
 
 #[async_trait]
@@ -288,9 +338,17 @@ impl Dataplane for SimDataplane {
 
     async fn update_service(
         &self,
-        vip: Ipv4Addr,
+        frontend: ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
+        // `frontend.vip` is IPv4-by-construction (ADR-0060 D1a) —
+        // narrow infallibly. `proto` is the single declared protocol;
+        // the reverse-NAT fan-out is per-proto (D4), never the legacy
+        // `[Tcp, Udp]` over-install.
+        let vip = frontend.vip_v4();
+        let port = frontend.port().get();
+        let proto = frontend.proto();
+
         // Single mutex acquisition guards both maps — observers
         // cannot witness a partial update. Mirrors the production
         // `EbpfDataplane`'s `REVERSE_NAT_MAP` lockstep contract:
@@ -298,17 +356,20 @@ impl Dataplane for SimDataplane {
         // critical section.
         let mut state = self.state.lock();
 
-        // Snapshot prior reverse-NAT keys for this VIP before any
-        // mutation — the diff drives the purge below.
+        // Snapshot prior reverse-NAT keys for this `(vip, proto)`
+        // before any mutation — the diff drives the purge below. Keyed
+        // per-proto so a co-resident other-proto frontend on the same
+        // VIP is untouched (D4).
         let prior_keys: std::collections::BTreeSet<BackendKey> = state
             .services
-            .get(&vip)
-            .map(|prior| prior.iter().flat_map(reverse_nat_keys_for).collect())
+            .get(&(vip, port, proto))
+            .map(|prior| prior.iter().filter_map(|b| reverse_nat_key_for(b, proto)).collect())
             .unwrap_or_default();
 
-        // Compute new reverse-NAT keys for the incoming backend set.
+        // Compute new reverse-NAT keys for the incoming backend set,
+        // under the declared proto only.
         let new_keys: std::collections::BTreeSet<BackendKey> =
-            backends.iter().flat_map(reverse_nat_keys_for).collect();
+            backends.iter().filter_map(|b| reverse_nat_key_for(b, proto)).collect();
 
         // Install the new reverse-NAT entries for the incoming
         // backend set. Each `(backend_ip, backend_port, proto)` →
@@ -320,24 +381,28 @@ impl Dataplane for SimDataplane {
         }
 
         // Atomic forward-path replacement. Empty backend set removes
-        // the VIP entirely — matches `EbpfDataplane` which deletes
-        // the SERVICE_MAP outer key on empty-backend updates.
+        // this `(vip, proto)` entry entirely (per-proto purge, D4) —
+        // matches `EbpfDataplane` which deletes the SERVICE_MAP outer
+        // key for this frontend on empty-backend updates.
         if backends.is_empty() {
-            state.services.remove(&vip);
+            state.services.remove(&(vip, port, proto));
         } else {
-            state.services.insert(vip, backends);
+            state.services.insert((vip, port, proto), backends);
         }
 
         // Compute the union of ALL active services' reverse-NAT keys
-        // (after the forward-path update above). Only purge entries
-        // that left THIS service AND are absent from the global set.
-        // Without this cross-service check, removing a backend from
-        // one service would delete the reverse-NAT entry even when
-        // another service still routes through the same backend.
+        // (after the forward-path update above), each under its own
+        // stored proto. Only purge entries that left THIS service AND
+        // are absent from the global set. Without this cross-service
+        // check, removing a backend from one service would delete the
+        // reverse-NAT entry even when another service still routes
+        // through the same backend.
         let live_keys: std::collections::BTreeSet<BackendKey> = state
             .services
-            .values()
-            .flat_map(|bs| bs.iter().flat_map(reverse_nat_keys_for))
+            .iter()
+            .flat_map(|((_v, _port, p), bs)| {
+                bs.iter().filter_map(move |b| reverse_nat_key_for(b, *p))
+            })
             .collect();
 
         for key in prior_keys.difference(&new_keys) {
@@ -363,12 +428,15 @@ impl Dataplane for SimDataplane {
         vip: Ipv4Addr,
         vip_port: u16,
         backend: SocketAddrV4,
+        proto: Proto,
     ) -> Result<(), DataplaneError> {
-        // Single-map point write per ADR-0053 § 2 — overwrites any
-        // pre-existing entry for `(vip, vip_port)` atomically (the
-        // mutex acquisition IS the atomicity boundary; observers see
-        // either the prior backend or the new one, never a mix).
-        self.local_backends.lock().insert((vip, vip_port), backend);
+        // Single-map point write per ADR-0053 § 2 (rev 2026-06-03) —
+        // keyed on `(vip, vip_port, proto)` so a co-located tcp/53 +
+        // udp/53 install two distinct entries, observably-equivalent
+        // to `EbpfDataplane`'s `LOCAL_BACKEND_MAP` (vip, port, proto)
+        // key. Overwrites any pre-existing entry for the SAME quadruple
+        // atomically (the mutex acquisition IS the atomicity boundary).
+        self.local_backends.lock().insert((vip, vip_port, proto), backend);
         Ok(())
     }
 
@@ -376,10 +444,13 @@ impl Dataplane for SimDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: Proto,
     ) -> Result<(), DataplaneError> {
         // Idempotent per ADR-0053 § 2 — removing an entry that does
-        // not exist is `Ok(())`, never `KeyNotFound`.
-        self.local_backends.lock().remove(&(vip, vip_port));
+        // not exist is `Ok(())`, never `KeyNotFound`. Removes only the
+        // `(vip, vip_port, proto)` entry; a co-located other-proto
+        // entry on the same `(vip, vip_port)` is left intact.
+        self.local_backends.lock().remove(&(vip, vip_port, proto));
         Ok(())
     }
 }

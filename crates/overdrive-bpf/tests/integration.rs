@@ -41,4 +41,8 @@ mod integration {
     // ingress (REVERSE_NAT lookup + L3+L4 rewrite + FIB + L2 +
     // bpf_redirect).
     mod xdp_reverse_nat_redirect_neigh;
+    // udp-service-support US-03 / S-03-E, S-03-F (ADR-0060 Tier 2; K3) —
+    // RED scaffolds. xdp_reverse_nat_lookup rewrites a proto=17 UDP
+    // response source to the VIP (hit); XDP_PASS unmodified (miss).
+    mod xdp_reverse_nat_udp;
 }

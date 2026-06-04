@@ -1,0 +1,182 @@
+# Peer review — udp-service-support SCOPED DIVERGE
+#
+# IMPORTANT PROVENANCE NOTE: The nw-diverger-reviewer (Prism) sub-agent
+# could NOT be dispatched — Flux is itself running as a sub-agent in this
+# context and the Task tool is unavailable inside sub-agents
+# ("Task is not available inside subagents"). This review.yaml is an
+# ADVERSARIAL SELF-REVIEW by Flux against the five Prism dimensions,
+# written to the same rubric, with the conscious caveat that a self-review
+# is a second assertion by the same entity that made the first (the
+# fox-guarding-the-henhouse hazard named in .claude/rules/verification.md).
+# The orchestrator SHOULD run Prism against these artifacts for an
+# independent verdict before handoff to product-owner. This file records
+# the self-review verdict and the issues found-and-fixed, so Prism starts
+# from a known state.
+
+review_type: adversarial-self-review
+reviewer: Flux (self; Prism dispatch unavailable in sub-agent context)
+independent_peer_review: NOT_PERFORMED
+independent_peer_review_reason: >
+  Task tool unavailable inside sub-agents; nw-diverger-reviewer could not
+  be invoked. Orchestrator should dispatch Prism for an independent pass.
+date: 2026-06-02
+feature: udp-service-support
+scope: >
+  Scoped DIVERGE on ONE decision (thread per-service L4 proto through
+  Dataplane::update_service, GH #163). Closes DISCUSS review finding H3.
+
+verdict: APPROVED_PENDING_INDEPENDENT_REVIEW
+
+dimensions:
+  - dimension: 1_jtbd_rigor
+    calibration: >
+      Job is pre-validated; judged on citation soundness + ODI quality,
+      not a re-run 5-Whys (per scoped mandate).
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          job-analysis.md correctly cites J-OPS-004 + J-PLAT-004 from
+          jobs.yaml, keeps jobs.yaml unchanged, and produces 5 ODI
+          outcomes (O1-O5). O4/O5 are correctly identified as the
+          DISCRIMINATING outcomes (O1-O3 are served identically by all
+          top options) — this is the right analytical move for a scoped
+          option study. ODI statements use Minimize + likelihood/effort
+          forms, no forbidden words.
+      - severity: low
+        note: >
+          O5 mixes "effort to extend to SCTP" with "multi-listener" — two
+          distinct extension axes folded into one outcome. Acceptable for
+          a scoped study (both are "extension cost") but a purist ODI
+          would split them. Not blocking.
+
+  - dimension: 2_research_quality
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          4 real prior-art references named with specific structs
+          (Cilium L4Addr.Protocol, Katran VipKey{address,port,proto},
+          k8s ServicePort.Protocol, loxilb/GLB). Each cites a behavior
+          and a source URL — no generic market claims. The non-obvious
+          alternative (loxilb/GLB thin split-tier surface) is genuinely
+          a different category and is used HONESTLY to keep option 1 a
+          live contender, not as a strawman. The synthesis correctly
+          declines to let prior art auto-decide (3/4 favor aggregate-family
+          but the recommendation does NOT therefore pick the aggregate).
+      - severity: low
+        note: >
+          Kubernetes issue #39188 is cited as "literally #163's failure
+          class." Strong rhetorical anchor; technically #39188 is a
+          display/merge-key bug, while #163 is a dataplane install bug —
+          same ROOT (proto not in key) but different surface. The artifact
+          already hedges ("the exact failure shape ... is"). Acceptable.
+
+  - dimension: 3_option_diversity
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          6 options, all 7 SCAMPER lenses applied (S->1, C->2, A->3, M->2
+          property, P->4, E->4 variant, R->5) + 2 Crazy-8s (6, 7). The
+          3-point diversity test (mechanism/assumption/cost) is applied
+          and tabulated; option 7 correctly merged out as an exact
+          variation. options-raw.md is genuinely free of evaluative
+          language — blast-radius facts are stated neutrally
+          ("call sites that change") not judgmentally. Generation/
+          evaluation separation respected.
+      - severity: low
+        note: >
+          SCAMPER-M and SCAMPER-E fold into options 2 and 4 respectively
+          rather than producing standalone options. This is legitimate
+          curation (they ARE properties/variants of those mechanisms), and
+          it is disclosed — but it means only 5 distinct SCAMPER mechanisms
+          + 1 Crazy-8 survive, with the 6th (option 6) carrying the
+          diversity. The diversity re-check for option 6 is explicit and
+          sound. Not blocking.
+
+  - dimension: 4_taste_correctness
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          Weights LOCKED before scoring using the skill's documented
+          developer-tool column, each with a recorded rationale. The
+          anti-pattern self-audit table is present and honest. Critically:
+          the weights do NOT advantage the user's preferred option 2 —
+          T1(Subtraction) and T4(Speed) are elevated per the dev-tool
+          profile, and those are exactly where the aggregate scores
+          WORST. A weight-manipulator wanting option 2 to win would have
+          raised an "industry-alignment" criterion; the matrix does not,
+          and the dissent explicitly names that as the documentable
+          weight change that WOULD make option 2 win. This is the honest
+          shape.
+      - severity: medium
+        issue: arithmetic-self-correction-in-place
+        note: >
+          The option-2 matrix cell shows 3.62 but the prose self-corrects
+          to the audited exact value 3.57, with an explicit "Correction
+          note (honesty)" and a recomputation. JUDGMENT: self-correcting
+          in-place with a visible note is ACCEPTABLE (it is honest and the
+          ranking 6>1>2>3>5>4 is unaffected either way), but leaving the
+          stale 3.62 in the matrix CELL while the prose says 3.57 is a
+          latent confusion for a downstream reader who scans only the
+          table. REMEDIATION APPLIED: cell corrected to 3.57 so table and
+          prose agree (see fix log below).
+      - severity: low
+        note: >
+          DVF is used as a filter (none eliminated; option 4 weakest at 8)
+          AND option 4's weakness re-surfaces in the taste scores — so DVF
+          is not used as a tiebreaker (anti-pattern avoided). Correct.
+
+  - dimension: 5_recommendation_coherence
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          Recommendation is traceable to the matrix (option 6 = top score
+          4.17). The decision statement is explicit and falsifiable
+          ("Proceed with Option 6 ... assuming multi-listener is a
+          hydrator concern"). The four required analyses (blast radius
+          table with concrete call sites; service_id reconciliation
+          verdict closing B2; lockstep pinning closing H1 with the
+          Tier1+Tier3 split; testability per tier) are all present and
+          code-grounded (dataplane.rs:101, validate.rs:288,
+          sim/dataplane.rs:277, reverse_nat_lockstep.rs:158-165). The
+          dissenting case for option 2 is GENUINE: it names three real
+          conditions under which the aggregate wins (multi-listener-in-
+          trait, typed-SSOT strategy, industry-weight reframing) rather
+          than a token paragraph. The "what the DISCUSS revision should
+          say" section maps 1:1 to B1/B2/H3.
+      - severity: low
+        note: >
+          The Option-6-vs-Option-1 gap is 0.04 (inside noise). The
+          recommendation handles this correctly by locking the FAMILY at
+          DISCUSS and deferring newtype-vs-positional to DESIGN, rather
+          than over-claiming a 0.04 win. Good calibration.
+
+issues_found_and_fixed:
+  - id: FIX-1
+    severity: medium
+    dimension: 4_taste_correctness
+    description: >
+      taste-evaluation.md matrix cell for option 2 showed 3.62 while the
+      audited exact weighted total is 3.57. Stale cell vs corrected prose.
+    resolution: >
+      Matrix cell updated to 3.57 to agree with the prose correction note
+      and the ranking summary. Ranking unaffected (option 2 third either
+      way). recommendation.md already uses 3.57 throughout — no change
+      needed there.
+
+gates:
+  G1_job_strategic_with_odi: PASS
+  G2_three_competitors_nonobvious: PASS
+  G3_six_diverse_options_no_eval_language: PASS
+  G4_dvf_scored_traceable_dissent_decision: PASS
+
+handoff_recommendation: >
+  APPROVED for handoff to the DISCUSS-revision author / product-owner,
+  CONDITIONAL on the orchestrator optionally dispatching Prism for an
+  independent confirmation (self-review caveat). No blocking defects
+  remain after FIX-1. The single medium issue was found and fixed in the
+  same pass.

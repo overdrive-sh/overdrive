@@ -1,0 +1,6 @@
+Workload ID:   dns-resolver
+Spec digest:   38080643ea47bfe84478b34daad3830389d313754eb0bd86133c2a7f8a0a535e
+Allocations:   0
+0 allocations for job dns-resolver — the scheduler + driver land in phase-1-first-workload
+Listeners:
+  15353/udp

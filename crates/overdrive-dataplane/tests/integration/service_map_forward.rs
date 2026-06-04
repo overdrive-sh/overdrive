@@ -295,6 +295,7 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
         let service_key = ServiceKey {
             vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
             port_host: VIP_PORT,
+            proto: 6, // TCP (IANA) — this test forwards TCP SYNs (step 02-01 key widening)
             _pad: 0,
         };
         service_map_handle

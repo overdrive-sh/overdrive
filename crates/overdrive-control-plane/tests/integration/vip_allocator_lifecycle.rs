@@ -132,6 +132,7 @@ fn build_state_with_range(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
     (state, allocator)
@@ -158,6 +159,22 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
+    }
+}
+
+/// Compose a `ServiceSpecInput` with a single `(port, protocol)`
+/// listener — used by the listener-projection test to drive a UDP
+/// listener end-to-end through the production submit handler.
+fn service_spec_proto(id: &str, port: u16, protocol: &str) -> ServiceSpecInput {
+    ServiceSpecInput {
+        id: id.to_owned(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        listeners: vec![ListenerInput { port, protocol: protocol.to_owned() }],
         startup_probes: vec![],
         readiness_probes: vec![],
         liveness_probes: vec![],
@@ -316,6 +333,57 @@ async fn terminal_state_releases_vip_end_to_end() {
         );
         drop(guard);
     }
+}
+
+// ---------------------------------------------------------------------------
+// O03 sub-claim 3 — the alloc-status handler projects the persisted
+// Service intent's listeners (port + Proto) into `AllocStatusResponse.
+// listeners`, so a UDP listener's `Proto::Udp` is observable on the read
+// surface.
+// ---------------------------------------------------------------------------
+
+/// Submit a Service with a single UDP listener on port 5353 through the
+/// production `submit_workload` handler, then read it back via the
+/// `alloc_status` handler. The response's `listeners` field MUST carry
+/// the `(5353, Proto::Udp)` listener projected from the persisted
+/// `WorkloadIntent::Service` aggregate — NOT a synthesised value.
+///
+/// This is the handler-side half of O03 sub-claim 3: the CLI render
+/// test (`overdrive-cli` `alloc_status.rs`) proves the section renders
+/// `5353/udp`; this test proves the handler actually threads the
+/// listener protocol from the intent onto the wire response.
+#[tokio::test]
+async fn alloc_status_projects_service_udp_listener_protocol() {
+    use overdrive_core::dataplane::Proto;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let (state, _allocator) = build_state_with_range(&tmp, VipRange::default());
+
+    let spec = service_spec_proto("dns-resolver", 5353, "udp");
+    let resp =
+        submit_json(state.clone(), SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
+            .await
+            .expect("Service submit must succeed");
+    assert_eq!(resp.outcome, IdempotencyOutcome::Inserted);
+
+    let status = fetch_alloc_status(state, "dns-resolver").await;
+
+    assert_eq!(
+        status.listeners.len(),
+        1,
+        "alloc_status must project exactly one listener for the single-listener Service; \
+         got {:?}",
+        status.listeners,
+    );
+    let listener = &status.listeners[0];
+    assert_eq!(listener.port.get(), 5353, "projected listener port must be 5353");
+    assert_eq!(
+        listener.protocol,
+        Proto::Udp,
+        "projected listener protocol must be Proto::Udp (UDP service observable black-box); \
+         got {:?}",
+        listener.protocol,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +569,7 @@ async fn build_state_with_range_and_reconciler(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
     (state, allocator)

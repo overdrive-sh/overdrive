@@ -518,6 +518,15 @@ pub enum ObservationRow {
     /// service. Read by the `ServiceMapHydrator` reconciler to
     /// hydrate `desired` state (GH #160).
     ServiceBackend(ServiceBackendRow),
+    /// `reconcile_conflict` row — written by `run_convergence_tick` on
+    /// a genuine same-slot reconcile-output invariant violation (Fix C,
+    /// RCA `fix-mixed-backend-dispatch-spin`). The machine-queryable
+    /// control signal that pairs with the supplemental
+    /// `reconciler.output.invariant_violation` tracing event (the
+    /// Kubernetes Events model: best-effort human signal distinct from
+    /// the durable observation row). Read via
+    /// [`ObservationStore::reconcile_conflict_rows`].
+    ReconcileConflict(ReconcileConflictRow),
 }
 
 // ---------------------------------------------------------------------------
@@ -933,6 +942,139 @@ impl VersionedEnvelope for ServiceBackendRowEnvelope {
     }
 }
 
+/// Route a conflicting reconcile-output write would take through the
+/// dataplane port boundary — the core-side mirror of
+/// `overdrive_control_plane::action_shim::validate::WriteRoute`.
+///
+/// `WriteRoute` lives in `overdrive-control-plane` (the dispatch
+/// boundary) and is NOT reachable from `overdrive-core` — and an
+/// `overdrive-core → overdrive-control-plane` dependency would invert
+/// the crate-class layering (core depends only on the trait surface).
+/// This enum is the minimal core-side representation the observation
+/// row needs to record *which two routes* a genuine same-slot conflict
+/// spanned. It is pure data: two unit variants, no behaviour.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ConflictRoute {
+    /// XDP `SERVICE_MAP` / Maglev path, keyed on `(vip, port, proto)`.
+    /// Mirrors `WriteRoute::Xdp`.
+    Xdp,
+    /// cgroup `connect4` rewrite path (`LOCAL_BACKEND_MAP`), keyed on
+    /// `(vip, vip_port, proto)`. Mirrors `WriteRoute::Cgroup`.
+    Cgroup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ReconcileConflictRowEnvelope {
+    V1(ReconcileConflictRowV1),
+}
+
+/// Public payload alias for the `reconcile_conflict` observation row,
+/// per the UI-02 alias-to-payload amendment (mirrors
+/// [`ServiceHydrationResultRow`]). Callers construct
+/// `ReconcileConflictRow { .. }` directly; the persistence boundary
+/// wraps via [`ReconcileConflictRowEnvelope::latest`] and projects via
+/// [`ReconcileConflictRowEnvelope::into_latest`].
+pub type ReconcileConflictRow = ReconcileConflictRowV1;
+
+/// Documentation alias for "the latest payload shape" of the
+/// `reconcile_conflict` row. Re-aliased alongside
+/// [`ReconcileConflictRow`] at every schema version bump.
+pub type ReconcileConflictRowLatest = ReconcileConflictRowV1;
+
+// `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
+// non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ReconcileConflictRowV1 {
+    /// Identity of the service whose `reconcile()` output carried the
+    /// genuine same-slot conflict. The reconciler identity operators
+    /// grep for. Primary key for LWW alongside the conflicting slot.
+    pub service_id: ServiceId,
+    /// Virtual IP of the conflicting `(vip, port, proto)` map slot.
+    /// Wire-shape `Ipv4Addr` (same precedent as
+    /// [`ServiceBackendRowV1::vip`]); the conflict is observed in
+    /// wire-shape terms at the dispatch boundary.
+    pub vip: Ipv4Addr,
+    /// Port of the conflicting map slot.
+    pub port: u16,
+    /// L4 protocol of the conflicting map slot. `(vip, port, proto)`
+    /// together name the single slot the two writes collided on.
+    pub proto: Proto,
+    /// Route the FIRST emitted conflicting write took. After ADR-0053
+    /// revision 2026-06-03 the only surviving conflict class is
+    /// same-route same-slot, so `first_route == second_route` today;
+    /// both are recorded as OBSERVED INPUTS (not a derived
+    /// classification) so a future cross-class conflict can populate
+    /// them distinctly without a schema change.
+    pub first_route: ConflictRoute,
+    /// Route the SECOND (conflicting) emitted write took.
+    pub second_route: ConflictRoute,
+    /// Lamport timestamp of this row. Same shape as
+    /// [`ServiceHydrationResultRowV1::updated_at`] — the convergence
+    /// tick writes `(counter = tick.tick + 1, writer = node_id)` so two
+    /// conflict observations for the same `(service_id, vip, port,
+    /// proto)` on different ticks are correctly ordered under LWW.
+    pub updated_at: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for ReconcileConflictRowEnvelope {
+    type Latest = ReconcileConflictRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `ReconcileConflictRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined via the byte-flip locator in
+    /// `tests/schema_evolution/reconcile_conflict_row.rs` (the
+    /// `#[ignore]`d `print_fixture_v1_bytes` regeneration aid + the
+    /// triangulation test confirm the value). The trailing root region
+    /// of the V1 payload is fixed-size — 8B service_id + 4B vip + 2B
+    /// port + 1B proto + 1B first_route + 1B second_route + padding +
+    /// 8B counter + 16B writer `ArchivedString` (the writer NodeId's
+    /// variable-length bytes live in the leading slab, not the trailing
+    /// root) + trailing 8-byte alignment.
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(48)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `ReconcileConflictRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - discriminant_offset_from_end()`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "ReconcileConflictRowEnvelope"
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Subscription stream alias
 // ---------------------------------------------------------------------------
@@ -1050,6 +1192,26 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
+    /// Read every LWW-winner `reconcile_conflict` row for the given
+    /// [`ServiceId`]. The machine-queryable surface for genuine
+    /// same-slot reconcile-output conflicts written by
+    /// `run_convergence_tick` (Fix C, RCA
+    /// `fix-mixed-backend-dispatch-spin`). Operators query this instead
+    /// of grepping the supplemental
+    /// `reconciler.output.invariant_violation` tracing event.
+    ///
+    /// Iteration order is deterministic — keyed by `(service_id, vip,
+    /// port, proto)` under the adapter's storage shape (e.g.
+    /// [`std::collections::BTreeMap`]). One row may exist per
+    /// `(service_id, vip, port, proto)` slot; the same `service_id` with
+    /// a different slot lives in a distinct row. LWW resolution uses
+    /// [`LogicalTimestamp::dominates`] on `updated_at`, mirroring the
+    /// `service_hydration_results` reader.
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError>;
 
     /// Write a single [`ProbeResultRow`] — the latest observed
     /// outcome of one probe for one allocation.

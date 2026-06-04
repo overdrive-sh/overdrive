@@ -34,6 +34,15 @@ mod integration {
     //! `per_entry_commit_index` module was deleted in step 01-04 of
     //! `redesign-drop-commit-index` — the per-entry index assertion
     //! has no consumer on the post-ADR-0020 wire shape.
+
+    // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
+    // `lo`-named `DataplaneConfig` helper for SimDataplane-override
+    // fixtures. `#[path]`-included (each `tests/*.rs` is its own crate
+    // root) so the same SSOT source backs both the acceptance and
+    // integration binaries and the `lo`/`lo` shape cannot drift.
+    #[path = "../common/dataplane_lo.rs"]
+    pub mod dataplane_lo;
+
     mod concurrent_submit_toctou;
     /// Action-shim `deregister_local_backend::dispatch` mutation kill
     /// per ADR-0053 § 3 — asserts the post-dispatch observable state
@@ -66,6 +75,15 @@ mod integration {
     /// Asserts `Reconciler::NAME` is a compile-time anchor and that
     /// `write_through_bytes` accepts `&'static str` directly.
     mod redb_view_store_no_leak;
+    /// single-node-dataplane-wiring step 01-04 (ADR-0061 § 8 / § 5) —
+    /// Tier-3 regression for the serve-boot dataplane wiring. Drives the
+    /// real `provision` + `EbpfDataplane::new_with_pin_dir` seam: (HAPPY)
+    /// default veth config attaches TWO DISTINCT XDP programs to TWO
+    /// distinct veth ifaces with NO `DataplaneBootError`, asserted via
+    /// observable kernel state (`ip link show prog/xdp id`); (DIAGNOSTIC)
+    /// both ifaces = one real iface surfaces the typed
+    /// `DataplaneError::IfaceXdpSlotBusy` on a REAL `EBUSY`.
+    mod serve_boot_provisions_veth;
     mod server_lifecycle;
     /// phase-2-xdp-service-map Slice 08 (US-08) — service-map
     /// hydrator dispatch RED scaffold per
@@ -80,6 +98,11 @@ mod integration {
     /// surfaces is structurally impossible.
     mod terminal_propagation;
     mod tls_bootstrap;
+    /// single-node-dataplane-wiring step 01-02 — Tier-3 idempotent
+    /// veth provision (ADR-0061 § 3.1). Drives real `ip(8)` through
+    /// `veth_provisioner::provision`: creates-when-absent +
+    /// adopts-pre-existing-without-recreating.
+    mod veth_provision_idempotent;
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads

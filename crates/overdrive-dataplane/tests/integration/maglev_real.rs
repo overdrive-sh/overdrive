@@ -257,6 +257,7 @@ fn maglev_real_distribution_under_xdp_trafficgen() {
     let service_key = ServiceKey {
         vip_host: u32::from(std::net::Ipv4Addr::from(vip_octets)),
         port_host: vip_port,
+        proto: 6, // TCP (IANA) — this test forwards TCP SYNs (step 02-01 key widening)
         _pad: 0,
     };
     service_map.set(&service_key, inner.as_fd()).expect("outer set");

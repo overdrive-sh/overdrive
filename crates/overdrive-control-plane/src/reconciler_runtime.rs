@@ -52,6 +52,9 @@ use overdrive_core::reconcilers::{
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::observation_store::{
+    ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
+};
 use parking_lot::Mutex;
 
 use crate::AppState;
@@ -989,6 +992,19 @@ fn service_lifecycle_canonical_name() -> ReconcilerName {
     .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
 }
 
+/// Map the dispatch-boundary [`action_shim::validate::WriteRoute`] onto
+/// the core-side [`ConflictRoute`] the observation row records. The two
+/// enums are intentionally separate (`WriteRoute` lives at the dispatch
+/// boundary; `ConflictRoute` is the core-side data mirror — an
+/// `overdrive-core → overdrive-control-plane` dep would invert the
+/// crate layering). Fix C, RCA `fix-mixed-backend-dispatch-spin`.
+const fn write_route_to_conflict_route(route: action_shim::validate::WriteRoute) -> ConflictRoute {
+    match route {
+        action_shim::validate::WriteRoute::Xdp => ConflictRoute::Xdp,
+        action_shim::validate::WriteRoute::Cgroup => ConflictRoute::Cgroup,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // phase-1-first-workload — slice 3 (US-03) — runtime convergence tick loop
 //
@@ -1138,6 +1154,65 @@ pub async fn run_convergence_tick(
     // reconciler is fixed, normal dispatch resumes. The control-plane
     // does NOT panic on a buggy reconciler.
     if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
+        // Surface-then-continue (`.claude/rules/reconcilers.md` self-heal
+        // posture; RCA `fix-mixed-backend-dispatch-spin` § Fix C). On a
+        // genuine same-slot conflict we surface the violation on TWO
+        // channels — the Kubernetes Events model: a machine-queryable
+        // control signal distinct from a best-effort human signal — then
+        // skip dispatch this tick, persist the View, and retry next
+        // tick. NO stop / early-return: the appliance OS has no operator
+        // shell, so the system must self-heal.
+        //
+        // Channel 1 (machine-queryable control signal): a durable
+        // `reconcile_conflict` observation row keyed on the conflicting
+        // `(service_id, vip, port, proto)` slot. Operators query it via
+        // `ObservationStore::reconcile_conflict_rows`. Best-effort write
+        // — a write failure must NOT abort the tick (the tracing signal
+        // below still fires and convergence retries), so we log + drop
+        // the error rather than propagate.
+        let action_shim::validate::ReconcilerOutputViolation::ConflictingServiceWrites {
+            service_id,
+            vip,
+            vip_port,
+            proto,
+            first_route,
+            second_route,
+        } = &violation;
+        let (service_id, vip, vip_port, proto, first_route, second_route) =
+            (*service_id, *vip, *vip_port, *proto, *first_route, *second_route);
+        // `vip_port` is `Some(_)` for every surviving conflict class in
+        // Phase 1 (same-route same-slot carries the shared port); the
+        // `Option` exists only to avoid churning the variant if a future
+        // port-less conflict class lands. Fall back to 0 if ever `None`.
+        let port = vip_port.unwrap_or(0);
+        let conflict_row = ReconcileConflictRow {
+            service_id,
+            vip,
+            port,
+            proto,
+            first_route: write_route_to_conflict_route(first_route),
+            second_route: write_route_to_conflict_route(second_route),
+            // LWW timestamp matching the action-shim convention
+            // (`counter = tick.tick + 1`, `writer = node_id`) — see
+            // `ServiceHydrationResultRowV1::updated_at`.
+            updated_at: LogicalTimestamp {
+                counter: tick.tick.saturating_add(1),
+                writer: state.node_id.clone(),
+            },
+        };
+        if let Err(err) = state.obs.write(ObservationRow::ReconcileConflict(conflict_row)).await {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "reconciler.output.conflict_row_write_failed",
+                reconciler = %reconciler_name,
+                target = %target.as_str(),
+                error = %err,
+                "failed to write reconcile_conflict observation row; the tracing \
+                 signal still fired and convergence will retry next tick"
+            );
+        }
+        // Channel 2 (supplemental human signal): the structured tracing
+        // event. KEPT alongside the observation row, never replaced.
         tracing::error!(
             target: "overdrive::reconciler",
             name = "reconciler.output.invariant_violation",
@@ -1326,21 +1401,54 @@ async fn hydrate_desired(
                 .service_backends_rows(&service_id)
                 .await
                 .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+            // Listener-bearing facts (ADR-0060 site #8): proto MUST be
+            // sourced from a listener-bearing fact, NEVER defaulted to Tcp
+            // (C3). The SSOT for the per-listener protocol is the Service
+            // intent's `listeners`; the in-memory `ListenerFactStore`
+            // (boot-rebuilt + edge-maintained) holds that projection keyed
+            // by the derived `ServiceId`, so steady-state hydration pays
+            // an O(1) keyed read per row rather than an O(S²) per-tick
+            // cluster scan over the intent store (ADR-0062 § Decision (3);
+            // the per-tick scan path was deleted in step 01-04). The
+            // `service_backends` row's `service_id` IS that primary key.
             let mut desired = BTreeMap::new();
             for row in rows {
-                // Wrap the row's wire-shape `Ipv4Addr` into `ServiceVip`
-                // at the read boundary per architecture.md § 8.
-                let vip = overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(row.vip))
-                    .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-                let fp = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
-                desired.insert(
-                    row.service_id,
-                    overdrive_core::reconcilers::ServiceDesired {
-                        vip,
-                        backends: row.backends,
-                        fingerprint: fp,
-                    },
-                );
+                // O(1) keyed read of the listener fact for THIS row's
+                // service. Lock discipline (`.claude/rules/development.md`
+                // § "Concurrency & async"): acquire the `listener_facts`
+                // guard, clone the small `Option<ListenerRow>`, and DROP
+                // the guard BEFORE the `project_service_desired` call —
+                // no `.await` follows while the guard is held.
+                let fact = {
+                    let facts = state.listener_facts.lock().await;
+                    let fact = facts.fact_for(row.service_id);
+                    drop(facts);
+                    fact
+                };
+                // Source `(port, proto)` from the keyed fact via the
+                // projection seam, passing the single `Option<&ListenerRow>`
+                // directly (the projection's VIP match + C3 error path are
+                // unchanged). On an unresolvable proto (no keyed fact), skip
+                // the service — emitting NO `update_service` action carrying
+                // a silently-defaulted `Proto::Tcp` (C3 guard) — and surface
+                // the structured failure for the operator.
+                match overdrive_core::reconcilers::service_map_hydrator::project_service_desired(
+                    &row,
+                    fact.as_ref(),
+                ) {
+                    Ok(desired_svc) => {
+                        desired.insert(row.service_id, desired_svc);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            name: "service_map_hydrator.desired.unresolvable_proto",
+                            service_id = %row.service_id,
+                            error = %e,
+                            "skipping service-map desired projection: no listener-bearing \
+                             protocol fact; refusing to default to Tcp (ADR-0060 C3)"
+                        );
+                    }
+                }
             }
             Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
                 desired,
@@ -1528,7 +1636,8 @@ const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
 /// branch's `ServiceBackendRow` composition. Mirrors
 /// [`hydrate_bridge_desired_listeners`]'s VIP resolution: compute the
 /// spec digest, consult the allocator memo, derive the `ServiceId`
-/// from the first listener's `(vip, port)` per ADR-0052 § 1.
+/// from the first listener's `(vip, port, protocol)` per ADR-0052 § 1
+/// / ADR-0040 companion revision (proto axis).
 ///
 /// Returns `None` when the Service has no listener (no VIP surface) or
 /// the allocator memo is absent (VIP not yet issued) — in either case
@@ -1568,8 +1677,12 @@ async fn service_dataplane_identity(
     let Some(assigned_vip) = assigned_vip_opt else {
         return Ok(None);
     };
-    let service_id =
-        overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
+    let service_id = overdrive_core::id::ServiceId::derive(
+        &assigned_vip,
+        listener.port,
+        listener.protocol,
+        "service-map",
+    );
     Ok(Some(overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
         service_id,
         vip: assigned_vip,
@@ -1613,7 +1726,8 @@ pub async fn hydrate_actual_for_test(
 /// * `WorkloadIntent::Service(ServiceV1)` — computes `spec_digest`,
 ///   consults `state.allocator.lock().await.get(&digest)` for the
 ///   allocator-issued VIP, projects each listener through
-///   `ServiceId::derive(&vip, port, "service-map")` per ADR-0052 § 1.
+///   `ServiceId::derive(&vip, port, protocol, "service-map")` per
+///   ADR-0052 § 1 / ADR-0040 companion revision (proto axis).
 /// * `WorkloadIntent::Job(_)` / `Schedule(_)` — returns empty map
 ///   (S-BDB-08; only Service has listeners).
 ///
@@ -1686,8 +1800,12 @@ async fn hydrate_bridge_desired_listeners(
     };
     let mut listeners = BTreeMap::new();
     for listener in &service_v1.listeners {
-        let service_id =
-            overdrive_core::id::ServiceId::derive(&assigned_vip, listener.port, "service-map");
+        let service_id = overdrive_core::id::ServiceId::derive(
+            &assigned_vip,
+            listener.port,
+            listener.protocol,
+            "service-map",
+        );
         listeners.insert(
             service_id,
             overdrive_core::reconcilers::backend_discovery_bridge::ProjectedListener {
@@ -2479,6 +2597,7 @@ mod tests {
             let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
             let allocator =
                 crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            let listener_facts = crate::test_empty_listener_facts();
             AppState::new(
                 store,
                 store_path,
@@ -2489,6 +2608,7 @@ mod tests {
                 Arc::new(SimDataplane::new()),
                 writer_node(),
                 allocator,
+                listener_facts,
                 std::net::Ipv4Addr::LOCALHOST,
             )
         }
@@ -2543,7 +2663,7 @@ mod tests {
 
         /// S-BDB-10 unit-level proxy: an N-listener Service produces
         /// exactly N (ServiceId, ProjectedListener) entries, each
-        /// keyed by `ServiceId::derive(&assigned_vip, port,
+        /// keyed by `ServiceId::derive(&assigned_vip, port, protocol,
         /// "service-map")` and carrying the allocator-issued VIP.
         #[tokio::test]
         async fn hydrate_desired_service_projects_listeners_with_allocator_vip() {
@@ -2568,8 +2688,8 @@ mod tests {
 
             let port_8080 = NonZeroU16::new(8080).expect("nz");
             let port_8443 = NonZeroU16::new(8443).expect("nz");
-            let sid_8080 = ServiceId::derive(&assigned_vip, port_8080, "service-map");
-            let sid_8443 = ServiceId::derive(&assigned_vip, port_8443, "service-map");
+            let sid_8080 = ServiceId::derive(&assigned_vip, port_8080, Proto::Tcp, "service-map");
+            let sid_8443 = ServiceId::derive(&assigned_vip, port_8443, Proto::Tcp, "service-map");
 
             let pl_8080 = s.desired.listeners.get(&sid_8080).expect("8080 entry");
             assert_eq!(pl_8080.vip, assigned_vip, "vip from allocator memo");

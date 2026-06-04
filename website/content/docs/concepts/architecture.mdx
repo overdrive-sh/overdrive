@@ -155,6 +155,14 @@ Five reconcilers run today:
 Adding a behavior to the control plane means adding a reconciler, not threading
 logic through the loop. The loop does not know what the reconcilers do.
 
+The same shape makes the loop self-heal. A reconciler recomputes the gap between
+desired and actual every time it runs, so it never assumes a past action took
+effect — it checks. A half-finished operation is just a gap the next pass
+closes: an allocation that crashed partway through starting is started again, a
+veth pair left half-provisioned by an interrupted boot is completed rather than
+adopted as-is. The control plane converges toward the declared state or keeps
+trying; it does not strand half-applied state for someone to fix by hand.
+
 ## The worker runs processes under cgroups
 
 The shipped workload driver is `ExecDriver`: it runs a Linux process with
@@ -192,14 +200,37 @@ not ad-hoc timers scattered through the worker.
 
 This is the part of the shipped system that most exceeds a "phase one"
 expectation: the dataplane is real eBPF, attached at boot. `EbpfDataplane` loads
-XDP programs onto the client and backend interfaces and a sockops program onto
-the workloads cgroup. Service traffic is matched and forwarded in the kernel —
-forward path and reverse-NAT path both — keyed off BPF maps (`SERVICE_MAP`,
-`BACKEND_MAP`, `REVERSE_NAT_MAP`) that the discovery reconcilers keep in sync
-with live allocations.
+XDP programs onto the client and backend interfaces and attaches a cgroup
+`connect4` program to the workloads cgroup. There is no userspace proxy in the
+packet path — the control plane keeps the BPF maps in sync with live
+allocations, and the kernel does the forwarding.
 
-There is no userspace proxy in the packet path. The control plane's job is to
-keep the maps correct; the kernel does the forwarding.
+What the kernel does with a service's traffic turns on **where the backend
+runs**. Today that answer is always "on this node."
+
+### Local backends — the path that runs today
+
+A backend is *local* when it runs on the same node as the dataplane, which on a
+single node is every backend. The `connect4` program rewrites the connection's
+destination from the service VIP to the backend's real address at `connect()`
+time — before a packet leaves the socket — and records the pick in
+`LOCAL_BACKEND_MAP`. The client then talks to the local process directly. The
+return path needs no rewrite: the socket was opened to the backend's own
+address, so its replies already carry the address the client expects. Both TCP
+and UDP listeners steer through this path.
+
+### Remote backends — built, dormant until multi-node
+
+A backend is *remote* when it runs on a different node, and it takes a different
+mechanism. XDP matches the VIP in `SERVICE_MAP` and redirects the packet to the
+backend's node; then, because that backend replies from its own address, a
+reverse-NAT program rewrites the reply's source back to the VIP through
+`REVERSE_NAT_MAP`, so the client never sees the backend IP. These programs and
+maps are loaded and tested, but no deploy reaches them yet: the node is always
+`local`, so every backend resolves to this host and classifies as local. Remote
+backends become reachable only when multi-node lands — the first point at which
+a backend can live somewhere else. Until then `SERVICE_MAP` and `REVERSE_NAT_MAP`
+stay empty by design, not by defect.
 
 ## Identity is mutual TLS, minted at boot
 
@@ -240,6 +271,10 @@ not describe them as present until there is:
   drivers are named in the trait but unimplemented.
 - **The ingress gateway, the policy engine, native telemetry, and the LLM
   self-healing agent.** Each is part of the design; none is wired into `serve`.
+- **Cross-host load balancing.** Service traffic reaches same-host backends
+  through the cgroup `connect4` path. The XDP `SERVICE_MAP` / `REVERSE_NAT_MAP`
+  path that forwards to a backend on another node is built and tested but
+  unreachable, because every backend on a single node is local.
 - **Multi-region federation.** The node is always `local`.
 
 ## Where to go next

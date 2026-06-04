@@ -23,9 +23,17 @@ mod integration {
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;
+    /// udp-service-support step 02-02 (S-02-02; ADR-0053 rev) —
+    /// `LOCAL_BACKEND_MAP` keys on `(vip, vip_port, proto)`: TCP +
+    /// UDP connect to the same `(vip, port)` reach proto-correct
+    /// backends via the cgroup_connect4 path.
+    mod local_backend_proto_connect;
     /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
     /// Maglev real-distribution under XDP traffic on real veth.
     mod maglev_real;
+    /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
+    /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
+    mod multi_listener_tcp_udp_e2e;
     /// phase-2-xdp-service-map Slice 09 step 09-03 (S-2.2-33;
     /// ADR-0045 § Operational) — loader attach topology under
     /// `bpf_redirect`-on-XDP datapath. Verifies dual-XDP attach
@@ -35,12 +43,20 @@ mod integration {
     /// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-15, S-2.2-18) —
     /// REVERSE_NAT_MAP real-TCP `nc` end-to-end. RED scaffolds.
     mod reverse_nat_e2e;
+    /// udp-service-support US-04 / S-04-A..C (ADR-0060 Tier 3; K1) —
+    /// single-UDP-listener forward+reverse e2e (walking skeleton).
+    /// RED scaffolds.
+    mod reverse_nat_udp_e2e;
     /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22) —
     /// sanity prologue mixed-batch counter assertions. RED scaffold.
     mod sanity_mixed_batch;
     /// phase-2-xdp-service-map Slice 02 (US-02; S-2.2-06) —
     /// SERVICE_MAP forward path through real veth. RED scaffold.
     mod service_map_forward;
+    /// udp-service-support — regression guard: SERVICE_MAP outer slot is
+    /// keyed on the declared VIP port, not the backend listener port
+    /// (VIP:53 → backend:5353).
+    mod service_map_vip_port;
     /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
     /// real-iface XDP attach. RED scaffolds.
     mod veth_attach;

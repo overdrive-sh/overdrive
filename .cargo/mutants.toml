@@ -385,6 +385,38 @@ exclude_re = [
     # legitimate mutation descriptions for arithmetic flips,
     # comparison flips, or `Vec::new()`/`()` body replacements.
     "Default::default",
+
+    # `ListenerFactStore::rebuild_from_intent` `||` → `&&` (ADR-0062 /
+    # reconciler-listener-fact-view; ADR-0060 site #8 / C3). NOTE: this
+    # equivalent-mutant guard was RELOCATED here from the now-deleted
+    # `gather_service_listener_facts` (`crates/overdrive-control-plane/
+    # src/reconciler_runtime.rs`) when the per-tick cluster scan was
+    # replaced by the boot-rebuilt in-memory ListenerFactStore (step
+    # 01-04 deleted the old fn; step 01-01 relocated its projection body
+    # to `rebuild_from_intent`). The old description-regex no longer
+    # matches because the function was renamed; this is the updated entry.
+    # The guard
+    # `if suffix.is_empty() || suffix.contains('/') { continue; }` is a
+    # fast-path skip of the `workloads/<id>/stop` and `workloads/<id>/kind`
+    # sub-keys before the `from_store_bytes` decode below. Flipping to
+    # `&&` makes the early-skip never fire, but the downstream
+    # `let Ok(intent) = WorkloadIntent::from_store_bytes(...) else { continue }`
+    # + `WorkloadIntent::Service(..)` match rejects those sub-keys
+    # identically: `/stop` carries an empty payload (`b""`) and `/kind` a
+    # single discriminator byte, neither of which passes rkyv bytecheck
+    # for a full `WorkloadIntentEnvelope::Service` (which embeds
+    # `String`/`Vec` fields needing a valid trailing root region). The
+    # canonical `workloads/<id>` key has a non-empty suffix without `/`,
+    # so it is never skipped under either operator. Both maps the rebuild
+    # populates are byte-identical for both operators — a genuine
+    # equivalent mutant, no test can distinguish them. The source-level
+    # `// mutants: skip` comment above the guard in
+    # `crates/overdrive-control-plane/src/listener_facts.rs` carries the
+    # same rationale as documentation; this regex is the actual
+    # suppression mechanism (same shape as the `ProbeRunner::probe` and
+    # `evaluate_reconciler_is_pure` entries above — comment-skip does not
+    # fire for a mid-body expression mutation).
+    "replace \\|\\| with && in ListenerFactStore::rebuild_from_intent",
 ]
 
 # ---------------------------------------------------------------------------

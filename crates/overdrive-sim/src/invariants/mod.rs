@@ -19,6 +19,23 @@
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+/// Build a TCP `ServiceFrontend` for `vip` on a fixed listener port —
+/// the default shape for invariant evaluators that exercised the legacy
+/// proto-agnostic `update_service(vip, ...)` surface. The port (8080) is
+/// not load-bearing for these invariants; only the VIP and (TCP) proto
+/// drive the observed reverse-NAT/forward state.
+#[must_use]
+pub(crate) fn tcp_frontend(vip: std::net::Ipv4Addr) -> overdrive_core::dataplane::ServiceFrontend {
+    let service_vip = overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(vip))
+        .unwrap_or_else(|_| unreachable!("ServiceVip::new is total over IPv4"));
+    overdrive_core::dataplane::ServiceFrontend::new(
+        service_vip,
+        std::num::NonZeroU16::new(8080).unwrap_or_else(|| unreachable!("8080 is non-zero")),
+        overdrive_core::dataplane::backend_key::Proto::Tcp,
+    )
+    .unwrap_or_else(|_| unreachable!("IPv4 ServiceFrontend constructs"))
+}
+
 pub mod evaluators;
 // phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09). The
 // `BackendSetSwapAtomic` invariant pins the SimDataplane's

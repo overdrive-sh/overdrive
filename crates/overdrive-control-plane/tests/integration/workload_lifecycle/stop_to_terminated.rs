@@ -27,8 +27,7 @@ use tempfile::TempDir;
 #[tokio::test]
 async fn job_stop_drives_running_to_terminated() {
     let tmp = TempDir::new().expect("tempdir");
-    let mut runtime =
-        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("rt");
     runtime.register(noop_heartbeat()).await.expect("register noop");
     runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
@@ -62,6 +61,7 @@ async fn job_stop_drives_running_to_terminated() {
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
 

@@ -13,6 +13,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::SpiffeId;
+use crate::dataplane::ServiceFrontend;
+use crate::dataplane::backend_key::Proto;
 
 #[derive(Debug, Error)]
 pub enum DataplaneError {
@@ -67,6 +69,25 @@ pub enum DataplaneError {
     /// "wire then probe then use" invariant per ADR-0052 § 3.
     #[error("LOCAL_BACKEND_MAP probe round-trip failed: {message}")]
     LocalBackendProbe { message: String },
+    /// An XDP program attach returned `EBUSY` — the kernel permits
+    /// exactly one program per netdev XDP hook, and that hook on
+    /// `iface` is already occupied (ADR-0061 § 5 / D3). Surfaces when
+    /// the loader's forward (`client_iface`) and reverse
+    /// (`backend_iface`) attaches both target one netdev — the
+    /// single-node default `DataplaneConfig::loopback()` does exactly
+    /// this until 01-03 lands. Distinct variant per
+    /// `.claude/rules/development.md` § Errors: collapsing `EBUSY`
+    /// into `LoadFailed(String)` would mask the real cause behind a
+    /// misleading "native attach failed" / `DRV_MODE` string and
+    /// prescribe the wrong remediation.
+    #[error(
+        "XDP slot on interface '{iface}' is already occupied (EBUSY): the kernel \
+         permits exactly one XDP program per netdev hook. The single-node default \
+         expects a dedicated veth pair — verify client_iface != backend_iface, and \
+         detach any stale Overdrive XDP program with `ip link show {iface}` (see \
+         debugging.md § \"Leftover XDP attachments across runs\")"
+    )]
+    IfaceXdpSlotBusy { iface: String },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.
@@ -97,10 +118,53 @@ pub trait Dataplane: Send + Sync + 'static {
     /// Install or update a single policy verdict.
     async fn update_policy(&self, key: PolicyKey, verdict: Verdict) -> Result<(), DataplaneError>;
 
-    /// Atomically replace the backend set for a service VIP.
+    /// Atomically replace the backend set for the service frontend
+    /// `(frontend.vip, frontend.port, frontend.proto)`.
+    ///
+    /// # Preconditions
+    ///
+    /// - `frontend` is V4-guaranteed by construction
+    ///   ([`ServiceFrontend::new`] rejected IPv6 at the action-shim);
+    ///   adapters narrow `frontend.vip → Ipv4Addr` infallibly via
+    ///   [`ServiceFrontend::vip_v4`]. No adapter re-validates the VIP.
+    /// - `backends` MAY be empty (see edge cases). Each `Backend.addr`
+    ///   is a `SocketAddr`; non-IPv4 backend addresses are skipped from
+    ///   the `REVERSE_NAT` key set (GH #155 deferral).
+    ///
+    /// # Postconditions on `Ok(())`
+    ///
+    /// After return, the adapter's `REVERSE_NAT` key set **for
+    /// `frontend.proto`** equals exactly the keys derived from
+    /// `backends`: `{ BackendKey { ip, port: backend.addr.port(),
+    /// proto: frontend.proto } : backend ∈ backends, backend.addr is
+    /// IPv4 }`, each mapping to `frontend.vip_v4()`. Keys for **other**
+    /// protocols of the same VIP — installed by separate per-listener
+    /// `update_service` calls — are untouched.
+    ///
+    /// # Edge cases
+    ///
+    /// - `backends.is_empty()` ⇒ **per-proto purge** (ADR-0060 D4). The
+    ///   adapter removes the prior `frontend.proto` `REVERSE_NAT` keys
+    ///   for this VIP that are not still live in another service's
+    ///   backend set (the existing `live_keys` difference check).
+    ///   `REVERSE_NAT` keys for *other* protocols of the same VIP are
+    ///   **not** removed.
+    /// - Idempotent re-apply: calling `update_service(frontend,
+    ///   backends)` twice with identical arguments yields the same
+    ///   post-state.
+    /// - A backend with an IPv6 `addr` contributes no `REVERSE_NAT` key
+    ///   (silently skipped).
+    ///
+    /// # Observable invariant (cross-adapter)
+    ///
+    /// For the same `(frontend, backends)`, `SimDataplane` and
+    /// `EbpfDataplane` install the **identical** `(ip, port, proto) →
+    /// vip` `REVERSE_NAT` set. The `ReverseNatLockstep` three-tier gate
+    /// enforces this (per `.claude/rules/development.md` § "The DST
+    /// equivalence test is the structural guard").
     async fn update_service(
         &self,
-        vip: Ipv4Addr,
+        frontend: ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError>;
 
@@ -166,11 +230,23 @@ pub trait Dataplane: Send + Sync + 'static {
     ///   cgroup path consumes the second. The classifier in
     ///   `ServiceMapHydrator` (ADR-0053 § 4) is responsible for
     ///   choosing exactly one per backend.
+    /// # `proto` (ADR-0053 rev 2026-06-03)
+    /// The `LOCAL_BACKEND_MAP` key is `(vip, vip_port, proto)`. `proto`
+    /// is sourced from the listener-bearing fact and lowered to its
+    /// IANA byte at the adapter's write edge; the kernel cgroup hook
+    /// reads `bpf_sock_addr.protocol` and keys the same dimension.
+    /// Registering tcp/53 and udp/53 on the SAME `(vip, vip_port)`
+    /// installs TWO distinct entries — a subsequent `connect(vip:53)`
+    /// over TCP reaches the tcp backend, over UDP the udp backend;
+    /// neither overwrites the other. Re-registration with the same
+    /// `(vip, vip_port, proto)` but a different `backend` atomically
+    /// replaces only that proto's entry.
     async fn register_local_backend(
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
         backend: SocketAddrV4,
+        proto: Proto,
     ) -> Result<(), DataplaneError>;
 
     /// Remove the local backend registration for `(vip, vip_port)`
@@ -197,10 +273,16 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - Concurrent `register_local_backend(vip, vip_port, b1)` +
     ///   `deregister_local_backend(vip, vip_port)` is not defined
     ///   to interleave at the adapter — callers must serialise.
+    /// # `proto` (ADR-0053 rev 2026-06-03)
+    /// Removes only the `(vip, vip_port, proto)` entry. Deregistering
+    /// tcp/53 leaves a co-located udp/53 entry intact — a subsequent
+    /// `connect(vip:53)` over UDP still rewrites; over TCP it no longer
+    /// does.
     async fn deregister_local_backend(
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: Proto,
     ) -> Result<(), DataplaneError>;
 }
 

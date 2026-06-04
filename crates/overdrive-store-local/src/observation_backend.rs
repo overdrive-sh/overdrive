@@ -81,8 +81,9 @@ use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
-    ObservationStore, ObservationStoreError, ObservationSubscription, ServiceBackendRow,
-    ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
+    ObservationStore, ObservationStoreError, ObservationSubscription, ReconcileConflictRow,
+    ReconcileConflictRowEnvelope, ServiceBackendRow, ServiceBackendRowEnvelope,
+    ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -112,6 +113,14 @@ const SERVICE_HYDRATION_TABLE: TableDefinition<&[u8], &[u8]> =
 /// service — the full current backend set. GH #160.
 const SERVICE_BACKENDS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_service_backends");
+
+/// Holds the rkyv-archived bytes of every `ReconcileConflictRow`,
+/// keyed on the canonical 15-byte encoding of `(service_id, vip, port,
+/// proto)` — the conflicting map slot (Fix C,
+/// `fix-mixed-backend-dispatch-spin`). New table; additive-only,
+/// never alters existing tables.
+const RECONCILE_CONFLICT_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_reconcile_conflict");
 
 /// Holds the rkyv-archived bytes of every `ProbeResultRow`, keyed on
 /// the canonical composite encoding of `(alloc_id, probe_idx)` per
@@ -176,6 +185,46 @@ const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
     service_id.get().to_le_bytes()
 }
 
+/// Encode the composite `(service_id, vip, port, proto)` key as 15
+/// bytes (`service_id` LE u64 || `vip` 4 octets BE || `port` LE u16 ||
+/// `proto` IANA byte) for the `RECONCILE_CONFLICT_TABLE`. The leading
+/// 8 `service_id` bytes are the prefix-scan boundary
+/// ([`encode_reconcile_conflict_prefix`]); within a service the slot
+/// triple disambiguates rows. Fix C.
+const fn encode_reconcile_conflict_key(
+    service_id: ServiceId,
+    vip: std::net::Ipv4Addr,
+    port: u16,
+    proto: overdrive_core::dataplane::backend_key::Proto,
+) -> [u8; 15] {
+    let sid = service_id.get().to_le_bytes();
+    let vip_oct = vip.octets();
+    let port_b = port.to_le_bytes();
+    [
+        sid[0],
+        sid[1],
+        sid[2],
+        sid[3],
+        sid[4],
+        sid[5],
+        sid[6],
+        sid[7],
+        vip_oct[0],
+        vip_oct[1],
+        vip_oct[2],
+        vip_oct[3],
+        port_b[0],
+        port_b[1],
+        proto.as_u8(),
+    ]
+}
+
+/// Encode the prefix `(service_id, *)` for range scans — the first 8
+/// bytes of [`encode_reconcile_conflict_key`]. Fix C.
+const fn encode_reconcile_conflict_prefix(service_id: ServiceId) -> [u8; 8] {
+    service_id.get().to_le_bytes()
+}
+
 /// Capacity of the in-process broadcast channel used for
 /// `subscribe_all`. Sized to absorb a short-lived reader stall on a
 /// single-node workload without backing memory to the moon. Subscribers
@@ -226,6 +275,9 @@ impl LocalObservationStore {
                 let _ = write.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
                 // Service-backends table — GH #160.
                 let _ = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
+                // Reconcile-conflict table — Fix C. New table;
+                // additive-only.
+                let _ = write.open_table(RECONCILE_CONFLICT_TABLE).map_err(map_to_io)?;
                 // Probe-results table — ADR-0054 §5. New table;
                 // never alters existing tables.
                 let _ = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
@@ -278,6 +330,11 @@ impl ObservationStore for LocalObservationStore {
                 ObservationRow::ServiceBackend(incoming) => {
                     let mut table = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
                     apply_service_backends_lww(&mut table, incoming)?
+                }
+                ObservationRow::ReconcileConflict(incoming) => {
+                    let mut table =
+                        write.open_table(RECONCILE_CONFLICT_TABLE).map_err(map_to_io)?;
+                    apply_reconcile_conflict_lww(&mut table, incoming)?
                 }
             };
             // Commit unconditionally — a rejected write performed only
@@ -552,6 +609,47 @@ impl ObservationStore for LocalObservationStore {
         );
         Ok(rows)
     }
+
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let prefix = encode_reconcile_conflict_prefix(*service_id);
+        // Prefix-scan over `(service_id, *)`: the key layout is
+        // `service_id LE u64 || vip || port || proto` (15 bytes); the
+        // range `[prefix||0x00.., prefix||0xFF..]` covers every slot for
+        // the service. Mirror of `service_hydration_results_rows`.
+        let mut range_start = [0u8; 15];
+        let mut range_end = [0xFFu8; 15];
+        range_start[..8].copy_from_slice(&prefix);
+        range_end[..8].copy_from_slice(&prefix);
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(RECONCILE_CONFLICT_TABLE).map_err(map_to_io)?;
+            let mut out: Vec<ReconcileConflictRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            let iter =
+                table.range(range_start.as_slice()..=range_end.as_slice()).map_err(map_to_io)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_envelope::<ReconcileConflictRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((out, failures))
+        })
+        .await
+        .map_err(map_to_io)??;
+
+        log_decode_failures(
+            "observation_reconcile_conflict",
+            "skipping reconcile-conflict row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -752,6 +850,38 @@ fn apply_service_hydration_lww(
         // ADR-0048 § 1 — the on-disk shape is the envelope, never the
         // bare payload.
         let envelope = ServiceHydrationResultRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
+        table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
+
+/// LWW-guarded insert for `ReconcileConflictRow`. Keyed on the
+/// composite `(service_id, vip, port, proto)` slot per Fix C. Mirrors
+/// [`apply_service_hydration_lww`]. On envelope decode failure of the
+/// prior row, treats the incoming write as dominating per ADR-0048 § 3.
+fn apply_reconcile_conflict_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &ReconcileConflictRow,
+) -> Result<bool, ObservationStoreError> {
+    let key = encode_reconcile_conflict_key(
+        incoming.service_id,
+        incoming.vip,
+        incoming.port,
+        incoming.proto,
+    );
+    let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<ReconcileConflictRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+            Err(_) => true,
+        }
+    });
+    if dominates {
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload. Goes through `::latest(...)` (NOT `::V1(...)`)
+        // per the dst_lint variant-construction clause.
+        let envelope = ReconcileConflictRowEnvelope::latest(incoming.clone());
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }

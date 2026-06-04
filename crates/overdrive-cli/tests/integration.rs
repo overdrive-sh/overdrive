@@ -20,6 +20,14 @@ mod integration {
     mod cluster_init_removed;
     mod endpoint_from_config;
     mod exec_spec_walking_skeleton;
+
+    // udp-service-support step 01-05 — S-04-A driving-adapter companion:
+    // `overdrive deploy <udp-spec>` accepted via the direct
+    // `commands::job::submit` handler; the persisted
+    // `WorkloadIntent::Service` intent carries `Proto::Udp` (C3 guard at
+    // the spec → handler → intent boundary). Closes the deploy half of
+    // S-04-A that step 01-03 (dataplane wire half) scoped out.
+    mod deploy_udp_walking_skeleton;
     mod http_client;
     mod job_submit;
     mod post_http_invalid_job_id;

@@ -1,0 +1,13 @@
+expectation_id: "O03"
+date_utc: "2026-06-02T18:07:48Z"
+overdrive_sha: "5a9cebd2297eaa79315c58d6f69ba03a5e07a655"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "5a9cebd2297eaa79315c58d6f69ba03a5e07a655"
+harness_invocation: "verification/harness/run-expectation.sh O03"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["S-04-A (`docs/feature/udp-service-support/distill/test-scenarios.md` — walking skeleton: deploy exits 0 + prints `Accepted.`)","roadmap 01-05 (`docs/feature/udp-service-support/deliver/roadmap.json` — "S-04-A driving-adapter companion: `overdrive deploy <udp-spec>` accepted via direct-handler test")","ADR-0060 (`docs/product/architecture/adr-0060-service-frontend-update-service-signature.md` — `ServiceFrontend(vip, port, proto)` carries the L4 protocol; proto is never positionally reconstructed)","ADR-0061 (`docs/product/architecture/adr-0061-single-node-veth-dataplane-wiring.md` — single-node serve provisions a veth pair + attaches the two XDP programs to two distinct ifaces; the boot fix that lets this capture reach a bound serve)","US-04 (`docs/feature/udp-service-support/feature-delta.md` § Walking skeleton — single UDP listener forward + reverse e2e)"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

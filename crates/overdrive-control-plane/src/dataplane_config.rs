@@ -47,19 +47,31 @@ pub struct DataplaneConfig {
 }
 
 impl DataplaneConfig {
-    /// Test-fixture helper: build a `DataplaneConfig` whose
-    /// interface names point at the loopback. Used by every test
-    /// `ServerConfig {}` construct site that does not exercise the
-    /// real XDP attach path — production callers go through
-    /// [`parse_dataplane_section`].
+    /// Single-node default `DataplaneConfig` (ADR-0061 § 1). Carries the
+    /// two DISTINCT host-netns veth names — `client_iface =
+    /// "ovd-veth-cli"`, `backend_iface = "ovd-veth-bk"` — so the serve
+    /// boot provisions a real two-NIC pair and the client-side /
+    /// backend-side XDP programs attach to DIFFERENT interfaces.
     ///
-    /// On Linux (the canonical Lima test environment per
-    /// `.claude/rules/testing.md` § "Running tests — Lima VM") the
-    /// loopback interface is named `lo`; on macOS dev hosts (which
-    /// run the tests inside Lima) the same name is reachable.
+    /// This REPLACES the prior `loopback()` helper, which set BOTH
+    /// ifaces to `lo` and was the origin of the EBUSY bug: attaching two
+    /// XDP programs to the same interface fails. The two names here are
+    /// the SSOT consts [`crate::veth_provisioner::DEFAULT_CLIENT_IFACE`]
+    /// / [`crate::veth_provisioner::DEFAULT_BACKEND_IFACE`], shared with
+    /// the serve-boot provision gate so the default config and the gate
+    /// cannot drift (step 01-03).
+    ///
+    /// Default `ServerConfig.dataplane` (`crate::ServerConfig::default`)
+    /// uses this so existing `..Default::default()` fixtures and the
+    /// production boot default both carry the veth-named shape.
+    /// Production callers that read an operator TOML go through
+    /// [`parse_dataplane_section`] and overwrite this value.
     #[must_use]
-    pub fn loopback() -> Self {
-        Self { client_iface: "lo".to_owned(), backend_iface: "lo".to_owned() }
+    pub fn single_node_veth() -> Self {
+        Self {
+            client_iface: crate::veth_provisioner::DEFAULT_CLIENT_IFACE.to_owned(),
+            backend_iface: crate::veth_provisioner::DEFAULT_BACKEND_IFACE.to_owned(),
+        }
     }
 }
 
@@ -185,6 +197,48 @@ backend_iface = "lb_veth_b"
             }
             other => panic!("expected Validation on missing client_iface, got {other:?}"),
         }
+    }
+
+    /// ADR-0061 § 1 acceptance anchor: the single-node default config
+    /// carries TWO DISTINCT veth interface names — `ovd-veth-cli` /
+    /// `ovd-veth-bk` — NOT `lo`/`lo`. The `lo`/`lo` shape (the prior
+    /// `loopback()` helper) was the origin of the EBUSY bug: attaching
+    /// both the client-side and backend-side XDP programs to the SAME
+    /// interface (`lo`) fails. Two distinct ifaces make that
+    /// structurally unreachable (feature-delta § 6.4).
+    #[test]
+    fn single_node_default_carries_two_distinct_veth_ifaces_not_loopback() {
+        let cfg = DataplaneConfig::single_node_veth();
+        assert_ne!(
+            cfg.client_iface, "lo",
+            "single-node default must not point the client iface at lo (EBUSY bug origin)",
+        );
+        assert_ne!(
+            cfg.backend_iface, "lo",
+            "single-node default must not point the backend iface at lo (EBUSY bug origin)",
+        );
+        assert_ne!(
+            cfg.client_iface, cfg.backend_iface,
+            "client_iface and backend_iface must differ — the property that makes \
+             attaching two XDP programs to the same iface (EBUSY) structurally unreachable",
+        );
+    }
+
+    /// The single-node default helper returns the exact veth names that
+    /// the serve-boot provision gate keys on (step 01-03). Exact-value
+    /// assertion (example-based is correct here — the contract is "these
+    /// two literal names", not an invariant over a generated space).
+    /// Both fields read from the SSOT consts in `veth_provisioner` so
+    /// the config default and the provision gate cannot drift.
+    #[test]
+    fn single_node_default_returns_canonical_veth_names() {
+        let cfg = DataplaneConfig::single_node_veth();
+        assert_eq!(cfg.client_iface, "ovd-veth-cli");
+        assert_eq!(cfg.backend_iface, "ovd-veth-bk");
+        // Pin against the SSOT consts so a rename of either const that
+        // forgets to update the other surface fails loud here.
+        assert_eq!(cfg.client_iface, crate::veth_provisioner::DEFAULT_CLIENT_IFACE);
+        assert_eq!(cfg.backend_iface, crate::veth_provisioner::DEFAULT_BACKEND_IFACE);
     }
 
     #[test]

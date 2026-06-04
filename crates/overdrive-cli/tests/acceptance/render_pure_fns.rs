@@ -132,6 +132,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusResponse 
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
         kind: Some(kind),
         vip: None,
+        listeners: vec![],
     }
 }
 

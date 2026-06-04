@@ -23,12 +23,27 @@
 #![allow(clippy::redundant_clone)]
 #![allow(clippy::cast_possible_truncation)]
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use overdrive_core::SpiffeId;
+use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::id::ServiceVip;
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use proptest::prelude::*;
+
+/// TCP `ServiceFrontend` for `vip` — this test asserts VIP iteration
+/// order, so proto/port are not load-bearing; TCP/8080 is the default.
+fn tcp_frontend(vip: Ipv4Addr) -> ServiceFrontend {
+    let service_vip = ServiceVip::new(IpAddr::V4(vip)).expect("valid IPv4 ServiceVip");
+    ServiceFrontend::new(
+        service_vip,
+        std::num::NonZeroU16::new(8080).expect("non-zero"),
+        Proto::Tcp,
+    )
+    .expect("IPv4 ServiceFrontend constructs")
+}
 
 // -----------------------------------------------------------------------------
 // Helpers — minimal scaffolding for building Backend values; the
@@ -104,11 +119,11 @@ proptest! {
             .expect("tokio runtime");
 
         for v in &order_a {
-            rt.block_on(dataplane_a.update_service(*v, vec![backend.clone()]))
+            rt.block_on(dataplane_a.update_service(tcp_frontend(*v), vec![backend.clone()]))
                 .expect("update_service succeeds");
         }
         for v in &order_b {
-            rt.block_on(dataplane_b.update_service(*v, vec![backend.clone()]))
+            rt.block_on(dataplane_b.update_service(tcp_frontend(*v), vec![backend.clone()]))
                 .expect("update_service succeeds");
         }
 
@@ -143,9 +158,9 @@ fn service_iteration_matches_btreemap_order_for_three_vips() {
     let rt = tokio::runtime::Builder::new_current_thread().build().expect("tokio runtime");
 
     // Insert in non-sorted order.
-    rt.block_on(dp.update_service(v1, vec![b.clone()])).expect("update");
-    rt.block_on(dp.update_service(v2, vec![b.clone()])).expect("update");
-    rt.block_on(dp.update_service(v3, vec![b])).expect("update");
+    rt.block_on(dp.update_service(tcp_frontend(v1), vec![b.clone()])).expect("update");
+    rt.block_on(dp.update_service(tcp_frontend(v2), vec![b.clone()])).expect("update");
+    rt.block_on(dp.update_service(tcp_frontend(v3), vec![b])).expect("update");
 
     let keys = dp.service_vip_keys();
     assert_eq!(keys, vec![v2, v3, v1], "BTreeMap order = ascending Ipv4Addr");

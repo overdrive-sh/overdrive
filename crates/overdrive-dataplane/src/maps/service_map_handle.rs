@@ -35,6 +35,7 @@
 
 use std::collections::BTreeMap;
 
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::ServiceVip;
 use overdrive_core::traits::dataplane::{Backend, DataplaneError};
 
@@ -61,20 +62,41 @@ pub(crate) struct ServiceKey {
     pub(crate) vip_host: u32,
     /// VIP port (the port the client connected to), host-order.
     pub(crate) port_host: u16,
-    /// Padding to 8-byte alignment. Always zero.
-    pub(crate) _pad: u16,
+    /// IANA L4 protocol byte — TCP=6, UDP=17 (`Proto::as_u8()`). Step
+    /// 02-01 widened the outer key from `(vip, port)` to
+    /// `(vip, port, proto)` IPVS-style (ADR-0040 rev 2026-06-03):
+    /// `proto` absorbs one of the two reserved `_pad` bytes so
+    /// tcp/8080 and udp/8080 occupy distinct outer-map slots. No
+    /// endianness concern — a single byte is orthogonal to the
+    /// u16/u32 host-order lockstep.
+    pub(crate) proto: u8,
+    /// Padding to 8-byte alignment. Always zero — deterministic BPF
+    /// hashing keys on raw bytes, so a non-zero pad would split
+    /// logically-equal keys across slots.
+    pub(crate) _pad: u8,
 }
 
+// Compile-time guard: the outer key MUST stay 8 bytes (ADR-0040 rev
+// "absorb the pad byte, keep 8 bytes"). A layout drift off 8 bytes
+// breaks kernel/userspace byte-for-byte parity and fails here at
+// build time rather than as a silent misroute at runtime.
+const _: () = assert!(
+    core::mem::size_of::<ServiceKey>() == 8,
+    "ServiceKey must be exactly 8 bytes (vip_host:4 + port_host:2 + proto:1 + _pad:1)"
+);
+
 impl ServiceKey {
-    /// Encode `(ServiceVip, u16)` to the host-order 8-byte POD.
-    /// Returns `DataplaneError::LoadFailed` for IPv6 VIPs (the
+    /// Encode `(ServiceVip, u16, Proto)` to the host-order 8-byte POD.
+    /// `proto` lowers to its IANA byte via [`Proto::as_u8`] (TCP=6,
+    /// UDP=17). Returns `DataplaneError::LoadFailed` for IPv6 VIPs (the
     /// SERVICE_MAP outer-key shape is fixed-width 4-byte IPv4 in
     /// Phase 2.2; IPv6 deferred per architecture.md § 6).
-    fn from_vip_port(vip: ServiceVip, port: u16) -> Result<Self, DataplaneError> {
+    fn from_vip_port(vip: ServiceVip, port: u16, proto: Proto) -> Result<Self, DataplaneError> {
         match vip.get() {
             std::net::IpAddr::V4(v4) => Ok(Self {
                 vip_host: u32::from(v4),
                 port_host: port,
+                proto: proto.as_u8(),
                 _pad: 0,
             }),
             std::net::IpAddr::V6(_) => Err(DataplaneError::LoadFailed(
@@ -171,9 +193,10 @@ impl ServiceMapHandle {
         &mut self,
         vip: ServiceVip,
         port: u16,
+        proto: Proto,
         backend: &Backend,
     ) -> Result<(), DataplaneError> {
-        let key = ServiceKey::from_vip_port(vip, port)?;
+        let key = ServiceKey::from_vip_port(vip, port, proto)?;
         let value = BackendEntry::from_backend(backend)?;
         self.backing.insert(key, value);
         Ok(())
@@ -184,8 +207,13 @@ impl ServiceMapHandle {
     /// `bpf_map_delete_elem`'s `ENOENT` semantics, which
     /// userspace treats as no-op for the hydrator's converge-on-
     /// retry loop).
-    pub fn remove(&mut self, vip: ServiceVip, port: u16) -> Result<(), DataplaneError> {
-        let key = ServiceKey::from_vip_port(vip, port)?;
+    pub fn remove(
+        &mut self,
+        vip: ServiceVip,
+        port: u16,
+        proto: Proto,
+    ) -> Result<(), DataplaneError> {
+        let key = ServiceKey::from_vip_port(vip, port, proto)?;
         self.backing.remove(&key);
         Ok(())
     }
@@ -197,8 +225,15 @@ impl ServiceMapHandle {
     /// production `EbpfDataplane::update_service` write path
     /// does not read back through the handle.
     #[cfg(test)]
-    pub(crate) fn get_for_test(&self, vip: ServiceVip, port: u16) -> Option<BackendEntry> {
-        ServiceKey::from_vip_port(vip, port).ok().and_then(|key| self.backing.get(&key).copied())
+    pub(crate) fn get_for_test(
+        &self,
+        vip: ServiceVip,
+        port: u16,
+        proto: Proto,
+    ) -> Option<BackendEntry> {
+        ServiceKey::from_vip_port(vip, port, proto)
+            .ok()
+            .and_then(|key| self.backing.get(&key).copied())
     }
 }
 
@@ -226,11 +261,19 @@ mod tests {
 
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 
+    use overdrive_core::dataplane::backend_key::Proto;
     use overdrive_core::id::{ServiceVip, SpiffeId};
     use overdrive_core::traits::dataplane::Backend;
     use proptest::prelude::*;
 
     use super::{BackendEntry, ServiceKey, ServiceMapHandle};
+
+    /// Generator over the two recognised L4 protocols. Step 02-01
+    /// widened the SERVICE_MAP key with a proto byte; every key-shape
+    /// proptest exercises both arms.
+    fn arb_proto() -> impl Strategy<Value = Proto> {
+        prop_oneof![Just(Proto::Tcp), Just(Proto::Udp)]
+    }
 
     /// Generator for an arbitrary IPv4 `ServiceVip`. Includes
     /// edge cases (0.0.0.0, 255.255.255.255, common host bits)
@@ -260,29 +303,28 @@ mod tests {
     }
 
     proptest! {
-        /// S-2.2-04 — host-order write → host-order read produces
-        /// byte-for-byte identical bytes for every IPv4 VIP /
-        /// port / backend tuple. Catches any sneaky
-        /// `to_be_bytes` / `from_be_bytes` slipping into the
-        /// userspace edge.
+        /// S-02-01 — endianness lockstep over the FULL 8 key bytes.
+        /// For any `(vip, port, proto)`, the host-order `ServiceKey`
+        /// from `from_vip_port` is byte-identical to the key the
+        /// kernel would build from the same IPv4 header: `vip_host`
+        /// via `u32::from_be_bytes(octets)`, `port_host` the raw
+        /// host-order port, `proto` the IPv4 proto byte, and trailing
+        /// `_pad == 0`. Catches any sneaky `to_be_bytes` /
+        /// `from_be_bytes` slipping into the userspace edge, a
+        /// mis-sloated proto byte, or a non-zero pad.
         #[test]
-        fn service_map_handle_endianness_roundtrip(
+        fn service_key_bytes_match_kernel_header_build(
             vip in arb_ipv4_vip(),
             vip_port in any::<u16>(),
+            proto in arb_proto(),
             backend in arb_ipv4_backend(),
         ) {
             let mut handle = ServiceMapHandle::new();
-            handle.insert(vip, vip_port, &backend).expect("IPv4 inputs always insert");
+            handle.insert(vip, vip_port, proto, &backend).expect("IPv4 inputs always insert");
 
-            let stored = handle.get_for_test(vip, vip_port)
+            let stored = handle.get_for_test(vip, vip_port, proto)
                 .expect("just-inserted key must read back");
 
-            // Reconstruct the expected host-order POD directly
-            // from the typed input — this is the load-bearing
-            // assertion. If the handle slipped a network-order
-            // flip in anywhere, `stored.ipv4_host` would not
-            // equal `u32::from(backend ipv4)` and the test fails
-            // at the field-by-field assert below.
             let backend_v4 = match backend.addr.ip() {
                 IpAddr::V4(v4) => v4,
                 IpAddr::V6(_) => unreachable!("arb_ipv4_backend only emits IPv4"),
@@ -296,44 +338,82 @@ mod tests {
             };
             prop_assert_eq!(stored, expected);
 
-            // Round-trip the key as well — the same no-flip rule
-            // applies to the outer-map key.
+            // The kernel builds the outer key from the IPv4 header:
+            //   vip_host = u32::from_be_bytes(dst_ip_octets)
+            //   port_host = dst_port (host-order)
+            //   proto = ipv4 proto byte (IANA u8)
+            //   _pad = 0
             let vip_v4 = match vip.get() {
                 IpAddr::V4(v4) => v4,
                 IpAddr::V6(_) => unreachable!("arb_ipv4_vip only emits IPv4"),
             };
-            let expected_key = ServiceKey {
-                vip_host: u32::from(vip_v4),
+            let kernel_key = ServiceKey {
+                vip_host: u32::from_be_bytes(vip_v4.octets()),
                 port_host: vip_port,
+                proto: proto.as_u8(),
                 _pad: 0,
             };
-            // `backing` is `pub(crate)` via the field-level
-            // visibility on `ServiceKey`; the proptest reaches
-            // into it for byte-level pinning.
-            prop_assert!(handle.backing.contains_key(&expected_key));
+            // Byte-for-byte equality over all 8 bytes — the handle's
+            // host-order key and the kernel's header-built key must
+            // be identical, including the zeroed trailing pad.
+            let handle_bytes: [u8; 8] = unsafe {
+                core::mem::transmute(ServiceKey {
+                    vip_host: u32::from(vip_v4),
+                    port_host: vip_port,
+                    proto: proto.as_u8(),
+                    _pad: 0,
+                })
+            };
+            let kernel_bytes: [u8; 8] = unsafe { core::mem::transmute(kernel_key) };
+            prop_assert_eq!(handle_bytes, kernel_bytes);
+            prop_assert_eq!(handle_bytes[7], 0u8, "trailing _pad byte must be zero");
+
+            // The stored entry is reachable under the proto-bearing key.
+            prop_assert!(handle.backing.contains_key(&kernel_key));
+        }
+
+        /// S-02-01 — proto is a load-bearing key component. Inserting
+        /// under `(vip, port, Tcp)` does NOT make the entry reachable
+        /// under `(vip, port, Udp)` — distinct outer-map slots, the
+        /// DNS co-location unlock.
+        #[test]
+        fn distinct_proto_is_distinct_slot(
+            vip in arb_ipv4_vip(),
+            vip_port in any::<u16>(),
+            backend in arb_ipv4_backend(),
+        ) {
+            let mut handle = ServiceMapHandle::new();
+            handle.insert(vip, vip_port, Proto::Tcp, &backend)
+                .map_err(|e| TestCaseError::fail(e.to_string()))?;
+
+            // Same (vip, port) under the OTHER proto must miss.
+            prop_assert!(handle.get_for_test(vip, vip_port, Proto::Udp).is_none());
+            // The inserted proto reads back.
+            prop_assert!(handle.get_for_test(vip, vip_port, Proto::Tcp).is_some());
         }
 
         /// Remove is idempotent and only affects the targeted
-        /// `(VIP, port)` — adjacent entries survive.
+        /// `(VIP, port, proto)` — adjacent entries survive.
         #[test]
         fn service_map_handle_remove_is_targeted(
             vip in arb_ipv4_vip(),
             port_a in any::<u16>(),
             port_b in any::<u16>(),
+            proto in arb_proto(),
             backend in arb_ipv4_backend(),
         ) {
             prop_assume!(port_a != port_b);
             let mut handle = ServiceMapHandle::new();
-            handle.insert(vip, port_a, &backend).map_err(|e| TestCaseError::fail(e.to_string()))?;
-            handle.insert(vip, port_b, &backend).map_err(|e| TestCaseError::fail(e.to_string()))?;
+            handle.insert(vip, port_a, proto, &backend).map_err(|e| TestCaseError::fail(e.to_string()))?;
+            handle.insert(vip, port_b, proto, &backend).map_err(|e| TestCaseError::fail(e.to_string()))?;
 
-            handle.remove(vip, port_a).map_err(|e| TestCaseError::fail(e.to_string()))?;
+            handle.remove(vip, port_a, proto).map_err(|e| TestCaseError::fail(e.to_string()))?;
 
-            prop_assert!(handle.get_for_test(vip, port_a).is_none());
-            prop_assert!(handle.get_for_test(vip, port_b).is_some());
+            prop_assert!(handle.get_for_test(vip, port_a, proto).is_none());
+            prop_assert!(handle.get_for_test(vip, port_b, proto).is_some());
 
             // Idempotent — second remove is a no-op, not an error.
-            handle.remove(vip, port_a).map_err(|e| TestCaseError::fail(e.to_string()))?;
+            handle.remove(vip, port_a, proto).map_err(|e| TestCaseError::fail(e.to_string()))?;
         }
     }
 
@@ -351,7 +431,7 @@ mod tests {
             healthy: true,
         };
         let mut handle = ServiceMapHandle::new();
-        match handle.insert(v6_vip, 8080, &backend) {
+        match handle.insert(v6_vip, 8080, Proto::Tcp, &backend) {
             Err(super::DataplaneError::LoadFailed(msg)) => {
                 assert!(msg.contains("IPv6"), "unexpected diagnostic: {msg}");
             }

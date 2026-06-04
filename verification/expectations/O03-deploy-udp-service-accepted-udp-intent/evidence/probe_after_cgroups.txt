@@ -1,0 +1,2 @@
+# probe: workload cgroups AFTER deploy
+alloc-dns-resolver-0.scope

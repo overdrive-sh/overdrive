@@ -503,6 +503,12 @@ impl EbpfDataplane {
                 })?
             }
             AttachOutcome::Propagate(e) => {
+                // Classify EBUSY into the honest slot-collision
+                // diagnostic (ADR-0061 § 5 / D3) before falling
+                // through to the masking DRV_MODE string.
+                if let Some(busy) = classify_iface_xdp_slot_busy(&e, client_iface) {
+                    return Err(busy);
+                }
                 return Err(DataplaneError::LoadFailed(format!(
                     "xdp_service_map_lookup.attach({client_iface}, DRV_MODE): {e}"
                 )));
@@ -548,6 +554,12 @@ impl EbpfDataplane {
                 })?
             }
             AttachOutcome::Propagate(e) => {
+                // Classify EBUSY into the honest slot-collision
+                // diagnostic (ADR-0061 § 5 / D3) before falling
+                // through to the masking DRV_MODE string.
+                if let Some(busy) = classify_iface_xdp_slot_busy(&e, backend_iface) {
+                    return Err(busy);
+                }
                 return Err(DataplaneError::LoadFailed(format!(
                     "xdp_reverse_nat_lookup.attach({backend_iface}, DRV_MODE): {e}"
                 )));
@@ -663,20 +675,16 @@ impl EbpfDataplane {
     }
 
     /// Returns `true` if REVERSE_NAT_MAP contains an entry for the
-    /// given `(backend_ip, backend_port)` keyed under TCP only.
+    /// given `(backend_ip, backend_port)` keyed under TCP.
     ///
     /// Observability surface — companion to [`Self::reverse_nat_map_size`].
-    /// Phase 2.2 hardcodes proto = TCP; UDP support follows in a
-    /// future slice when the trait surface gains the field (GH #163).
-    ///
-    /// **Sim-vs-production divergence**: `SimDataplane::update_service`
-    /// writes reverse-NAT entries for both `Proto::Tcp` and `Proto::Udp`
-    /// (via `reverse_nat_keys_for`), and the `ReverseNatLockstep` DST
-    /// invariant asserts on both protos. This production helper — and
-    /// `EbpfDataplane::update_service` — only populate / query TCP keys.
-    /// Tier 3 tests using this helper to verify lockstep correctness will
-    /// miss UDP-only gaps; use `reverse_nat_map_size` for a proto-agnostic
-    /// count or iterate the map directly when both protos matter.
+    /// Fixes `proto = TCP`; the per-proto variant is
+    /// [`Self::reverse_nat_map_has_backend_proto`]. Since ADR-0060
+    /// (GH #163) `EbpfDataplane::update_service` populates the
+    /// REVERSE_NAT key with the `ServiceFrontend`'s proto byte, so a UDP
+    /// service installs a proto=17 key this TCP-keyed helper will MISS —
+    /// pass `Proto::Udp` to `reverse_nat_map_has_backend_proto`, or use
+    /// `reverse_nat_map_size` for a proto-agnostic count.
     ///
     /// # Errors
     ///
@@ -688,13 +696,40 @@ impl EbpfDataplane {
         ip: Ipv4Addr,
         port: u16,
     ) -> Result<bool, DataplaneError> {
-        use crate::maps::BackendKeyPod;
         use overdrive_core::dataplane::backend_key::Proto;
+        self.reverse_nat_map_has_backend_proto(ip, port, Proto::Tcp)
+    }
+
+    /// Returns `true` if REVERSE_NAT_MAP contains an entry for the
+    /// given `(backend_ip, backend_port, proto)` 3-tuple key.
+    ///
+    /// Observability surface — the proto-aware companion to
+    /// [`Self::reverse_nat_map_has_backend`] (which fixes `proto = TCP`).
+    /// Per ADR-0060 D7 the REVERSE_NAT key carries the per-service L4
+    /// protocol byte (6 = tcp, 17 = udp); a UDP service installs a
+    /// proto=17 key that a TCP-keyed lookup would MISS. Tier 3 e2e tests
+    /// that exercise the UDP reverse-NAT path (US-04) use this accessor
+    /// to assert the `(backend_ip, 5353, udp)` key is present — the
+    /// observable side-effect of the source rewrite the kernel
+    /// `xdp_reverse_nat_lookup` performs on proto=17 responses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
+    /// the lookup with anything other than `KeyNotFound` (the
+    /// `Ok(false)` path).
+    pub fn reverse_nat_map_has_backend_proto(
+        &self,
+        ip: Ipv4Addr,
+        port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
+    ) -> Result<bool, DataplaneError> {
+        use crate::maps::BackendKeyPod;
 
         let key = BackendKeyPod {
             ip_host: u32::from(ip),
             port_host: port,
-            proto: Proto::Tcp.as_u8(),
+            proto: proto.as_u8(),
             _pad: 0,
         };
         let map = self.reverse_nat_map.lock();
@@ -741,11 +776,13 @@ impl EbpfDataplane {
     }
 
     /// Returns `true` if SERVICE_MAP contains an outer slot for the
-    /// given `(vip, port)` key.
+    /// given `(vip, port, proto)` key.
     ///
     /// Observability surface — used by Tier 3 integration tests to
     /// verify the empty-backend cleanup path removes the outer HoM
-    /// slot.
+    /// slot. Step 02-01 widened the key with `proto`, so the diagnostic
+    /// queries the exact `(vip, port, proto)` slot rather than a
+    /// proto-agnostic one.
     ///
     /// # Errors
     ///
@@ -755,10 +792,12 @@ impl EbpfDataplane {
         &self,
         vip: std::net::Ipv4Addr,
         port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<bool, DataplaneError> {
         use crate::maps::wire::ServiceKey;
 
-        let key = ServiceKey { vip_host: u32::from(vip), port_host: port, _pad: 0 };
+        let key =
+            ServiceKey { vip_host: u32::from(vip), port_host: port, proto: proto.as_u8(), _pad: 0 };
         let key_bytes = unsafe {
             core::slice::from_raw_parts(
                 (&raw const key).cast::<u8>(),
@@ -970,29 +1009,33 @@ impl EbpfDataplane {
         let sentinel_vip = Ipv4Addr::UNSPECIFIED;
         let sentinel_vip_port: u16 = 0;
         let sentinel_backend = std::net::SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+        // Sentinel proto is arbitrary — the round-trip only confirms the
+        // map is programmable end-to-end. TCP is the conventional choice.
+        let sentinel_proto = overdrive_core::dataplane::backend_key::Proto::Tcp;
 
-        self.local_backend_map.upsert(sentinel_vip, sentinel_vip_port, sentinel_backend).map_err(
-            |e| DataplaneError::LocalBackendProbe {
+        self.local_backend_map
+            .upsert(sentinel_vip, sentinel_vip_port, sentinel_backend, sentinel_proto)
+            .map_err(|e| DataplaneError::LocalBackendProbe {
                 message: format!("LOCAL_BACKEND_MAP sentinel insert: {e}"),
-            },
-        )?;
+            })?;
 
-        let got = self.local_backend_map.get(sentinel_vip, sentinel_vip_port).map_err(|e| {
-            DataplaneError::LocalBackendProbe {
+        let got = self
+            .local_backend_map
+            .get(sentinel_vip, sentinel_vip_port, sentinel_proto)
+            .map_err(|e| DataplaneError::LocalBackendProbe {
                 message: format!("LOCAL_BACKEND_MAP sentinel get: {e}"),
-            }
-        })?;
+            })?;
         if got.is_none() {
             return Err(DataplaneError::LocalBackendProbe {
                 message: "LOCAL_BACKEND_MAP sentinel round-trip missed: got None".to_string(),
             });
         }
 
-        self.local_backend_map.remove(sentinel_vip, sentinel_vip_port).map_err(|e| {
-            DataplaneError::LocalBackendProbe {
+        self.local_backend_map.remove(sentinel_vip, sentinel_vip_port, sentinel_proto).map_err(
+            |e| DataplaneError::LocalBackendProbe {
                 message: format!("LOCAL_BACKEND_MAP sentinel delete: {e}"),
-            }
-        })?;
+            },
+        )?;
 
         Ok(())
     }
@@ -1028,9 +1071,10 @@ impl EbpfDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<Option<crate::maps::LocalBackendEntry>, DataplaneError> {
         self.local_backend_map
-            .get(vip, vip_port)
+            .get(vip, vip_port, proto)
             .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP get: {e}")))
     }
 
@@ -1126,6 +1170,46 @@ fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
     io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP)
 }
 
+/// Select the `SERVICE_MAP` outer-map slots an empty-backend
+/// `update_service(frontend, [])` must purge.
+///
+/// The purge is scoped to the **single frontend identity**
+/// `(vip, port, proto)` — exactly the [`crate::maps::ServiceKey`] the
+/// non-empty path keys on. A co-resident listener on the same VIP under
+/// a different `(port, proto)` — e.g. CoreDNS `udp/53` alongside
+/// `tcp/53`, installed by a *separate* per-listener `update_service`
+/// call — keeps its outer-map slot, its `BACKEND_MAP` entries, and its
+/// `REVERSE_NAT_MAP` keys. This is the **per-proto purge** the
+/// [`Dataplane`] trait contract mandates (ADR-0060 D4; the trait
+/// docstring in `overdrive-core`: *"REVERSE_NAT keys for other
+/// protocols of the same VIP are not removed"*), and the behaviour
+/// `SimDataplane::update_service` already implements.
+///
+/// Selecting by `vip_host` alone is the bug this guards against: it
+/// would pick every listener registered on the VIP, transiently
+/// deleting a live listener's outer slot so XDP `XDP_PASS`es packets it
+/// should forward. The selected set then drives all three cleanup
+/// passes (outer-slot delete, `BACKEND_MAP` orphan-GC, `REVERSE_NAT`
+/// purge), so an over-broad selection over-purges every map.
+///
+/// Lives at module scope rather than inline in `update_service` so the
+/// unit tests in `mod tests` can exercise the selection without
+/// constructing a full `EbpfDataplane` (mirrors
+/// [`should_fallback_to_generic`]).
+fn empty_backend_purge_keys<'a>(
+    tracked_keys: impl Iterator<Item = &'a crate::maps::ServiceKey>,
+    frontend_key: crate::maps::ServiceKey,
+) -> Vec<crate::maps::ServiceKey> {
+    tracked_keys
+        .filter(|k| {
+            k.vip_host == frontend_key.vip_host
+                && k.port_host == frontend_key.port_host
+                && k.proto == frontend_key.proto
+        })
+        .copied()
+        .collect()
+}
+
 /// Verdict from classifying an `aya::programs::Xdp::attach` result
 /// against the native→generic fallback policy. Wraps the three
 /// outcomes the loader's two attach call sites (forward-path on
@@ -1185,6 +1269,43 @@ fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> 
     }
 }
 
+/// Classify an `aya::programs::Xdp::attach` error into the honest
+/// `EBUSY`-slot-collision diagnostic (ADR-0061 § 5 / D3), or `None`
+/// when the error is something else.
+///
+/// The kernel permits exactly one XDP program per netdev XDP hook;
+/// attaching a second program to an occupied hook returns `EBUSY`.
+/// The single-node default (`DataplaneConfig::single_node_veth()`)
+/// gives the forward (`client_iface`) and reverse (`backend_iface`)
+/// programs two distinct veth names, so the collision is structurally
+/// unreachable on the default path (ADR-0061 § 1). An operator who
+/// points both ifaces at one real NIC still hits it.
+///
+/// Returns `Some(DataplaneError::IfaceXdpSlotBusy { iface })` only when
+/// the attach error is a `SyscallError` whose `io_error` carries the
+/// `EBUSY` errno; every other error (`EOPNOTSUPP` fallback, `EPERM`,
+/// `ENODEV`, non-syscall errors) returns `None` so the caller falls
+/// through to its existing `LoadFailed`/`DRV_MODE` handling. This is
+/// the same `raw_os_error()` reach `should_fallback_to_generic` uses,
+/// swapping `EOPNOTSUPP` for `libc::EBUSY` — and the same
+/// pure-function shape, so the default-lane unit tests below drive it
+/// against synthetic `SyscallError` values without a real attach (Lima
+/// virtio-net never produces a real `EBUSY` here; 01-04's Tier 3 path
+/// does).
+fn classify_iface_xdp_slot_busy(
+    error: &aya::programs::ProgramError,
+    iface: &str,
+) -> Option<DataplaneError> {
+    use aya::programs::ProgramError;
+
+    match error {
+        ProgramError::SyscallError(se) if se.io_error.raw_os_error() == Some(libc::EBUSY) => {
+            Some(DataplaneError::IfaceXdpSlotBusy { iface: iface.to_owned() })
+        }
+        _ => None,
+    }
+}
+
 #[async_trait]
 #[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
@@ -1224,33 +1345,50 @@ impl Dataplane for EbpfDataplane {
     ///    own ref-counting machinery — the kernel reaps the map
     ///    once no XDP program references it (refcount = 0).
     ///
-    /// VIP port note: the `Dataplane` trait passes a single
-    /// `Ipv4Addr` plus a `Vec<Backend>`. Slice 03 derives the VIP
-    /// port from `backends[0].addr.port()` (matches the Slice 02
-    /// convention) — every backend in a set serves the same VIP
-    /// port. Slice 04 lifts a separate VIP-port parameter through
-    /// the trait (architecture.md § 5 D-Sig).
+    /// VIP port note: the VIP port for the SERVICE_MAP `ServiceKey`
+    /// and the reverse-NAT `VipPod` value is sourced from
+    /// `frontend.port()` — the `ServiceFrontend` triple already
+    /// carries the declared `(vip, port, proto)`. It is NOT derived
+    /// from `backends[0].addr.port()`: a backend's listener port may
+    /// differ from the VIP port (e.g. VIP:53 → backend:5353), and the
+    /// XDP program keys the outer slot on the packet's destination
+    /// port (= the VIP port).
     async fn update_service(
         &self,
-        vip: Ipv4Addr,
+        frontend: overdrive_core::dataplane::ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
         use std::os::fd::AsFd;
 
         use crate::maps::wire::{BackendEntryPod, ServiceKey};
         use crate::maps::{BackendKeyPod, VipPod};
-        use overdrive_core::dataplane::backend_key::Proto;
 
-        // Empty backend set — remove this VIP from all maps so XDP
-        // returns XDP_PASS. Collect ALL ServiceKeys matching the VIP
-        // IP (the same VIP may be registered on multiple ports via
-        // separate update_service calls).
+        // `frontend.vip` is IPv4-by-construction (ADR-0060 D1a) — narrow
+        // infallibly. `frontend.proto()` is the single declared L4
+        // protocol; the REVERSE_NAT fan-out is per-proto (D4).
+        let vip = frontend.vip_v4();
+        let svc_proto = frontend.proto();
+
+        // Empty backend set — remove THIS frontend's slot from all maps
+        // so XDP returns XDP_PASS for it. The purge is scoped to the
+        // single `(vip, port, proto)` identity (per-proto purge,
+        // ADR-0060 D4): the same VIP may carry several listeners
+        // installed by separate `update_service` calls (CoreDNS
+        // `tcp/53` + `udp/53`), and an empty-backend update for one MUST
+        // leave the others' outer-map slots intact. `frontend.port()`
+        // is the listener port — `backends` is empty here, so the
+        // non-empty path's `backends[0].addr.port()` is unavailable.
         if backends.is_empty() {
-            let vip_host = u32::from(vip);
+            let frontend_key = crate::maps::wire::ServiceKey {
+                vip_host: u32::from(vip),
+                port_host: frontend.port().get(),
+                proto: svc_proto.as_u8(),
+                _pad: 0,
+            };
 
             let matching_keys: Vec<crate::maps::wire::ServiceKey> = {
                 let tracker = self.service_backends.lock();
-                tracker.keys().filter(|k| k.vip_host == vip_host).copied().collect()
+                empty_backend_purge_keys(tracker.keys(), frontend_key)
             };
 
             if matching_keys.is_empty() {
@@ -1322,8 +1460,17 @@ impl Dataplane for EbpfDataplane {
             return Ok(());
         }
 
-        let vip_port = backends[0].addr.port();
-        let service_key = ServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        let vip_port = frontend.port().get();
+        // Step 02-01: proto sourced from the `ServiceFrontend` (ADR-0060
+        // site #7) — NO `Proto::Tcp` literal on the action→handle→key
+        // path, so a UDP service keys a distinct outer-map slot (C3
+        // guard).
+        let service_key = ServiceKey {
+            vip_host: u32::from(vip),
+            port_host: vip_port,
+            proto: svc_proto.as_u8(),
+            _pad: 0,
+        };
 
         // Step 1 — Upsert each backend into BACKEND_MAP. BackendId
         // is assigned by the monotonic-counter allocator per ADR-0046.
@@ -1331,9 +1478,9 @@ impl Dataplane for EbpfDataplane {
         // updates (memo-table hit); orphan GC removes IDs not in the
         // new set.
         //
-        // Phase 2.2 hardcodes proto = TCP because the trait surface
-        // does not yet carry per-service protocol (GH #163).
-        let proto = Proto::Tcp.as_u8();
+        // Proto threaded from the `ServiceFrontend` (ADR-0060, GH #163)
+        // — the per-service L4 protocol, no longer hardcoded TCP.
+        let proto = svc_proto.as_u8();
         let mut backend_ids: Vec<u32> = Vec::with_capacity(backends.len());
         {
             // Locks held only for the BACKEND_MAP populate loop;
@@ -1452,7 +1599,7 @@ impl Dataplane for EbpfDataplane {
                 std::net::IpAddr::V4(v4) => Some(BackendKeyPod {
                     ip_host: u32::from(v4),
                     port_host: backend.addr.port(),
-                    proto: Proto::Tcp.as_u8(),
+                    proto: svc_proto.as_u8(),
                     _pad: 0,
                 }),
                 std::net::IpAddr::V6(_) => None,
@@ -1530,8 +1677,8 @@ impl Dataplane for EbpfDataplane {
         // longer receive forward-path traffic) while the pre-swap
         // insert ordering is safety-critical.
         //
-        // Phase 2.2 hardcodes `proto = TCP` because the trait
-        // surface does not yet carry per-service protocol (GH #163).
+        // The proto is `frontend.proto()` (ADR-0060 D4) — the
+        // per-service L4 protocol threaded through `new_keys` above.
         let (prior_keys, live_nat_keys): (
             std::collections::BTreeSet<BackendKeyPod>,
             std::collections::BTreeSet<BackendKeyPod>,
@@ -1583,8 +1730,9 @@ impl Dataplane for EbpfDataplane {
         vip: Ipv4Addr,
         vip_port: u16,
         backend: std::net::SocketAddrV4,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
-        self.local_backend_map.upsert(vip, vip_port, backend).map_err(|e| {
+        self.local_backend_map.upsert(vip, vip_port, backend, proto).map_err(|e| {
             DataplaneError::LocalBackendInsert {
                 source: std::io::Error::other(format!("aya HashMap::insert: {e}")),
             }
@@ -1597,8 +1745,9 @@ impl Dataplane for EbpfDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
-        self.local_backend_map.remove(vip, vip_port).map_err(|e| {
+        self.local_backend_map.remove(vip, vip_port, proto).map_err(|e| {
             DataplaneError::LocalBackendDelete {
                 source: std::io::Error::other(format!("aya HashMap::remove: {e}")),
             }
@@ -1610,6 +1759,60 @@ impl Dataplane for EbpfDataplane {
 mod tests {
     //! Unit tests for the native→generic fallback classification
     //! helper (S-2.2-02) and the `classify_attach_result` dispatcher.
+
+    use super::DataplaneError;
+
+    /// Regression — empty-backend purge must be scoped to the single
+    /// frontend identity `(vip, port, proto)`, NOT VIP-wide.
+    ///
+    /// Reproduces the defect where `update_service(frontend, [])`
+    /// selected every `ServiceKey` matching only `vip_host`, so an
+    /// empty-backend update for one listener (`tcp/53`) deleted the
+    /// co-resident `udp/53` outer-map slot — and cascaded the
+    /// `BACKEND_MAP`/`REVERSE_NAT` purge — for every other listener on
+    /// the same VIP. The `Dataplane` trait contract mandates a
+    /// per-`(vip, port, proto)` purge (ADR-0060 D4); `SimDataplane`
+    /// already honours it, so the buggy `EbpfDataplane` diverged from
+    /// the sim and from the documented contract.
+    ///
+    /// The tracker below carries four co-resident slots: the target
+    /// `tcp/53`, a same-VIP+port other-proto `udp/53`, a same-VIP+proto
+    /// other-port `tcp/853`, and a different VIP entirely. An
+    /// empty-backend update for `tcp/53` must select ONLY the `tcp/53`
+    /// slot; the other three survive.
+    #[test]
+    fn empty_backend_purge_is_scoped_to_frontend_not_vip_wide() {
+        use std::net::Ipv4Addr;
+
+        use crate::maps::ServiceKey;
+
+        // IANA L4 proto bytes (`Proto::as_u8`): TCP = 6, UDP = 17.
+        const TCP: u8 = 6;
+        const UDP: u8 = 17;
+
+        let vip = u32::from(Ipv4Addr::new(10, 0, 0, 1));
+        let target = ServiceKey { vip_host: vip, port_host: 53, proto: TCP, _pad: 0 };
+        let other_proto = ServiceKey { vip_host: vip, port_host: 53, proto: UDP, _pad: 0 };
+        let other_port = ServiceKey { vip_host: vip, port_host: 853, proto: TCP, _pad: 0 };
+        let other_vip = ServiceKey {
+            vip_host: u32::from(Ipv4Addr::new(10, 0, 0, 2)),
+            port_host: 53,
+            proto: TCP,
+            _pad: 0,
+        };
+
+        let tracked = [target, other_proto, other_port, other_vip];
+
+        let purge = super::empty_backend_purge_keys(tracked.iter(), target);
+
+        assert_eq!(
+            purge,
+            vec![target],
+            "empty-backend purge must select ONLY the frontend's own \
+             (vip, port, proto) slot — co-resident listeners differing by \
+             proto or port, and other VIPs, must survive"
+        );
+    }
 
     /// Classification — `EOPNOTSUPP` from `bpf_link_create` /
     /// `netlink_set_xdp_fd` is the canonical "driver does not
@@ -1766,5 +1969,100 @@ mod tests {
             super::AttachOutcome::Propagate(_) => {}
             other => panic!("expected AttachOutcome::Propagate(_), got {other:?}"),
         }
+    }
+
+    // ----- EBUSY → IfaceXdpSlotBusy classification (ADR-0061 § 5 / D3) -----
+    //
+    // The kernel permits exactly one XDP program per netdev XDP hook.
+    // When the single-node default points both the forward
+    // (`client_iface`) and reverse (`backend_iface`) attaches at one
+    // netdev, the second attach returns `EBUSY`. The pre-fix loader
+    // wrapped that in `DataplaneError::LoadFailed(format!("...DRV_MODE:
+    // {e}"))`, masking the real cause behind a misleading "native
+    // attach failed" string. `classify_iface_xdp_slot_busy` is the pure
+    // classifier that recovers the EBUSY case BEFORE the masking
+    // fallthrough — same `raw_os_error()` reach as
+    // `should_fallback_to_generic`, swapping EOPNOTSUPP for EBUSY.
+    //
+    // Tier 3 (01-04) exercises a real EBUSY attach; these default-lane
+    // unit tests drive the classifier against synthetic
+    // `ProgramError::SyscallError` values — no real attach.
+
+    /// Acceptance-shaped: an `EBUSY` attach failure on `client_iface`
+    /// surfaces as [`DataplaneError::IfaceXdpSlotBusy`] carrying that
+    /// iface — NOT a masking `LoadFailed`/`DRV_MODE` string. This is
+    /// the scenario the variant fixes: the operator gets the honest
+    /// cause (the XDP slot is already taken) and the remediation,
+    /// instead of a misleading "native attach failed".
+    #[test]
+    fn ebusy_attach_surfaces_as_iface_xdp_slot_busy_not_masking_load_failed() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_link_create",
+            io_error: io::Error::from_raw_os_error(libc::EBUSY),
+        });
+        let classified = super::classify_iface_xdp_slot_busy(&err, "client0");
+        match classified {
+            Some(DataplaneError::IfaceXdpSlotBusy { iface }) => {
+                assert_eq!(iface, "client0");
+            }
+            other => {
+                panic!("expected Some(IfaceXdpSlotBusy {{ iface: \"client0\" }}), got {other:?}")
+            }
+        }
+    }
+
+    /// `EPERM` is a permissions failure, not a slot collision — it must
+    /// NOT classify as `IfaceXdpSlotBusy`. The classifier returns
+    /// `None`, so the caller falls through to the existing
+    /// `LoadFailed`/`DRV_MODE` path (which `EPERM` legitimately wants).
+    #[test]
+    fn eperm_attach_does_not_classify_as_iface_xdp_slot_busy() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_link_create",
+            io_error: io::Error::from_raw_os_error(libc::EPERM),
+        });
+        assert!(super::classify_iface_xdp_slot_busy(&err, "client0").is_none());
+    }
+
+    /// `ENODEV` (interface gone) is likewise not a slot collision and
+    /// must fall through. Pairs with the EBUSY test to kill the errno
+    /// guard mutant: flipping `code == EBUSY` to match ENODEV would
+    /// classify this case, firing the assertion.
+    #[test]
+    fn enodev_attach_does_not_classify_as_iface_xdp_slot_busy() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "netlink_set_xdp_fd",
+            io_error: io::Error::from_raw_os_error(libc::ENODEV),
+        });
+        assert!(super::classify_iface_xdp_slot_busy(&err, "backend0").is_none());
+    }
+
+    /// The `IfaceXdpSlotBusy` Display contract (ADR-0061 § 5): names
+    /// the iface, names the real cause (`EBUSY`), and carries the
+    /// `client_iface != backend_iface` remediation hint so the
+    /// operator knows the single-node default expects a dedicated
+    /// veth pair.
+    #[test]
+    fn iface_xdp_slot_busy_display_names_iface_ebusy_and_remediation() {
+        let rendered =
+            DataplaneError::IfaceXdpSlotBusy { iface: "veth-client".to_owned() }.to_string();
+        assert!(rendered.contains("veth-client"), "Display must name the iface: {rendered}");
+        assert!(rendered.contains("EBUSY"), "Display must name the real cause EBUSY: {rendered}");
+        assert!(
+            rendered.contains("client_iface != backend_iface"),
+            "Display must carry the client_iface != backend_iface remediation hint: {rendered}"
+        );
     }
 }

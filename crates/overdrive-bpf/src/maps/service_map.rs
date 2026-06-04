@@ -64,18 +64,35 @@ use aya_ebpf::{macros::map, maps::Array};
 use crate::maps::hash_of_maps::{HashOfMaps, PINNING_BY_NAME};
 
 /// Outer-map key for `SERVICE_MAP`. 8 bytes, host-order. Matches
-/// `crates/overdrive-dataplane/src/maps/service_map_handle.rs`
+/// `crates/overdrive-dataplane/src/maps/{mod.rs::wire,service_map_handle}.rs`
 /// `ServiceKey` byte-for-byte (`vip_host`: u32, `port_host`: u16,
-/// _pad: u16). Kept `#[repr(C)]` so the kernel-side and
+/// `proto`: u8, `_pad`: u8). Kept `#[repr(C)]` so the kernel-side and
 /// userspace structs share an identical memory layout — aya's
 /// `bpf_map_lookup_elem` keys the map by raw bytes.
+///
+/// Step 02-01 widened the key from `(vip, port)` to `(vip, port, proto)`
+/// IPVS-style (ADR-0040 rev 2026-06-03). `proto` is the IANA L4 byte
+/// (TCP=6, UDP=17) the XDP fast path already parses from the IPv4
+/// header; it absorbs one of the two reserved `_pad` bytes so the
+/// struct stays 8 bytes. The trailing `_pad` stays zeroed — BPF hashes
+/// the raw key bytes, so a non-zero pad would split logically-equal
+/// keys across slots.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct ServiceKey {
     pub vip_host: u32,
     pub port_host: u16,
-    pub _pad: u16,
+    pub proto: u8,
+    pub _pad: u8,
 }
+
+// Compile-time guard: the outer key MUST stay 8 bytes (ADR-0040 rev
+// "absorb the pad byte, keep 8 bytes"). Drift fails the build rather
+// than silently misrouting at runtime.
+const _: () = assert!(
+    core::mem::size_of::<ServiceKey>() == 8,
+    "ServiceKey must be exactly 8 bytes (vip_host:4 + port_host:2 + proto:1 + _pad:1)"
+);
 
 /// Outer-map *capacity* in service slots. 4096 per architecture.md
 /// § 10. Sized to comfortably hold every `(VIP, port)` tuple a single

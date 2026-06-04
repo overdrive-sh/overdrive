@@ -822,6 +822,468 @@ different job.
 - `feedback_phase1_single_node_scope.md`.
 - `feedback_single_cut_greenfield_migrations.md`.
 
+## Revision 2026-06-03 — LOCAL_BACKEND_MAP key gains L4 protocol (`(VIP, vip_port)` → `(VIP, vip_port, proto)`)
+
+### Status
+
+Amendment. 2026-06-03. Decision-maker: Morgan; user-locked (resolves
+P2-Q4 on the `udp-service-support` feature — "do `(vip, port, proto)`
+as IPVS"). Tags: phase-1, dataplane, cgroup-bpf, local-backend,
+l4-proto-keying, udp-service-support.
+
+**Feature SSOT**:
+`docs/feature/udp-service-support/feature-delta.md` § "Wave: DESIGN /
+[REF] P2-Q4 resolution — proto in the service-LB map keys".
+**Decision record**:
+`docs/feature/udp-service-support/design/wave-decisions.md` (P2-Q4).
+**Evidence base**:
+`docs/research/dataplane/service-map-l4-proto-keying-research.md`
+(Nova, 2026-06-03, High confidence). **Companion amendment**:
+ADR-0040 revision 2026-06-03 (the same proto dimension threaded into
+the SERVICE_MAP *wire-boundary* forward key; this amendment threads
+it into the *same-host* cgroup path).
+
+### Why this amendment
+
+Decision 1 above locked `LOCAL_BACKEND_MAP` as "one entry per
+`(VIP, vip_port)`" — proto-less. That shape cannot represent a
+same-host service that listens on both TCP and UDP on the same
+`(VIP, vip_port)`: the canonical DNS case (`tcp/53 + udp/53`) and the
+HTTP/3 case (`443/tcp + 443/udp`). A single `LocalServiceKey {
+vip_host, port_host, _pad }` collapses the two listeners into one
+map slot, so a UDP `connect(VIP:53)` and a TCP `connect(VIP:53)` would
+rewrite to the same backend — losing the per-protocol distinction the
+operator declared.
+
+The same IPVS-alignment rationale that drives the SERVICE_MAP
+amendment (ADR-0040 revision 2026-06-03) applies here: every
+kernel-native L4 LB keys on `{protocol, addr, port}` (IPVS UAPI
+`ip_vs_service_user`); proto-less keying is the defect Cilium spent
+~5.5 years closing (#9207 → #37164). The cgroup same-host path is no
+exception — it is a per-`(VIP, port)` rewrite table and must carry
+proto to distinguish co-located TCP and UDP services.
+
+The cost is the same near-zero widening: `LocalServiceKey`
+(`crates/overdrive-bpf/src/maps/local_backend_map.rs:27-34`) is an
+8-byte `#[repr(C)]` POD with a trailing `_pad: u16`; the proto byte
+absorbs one pad byte and the struct stays 8 bytes.
+
+### Amendment 1 — `LOCAL_BACKEND_MAP` key gains proto
+
+Decision 1's `LOCAL_BACKEND_MAP` key row is amended:
+
+| Field | Type (amended) | Notes |
+|---|---|---|
+| Key | `LocalServiceKey { vip: u32, port: u16, proto: u8, _pad: u8 }` (host order, `#[repr(C)]`, 8 bytes) | The `proto: u8` absorbs one of the two reserved `_pad` bytes — same trick as ADR-0040's `ServiceKey`. The trailing `_pad: u8` **MUST stay deterministically zeroed** (BPF hash maps key on raw bytes). `proto` is the IANA L4 number (IPPROTO_TCP=6 / IPPROTO_UDP=17), lowered from ADR-0060's typed `Proto` at the userspace map-write edge via `Proto::as_u8()`. |
+
+The value (`LocalBackendEntry { backend_ip, backend_port, _pad }`) is
+**unchanged** — proto is a *key* dimension, not a value dimension.
+Capacity (`max_entries = 4096`) is unchanged.
+
+The userspace handle
+(`crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs`)
+gains a `proto` parameter on `upsert` and `remove`:
+
+```rust
+pub fn upsert(&self, vip: Ipv4Addr, vip_port: u16, proto: Proto, backend: SocketAddrV4) -> Result<(), MapError>;
+pub fn remove(&self, vip: Ipv4Addr, vip_port: u16, proto: Proto) -> Result<(), MapError>;
+```
+
+`Proto` is `overdrive_core::dataplane::backend_key::Proto` (ADR-0060),
+reused — NOT a new enum. The typed handle continues to enforce
+IPv4-only via `SocketAddrV4` at the boundary.
+
+### Amendment 2 — cgroup_connect4 proto-source contract
+
+This is the load-bearing contract decision the amendment must pin.
+The `cgroup_connect4_service` program
+(`crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs`)
+today reads only `(user_ip4, user_port)` from `bpf_sock_addr` and
+keys `LOCAL_BACKEND_MAP` on `(vip_host, port_host)`. To key on proto
+it must derive the L4 protocol from the syscall context.
+
+**Verified against the in-tree `bpf_sock_addr` UAPI**
+(`aya-ebpf-bindings-0.1.2/.../bindings.rs:2335-2346`): the
+`bpf_sock_addr` struct exposes **both** of:
+
+```c
+__u32 user_family;
+__u32 user_ip4;
+...
+__u32 user_port;
+__u32 family;
+__u32 type;        // socket type: SOCK_STREAM=1, SOCK_DGRAM=2
+__u32 protocol;    // IANA L4 protocol: IPPROTO_TCP=6, IPPROTO_UDP=17
+...
+```
+
+**The contract: read `bpf_sock_addr.protocol` as the primary proto
+source.** It carries the IANA L4 protocol number directly
+(IPPROTO_TCP=6 / IPPROTO_UDP=17), so it maps 1:1 onto the
+`LocalServiceKey.proto` byte with **no translation table**. This is
+strictly simpler and less error-prone than the socket-type→proto
+mapping the DISCUSS framing hypothesised. Concretely the kernel-side
+key construction becomes:
+
+```rust
+// host-order proto byte, read directly from the syscall context.
+// bpf_sock_addr.protocol is the IANA L4 number; no byte-swap (single
+// byte), no SOCK_*→IPPROTO_* mapping table.
+let proto = unsafe { (*sock_addr).protocol as u8 };   // 6 (TCP) | 17 (UDP)
+let key = LocalServiceKey { vip_host, port_host, proto, _pad: 0 };
+```
+
+**Fallback / robustness clause.** `bpf_sock_addr.type` (SOCK_STREAM=1
+→ IPPROTO_TCP=6, SOCK_DGRAM=2 → IPPROTO_UDP=17) is the documented
+fallback derivation **only if** a kernel in the matrix is observed to
+leave `protocol` zero/unset for `connect4` (no such kernel is known
+on the 5.10+ floor; `protocol` is populated for connect-family hooks).
+The crafter MUST verify `protocol` is populated on the Tier 3 kernel
+matrix; if any matrix kernel leaves it zero, derive proto from `type`
+via the SOCK_*→IPPROTO_* mapping above. Either way the key carries the
+IANA byte — the map key shape is identical. **No Tier 2 backstop
+exists** for `cgroup_sock_addr` (`BPF_PROG_TEST_RUN` returns ENOTSUPP
+for this program type on kernel ≤ 6.8 — see `.claude/rules/development.md`
+§ "`bpf_sock_addr.user_port` — low-16-NBO in a u32"); the proto-source
+correctness is a **Tier 3** verification (real `connect()` through the
+cgroup), not a unit-testable one.
+
+The connect4 hook fires for **both** TCP `connect()` and
+**connected-UDP** `connect()` (a UDP socket that calls `connect(2)`
+to fix its peer before `send()`), exactly as Decision 1 § 1 scoped.
+For both, `bpf_sock_addr.protocol` carries the correct IANA byte, so
+the proto-keyed lookup works for connected-UDP services with no
+additional hook.
+
+### Amendment 3 — `Action::RegisterLocalBackend` / `DeregisterLocalBackend` gain proto
+
+Decision 3's action variants
+(`crates/overdrive-core/src/reconcilers/mod.rs:485-509`) carry no
+proto field today. Both gain one, sourced from the same listener-bearing
+fact ADR-0060 § "True blast radius (D6)" site #8 pins (the `Listener`
+proto, NEVER a silent `Proto::Tcp` default — C3):
+
+```rust
+RegisterLocalBackend {
+    service_id:  ServiceId,
+    vip:         Ipv4Addr,
+    vip_port:    u16,
+    proto:       Proto,        // NEW — per-listener L4 proto (ADR-0060 Proto)
+    backend:     SocketAddrV4,
+    correlation: CorrelationKey,
+},
+DeregisterLocalBackend {
+    service_id:  ServiceId,
+    vip:         Ipv4Addr,
+    vip_port:    u16,
+    proto:       Proto,        // NEW
+    correlation: CorrelationKey,
+},
+```
+
+The `ServiceMapHydrator` (Decision 4) already has proto per-listener
+once ADR-0060's site #8 lands (the desired projection sourced from a
+listener-bearing fact); its Local-vs-Remote classifier threads
+`backend.proto` / the listener proto into `RegisterLocalBackend`
+alongside the existing fields. The action-shim
+(`action_shim/register_local_backend.rs`) and the
+`Dataplane::register_local_backend` / `deregister_local_backend`
+trait methods gain a `proto: Proto` parameter, threaded to
+`LocalBackendMapHandle::upsert` / `remove`.
+
+The `register_local_backend` trait-method rustdoc contract
+(Decision 2) is amended: the per-`(vip, vip_port)` postconditions and
+edge cases now read per-`(vip, vip_port, proto)`. Specifically:
+re-registration with a different `backend` for the same
+`(vip, vip_port, proto)` atomically replaces that entry;
+`deregister_local_backend(vip, vip_port, proto)` removes only that
+proto's entry, leaving a co-located other-proto entry for the same
+`(vip, vip_port)` intact (parity with ADR-0060's per-proto purge for
+the REVERSE_NAT path — D4).
+
+### Amendment 4 — sendmsg4 / unconnected-UDP remains explicitly out of scope (NOT silently assumed in)
+
+Decision 1 § 1 already scoped `SENDMSG` / `RECVMSG` cgroup hooks as
+out of Phase 1 scope ("unconnected-UDP support is a separate
+concern"). This amendment **reaffirms and sharpens** that boundary in
+light of UDP services becoming first-class:
+
+- **In scope (this amendment):** TCP `connect()` and **connected-UDP**
+  `connect()` — both route through `BPF_CGROUP_INET4_CONNECT`
+  (`cgroup_connect4_service`), and both now key on proto. A UDP client
+  that calls `connect(VIP:port)` before `send()` IS handled.
+- **Out of scope (a separate hook, NOT delivered here):**
+  **unconnected-UDP** — a UDP client that calls `sendto(VIP:port, ...)`
+  / `sendmsg()` **without** a prior `connect()`. The kernel does not
+  fire `connect4` for these datagrams; the destination rewrite would
+  need a **`BPF_CGROUP_UDP4_SENDMSG`** program (`sendmsg4`), which is a
+  **separate hook with a separate `bpf_sock_addr`-shaped context** and
+  is **not implemented in this codebase today**. This amendment does
+  NOT silently assume sendmsg4 coverage. It is surfaced as an open
+  question with a recommendation (see below) — the DELIVER scope for
+  proto-keyed UDP covers the *connected*-UDP path only.
+
+This boundary matters operationally: the canonical UDP driver (DNS)
+uses **unconnected** UDP from most resolvers (`sendto` per query, no
+`connect`). So a DNS *server* deployed as an Overdrive service is
+reachable via the connected-UDP path only if the *client* connects
+first — many DNS clients do not. The sendmsg4 hook is what closes
+that gap. It is a real, named follow-up tracked as
+[#200](https://github.com/overdrive-sh/overdrive/issues/200) (see
+§ Out of scope), NOT a hand-wavy forward pointer.
+
+### Migration — single-cut, reconciler-repopulated; no shim
+
+Identical posture to ADR-0040's amendment: `LOCAL_BACKEND_MAP` is
+repopulated from intent on boot by the hydrator's per-backend
+classifier (Decision 4). The migration is "the key struct changes;
+the map is recreated on next boot." NO live in-place migration, NO
+dual-key shim, NO deprecation path. DELIVER must NOT build a migration
+shim — the key struct edit + the hydrator repopulation IS the
+migration. Per `feedback_single_cut_greenfield_migrations.md`.
+
+### What this amendment supersedes vs preserves
+
+| Original decision | Status |
+|---|---|
+| Decision 1 § 1 — adopt `cgroup_sock_addr` connect-time rewrite | **Preserved.** The mechanism is unchanged; only the lookup key widens. |
+| Decision 1 § 1 — `LOCAL_BACKEND_MAP` "one entry per `(VIP, vip_port)`" | **Amended** to "one entry per `(VIP, vip_port, proto)`." |
+| Decision 1 § 1 — connect4 in scope; SENDMSG/RECVMSG out of scope | **Preserved and sharpened** (Amendment 4): connected-UDP `connect4` is in; unconnected-UDP sendmsg4 is explicitly a separate, undelivered hook. |
+| Decision 2 — `register_local_backend` / `deregister_local_backend` trait methods | **Extended** — gain a `proto: Proto` parameter; contract re-pinned per-proto. |
+| Decision 3 — `Action::RegisterLocalBackend` / `DeregisterLocalBackend` | **Extended** — gain a `proto: Proto` field. |
+| Decision 4 — hydrator Local-vs-Remote classifier | **Extended** — threads per-listener proto into `RegisterLocalBackend`; sources proto from the listener-bearing fact (ADR-0060 site #8), never a `Tcp` default. |
+| Decision 5 (XDP programs unchanged), 6 (Earned-Trust probe), 7 (operator config), 8 (walking-skeleton) | **Preserved.** The probe's sentinel upsert gains a proto arg (`(vip=0,port=0,proto=tcp)`); otherwise unchanged. |
+| Out of scope § "IPv6 service VIPs" | **Preserved** — IPv6 + `BPF_CGROUP_INET6_CONNECT` still out of scope (GH #155 territory). |
+
+### Consequences
+
+**Positive.**
+
+- A same-host service with co-located TCP and UDP listeners on one
+  `(VIP, vip_port)` is representable — the cgroup path rewrites each
+  proto's `connect()` to its declared backend.
+- The same-host path aligns with the wire-boundary path: SERVICE_MAP
+  (ADR-0040 amendment), REVERSE_NAT (ADR-0060), and LOCAL_BACKEND_MAP
+  (this amendment) all key on `(…, proto)`. One proto dimension,
+  three maps, consistent.
+- `bpf_sock_addr.protocol` gives a zero-translation proto source —
+  cleaner than the socket-type mapping the DISCUSS framing assumed.
+- Zero byte-width cost: 8-byte key before and after.
+
+**Negative / accepted.**
+
+- `LocalServiceKey` layout changes (proto at offset 6, pad narrows to
+  1 byte) — single-cut; the kernel-side program, the userspace handle,
+  the action variants, the trait methods, and the Tier 3 cgroup test
+  update in the same PR. DELIVER concern, noted for blast-radius.
+- **Unconnected-UDP (`sendto` without `connect`) is not delivered** by
+  this amendment — a real functional gap for UDP clients that do not
+  connect first (DNS being the prominent case). Surfaced as an open
+  question + recommendation, not silently assumed. See § Out of scope.
+
+### Out of scope (explicit, additive to Decision 1's list)
+
+- **Unconnected-UDP via `sendmsg4`.** A `BPF_CGROUP_UDP4_SENDMSG`
+  program to rewrite the destination of `sendto(VIP, ...)` datagrams
+  that never call `connect()`. Separate hook, separate context,
+  **not implemented today**. **Architect recommendation:** this is a
+  genuine follow-up worth a tracked GitHub issue — it is required for
+  unconnected-UDP clients (notably DNS resolvers that `sendto` per
+  query) to reach a same-host UDP service. Tracked:
+  [#200](https://github.com/overdrive-sh/overdrive/issues/200).
+
+### Cross-references
+
+- ADR-0040 revision 2026-06-03 — the companion amendment threading
+  the same proto dimension into the SERVICE_MAP wire-boundary forward
+  key.
+- ADR-0060 — `Proto` reused here; REVERSE_NAT per-proto purge (D4) is
+  the parity the local-backend per-proto deregister mirrors; site #8
+  (proto from a listener-bearing fact, never `Tcp`-default) is the
+  proto source for the `RegisterLocalBackend` action.
+- `docs/research/dataplane/service-map-l4-proto-keying-research.md`
+  — IPVS / Cilium / Kubernetes evidence base.
+- `crates/overdrive-bpf/src/maps/local_backend_map.rs:27-34`
+  (`LocalServiceKey` — gains proto byte),
+  `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs:56-76`
+  (reads `bpf_sock_addr.protocol`; builds the proto-keyed key),
+  `crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs`
+  (handle gains proto param),
+  `crates/overdrive-core/src/reconcilers/mod.rs:485-509`
+  (`Action::RegisterLocalBackend` / `DeregisterLocalBackend` gain
+  proto).
+- `aya-ebpf-bindings-0.1.2` `bpf_sock_addr` UAPI struct (verified:
+  exposes both `protocol` and `type`).
+
+### Changelog (Revision 2026-06-03)
+
+| Date | Change |
+|---|---|
+| 2026-06-03 | LOCAL_BACKEND_MAP key `(VIP, vip_port)` → `(VIP, vip_port, proto)`, IPVS-style. cgroup_connect4 proto-source contract pinned to `bpf_sock_addr.protocol` (IANA byte, zero-translation; `type` as documented fallback). `Action::RegisterLocalBackend`/`DeregisterLocalBackend` + trait methods gain `proto: Proto`. Connected-UDP in scope; unconnected-UDP via sendmsg4 explicitly out of scope (separate undelivered hook, tracked as [#200](https://github.com/overdrive-sh/overdrive/issues/200)). Single-cut reconciler-repopulated migration; no shim. Resolves P2-Q4 (`udp-service-support`) for the same-host path. — Morgan (user-locked). |
+
+## Revision 2026-06-03 — dispatch-boundary conflict granularity is `(route, key-tuple)`, NOT the shared VIP (cross-route dual-path is blessed, not a conflict)
+
+### Status
+
+Amendment. 2026-06-03. Decision-maker: Morgan. This amendment does NOT
+change the architecture — it states authoritatively a property that
+Decisions 2, 4, and 5 above already imply, because a later artifact
+(the `validate_reconcile_output` runtime validator) contradicted it
+and misattributed its provenance. This is a correction of the
+design-artifact surface so the next reader does not re-derive the
+over-broad rule.
+
+**Triggering RCA**: a completed root-cause analysis found that
+`validate_reconcile_output` in
+`crates/overdrive-control-plane/src/action_shim/validate.rs` rejects a
+reconcile output that emits BOTH a `DataplaneUpdateService` (XDP
+`SERVICE_MAP` write) AND a `RegisterLocalBackend` (cgroup
+`LOCAL_BACKEND_MAP` write) for the same VIP in one tick — calling it a
+"cross-route conflict" (its "Conflict class 2") and citing "the Phase
+16 D11 finding." Both the rule and the citation are wrong against this
+ADR.
+
+**Evidence base**:
+`docs/research/reconcilers/dispatch-boundary-validation-and-attempt-budget-backoff.md`
+(Nova, 2026-06-03, High confidence) — Kubernetes Server-Side Apply
+field-manager conflict granularity (conflict = collision on an owned
+field, never co-residence on the shared parent object) and Cilium
+socket-LB (`cgroup connect4`) ⊥ XDP/tc datapath as complementary,
+explicitly "transparent" surfaces for one ClusterIP.
+
+### The property this ADR already establishes
+
+Three load-bearing statements above pin that cross-route writes on one
+VIP are the **intended dual-path**, not a conflict:
+
+- **Decision 2 (observable invariant, lines ~295–300):** *"`update_service(vip, ...)`
+  and `register_local_backend(vip, port, ...)` for the same VIP are not
+  mutually exclusive at the adapter — the XDP path consumes the first,
+  the cgroup path consumes the second. The classifier in
+  `ServiceMapHydrator` (§ 4) is responsible for choosing exactly one
+  per backend."*
+- **Decision 4 (mixed-backend emission, lines ~390–394):** *"A service
+  with mixed local and remote backends (a Phase 2+ shape) emits both
+  action kinds for the same `service_id`. The two dataplane paths are
+  independent and the trait contract permits this concurrent dual-path."*
+- **Decision 5 (no precedence race, lines ~408–413):** *"Traffic that
+  would match a backend's IP never traverses XDP because the cgroup
+  rewrite happens before the kernel routes the SYN."* `cgroup_connect4`
+  fires at `connect(2)` time, before the SYN exists; XDP fires at wire
+  ingress. Two disjoint kernel maps, two hooks, disjoint backend sets
+  (local vs remote). There is no shared slot and no precedence
+  ambiguity.
+
+### Amendment — the dispatch-boundary invariant, stated authoritatively
+
+The runtime validator at the action-shim dispatch boundary (ADR-0023)
+MUST detect reconcile-output conflicts at **`(route, key-tuple)`
+granularity, never at the shared-VIP level**:
+
+1. **Genuine conflicts — same route, same key-tuple (a real
+   last-writer-wins overwrite of one map slot):**
+   - **XDP-vs-XDP:** two `DataplaneUpdateService` writes to the same
+     `SERVICE_MAP` key `(vip, port, proto)` (per ADR-0040 revision
+     2026-06-03; pre-02-01 this key was VIP-only). *Conflict.*
+   - **Cgroup-vs-cgroup:** two `RegisterLocalBackend` /
+     `DeregisterLocalBackend` writes to the same `LOCAL_BACKEND_MAP`
+     key `(vip, vip_port, proto)` (per this ADR's revision 2026-06-03;
+     pre-02-02 this key was `(vip, vip_port)`). *Conflict.*
+2. **NOT a conflict — cross-route on the same VIP:** an XDP
+   `SERVICE_MAP` write AND a cgroup `LOCAL_BACKEND_MAP` write for the
+   same VIP in one tick. **This is the blessed dual-path of Decisions
+   2/4/5 above.** The two routes are disjoint kernel maps consumed by
+   different hooks with no precedence race; the backend sets are
+   disjoint (local XOR remote per backend, chosen by the §4
+   classifier). A VIP appearing on both routes is the *correct* shape
+   for a mixed local+remote service, not a defect. The validator MUST
+   NOT reject it.
+
+The key tuples are the *actual map keys* (post-2026-06-03 amendments:
+XDP `(vip, port, proto)`, cgroup `(vip, vip_port, proto)`). Disjoint
+ports and disjoint proto are distinct slots on either route and do not
+conflict — the same per-`(…, proto)` granularity the SERVICE_MAP /
+REVERSE_NAT / LOCAL_BACKEND_MAP amendments established.
+
+### External precedent (from the evidence-base research)
+
+- **Kubernetes Server-Side Apply** keys conflict detection on the
+  individual owned field, never on the whole object: two managers on
+  disjoint fields of one object never conflict (conflict is the *set
+  intersection* of owned field paths, computed by
+  `sigs.k8s.io/structured-merge-diff`). The owned leaf — the
+  `(map, key)` slot here — is the unit of conflict, not the shared
+  parent (the VIP). Source: https://kubernetes.io/docs/reference/using-api/server-side-apply/
+  (accessed 2026-06-03).
+- **Cilium** runs socket-LB (`cgroup/connect4`) and the wire-time
+  XDP/tc datapath as complementary surfaces for the same service
+  ClusterIP: *"The socket-level loadbalancer acts transparent to
+  Cilium's lower layer datapath."* The connect-time rewrite happens
+  before any XDP ingress decision, so the two paths cannot race on the
+  same key — the dataplane-specific instance of the SSA principle and
+  the direct analogue to Overdrive's `RegisterLocalBackend` (cgroup,
+  local) + `DataplaneUpdateService` (XDP, remote) pair. Source:
+  https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
+  (accessed 2026-06-03).
+
+### Why this lives here and not in a new ADR
+
+The validator is not a new architectural decision — it is a *runtime
+enforcement* of an invariant this ADR already specifies (Decisions
+2/4/5) plus the same-class observation-row finding D11 (see below).
+Its correct conflict granularity is therefore an amendment to this
+ADR's existing contract, not a standalone decision record. No new ADR
+is warranted; opening one would imply a fresh option-space that does
+not exist — the option-space was settled when Decisions 2/4/5 landed.
+
+### D11 provenance correction
+
+The validator cites *"the Phase 16 D11 finding"* as the authority for
+its cross-route rule. **The citation is misattributed.** The real D11
+finding (`docs/evolution/2026-05-23-backend-discovery-bridge-service-reachability.md`
+§ "Reconcile-output invariant at the action_shim boundary (D11,
+`6d62afe6`)") is about two **same-class** `WriteServiceBackendRow`
+Actions (observation-row writes) targeting one VIP with *conflicting
+backend sets* — a genuine last-writer-wins overwrite of one
+observation slot. D11 says nothing about XDP+cgroup cross-route
+composition. The validator generalised a same-slot-overwrite finding
+into a cross-route rule that contradicts this ADR. D11 governs
+**same-route same-key** overwrites only (conflict class 1); it does
+NOT authorise the cross-route rule (the rejected non-conflict, class
+2). The evolution doc carries a matching clarifying note as of
+2026-06-03.
+
+### What this amendment changes vs preserves
+
+| Element | Status |
+|---|---|
+| Decisions 2 / 4 / 5 (cross-route dual-path is intended) | **Preserved and restated authoritatively.** No change; this amendment makes the already-implied property explicit so the validator can be brought into line. |
+| `validate_reconcile_output` conflict granularity | **Corrected (code fix is a separate `/nw-deliver`).** Conflict at `(route, key-tuple)`; cross-route-on-same-VIP rule removed. The architect provides the corrected module-doc prose; the code change is out of this amendment's scope. |
+| D11 provenance citation in `validate.rs` | **Corrected.** D11 governs same-class observation-row write conflicts only; the cross-route rule is not derived from it. |
+
+### Cross-references
+
+- `docs/research/reconcilers/dispatch-boundary-validation-and-attempt-budget-backoff.md`
+  — SSA field-manager + Cilium socket-LB/XDP evidence base.
+- `docs/evolution/2026-05-23-backend-discovery-bridge-service-reachability.md`
+  § D11 — the same-class observation-row finding the validator
+  misattributed (carries a matching clarifying note as of 2026-06-03).
+- `crates/overdrive-control-plane/src/action_shim/validate.rs` — the
+  validator whose conflict granularity is corrected by the companion
+  `/nw-deliver` code fix.
+- ADR-0040 revision 2026-06-03 (SERVICE_MAP `(vip, port, proto)` key) /
+  this ADR's revision 2026-06-03 (LOCAL_BACKEND_MAP `(vip, vip_port,
+  proto)` key) — the actual map key tuples the `(route, key-tuple)`
+  granularity refers to.
+- ADR-0023 (action-shim dispatch boundary) — the layer the validator
+  runs at.
+
+### Changelog (Revision 2026-06-03 — dispatch-boundary granularity)
+
+| Date | Change |
+|---|---|
+| 2026-06-03 | State authoritatively: cross-route writes (XDP-for-remote + cgroup-for-local) on the same VIP are the blessed dual-path of Decisions 2/4/5 and are explicitly NOT a conflict. The only genuine reconcile-output conflicts are same-route same-key overwrites: two XDP writes to `(vip, port, proto)`, or two cgroup writes to `(vip, vip_port, proto)`. Dispatch-boundary validator MUST detect conflicts at `(route, key-tuple)` granularity, never at the shared VIP. Cite SSA field-manager + Cilium socket-LB/XDP precedent. Correct the validator's D11 misattribution (D11 governs same-class observation-row write conflicts only). Code fix is a separate `/nw-deliver`. — Morgan. |
+
 ## Changelog
 
 - 2026-05-22 — Initial proposed version. Same-host backend delivery via `cgroup_sock_addr` connect-time destination rewrite. Resolves the walking-skeleton TCP round-trip data-path gap.

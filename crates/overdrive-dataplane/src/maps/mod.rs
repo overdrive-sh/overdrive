@@ -33,13 +33,20 @@ pub mod hash_of_maps;
 // it loses the "this is padding" signal at every call site.
 #[allow(clippy::pub_underscore_fields)]
 pub mod wire {
-    use overdrive_core::dataplane::backend_key::BackendKey;
+    use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
     use overdrive_core::id::ServiceVip;
     use overdrive_core::traits::dataplane::{Backend, DataplaneError};
 
     /// Outer-map key for SERVICE_MAP. 8-byte POD; host-order. Matches
     /// `crates/overdrive-bpf/src/maps/service_map.rs` `ServiceKey`
-    /// byte-for-byte (vip_host: u32, port_host: u16, _pad: u16).
+    /// byte-for-byte (vip_host: u32, port_host: u16, proto: u8, _pad: u8).
+    ///
+    /// Step 02-01 widened the key from `(vip, port)` to
+    /// `(vip, port, proto)` IPVS-style (ADR-0040 rev 2026-06-03): the
+    /// IANA L4 proto byte (TCP=6, UDP=17) absorbs one reserved pad byte
+    /// so tcp/8080 and udp/8080 occupy distinct outer-map slots. The
+    /// struct stays 8 bytes; the trailing `_pad` stays zeroed (BPF hashes
+    /// raw key bytes).
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[repr(C)]
     pub struct ServiceKey {
@@ -48,9 +55,18 @@ pub mod wire {
         pub vip_host: u32,
         /// VIP port, host-order.
         pub port_host: u16,
+        /// IANA L4 protocol byte — TCP=6, UDP=17 (`Proto::as_u8()`).
+        pub proto: u8,
         /// Padding to 8-byte alignment. Always zero.
-        pub _pad: u16,
+        pub _pad: u8,
     }
+
+    // Compile-time guard: the outer key MUST stay 8 bytes (ADR-0040 rev
+    // "absorb the pad byte, keep 8 bytes").
+    const _: () = assert!(
+        core::mem::size_of::<ServiceKey>() == 8,
+        "wire::ServiceKey must be exactly 8 bytes (vip_host:4 + port_host:2 + proto:1 + _pad:1)"
+    );
 
     // SAFETY: repr(C), all fields fully byte-addressable, no
     // padding-uninit issues (we always set _pad to 0).
@@ -60,14 +76,22 @@ pub mod wire {
     unsafe impl aya::Pod for ServiceKey {}
 
     impl ServiceKey {
-        /// Encode `(ServiceVip, u16)` to the host-order POD. Returns
+        /// Encode `(ServiceVip, u16, Proto)` to the host-order POD.
+        /// `proto` lowers to its IANA byte via [`Proto::as_u8`]. Returns
         /// `LoadFailed` for IPv6 VIPs (Phase 2.2 IPv4-only per
         /// architecture.md § 6 / GH #155 deferral).
-        pub fn from_vip_port(vip: ServiceVip, port: u16) -> Result<Self, DataplaneError> {
+        pub fn from_vip_port(
+            vip: ServiceVip,
+            port: u16,
+            proto: Proto,
+        ) -> Result<Self, DataplaneError> {
             match vip.get() {
-                std::net::IpAddr::V4(v4) => {
-                    Ok(Self { vip_host: u32::from(v4), port_host: port, _pad: 0 })
-                }
+                std::net::IpAddr::V4(v4) => Ok(Self {
+                    vip_host: u32::from(v4),
+                    port_host: port,
+                    proto: proto.as_u8(),
+                    _pad: 0,
+                }),
                 std::net::IpAddr::V6(_) => Err(DataplaneError::LoadFailed(
                     "ServiceKey: IPv6 VIP not supported in Phase 2.2 SERVICE_MAP key (deferred to GH #155)"
                         .into(),
@@ -186,11 +210,14 @@ pub mod wire {
     // `_pad`); aya needs the marker for raw map access.
     unsafe impl aya::Pod for VipPod {}
 
-    /// `LOCAL_BACKEND_MAP` outer-key POD per ADR-0053 § 1.
+    /// `LOCAL_BACKEND_MAP` outer-key POD per ADR-0053 § 1
+    /// (rev 2026-06-03).
     ///
-    /// 8-byte host-order tuple `(vip, vip_port, _pad)`. Matches
+    /// 8-byte host-order tuple `(vip, vip_port, proto, _pad)`. Matches
     /// `crates/overdrive-bpf/src/maps/local_backend_map.rs`'s
-    /// kernel `LocalServiceKey` byte-for-byte.
+    /// kernel `LocalServiceKey` byte-for-byte. Step 02-02 widened the
+    /// key with the IANA proto byte (TCP=6, UDP=17) absorbing one
+    /// reserved pad byte; the 8-byte envelope is preserved.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[repr(C)]
     pub struct LocalServiceKey {
@@ -198,8 +225,10 @@ pub mod wire {
         pub vip_host: u32,
         /// VIP port, host-order.
         pub port_host: u16,
+        /// IANA L4 protocol byte — TCP=6, UDP=17 (`Proto::as_u8()`).
+        pub proto: u8,
         /// Padding to 8-byte alignment. Always zero.
-        pub _pad: u16,
+        pub _pad: u8,
     }
 
     // SAFETY: repr(C), `_pad` always 0, all fields fully

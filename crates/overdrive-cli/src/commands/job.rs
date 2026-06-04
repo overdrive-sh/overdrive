@@ -187,11 +187,14 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
 
     // 2. Try the kind-discriminated parser first (same detection as
     //    `submit_streaming`). If the TOML carries a `[job]` section,
-    //    translate to the wire shape via `JobSpecInput`. Flat TOMLs
-    //    fall through to the legacy `JobSpecInput` parser. Per
-    //    ADR-0051 the wire-side discriminator now lives inside
-    //    `SubmitSpecInput`'s `kind` tag; the outer
-    //    `SubmitWorkloadRequest.workload_kind` field has been deleted.
+    //    translate to the wire shape via `JobSpecInput`. A `[service]`
+    //    body (with `[[listener]]` blocks) routes to the Service-kind
+    //    deploy lane below — this is the non-streaming (JSON-ack)
+    //    companion to `submit_streaming_service`, used by the detached /
+    //    non-TTY `overdrive deploy` path (`main.rs` `Command::Deploy`).
+    //    Flat TOMLs fall through to the legacy `JobSpecInput` parser.
+    //    Per ADR-0051 the wire-side discriminator lives inside
+    //    `SubmitSpecInput`'s `kind` tag.
     let spec_input: JobSpecInput = match WorkloadSpecInput::from_toml_str(&toml_str) {
         Ok(WorkloadSpecInput::Job(job_spec)) => JobSpecInput {
             id: job_spec.id,
@@ -205,6 +208,16 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
                 memory_bytes: job_spec.resources.memory_bytes,
             },
         },
+        // Service-kind deploy in the JSON-ack lane. Routes to the
+        // Service submit path so the listener protocol (e.g. udp)
+        // threads through to the persisted `WorkloadIntent::Service`
+        // intent. Without this arm a `[service]` spec falls through to
+        // the legacy `JobSpecInput` parser and is rejected as
+        // "missing field `id`" — the gap udp-service-support step 01-05
+        // closes (the deploy half of S-04-A).
+        Ok(WorkloadSpecInput::Service(service_spec)) => {
+            return submit_service(args, service_spec).await;
+        }
         // Slice 07 / US-07 — surface the kind-rejection verbatim with
         // its per-kind guidance. Without this explicit arm the error
         // would be swallowed by the legacy `toml::from_str` fall-through
@@ -212,8 +225,8 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
         Err(parse_err @ ParseError::ProbesNotAllowedOnKind { .. }) => {
             return Err(CliError::ParseError(parse_err));
         }
-        // Service / Schedule kinds and other parse failures fall through
-        // to the legacy flat `JobSpecInput` parser — unchanged behaviour.
+        // Schedule kind and other parse failures fall through to the
+        // legacy flat `JobSpecInput` parser — unchanged behaviour.
         Ok(_) | Err(_) => toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
             field: "toml".to_string(),
             message: format!("failed to parse TOML: {e}"),
@@ -238,6 +251,75 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     //    shared `IntentKey::for_workload` helper (ADR-0050 OQ-5 single-
     //    cut migration: `jobs/<id>` → `workloads/<id>`) — no drift-
     //    prone second `workloads/` literal in this crate.
+    let workload_id = parse_response_job_id(&resp.workload_id)?;
+    let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
+    let next_command = format!("overdrive alloc status --job {}", resp.workload_id);
+    Ok(SubmitOutput {
+        workload_id: resp.workload_id,
+        intent_key,
+        spec_digest: resp.spec_digest,
+        outcome: resp.outcome,
+        endpoint,
+        next_command,
+    })
+}
+
+/// Service-kind deploy in the JSON-ack (non-streaming) lane — the
+/// companion to [`submit_streaming_service`] for the detached / non-TTY
+/// `overdrive deploy` path.
+///
+/// Projects the parser-side [`ServiceSpec`] (carries `Listener` with a
+/// `NonZeroU16` port and the `Proto` newtype) to the wire-side
+/// [`ServiceSpecInput`] (`u16` port + `String` protocol for JSON
+/// tolerance) and POSTs as `SubmitSpecInput::Service(_)`. The listener
+/// protocol threads through unchanged: the server's
+/// `ServiceV1::from_submit` re-parses the `String` token back into
+/// `Proto`, so the persisted `WorkloadIntent::Service(ServiceV1)`
+/// carries the operator's declared protocol verbatim.
+///
+/// Returns the same [`SubmitOutput`] shape as the Job lane so the
+/// caller renders `workload_submit_accepted` identically across kinds.
+async fn submit_service(
+    args: SubmitArgs,
+    service_spec: ServiceSpec,
+) -> Result<SubmitOutput, CliError> {
+    // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`,
+    // mirroring `submit_streaming_service`. The listener `(NonZeroU16,
+    // Proto)` pair projects to `(u16, String)`; the protocol's canonical
+    // lowercase render (`Proto::as_str`) is what the server re-parses.
+    let listeners: Vec<ListenerInput> = service_spec
+        .listeners
+        .iter()
+        .map(|l| ListenerInput { port: l.port.get(), protocol: l.protocol.as_str().to_owned() })
+        .collect();
+    let spec_input = ServiceSpecInput {
+        id: service_spec.id,
+        replicas: service_spec.replicas,
+        resources: LegacyResourcesInput {
+            cpu_milli: service_spec.resources.cpu_milli,
+            memory_bytes: service_spec.resources.memory_bytes,
+        },
+        driver: DriverInput::Exec(LegacyExecInput {
+            command: service_spec.exec.command,
+            args: service_spec.exec.args,
+        }),
+        listeners,
+        startup_probes: service_spec.startup_probes,
+        readiness_probes: service_spec.readiness_probes,
+        liveness_probes: service_spec.liveness_probes,
+    };
+
+    // Client-side validation via the shared ADR-0011 constructor —
+    // same fast-fail discipline as the Job lane's `Job::from_submit`.
+    let _validated: ServiceV1 =
+        ServiceV1::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
+    let resp = client
+        .submit_workload(SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec_input) })
+        .await?;
+
     let workload_id = parse_response_job_id(&resp.workload_id)?;
     let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
     let next_command = format!("overdrive alloc status --job {}", resp.workload_id);

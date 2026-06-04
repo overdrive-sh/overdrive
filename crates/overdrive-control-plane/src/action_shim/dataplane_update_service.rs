@@ -21,6 +21,7 @@
 //! caller — only an `ObservationStoreError` causes the dispatch fn
 //! to return `Err`.
 
+use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{NodeId, ServiceVip};
 use overdrive_core::reconcilers::{Action, TickContext};
@@ -97,7 +98,8 @@ pub async fn dispatch(
     tick: &TickContext,
     writer: &NodeId,
 ) -> Result<DispatchOutcome, ServiceHydrationDispatchError> {
-    let Action::DataplaneUpdateService { service_id, vip, backends, correlation: _ } = action
+    let Action::DataplaneUpdateService { service_id, vip, port, proto, backends, correlation: _ } =
+        action
     else {
         panic!(
             "action_shim::dataplane_update_service::dispatch invoked \
@@ -107,27 +109,29 @@ pub async fn dispatch(
     };
 
     let fp = fingerprint(vip, backends);
-    let v4 = match ipv4_from_vip(vip) {
-        Ok(addr) => addr,
-        Err(e) => {
-            let row = ServiceHydrationResultRow {
-                service_id: *service_id,
+    // V4 validation lives here, at the operator-visible rejection site
+    // (ADR-0060 D1a): `ServiceFrontend::new` rejects an IPv6 VIP, which
+    // we map to the existing operator-visible `Failed` row — NOT a late
+    // opaque `DataplaneError` in an adapter.
+    let Ok(frontend) = ServiceFrontend::new(*vip, *port, *proto) else {
+        let reason = ServiceHydrationDispatchError::Ipv6Unsupported { vip: *vip }.to_string();
+        let row = ServiceHydrationResultRow {
+            service_id: *service_id,
+            fingerprint: fp,
+            status: ServiceHydrationStatus::Failed {
                 fingerprint: fp,
-                status: ServiceHydrationStatus::Failed {
-                    fingerprint: fp,
-                    failed_at: tick.now_unix,
-                    reason: e.to_string(),
-                },
-                updated_at: LogicalTimestamp {
-                    counter: tick.tick.saturating_add(1),
-                    writer: writer.clone(),
-                },
-            };
-            observation.write(ObservationRow::ServiceHydration(row)).await?;
-            return Ok(DispatchOutcome::Failed);
-        }
+                failed_at: tick.now_unix,
+                reason,
+            },
+            updated_at: LogicalTimestamp {
+                counter: tick.tick.saturating_add(1),
+                writer: writer.clone(),
+            },
+        };
+        observation.write(ObservationRow::ServiceHydration(row)).await?;
+        return Ok(DispatchOutcome::Failed);
     };
-    let dataplane_result = dataplane.update_service(v4, backends.clone()).await;
+    let dataplane_result = dataplane.update_service(frontend, backends.clone()).await;
 
     let (status, outcome) = match &dataplane_result {
         Ok(()) => (
@@ -155,13 +159,4 @@ pub async fn dispatch(
     };
     observation.write(ObservationRow::ServiceHydration(row)).await?;
     Ok(outcome)
-}
-
-fn ipv4_from_vip(vip: &ServiceVip) -> Result<std::net::Ipv4Addr, ServiceHydrationDispatchError> {
-    match vip.get() {
-        std::net::IpAddr::V4(v4) => Ok(v4),
-        std::net::IpAddr::V6(_) => {
-            Err(ServiceHydrationDispatchError::Ipv6Unsupported { vip: *vip })
-        }
-    }
 }

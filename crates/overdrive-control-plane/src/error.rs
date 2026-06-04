@@ -294,6 +294,29 @@ pub enum DataplaneBootError {
         source: overdrive_core::traits::dataplane::DataplaneError,
     },
 
+    /// The single-node veth provisioner (ADR-0061 § 3, step 01-03)
+    /// failed to stand up the host-netns veth pair before
+    /// `EbpfDataplane::new`. Reached only on the production
+    /// (non-`dataplane_override`) boot branch AND only when the
+    /// configured ifaces are the default veth names — an operator who
+    /// names real NICs skips provision entirely, so this variant cannot
+    /// fire on the two-NIC path.
+    ///
+    /// Pass-through `#[from]` per `.claude/rules/development.md`
+    /// § "Never flatten a typed error to Internal(String)": the
+    /// underlying [`crate::veth_provisioner::VethProvisionError`]
+    /// carries a distinct variant per failing `ip(8)` step
+    /// (link-show / link-add / addr-add / link-up / route-add), so the
+    /// CLI / §12 investigation agent can branch on which provisioning
+    /// step failed without `Display`-grepping. Mirrors the `Construct`
+    /// / `Probe` precedent above.
+    #[error("single-node veth provisioning failed: {source}")]
+    Provision {
+        /// Underlying typed provisioner failure.
+        #[from]
+        source: crate::veth_provisioner::VethProvisionError,
+    },
+
     /// `iface::resolve_iface_ipv4` failed for the configured
     /// `client_iface`. Two sub-cases collapse into one variant
     /// because the operator remediation (`ip -4 addr show <iface>`)
@@ -449,6 +472,30 @@ pub enum ControlPlaneError {
     /// into this variant.
     #[error(transparent)]
     ProbeRunnerBoot(#[from] ProbeRunnerBootError),
+
+    /// Boot-time listener-fact projection rebuild failure (ADR-0062
+    /// § Decision (1); reconciler-listener-fact-view step 01-02). The
+    /// boot wiring rebuilds the in-memory [`crate::listener_facts::
+    /// ListenerFactStore`] from the intent SSOT immediately after the
+    /// allocator's `bulk_load`; if the underlying `IntentStore` scan
+    /// fails the control-plane refuses to start.
+    ///
+    /// Carries the typed [`crate::reconciler_runtime::ConvergenceError`]
+    /// boxed rather than by a bare `#[from]`: that enum already carries a
+    /// `ViewPersist(ControlPlaneError)` arm, so a `#[from] ConvergenceError`
+    /// here would form a recursive type cycle (`ControlPlaneError` ↔
+    /// `ConvergenceError`, E0072). `Box` breaks the cycle by giving the
+    /// variant a fixed size, while PRESERVING the full typed error — no
+    /// fidelity is lost (the previous `String` flatten discarded the
+    /// variant; the boxed `ConvergenceError` keeps it `matches!`-able all
+    /// the way down). This is a discrete, named, `matches!`-able variant
+    /// per `.claude/rules/development.md` § "Never flatten a typed error
+    /// to `Internal(String)`", NOT a flatten into
+    /// [`ControlPlaneError::Internal`]. Same boot-path shape as
+    /// `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the listener
+    /// binds, so the `to_response` arm is exhaustiveness-only.
+    #[error("listener-fact projection rebuild failed at boot: {0}")]
+    ListenerFactRebuild(Box<crate::reconciler_runtime::ConvergenceError>),
 
     #[error("internal: {0}")]
     Internal(String),
@@ -668,6 +715,17 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // exists only for enum exhaustiveness.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::ListenerFactRebuild(source) => (
+            // Same shape as `ViewStoreBoot` / `DataplaneBoot` above: the
+            // boot-time listener-fact rebuild happens BEFORE the listener
+            // binds, so this arm is exhaustiveness-only. The composition
+            // root branches on the typed variant
+            // (`matches!(e, ListenerFactRebuild(_))`) for structured
+            // startup diagnostics. The boxed `ConvergenceError`'s own
+            // `Display` carries the underlying cause.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: source.to_string(), field: None },
         ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,

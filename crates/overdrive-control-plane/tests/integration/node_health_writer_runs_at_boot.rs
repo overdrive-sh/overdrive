@@ -61,6 +61,10 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         data_dir,
         operator_config_dir,
         dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
+        // ADR-0061 § 1 (step 01-03): default `dataplane` is now veth-named
+        // (`ovd-veth-cli` absent in the test VM); name `lo` so the boot
+        // `host_ipv4` resolution succeeds. SimDataplane skips XDP attach.
+        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         ..Default::default()
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
@@ -130,6 +134,10 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
         dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
+        // ADR-0061 § 1 (step 01-03): default `dataplane` is now veth-named
+        // (`ovd-veth-cli` absent in the test VM); name `lo` so the boot
+        // `host_ipv4` resolution succeeds. SimDataplane skips XDP attach.
+        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         ..Default::default()
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));

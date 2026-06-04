@@ -25,8 +25,10 @@ use overdrive_cli::render::{
     format_job_verdict,
 };
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, AllocStatusRowBody};
-use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::aggregate::{Listener, WorkloadKind};
+use overdrive_core::dataplane::Proto;
 use proptest::prelude::*;
+use std::num::NonZeroU16;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -73,6 +75,7 @@ fn fixture_response(
         restart_budget: None,
         kind: Some(kind),
         vip: None,
+        listeners: vec![],
     }
 }
 
@@ -112,6 +115,115 @@ fn s_03_01_service_alloc_status_replicas_no_exit_column() {
         rendered.contains("Restarts"),
         "Service per-alloc table must have a 'Restarts' column; got:\n{rendered}",
     );
+}
+
+// ---------------------------------------------------------------------------
+// O03 sub-claim 3 — Service alloc status renders each listener as
+// `<port>/<protocol>` so a UDP service's `Proto::Udp` is operator-visible.
+// ---------------------------------------------------------------------------
+
+/// Build a `Listener` from `(port, protocol)`.
+const fn listener(port: u16, protocol: Proto) -> Listener {
+    Listener { port: NonZeroU16::new(port).expect("non-zero port"), protocol }
+}
+
+/// Attach listeners to a Service fixture response.
+fn fixture_response_with_listeners(
+    workload_id: &str,
+    listeners: Vec<Listener>,
+) -> AllocStatusResponse {
+    let mut response = fixture_response(
+        workload_id,
+        WorkloadKind::Service,
+        vec![fixture_row("alloc-0", AllocStateWire::Running, None, Some("123@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.listeners = listeners;
+    response
+}
+
+/// A Service with a UDP and a TCP listener renders a Listeners section
+/// where each listener appears as `<port>/<protocol>` (lowercase
+/// canonical protocol via `Proto::as_str`). This is the black-box
+/// surface that makes a UDP service's `Proto::Udp` observable —
+/// O03 verification sub-claim 3.
+#[test]
+fn service_alloc_status_renders_each_listener_as_port_slash_protocol() {
+    let response = fixture_response_with_listeners(
+        "dns-resolver",
+        vec![listener(5353, Proto::Udp), listener(8080, Proto::Tcp)],
+    );
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    assert!(
+        rendered.contains("Listeners:"),
+        "Service alloc-status must render a 'Listeners:' section; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("5353/udp"),
+        "UDP listener must render as '5353/udp' (Proto::Udp visible black-box); got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("8080/tcp"),
+        "TCP listener must render as '8080/tcp'; got:\n{rendered}",
+    );
+}
+
+/// A Job response (no listeners) renders NO Listeners section — the
+/// section is Service-only and listener-presence-guarded.
+#[test]
+fn job_alloc_status_renders_no_listeners_section() {
+    let response = fixture_response(
+        "coinflip",
+        WorkloadKind::Job,
+        vec![fixture_row(
+            "alloc-coinflip-0",
+            AllocStateWire::Terminated,
+            Some(0),
+            Some("100@node-1"),
+        )],
+        /*desired=*/ 1,
+        /*running=*/ 0,
+    );
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    assert!(
+        !rendered.contains("Listeners:"),
+        "Job alloc-status must NOT render a 'Listeners:' section; got:\n{rendered}",
+    );
+}
+
+// Property: for every `(port, protocol)` listener set, the rendered
+// Service output contains the exact `<port>/<protocol>` token for each
+// listener, using the canonical lowercase protocol form — and renders
+// the lowercase token regardless of which protocols are present.
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+    #[test]
+    fn service_render_surfaces_every_listener_port_and_proto(
+        listeners in proptest::collection::vec(
+            (1u16..=65535, prop_oneof![Just(Proto::Tcp), Just(Proto::Udp)]),
+            1..=6,
+        ),
+    ) {
+        let typed: Vec<Listener> =
+            listeners.iter().map(|&(p, proto)| listener(p, proto)).collect();
+        let response = fixture_response_with_listeners("svc", typed);
+
+        let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+        for &(port, proto) in &listeners {
+            let token = format!("{port}/{}", proto.as_str());
+            prop_assert!(
+                rendered.contains(&token),
+                "render must surface listener token {token:?}; got:\n{rendered}",
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,225 @@
+schema_version: 1
+
+# Feature-level UDP-Service submit journey (structured schema).
+# Companion to journey-udp-service-visual.md. Embedded Gherkin per step
+# is the SPECIFICATION-ONLY companion per .claude/rules/testing.md
+# ("No .feature files anywhere") — the crafter translates these into
+# Rust #[test] / #[tokio::test] functions in DELIVER; they are never
+# parsed or executed as Gherkin.
+
+journey:
+  name: "Submit a UDP Service and trust the wire path both ways"
+  goal: >
+    Declare a Service with a udp listener, submit it, and have BOTH the
+    forward and reverse UDP paths work — client sees responses sourced
+    from the VIP. Closes GH #163.
+  persona: "Ana, Overdrive platform engineer (runs UDP-bearing services)"
+  job_id: [J-OPS-004, J-PLAT-004]
+
+  emotional_arc:
+    start: "Confident-but-cautious — UDP reverse-path bugs are invisible"
+    middle: "Focused — submit Accepted, forward path carries packets"
+    end: "Trusting (happy) OR Relieved (sad — gate fails loudly, not in prod)"
+
+steps:
+  - id: 1
+    name: "Declare a UDP listener and submit"
+    command: "overdrive deploy dns-resolver.toml"
+
+    shared_artifacts:
+      - name: service_proto
+        source: "intent Listener.protocol (Proto enum); crates/overdrive-core/src/aggregate/workload_spec.rs:547"
+        displayed_as: "udp/${port}"
+        consumers:
+          - "submit accepted line (CLI)"
+          - "ServiceFrontend newtype proto field"
+          - "REVERSE_NAT_MAP key proto byte"
+
+    emotional_state:
+      entry: "Confident-but-cautious"
+      exit: "Focused — Accepted landed, listener proto recorded"
+
+    integration_checkpoint: >
+      The submitted spec's Listener.protocol = Udp must reach the
+      ServiceFrontend newtype unmodified — never coerced to Tcp.
+
+    failure_modes:
+      - "Unsupported protocol (sctp) — parse-time reject (already shipped by #164)"
+      - "Listener port 0 — parse-time reject (already shipped)"
+
+    gherkin: |
+      Scenario: Operator submits a Service declaring a UDP listener
+        Given Ana has dns-resolver.toml with a [service] block and a
+          [[listener]] carrying port = 5353 and protocol = "udp"
+        When Ana runs `overdrive deploy dns-resolver.toml`
+        Then the CLI prints an Accepted line naming "udp/5353"
+        And the committed intent Service aggregate carries
+          Listener.protocol == Proto::Udp
+        And no point on the submit path coerces the protocol to Tcp
+
+  - id: 2
+    name: "ServiceMapHydrator emits update_service with the UDP proto"
+    command: "(internal — observable via REVERSE_NAT key set)"
+
+    shared_artifacts:
+      - name: service_frontend
+        # B1 fix: migration is FROM shipped trait option C
+        # (update_service(vip: Ipv4Addr, backends), dataplane.rs:101) →
+        # ServiceFrontend newtype. Locked-A (update_service(service_id,
+        # vip: ServiceVip, backends), architecture.md §5:155) was a paper
+        # decision never implemented. The frontend re-absorbs ServiceVip
+        # (locked-A's typed-VIP intent) but leaves service_id/correlation
+        # on the Action::DataplaneUpdateService envelope (validate.rs:288)
+        # by design — service_id is action-routing, not a dataplane key.
+        source: "NEW ServiceFrontend newtype (ServiceVip, port, Proto) — replaces shipped (vip: Ipv4Addr, backends); backends stays a separate arg"
+        displayed_as: "update_service(frontend{ vip, port, proto: Udp }, backends)"
+        consumers:
+          - "Dataplane::update_service trait surface (frontend arg)"
+          - "EbpfDataplane Step 4b REVERSE_NAT fan-out (frontend.proto)"
+          - "SimDataplane reverse_nat_keys_for (narrowed [Tcp,Udp] → frontend.proto)"
+
+    emotional_state:
+      entry: "Focused"
+      exit: "Focused — the (ip,port,udp) key present in BOTH adapters"
+
+    integration_checkpoint: >
+      ServiceMapHydrator reads Vec<Listener> and emits one
+      update_service per listener; the UDP listener's frontend.proto
+      is Proto::Udp.
+
+    failure_modes:
+      - "Hydrator emits only one update_service for multi-listener services (TCP wins, UDP dropped)"
+      - "Frontend proto defaulted to Tcp inside the hydrator"
+
+    gherkin: |
+      Scenario: Hydrator installs UDP reverse-NAT entries
+        Given an intent Service aggregate with a udp listener on 5353
+          and one Running backend at 10.244.0.20:5353
+        When ServiceMapHydrator reconciles the service
+        Then it emits a Dataplane::update_service call carrying a
+          ServiceFrontend whose proto is Proto::Udp
+        And after the call the production EbpfDataplane's REVERSE_NAT_MAP
+          contains the key (10.244.0.20, 5353, udp) -> vip
+        And the SimDataplane's reverse-NAT map contains the identical key
+
+  - id: 3
+    name: "Forward + reverse UDP path completes with VIP source"
+    command: "(internal — observable via Tier 3 wire capture)"
+
+    shared_artifacts:
+      - name: reverse_nat_key
+        source: "ServiceFrontend newtype (vip,port,proto); BackendKey newtype crates/overdrive-core/src/dataplane/backend_key.rs"
+        displayed_as: "(backend_ip, backend_port, proto) -> vip"
+        consumers:
+          - "xdp_reverse_nat_lookup (kernel) source-rewrite decision"
+          - "Tier 3 reverse-path wire capture assertion"
+
+    emotional_state:
+      entry: "Focused"
+      exit: "Trusting — the round-trip is honest both ways"
+
+    integration_checkpoint: >
+      A real UDP datagram round-trips: forward path rewrites to a
+      backend; the backend's response hits xdp_reverse_nat_lookup with
+      proto=17, finds the entry, rewrites source to VIP.
+
+    failure_modes:
+      - "REVERSE_NAT_MAP miss for proto=17 -> XDP_PASS without rewrite (the #163 bug)"
+      - "Client receives a response sourced from the backend IP, drops it"
+
+    gherkin: |
+      Scenario: UDP response is source-rewritten to the VIP
+        Given a UDP Service 'dns-resolver' with vip 10.96.0.10:5353
+          and a backend at 10.244.0.20:5353, both forward and reverse
+          XDP programs attached
+        When a client at 10.244.0.5:51000 sends a UDP datagram to
+          10.96.0.10:5353 and the backend replies
+        Then a tcpdump capture on the client veth shows the reply
+          sourced from 10.96.0.10:5353 (the VIP)
+        And the reply is NOT sourced from 10.244.0.20 (the backend)
+
+  - id: 4
+    name: "Lockstep cannot silently regress"
+    command: "(CI — Tier-1 ReverseNatLockstep Sim set-equality + Tier-3 Ebpf acceptance)"
+
+    shared_artifacts:
+      - name: lockstep_key_set_equality
+        # H1 fix: a pure Tier-1 retarget against the REAL EbpfDataplane is
+        # infeasible (it needs a kernel + bpffs; DST is in-process). The
+        # pin is two-pronged, meeting at the shared BackendKey set:
+        # Tier 1 (Sim set-equality) AND Tier 3 (real Ebpf bpftool dump).
+        source: "the same ServiceFrontend driven through Sim (Tier 1) and real Ebpf (Tier 3)"
+        displayed_as: "SimDataplane.reverse_nat_keys ≡ EbpfDataplane.reverse_nat_keys (shared BackendKey set)"
+        consumers:
+          - "ReverseNatLockstep invariant (Tier 1, Sim set-equality, per-PR critical path)"
+          - "Tier 3 Ebpf acceptance test (bpftool map dump + VIP-source wire capture, integration lane)"
+          - "Tier 2 BPF_PROG_TEST_RUN triptych (proto=17 source rewrite)"
+
+    emotional_state:
+      entry: "Cautious"
+      exit: "Reassured — the gate guards the symmetry forever"
+
+    integration_checkpoint: >
+      The lockstep is pinned by Tier-1 Sim set-equality (the
+      ReverseNatLockstep invariant asserts the Sim installs exactly the
+      declared-frontend.proto BackendKey set) AND Tier-3 Ebpf acceptance
+      (real update_service(udp) → bpftool dump shows (ip,port,udp)). A
+      dropped UDP fan-out in the Sim adapter fails Tier 1; a dropped
+      fan-out in the Ebpf adapter fails Tier 3. The in-process
+      both-adapter retarget is infeasible (resolved at DIVERGE).
+
+    failure_modes:
+      - "Tier-1 invariant runs against Sim only (the current #163 gap) — Sim divergence unobserved"
+      - "Tier-3 acceptance asserts forward path only, never the reverse key set"
+
+    gherkin: |
+      Scenario: Reverse-NAT lockstep is enforced for UDP across both adapters
+        Given the same ServiceFrontend with a udp listener
+        When the SimDataplane processes update_service(frontend) under the
+          Tier-1 ReverseNatLockstep invariant and the real EbpfDataplane
+          processes the identical call under the Tier-3 acceptance test
+        Then the Tier-1 Sim set-equality and the Tier-3 Ebpf bpftool dump
+          meet at the same BackendKey set
+        And a change that drops the UDP fan-out from the Sim adapter fails
+          the Tier-1 gate, and one that drops it from the Ebpf adapter
+          fails the Tier-3 acceptance, both before merge
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: reverse_nat_key
+      must_match_across: [2, 3, 4]
+      failure_message: >
+        REVERSE_NAT key (ip,port,proto)->vip diverges between
+        SimDataplane and EbpfDataplane — the #163 silent-asymmetry bug.
+    - artifact: service_proto
+      must_match_across: [1, 2, 3]
+      failure_message: >
+        Listener protocol was coerced to Tcp somewhere on the
+        intent -> hydrator -> ServiceFrontend -> dataplane path.
+    - artifact: service_frontend
+      must_match_across: [2, 3]
+      failure_message: >
+        A call site reconstructed (vip,port,proto) from separate
+        positional args instead of reading the single ServiceFrontend
+        newtype. (service_id/correlation on the Action envelope is
+        allowed by design and is NOT a violation.)
+
+changelog:
+  - date: 2026-06-02
+    feature: udp-service-support
+    change: >
+      Initial feature-level UDP-Service journey. 4 steps, embedded
+      Gherkin per step (specification-only). Walking skeleton is the
+      single-UDP-listener forward+reverse e2e (step 3). Job grounding:
+      J-OPS-004 + J-PLAT-004.
+  - date: 2026-06-02
+    feature: udp-service-support
+    change: >
+      DIVERGE-convergence revision (B1/B2/H1 corrections). Renamed the
+      typed_service_descriptor artifact to service_frontend (ServiceFrontend
+      newtype, DIVERGE Option 6); corrected the from-state to shipped trait
+      option C (locked-A never landed); the frontend re-absorbs ServiceVip
+      but leaves service_id/correlation on the Action envelope; step 4
+      lockstep collapsed to the two-pronged pin (Tier-1 Sim set-equality +
+      Tier-3 Ebpf acceptance + Tier-2 triptych) since the in-process
+      both-adapter retarget is infeasible. See recommendation.md.

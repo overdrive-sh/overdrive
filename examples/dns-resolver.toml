@@ -1,0 +1,52 @@
+# dns-resolver.toml — S-04-A / O03 / E02 verification fixture.
+#
+# A single-UDP-listener Service spec the `overdrive deploy <SPEC>` handler
+# accepts. The load-bearing element is the `protocol = "udp"` listener on
+# 15353: it proves the operator's udp token threads spec -> handler -> intent
+# without a Proto::Tcp substitution (the S-04-A walking-skeleton deploy half).
+#
+# Port choice — 15353, NOT 5353. The dev Lima VM's `systemd-resolved` already
+# owns UDP 5353 (mDNS); a backend binding 5353 fails `bind(): Address already
+# in use`, exits 1, and the allocation never reaches Running — which on a
+# convergence capture reads (misleadingly) as an empty dataplane map. See the
+# RCA `docs/analysis/root-cause-analysis-convergence-dataplane-gap.md`. 15353 is
+# a free, unprivileged port in the VM (verified via `ss -uln`), so the socat
+# backend binds and the Service can actually converge.
+#
+# The accepted `[service]`/`[exec]`/`[resources]`/`[[listener]]` shape matches
+# the 01-05 direct-handler test
+# `crates/overdrive-cli/tests/integration/deploy_udp_walking_skeleton.rs`
+# (`dns_resolver_udp_toml()`) — that in-process test asserts `Proto::Udp` and
+# never binds a socket, so its port value is irrelevant to it; this checked-in
+# fixture parses through the same `WorkloadSpecInput::from_toml_str` -> Service
+# path the test exercises.
+#
+# Backend: `socat` UDP echo bound on 15353 — a real binary present in the Lima
+# dev VM (/usr/bin/socat), not a phantom path. `UDP-RECVFROM:15353,fork`
+# accepts a datagram, forks a handler, and `PIPE` echoes the payload back to
+# the sender — a connectionless reply service whose reverse path E02 inspects
+# (the reply's source is rewritten to the VIP, not the backend IP). For O03
+# (deploy-accept, pre-convergence) the backend is never launched: the accept
+# render is produced before any allocation runs, so the spec only needs to
+# PARSE — but the command is a real on-disk binary so the fixture is honest
+# and reusable for a future convergence capture.
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/O03-deploy-udp-service-accepted-udp-intent/runner.sh
+#   verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh
+
+[service]
+id = "dns-resolver"
+replicas = 1
+
+[exec]
+command = "/usr/bin/socat"
+args    = ["-T15", "UDP-RECVFROM:15353,fork", "PIPE"]
+
+[resources]
+cpu_milli = 250
+memory_bytes = 67108864
+
+[[listener]]
+port = 15353
+protocol = "udp"

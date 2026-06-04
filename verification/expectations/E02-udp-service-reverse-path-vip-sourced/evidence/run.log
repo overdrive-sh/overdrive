@@ -1,0 +1,15 @@
+  [capture] reverse_nat_map_dump_preflight -> reverse_nat_map_dump_preflight.out (exit 1)
+  [pending] sub-claim 2 (preflight): REVERSE_NAT_MAP not dumpable (rc=1) —
+            no running dataplane pinned the map (production serve's XDP attach
+            to lo fails at boot on this VM; see O03 evidence/serve.log). Captured
+            the absent/failed dump as honest negative evidence. The Tier-3 witness
+            for the (backend_ip,5353,udp)->VIP key is reverse_nat_udp_e2e.rs.
+  [capture] preflight_cluster -> preflight_cluster.out (exit 1)
+  [pending] control plane not reachable — E02 needs a running deployment AND
+  the ThreeIfaceTopology veth setup. In a separate Lima-routed terminal:
+
+      cargo overdrive serve --bind 127.0.0.1:7443 --data-dir /tmp/od-e02
+
+  then re-run E02. This run captured the preflight failure (and the absent
+  REVERSE_NAT_MAP dump above) as evidence and is leaving every sub-claim
+  'pending'.

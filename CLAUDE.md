@@ -72,6 +72,28 @@ This keeps the typed-error discipline from `.claude/rules/development.md`
 intact while removing the noise of repeating the error type at every call
 site.
 
+## CLI verb — `overdrive deploy <SPEC>`, never `overdrive job submit`
+
+The operator command to apply a workload TOML spec is **`overdrive
+deploy <SPEC>`** (e.g. `overdrive deploy dns-resolver.toml`). It is a
+top-level `Command::Deploy { spec, detach }` in
+`crates/overdrive-cli/src/cli.rs`.
+
+`overdrive job submit` **does not exist** as a user-facing verb. It was
+the real command until commit `17f633e2` ("refactor: rename
+job-specific identifiers to workload-generic naming", May 11 2026),
+which promoted it to top-level `overdrive deploy`. The `Job` subcommand
+now carries only `list` and `stop`. The internal handler is still named
+`commands::job::submit` / `SubmitArgs` and there is a
+`tests/integration/job_submit.rs` — so the stale `job submit` phrasing
+is still discoverable in the code surface and keeps leaking into docs
+(it did in the udp-service-support DISCUSS/DIVERGE artifacts). When
+writing operator-facing docs, journeys, or examples, the only correct
+verb is `overdrive deploy <SPEC>`. Do not copy `job submit` from older
+phase docs or from the handler name. The internal-surface rename that
+removes this trap is tracked in
+[#193](https://github.com/overdrive-sh/overdrive/issues/193).
+
 ## Mutation Testing Strategy
 
 This project uses **per-feature** mutation testing. Per-PR runs are diff-scoped via `cargo mutants --in-diff origin/main` with a kill-rate gate of ≥80%. A nightly job runs the full workspace against the baseline in `mutants-baseline/main/` to catch drift. Mutations to `unsafe` blocks, `aya-rs` eBPF programs, generated code, and async scheduling logic are excluded per `.claude/rules/testing.md`.
