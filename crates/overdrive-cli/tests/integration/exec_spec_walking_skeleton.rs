@@ -3,7 +3,7 @@
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` § *Integration tests — no
 //! subprocess*: this test calls
-//! `overdrive_cli::commands::job::submit(SubmitArgs { ... })` directly
+//! `overdrive_cli::commands::deploy::deploy(DeployArgs { ... })` directly
 //! as a Rust async function. No `Command::new(env!("CARGO_BIN_EXE_overdrive"))`.
 //!
 //! The WS exercises the end-to-end data flow exposed in ADR-0031 §10:
@@ -40,7 +40,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use overdrive_cli::commands::job::SubmitArgs;
+use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput, WorkloadDriver};
@@ -120,12 +120,12 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
 
     // Phase 1 — write the new-shape TOML and submit via handler.
     let spec_path = write_toml(server_tmp.path(), "payments.toml", payments_toml_with_exec_block());
-    let submit_output = overdrive_cli::commands::job::submit(SubmitArgs {
+    let submit_output = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: spec_path,
         config_path: server_cfg.clone(),
     })
     .await
-    .expect("job::submit must accept the new-shape spec end-to-end");
+    .expect("deploy::deploy must accept the new-shape spec end-to-end");
 
     // Phase 2 — assert the client-visible outcome.
     assert_eq!(submit_output.workload_id, "payments", "echoed workload_id must equal the spec id");

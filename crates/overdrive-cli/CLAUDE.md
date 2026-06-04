@@ -13,9 +13,9 @@ not runtime-tunable per command.
 
 - `Cli` has no `endpoint` field — only `command`.
 - `ApiClient::from_config(config_path)` is the only constructor.
-- Handler arg structs (`SubmitArgs`, `StatusArgs`, `ListArgs`) carry
+- Handler arg structs (`DeployArgs`, `StatusArgs`, `ListArgs`) carry
   `config_path: PathBuf` — no endpoint field.
-- `SubmitOutput.endpoint` and the `CliError::Transport` rendering
+- `DeployOutput.endpoint` and the `CliError::Transport` rendering
   both read from `ApiClient::base_url()` — the endpoint the trust
   triple names is the only source.
 - `overdrive serve` writes the trust triple *after* binding the
@@ -30,7 +30,7 @@ trust triple `overdrive serve` writes already names the live
 endpoint. See `tests/integration/endpoint_from_config.rs` for the
 canonical shape.
 
-The transport-error tests in `tests/integration/job_submit.rs` are
+The transport-error tests in `tests/integration/deploy.rs` are
 the only exception — they overwrite the config's endpoint with an
 unreachable one (`127.0.0.1:1`) to exercise `CliError::Transport`.
 
@@ -84,8 +84,8 @@ in-memory config.
 
 ```rust
 // Good — direct call, injected sim adapters, typed assertion
-let output = overdrive_cli::commands::job::submit(
-    SubmitArgs { spec: spec_path, config_path: cfg_path },
+let output = overdrive_cli::commands::deploy::deploy(
+    DeployArgs { spec: spec_path, config_path: cfg_path },
     &SimClock::new(),
     &SimTransport::new(),
 ).await?;
@@ -96,7 +96,7 @@ assert_eq!(output.spec_digest, expected_digest);
 ```rust
 // Bad — subprocess; rejected
 let out = Command::new(env!("CARGO_BIN_EXE_overdrive"))
-    .args(["job", "submit", "payments.toml"])
+    .args(["deploy", "payments.toml"])
     .output()?;
 assert!(out.status.success());
 ```

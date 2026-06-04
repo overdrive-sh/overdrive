@@ -1,4 +1,4 @@
-//! Integration tests for `overdrive_cli::commands::job::submit` —
+//! Integration tests for `overdrive_cli::commands::deploy::deploy` —
 //! step 05-04.
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` these call the handler directly
@@ -6,12 +6,12 @@
 //! `commands::serve::run(...)` (step 05-02), then the handler reads a
 //! TOML file from disk, validates locally through `Job::from_submit`
 //! (ADR-0011 constructor), POSTs `SubmitWorkloadRequest` via the `ApiClient`
-//! from step 05-01, and returns a typed `SubmitOutput` with `workload_id`,
+//! from step 05-01, and returns a typed `DeployOutput` with `workload_id`,
 //! `intent_key`, `spec_digest`, `outcome`, `endpoint`, and
 //! `next_command` (per ADR-0020 the `commit_index` field is dropped).
 //!
 //! Acceptance coverage:
-//!   (a) valid TOML against in-process server returns `SubmitOutput`
+//!   (a) valid TOML against in-process server returns `DeployOutput`
 //!       with `workload_id = "payments"`, `intent_key = "workloads/payments"`,
 //!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
 //!       `spec_digest`, and `next_command` naming
@@ -31,7 +31,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use overdrive_cli::commands::job::{SubmitArgs, SubmitOutput};
+use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
@@ -119,7 +119,7 @@ args = []
 }
 
 // -------------------------------------------------------------------
-// (a) submit with valid TOML against in-process server → SubmitOutput
+// (a) submit with valid TOML against in-process server → DeployOutput
 // -------------------------------------------------------------------
 
 #[tokio::test]
@@ -130,35 +130,35 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
 
     let spec_path = write_valid_payments_toml(tmp.path());
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
-    let output: SubmitOutput =
-        overdrive_cli::commands::job::submit(args).await.expect("job::submit");
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
+    let output: DeployOutput =
+        overdrive_cli::commands::deploy::deploy(args).await.expect("deploy::deploy");
 
-    assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
+    assert_eq!(output.workload_id, "payments", "DeployOutput.workload_id must be 'payments'");
     assert_eq!(
         output.intent_key, "workloads/payments",
-        "SubmitOutput.intent_key must be 'jobs/payments'",
+        "DeployOutput.intent_key must be 'jobs/payments'",
     );
     assert_eq!(
         output.outcome,
         IdempotencyOutcome::Inserted,
-        "SubmitOutput.outcome must be `Inserted` on a fresh submit; got {:?}",
+        "DeployOutput.outcome must be `Inserted` on a fresh submit; got {:?}",
         output.outcome,
     );
     assert_eq!(
         output.spec_digest.len(),
         64,
-        "SubmitOutput.spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        "DeployOutput.spec_digest must be 64 hex chars (SHA-256); got {} chars",
         output.spec_digest.len(),
     );
     assert_eq!(
         output.endpoint,
         *handle.endpoint(),
-        "SubmitOutput.endpoint must echo the endpoint recorded in the operator config",
+        "DeployOutput.endpoint must echo the endpoint recorded in the operator config",
     );
     assert_eq!(
         output.next_command, "overdrive alloc status --job payments",
-        "SubmitOutput.next_command must guide the operator to alloc status",
+        "DeployOutput.next_command must guide the operator to alloc status",
     );
 
     handle.shutdown().await.expect("clean shutdown");
@@ -198,8 +198,8 @@ args = []
     let spec_path = tmp.path().join("broken.toml");
     std::fs::write(&spec_path, broken_spec).expect("write broken.toml");
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
-    let err = overdrive_cli::commands::job::submit(args)
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::deploy::deploy(args)
         .await
         .expect_err("replicas=0 must fail local validation");
 
@@ -244,9 +244,9 @@ cpu_milli = 500
     let spec_path = tmp.path().join("broken_syntax.toml");
     std::fs::write(&spec_path, broken_syntax).expect("write broken_syntax.toml");
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
     let err =
-        overdrive_cli::commands::job::submit(args).await.expect_err("malformed TOML must fail");
+        overdrive_cli::commands::deploy::deploy(args).await.expect_err("malformed TOML must fail");
 
     match &err {
         CliError::InvalidSpec { .. } => (),
@@ -272,8 +272,8 @@ async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endp
 
     let spec_path = write_valid_payments_toml(tmp.path());
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
-    let err = overdrive_cli::commands::job::submit(args)
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::deploy::deploy(args)
         .await
         .expect_err("unreachable endpoint must fail");
 
@@ -325,8 +325,8 @@ async fn submit_transport_error_display_does_not_contain_raw_reqwest_token() {
 
     let spec_path = write_valid_payments_toml(tmp.path());
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
-    let err = overdrive_cli::commands::job::submit(args)
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::deploy::deploy(args)
         .await
         .expect_err("unreachable endpoint must fail");
 
@@ -392,8 +392,8 @@ async fn cli_submit_rejects_empty_exec_command_before_any_http_call() {
     let spec_path = tmp.path().join("empty-cmd.toml");
     std::fs::write(&spec_path, EMPTY_COMMAND_TOML).expect("write toml");
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
-    let err = overdrive_cli::commands::job::submit(args)
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::deploy::deploy(args)
         .await
         .expect_err("empty exec.command must be rejected client-side");
 
@@ -424,7 +424,7 @@ async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
     // A TOML missing the `[exec]` table fails at `toml::from_str` —
     // before `Job::from_submit` runs. The CLI's existing mapping wraps
     // this as `CliError::InvalidSpec { field: "toml", .. }` (per
-    // `commands/job.rs:104-108`). Pin that the new tagged-enum
+    // `commands/deploy.rs:104-108`). Pin that the new tagged-enum
     // dispatch participates correctly: the absence of the driver
     // table is a parse-time rejection, not a runtime "missing field"
     // panic.
@@ -435,8 +435,8 @@ async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
     let spec_path = tmp.path().join("no-exec.toml");
     std::fs::write(&spec_path, MISSING_EXEC_TABLE_TOML).expect("write toml");
 
-    let args = SubmitArgs { spec: spec_path, config_path: cfg };
-    let err = overdrive_cli::commands::job::submit(args)
+    let args = DeployArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::deploy::deploy(args)
         .await
         .expect_err("TOML missing [exec] must be rejected at parse time");
 
@@ -444,7 +444,7 @@ async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
         CliError::InvalidSpec { field, message } => {
             assert_eq!(
                 field, "toml",
-                "TOML parse failures map to field=\"toml\" per commands/job.rs; got {field:?}",
+                "TOML parse failures map to field=\"toml\" per commands/deploy.rs; got {field:?}",
             );
             assert!(
                 message.contains("exec")
@@ -485,8 +485,8 @@ memory_bytes = 67108864
     let path = tmp.path().join("job-section.toml");
     std::fs::write(&path, spec).expect("write job-section.toml");
 
-    let args = SubmitArgs { spec: path, config_path: cfg };
-    let output: SubmitOutput = overdrive_cli::commands::job::submit(args)
+    let args = DeployArgs { spec: path, config_path: cfg };
+    let output: DeployOutput = overdrive_cli::commands::deploy::deploy(args)
         .await
         .expect("submit must accept [job]-section TOML");
 

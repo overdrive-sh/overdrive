@@ -18,7 +18,7 @@
 //! issue #81 for reintroduction alongside `op create` / `op revoke`.
 //!
 //! `default_operator_config_dir` and `default_operator_config_path`
-//! remain — `serve` and `job submit` use them to compute the canonical
+//! remain — `serve` and `deploy` use them to compute the canonical
 //! read/write target for the trust triple.
 //!
 //! The handler is a plain `async fn` so integration tests can call it

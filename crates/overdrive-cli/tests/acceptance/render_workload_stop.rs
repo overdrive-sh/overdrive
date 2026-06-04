@@ -14,7 +14,7 @@
 
 #![allow(clippy::expect_used)]
 
-use overdrive_cli::commands::job::StopOutput;
+use overdrive_cli::commands::deploy::StopOutput;
 use overdrive_control_plane::api::StopOutcome;
 use url::Url;
 

@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use overdrive_cli::commands::alloc::StatusArgs as AllocStatusArgs;
-use overdrive_cli::commands::job::{StopArgs, SubmitArgs};
+use overdrive_cli::commands::deploy::{DeployArgs, StopArgs};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::AllocStateWire;
 use serial_test::serial;
@@ -126,7 +126,7 @@ memory_bytes = 67108864
 /// parser AND the legacy `format_running_summary` Service-vocabulary
 /// renderer, which by construction emits `"is running with"`.
 ///
-/// Slice 02 (this step) wires `WorkloadSpec` into `submit_streaming`
+/// Slice 02 (this step) wires `WorkloadSpec` into `deploy_streaming`
 /// so a `[job]`-shape spec dispatches via `JobSubmitEvent` (no
 /// converged-running terminal variant) and renders via the new
 /// `format_job_succeeded_summary` whose output names exit code +
@@ -149,14 +149,14 @@ async fn s_02_05_anti_scenario_no_is_running_with() {
     let submit_cfg = cfg.clone();
     let stop_cfg = cfg.clone();
     let submit_handle = tokio::spawn(async move {
-        overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+        overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
             spec: spec_path,
             config_path: submit_cfg,
         })
         .await
     });
     wait_for_alloc_running(&cfg, "happy-job").await;
-    let _ = overdrive_cli::commands::job::stop(StopArgs {
+    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "happy-job".to_owned(),
         config_path: stop_cfg,
     })
@@ -217,14 +217,14 @@ async fn s_02_06_submit_echo_names_kind_upfront() {
     let submit_cfg = cfg.clone();
     let stop_cfg = cfg.clone();
     let submit_handle = tokio::spawn(async move {
-        overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+        overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
             spec: spec_path,
             config_path: submit_cfg,
         })
         .await
     });
     wait_for_alloc_running(&cfg, "happy-job").await;
-    let _ = overdrive_cli::commands::job::stop(StopArgs {
+    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "happy-job".to_owned(),
         config_path: stop_cfg,
     })
@@ -305,7 +305,7 @@ async fn s_02_01_job_exits_zero_reports_succeeded() {
 
     let spec_path = write_toml(tmp.path(), "happy-job.toml", job_exit_zero_spec());
 
-    let output = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })
@@ -344,7 +344,7 @@ async fn s_02_02_job_exits_nonzero_reports_failed_with_attempts() {
 
     let spec_path = write_toml(tmp.path(), "coinflip.toml", job_exit_nonzero_spec());
 
-    let output = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })
@@ -394,7 +394,7 @@ async fn s_02_03_intermediate_attempt_failure_does_not_close_stream() {
 
     let spec_path = write_toml(tmp.path(), "coinflip.toml", job_exit_nonzero_spec());
 
-    let output = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })
@@ -436,7 +436,7 @@ async fn s_02_04_third_attempt_zero_reports_succeeded() {
 
     let spec_path = write_toml(tmp.path(), "happy-job.toml", job_exit_zero_spec());
 
-    let output = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })
@@ -492,7 +492,7 @@ memory_bytes = 67108864
 "#;
     let spec_path = write_toml(tmp.path(), "bad-job.toml", bad_spec);
 
-    let err = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let err = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })
@@ -540,7 +540,7 @@ async fn s_02_08_streaming_transport_interruption_surfaces_honestly() {
 
     let spec_path = write_toml(tmp.path(), "happy-job.toml", job_exit_zero_spec());
 
-    let err = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let err = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })

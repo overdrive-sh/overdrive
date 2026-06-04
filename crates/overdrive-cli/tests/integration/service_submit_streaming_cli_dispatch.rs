@@ -2,7 +2,7 @@
 //!
 //! 01-03e3 (commit `db4fccc5`) migrated the CLI consumer match arms
 //! to `ServiceSubmitEvent` but missed the submit-side dispatch path
-//! at `crates/overdrive-cli/src/commands/job.rs::submit_streaming`.
+//! at `crates/overdrive-cli/src/commands/deploy.rs::deploy_streaming`.
 //! Today (pre-fix) a Service-kind TOML falls through every Service
 //! TOML wrapped in `SubmitSpecInput::Job(spec_input)` — actually,
 //! because `JobSpecInput` is `deny_unknown_fields` and a Service
@@ -14,21 +14,21 @@
 //! This file pins the corrective contract:
 //!
 //!   * **S-SHCP-CLI-DISPATCH-01** — a Service-kind TOML fed through
-//!     `submit_streaming` MUST NOT synchronously return
+//!     `deploy_streaming` MUST NOT synchronously return
 //!     `CliError::InvalidSpec` (it routes to the new
-//!     `submit_streaming_service` path; the consumer observes
+//!     `deploy_streaming_service` path; the consumer observes
 //!     `ServiceSubmitEvent::Accepted` as the first wire line; the
 //!     test does not wait for terminal — it asserts the dispatch
 //!     reached the in-process server).
 //!   * **S-SHCP-CLI-DISPATCH-02** — a Job-kind TOML fed through the
-//!     same `submit_streaming` entrypoint MUST route to
-//!     `submit_streaming_job` and produce a Job-vocabulary summary
+//!     same `deploy_streaming` entrypoint MUST route to
+//!     `deploy_streaming_job` and produce a Job-vocabulary summary
 //!     (regression guard against accidental cross-routing).
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no
 //! subprocess": this file spawns a real in-process control-plane
 //! server via `commands::serve::run_with_dataplane(...)` and calls
-//! `commands::job::submit_streaming(...)` directly.
+//! `commands::deploy::deploy_streaming(...)` directly.
 //!
 //! Linux-gated because the production submit path eventually drives
 //! `ExecDriver` against `/bin/sh`. The macOS `--no-run` gate
@@ -41,7 +41,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use overdrive_cli::commands::job::{StopArgs, SubmitArgs};
+use overdrive_cli::commands::deploy::{DeployArgs, StopArgs};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
 use serial_test::serial;
@@ -118,8 +118,8 @@ memory_bytes = 67108864
 // S-SHCP-CLI-DISPATCH-01 — Service TOML routes to ServiceSubmitEvent
 // ===========================================================================
 
-/// A Service-kind TOML fed through `submit_streaming` MUST route to
-/// `submit_streaming_service` (the `ServiceSubmitEvent` consumer
+/// A Service-kind TOML fed through `deploy_streaming` MUST route to
+/// `deploy_streaming_service` (the `ServiceSubmitEvent` consumer
 /// surface). Today the production path returns
 /// `CliError::InvalidSpec` synchronously because the Service TOML
 /// falls through to a legacy `JobSpecInput`-deserialise that
@@ -138,14 +138,14 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
     // `Err(CliError::InvalidSpec)` synchronously because the legacy
     // path tries `toml::from_str::<JobSpecInput>` and `[service]` is
     // an unknown field under `deny_unknown_fields`. Post-fix this
-    // routes to the new `submit_streaming_service` function which
+    // routes to the new `deploy_streaming_service` function which
     // POSTs to the in-process server; the streaming consumer awaits
     // terminal — we cap the await with a short timeout and assert
     // the dispatch reached the server (no synchronous InvalidSpec).
     let submit_cfg = cfg.clone();
     let stop_cfg = cfg.clone();
     let submit_handle = tokio::spawn(async move {
-        overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+        overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
             spec: spec_path,
             config_path: submit_cfg,
         })
@@ -170,7 +170,7 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
     // `Stopped` so the submit task finishes. Pre-fix this is a
     // no-op (the workload was never admitted; the submit already
     // failed); post-fix it walks the Service-kind terminal path.
-    let _ = overdrive_cli::commands::job::stop(StopArgs {
+    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "svc-dispatch-1".to_owned(),
         config_path: stop_cfg,
     })
@@ -225,8 +225,8 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
 // S-SHCP-CLI-DISPATCH-02 — Job TOML routes to JobSubmitEvent (regression)
 // ===========================================================================
 
-/// A Job-kind TOML fed through `submit_streaming` MUST route to
-/// `submit_streaming_job` (the `JobSubmitEvent` consumer surface).
+/// A Job-kind TOML fed through `deploy_streaming` MUST route to
+/// `deploy_streaming_job` (the `JobSubmitEvent` consumer surface).
 /// Regression guard against accidental cross-routing when the new
 /// Service-kind branch is added.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -237,7 +237,7 @@ async fn cli_submit_streaming_job_still_routes_to_job_submit_event_consumer() {
 
     let spec_path = write_toml(tmp.path(), "job-dispatch-1.toml", JOB_TOML);
 
-    let output = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
         spec: spec_path,
         config_path: cfg,
     })

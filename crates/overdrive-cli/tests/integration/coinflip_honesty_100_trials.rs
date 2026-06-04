@@ -2,7 +2,7 @@
 //! gate).
 //!
 //! Per slice 02 step 02-07 of `workload-kind-discriminator`: 100 trials
-//! of `overdrive job submit examples/coinflip.toml` against the real
+//! of `overdrive deploy examples/coinflip.toml` against the real
 //! `ExecDriver` in Lima must show ≥99 trials where the CLI process
 //! exit code equals the workload's kernel-observed exit code AND every
 //! trial's terminal verdict line names the same exit code as the
@@ -19,7 +19,7 @@
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` § *Integration tests — no
 //! subprocess*: the test calls
-//! `overdrive_cli::commands::job::submit_streaming` directly as a
+//! `overdrive_cli::commands::deploy::deploy_streaming` directly as a
 //! Rust async function. No `Command::spawn`.
 //!
 //! The `examples/coinflip.toml` workload picks a pseudo-random branch
@@ -58,7 +58,7 @@ use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use overdrive_cli::commands::job::SubmitArgs;
+use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use serial_test::serial;
 use tempfile::TempDir;
@@ -188,7 +188,7 @@ async fn s_02_09_k1_honesty_100_trials() {
         let spec_name = format!("coinflip-{trial:03}.toml");
         let spec_path = write_toml(tmp.path(), &spec_name, &body);
 
-        let output = overdrive_cli::commands::job::submit_streaming(SubmitArgs {
+        let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
             spec: spec_path,
             config_path: cfg.clone(),
         })

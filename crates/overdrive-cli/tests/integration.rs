@@ -23,13 +23,13 @@ mod integration {
 
     // udp-service-support step 01-05 — S-04-A driving-adapter companion:
     // `overdrive deploy <udp-spec>` accepted via the direct
-    // `commands::job::submit` handler; the persisted
+    // `commands::deploy::deploy` handler; the persisted
     // `WorkloadIntent::Service` intent carries `Proto::Udp` (C3 guard at
     // the spec → handler → intent boundary). Closes the deploy half of
     // S-04-A that step 01-03 (dataplane wire half) scoped out.
+    mod deploy;
     mod deploy_udp_walking_skeleton;
     mod http_client;
-    mod job_submit;
     mod post_http_invalid_job_id;
     mod walking_skeleton;
 
@@ -48,7 +48,7 @@ mod integration {
     // alloc-status render surface + IntentStore persistence, with
     // KPI K5 byte-equal deferral URL across surfaces. Per ADR-0047
     // §1, §3 + slice 05 spec.
-    mod job_submit_schedule;
+    mod deploy_schedule;
 
     // Slice 03 step 03-02 — S-CLI-03 Tier 3 jq-pipeline-equivalent:
     // a pipe-redirected stdout (non-TTY) without --detach MUST
@@ -91,8 +91,8 @@ mod integration {
 
     // service-health-check-probes step 01-03e3-fix — CLI submit-side
     // dispatch routing. Closes the gap 01-03e3 missed: a Service-kind
-    // TOML through `submit_streaming` must route to the new
-    // `submit_streaming_service` (the `ServiceSubmitEvent` consumer),
+    // TOML through `deploy_streaming` must route to the new
+    // `deploy_streaming_service` (the `ServiceSubmitEvent` consumer),
     // not fall through to the legacy `JobSpecInput` path.
     mod service_submit_streaming_cli_dispatch;
 }

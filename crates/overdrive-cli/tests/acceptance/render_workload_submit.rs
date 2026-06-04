@@ -18,15 +18,15 @@
 //!       token, and does NOT mention the removed `--endpoint` /
 //!       `OVERDRIVE_ENDPOINT` override surface.
 
-use overdrive_cli::commands::job::SubmitOutput;
+use overdrive_cli::commands::deploy::DeployOutput;
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use url::Url;
 
 const FIXTURE_DIGEST: &str = "deadbeefcafebabe0123456789abcdefdeadbeefcafebabe0123456789abcdef";
 
-fn fixture_submit_output() -> SubmitOutput {
-    SubmitOutput {
+fn fixture_submit_output() -> DeployOutput {
+    DeployOutput {
         workload_id: "payments".to_string(),
         intent_key: "workloads/payments".to_string(),
         spec_digest: FIXTURE_DIGEST.to_string(),

@@ -1,4 +1,4 @@
-//! S-CLI-03 — Tier 3 `overdrive job submit | jq -r .spec_digest`
+//! S-CLI-03 — Tier 3 `overdrive deploy | jq -r .spec_digest`
 //! pipeline-equivalent.
 //!
 //! Per `docs/feature/cli-submit-vs-deploy-and-alloc-status/deliver/03-02`
@@ -6,7 +6,7 @@
 //!
 //! > Given a control plane is running
 //! > When the operator runs
-//! >   `overdrive job submit ./payments.toml | jq -r .spec_digest`
+//! >   `overdrive deploy ./payments.toml | jq -r .spec_digest`
 //! > Then jq's output is a single line of 64 hex characters
 //! > And the CLI exits with status 0
 //!
@@ -27,14 +27,14 @@
 //!    `LocalIntentStore`, real `LocalObservationStore`, real
 //!    `ExecDriver`) — same shape as
 //!    `streaming_submit_happy_path.rs` and the JSON-ack
-//!    `job_submit.rs`.
+//!    `deploy.rs`.
 //! 2. Driving the dispatch decision through `should_stream(detach=false,
 //!    is_terminal=false)` — `false` simulates the pipe-redirected
 //!    stdout the real shell pipeline produces. This is the same
 //!    decision main.rs makes; the pure function is the SSOT.
-//! 3. Calling `commands::job::submit` (the JSON-ack lane) — the lane
+//! 3. Calling `commands::deploy::deploy` (the JSON-ack lane) — the lane
 //!    `should_stream == false` selects.
-//! 4. Asserting on the typed `SubmitOutput.spec_digest` — a 64-char
+//! 4. Asserting on the typed `DeployOutput.spec_digest` — a 64-char
 //!    lowercase-hex SHA-256 — which is what `jq -r .spec_digest` would
 //!    extract from the real JSON response body.
 //!
@@ -52,7 +52,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use overdrive_cli::commands::job::{SubmitArgs, SubmitOutput, should_stream};
+use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, should_stream};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
 use tempfile::TempDir;
@@ -123,23 +123,23 @@ async fn pipe_redirected_submit_emits_64_char_hex_spec_digest_via_json_lane() {
 
     // Step 2 — call the lane the dispatch decision selects (JSON-ack).
     // This IS what main.rs would do under
-    //   `overdrive job submit ./payments.toml | jq -r .spec_digest`
+    //   `overdrive deploy ./payments.toml | jq -r .spec_digest`
     // — the pipe makes stdout non-TTY, `should_stream` returns false,
-    // and main.rs invokes `commands::job::submit` (which sets
+    // and main.rs invokes `commands::deploy::deploy` (which sets
     // `Accept: application/json` on the request).
-    let output: SubmitOutput =
-        overdrive_cli::commands::job::submit(SubmitArgs { spec: spec_path, config_path: cfg })
+    let output: DeployOutput =
+        overdrive_cli::commands::deploy::deploy(DeployArgs { spec: spec_path, config_path: cfg })
             .await
             .expect(
-                "S-CLI-03: pipe-redirected `overdrive job submit ./payments.toml` MUST succeed — \
+                "S-CLI-03: pipe-redirected `overdrive deploy ./payments.toml` MUST succeed — \
                  the JSON-ack lane against an in-process control plane is the same wire path the \
                  shell pipeline would exercise",
             );
 
     // Step 3 — assert on the field `jq -r .spec_digest` would extract.
     // The shell pipeline would observe a single JSON object on stdout,
-    // pipe it to jq, and read 64 hex chars. The typed `SubmitOutput`
-    // is what `submit` returns from parsing the same JSON body — so
+    // pipe it to jq, and read 64 hex chars. The typed `DeployOutput`
+    // is what `deploy` returns from parsing the same JSON body — so
     // asserting on `output.spec_digest` IS asserting on what jq would
     // print.
     assert_eq!(

@@ -92,7 +92,7 @@ overdrive-control-plane.path = "../overdrive-control-plane"
 tempfile.workspace           = true
 base64.workspace             = true
 # Per ADR-0019 the operator config is TOML; the `toml` runtime dep
-# above covers both the `job submit` spec loader and the integration
+# above covers both the `deploy` spec loader and the integration
 # tests that round-trip the trust triple. No YAML serde backend
 # (`serde_yaml` / `serde_yml`) in this crate's dependency graph — the
 # absence is enforced by `cargo xtask yaml-free-cli` in CI (ADR-0019

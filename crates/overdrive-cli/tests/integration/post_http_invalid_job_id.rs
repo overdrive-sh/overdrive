@@ -5,7 +5,7 @@
 //! [`WorkloadId::new`](overdrive_core::id::WorkloadId::new) constructor rejects.
 //!
 //! Bug under regression. The handler at
-//! `crates/overdrive-cli/src/commands/job.rs:110` was mapping post-HTTP
+//! `crates/overdrive-cli/src/commands/deploy.rs:110` was mapping post-HTTP
 //! `WorkloadId::new` failure to [`CliError::InvalidSpec`] — but per the rustdoc
 //! on the variants in `crates/overdrive-cli/src/http_client.rs:39-88`:
 //!
@@ -34,7 +34,7 @@
 //! end-to-end shape would. The mutation-testing gate at the per-file level
 //! still sees this as the canonical test for the variant choice.
 
-use overdrive_cli::commands::job::parse_response_job_id;
+use overdrive_cli::commands::deploy::parse_response_job_id;
 use overdrive_cli::http_client::CliError;
 
 /// A `workload_id` value that is JSON-decodable (it is just a `String`) but

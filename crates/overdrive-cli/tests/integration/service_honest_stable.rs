@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use bytes::BytesMut;
 use futures::StreamExt as _;
 use overdrive_cli::commands::cluster::StatusArgs as ClusterStatusArgs;
-use overdrive_cli::commands::job::StopArgs;
+use overdrive_cli::commands::deploy::StopArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::ApiClient;
 use overdrive_control_plane::api::SubmitWorkloadRequest;
@@ -82,7 +82,7 @@ fn read_example_toml(name: &str) -> String {
 /// `ServiceSubmitEvent` line until the stream emits a terminal event
 /// (`Stable`, `Failed`, or `Stopped`) or the response body closes.
 ///
-/// Higher-level than `submit_streaming` because the typed
+/// Higher-level than `deploy_streaming` because the typed
 /// `ServiceSubmitEvent` values are needed by S-SHCP-INT-CLI-04 to
 /// reconstruct `TerminalCondition::Stable { settled_in_ms, witness }`
 /// for the rkyv byte-equality assertion. The TOML is parsed and
@@ -101,7 +101,7 @@ async fn submit_service_and_collect_events(
     };
 
     // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`,
-    // mirroring `commands::job::submit_streaming_service`. The wire
+    // mirroring `commands::deploy::deploy_streaming_service`. The wire
     // shape preserves probe descriptors verbatim (including the
     // ADR-0058 default-TCP probe synthesised at parse time when the
     // TOML omits `[[health_check.startup]]`).
@@ -291,7 +291,7 @@ async fn given_quick_bind_service_fixture_when_submit_then_stable_settled_in_wit
     // the next test in this binary executes. The `#[serial(
     // workload_cgroup)]` attribute already prevents overlap with
     // sibling tests; this is belt-and-braces.
-    let _ = overdrive_cli::commands::job::stop(StopArgs {
+    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "quick-bind".to_owned(),
         config_path: config_path(tmp.path()),
     })
@@ -359,7 +359,7 @@ async fn given_never_binds_service_fixture_when_submit_then_failed_startup_probe
         ),
     }
 
-    let _ = overdrive_cli::commands::job::stop(StopArgs {
+    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "never-binds".to_owned(),
         config_path: config_path(tmp.path()),
     })
@@ -453,7 +453,7 @@ async fn given_stable_decision_when_snapshot_and_streaming_terminal_then_byte_eq
          witness={witness:?}"
     );
 
-    let _ = overdrive_cli::commands::job::stop(StopArgs {
+    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "quick-bind".to_owned(),
         config_path: config_path(tmp.path()),
     })
@@ -643,7 +643,7 @@ async fn given_coinflip_as_service_fixture_when_submit_100_seeds_then_99_emit_fa
         // Clean the alloc up before the next trial so cgroup scopes do
         // not accumulate. The helper has already exited, so this is a
         // no-op converge on a Failed alloc in the common case.
-        let _ = overdrive_cli::commands::job::stop(StopArgs {
+        let _ = overdrive_cli::commands::deploy::stop(StopArgs {
             id: format!("coinflip-svc-{trial:03}"),
             config_path: cfg.clone(),
         })
