@@ -6,6 +6,13 @@ Accepted. 2026-05-04. Decision-makers: Morgan (proposing), user
 ratification 2026-05-04. Tags: cross-cutting, tls, identity, mtls,
 compliance, dependency.
 
+**Implementation status (added 2026-06-05): NOT YET IMPLEMENTED.** Despite
+acceptance, the workspace remains on `ring` — `rustls` and `rcgen` pin the
+`ring` feature and no crate enables `aws-lc-rs` (the `aws-lc-rs = "1"` dep is
+declared but unused). Discovered during built-in-ca DESIGN (#28).
+Implementation is tracked by **#204**. Until #204 lands, the FIPS 140-3 posture
+this ADR describes is aspirational, not active.
+
 ## Context
 
 `rustls` is the platform's TLS terminator at every userspace handshake
@@ -370,3 +377,9 @@ ADR-0010 (Phase 1 TLS bootstrap) is unchanged.
 ## Changelog
 
 - 2026-05-04 — Initial accepted version.
+- 2026-06-05 — Added implementation-status note to § Status: the ADR is
+  accepted but **not yet implemented** — the workspace is still on `ring`
+  (`rustls`/`rcgen` pin the `ring` feature; the declared `aws-lc-rs` dep is
+  unused). Discovered during built-in-ca DESIGN (#28); implementation tracked
+  by **#204**. Decision/context unchanged — aws-lc-rs remains the intended
+  provider.

@@ -676,3 +676,146 @@ signal. The shared-helper call graph (connect4 + sendmsg4 + recvmsg4 →
 recvmsg4 — and its own rewrite direction) is captured in
 `feature-delta.md` § DESIGN component decomposition.
 
+---
+
+## Built-in CA — `Ca` port trait + 3-tier hierarchy (Mermaid)
+
+**Source:** `docs/feature/built-in-ca/` DESIGN-wave artifacts.
+**ADR:** ADR-0063. Supersedes ADR-0010 for *workload identity* only.
+**Date:** 2026-06-05. **GH:** #28 [2.6]. Single-node.
+
+### C4 Level 1 — System Context
+
+The platform IS the CA — no external PKI (SPIRE / cert-manager / Vault).
+The new external boundaries are the **Linux kernel keyring** (holds the KEK
+in kernel space) and **systemd-creds** (delivers the KEK at boot,
+host-key/TPM-backed). Sam (platform/security engineer) verifies the chain
+with `openssl verify`, not by trusting the platform's word.
+
+```mermaid
+C4Context
+  title System Context — Overdrive built-in CA (GH #28)
+
+  Person(sam, "Platform/Security Engineer (Sam)", "Builds + operates the identity layer; verifies the chain with `openssl verify`; threat-models by default")
+  System(overdrive, "Overdrive node", "Single binary — control plane + worker; now mints a persistent Root → Node-Intermediate → Workload-SVID hierarchy behind a `Ca` port trait")
+  System_Ext(keyring, "Linux kernel keyring", "Holds the 256-bit KEK in kernel space (add_key/keyctl); volatile across reboots")
+  System_Ext(systemd_creds, "systemd-creds", "LoadCredentialEncrypted — host-key/TPM-backed; delivers the KEK to the service at each boot")
+  System_Ext(ci, "CI", "Runs `openssl verify` over real rcgen output (Tier-3, integration-tests via Lima) + seeded DST equivalence (Tier-1)")
+
+  Rel(sam, overdrive, "Runs a workload (overdrive deploy); reads the issued_certificates audit row; verifies chains")
+  Rel(overdrive, systemd_creds, "Loads the encrypted KEK credential at boot")
+  Rel(overdrive, keyring, "Loads KEK into the keyring; reads it back to derive the root-key encryption subkey")
+  Rel(ci, overdrive, "Gates: 100% of SVIDs chain-verify (K1); single-URI-SAN (K2); no plaintext key at rest (K3); DST determinism (K5)")
+```
+
+### C4 Level 2 — Container
+
+`overdrive-core` gains the pure `Ca` trait + `CertSpec` builder + the two
+rkyv envelopes + the `Kek` provider port — **no rcgen, no aws-lc-rs** (dst-lint
+boundary). `overdrive-host` gains `RcgenCa` (all rcgen/aws-lc-rs/HKDF/AEAD usage)
++ `SystemdCredsKeyring`. `overdrive-sim` gains `SimCa` (fixture keys) for DST.
+The Root-CA key persists as intent (IntentStore/redb); the
+`issued_certificates` audit row is observation.
+
+```mermaid
+C4Container
+  title Container Diagram — Overdrive built-in CA
+
+  Person(sam, "Platform/Security Engineer (Sam)", "Runs workloads; verifies + audits issuance")
+
+  Container(cli, "overdrive-cli", "Rust binary", "Composition root — wires RcgenCa + SystemdCredsKeyring (prod) or SimCa (tests); probes the CA before serving (wire→probe→use)")
+  Container(ctrl, "overdrive-control-plane", "Rust crate", "Boot path triggers Ca::root() (generate-or-load); workload-start path triggers Ca::issue_svid(); writes the issued_certificates audit row")
+  Container(worker, "overdrive-worker", "adapter-host", "Node bootstrap path triggers Ca::issue_intermediate(node) — single-node, one intermediate")
+  Container(core, "overdrive-core", "Rust crate (class core)", "NEW Ca trait + CertSpec builder + RootCaKeyEnvelope + IssuedCertificateRowEnvelope + Kek provider port. NO rcgen/aws-lc-rs (dst-lint). Reuses SpiffeId/CertSerial/NodeId/Entropy/VersionedEnvelope")
+  Container(host, "overdrive-host", "adapter-host", "NEW RcgenCa (all rcgen + aws-lc-rs + HKDF + AES-256-GCM) + SystemdCredsKeyring (KEK provider). The explicit opt-in to real crypto/FFI/keyring")
+  Container(sim, "overdrive-sim", "adapter-sim", "NEW SimCa (fixture P-256 keys via PEM) + fixture Kek; serials via SeededEntropy → DST-deterministic")
+  ContainerDb(intent, "LocalStore (redb)", "IntentStore", "Root-CA key as RootCaKeyEnvelope (AES-256-GCM ciphertext + HKDF params + kek_id). Linearizable. NEVER observation")
+  ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "issued_certificates row (serial, spiffe_id, issuer_serial, not_before, not_after, node_id, issued_at). Gossiped when #36 lands")
+  System_Ext(keyring, "Linux kernel keyring", "KEK in kernel space")
+  System_Ext(systemd_creds, "systemd-creds", "KEK delivery at boot")
+
+  Rel(sam, cli, "overdrive deploy <spec>")
+  Rel(cli, ctrl, "Boots control plane; injects Arc<dyn Ca>")
+  Rel(cli, host, "Instantiates RcgenCa + SystemdCredsKeyring; calls Ca probe")
+  Rel(cli, sim, "Instantiates SimCa [tests/DST]")
+  Rel(ctrl, core, "Ca::root() / Ca::issue_svid(req) — speaks SpiffeId/CertSerial + CertSpec")
+  Rel(worker, core, "Ca::issue_intermediate(node)")
+  Rel(host, keyring, "Reads KEK; HKDF-derives subkey")
+  Rel(host, systemd_creds, "LoadCredentialEncrypted at boot")
+  Rel(ctrl, intent, "Persists/reads RootCaKeyEnvelope (intent fail-fast on decode failure)")
+  Rel(ctrl, obs, "Writes issued_certificates per issuance (no silent issuance)")
+```
+
+### C4 Level 3 — CA subsystem component decomposition
+
+Warranted by the complexity (trait → host/sim adapters → IntentStore /
+ObservationStore / keyring / Entropy). Makes the two reconciliation
+decisions explicit: **(B)** the pure `CertSpec` builder lives in core and the
+host adapter translates it to `rcgen::CertificateParams`; **(A)** the
+`RcgenCa` HKDF-derives a subkey from the keyring KEK before AES-256-GCM.
+
+```mermaid
+C4Component
+  title Component Diagram — built-in CA subsystem
+
+  Container_Boundary(core, "overdrive-core (class core — no rcgen)") {
+    Component(ca_trait, "Ca trait (NEW)", "traits/ca.rs", "root() / issue_intermediate(node) / issue_svid(req) / trust_bundle(). Rustdoc pins pre/post/edge/invariants; speaks newtypes + typed PEM/DER byte newtypes")
+    Component(certspec, "CertSpec builder (NEW)", "ca/cert_spec.rs", "Pure policy: CertRole {Root, Intermediate{path_len}, Svid}; svid() ENFORCES single-URI-SAN (rejects 0 or ≥2) + CA:FALSE + keyUsage=digitalSignature critical. DST-testable")
+    Component(rootenv, "RootCaKeyEnvelope (NEW)", "ca/root_key.rs", "rkyv versioned envelope (ADR-0048). RootCaKeyRecordV1 {kek_id, salt, info, nonce, ciphertext, aead_tag}. Persists INPUTS not derived. archive_for_store/from_store_bytes co-located")
+    Component(auditenv, "IssuedCertificateRowEnvelope (NEW)", "traits/observation_store.rs", "rkyv envelope mirroring AllocStatusRow. {serial, spiffe_id, issuer_serial, not_before, not_after, node_id, issued_at}")
+    Component(kekport, "Kek provider port (NEW)", "traits/kek.rs", "kek() -> Result<KekBytes, KekError>. The pluggable KEK-source seam (env → systemd-creds → future HSM)")
+    Component(ids, "SpiffeId / CertSerial / NodeId (REUSE)", "id.rs", "Existing newtypes — subject, serial, issuer identity. No change")
+    Component(entropy, "Entropy port (REUSE)", "traits/entropy.rs", "fill() for ≥64-bit CSPRNG serials. OsEntropy prod / SeededEntropy DST. No change")
+  }
+
+  Container_Boundary(host, "overdrive-host (adapter-host)") {
+    Component(rcgenca, "RcgenCa (NEW)", "ca/rcgen_ca.rs", "Implements Ca. Translates CertSpec → rcgen::CertificateParams (B); KeyPair::generate (backend CSPRNG, NOT injectable); self_signed/signed_by; holds root+intermediate signing keys in memory")
+    Component(aead, "Root-key AEAD codec (NEW)", "ca/aead.rs", "HKDF-SHA256-derive subkey from keyring KEK (A) → AES-256-GCM seal/open root key DER; aad = kek_id; distinct tampered-vs-wrong-KEK errors")
+    Component(keyringkek, "SystemdCredsKeyring (NEW)", "ca/keyring.rs", "Kek provider — LoadCredentialEncrypted → add_key into kernel keyring → read back; OVERDRIVE_CA_KEK dev-only fallback")
+  }
+
+  Container_Boundary(sim, "overdrive-sim (adapter-sim)") {
+    Component(simca, "SimCa (NEW)", "adapters/ca.rs", "Implements Ca via fixture P-256 keys (KeyPair::from_pem); shares CertSpec policy with host; serials via SeededEntropy → bit-identical at a seed")
+    Component(simkek, "fixture Kek (NEW)", "adapters/ca.rs", "Deterministic fixture KEK for DST")
+  }
+
+  ContainerDb(intent, "IntentStore (redb)", "LocalStore", "RootCaKeyEnvelope")
+  ContainerDb(obs, "ObservationStore (redb)", "LocalObservationStore", "issued_certificates")
+  System_Ext(keyring, "Linux kernel keyring", "KEK")
+
+  Rel(ca_trait, certspec, "issue_* builds a CertSpec (policy decision)")
+  Rel(certspec, ids, "Speaks SpiffeId/CertSerial")
+  Rel(certspec, entropy, "Serial drawn via Entropy::fill")
+  Rel(rcgenca, ca_trait, "implements")
+  Rel(simca, ca_trait, "implements")
+  Rel(rcgenca, certspec, "Translates CertSpec → rcgen::CertificateParams (B)")
+  Rel(simca, certspec, "Shares the same CertSpec policy surface")
+  Rel(rcgenca, aead, "Seals/opens the root key")
+  Rel(aead, keyringkek, "Gets KEK bytes")
+  Rel(keyringkek, kekport, "implements")
+  Rel(keyringkek, keyring, "add_key / keyctl read")
+  Rel(rcgenca, rootenv, "Wraps sealed root key via RootCaKeyEnvelope::latest")
+  Rel(rootenv, intent, "Persisted / read (intent fail-fast on decode failure)")
+  Rel(rcgenca, auditenv, "Writes issued_certificates per issuance")
+  Rel(auditenv, obs, "Persisted (no silent issuance)")
+```
+
+Five properties the diagrams make explicit:
+
+1. **rcgen/aws-lc-rs never touch `overdrive-core`** (dst-lint boundary). The
+   trait speaks newtypes + typed byte newtypes; `CertSpec` is pure policy; the
+   `RcgenCa` adapter is the sole rcgen site. (B resolved.)
+2. **The single-URI-SAN rejection is in core** (`CertSpec::svid`), so it is
+   DST-testable and the sim adapter shares the exact policy — the highest-value
+   invariant (K2) is not a host-adapter shortcut.
+3. **CA material is intent; the audit is observation.** `RootCaKeyEnvelope` →
+   IntentStore (linearizable, fail-fast); `issued_certificates` →
+   ObservationStore (gossiped when #36 lands). They never merge (whitepaper §4).
+4. **The KEK lives in kernel space** (keyring), delivered by systemd-creds at
+   boot; the root key is HKDF+AES-256-GCM-sealed under it (A resolved). The dev
+   `OVERDRIVE_CA_KEK` fallback is gated dev-only.
+5. **Earned Trust: wire → probe → use.** The composition root probes KEK
+   presence + envelope-decrypt before the control plane serves; a probe failure
+   refuses startup (`health.startup.refused`), distinct errors for tampered vs
+   wrong-KEK.
+

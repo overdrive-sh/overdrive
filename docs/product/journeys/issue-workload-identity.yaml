@@ -1,0 +1,143 @@
+schema_version: 1
+
+# Product-level journey for the built-in certificate authority (GH #28).
+#
+# This is a SECURITY-PRIMITIVE / capability journey, not an operator-CLI
+# journey. The CA's happy path is mostly internal platform mechanism —
+# there is NO direct operator verb to "issue an SVID" in this phase (SVID
+# issuance is triggered by the platform when it runs a workload). The
+# operator-visible surfaces are: the control plane starting cleanly with a
+# persistent CA, and (audit) the issued-certificates observation row.
+#
+# Lightweight depth (D3): happy path + key error paths, no rich emotional
+# arc — this is infrastructure. Maps to J-SEC-001.
+#
+# Feature origin: built-in-ca DISCUSS wave (2026-06-04). The authoritative
+# detailed version lives in docs/feature/built-in-ca/feature-delta.md
+# (§ Wave: DISCUSS). This file is the product-level summary for cross-feature
+# reference.
+
+journey:
+  name: "Give every workload a platform-minted cryptographic identity"
+  goal: >
+    The Overdrive control plane is its own certificate authority: it
+    generates and protects a persistent Root CA, issues each node an
+    intermediate CA at bootstrap, and mints a short-lived X.509 SVID with a
+    SPIFFE URI SAN for every workload it runs — each cert chain-verifiable
+    back to the root, with no external PKI (SPIRE / cert-manager / Vault) to
+    operate.
+  persona: >
+    Sam, platform/security engineer (see
+    docs/product/personas/sam-platform-security-engineer.yaml). Builds the CA
+    primitive and defends the trust story to a security reviewer.
+
+  emotional_arc:
+    start: "Skeptical, threat-modelling — 'a self-built CA? prove it is correct and the root key is not in plaintext.'"
+    middle: "Reassured incrementally — root key round-trips through envelope decryption; the intermediate is pathLen-constrained; the SVID carries exactly one URI SAN."
+    end: "Confident — 'openssl verify accepts the chain, the root key is encrypted at rest, and there is no second daemon to operate.'"
+
+steps:
+  - id: 1
+    name: "Root CA exists and its key is protected at rest"
+    command: "(internal — on control-plane bootstrap; root key envelope-encrypted in IntentStore)"
+    summary: >
+      On first boot the control plane generates a self-signed P-256 Root CA
+      (rcgen, aws-lc-rs backend per ADR-0039), then envelope-encrypts the
+      private key (AES-256-GCM DEK, KEK from operator passphrase) and stores
+      the encrypted blob — never the plaintext key — in the IntentStore. On
+      subsequent boots it decrypts and reuses the same root (persistent, not
+      ephemeral — this is what supersedes ADR-0010).
+    emotional_state:
+      entry: "Skeptical — 'where does the root come from and is the key safe?'"
+      exit: "Reassured — 'the key round-trips through authenticated decryption; only the ciphertext is on disk.'"
+
+  - id: 2
+    name: "Node receives a pathLen-constrained intermediate CA at bootstrap (limiting what a compromised node can sign)"
+    command: "(internal — at node bootstrap; intermediate signed by the root)"
+    summary: >
+      At node bootstrap the platform mints a Node Intermediate CA, signed by
+      the root, with basicConstraints pathLen=0 — it can issue leaf SVIDs
+      but cannot mint further intermediates, bounding blast radius on node
+      compromise. In single-node Phase 2.6 the one co-located node gets
+      exactly one intermediate.
+    emotional_state:
+      entry: "Focused — 'can the node sign workload identities locally, and is that power bounded?'"
+      exit: "Reassured — 'the intermediate is pathLen=0; a compromised node cannot mint further CAs.'"
+
+  - id: 3
+    name: "Workload gets an SVID with a single SPIFFE URI SAN (a forgery-proof identity the platform mints)"
+    command: "(internal — at workload start; SVID signed by the node intermediate)"
+    summary: >
+      When the platform starts an allocation, the node intermediate signs a
+      short-lived (1h TTL) leaf SVID carrying exactly one SPIFFE URI SAN
+      (spiffe://overdrive.local/job/<name>/alloc/<id>), CA:FALSE,
+      keyUsage=digitalSignature (critical), and a CSPRNG serial drawn through
+      the Entropy port. Re-issuance on demand mints a fresh valid leaf
+      without a control-plane restart.
+    emotional_state:
+      entry: "Focused — 'does the leaf match the SPIFFE spec exactly?'"
+      exit: "Confident — 'one URI SAN, CA:FALSE, signed by the intermediate — spec-compliant.'"
+
+  - id: 4
+    name: "The chain verifies and issuance is auditable"
+    command: "overdrive alloc status --job <id>  (SVID metadata)  +  openssl verify (chain)"
+    summary: >
+      The trust bundle composes {root [+ intermediate as needed]} so that an
+      SVID validates back to the root with a standard tool. Each issuance
+      writes an issued_certificates observation row (serial, spiffe_id,
+      issuer_serial, not_before, not_after, node_id) — the internal CT
+      equivalent, gossiped like any other observation. No silent issuance.
+    emotional_state:
+      entry: "Skeptical — 'does it ACTUALLY verify, independent of the platform's word?'"
+      exit: "Confident — 'openssl verify accepts it and I can see exactly what was issued, when, and by whom.'"
+
+error_paths:
+  - step: 1
+    failure: "Root CA key cannot be decrypted at boot (wrong passphrase / corrupt envelope / tampered ciphertext)"
+    recovery: >
+      The control plane REFUSES to start with a structured, actionable
+      error naming the cause (bad passphrase vs corrupt/tampered envelope —
+      AES-GCM authentication distinguishes them) and the IntentStore path.
+      It MUST NOT silently re-mint a new root (that would orphan every
+      existing SVID and break trust). Per development.md § Intent =
+      load-bearing: refuse to start, surface health.startup.refused.
+  - step: 2
+    failure: "Intermediate signing fails at node bootstrap (root key unavailable / rcgen error)"
+    recovery: >
+      Node bootstrap fails loudly with a typed error; the node does not
+      proceed to run workloads it cannot issue identities for. No
+      half-provisioned state.
+  - step: 3
+    failure: "SVID issuance would produce zero or more-than-one URI SAN, or signing fails"
+    recovery: >
+      Issuance is rejected before any cert is handed out; the SPIFFE
+      single-URI-SAN invariant is enforced by construction. The allocation
+      does not start without a valid identity.
+
+integration_validation:
+  shared_artifacts_summary:
+    - "trust_domain — spiffe://overdrive.local; single source is the SpiffeId newtype in overdrive-core; consumed by every SVID SAN and by the SpiffeId validator."
+    - "root CA cert (PEM/DER) — single source is the IntentStore-persisted root; consumed by intermediate signing, by trust-bundle composition, and by chain verification."
+    - "issued SVID serial — CSPRNG via the Entropy port (OsEntropy prod, SeededEntropy DST per research Finding 10); consumed by the cert itself and by the issued_certificates audit row."
+
+related_jobs: [J-SEC-001]
+
+related_features:
+  - id: built-in-ca
+    role: "Ships the persistent CA hierarchy (root + per-node intermediate + workload SVID) that supersedes the Phase-1 ephemeral in-process CA (ADR-0010)."
+
+deferred_outside_this_journey:
+  - "Certificate rotation lifecycle (the scheduled-renewal workflow) → GH #40, depends on workflow primitive GH #39. The engine here can re-issue on demand; the rotation workflow that drives renewal is #40."
+  - "Operator cert minting (overdrive op create), operator SPIFFE IDs, OIDC enrolment, Biscuit delegation → Phase 5 / Phase 7 (whitepaper §8 Deferred)."
+  - "Gossip-propagated revocation (revoked_operator_certs) → Phase 5."
+  - "mTLS handshake + kTLS session-key install (the CA's consumer) → separate feature."
+  - "Multi-node CA: per-node intermediates + node attestation at bootstrap → GH #36 [2.14] (node enrollment / admission handler; already depends on #28). Single-node #28 gets exactly one intermediate."
+  - "Multi-region CA federation → GH #104 [7.1] (multi-region federation) + GH #83 [5.17] (operator trust-bundle federation across regions)."
+
+changelog:
+  - date: 2026-06-04
+    feature: built-in-ca
+    change: >
+      Initial product-level journey for the built-in CA primitive (GH #28).
+      Maps to J-SEC-001. Lightweight depth — security-primitive capability
+      path, no operator-facing SVID-issuance verb in this phase.

@@ -1,0 +1,70 @@
+schema_version: 1
+
+# Persona for the built-in-ca feature (GH #28) and future J-SEC-* jobs.
+#
+# This is the platform-internal security engineer arc — distinct from the
+# docs-consumer personas (priya-evaluator, maya-agent-developer). Sam is the
+# person who builds AND operates the platform's identity layer. Where prior
+# platform journeys (submit-a-job, trust-the-sim) reference "Ana, Overdrive
+# platform engineer", Sam is the same archetype seen through a security lens:
+# the engineer who has to defend "how does identity work, and is it real?" to
+# a security reviewer and to themselves.
+#
+# Origin: built-in-ca DISCUSS wave (2026-06-04). Distilled from whitepaper
+# §4/§8/§19 and vision.md, not from user interviews.
+
+persona:
+  id: sam-platform-security-engineer
+  name: "Sam Okafor"
+  role: "Platform / security engineer building and operating Overdrive's identity layer"
+  one_liner: >
+    Owns the trust story for an Overdrive deployment. Has run SPIRE +
+    cert-manager + Vault in a previous life and remembers every 3am page
+    caused by an expired intermediate or a misconfigured trust bundle.
+    Wants workload identity to be a built-in property of the platform —
+    forgery-proof by construction — not a second distributed system bolted
+    on beside it.
+
+  characteristics:
+    - "10+ years platform/SRE with a security specialism; has operated a production PKI and hated it"
+    - "Reads RFCs and the SPIFFE X.509-SVID spec directly; will not accept hand-waving about cert profiles"
+    - "Threat-models by default — asks 'what can a compromised workload do?' before 'does the happy path work?'"
+    - "Distrusts security that must be remembered/configured; trusts security that is structural and cannot be turned off"
+    - "Will personally verify a chain with `openssl verify` rather than take the platform's word for it"
+
+  context:
+    device: "Laptop + terminal; a Lima/Linux VM for the real-kernel surface; openssl and step CLI always within reach"
+    entry_points:
+      - "Building the CA primitive itself (the crafter persona) — writing the port trait + host adapter over rcgen"
+      - "Standing up a new Overdrive cluster and asking 'where does workload identity come from, and is the root key safe?'"
+      - "Preparing a security review / FIPS attestation and needing to point at a real, correct trust hierarchy"
+    triggers:
+      - "A new deployment that must carry cryptographic workload identity (billing, policy, mTLS all depend on it)"
+      - "A security reviewer asking 'show me the cert chain and how the root key is protected'"
+      - "The Phase-1 ephemeral CA (ADR-0010) proving insufficient — it dies on restart and has no SPIFFE identity"
+
+  motivations:
+    functional: "Get a real, persistent Root CA → Node Intermediate → Workload SVID chain that validates back to the root, minted by the platform itself with no external PKI to operate"
+    emotional: "Trust that identity is forgery-proof by construction — sleep through the night because expiry, not operator vigilance, is the security boundary"
+    social: "Tell a security reviewer 'identity is a built-in SPIFFE-compliant CA with an envelope-encrypted root key and pathLen-constrained intermediates' — and have it be verifiably true"
+
+  emotional_arc:
+    start: "Skeptical and threat-modelling — 'a self-built CA? show me it is actually correct and that the root key is not sitting in plaintext on disk.'"
+    middle: "Reassured incrementally — the root CA generates and its key round-trips through envelope decryption; the node intermediate is pathLen-constrained; the SVID carries exactly one SPIFFE URI SAN; `openssl verify` accepts the chain."
+    end: "Confident and quietly relieved — 'this is a real trust hierarchy I can defend in a review, and there is no second daemon for me to operate or page on.'"
+
+  frustrations_to_avoid:
+    - "A root CA private key stored unencrypted, or encrypted with an unauthenticated cipher (integrity matters as much as confidentiality)"
+    - "A leaf SVID with zero or more-than-one URI SAN (the SPIFFE spec's single hardest constraint — a multi-URI SVID must be rejected)"
+    - "An intermediate that can mint further intermediates (no pathLen constraint) — unbounded blast radius on node compromise"
+    - "A chain that does not actually verify back to the root, or a trust bundle that silently omits the root"
+    - "Aspirational security docs describing rotation/revocation that is not built yet (erodes trust in the whole claim)"
+    - "Being forced to operate a separate identity stack (SPIRE/Vault) alongside the platform that promised to absorb it"
+
+  success_signals:
+    - "A workload's SVID chain-verifies to the root with a standard tool (openssl verify), independent of the platform's own assertion"
+    - "The root CA key is never observable in plaintext at rest — only the envelope-encrypted blob is on disk"
+    - "Re-issuing an SVID on demand produces a fresh, valid leaf without restarting the control plane"
+    - "Zero external identity components to deploy, monitor, or upgrade"
+
+  related_jobs: [J-SEC-001]

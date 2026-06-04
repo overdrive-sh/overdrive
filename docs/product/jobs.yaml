@@ -162,6 +162,82 @@ jobs:
     served_by_phase: 1
     status: active
 
+  - id: J-SEC-001
+    title: "Give every workload a forgery-proof cryptographic identity the platform mints itself, with no external PKI to operate"
+    situation: >
+      When I, an Overdrive platform engineer (or the platform operator I
+      hand a cluster to), run a workload on the platform — and that
+      workload's traffic, billing record, and policy decision all hinge on
+      "which workload is this, really" — and I have no separate SPIRE
+      server, cert-manager, or Vault to lean on,
+    motivation: >
+      I want the control plane to BE the certificate authority: generate
+      its own root CA and protect that key at rest, issue each node an
+      intermediate CA at bootstrap, and mint a short-lived X.509 SVID
+      (SPIFFE URI SAN, e.g. spiffe://overdrive.local/job/payments/alloc/a1b2c3)
+      for every workload it runs — every cert chain-verifiable back to the
+      root, with no operator PKI plumbing to stand up,
+    outcome: >
+      so the whitepaper's structural-security promise (design principle 3:
+      "every packet carries cryptographic workload identity") rests on a
+      real, persistent trust hierarchy rather than the Phase-1 ephemeral
+      stub (ADR-0010); so the SPIFFE-identity-on-every-flow-event billing
+      pillar (vision.md strategic pillar 2) and the FIPS/HSM enterprise
+      self-hosted tier have a CA primitive to build on; and so adopting
+      Overdrive does NOT mean adopting and operating a second identity
+      stack alongside it.
+    job_dimensions:
+      functional: >
+        Produce a verifiable chain Root CA → Node Intermediate CA →
+        Workload SVID, where the leaf carries exactly one SPIFFE URI SAN
+        and validates back to the root; re-mint a fresh SVID on demand.
+      emotional: >
+        Trust that identity is forgery-proof by construction (a compromised
+        workload cannot mint its own identity; a compromised node's
+        intermediate cannot mint further intermediates) — security I do not
+        have to remember to configure.
+      social: >
+        Be able to tell a security reviewer "identity is a built-in X.509
+        CA with envelope-encrypted root key and pathLen-constrained
+        intermediates, SPIFFE-compliant" — and have that be true, not
+        aspirational.
+    four_forces:
+      push: >
+        The Phase-1 CA is ephemeral and in-process (ADR-0010): it dies on
+        restart, encodes identity in the CN not a SPIFFE URI SAN, and has
+        no per-node intermediate. It cannot underpin persistent workload
+        identity, billing evidence, or a FIPS story. Operating SPIRE +
+        cert-manager + Vault is exactly the multi-component operational
+        surface Overdrive exists to collapse (vision.md principle 1).
+      pull: >
+        One binary that is its own CA: persistent root, per-node
+        intermediate at bootstrap, SVID per allocation, trust bundle
+        gossiped — no daemon, no gRPC server↔agent hop, FIPS-aligned crypto
+        (aws-lc-rs, ADR-0039) end to end.
+      anxiety: >
+        "Is a self-built CA actually correct?" (mitigated: rcgen covers
+        100% of the SPIFFE X.509-SVID extension surface — research Finding
+        1/2; SPIRE/Istio/Linkerd are the precedent — Finding 5/6). "Is the
+        root key safe at rest?" (mitigated: aws-lc-rs AES-256-GCM envelope
+        encryption, authenticated — Finding 8). "Does it compose with DST?"
+        (mitigated: serial numbers flow through the Entropy port; key
+        generation is a host-adapter concern with fixture keys under DST —
+        Finding 10/11).
+      habit: >
+        Teams reach for SPIRE/SPIFFE-aware sidecars and the Unix-socket
+        Workload API out of habit. Overdrive's internal SVID injection is a
+        different distribution path; the Workload-API compatibility shim is
+        deferred (research Gap 1) and is an explicit non-goal here.
+    source: >
+      whitepaper §4 (Built-in Certificate Authority), §8 (Identity and
+      mTLS), §19 (Security Model); vision.md design principle 3 + strategic
+      pillar 2 (SPIFFE→billing) + enterprise FIPS tier;
+      docs/research/security/built-in-ca-rcgen-rustls-comprehensive-research.md.
+      Distilled from the whitepaper, not from user interviews (per the
+      header precedent above).
+    served_by_phase: 2
+    status: active
+
   - id: J-DOCS-001
     title: "Find an authoritative Overdrive answer fast while evaluating or adopting"
     situation: >
@@ -281,6 +357,24 @@ changelog:
       pulls grounded Overdrive docs via MCP), and J-DOCS-003 (the docs
       maintainer prioritises from MCP/search analytics evidence). Existing
       entries unmodified.
+  - date: 2026-06-04
+    change: >
+      Added J-SEC-001 for the built-in-ca feature (GH #28, roadmap Phase
+      2.6). This is the first J-SEC-* job: it covers the platform's
+      built-in X.509 certificate authority — root CA generation +
+      envelope-encrypted key at rest, per-node intermediate CA at
+      bootstrap, and workload SVID issuance with SPIFFE URI SANs. Unlike
+      the J-PLAT-*/J-OPS-* DST/control-surface jobs, J-SEC-001 is a
+      security-primitive job underpinning design principle 3 (structural
+      security), strategic pillar 2 (SPIFFE→billing), and the enterprise
+      FIPS tier. Authored with full JTBD dimensions (functional/emotional/
+      social + four forces) per the DISCUSS wave decision, distilled from
+      whitepaper §4/§8/§19 — not from user interviews. The CA primitive
+      supersedes the Phase-1 ephemeral in-process CA (ADR-0010). Certificate
+      ROTATION (workflow, GH #40, depends on workflow primitive GH #39),
+      operator cert minting (Phase 5/7), gossip revocation (Phase 5), and
+      the mTLS handshake consumer are explicit non-goals — see
+      docs/feature/built-in-ca/feature-delta.md § Out-of-scope.
   - date: 2026-06-05
     change: >
       DIVERGE for unconnected-udp-sendmsg4 (GH #200) extracted the
