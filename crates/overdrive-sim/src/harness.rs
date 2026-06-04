@@ -124,7 +124,7 @@ pub struct RunReport {
 impl RunReport {
     /// `true` iff every invariant passed.
     #[must_use]
-    pub fn is_green(&self) -> bool {
+    pub const fn is_green(&self) -> bool {
         self.failures.is_empty()
     }
 }

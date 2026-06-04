@@ -119,16 +119,17 @@ pub fn scan_metadata(metadata: &Metadata) -> Result<Vec<ForbiddenDependency>> {
 
     let mut hits: Vec<ForbiddenDependency> = Vec::new();
     while let Some(id) = queue.pop_front() {
-        if let Some(name) = name_of.get(&id) {
-            if FORBIDDEN_CRATES.contains(&name.as_str()) && &id != target_id {
-                hits.push(ForbiddenDependency {
-                    name: name.clone(),
-                    chain: reconstruct_chain(&id, &parent, &name_of),
-                });
-                // Don't recurse past a forbidden node — one chain per
-                // forbidden package is enough to motivate the failure.
-                continue;
-            }
+        if let Some(name) = name_of.get(&id)
+            && FORBIDDEN_CRATES.contains(&name.as_str())
+            && &id != target_id
+        {
+            hits.push(ForbiddenDependency {
+                name: name.clone(),
+                chain: reconstruct_chain(&id, &parent, &name_of),
+            });
+            // Don't recurse past a forbidden node — one chain per
+            // forbidden package is enough to motivate the failure.
+            continue;
         }
         if let Some(children) = edges.get(&id) {
             for child in children {

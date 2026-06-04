@@ -646,10 +646,11 @@ fn blocking_io_path_matches(source: &str, prefix: &str) -> bool {
     // of the banned prefix.
     let prefix_segs: Vec<&str> = prefix.split("::").collect();
     let source_segs: Vec<&str> = source.split("::").collect();
-    if let Some(last_prefix_seg) = prefix_segs.last() {
-        if source_segs.len() >= 2 && source_segs.first() == Some(last_prefix_seg) {
-            return true;
-        }
+    if let Some(last_prefix_seg) = prefix_segs.last()
+        && source_segs.len() >= 2
+        && source_segs.first() == Some(last_prefix_seg)
+    {
+        return true;
     }
     false
 }
@@ -1307,17 +1308,15 @@ impl<'ast> Visit<'ast> for ProbeGateHelperCallCollector {
     }
 
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
-        if self.cfg_test_depth == 0 {
-            if let syn::Expr::Path(path_expr) = &*node.func {
-                if path_expr
-                    .path
-                    .segments
-                    .last()
-                    .is_some_and(|seg| seg.ident == "compose_and_probe_runner_gate")
-                {
-                    self.found_in_production = true;
-                }
-            }
+        if self.cfg_test_depth == 0
+            && let syn::Expr::Path(path_expr) = &*node.func
+            && path_expr
+                .path
+                .segments
+                .last()
+                .is_some_and(|seg| seg.ident == "compose_and_probe_runner_gate")
+        {
+            self.found_in_production = true;
         }
         visit::visit_expr_call(self, node);
     }
@@ -1579,24 +1578,23 @@ impl<'ast> Visit<'ast> for EnvelopeVariantCollector<'_> {
     }
 
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
-        if let Some(banned_path) = is_envelope_variant_call(node) {
-            if !self.is_allowed_context() {
-                // Locate the head segment span for accurate reporting.
-                if let syn::Expr::Path(path_expr) = &*node.func {
-                    if let Some(first) = path_expr.path.segments.first() {
-                        let start = first.ident.span().start();
-                        self.violations.push(Violation {
-                            file: self.file.to_path_buf(),
-                            line: start.line,
-                            column: start.column + 1,
-                            banned_path,
-                            replacement_trait:
-                                "<Envelope>::latest(payload) (codec-internal wrapping site)"
-                                    .to_owned(),
-                            kind: BannedKind::Api,
-                        });
-                    }
-                }
+        if let Some(banned_path) = is_envelope_variant_call(node)
+            && !self.is_allowed_context()
+        {
+            // Locate the head segment span for accurate reporting.
+            if let syn::Expr::Path(path_expr) = &*node.func
+                && let Some(first) = path_expr.path.segments.first()
+            {
+                let start = first.ident.span().start();
+                self.violations.push(Violation {
+                    file: self.file.to_path_buf(),
+                    line: start.line,
+                    column: start.column + 1,
+                    banned_path,
+                    replacement_trait: "<Envelope>::latest(payload) (codec-internal wrapping site)"
+                        .to_owned(),
+                    kind: BannedKind::Api,
+                });
             }
         }
         visit::visit_expr_call(self, node);

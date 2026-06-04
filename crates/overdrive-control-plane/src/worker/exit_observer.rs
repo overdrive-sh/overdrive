@@ -227,75 +227,73 @@ pub fn spawn_with_runtime(
                     // change. Per RCA `docs/evolution/2026-05-02-fix-exit-observer-
                     // write-retry.md` (or `docs/feature/fix-exit-observer-write-retry/
                     // deliver/rca.md` pre-archive).
-                    if let Some(runtime) = runtime.as_ref() {
-                        if let Ok(target) = TargetResource::new(&format!("job/{}", row.workload_id))
-                        {
-                            runtime.broker().submit(Evaluation {
-                                reconciler: workload_lifecycle_name(),
-                                target: target.clone(),
-                            });
-                            // backend-discovery-bridge-service-reachability
-                            // step 01-04 — re-enqueue the bridge for the
-                            // same workload-scoped target so the next tick
-                            // observes the AllocStatusRow transition the
-                            // exit observer just wrote (per
-                            // architecture.md § 3 step 5: "Broker
-                            // re-enqueues `BackendDiscoveryBridge` for the
-                            // workload (same enqueue site as
-                            // `WorkloadLifecycle`, keyed by
-                            // `WorkloadId`)"). The bridge's reconcile
-                            // body observes its own prior write via the
-                            // dedup fingerprint, so a Running → Failed
-                            // transition that removes a backend from the
-                            // running set fires a fresh
-                            // `Action::WriteServiceBackendRow` with the
-                            // updated `[backend]` slice.
-                            runtime.broker().submit(Evaluation {
-                                reconciler: backend_discovery_bridge_name(),
-                                target: target.clone(),
-                            });
-                            // GAP-9 (Shape C) — also re-enqueue the
-                            // service-lifecycle reconciler for the same
-                            // workload-scoped target so it observes the
-                            // AllocStatusRow transition the exit observer
-                            // just wrote (a Running → Failed transition is
-                            // exactly an EarlyExit / StartupProbeFailed
-                            // witness for a Service alloc).
-                            //
-                            // UNCONDITIONAL (not kind-gated): the exit
-                            // observer holds an `ObservationStore` but NOT
-                            // an `IntentStore`, so the persisted
-                            // workload-kind discriminator
-                            // (`IntentKey::for_workload_kind`) is not
-                            // cheaply readable here — kind-gating would
-                            // require threading the intent store through
-                            // the whole observer subsystem. Per the GAP-9
-                            // brief, unconditional enqueue is permitted
-                            // here PROVIDED it cannot busy-loop:
-                            //
-                            //   - For a Job-kind workload,
-                            //     `hydrate_actual`'s service-lifecycle arm
-                            //     reads `service_spec_from_intent`, which
-                            //     returns `None` on a kind mismatch →
-                            //     `actual.allocs` is empty → the reconcile
-                            //     loop emits 0 actions and returns a
-                            //     default `next_view` (empty `observed`).
-                            //   - `view_has_backoff_pending`'s
-                            //     ServiceLifecycle arm
-                            //     (`has_alloc_mid_startup_window`) returns
-                            //     false on that empty view.
-                            //
-                            // So a Job-kind enqueue runs exactly one empty
-                            // reconcile and then drains — no re-enqueue, no
-                            // churn. The kind-gated WorkloadLifecycle
-                            // dual-emit (Shape C in workload_lifecycle.rs)
-                            // is the precise first-tick path; this site is
-                            // the on-exit nudge.
-                            runtime.broker().submit(Evaluation {
-                                reconciler: service_lifecycle_name(),
-                                target,
-                            });
-                        }
+                    if let Some(runtime) = runtime.as_ref()
+                        && let Ok(target) = TargetResource::new(&format!("job/{}", row.workload_id))
+                    {
+                        runtime.broker().submit(Evaluation {
+                            reconciler: workload_lifecycle_name(),
+                            target: target.clone(),
+                        });
+                        // backend-discovery-bridge-service-reachability
+                        // step 01-04 — re-enqueue the bridge for the
+                        // same workload-scoped target so the next tick
+                        // observes the AllocStatusRow transition the
+                        // exit observer just wrote (per
+                        // architecture.md § 3 step 5: "Broker
+                        // re-enqueues `BackendDiscoveryBridge` for the
+                        // workload (same enqueue site as
+                        // `WorkloadLifecycle`, keyed by
+                        // `WorkloadId`)"). The bridge's reconcile
+                        // body observes its own prior write via the
+                        // dedup fingerprint, so a Running → Failed
+                        // transition that removes a backend from the
+                        // running set fires a fresh
+                        // `Action::WriteServiceBackendRow` with the
+                        // updated `[backend]` slice.
+                        runtime.broker().submit(Evaluation {
+                            reconciler: backend_discovery_bridge_name(),
+                            target: target.clone(),
+                        });
+                        // GAP-9 (Shape C) — also re-enqueue the
+                        // service-lifecycle reconciler for the same
+                        // workload-scoped target so it observes the
+                        // AllocStatusRow transition the exit observer
+                        // just wrote (a Running → Failed transition is
+                        // exactly an EarlyExit / StartupProbeFailed
+                        // witness for a Service alloc).
+                        //
+                        // UNCONDITIONAL (not kind-gated): the exit
+                        // observer holds an `ObservationStore` but NOT
+                        // an `IntentStore`, so the persisted
+                        // workload-kind discriminator
+                        // (`IntentKey::for_workload_kind`) is not
+                        // cheaply readable here — kind-gating would
+                        // require threading the intent store through
+                        // the whole observer subsystem. Per the GAP-9
+                        // brief, unconditional enqueue is permitted
+                        // here PROVIDED it cannot busy-loop:
+                        //
+                        //   - For a Job-kind workload,
+                        //     `hydrate_actual`'s service-lifecycle arm
+                        //     reads `service_spec_from_intent`, which
+                        //     returns `None` on a kind mismatch →
+                        //     `actual.allocs` is empty → the reconcile
+                        //     loop emits 0 actions and returns a
+                        //     default `next_view` (empty `observed`).
+                        //   - `view_has_backoff_pending`'s
+                        //     ServiceLifecycle arm
+                        //     (`has_alloc_mid_startup_window`) returns
+                        //     false on that empty view.
+                        //
+                        // So a Job-kind enqueue runs exactly one empty
+                        // reconcile and then drains — no re-enqueue, no
+                        // churn. The kind-gated WorkloadLifecycle
+                        // dual-emit (Shape C in workload_lifecycle.rs)
+                        // is the precise first-tick path; this site is
+                        // the on-exit nudge.
+                        runtime
+                            .broker()
+                            .submit(Evaluation { reconciler: service_lifecycle_name(), target });
                     }
                 }
                 RetryOutcome::NoPriorRow => {

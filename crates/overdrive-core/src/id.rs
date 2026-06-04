@@ -469,7 +469,7 @@ impl CertSerial {
         if raw.is_empty() {
             return Err(IdParseError::Empty { kind: "CertSerial" });
         }
-        if raw.len() % 2 != 0 {
+        if !raw.len().is_multiple_of(2) {
             return Err(IdParseError::InvalidFormat {
                 kind: "CertSerial",
                 expected: "even number of hex digits",

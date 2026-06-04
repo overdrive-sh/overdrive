@@ -429,10 +429,9 @@ pub async fn submit_workload(
                     state.store.get(kind_key.as_bytes()).await.map_err(|e| {
                         ControlPlaneError::internal("read workload kind (unchanged path)", e)
                     })?
+                    && let Some(b) = stored_kind_bytes.first().copied()
                 {
-                    if let Some(b) = stored_kind_bytes.first().copied() {
-                        workload_kind = WorkloadKind::from_discriminator_byte(b);
-                    }
+                    workload_kind = WorkloadKind::from_discriminator_byte(b);
                 }
                 enqueue_workload_lifecycle_eval(&state, &workload_id)?;
                 api::IdempotencyOutcome::Unchanged

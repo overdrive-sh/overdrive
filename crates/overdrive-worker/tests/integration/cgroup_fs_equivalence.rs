@@ -260,10 +260,10 @@ fn collect_files<'a>(
             let Ok(meta) = tokio::fs::metadata(&p).await else { continue };
             if meta.is_dir() {
                 collect_files(base, &p, acc).await;
-            } else if meta.is_file() {
-                if let Ok(relative) = p.strip_prefix(base) {
-                    acc.insert(relative.to_path_buf());
-                }
+            } else if meta.is_file()
+                && let Ok(relative) = p.strip_prefix(base)
+            {
+                acc.insert(relative.to_path_buf());
             }
         }
     })

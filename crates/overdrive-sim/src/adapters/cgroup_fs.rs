@@ -206,10 +206,10 @@ impl SimCgroupFs {
         // Cleanup: when a queue empties, drop the entry so iteration
         // order over `errors` only reflects live injections. Stable
         // across runs because BTreeMap iteration is `Ord`-deterministic.
-        if let Some(queue) = errors.get(&key) {
-            if queue.is_empty() {
-                errors.remove(&key);
-            }
+        if let Some(queue) = errors.get(&key)
+            && queue.is_empty()
+        {
+            errors.remove(&key);
         }
         kind
     }
@@ -272,10 +272,11 @@ impl CgroupFs for SimCgroupFs {
             // Parent-existence check — matches Real adapter NotFound shape
             // per ADR-0054 § Trait contract (the trait docstring pins
             // `Err(NotFound)` when the parent is absent).
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() && !state.contains_key(parent) {
-                    return Err(io::Error::from(io::ErrorKind::NotFound));
-                }
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+                && !state.contains_key(parent)
+            {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
             }
             // Refuse writing to a path that is currently a Dir. Matches
             // kernel POSIX semantics: `tokio::fs::write` (open + O_WRONLY)

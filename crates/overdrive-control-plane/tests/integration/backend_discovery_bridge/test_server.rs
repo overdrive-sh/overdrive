@@ -231,14 +231,14 @@ impl Drop for TestServer {
         // flavour this branch is skipped and the server task is
         // simply abandoned (kernel resources still detach via the
         // EbpfDataplane Arc's eventual Drop).
-        if let Some(handle) = self.handle.take() {
-            if let Ok(handle_rt) = tokio::runtime::Handle::try_current() {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    tokio::task::block_in_place(|| {
-                        handle_rt.block_on(handle.shutdown(Duration::from_secs(2)));
-                    });
-                }));
-            }
+        if let Some(handle) = self.handle.take()
+            && let Ok(handle_rt) = tokio::runtime::Handle::try_current()
+        {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tokio::task::block_in_place(|| {
+                    handle_rt.block_on(handle.shutdown(Duration::from_secs(2)));
+                });
+            }));
         }
     }
 }

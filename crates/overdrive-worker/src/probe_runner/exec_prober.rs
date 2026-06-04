@@ -214,14 +214,14 @@ impl ExecProber for CgroupExecProber {
         // ENOENT / EBUSY) is an infrastructure failure per ADR-0054
         // §3 QR2 — kill the child and surface ExecSpawnFailed (NOT
         // auto-retried by the runner).
-        if let Some(pid) = child.id() {
-            if let Err(err) = self.cgroup.place_pid_in_scope(&scope, pid).await {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(ProbeFailure::ExecSpawnFailed {
-                    reason: format!("cgroup placement failed: {err}"),
-                });
-            }
+        if let Some(pid) = child.id()
+            && let Err(err) = self.cgroup.place_pid_in_scope(&scope, pid).await
+        {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(ProbeFailure::ExecSpawnFailed {
+                reason: format!("cgroup placement failed: {err}"),
+            });
         }
 
         // Wait for exit within the timeout. On timeout, mass-SIGKILL

@@ -423,13 +423,13 @@ impl EbpfDataplane {
         // shutdown. `unlink` against a non-existent path is fine; we
         // only error if the path exists AND we cannot unlink it.
         let pin_path = pin_dir.join(SERVICE_MAP_NAME);
-        if let Err(e) = std::fs::remove_file(&pin_path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                return Err(DataplaneError::LoadFailed(format!(
-                    "unlink stale pin {}: {e}",
-                    pin_path.display()
-                )));
-            }
+        if let Err(e) = std::fs::remove_file(&pin_path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(DataplaneError::LoadFailed(format!(
+                "unlink stale pin {}: {e}",
+                pin_path.display()
+            )));
         }
 
         // Pre-create + pre-pin SERVICE_MAP. Outer max_entries =
@@ -1439,15 +1439,15 @@ impl EbpfDataplane {
 impl Drop for EbpfDataplane {
     fn drop(&mut self) {
         let pin_path = self.pin_dir.join(SERVICE_MAP_NAME);
-        if let Err(e) = std::fs::remove_file(&pin_path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::debug!(
-                    name: "xdp.shutdown.unlink_failed",
-                    path = %pin_path.display(),
-                    error = %e,
-                    "SERVICE_MAP pin unlink failed during shutdown"
-                );
-            }
+        if let Err(e) = std::fs::remove_file(&pin_path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::debug!(
+                name: "xdp.shutdown.unlink_failed",
+                path = %pin_path.display(),
+                error = %e,
+                "SERVICE_MAP pin unlink failed during shutdown"
+            );
         }
         // `XdpLinkId` fields held by `self` drop here; aya detaches
         // each XDP program from its iface as part of `XdpLinkId::Drop`.
