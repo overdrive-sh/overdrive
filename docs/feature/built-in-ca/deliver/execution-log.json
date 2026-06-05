@@ -428,6 +428,62 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-05T16:06:39Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:26:00Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: activated S-04-07 (walking_skeleton) + S-04-08 (leaf profile) scaffolds; both failed for business-logic reason (issue_svid unimplemented) then driven GREEN. S-04-09 (bad-SAN reject) NOT activated: structurally unreachable through issue_svid(&SvidRequest) -- a valid single SpiffeId always projects to exactly one URI SAN, so CertSpec::svid cannot yield 0/>=2 at the adapter; satisfying it needs widening SvidRequest to a SAN set (overdrive-core, out of scope). Scaffold remains #[should_panic]; blocker surfaced for design decision.",
+      "t": "2026-06-05T16:26:08Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RcgenCa is an adapter-host crypto adapter exercised exclusively by L3 integration ATs over real rcgen + real openssl verify (Mandate 4 -- adapters are integration-tested, never mocked unit tests). The two activated ATs (S-04-07 chain-verify, S-04-08 leaf profile via x509-parser) fully drive issue_svid through the Ca driving port to GREEN -- no separate decomposition layer to unit-test, matching the 01-03/03-03 pattern.",
+      "t": "2026-06-05T16:26:16Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: implemented RcgenCa::issue_svid (CA:FALSE single-URI-SAN leaf, digitalSignature critical, ~1h validity, Entropy serial, signed by cached node intermediate); refactored issue_intermediate to mint-once-and-cache so the leaf chains to the same intermediate. Full overdrive-host integration suite GREEN in Lima: 13/13 passed (incl. S-01/S-03 root+intermediate, S-04-07 openssl-verify chain exit 0, S-04-08 x509-parser leaf profile). clippy -D warnings clean. S-04-09 remains a #[should_panic] scaffold (structural blocker, see RED_ACCEPTANCE).",
+      "t": "2026-06-05T16:26:24Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 18666841 (2 files: rcgen_ca.rs + rcgen_ca_chain_verify.rs). Lefthook gates passed (fmt, doctest, clippy, nextest-affected 1386 passed/0 failed). Delivers S-04-07 (walking skeleton) + S-04-08 (leaf profile). S-04-09 explicitly documented as BLOCKED in commit body -- bad-SAN reject unreachable through issue_svid(&SvidRequest) without widening SvidRequest (overdrive-core, out of scope); needs a design decision. Step 04-03 is a PARTIAL completion (2/3 scenarios); not logging the step as fully complete.",
+      "t": "2026-06-05T16:26:32Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:28:03Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:28:03Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:28:03Z"
     }
   ]
 }
