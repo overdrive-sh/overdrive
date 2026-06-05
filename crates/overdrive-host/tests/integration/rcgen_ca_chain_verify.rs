@@ -32,6 +32,15 @@
 //! `RcgenCa`. DELIVER replaces with real `RcgenCa` calls + `openssl verify`
 //! subprocess assertions.
 
+use std::process::Command;
+use std::sync::Arc;
+
+use overdrive_core::SpiffeId;
+use overdrive_core::traits::ca::Ca;
+use overdrive_host::OsEntropy;
+use overdrive_host::ca::RcgenCa;
+use x509_parser::prelude::FromDer;
+
 // ---------------------------------------------------------------------------
 // S-01 — Root CA self-verifies (US-CA-01)
 // ---------------------------------------------------------------------------
@@ -41,11 +50,52 @@
 /// root.pem root.pem` accepts (exit 0). x509-parser confirms CA:TRUE,
 /// keyCertSign set, keyUsage marked critical.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn rcgen_root_is_a_valid_self_signed_ca_via_openssl_verify() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-01 / RcgenCa::root() self-verifies: \
-         openssl verify -CAfile root.pem root.pem exits 0; CA:TRUE + keyCertSign + keyUsage critical)"
+    // GIVEN a host CA over a real OS entropy source and a trust-domain subject.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+
+    // WHEN the persistent self-signed root is produced (driving port).
+    let root = ca.root().expect("RcgenCa::root() self-signs a real P-256 root");
+
+    // THEN `openssl verify -CAfile root.pem root.pem` accepts the cert (exit 0)
+    // — KPI K1, the real-tool gate on the real bytes.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root_pem_path = dir.path().join("root.pem");
+    std::fs::write(&root_pem_path, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
+
+    let status = Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&root_pem_path)
+        .arg(&root_pem_path)
+        .status()
+        .expect("invoke openssl verify");
+    assert!(status.success(), "openssl verify -CAfile root.pem root.pem must exit 0");
+
+    // AND x509-parser confirms the root profile on the REAL cert bytes:
+    // CA:TRUE, keyCertSign set, keyUsage marked critical (research Finding 2).
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(root.cert_der().as_der())
+        .expect("parse root DER");
+
+    let bc = cert
+        .basic_constraints()
+        .expect("basicConstraints parses")
+        .expect("basicConstraints present");
+    assert!(bc.value.ca, "root must be CA:TRUE");
+    assert_eq!(bc.value.path_len_constraint, None, "root carries NO pathLen");
+
+    let ku = cert.key_usage().expect("keyUsage parses").expect("keyUsage present");
+    assert!(ku.critical, "keyUsage extension must be marked critical");
+    assert!(ku.value.key_cert_sign(), "root carries keyCertSign");
+    assert!(ku.value.crl_sign(), "root carries cRLSign");
+
+    // AND a self-signed root is its own issuer.
+    assert_eq!(
+        cert.issuer().to_string(),
+        cert.subject().to_string(),
+        "a self-signed root's issuer equals its subject"
     );
 }
 

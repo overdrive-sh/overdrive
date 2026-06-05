@@ -21,11 +21,13 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+pub mod ca;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod entropy;
 pub mod transport;
 
+pub use ca::RcgenCa;
 pub use cgroup_fs::RealCgroupFs;
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};

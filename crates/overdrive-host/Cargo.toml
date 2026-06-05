@@ -22,9 +22,10 @@ crate_class = "adapter-host"
 # --features integration-tests` resolves uniformly under per-package
 # scoping (cargo refuses the bare feature on packages that do not
 # declare it, which breaks mutation testing's per-mutant invocations).
-# This crate has no integration-shaped tests of its own — the
-# declaration is a deliberate no-op. See `.claude/rules/testing.md`
-# §"Integration vs unit gating".
+# Gates this crate's integration suite (`tests/integration/*.rs` — the
+# `RcgenCa` real-crypto + `openssl verify` acceptance tests, built-in-ca
+# / GH #28). See `.claude/rules/testing.md` §"Integration vs unit
+# gating".
 integration-tests = []
 
 [dependencies]
@@ -32,6 +33,11 @@ overdrive-core.workspace = true
 async-trait.workspace    = true
 bytes.workspace          = true
 rand.workspace           = true
+# `rcgen` (ring + pem) — `RcgenCa` (the production `Ca` host adapter,
+# ADR-0063 D1) owns ALL rcgen / crypto-backend usage. This is a
+# `[dependencies]` (production) entry, not a dev-dep: `RcgenCa` is
+# production code. `overdrive-core` stays rcgen/ring-free (dst-lint).
+rcgen                    = { workspace = true }
 tokio.workspace          = true
 # `uuid` v4 — used by `RealCgroupFs::probe` to mint a per-call probe
 # directory under `<probe_root>/.overdrive-probe-<uuid>/`. Parallel
@@ -39,6 +45,15 @@ tokio.workspace          = true
 # scope independent scratch namespaces — UUID v4 provides that with
 # no coordination cost.
 uuid                     = { workspace = true }
+
+[dev-dependencies]
+# `x509-parser` — byte-level assertions on the REAL cert bytes the
+# `RcgenCa` host adapter produces (CA:TRUE, keyUsage critical, no
+# pathLen) in the integration suite. `tempfile` scopes the on-disk
+# PEM the `openssl verify` subprocess gate reads. Both dev-only —
+# the integration tests under `tests/integration/` consume them.
+x509-parser.workspace    = true
+tempfile.workspace       = true
 
 [lints]
 workspace = true

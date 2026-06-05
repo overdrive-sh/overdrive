@@ -42,17 +42,107 @@
 //! `RcgenCa` / `SimCa`. DELIVER replaces with the real twin-adapter
 //! call-sequence + accessor-equivalence assertions.
 
+use std::sync::Arc;
+
+use overdrive_core::SpiffeId;
+use overdrive_core::traits::ca::{Ca, RootCaHandle};
+use overdrive_host::OsEntropy;
+use overdrive_host::ca::RcgenCa;
+use overdrive_sim::adapters::SimCa;
+use overdrive_sim::adapters::entropy::SimEntropy;
+use x509_parser::prelude::FromDer;
+
+/// The contract-observable root profile, parsed from a [`RootCaHandle`]'s real
+/// cert DER via the trait accessor (`cert_der`). This is the equivalence
+/// Universe: `is_ca`, `path_len`, the key-usage set, and `key_usage_critical`
+/// — NEVER the serial / key bytes (the sim fixture key differs from the
+/// host-generated key by construction, research Finding 11) and NEVER the
+/// subject DN (a sim-fixture concern that differs by construction in the same
+/// way the key does). Reading the public cert bytes (not internal adapter
+/// fields) keeps the assertion refactor-resilient.
+#[derive(Debug, PartialEq, Eq)]
+struct RootProfile {
+    is_ca: bool,
+    path_len: Option<u32>,
+    /// The key-usage set in canonical order — the contract-observable set, not
+    /// individual bits, so the comparison is over the whole profile.
+    key_usages: Vec<&'static str>,
+    key_usage_critical: bool,
+    /// A self-signed root is its own issuer — a structural property both
+    /// adapters share even though the concrete DN differs by construction.
+    self_issued: bool,
+}
+
+fn root_profile(handle: &RootCaHandle) -> RootProfile {
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(handle.cert_der().as_der())
+        .expect("parse root DER");
+    let bc = cert
+        .basic_constraints()
+        .expect("basicConstraints parses")
+        .expect("basicConstraints present");
+    let ku = cert.key_usage().expect("keyUsage parses").expect("keyUsage present");
+    let mut key_usages = Vec::new();
+    if ku.value.key_cert_sign() {
+        key_usages.push("keyCertSign");
+    }
+    if ku.value.crl_sign() {
+        key_usages.push("cRLSign");
+    }
+    if ku.value.digital_signature() {
+        key_usages.push("digitalSignature");
+    }
+    RootProfile {
+        is_ca: bc.value.ca,
+        path_len: bc.value.path_len_constraint,
+        key_usages,
+        key_usage_critical: ku.critical,
+        self_issued: cert.issuer().to_string() == cert.subject().to_string(),
+    }
+}
+
 /// `@real-io` `@adapter-integration` `@S-01` — root profile equivalence:
 /// `RcgenCa::root()` and `SimCa::root()` produce roots whose
 /// CONTRACT-OBSERVABLE profile is equivalent — both CA:TRUE, both carry
-/// keyCertSign|cRLSign, both keyUsage-critical, both trust-domain-only
-/// subject. (Key bytes differ by construction; the profile does not.)
+/// keyCertSign|cRLSign, both keyUsage-critical, both self-signed roots.
+/// (Key bytes AND the subject DN differ by construction; the profile does not.)
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn ca_equivalence_root_profile_matches_across_host_and_sim() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-01 / RcgenCa::root and SimCa::root agree on the \
-         contract-observable profile: CA:TRUE + keyCertSign|cRLSign + keyUsage critical + trust-domain subject)"
+    // GIVEN both adapters: the host CA over a real OS entropy source + a
+    // trust-domain subject, and the sim CA over a seeded entropy source +
+    // its embedded fixture root.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let host: RcgenCa = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let sim: SimCa = SimCa::new(Arc::new(SimEntropy::new(0xCA_5E)));
+
+    // WHEN each produces its persistent self-signed root (driving port).
+    let host_root = host.root().expect("RcgenCa::root() self-signs a real root");
+    let sim_root = sim.root().expect("SimCa::root() loads its fixture root");
+
+    // THEN the contract-observable profile is equivalent across host and sim —
+    // both CA:TRUE, no pathLen, keyCertSign + cRLSign, keyUsage critical, each
+    // a self-signed root. This proves the host adapter derives the SAME profile
+    // the sim shares (both from the one core `CertSpec::root` policy), with the
+    // serial/key/subject explicitly excluded from the Universe (differ by
+    // construction — research Finding 11; ADR-0063 D8).
+    let host_profile = root_profile(&host_root);
+    let sim_profile = root_profile(&sim_root);
+    assert_eq!(
+        host_profile, sim_profile,
+        "host and sim roots must agree on the contract-observable profile"
+    );
+
+    // AND the shared profile is the root profile the contract pins.
+    assert_eq!(
+        host_profile,
+        RootProfile {
+            is_ca: true,
+            path_len: None,
+            key_usages: vec!["keyCertSign", "cRLSign"],
+            key_usage_critical: true,
+            self_issued: true,
+        },
+        "the shared root profile matches the Ca::root contract"
     );
 }
 

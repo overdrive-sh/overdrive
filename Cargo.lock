@@ -1968,8 +1968,11 @@ dependencies = [
  "bytes",
  "overdrive-core",
  "rand 0.8.6",
+ "rcgen",
+ "tempfile",
  "tokio",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]
