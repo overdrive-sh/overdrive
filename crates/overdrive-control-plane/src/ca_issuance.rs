@@ -4,19 +4,23 @@
 //!
 //! This is the focused issuance seam the workload-start path calls to mint a
 //! workload SVID. It composes the [`Ca`] driving port (issue the leaf + draw the
-//! issuer serial from the node intermediate) with an [`IssuedCertificateAudit`]
-//! driven port (record the issuance fact), and **binds the two**: the leaf and
-//! its audit row are observable TOGETHER. If the audit row cannot be written,
-//! the issuance fails — NO unaudited certificate ever escapes (KPI/AC US-CA-05;
-//! ADR-0063 D6 "issuance is never silent").
+//! issuer serial from the node intermediate) with the [`ObservationStore`]
+//! driven port (record the issuance fact as a first-class
+//! [`ObservationRow::IssuedCertificate`] row), and **binds the two**: the leaf
+//! and its audit row are observable TOGETHER. If the audit row cannot be
+//! written, the issuance fails — NO unaudited certificate ever escapes (KPI/AC
+//! US-CA-05; ADR-0063 D6 "issuance is never silent").
 //!
 //! # State-layer hygiene (whitepaper §4, ADR-0063 D2/D6)
 //!
 //! The CA *material* (root key, intermediate keys) is **intent** (linearizable,
 //! the [`crate::ca_boot`] path). The *record of what was issued* — the
 //! `issued_certificates` row — is **observation** (gossiped when #36 lands;
-//! single-node = local). This module writes ONLY the observation row; it never
-//! touches the intent store. The audit port is the observation boundary.
+//! single-node = local). This module writes ONLY the observation row, through
+//! the `ObservationStore` port exactly like `alloc_status` / `node_health`; it
+//! never touches the intent store. The `ObservationStore` IS the observation
+//! boundary — there is no parallel audit table or inherent-method bypass
+//! (ADR-0063 D6 "mirroring AllocStatusRow/NodeHealthRow").
 //!
 //! # Persist inputs, not derived state
 //!
@@ -35,16 +39,15 @@
 //! restart. This is the mechanism the #40 rotation workflow will later drive on
 //! a schedule; this module provides only the mechanism, not the trigger.
 
-use std::sync::Arc;
 use std::time::Duration;
-
-use async_trait::async_trait;
 
 use overdrive_core::NodeId;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::observation_store::ObservationStoreError;
+use overdrive_core::traits::observation_store::{
+    ObservationRow, ObservationStore, ObservationStoreError,
+};
 use overdrive_core::wall_clock::UnixInstant;
 
 /// Audit validity window the control plane records for a freshly-issued
@@ -106,53 +109,6 @@ impl CaIssuanceError {
     }
 }
 
-/// Driven port for the `issued_certificates` audit surface (ADR-0063 D6).
-///
-/// The observation boundary [`issue_and_audit`] writes through. Production wires
-/// the real `LocalObservationStore` (the impl below); a test wires a double —
-/// most usefully a failing double, to exercise the no-silent-issuance sad path
-/// (S-05-04) by injecting an audit-write failure at the port boundary.
-///
-/// This is a driven port, so the test double lives at the hexagonal boundary
-/// (`.claude/skills/nw-hexagonal-testing`) — never inside the issuance logic.
-#[async_trait]
-pub trait IssuedCertificateAudit: Send + Sync {
-    /// Record one issuance fact. On `Ok(())`, the row is durable and readable
-    /// back via [`Self::issued_certificate_rows`]. On `Err`, the audit write
-    /// failed — [`issue_and_audit`] surfaces this as
-    /// [`CaIssuanceError::Audit`] and the issued cert is dropped.
-    async fn record(&self, row: IssuedCertificateRow) -> Result<(), ObservationStoreError>;
-
-    /// Read back every recorded `issued_certificates` row. The operator-
-    /// observable audit surface (graduates to verification expectation O05).
-    async fn issued_certificate_rows(
-        &self,
-    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError>;
-}
-
-/// Production [`IssuedCertificateAudit`] binding over the single-node
-/// `LocalObservationStore` (ADR-0012, revised 2026-04-24).
-///
-/// Delegates to the store's inherent `issued_certificates` audit-table methods
-/// — the `issued_certificates` row is OBSERVATION, persisted in the production
-/// observation store, mirroring the `alloc_status` / `node_health` plumbing
-/// (ADR-0063 D6). The `ObservationStore` *trait* is unchanged; the audit-table
-/// methods are inherent on `LocalObservationStore` because this audit surface is
-/// a typed-bytes table read back here, not through the closed `ObservationRow`
-/// write enum.
-#[async_trait]
-impl IssuedCertificateAudit for overdrive_store_local::LocalObservationStore {
-    async fn record(&self, row: IssuedCertificateRow) -> Result<(), ObservationStoreError> {
-        self.write_issued_certificate(row).await
-    }
-
-    async fn issued_certificate_rows(
-        &self,
-    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError> {
-        Self::issued_certificate_rows(self).await
-    }
-}
-
 /// Issue a workload SVID and record its `issued_certificates` audit row, bound
 /// so an audit-write failure refuses the issuance.
 ///
@@ -168,9 +124,13 @@ impl IssuedCertificateAudit for overdrive_store_local::LocalObservationStore {
 ///    `serial` / `spiffe_id` from [`SvidMaterial`]'s per-call accessors,
 ///    `issuer_serial` from the [`IntermediateHandle`](overdrive_core::traits::ca::IntermediateHandle),
 ///    `issued_at` from the injected [`Clock`], and the observed validity window.
-/// 4. **Write the audit row, then hand back the leaf.** If the write fails,
-///    return [`CaIssuanceError::Audit`] and DROP the leaf — no unaudited cert
-///    escapes (no silent issuance).
+/// 4. **Write the audit row through the [`ObservationStore`] port, then hand
+///    back the leaf.** The row is written as a first-class
+///    [`ObservationRow::IssuedCertificate`] via [`ObservationStore::write`] —
+///    the SAME plumbing as `alloc_status` / `node_health` (ADR-0063 D6), so the
+///    audit path is DST-testable through `SimObservationStore`. If the write
+///    fails, return [`CaIssuanceError::Audit`] and DROP the leaf — no unaudited
+///    cert escapes (no silent issuance).
 ///
 /// # Errors
 ///
@@ -179,7 +139,7 @@ impl IssuedCertificateAudit for overdrive_store_local::LocalObservationStore {
 ///   not be written; the issuance is refused and the cert dropped.
 pub async fn issue_and_audit(
     ca: &dyn Ca,
-    audit: &Arc<dyn IssuedCertificateAudit>,
+    observation: &dyn ObservationStore,
     clock: &dyn Clock,
     node: &NodeId,
     request: &SvidRequest,
@@ -212,10 +172,15 @@ pub async fn issue_and_audit(
         issued_at,
     };
 
-    // Bind issuance + audit: write the audit row BEFORE returning the cert. On
-    // failure, drop the leaf and surface the error — the cert and its audit row
-    // are observable together or not at all (ADR-0063 D6; no silent issuance).
-    audit.record(row).await.map_err(CaIssuanceError::audit)?;
+    // Bind issuance + audit: write the audit row through the `ObservationStore`
+    // port (as `ObservationRow::IssuedCertificate`, exactly like `alloc_status`
+    // / `node_health`) BEFORE returning the cert. On failure, drop the leaf and
+    // surface the error — the cert and its audit row are observable together or
+    // not at all (ADR-0063 D6; no silent issuance).
+    observation
+        .write(ObservationRow::IssuedCertificate(row))
+        .await
+        .map_err(CaIssuanceError::audit)?;
 
     Ok(svid)
 }

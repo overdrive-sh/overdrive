@@ -32,18 +32,18 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_control_plane::ca_boot::{self, CaBootError};
-use overdrive_control_plane::ca_issuance::{self, CaIssuanceError, IssuedCertificateAudit};
-use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_control_plane::ca_issuance::{self, CaIssuanceError};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::traits::ca::{
     Ca, CaError, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
 };
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::ObservationStoreError;
+use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::{RcgenCa, RootKeyAeadCodec, SystemdCredsKeyring};
+use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalObservationStore;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -336,27 +336,12 @@ impl Clock for FixedClock {
     }
 }
 
-/// An [`IssuedCertificateAudit`] double whose `record` ALWAYS fails — injects
-/// the audit-write failure for the no-silent-issuance sad path (S-05-04) at the
-/// driven-port boundary, never inside the issuance logic.
-struct FailingAudit;
-
-#[async_trait]
-impl IssuedCertificateAudit for FailingAudit {
-    async fn record(&self, _row: IssuedCertificateRow) -> Result<(), ObservationStoreError> {
-        Err(ObservationStoreError::Io(std::io::Error::other("audit store unavailable (injected)")))
-    }
-
-    async fn issued_certificate_rows(
-        &self,
-    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError> {
-        Ok(Vec::new())
-    }
-}
-
-/// Open a real `LocalObservationStore` at `obs.redb` under `dir` as the
-/// production [`IssuedCertificateAudit`] binding.
-fn audit_store(dir: &TempDir) -> Arc<dyn IssuedCertificateAudit> {
+/// Open a real `LocalObservationStore` at `obs.redb` under `dir` — the
+/// production `ObservationStore` the issuance seam writes the
+/// `issued_certificates` audit row through (`ObservationRow::IssuedCertificate`,
+/// ADR-0063 D6). Returned as `Arc<dyn ObservationStore>` so the issuance seam
+/// receives the PORT, never an inherent-method concrete binding.
+fn audit_store(dir: &TempDir) -> Arc<dyn ObservationStore> {
     Arc::new(
         LocalObservationStore::open(dir.path().join("obs.redb"))
             .expect("LocalObservationStore::open"),
@@ -377,13 +362,16 @@ fn workload_request() -> SvidRequest {
 }
 
 /// `@real-io` `@adapter-integration` `@S-05` — every issuance writes an
-/// `issued_certificates` observation row; a test reads it back via the
-/// `ObservationStore` and asserts serial + `spiffe_id` + `issuer_serial` match
-/// the minted cert (the internal-CT-equivalent audit surface, readable via
-/// the existing `alloc status` path).
+/// `issued_certificates` observation row through the `ObservationStore` port
+/// (`ObservationRow::IssuedCertificate`); a test reads it back via the
+/// `ObservationStore::issued_certificate_rows` read surface — the same way it
+/// reads an `alloc_status` row — and asserts serial + `spiffe_id` +
+/// `issuer_serial` match the minted cert (the internal-CT-equivalent audit
+/// surface).
 #[tokio::test]
 async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
-    // GIVEN a host CA, a real observation-store audit binding, and a fixed clock.
+    // GIVEN a host CA, a real observation-store binding (the PORT), and a fixed
+    // clock.
     let obs_dir = TempDir::new().expect("obs-store tempdir");
     let ca = host_ca();
     let audit = audit_store(&obs_dir);
@@ -391,8 +379,9 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
     let node = issuing_node();
     let request = workload_request();
 
-    // WHEN the workload-start path issues the SVID through the issuance seam.
-    let svid = ca_issuance::issue_and_audit(&ca, &audit, &clock, &node, &request)
+    // WHEN the workload-start path issues the SVID through the issuance seam,
+    // which writes the audit row through the `ObservationStore` port.
+    let svid = ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
         .await
         .expect("issuance + audit write succeeds");
 
@@ -400,9 +389,9 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
     // intermediate's serial (the chain link recorded on the row).
     let issuer_serial = ca.issue_intermediate(&node).expect("intermediate").serial().clone();
 
-    // THEN reading the audit surface back via the ObservationStore yields
-    // exactly one row whose serial + spiffe_id + issuer_serial match the minted
-    // cert's FAITHFUL accessors (not the cert bytes).
+    // THEN reading the audit surface back via the ObservationStore read path
+    // yields exactly one row whose serial + spiffe_id + issuer_serial match the
+    // minted cert's FAITHFUL accessors (not the cert bytes).
     let rows = audit.issued_certificate_rows().await.expect("read back audit rows");
     assert_eq!(rows.len(), 1, "exactly one issued_certificates row must be written per issuance");
     let row = &rows[0];
@@ -426,18 +415,28 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
 /// (US-CA-05 AC + SSOT journey): an issuance whose `issued_certificates`
 /// audit row cannot be written surfaces a `CaError` rather than handing out
 /// an unaudited certificate (issuance + audit are observable together).
+///
+/// The fault is injected through the `ObservationStore` PORT — a
+/// `SimObservationStore` with a queued write failure (`inject_write_failure`).
+/// Because the audit write now flows through `ObservationStore::write`, the
+/// DST sim adapter IS the audit path, so the no-silent-issuance bind is
+/// exercised against the same port the production `LocalObservationStore`
+/// implements.
 #[tokio::test]
 async fn issuance_that_cannot_write_audit_row_surfaces_an_error() {
-    // GIVEN a host CA but an audit store whose write ALWAYS fails (injected
-    // fault at the driven-port boundary).
+    // GIVEN a host CA but an observation store (the PORT) whose NEXT write fails
+    // — the audit-write fault injected through the sim adapter's queue.
     let ca = host_ca();
-    let audit: Arc<dyn IssuedCertificateAudit> = Arc::new(FailingAudit);
+    let obs = SimObservationStore::single_peer(issuing_node(), 0xCA_05_04);
+    obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
+        "audit store unavailable (injected)",
+    )));
     let clock = FixedClock::at_unix_secs(1_700_000_005);
     let node = issuing_node();
     let request = workload_request();
 
     // WHEN issuance is attempted.
-    let result = ca_issuance::issue_and_audit(&ca, &audit, &clock, &node, &request).await;
+    let result = ca_issuance::issue_and_audit(&ca, &obs, &clock, &node, &request).await;
 
     // THEN the issuance is REFUSED with a typed audit error — NO SvidMaterial is
     // returned, so no unaudited certificate escapes (issuance is never silent).
@@ -445,6 +444,16 @@ async fn issuance_that_cannot_write_audit_row_surfaces_an_error() {
         matches!(result, Err(CaIssuanceError::Audit { .. })),
         "an audit-write failure must refuse the issuance with CaIssuanceError::Audit and hand out \
          NO certificate, got {result:?}"
+    );
+
+    // AND no audit row was recorded — the failed write mutated no observed state,
+    // so the audit surface is empty (the cert and its row are observable together
+    // or not at all).
+    let rows = obs.issued_certificate_rows().await.expect("read back audit rows");
+    assert!(
+        rows.is_empty(),
+        "a refused issuance must leave NO audit row behind, got {} rows",
+        rows.len()
     );
 }
 
@@ -465,10 +474,10 @@ async fn svid_is_reissued_on_demand_without_control_plane_restart() {
     let request = workload_request();
 
     // WHEN the SAME identity is issued twice against the SAME running composition.
-    let first = ca_issuance::issue_and_audit(&ca, &audit, &clock, &node, &request)
+    let first = ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
         .await
         .expect("first issuance succeeds");
-    let second = ca_issuance::issue_and_audit(&ca, &audit, &clock, &node, &request)
+    let second = ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
         .await
         .expect("re-issue on the running control plane succeeds (no restart)");
 

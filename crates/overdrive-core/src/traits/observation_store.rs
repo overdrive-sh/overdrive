@@ -30,6 +30,7 @@ use thiserror::Error;
 use std::net::Ipv4Addr;
 
 use crate::aggregate::{Listener, ServiceVip, WorkloadKind};
+use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
@@ -527,6 +528,22 @@ pub enum ObservationRow {
     /// the durable observation row). Read via
     /// [`ObservationStore::reconcile_conflict_rows`].
     ReconcileConflict(ReconcileConflictRow),
+    /// `issued_certificates` audit row (table `issued_certificates`,
+    /// ADR-0063 D6) — the record of *what was issued*. Written through
+    /// [`ObservationStore::write`] by the CA issuance seam on every
+    /// workload-SVID mint, bound so an audit-write failure refuses the
+    /// issuance (no silent issuance, US-CA-05). Read back via
+    /// [`ObservationStore::issued_certificate_rows`].
+    ///
+    /// The CA *material* (root/intermediate keys) is intent (ADR-0063 D2);
+    /// the *record of an issuance* is OBSERVATION (D6) — this variant
+    /// mirrors the `alloc_status` / `node_health` observation-row plumbing
+    /// exactly. Single-node-local today; gossiped (like every observation
+    /// row) when GH #36 lands. The payload's rkyv versioned envelope and
+    /// co-located typed codec ([`IssuedCertificateRow::archive_for_store`] /
+    /// [`IssuedCertificateRow::from_store_bytes`]) are reused as-is per
+    /// ADR-0048.
+    IssuedCertificate(IssuedCertificateRow),
 }
 
 // ---------------------------------------------------------------------------
@@ -1158,6 +1175,36 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// the full ordered history; Phase 2 will add LWW parallel
     /// tracking and this method will return winners only.
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError>;
+
+    /// Read every `issued_certificates` audit row this peer holds
+    /// (table `issued_certificates`, ADR-0063 D6) — the
+    /// operator-observable issuance audit surface (the internal-CT
+    /// equivalent), readable the same way the REST observation-read
+    /// path reads `alloc_status`.
+    ///
+    /// The table is **append-only** — keyed by the issued certificate's
+    /// serial bytes, so each distinct issuance is its own row (serials
+    /// are CSPRNG-drawn; a key collision is the issuance bug, not an
+    /// LWW case). Unlike the LWW siblings there is no "winner" to
+    /// resolve; every recorded issuance is returned.
+    ///
+    /// # Postconditions
+    ///
+    /// Iteration order is deterministic — ascending by serial-key bytes
+    /// under the adapter's storage shape. A row whose envelope bytes
+    /// fail to decode (corrupt / unknown future version) is skipped with
+    /// a `tracing::warn!` per ADR-0048 § 3 (observation log-and-skip;
+    /// asymmetric vs intent fail-fast) and the surviving rows are
+    /// returned — convergence proceeds.
+    ///
+    /// # Errors
+    ///
+    /// [`ObservationStoreError::Io`] on a backing-store read failure. A
+    /// per-row envelope-decode failure does NOT error — it is logged and
+    /// the row skipped.
+    async fn issued_certificate_rows(
+        &self,
+    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError>;
 
     /// Read every LWW-winner `service_hydration_results` row for the
     /// given [`ServiceId`]. Used by the `ServiceMapHydrator` reconciler
