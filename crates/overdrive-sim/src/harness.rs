@@ -541,6 +541,16 @@ impl Harness {
             Invariant::ReverseNatLockstep => {
                 crate::invariants::reverse_nat_lockstep::evaluate_reverse_nat_lockstep().await
             }
+            // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3).
+            // GH #200, ADR-0053 rev 2026-06-05. The evaluator drives
+            // `register_local_backend` and asserts the reply mirror's
+            // `reply_source_for(...) == Some(vip)` (step 02-01 GREEN) —
+            // the structural defense below Tier-3 for the reply-source
+            // identity. A forward-only mutation (forward entry written,
+            // reply mirror not) turns it RED.
+            Invariant::ReplySourceRewriteLockstep => {
+                crate::invariants::reply_source_rewrite_lockstep::evaluate_reply_source_rewrite_lockstep().await
+            }
             // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22
             // sibling). GREEN of step 06-04 lands the real evaluator
             // body in `crate::invariants::sanity_checks_fire`. Sibling
@@ -874,6 +884,13 @@ mod tests {
     // section's "removing the underlying todo!() / panic!() will fire
     // a different panic message, trip #[should_panic], and flag the
     // test for review at the moment the scaffold goes GREEN" handoff.
+    // unconnected-udp-sendmsg4 step 02-01 GREEN: the
+    // `ReplySourceRewriteLockstep` evaluator landed (the SimDataplane
+    // reply-mirror write in `register_local_backend`), so the prior
+    // `#[should_panic(expected = "RED scaffold")]` downstream-fallout
+    // guard (per `.claude/rules/testing.md` § "Downstream fallout on
+    // pre-existing tests") is removed — the full-invariant walk now
+    // reaches the real evaluator and passes green.
     #[test]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");

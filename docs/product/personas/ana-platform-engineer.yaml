@@ -1,0 +1,93 @@
+schema_version: 1
+
+# Persona for the UDP dataplane-reachability journeys.
+#
+# Ana is the operator who declares UDP-bearing Service workloads on
+# Overdrive and expects them to be reachable from real, unmodified
+# clients. She now anchors TWO UDP journeys, which is why she is
+# promoted to a first-class persona record:
+#   - submit-a-udp-service.yaml         — connected-UDP / XDP REVERSE_NAT
+#                                          wire path (remote backends).
+#   - reach-an-unconnected-udp-service.yaml — unconnected-UDP / same-host
+#                                          cgroup sendmsg4+recvmsg4 path.
+# Pairs with maya-agent-developer.yaml and priya-evaluator.yaml.
+# Origin: unconnected-udp-sendmsg4 DISCUSS wave (2026-06-05, GH #200).
+
+persona:
+  id: ana-platform-engineer
+  name: "Ana Moreno"
+  role: "Overdrive platform engineer running UDP-bearing services on a single-node dev host"
+  one_liner: >
+    Runs UDP-bearing services (DNS resolvers, QUIC edge endpoints, game
+    servers, syslog collectors) and expects UDP to be a first-class
+    workload protocol, exactly as TCP is (vision.md principle 4 "all
+    workload types are first class"). She does not control the clients
+    that talk to her services — they are third-party code (a DNS
+    resolver, `dig`, glibc `getaddrinfo`) she cannot rewrite to suit the
+    platform's socket idioms.
+
+  characteristics:
+    - "Years of DevOps / SRE / platform-engineering background; reasons in terms of intent vs actual state"
+    - "Declares a service on a stable VIP and trusts the dataplane to converge delivery to it"
+    - "Has been bitten by silent dataplane asymmetry — forward path works, reverse path fails invisibly"
+    - "Reaches for `dig @<vip>`, `tcpdump`, and `bpftool map dump` to diagnose reachability"
+    - "Treats `overdrive deploy` success + `alloc status: Running` as a PROMISE the service answers — not just that a process started"
+    - "Does NOT own the client: the canonical UDP client (a DNS resolver) calls sendto(VIP) per query, never connect()"
+
+  context:
+    device: "Single-node Overdrive dev host (control plane + worker co-located); Lima VM on macOS for the real-kernel path"
+    entry_points:
+      - "Writes a UDP service spec (e.g. dns-resolver.toml with a `[[listener]]` protocol = \"udp\") and runs `overdrive deploy <spec>`"
+      - "Points a real client at the VIP — `dig @<vip>`, or resolv.conf `nameserver <vip>` then `getaddrinfo`"
+    triggers:
+      - "Ana deploys a same-host DNS resolver service and runs `dig @<vip> example.com` to confirm it answers"
+      - "Ana sees `alloc status: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
+
+  motivations:
+    functional: >
+      A datagram a same-host client addresses to her service VIP reaches
+      a healthy backend, and the reply appears to come from the VIP —
+      regardless of whether the client connected first (the unconnected
+      sendto idiom every DNS resolver uses).
+    emotional: >
+      Relief from the anxiety of the half-working service — the class of
+      defect where deploy succeeds, alloc status shows Running, a
+      connected-UDP test even passes, and yet `dig @<vip>` hangs because
+      the resolver never called connect().
+    social: >
+      Seen as running a REAL DNS service on Overdrive — one that
+      resolv.conf can point at and getaddrinfo actually resolves through
+      — not a demo that only works with a bespoke, hand-written client.
+
+  emotional_arc:
+    start: >
+      Confident-but-cautious — "TCP and connected-UDP work. But the
+      clients I care about (DNS resolvers) send unconnected datagrams,
+      and unconnected-UDP reachability bugs are invisible until a real
+      client times out."
+    middle: >
+      Focused — deploy is Accepted, the service reaches Running, and a
+      first unconnected `sendto(VIP)` even reaches the backend. The open
+      anxiety hangs: will the reply come back sourced from the VIP, or
+      will the resolver reject a backend-sourced reply it never asked?
+    end: >
+      Trusting (happy path) — `dig @<vip> example.com` returns an answer;
+      a wire capture shows the reply sourced from the VIP, not the backend
+      IP, so the resolver's source validation accepts it.
+      OR Reassured (sad path, pre-fix) — the Sim≡kernel reply-path
+      equivalence invariant FAILS LOUDLY at PR time instead of in
+      production, so the silent-asymmetry class is caught before any
+      operator ever deploys a half-working service.
+
+  frustrations_to_avoid:
+    - "A service reported Running that a DNS resolver cannot reach (the operator-trust violation J-OPS-004 exists to prevent)"
+    - "A reply that leaks the backend IP as its source, so the client discards it via source validation and the query silently times out"
+    - "A forward-only fix that 'works' in a hand-written connected-UDP test but fails for the real unconnected resolver — the silent asymmetry"
+    - "A diagnosis that requires reading kernel source instead of `dig`, `tcpdump`, and `bpftool map dump`"
+
+  success_signals:
+    - "`dig @<vip> example.com` against a same-host resolver service returns a correct answer on the first try"
+    - "A Tier-3 wire capture shows every reply sourced from the VIP (never the backend IP)"
+    - "The Sim≡kernel reply-path equivalence invariant is present and green, so the asymmetry cannot regress silently"
+
+  related_jobs: [J-OPS-004, J-PLAT-004]

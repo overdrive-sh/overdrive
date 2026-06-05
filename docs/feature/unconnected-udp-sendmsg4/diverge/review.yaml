@@ -1,0 +1,278 @@
+# Peer review — unconnected-udp-sendmsg4 DIVERGE
+#
+# PROVENANCE NOTE (load-bearing): The nw-diverger-reviewer (Prism)
+# sub-agent could NOT be dispatched — Flux is running as a sub-agent and
+# the Task tool is unavailable inside sub-agents ("Task is not available
+# inside subagents"). This was attempted and failed (same constraint
+# recorded in docs/feature/udp-service-support/diverge/review.yaml).
+# This review.yaml is an ADVERSARIAL SELF-REVIEW by Flux against the five
+# Prism dimensions, with the conscious caveat that a self-review is a
+# second assertion by the same entity that made the first (the
+# fox-guarding-the-henhouse hazard, .claude/rules/verification.md).
+# The orchestrator SHOULD dispatch Prism for an INDEPENDENT verdict before
+# handoff to product-owner. This file records the self-review verdict and
+# the issues found-and-fixed so Prism starts from a known state.
+
+review_type: adversarial-self-review
+reviewer: Flux (self; Prism dispatch attempted, unavailable in sub-agent context)
+independent_peer_review: NOT_PERFORMED
+independent_peer_review_reason: >
+  Task tool unavailable inside sub-agents; nw-diverger-reviewer could not be
+  invoked (dispatch attempted, returned "Task is not available inside
+  subagents"). Orchestrator should dispatch Prism for an independent pass.
+date: 2026-06-05
+feature: unconnected-udp-sendmsg4
+gh_issue: 200
+scope: >
+  Brownfield DIVERGE on how to close the unconnected-UDP (sendto(VIP)
+  without connect()) same-host delivery gap that ADR-0053 Amendment 4 left
+  open and tracked as #200. ADR-0053 connect4 decision NOT reopened.
+
+verdict: APPROVED_PENDING_INDEPENDENT_REVIEW
+
+# --- Independent arithmetic re-verification (the most refutable surface) ---
+arithmetic_recomputed_independently: true
+weights_used: {DVF: 0.25, T1: 0.15, T2: 0.20, T3: 0.15, T4: 0.25}
+recomputed_totals:
+  opt_2_sendmsg4_recvmsg4: 4.65   # 1.25+0.60+0.80+0.75+1.25
+  opt_3_unify:             4.07   # 1.1675+0.45+0.60+0.60+1.25 = 4.0675
+  opt_1_sendmsg4_only:     3.48   # 0.8325+0.75+0.80+0.60+0.50 = 3.4825
+  opt_6_document:          3.05   # 0.75+0.75+1.00+0.30+0.25
+  opt_4_sk_lookup:         2.65   # 0.75+0.30+0.40+0.45+0.75 (corrected from stale 2.75)
+  opt_5_vip_bind:          2.48   # 0.5825+0.45+0.40+0.30+0.75 = 2.4825 (corrected from stale 2.51)
+ranking: "2 > 3 > 1 > 6 > 4 > 5"
+ranking_unaffected_by_corrections: true
+
+dimensions:
+  - dimension: 1_jtbd_rigor
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          Job extracted to physical level via 5-Whys + first-principles
+          inversion ("a datagram to a VIP reaches a healthy backend; the
+          reply looks like it came from the VIP, regardless of whether the
+          client connected first"). Correctly rides J-OPS-004 + J-PLAT-004
+          (no new job — udp-service-support D5 precedent cited). 5 ODI
+          outcomes (O1-O5) in Minimize + likelihood/effort form, no
+          forbidden words, no embedded solution in the job statement. O2
+          (reply-source identity) correctly identified as THE discriminating
+          outcome — this is the analytical pivot of the whole study and it
+          is right.
+      - severity: low
+        note: >
+          O5 (testability-below-Tier-3) is partly a constraint-restatement
+          rather than a pure user-outcome; acceptable as an ODI because it
+          is framed as "minimize the likelihood of an untestable correctness
+          gap," which is a real risk outcome. A purist might split it. Not
+          blocking.
+
+  - dimension: 2_research_quality
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          6 real references with specific behaviours + source URLs + access
+          dates: Cilium (4-hook set, recvmsg4 mandatory), kernel
+          cgroup_sock_addr UAPI (connect4 4.17 / sendmsg4 4.18 / recvmsg4
+          4.20 — all below the 5.10 floor), kernel commit 983695fa6765 (the
+          decisive recvmsg4-load-bearing evidence — nslookup rejects
+          backend-sourced reply), DNS resolvers (the source-validating
+          client whose behaviour is the constraint), SK_LOOKUP (the
+          non-obvious alternative, examined honestly), IPVS/kube-proxy (the
+          architecturally-disqualified floor). The non-obvious alternative
+          (SK_LOOKUP) is used HONESTLY — the connect4-rejection-transfer
+          question is worked through and SK_LOOKUP is kept a live contender
+          (it does NOT solve the reply path for free), not strawmanned.
+          Fresh kernel-UAPI verification done 2026-06-05; the crux
+          (recvmsg4) is grounded in a PRIMARY kernel commit, not opinion.
+      - severity: low
+        note: >
+          recvmsg4 since-version stated as 4.20 (commit 983695fa6765
+          backported to 4.19 stable). The precise mainline tag (4.20 vs
+          4.19-stable) is slightly soft, but it is FAR below the 5.10 floor
+          either way, so the viability conclusion is unaffected. Acceptable.
+      - severity: low
+        note: >
+          The "DNS resolvers use unconnected sockets" claim leans on the
+          general stub-resolver idiom; the strongest single proof is the
+          kernel commit's own nslookup example (which IS a DNS client doing
+          exactly this). glibc/musl per-query connect behaviour varies by
+          version/path, but the load-bearing claim (the canonical client
+          validates the reply source and the unconnected idiom dominates) is
+          carried by the kernel commit + Cilium, not by the resolver-internal
+          detail. Acceptable.
+
+  - dimension: 3_option_diversity
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          6 curated options, all 7 SCAMPER lenses applied (S->A1, C->A5,
+          A->A2, M->A6, P->A3, E->A4, R->A7) + 2 Crazy-8s (A8, A9). The
+          3-point diversity test (mechanism/assumption/cost) is tabulated
+          and each of the 6 is distinct on all three axes. Merges are
+          structural-duplication only (A6 = A2 + test-gate difference; A8 =
+          A2 + reply-data-shape detail) and A9 held out as a strictly-worse
+          variant of A3's category — all disclosed. options-raw.md is
+          genuinely free of evaluative language (the "smallest"/"largest"
+          cost descriptors are neutral structural facts, not judgments;
+          no option is preferred or eliminated in the generation file).
+          Generation/evaluation separation respected.
+      - severity: low
+        note: >
+          SCAMPER-M (A6) and the Crazy-8 A8 both fold into A2 at curation,
+          so the 6 carry 5 distinct SCAMPER mechanisms + 1 Crazy-8 (A9 held
+          out). This is legitimate curation (they ARE properties of A2's
+          mechanism) and disclosed. The diversity of the surviving 6 is
+          genuine (sendmsg4-only / bidirectional / unify-refactor /
+          SK_LOOKUP / VIP-inversion / no-op are six distinct primitive
+          stances). Not blocking.
+
+  - dimension: 4_taste_correctness
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          Weights LOCKED before scoring using the skill's dev-tool column,
+          each with a recorded rationale + an explicit honesty check. The
+          weights do NOT manufacture the winner: the reply-path
+          discriminator (O2) is scored under generic DVF + T4, which the
+          dev-tool profile sets independent of the options; the CHEAPEST
+          option (1, sendmsg4-only) is penalized on T4 for a
+          kernel-DOCUMENTED reason (commit 983695fa6765), not a fabricated
+          one. No "industry-alignment" criterion smuggled in to favour
+          Cilium's exact four-hook set. DVF used as a filter (none
+          eliminated in-matrix; weak survivors 5/6/4 kept) AND their DVF
+          weakness re-surfaces in their taste ranks (5 last, 4 fifth) — DVF
+          not used as a tiebreaker. Anti-pattern self-audit table present
+          and honest.
+      - severity: medium
+        issue: arithmetic-self-correction-in-place
+        note: >
+          Two matrix cells were hand-rounded off (Opt 4 showed 2.75, correct
+          2.65; Opt 5 showed 2.51, correct 2.48). Flux self-corrected these
+          in-place with a visible "Correction note (honesty)" and a
+          recomputation, and emitted a corrected ranking table. JUDGMENT:
+          self-correcting in-place with a visible note + a clean corrected
+          table is ACCEPTABLE and honest; the ranking 2>3>1>6>4>5 is
+          unaffected (Opt 4 at 2.65 does not pass Opt 6 at 3.05; Opt 5 stays
+          last). Independently re-verified above (recomputed_totals). NO
+          residual stale cell — the corrected table is the operative one.
+          RESOLVED in-doc.
+      - severity: low
+        note: >
+          Opt 1 scores T1=5 (maximal subtraction) yet ranks 3rd — the
+          taste-evaluation explicitly notes this is value-DESTROYING
+          subtraction (removing the reply path), which the rubric's "nothing
+          removable without breaking core value" framing should arguably
+          score lower than 5. Flux acknowledges the tension in the T1
+          breakdown. Keeping T1=5 is DEFENSIBLE (it IS minimal surface) and,
+          critically, does NOT change the ranking (Opt 1's low DVF+T4 sink
+          it regardless). Honest and non-decision-affecting. Not blocking.
+
+  - dimension: 5_recommendation_coherence
+    verdict: PASS
+    findings:
+      - severity: none
+        note: >
+          Recommendation (Option 2, 4.65) is the matrix top score — fully
+          traceable: job (O2 reply-path) -> research (kernel 983695fa6765
+          makes recvmsg4 load-bearing; Cilium ships it) -> matrix (Opt 2 top,
+          driven by DVF+T4 on O2) -> recommendation. The decision statement
+          is explicit and falsifiable ("Proceed with Option 2 ... assuming
+          recvmsg4's reverse lookup is served by a reverse map written with
+          the forward write, NOT a conntrack table"). The four required
+          analyses are present and code/kernel-grounded: blast radius
+          (concrete program/map/action/hydrator sites; the "pure addition,
+          connect4 untouched" fact is load-bearing and correct against
+          ADR-0053 Amd 3); reply-path correctness table (the decision in one
+          view); kernel viability (since-versions vs 5.10 floor); testability
+          (Tier-3-only, identical across 1/2/3 so NOT a discriminator —
+          correctly stated). The dissent for Option 1 is GENUINE: it names
+          two real conditions under which sendmsg4-only wins (non-source-
+          validating client model; documented request-path-first interim)
+          and ties the flip to an explicit assumption change, not a token
+          paragraph. The recvmsg4 sub-deferral is surfaced for user approval
+          and explicitly NOT actioned (no GH issue created) per CLAUDE.md.
+      - severity: low
+        note: >
+          The recommendation folds Option 3 (unify) as a "DESIGN-time
+          refinement of Option 2, same family" rather than a distinct
+          destination. This is sound (both are bidirectional cgroup rewrite;
+          the split is additive-vs-refactor) and correctly calibrated — it
+          does not over-claim the 0.58 gap as a hard architectural fork.
+          Good calibration.
+
+issues_found_and_fixed:
+  - id: FIX-1
+    severity: medium
+    dimension: 4_taste_correctness
+    description: >
+      taste-evaluation.md matrix cells for Opt 4 (2.75) and Opt 5 (2.51)
+      were hand-rounded off vs the audited exact totals (2.65, 2.48).
+    resolution: >
+      Corrected in-place in taste-evaluation.md with a visible "Correction
+      note (honesty)" and a clean corrected ranking table; recommendation.md
+      and wave-decisions.md already cite the correct ranking (2>3>1>6>4>5)
+      and the correct top score (4.65). Ranking unaffected. Independently
+      re-verified in this review (recomputed_totals above).
+
+gates:
+  G1_job_strategic_with_odi: PASS
+  G2_three_competitors_nonobvious: PASS        # 6 refs; SK_LOOKUP is the non-obvious alt
+  G3_six_diverse_options_no_eval_language: PASS
+  G4_dvf_scored_traceable_dissent_decision: PASS
+
+scope_compliance:
+  adr_0053_connect4_not_reopened: true         # diverged only on the unconnected hook
+  no_gh_issue_created: true                     # #200 already exists; recvmsg4-split deferral surfaced for user, not created
+  no_adr_edited: true                          # forward-points to architect for the ADR amendment
+  ssot_jobs_yaml_updated: true                 # changelog 2026-06-05 + J-OPS-004 source annotation; no new job
+
+handoff_recommendation: >
+  APPROVED for handoff to the DISCUSS wave (product-owner), CONDITIONAL on
+  the orchestrator dispatching Prism for an INDEPENDENT confirmation (the
+  self-review caveat is real — same entity wrote the artifacts and this
+  review). No blocking defects remain after FIX-1. The single medium issue
+  (matrix-cell rounding) was found and fixed in the same pass, with the
+  arithmetic independently re-verified. The recommendation (Option 2:
+  sendmsg4 + recvmsg4) is traceable to the matrix and grounded in primary
+  kernel-source evidence (commit 983695fa6765) for its load-bearing claim
+  (recvmsg4 required). One sub-deferral (recvmsg4-as-separate-follow-up)
+  is surfaced for explicit user approval and was NOT actioned.
+
+# ============================================================
+# INDEPENDENT PEER REVIEW (Prism / nw-diverger-reviewer)
+# Dispatched by the orchestrator after the self-review above,
+# per the self-review caveat. Different agent, read-only,
+# pointed at the artifacts + cited anchors — NOT at the code.
+# ============================================================
+independent_review:
+  reviewer: "nw-diverger-reviewer (Prism)"
+  review_date: "2026-06-05"
+  basis: "Read all 7 artifacts + cited anchors; treated the self-review as a claim to verify, not as evidence."
+  dimensions:
+    jtbd_rigor: PASSED            # physical-level job via 5-Why; 5 ODI outcomes in Minimize form; no solution refs
+    research_quality: PASSED      # load-bearing recvmsg4-required claim grounded in primary kernel commit 983695fa6765 + Cilium + DNS client behavior; 6 competitors, 1 non-obvious (SK_LOOKUP)
+    option_diversity: PASSED      # 6 options distinct on all three axes (mechanism/assumption/cost); genuine do-nothing floor (Opt 6)
+    taste_application: PASSED     # weights locked pre-scoring with rationale; top-2 + Opt4 arithmetic re-verified independently (4.65, 4.07, 2.65); ranking unaffected by the two self-corrections
+    recommendation_coherence: PASSED  # traceable job->research->matrix->decision; conditional dissent; explicit falsifiable decision statement
+  project_gate_compliance:
+    adr_0053_connect4_not_reopened: true
+    no_gh_issue_unilaterally_created: true
+    ebpf_not_iptables_vision_principle: true
+    kernel_viability_gate_verified: true     # sendmsg4 4.18 / recvmsg4 4.20 vs 5.10 floor, fresh-verified 2026-06-05
+    jobs_yaml_not_fragmented: true
+  blocking_issues: []
+  verdict: APPROVED
+  note: >
+    All five dimensions PASS independently. Arithmetic for the top-2 rows
+    and Opt 4 re-verified by hand (Opt 2 = 4.65, Opt 3 = 4.07, Opt 4 =
+    2.65). The crux claim (recvmsg4 load-bearing) hinges on kernel commit
+    983695fa6765; Prism could not run `git show` in-context but confirmed
+    the artifact's characterization is consistent with the commit's
+    publicly-documented purpose (nslookup rejecting a backend-sourced
+    reply) and with Cilium's documented behavior. Evidence chain sound.
+    Cleared for handoff to DISCUSS (product-owner). The conditional in the
+    self-review's handoff_recommendation is now SATISFIED.

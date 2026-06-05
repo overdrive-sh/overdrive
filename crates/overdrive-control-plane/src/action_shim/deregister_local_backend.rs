@@ -1,9 +1,15 @@
 //! Action shim for `Action::DeregisterLocalBackend` per ADR-0053 § 3.
 //!
 //! Dispatch invokes [`Dataplane::deregister_local_backend`] for the
-//! `(vip, vip_port)` whose `LOCAL_BACKEND_MAP` entry should be
-//! removed. The trait contract pins idempotence — removing an entry
-//! that does not exist is `Ok(())`, not an error.
+//! `(vip, vip_port, proto)` whose registration should be removed. The
+//! single call performs the dual-removal (ADR-0053 rev 2026-06-05,
+//! DDD-5a; caller-supplied backend, GH #211): both the
+//! `LOCAL_BACKEND_MAP` forward entry AND its matching `REVERSE_LOCAL_MAP`
+//! reverse entry are removed. The reverse key is built from the `backend`
+//! carried on the action, NOT derived from a forward read-back — so the
+//! removal is retry-safe (a retry after a partial failure still carries
+//! the backend identity). The trait contract pins idempotence — removing
+//! an entry that does not exist is `Ok(())`, not an error.
 //!
 //! No correlation-driven follow-up is required at the shim level
 //! per the same rationale as
@@ -30,8 +36,8 @@ pub enum DeregisterLocalBackendDispatchError {
 }
 
 /// Dispatch one `Action::DeregisterLocalBackend`. Calls
-/// [`Dataplane::deregister_local_backend`] with the `(vip, vip_port)`
-/// carried on the action.
+/// [`Dataplane::deregister_local_backend`] with the `(vip, vip_port,
+/// backend, proto)` carried on the action.
 ///
 /// # Errors
 ///
@@ -48,13 +54,13 @@ pub async fn dispatch(
     action: &Action,
     dataplane: &dyn Dataplane,
 ) -> Result<(), DeregisterLocalBackendDispatchError> {
-    let Action::DeregisterLocalBackend { vip, vip_port, proto, .. } = action else {
+    let Action::DeregisterLocalBackend { vip, vip_port, backend, proto, .. } = action else {
         panic!(
             "action_shim::deregister_local_backend::dispatch invoked with \
              wrong Action variant — caller is the action shim's match \
              arm and is the sole expected caller"
         );
     };
-    dataplane.deregister_local_backend(*vip, *vip_port, *proto).await?;
+    dataplane.deregister_local_backend(*vip, *vip_port, *backend, *proto).await?;
     Ok(())
 }

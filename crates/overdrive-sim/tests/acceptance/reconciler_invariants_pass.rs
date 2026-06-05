@@ -27,9 +27,14 @@ use overdrive_sim::{Harness, Invariant, InvariantStatus};
 /// Phase 01-05 (closes #174) GREEN handed off: the three
 /// backend-discovery-bridge evaluators landed alongside the prior
 /// Slice 08 hydrator evaluators, so the downstream-fallout
-/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// `#[should_panic]` attribute was removed per `.claude/rules/testing.md`
 /// § "Downstream fallout on pre-existing tests" handoff procedure.
-/// Test now asserts the green-bar invariant directly.
+///
+/// unconnected-udp-sendmsg4 step 02-01 GREEN: the
+/// `ReplySourceRewriteLockstep` evaluator landed (the `SimDataplane`
+/// reply-mirror write), so the re-armed `#[should_panic(expected = "RED
+/// scaffold")]` guard is removed — this full-invariant walk now reaches
+/// the real evaluator and passes green.
 #[test]
 fn default_harness_run_passes_all_three_reconciler_invariants() {
     let report = Harness::new().run(42).expect("harness must compose");
@@ -175,9 +180,15 @@ fn write_through_ordering_passes_on_default_harness() {
 ///
 /// Phase 01-05 (closes #174) GREEN handed off: the three
 /// backend-discovery-bridge evaluators landed and the
-/// downstream-fallout `#[should_panic]` attribute is removed per
+/// downstream-fallout `#[should_panic]` attribute was removed per
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
+///
+/// unconnected-udp-sendmsg4 step 02-01 GREEN: the
+/// `ReplySourceRewriteLockstep` evaluator landed (the `SimDataplane`
+/// reply-mirror write), so the re-armed `#[should_panic(expected = "RED
+/// scaffold")]` guard is removed — the full `run(99)` walk now reaches
+/// the real evaluator and passes green.
 #[test]
 fn full_default_catalogue_includes_three_view_store_invariants_and_passes_them() {
     let report = Harness::new().run(99).expect("harness must compose");

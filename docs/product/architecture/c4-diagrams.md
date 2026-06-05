@@ -586,3 +586,93 @@ Four properties the diagram makes explicit:
    set; there is no single-process two-adapter DST because the real adapter
    needs a kernel + bpffs.
 
+---
+
+## Unconnected-UDP sendmsg4 + recvmsg4 (GH #200, ADR-0053 rev 2026-06-05)
+
+**Source:** `docs/feature/unconnected-udp-sendmsg4/`. **ADR:** ADR-0053
+revision 2026-06-05. Adds two cgroup hooks + the `REVERSE_LOCAL_MAP`
+reply store to the same-host cgroup path; the XDP SERVICE_MAP/REVERSE_NAT
+wire path (above) is untouched and remains distinct.
+
+### C4 Level 1 — System Context
+
+**Unchanged.** No new external actor, no new external system. Ana (the
+platform engineer) and the Linux kernel (BPF) are the same actors as the
+shipped same-host path; the only delta is two additional cgroup hook
+types and one additional kernel map, all inside the existing
+`overdrive` ↔ `kernel` relationship. No L1 diagram is reproduced —
+adding one would be redundant noise (the same posture the 2026-06-03
+proto-keying revision took).
+
+### C4 Level 2 — Container delta
+
+Container topology inherits unchanged (no new container). The delta is
+internal to `overdrive-bpf` (two new programs + a shared helper),
+`overdrive-dataplane` (the new `REVERSE_LOCAL_MAP` handle + dual-write +
+miss counter), `overdrive-sim` (the reply mirror), and the kernel (the
+new map + two hook types). The diagram below makes the **same-host
+cgroup path distinct from the XDP SERVICE_MAP/REVERSE_NAT wire path**.
+
+```mermaid
+C4Container
+  title Container Diagram delta — Unconnected-UDP sendmsg4 + recvmsg4
+
+  Person(ana, "Platform Engineer (Ana)", "Deploys a same-host UDP DNS service; runs an unconnected `dig @<vip>`")
+
+  Container(cli, "overdrive-cli", "Rust binary", "Unchanged — `overdrive deploy dns-resolver.toml` (udp listener)")
+  Container(ctrl, "overdrive-control-plane", "Rust crate", "Unchanged shape — ServiceMapHydrator emits RegisterLocalBackend (proto-carrying, ADR-0053 Amd 3); the dual-write is an adapter-internal consequence")
+  Container(core, "overdrive-core", "Rust crate", "EXTEND — Dataplane::register_local_backend contract amended (reverse entry + observable invariant); REVERSE_LOCAL_MISS_COUNTER reason; BackendKey REUSED as the reverse key")
+  Container(dp, "overdrive-dataplane", "adapter-host (Ebpf)", "EXTEND — NEW ReverseLocalMapHandle; register_local_backend writes REVERSE_LOCAL_MAP reverse-first then LOCAL_BACKEND_MAP; probe attaches both new hooks")
+  Container(bpf, "overdrive-bpf", "no_std BPF", "EXTEND — NEW cgroup_sendmsg4_service + cgroup_recvmsg4_service; NEW shared build_local_service_key #[inline(always)] helper (key-build + NBO only; per-hook lookup + rewrite stay in each program; connect4 refactored to call it)")
+  Container(sim, "overdrive-sim", "adapter-sim", "EXTEND — reply mirror BTreeMap<BackendKey, Ipv4Addr> under the same mutex as local_backends; reply_source_for() test accessor; Tier-1 reply-path equivalence invariant")
+
+  System_Boundary(kern, "Linux kernel (BPF), overdrive.slice cgroup") {
+    Container(connect4, "cgroup/connect4 hook", "BPF_CGROUP_INET4_CONNECT (shipped, REFACTORED)", "TCP + connected-UDP connect-time forward dst rewrite; key built via shared helper, own LOCAL_BACKEND_MAP lookup")
+    Container(sendmsg4, "cgroup/sendmsg4 hook", "BPF_CGROUP_UDP4_SENDMSG (NEW, >=4.18)", "Unconnected sendto: forward dst rewrite VIP->backend; key built via shared helper, own LOCAL_BACKEND_MAP lookup")
+    Container(recvmsg4, "cgroup/recvmsg4 hook", "BPF_CGROUP_UDP4_RECVMSG (NEW, >=4.20)", "Reply src rewrite backend->VIP over REVERSE_LOCAL_MAP; verifier [1,1] cannot-deny; miss -> sentinel 192.0.2.1 + counter")
+    ContainerDb(fwdmap, "LOCAL_BACKEND_MAP", "BPF_MAP_TYPE_HASH (shipped)", "(vip, vip_port, proto) -> backend; forward")
+    ContainerDb(revmap, "REVERSE_LOCAL_MAP", "BPF_MAP_TYPE_HASH (NEW)", "BackendKey(backend_ip, backend_port, proto) -> VIP; reply")
+    ContainerDb(svcmap, "SERVICE_MAP / REVERSE_NAT", "BPF maps (shipped, XDP path)", "DISTINCT wire-boundary path for remote/connected backends — untouched")
+  }
+
+  Rel(ana, cli, "overdrive deploy dns-resolver.toml")
+  Rel(cli, ctrl, "ServiceSubmitEvent")
+  Rel(ctrl, dp, "register_local_backend(vip, vip_port, proto, backend)")
+  Rel(dp, revmap, "1. upsert BackendKey->VIP (reverse-FIRST)")
+  Rel(dp, fwdmap, "2. upsert (vip,port,proto)->backend (forward)")
+  Rel(ana, sendmsg4, "Unconnected sendto(VIP:53) [no connect]")
+  Rel(sendmsg4, fwdmap, "build key via shared helper -> own lookup (vip,port,proto) -> forward dst rewrite")
+  Rel(recvmsg4, revmap, "build key via shared helper -> own lookup BackendKey -> reverse src rewrite to VIP (or sentinel on miss)")
+  Rel(connect4, fwdmap, "build key via shared helper -> own lookup (REFACTORED)")
+  Rel(dp, bpf, "Loads + attaches connect4 + sendmsg4 + recvmsg4 (one orchestration); probes both new hooks")
+  Rel(ctrl, sim, "register_local_backend [tests/DST] -> reply mirror under one lock")
+```
+
+Three properties the diagram makes explicit:
+
+1. **The cgroup same-host path and the XDP wire path are disjoint.**
+   `REVERSE_LOCAL_MAP` (cgroup recvmsg4) and `REVERSE_NAT` (XDP) are
+   different maps on different hooks for different backend classes
+   (same-host vs remote/connected). The diagram keeps them in separate
+   boxes to defuse the wrong-map-on-wrong-hook trap the sibling-journey
+   decision named.
+2. **The dual-write is reverse-first.** Edge "1." (reverse) precedes
+   edge "2." (forward) — the reply path is never ahead of the request
+   path; no observer sees a forward entry without its reverse.
+3. **recvmsg4 cannot deny.** The hook box pins the verifier `[1,1]`
+   constraint; the miss path is a sentinel substitution + counter, not a
+   drop. This is the application-sockaddr-layer guarantee — wire-level
+   no-leak is the XDP box's concern, not recvmsg4's.
+
+### C4 Level 3
+
+No new L3 component diagram is warranted. The cgroup path's internal
+decomposition is the three hooks + the shared helper + two maps already
+shown at L2; an L3 would restate the L2 boxes at finer grain without new
+signal. The shared-helper call graph (connect4 + sendmsg4 + recvmsg4 →
+`build_local_service_key`; each hook then does its own map lookup —
+`LOCAL_BACKEND_MAP` for connect4/sendmsg4, `REVERSE_LOCAL_MAP` for
+recvmsg4 — and its own rewrite direction) is captured in
+`feature-delta.md` § DESIGN component decomposition.
+

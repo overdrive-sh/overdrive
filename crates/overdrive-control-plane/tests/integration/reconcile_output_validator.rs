@@ -69,6 +69,7 @@ fn deregister(v: Ipv4Addr, port: u16) -> Action {
         vip: v,
         vip_port: port,
         proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
+        backend: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 9090),
         correlation: correlation("deregister-local-backend"),
     }
 }

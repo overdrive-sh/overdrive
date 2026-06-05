@@ -259,5 +259,34 @@ pub use wire::{
     BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
 };
 
+/// Does this `HashMap::remove` outcome signal an absent key?
+///
+/// The ADR-0053 § 2 deregister idempotency contract requires removing an
+/// absent entry to be a no-op success. aya 0.13 surfaces absent-key on a
+/// real BPF HASH map in TWO shapes: the typed `MapError::KeyNotFound`,
+/// AND a `MapError::SyscallError` wrapping the `bpf_map_delete_elem`
+/// `ENOENT` (the kernel returns ENOENT and aya does not normalise it to
+/// `KeyNotFound` on this path). Both `LocalBackendMapHandle::remove` and
+/// `ReverseLocalMapHandle::remove` swallow both — the single source of
+/// truth for "absent key is `Ok(())`" lives here so the two handles
+/// cannot drift. Without the `SyscallError(ENOENT)` arm, a deregister
+/// retry after a partial failure (forward already gone) errors on the
+/// second forward delete and never reaches the reverse removal (GH #211).
+#[must_use]
+pub(crate) fn is_absent_key(outcome: &Result<(), aya::maps::MapError>) -> bool {
+    use aya::maps::MapError;
+    match outcome {
+        Err(MapError::KeyNotFound) => true,
+        Err(MapError::SyscallError(e)) => e.io_error.raw_os_error() == Some(libc::ENOENT),
+        _ => false,
+    }
+}
+
 // Typed userspace handle for `LOCAL_BACKEND_MAP` per ADR-0053 § 1.
 pub mod local_backend_map_handle;
+
+// unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — typed
+// userspace handle for `REVERSE_LOCAL_MAP` (the cgroup reply store).
+// RED scaffold: method bodies `todo!()` until DELIVER Slice 01.
+// DISTINCT from `reverse_nat_map_handle` (the XDP wire path).
+pub mod reverse_local_map_handle;

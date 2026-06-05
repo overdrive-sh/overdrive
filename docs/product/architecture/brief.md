@@ -3879,6 +3879,166 @@ ip/port only).
 
 ---
 
+## Unconnected-UDP sendmsg4 extension (GH #200, ADR-0053 rev 2026-06-05)
+
+**Source:** `docs/feature/unconnected-udp-sendmsg4/` (DISCUSS approved
+2026-06-05; DESIGN 2026-06-05). **ADR:** ADR-0053 revision 2026-06-05.
+Extends the same-host cgroup path (ADR-0053 Decision 1; the 2026-06-03
+proto-keying revision). Delivers what Amendment 4 (2026-06-03) scoped
+OUT and tracked as #200.
+
+### Problem this extension closes
+
+The shipped `cgroup_connect4_service` fires at `connect(2)` time only.
+The dominant DNS-resolver idiom (`dig`, glibc `getaddrinfo`, musl) is
+**unconnected** — `sendto(VIP)` per query, never `connect()`. So a
+same-host UDP service is reachable today only by clients that connect
+first; most do not. The datagram is never intercepted, `LOCAL_BACKEND_MAP`
+is never consulted, and the VIP→backend rewrite never happens — a
+half-working service (healthy upstream, unreachable client).
+
+### What lands
+
+Two new `cgroup_sock_addr` hooks on the same `cgroup_attach_path`:
+
+- **`cgroup/sendmsg4`** (`cgroup_sendmsg4_service`) — forward: rewrites
+  the unconnected request destination VIP→backend over the existing
+  `LOCAL_BACKEND_MAP[(vip, vip_port, proto)]`. Per-datagram analogue of
+  connect4's per-connect rewrite.
+- **`cgroup/recvmsg4`** (`cgroup_recvmsg4_service`) — reply: rewrites the
+  reply *source* the app reads (`recvfrom`/`msg_name`) backend→VIP over a
+  NEW `REVERSE_LOCAL_MAP`.
+
+Plus the new reverse store and the dual-write that fills it:
+
+- **`REVERSE_LOCAL_MAP`** — `BPF_MAP_TYPE_HASH`, key = the existing
+  `BackendKey {ip, port, proto}` newtype (byte-parity with SERVICE_MAP /
+  REVERSE_NAT / LOCAL_BACKEND_MAP), value = VIP `u32`. Written in
+  **ordered (reverse-first)** sequence by the same `register_local_backend`
+  call that writes `LOCAL_BACKEND_MAP` — two BPF map syscalls, not one
+  transaction; the guarantee is ordering, not atomicity (no new trait
+  method; the trait contract is amended so observers never see a forward
+  entry without its reverse). `deregister_local_backend` removes both.
+  NOT a reverse scan, NOT conntrack (UDP is stateless).
+
+### The recvmsg4 cannot-deny finding (load-bearing)
+
+Per `docs/research/dataplane/recvmsg4-reply-source-rewrite-and-miss-semantics-research.md`
+(Nova, High confidence): the kernel verifier restricts
+`BPF_CGROUP_UDP4_RECVMSG` to a return-value range of exactly `[1,1]` — a
+program returning 0 is **rejected at load time**. So "drop on miss" is
+impossible at any layer. recvmsg4 attaches at a cgroup **ancestor** and
+fires on **every** unconnected-UDP recv from any descendant, so the
+`REVERSE_LOCAL_MAP` lookup IS the "this is a service reply"
+discriminator. On a **HIT** (source is a registered backend → a service
+reply) recvmsg4 rewrites the reply source `backend → VIP`; on a **MISS**
+(not a service reply — a backend's own inbound-query `recvfrom`, any
+unrelated same-host UDP) recvmsg4 performs a **pure no-op** — it leaves
+the real source intact and bumps `REVERSE_LOCAL_MISS_COUNTER` for
+observability only. This is **Cilium-aligned** (`cil_sock4_recvmsg`
+returns `SYS_PROCEED` and leaves the source unchanged on a reverse-SK
+miss). The K5 no-leak guarantee is preserved by the **reverse-first
+dual-write** (every registered backend has a visible reverse entry
+before its forward entry is usable, so a genuine service reply ALWAYS
+hits → always VIP-rewritten), NOT by a miss-path sentinel. A source
+rewrite on a miss would corrupt every non-service datagram's sender
+address (observed and fixed in DELIVER step 01-03 — back-prop finding
+UI-1; ADR-0053 D3 sub-revision 2026-06-05b corrects the earlier
+"sentinel on miss" decision).
+
+### Layer boundary — application sockaddr, NOT wire
+
+recvmsg4 fires inside `udp_recvmsg()` AFTER the kernel populated the
+source sockaddr from the backend's skb; a `tcpdump -i lo` sees the
+backend-sourced reply on every round-trip regardless of the hook.
+recvmsg4's domain is the **application sockaddr** (`recvfrom`/`msg_name`)
+only. Wire-level no-leak is XDP's concern (the out-of-scope
+connected/remote REVERSE_NAT path), NOT recvmsg4's. The DISCUSS
+US-01/US-03/K2/K5 ACs were reframed from wire (`tcpdump`, "left the
+host") to application-sockaddr layer accordingly (see
+`design/upstream-changes.md`).
+
+### Shared key-build helper (Option 3 — refactors connect4)
+
+Only the genuinely-shared primitive — **service-key construction +
+`user_port` low-16-NBO handling** — is factored into ONE
+`#[inline(always)]` kernel helper (`build_local_service_key`, the
+`shared::sanity`/`shared::access` precedent) consumed by **all three**
+hooks. The helper does **not** perform any map lookup or any rewrite:
+the **map lookup differs per hook** (connect4 + sendmsg4 look up
+`LOCAL_BACKEND_MAP`; recvmsg4 looks up `REVERSE_LOCAL_MAP`) and the
+**rewrite direction differs per hook and stays in the per-hook program
+body** (connect4/sendmsg4 do a forward DEST rewrite; recvmsg4 does a
+reverse SOURCE rewrite). One helper MUST NOT serve both rewrite
+directions. This **refactors shipped connect4** — its inline key-build /
+NBO code is replaced by a call to the helper (its own lookup + forward
+dest-rewrite stay in its body): behavior-preserving, **Tier-3-reverified**
+(no Tier-2 backstop —
+`BPF_PROG_TEST_RUN` returns ENOTSUPP for `cgroup_sock_addr` ≤ 6.8, so
+the connect4 refactor's regression surface is Tier-3-only; honest risk).
+This changes the DISCUSS "0 connect4 changes / pure addition" claim:
+connect4 is now EXTEND (net-new behavior 0, diff non-zero).
+
+### Probe extension and below-floor preflight
+
+The Earned-Trust probe attaches sendmsg4 + recvmsg4 on the same
+`cgroup_attach_path` and round-trips a `REVERSE_LOCAL_MAP` sentinel. The
+**`attach()` syscall IS the below-floor preflight** — sendmsg4 (≥4.18)
+and recvmsg4 (≥4.20) are both below the 5.10 floor, so a below-floor
+host fails attach → structured `health.startup.refused`. NO `/proc` /
+`uname` parsing (avoids the `unwrap_or_default` boundary-read footgun).
+New `#[from]`-routed `DataplaneError`/`DataplaneBootError` variant(s),
+never flattened to `Internal(String)`.
+
+### SimDataplane reply mirror
+
+`SimDataplane` gains a reply mirror `BTreeMap<BackendKey, Ipv4Addr>`
+written under the SAME mutex acquisition as `local_backends` inside
+`register_local_backend` (the `services`+`reverse_nat` lockstep idiom is
+the template), plus a `reply_source_for(...)` test-only accessor so the
+Tier-1 J-PLAT-004 equivalence invariant can assert "Sim reply source =
+VIP." Models the observable contract only — does not shape production.
+
+### Reuse posture
+
+Only `REVERSE_LOCAL_MAP` (map + handle) and the two programs + shared
+helper + miss counter are CREATE NEW. `BackendKey`, `Proto`,
+`LOCAL_BACKEND_MAP`, `register_local_backend`, the hydrator classifier,
+the action variants, `cgroup_attach_path` are all REUSE/EXTEND. Full
+table in `feature-delta.md` § DESIGN.
+
+### Shipped — Component Inventory (FINALIZE 2026-06-05)
+
+All of "What lands" above is **SHIPPED** (DELIVER complete; 7 steps
+01-01…03-02 all COMMIT/PASS; closes ADR-0053 OQ-3 / #200). Nothing in
+this section is deferred-that-shipped. Evolution record:
+`docs/evolution/2026-06-05-unconnected-udp-sendmsg4.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `cgroup_sendmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs` | NEW |
+| `cgroup_recvmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs` | NEW |
+| `build_local_service_key` shared helper (key-build + NBO only) | `crates/overdrive-bpf/src/shared/build_local_service_key.rs` | NEW |
+| `REVERSE_LOCAL_MAP` kernel map | `crates/overdrive-bpf/src/maps/reverse_local_map.rs` | NEW |
+| `REVERSE_LOCAL_MISS_COUNTER` (`PERCPU_ARRAY`) | `crates/overdrive-bpf/src/maps/` | NEW |
+| `ReverseLocalMapHandle` userspace handle | `crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs` | NEW |
+| `cgroup_connect4_service` (key-build/NBO via shared helper) | `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs` | EXTEND (behavior-preserving) |
+| `register_local_backend` reverse-first dual-write + amended contract | `crates/overdrive-core/src/traits/dataplane.rs`, `crates/overdrive-dataplane/src/lib.rs` | EXTEND (no new trait method) |
+| `SimDataplane` reply mirror + `reply_source_for()` | `crates/overdrive-sim/src/adapters/dataplane.rs` | EXTEND |
+| `reply_source_rewrite_lockstep` Tier-1 DST invariant | `crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs` | NEW |
+| `CgroupSendRecvAttach` / `ReverseLocalProbe` typed error variants (`#[from]`-routed → `health.startup.refused`) | `crates/overdrive-core/src/traits/dataplane.rs` | EXTEND |
+
+> **`REVERSE_LOCAL_MISS_COUNTER` operational-semantics design note (for
+> DEVOPS):** recvmsg4 fires on ALL subtree unconnected UDP, so the
+> counter's absolute value is dominated by non-service traffic and is
+> NOT a "service reply failed to translate" alarm. Whether to keep,
+> demote, or replace it (e.g. a control-plane reconciler comparing
+> forward-vs-reverse map cardinality) is a metric-semantics decision,
+> recorded as a DESIGN NOTE (feature-delta § Open questions #1) — NOT a
+> tracking issue. The no-op-on-miss behavior is correct regardless.
+
+---
+
 ### 88. Listener-fact in-memory view extension (ADR-0062)
 
 **Source:** `docs/feature/reconciler-listener-fact-view/` (DESIGN 2026-06-03;

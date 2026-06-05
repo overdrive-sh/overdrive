@@ -90,6 +90,14 @@ const REVERSE_NAT_MAP_NAME: &str = "REVERSE_NAT_MAP";
 /// aya supports HASH natively.
 const LOCAL_BACKEND_MAP_NAME: &str = "LOCAL_BACKEND_MAP";
 
+/// REVERSE_LOCAL_MAP name per ADR-0053 rev 2026-06-05 (GH #200) —
+/// regular HASH keyed on `ReverseLocalKeyPod { backend_ip_host,
+/// backend_port_host, proto, _pad }` → `vip_host: u32`. The reply
+/// store for the unconnected same-host UDP cgroup path; the
+/// `cgroup_recvmsg4_service` program reads it. aya supports HASH
+/// natively. DISTINCT from `REVERSE_NAT_MAP` (the XDP wire path).
+const REVERSE_LOCAL_MAP_NAME: &str = "REVERSE_LOCAL_MAP";
+
 /// Default cgroup attach path for `cgroup_connect4_service` per
 /// ADR-0053 § 7.
 ///
@@ -250,6 +258,16 @@ pub struct EbpfDataplane {
     /// `connect(2)` from a process inside the attach cgroup.
     local_backend_map: crate::maps::local_backend_map_handle::LocalBackendMapHandle,
 
+    /// Userspace handle to REVERSE_LOCAL_MAP per ADR-0053 rev
+    /// 2026-06-05 (GH #200). Populated reverse-first by
+    /// `register_local_backend` (DDD-1) — keyed on the backend
+    /// identity `(backend_ip, backend_port, proto)` → vip. The
+    /// `cgroup_recvmsg4_service` kernel program reads it on every
+    /// unconnected `recvmsg(2)` to rewrite the reply source the app
+    /// reads backend→VIP. DISTINCT from `reverse_nat_map` (the XDP
+    /// connected/remote wire path).
+    reverse_local_map: crate::maps::reverse_local_map_handle::ReverseLocalMapHandle,
+
     /// Owns the `cgroup_connect4_service` cgroup_sock_addr
     /// attachment. Dropping detaches the program per ADR-0053
     /// § "Consequences" — Reliability — recoverability.
@@ -277,6 +295,35 @@ pub struct EbpfDataplane {
     /// sweep).
     #[allow(dead_code)]
     _cgroup_connect4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
+
+    /// Owns the `cgroup_sendmsg4_service` attachment (ADR-0053 rev
+    /// 2026-06-05, GH #200). The per-datagram forward analogue of
+    /// `connect4` — fires on every unconnected IPv4 `sendmsg`/`sendto`
+    /// from a process inside the attach cgroup, rewriting the
+    /// destination VIP→backend over `LOCAL_BACKEND_MAP`. Same RAII
+    /// detach-on-drop shape as `_cgroup_connect4_link`.
+    #[allow(dead_code)]
+    _cgroup_sendmsg4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
+
+    /// Owns the `cgroup_recvmsg4_service` attachment (ADR-0053 rev
+    /// 2026-06-05, GH #200). The reply-source rewrite — fires on every
+    /// unconnected IPv4 `recvmsg`/`recvfrom`, rewriting the reply
+    /// source backend→VIP over `REVERSE_LOCAL_MAP` so a same-host UDP
+    /// client reads the VIP as the reply source. Same RAII
+    /// detach-on-drop shape as `_cgroup_connect4_link`.
+    #[allow(dead_code)]
+    _cgroup_recvmsg4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
+
+    /// Userspace handle to `REVERSE_LOCAL_MISS_COUNTER` — the single-slot
+    /// `BPF_MAP_TYPE_PERCPU_ARRAY<u64>` the `cgroup_recvmsg4_service`
+    /// program bumps on every `REVERSE_LOCAL_MAP` miss (ADR-0053 § D3
+    /// rev 2026-06-05b / UI-1). A miss is the common non-service-reply
+    /// case (recvmsg4 fires on ALL subtree unconnected UDP); the counter
+    /// is observable-but-inert — its incrementing has no effect on the
+    /// source the app reads (the miss path is a pure no-op). Read-back
+    /// via [`Self::reverse_local_miss_count`] sums per-CPU at read time
+    /// (the `DROP_COUNTER` `aggregate_per_cpu` precedent).
+    reverse_local_miss_counter: aya::maps::PerCpuArray<aya::maps::MapData, u64>,
 
     /// Attach path the `cgroup_connect4_service` program is bound
     /// to. Retained for the operator-surfaced
@@ -337,6 +384,9 @@ impl EbpfDataplane {
 
         use crate::maps::hash_of_maps::HashOfMapsHandle;
         use crate::maps::local_backend_map_handle::LocalBackendMapHandle;
+        use crate::maps::reverse_local_map_handle::{
+            ReverseLocalEntryPod, ReverseLocalKeyPod, ReverseLocalMapHandle,
+        };
         use crate::maps::{
             BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
         };
@@ -580,6 +630,40 @@ impl EbpfDataplane {
             .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP try_from: {e}")))?;
         let local_backend_map = LocalBackendMapHandle::new(local_backend_map_inner);
 
+        // ADR-0053 rev 2026-06-05 (GH #200) — recover REVERSE_LOCAL_MAP
+        // typed handle. Regular HASH; aya supports it natively. The
+        // kernel `#[map]` declaration in
+        // `crates/overdrive-bpf/src/maps/reverse_local_map.rs` makes
+        // this map present in the loaded ELF. DISTINCT from
+        // REVERSE_NAT_MAP (the XDP wire path) — keyed on the backend
+        // identity, value = the original VIP (address AND port).
+        let reverse_local_map_inner =
+            aya::maps::HashMap::<_, ReverseLocalKeyPod, ReverseLocalEntryPod>::try_from(
+                bpf.take_map(REVERSE_LOCAL_MAP_NAME).ok_or_else(|| {
+                    DataplaneError::LoadFailed("REVERSE_LOCAL_MAP not found in BPF object".into())
+                })?,
+            )
+            .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP try_from: {e}")))?;
+        let reverse_local_map = ReverseLocalMapHandle::new(reverse_local_map_inner);
+
+        // ADR-0053 § D3 (rev 2026-06-05b / UI-1) — recover the
+        // REVERSE_LOCAL_MISS_COUNTER PerCpuArray<u64>. The kernel
+        // `#[map]` declaration in
+        // `crates/overdrive-bpf/src/maps/reverse_local_miss_counter.rs`
+        // makes this map present in the loaded ELF. Single slot
+        // (`SLOT_REVERSE_MISS = 0`); userspace sums per-CPU at read time
+        // (the DROP_COUNTER `aggregate_per_cpu` precedent).
+        let reverse_local_miss_counter = aya::maps::PerCpuArray::<_, u64>::try_from(
+            bpf.take_map("REVERSE_LOCAL_MISS_COUNTER").ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "REVERSE_LOCAL_MISS_COUNTER not found in BPF object".into(),
+                )
+            })?,
+        )
+        .map_err(|e| {
+            DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MISS_COUNTER try_from: {e}"))
+        })?;
+
         // ADR-0053 § 1 — load + attach cgroup_connect4_service.
         // Open the cgroup directory FD (read-only is sufficient;
         // aya's `attach` passes it through to
@@ -619,6 +703,56 @@ impl EbpfDataplane {
                 ))
             })?;
 
+        // ADR-0053 rev 2026-06-05 (GH #200) — load + attach the two new
+        // unconnected-UDP cgroup hooks to the SAME cgroup ancestor
+        // (DDD-5b). Each is a `CgroupSockAddr` program; aya recovers the
+        // attach type from the kernel-side `link_section` the
+        // `#[cgroup_sock_addr(sendmsg4)]` / `(recvmsg4)` macros emit. The
+        // attaches happen AFTER connect4 so a partial failure leaves a
+        // consistent "earlier hooks attached, later not" state the boot
+        // error surfaces — not a silently half-wired dataplane.
+        let sendmsg4_prog: &mut CgroupSockAddr = bpf
+            .program_mut("cgroup_sendmsg4_service")
+            .ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "cgroup_sendmsg4_service program not found in BPF object".into(),
+                )
+            })?
+            .try_into()
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("cgroup_sendmsg4_service program type: {e}"))
+            })?;
+        sendmsg4_prog.load().map_err(|e| cgroup_load_error("cgroup_sendmsg4_service", &e))?;
+        // ADR-0053 D5b/c — the attach() syscall IS the below-floor
+        // preflight: a host below the sendmsg4 floor (< 4.18) rejects this
+        // attach (EOPNOTSUPP/ENOSYS). Route through the typed
+        // `CgroupSendRecvAttach` variant (never `LoadFailed(String)`) so
+        // the composition root surfaces the refusal as
+        // `health.startup.refused`. NO /proc/uname parse.
+        let cgroup_sendmsg4_link_id = sendmsg4_prog
+            .attach(&cgroup_file, CgroupAttachMode::Single)
+            .map_err(|e| cgroup_attach_error("cgroup_sendmsg4_service", &e))?;
+
+        let recvmsg4_prog: &mut CgroupSockAddr = bpf
+            .program_mut("cgroup_recvmsg4_service")
+            .ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "cgroup_recvmsg4_service program not found in BPF object".into(),
+                )
+            })?
+            .try_into()
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("cgroup_recvmsg4_service program type: {e}"))
+            })?;
+        recvmsg4_prog.load().map_err(|e| cgroup_load_error("cgroup_recvmsg4_service", &e))?;
+        // ADR-0053 D5b/c — the attach() syscall IS the below-floor
+        // preflight: a host below the recvmsg4 floor (< 4.20) rejects this
+        // attach (EOPNOTSUPP/ENOSYS). Route through the typed
+        // `CgroupSendRecvAttach` variant (never `LoadFailed(String)`).
+        let cgroup_recvmsg4_link_id = recvmsg4_prog
+            .attach(&cgroup_file, CgroupAttachMode::Single)
+            .map_err(|e| cgroup_attach_error("cgroup_recvmsg4_service", &e))?;
+
         Ok(Self {
             bpf,
             service_map,
@@ -631,7 +765,11 @@ impl EbpfDataplane {
             _xdp_forward_link: xdp_forward_link,
             _xdp_reverse_link: xdp_reverse_link,
             local_backend_map,
+            reverse_local_map,
             _cgroup_connect4_link: cgroup_link_id,
+            _cgroup_sendmsg4_link: cgroup_sendmsg4_link_id,
+            _cgroup_recvmsg4_link: cgroup_recvmsg4_link_id,
+            reverse_local_miss_counter,
             cgroup_attach_path: cgroup_attach_path.to_path_buf(),
             #[cfg(any(test, feature = "integration-tests"))]
             probe_fault: parking_lot::Mutex::new(None),
@@ -908,6 +1046,12 @@ impl EbpfDataplane {
     /// with `"probe: BACKEND_MAP insert: ..."`, `"probe: BACKEND_MAP
     /// get: ..."`, `"probe: round-trip mismatch ..."`, or `"probe:
     /// BACKEND_MAP delete: ..."` depending on which step rejected.
+    /// Returns [`DataplaneError::LocalBackendProbe`] when the
+    /// `LOCAL_BACKEND_MAP` sentinel round-trip fails, and
+    /// [`DataplaneError::ReverseLocalProbe`] when the `REVERSE_LOCAL_MAP`
+    /// sentinel round-trip fails (ADR-0053 rev D5b/c reverse-path
+    /// Earned-Trust extension) — both surfaced by the composition root as
+    /// `health.startup.refused`.
     // `#[allow(clippy::unused_async)]` is required because the probe
     // body uses only synchronous parking_lot::Mutex guards against
     // the `BackendMapHandle`; there is no `.await` inside. The
@@ -1037,6 +1181,93 @@ impl EbpfDataplane {
             },
         )?;
 
+        // ADR-0053 rev D5b/c (GH #200) — Earned-Trust reverse-path
+        // extension. The two unconnected-UDP hooks are already attached
+        // (in `EbpfDataplane::new`, routed through the typed
+        // `CgroupSendRecvAttach` variant on a below-floor kernel). This
+        // sentinel round-trip confirms the reverse backend→VIP lookup
+        // path is programmable end-to-end BEFORE the dataplane is declared
+        // usable ("wire → probe → use").
+        self.probe_reverse_local()?;
+
+        Ok(())
+    }
+
+    /// REVERSE_LOCAL_MAP sentinel round-trip — the reverse-path half of
+    /// the Earned-Trust probe (ADR-0053 rev D5b/c, GH #200). Writes,
+    /// reads-back, and deletes a reserved `(0.0.0.0:0, Udp) → 0.0.0.0`
+    /// sentinel; a miss is the structural signal the reverse lookup path
+    /// is not programmable on this kernel. The 0.0.0.0 backend identity is
+    /// reserved — production allocator-issued backends never use it.
+    ///
+    /// Extracted from [`Self::probe`] to keep that method within the
+    /// per-fn line budget; it is the sole caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::ReverseLocalProbe`] when the sentinel
+    /// insert, read-back, round-trip assertion, or delete fails.
+    fn probe_reverse_local(&self) -> Result<(), DataplaneError> {
+        use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapValue};
+        use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+
+        let sentinel_backend_ip = Ipv4Addr::UNSPECIFIED;
+        let sentinel_backend_port: u16 = 0;
+        let sentinel_proto = Proto::Udp;
+        let sentinel_vip = Ipv4Addr::UNSPECIFIED;
+        let sentinel_vip_port: u16 = 0;
+
+        self.reverse_local_map
+            .upsert(
+                sentinel_backend_ip,
+                sentinel_backend_port,
+                sentinel_proto,
+                sentinel_vip,
+                sentinel_vip_port,
+            )
+            .map_err(|e| DataplaneError::ReverseLocalProbe {
+                message: format!("REVERSE_LOCAL_MAP sentinel insert: {e}"),
+            })?;
+
+        let sentinel_key = ReverseLocalKeyPod::from_typed(BackendKey::new(
+            sentinel_backend_ip,
+            sentinel_backend_port,
+            sentinel_proto,
+        ));
+        let sentinel_value = ReverseLocalMapValue::encode(sentinel_vip, sentinel_vip_port);
+
+        // Read-back via the dump surface, then verify the round-trip.
+        // The sentinel key MUST be present with the sentinel VIP value;
+        // a miss is the structural signal the reverse path is not
+        // programmable on this kernel. BOTH non-confirmation paths — a
+        // read-back failure AND a sentinel-absent miss — route through
+        // one fallible verdict so they share the single cleanup site
+        // below. The sentinel MUST be removed before the probe returns
+        // on either: a stranded `(0.0.0.0:0, Udp)` sentinel is
+        // inconsistent map state for the process lifetime (the leak this
+        // guards against — the earlier inline `entries()?` propagated a
+        // read-back error without cleanup).
+        if let Err(e) = reverse_local_sentinel_verdict(
+            self.reverse_local_map.entries(),
+            sentinel_key,
+            sentinel_value,
+        ) {
+            // Best-effort cleanup before bailing; the verdict failure is
+            // the real story so a delete failure here is swallowed.
+            let _ = self.reverse_local_map.remove(
+                sentinel_backend_ip,
+                sentinel_backend_port,
+                sentinel_proto,
+            );
+            return Err(e);
+        }
+
+        self.reverse_local_map
+            .remove(sentinel_backend_ip, sentinel_backend_port, sentinel_proto)
+            .map_err(|e| DataplaneError::ReverseLocalProbe {
+            message: format!("REVERSE_LOCAL_MAP sentinel delete: {e}"),
+        })?;
+
         Ok(())
     }
 
@@ -1056,6 +1287,61 @@ impl EbpfDataplane {
         self.local_backend_map
             .entries()
             .map_err(|e| DataplaneError::LoadFailed(format!("LOCAL_BACKEND_MAP iter: {e}")))
+    }
+
+    /// Public read-back surface for `REVERSE_LOCAL_MAP` (ADR-0053 rev
+    /// 2026-06-05, GH #200) — the `bpftool map dump`-equivalent the
+    /// Tier-3 acceptance asserts on (S-01-02): after one
+    /// `register_local_backend`, the reverse map carries
+    /// `(backend_ip, backend_port, proto) → vip`. Mirrors
+    /// [`Self::local_backend_map_entries`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] when the underlying map
+    /// iteration fails.
+    pub fn reverse_local_map_entries(
+        &self,
+    ) -> Result<
+        Vec<(
+            crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
+            crate::maps::reverse_local_map_handle::ReverseLocalEntryPod,
+        )>,
+        DataplaneError,
+    > {
+        self.reverse_local_map
+            .entries()
+            .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP iter: {e}")))
+    }
+
+    /// Read-back surface for `REVERSE_LOCAL_MISS_COUNTER` (ADR-0053 § D3
+    /// rev 2026-06-05b / UI-1, GH #200) — the percpu-array dump the
+    /// Tier-3 hardening test asserts on (S-03-01 assertion c). Returns
+    /// the count of `cgroup_recvmsg4_service` `REVERSE_LOCAL_MAP` misses
+    /// summed across every online CPU (the `aggregate_per_cpu` fold the
+    /// `DROP_COUNTER` read path uses).
+    ///
+    /// A miss is the common non-service-reply case — recvmsg4 fires on
+    /// ALL subtree unconnected UDP, and only a registered backend's reply
+    /// hits. The counter is observable-but-inert: its incrementing has no
+    /// effect on the source the app reads (the miss path is a pure no-op,
+    /// not a sentinel rewrite).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] when the underlying per-CPU
+    /// slot read fails.
+    pub fn reverse_local_miss_count(&self) -> Result<u64, DataplaneError> {
+        // Single-slot counter; slot 0 is the reverse-miss count
+        // (lockstep with `reverse_local_miss_counter.rs`'s
+        // `SLOT_REVERSE_MISS` / `MAX_ENTRIES = 1`).
+        const SLOT_REVERSE_MISS: u32 = 0;
+        let per_cpu = self.reverse_local_miss_counter.get(&SLOT_REVERSE_MISS, 0).map_err(|e| {
+            DataplaneError::LoadFailed(format!(
+                "REVERSE_LOCAL_MISS_COUNTER PerCpuArray::get(slot={SLOT_REVERSE_MISS}): {e}"
+            ))
+        })?;
+        Ok(overdrive_core::dataplane::aggregate_per_cpu(&per_cpu))
     }
 
     /// Returns the LOCAL_BACKEND_MAP entry for `(vip, vip_port)`,
@@ -1095,6 +1381,39 @@ impl EbpfDataplane {
     #[cfg(any(test, feature = "integration-tests"))]
     pub fn set_probe_fault(&self, fault: DataplaneError) {
         *self.probe_fault.lock() = Some(fault);
+    }
+
+    /// Test-only seam: remove ONLY the forward `LOCAL_BACKEND_MAP` entry
+    /// for `(vip, vip_port, proto)`, leaving any reverse `REVERSE_LOCAL_MAP`
+    /// entry untouched.
+    ///
+    /// Models the post-partial-failure state of a prior
+    /// `deregister_local_backend` where the forward removal succeeded but
+    /// the reverse removal errored — the exact state the GH #211 retry-
+    /// safety regression test drives a retry against. There is no
+    /// production caller; production never removes forward-without-reverse.
+    ///
+    /// Gated behind `#[cfg(any(test, feature = "integration-tests"))]` —
+    /// the symbol does not exist in production builds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LocalBackendDelete`] on a kernel-side map
+    /// delete failure other than `KeyNotFound` (which is idempotent).
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn remove_local_backend_forward_only(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
+    ) -> Result<(), DataplaneError> {
+        self.local_backend_map.remove(vip, vip_port, proto).map_err(|e| {
+            DataplaneError::LocalBackendDelete {
+                source: std::io::Error::other(format!(
+                    "aya HashMap::remove (LOCAL_BACKEND_MAP, forward-only test seam): {e}"
+                )),
+            }
+        })
     }
 }
 
@@ -1210,6 +1529,52 @@ fn empty_backend_purge_keys<'a>(
         .collect()
 }
 
+/// Read-back verdict for the `REVERSE_LOCAL_MAP` sentinel round-trip
+/// (ADR-0053 rev D5b/c, GH #200).
+///
+/// `Ok(())` means the dumped `entries` contain the sentinel key with
+/// the expected VIP — the reverse path is programmable and
+/// [`EbpfDataplane::probe_reverse_local`] proceeds to delete the
+/// sentinel. `Err(_)` means the read-back itself failed OR the sentinel
+/// was absent; in **both** cases the caller MUST remove the sentinel
+/// before returning, so the two non-confirmation paths share one
+/// cleanup site.
+///
+/// Folding the read-back-failure and round-trip-miss branches into a
+/// single fallible verdict is what closes the sentinel-leak gap: the
+/// earlier inline `entries()?` propagated a read error WITHOUT removing
+/// the sentinel, stranding the reserved `(0.0.0.0:0, Udp) → 0.0.0.0`
+/// entry in the map for the process lifetime.
+///
+/// Lives at module scope rather than inline in `probe_reverse_local` so
+/// the unit tests in `mod tests` can exercise the verdict without
+/// constructing a full `EbpfDataplane` (mirrors
+/// [`empty_backend_purge_keys`] / [`should_fallback_to_generic`]) —
+/// the probe itself needs a real kernel map and has no Tier-2 backstop.
+fn reverse_local_sentinel_verdict(
+    entries: Result<
+        Vec<(
+            crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
+            crate::maps::reverse_local_map_handle::ReverseLocalEntryPod,
+        )>,
+        aya::maps::MapError,
+    >,
+    sentinel_key: crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
+    sentinel_value: crate::maps::reverse_local_map_handle::ReverseLocalEntryPod,
+) -> Result<(), DataplaneError> {
+    let entries = entries.map_err(|e| DataplaneError::ReverseLocalProbe {
+        message: format!("REVERSE_LOCAL_MAP sentinel read-back: {e}"),
+    })?;
+    if entries.iter().any(|(k, v)| *k == sentinel_key && *v == sentinel_value) {
+        Ok(())
+    } else {
+        Err(DataplaneError::ReverseLocalProbe {
+            message: "REVERSE_LOCAL_MAP sentinel round-trip missed: key absent after insert"
+                .to_string(),
+        })
+    }
+}
+
 /// Verdict from classifying an `aya::programs::Xdp::attach` result
 /// against the native→generic fallback policy. Wraps the three
 /// outcomes the loader's two attach call sites (forward-path on
@@ -1304,6 +1669,44 @@ fn classify_iface_xdp_slot_busy(
         }
         _ => None,
     }
+}
+
+/// Build the typed [`DataplaneError::CgroupSendRecvAttach`] for a failed
+/// load/attach of an unconnected-UDP cgroup hook (ADR-0053 D5b/c, GH
+/// #200).
+///
+/// The aya `ProgramError` from `load()`/`attach()` is classified into the
+/// typed variant: when the failure carries a `SyscallError` we extract its
+/// `io_error` (preserving the `EOPNOTSUPP`/`ENOSYS` errno that a
+/// below-floor kernel returns); otherwise we synthesise an `io::Error`
+/// from the `ProgramError`'s `Display` so the `source` chain is never
+/// empty. Either way the result is the typed variant the composition root
+/// routes to `health.startup.refused` — NEVER a flattened
+/// `LoadFailed(String)` (`.claude/rules/development.md` § "Never flatten a
+/// typed error"). Mirrors the `classify_iface_xdp_slot_busy` precedent.
+fn cgroup_attach_error(hook: &'static str, error: &aya::programs::ProgramError) -> DataplaneError {
+    use aya::programs::ProgramError;
+
+    let source = match error {
+        ProgramError::SyscallError(se) => se.io_error.raw_os_error().map_or_else(
+            || std::io::Error::other(error.to_string()),
+            std::io::Error::from_raw_os_error,
+        ),
+        other => std::io::Error::other(other.to_string()),
+    };
+    DataplaneError::CgroupSendRecvAttach { hook, source }
+}
+
+/// Build the typed [`DataplaneError::LoadFailed`] for a failed
+/// `load()` of an unconnected-UDP cgroup hook. A load failure is a
+/// BPF program-correctness problem (verifier rejection, missing
+/// program, capability gap) — NOT the below-floor attach refusal
+/// `cgroup_attach_error` / `CgroupSendRecvAttach` is reserved for
+/// (ADR-0053 D5b/c: the attach() syscall is the kernel-version
+/// oracle, not load()). Mirrors the `cgroup_connect4_service.load`
+/// inline mapping.
+fn cgroup_load_error(hook: &'static str, error: &aya::programs::ProgramError) -> DataplaneError {
+    DataplaneError::LoadFailed(format!("{hook}.load: {error}"))
 }
 
 #[async_trait]
@@ -1721,10 +2124,25 @@ impl Dataplane for EbpfDataplane {
         Ok(vec![])
     }
 
-    /// ADR-0053 § 2 — register or replace the local backend for
-    /// `(vip, vip_port)`. Point write against LOCAL_BACKEND_MAP via
-    /// the typed handle; kernel sees either the prior backend or
-    /// the new one — no torn states.
+    /// ADR-0053 rev 2026-06-05 (GH #200) — register or replace the
+    /// local backend for `(vip, vip_port, proto)` with the ORDERED
+    /// reverse-first dual-write (DDD-1).
+    ///
+    /// Two BPF map syscalls, reverse BEFORE forward:
+    /// 1. `REVERSE_LOCAL_MAP[(backend_ip, backend_port, proto)] =
+    ///    (vip, vip_port)` — the reply store the
+    ///    `cgroup_recvmsg4_service` program reads to rewrite the
+    ///    unconnected reply source backend→VIP (BOTH address and port,
+    ///    ADR-0053 §D4).
+    /// 2. `LOCAL_BACKEND_MAP[(vip, vip_port, proto)] = backend`
+    ///    — the forward store `cgroup_connect4`/`sendmsg4` read to
+    ///    rewrite the destination VIP→backend.
+    ///
+    /// The order is an ORDERING guarantee, not atomicity (DDD-1, F-2):
+    /// because the reverse entry lands first, no observer ever sees a
+    /// forward entry without its matching reverse. A `sendmsg` the
+    /// forward entry rewrites is guaranteed the reply's reverse entry
+    /// is already present.
     async fn register_local_backend(
         &self,
         vip: Ipv4Addr,
@@ -1732,26 +2150,76 @@ impl Dataplane for EbpfDataplane {
         backend: std::net::SocketAddrV4,
         proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
+        // Reverse FIRST (DDD-1) — keyed on the backend identity →
+        // (vip, vip_port). The VIP port is restored alongside the VIP
+        // address on the reply rewrite (ADR-0053 §D4).
+        self.reverse_local_map
+            .upsert(*backend.ip(), backend.port(), proto, vip, vip_port)
+            .map_err(|e| DataplaneError::LocalBackendInsert {
+                source: std::io::Error::other(format!(
+                    "aya HashMap::insert (REVERSE_LOCAL_MAP): {e}"
+                )),
+            })?;
+        // Forward SECOND — keyed on (vip, vip_port, proto) → backend.
         self.local_backend_map.upsert(vip, vip_port, backend, proto).map_err(|e| {
             DataplaneError::LocalBackendInsert {
-                source: std::io::Error::other(format!("aya HashMap::insert: {e}")),
+                source: std::io::Error::other(format!(
+                    "aya HashMap::insert (LOCAL_BACKEND_MAP): {e}"
+                )),
             }
         })
     }
 
-    /// ADR-0053 § 2 — idempotent removal. KeyNotFound is swallowed
-    /// inside the typed handle per the trait contract.
+    /// ADR-0053 rev 2026-06-05 (GH #200) — idempotent dual-removal
+    /// (DDD-5a; caller-supplied backend, GH #211). Removes BOTH the
+    /// forward `(vip, vip_port, proto)` entry and its matching reverse
+    /// `(backend, proto) → vip` entry.
+    ///
+    /// The `backend` tuple is supplied by the caller (mirroring
+    /// `register_local_backend`), so the reverse key is NOT derived by
+    /// reading the forward entry. Both removals are unconditional and
+    /// idempotent. Removal order is forward THEN reverse — so no
+    /// `connect`/`sendmsg` can be rewritten toward a backend whose
+    /// reverse entry is already gone (the no-forward-without-reverse
+    /// invariant, inverted for teardown).
+    ///
+    /// Retry-safety is the reason the backend is caller-supplied: a
+    /// retry after a partial failure (forward removed, reverse removal
+    /// errored) still carries the backend identity and completes the
+    /// reverse removal. The previous forward-read-back derivation was
+    /// unrecoverable once the forward entry was gone — the retry saw
+    /// `None`, skipped the reverse removal, and stranded a stale reverse
+    /// entry that mis-rewrote the reply source of any datagram from that
+    /// backend address (GH #211). `KeyNotFound` is swallowed inside the
+    /// typed handles per the trait contract.
     async fn deregister_local_backend(
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        backend: std::net::SocketAddrV4,
         proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
+        // Forward FIRST (DDD-5a teardown order). Idempotent.
         self.local_backend_map.remove(vip, vip_port, proto).map_err(|e| {
             DataplaneError::LocalBackendDelete {
-                source: std::io::Error::other(format!("aya HashMap::remove: {e}")),
+                source: std::io::Error::other(format!(
+                    "aya HashMap::remove (LOCAL_BACKEND_MAP): {e}"
+                )),
             }
-        })
+        })?;
+
+        // Reverse SECOND — keyed on the CALLER-SUPPLIED backend, so the
+        // removal is unconditional and retry-safe (no dependence on a
+        // since-removed forward entry, GH #211). Idempotent inside the
+        // handle.
+        self.reverse_local_map.remove(*backend.ip(), backend.port(), proto).map_err(|e| {
+            DataplaneError::LocalBackendDelete {
+                source: std::io::Error::other(format!(
+                    "aya HashMap::remove (REVERSE_LOCAL_MAP): {e}"
+                )),
+            }
+        })?;
+        Ok(())
     }
 }
 
@@ -1811,6 +2279,68 @@ mod tests {
             "empty-backend purge must select ONLY the frontend's own \
              (vip, port, proto) slot — co-resident listeners differing by \
              proto or port, and other VIPs, must survive"
+        );
+    }
+
+    /// Regression — a `REVERSE_LOCAL_MAP` sentinel read-back FAILURE
+    /// must be classified as a probe failure (`Err`), the same verdict
+    /// as a round-trip miss, so `probe_reverse_local` removes the
+    /// sentinel before returning. The earlier inline `entries()?`
+    /// propagated a read-back error WITHOUT removing the sentinel,
+    /// stranding the reserved `(0.0.0.0:0, Udp) → 0.0.0.0` entry in
+    /// `REVERSE_LOCAL_MAP` for the process lifetime (ADR-0053 rev
+    /// D5b/c, GH #200). Folding the read-back-failure and round-trip
+    /// -miss branches into one fallible verdict gives both a single
+    /// cleanup site at the call site.
+    ///
+    /// Exercises the pure verdict without constructing a full
+    /// `EbpfDataplane` (mirrors
+    /// `empty_backend_purge_is_scoped_to_frontend_not_vip_wide`) —
+    /// `probe_reverse_local` itself needs a real kernel map and has no
+    /// Tier-2 backstop, so the verdict seam is the default-lane guard.
+    #[test]
+    fn reverse_local_sentinel_verdict_pins_all_three_branches() {
+        use std::net::Ipv4Addr;
+
+        use aya::maps::MapError;
+        use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+
+        use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapValue};
+
+        let sentinel_key =
+            ReverseLocalKeyPod::from_typed(BackendKey::new(Ipv4Addr::UNSPECIFIED, 0, Proto::Udp));
+        let sentinel_value = ReverseLocalMapValue::encode(Ipv4Addr::UNSPECIFIED, 0);
+
+        // 1. Read-back FAILURE — THE regression. The map dump errored;
+        //    the verdict must be `Err` so the caller cleans up the
+        //    sentinel rather than leaking it.
+        let read_back_failed = super::reverse_local_sentinel_verdict(
+            Err(MapError::KeyNotFound),
+            sentinel_key,
+            sentinel_value,
+        );
+        assert!(
+            read_back_failed.is_err(),
+            "a read-back failure must be a probe failure so the sentinel is cleaned up"
+        );
+
+        // 2. Round-trip MISS — sentinel absent from a successful dump.
+        //    Also `Err` (already-correct path; pinned so the two
+        //    non-confirmation branches stay unified).
+        let missed =
+            super::reverse_local_sentinel_verdict(Ok(Vec::new()), sentinel_key, sentinel_value);
+        assert!(missed.is_err(), "an absent sentinel must be a probe failure");
+
+        // 3. CONFIRMED — sentinel present with the expected VIP. The
+        //    only `Ok` path; the caller proceeds to delete the sentinel.
+        let confirmed = super::reverse_local_sentinel_verdict(
+            Ok(vec![(sentinel_key, sentinel_value)]),
+            sentinel_key,
+            sentinel_value,
+        );
+        assert!(
+            confirmed.is_ok(),
+            "a present sentinel with the expected VIP confirms the round-trip"
         );
     }
 
@@ -2064,5 +2594,88 @@ mod tests {
             rendered.contains("client_iface != backend_iface"),
             "Display must carry the client_iface != backend_iface remediation hint: {rendered}"
         );
+    }
+
+    // ----- load() vs attach() error routing for the unconnected-UDP
+    //       cgroup hooks (ADR-0053 D5b/c, GH #200) -----
+    //
+    // A `load()` failure on `cgroup_sendmsg4_service` / `cgroup_recvmsg4_service`
+    // is a BPF program-correctness problem (verifier regression, missing
+    // program, capability gap) — NOT the attach-time below-floor kernel
+    // refusal `CgroupSendRecvAttach` is reserved for. Routing a `load()`
+    // failure through `cgroup_attach_error` would tell the operator "the
+    // attach() syscall is the kernel-version oracle" for a problem that has
+    // nothing to do with the kernel floor.
+    //
+    // There is no Tier-2 backstop (`BPF_PROG_TEST_RUN` returns ENOTSUPP for
+    // `cgroup_sock_addr` programs) and a real `load()` failure cannot be
+    // forced on the 5.10+ Lima matrix, so these default-lane unit tests on
+    // the two error-construction helpers ARE the structural defense against
+    // the call-site routing regressing. Each pins the variant its helper
+    // selects; together they lock both helpers' contracts so a future swap
+    // of `load()` back onto `cgroup_attach_error` flips an assertion here.
+
+    /// `cgroup_load_error` builds a [`DataplaneError::LoadFailed`] — the
+    /// program-correctness variant — NOT the kernel-floor-reserved
+    /// `CgroupSendRecvAttach`. The message names the hook and `load` so all
+    /// three cgroup hooks (`connect4`, `sendmsg4`, `recvmsg4`) read
+    /// identically in logs.
+    #[test]
+    fn cgroup_load_error_yields_load_failed_not_attach_refusal() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_prog_load",
+            io_error: io::Error::from_raw_os_error(libc::E2BIG),
+        });
+        let built = super::cgroup_load_error("cgroup_sendmsg4_service", &err);
+
+        assert!(
+            !matches!(built, DataplaneError::CgroupSendRecvAttach { .. }),
+            "a load() failure must NOT route through the attach-time \
+             below-floor variant: {built:?}"
+        );
+        match built {
+            DataplaneError::LoadFailed(message) => {
+                assert!(
+                    message.contains("cgroup_sendmsg4_service"),
+                    "LoadFailed message must name the hook: {message}"
+                );
+                assert!(
+                    message.contains("load"),
+                    "LoadFailed message must name the load() phase: {message}"
+                );
+            }
+            other => panic!("expected DataplaneError::LoadFailed(_), got {other:?}"),
+        }
+    }
+
+    /// `cgroup_attach_error` (the attach path, unchanged) builds the typed
+    /// [`DataplaneError::CgroupSendRecvAttach`] carrying the offending
+    /// hook. Pinned alongside the `load()` test so the two helpers'
+    /// contracts are both locked — `attach()` genuinely IS the below-floor
+    /// oracle per ADR-0053 D5b/c.
+    #[test]
+    fn cgroup_attach_error_yields_send_recv_attach_with_hook() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_prog_attach",
+            io_error: io::Error::from_raw_os_error(libc::EOPNOTSUPP),
+        });
+        let built = super::cgroup_attach_error("cgroup_recvmsg4_service", &err);
+
+        match built {
+            DataplaneError::CgroupSendRecvAttach { hook, .. } => {
+                assert_eq!(hook, "cgroup_recvmsg4_service");
+            }
+            other => {
+                panic!("expected DataplaneError::CgroupSendRecvAttach {{ .. }}, got {other:?}")
+            }
+        }
     }
 }

@@ -29,6 +29,7 @@
 use aya_ebpf::{macros::cgroup_sock_addr, programs::SockAddrContext};
 
 use crate::maps::local_backend_map::{LOCAL_BACKEND_MAP, LocalServiceKey};
+use crate::shared::build_local_service_key::build_local_service_key_parts;
 
 /// `BPF_CGROUP_INET4_CONNECT` entry point. Returns 1 on every code
 /// path — the hook only rewrites; it never denies.
@@ -46,45 +47,29 @@ pub fn cgroup_connect4_service(ctx: SockAddrContext) -> i32 {
 
 #[inline(always)]
 fn try_cgroup_connect4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
+    let sock_addr = ctx.sock_addr;
+
+    // Build the host-order `(addr, port, proto)` triple via the shared
+    // key-build helper — the single site that handles the `user_port`
+    // low-16-NBO hazard correctly (per ADR-0053 § D4 / DDD-4, Option 3).
+    // The helper does key-build + NBO ONLY: connect4's own
+    // `LOCAL_BACKEND_MAP` lookup and forward dest-rewrite stay below.
+    // `connect4` fires for TCP `connect()` and connected-UDP
+    // `connect()`; unconnected-UDP `sendmsg4` is its own hook (GH #200).
+    //
     // SAFETY: aya's `SockAddrContext` exposes `*mut bpf_sock_addr`
     // directly. The kernel guarantees the pointer is valid for the
     // duration of the program invocation; the bounds of the struct
-    // are fixed by the in-tree UAPI definition. We read two u32
-    // fields (`user_ip4`, `user_port`) and write the same two
-    // back — all reads/writes are within the kernel-guaranteed
-    // struct layout.
-    let sock_addr = ctx.sock_addr;
-    if sock_addr.is_null() {
-        return Err(());
-    }
+    // are fixed by the in-tree UAPI definition. The helper reads
+    // `user_ip4` / `user_port` / `protocol` within that layout.
+    let parts = unsafe { build_local_service_key_parts(sock_addr) }?;
 
-    // Read connect destination — network-byte-order per kernel
-    // UAPI. Convert to host-order for the map key.
-    let user_ip4_nbo = unsafe { (*sock_addr).user_ip4 };
-    let user_port_nbo = unsafe { (*sock_addr).user_port };
-    // `bpf_sock_addr.protocol` carries the IANA L4 proto number
-    // (IPPROTO_TCP=6, IPPROTO_UDP=17) as a kernel-internal u32 in
-    // host byte order — NOT network-order, and NOT a SOCK_* type
-    // (that lives in `.type`). Zero translation: truncate the low
-    // byte straight into the map key. No SOCK_*→IPPROTO_* table; a
-    // single byte so no endianness swap. `connect4` fires for TCP
-    // `connect()` and connected-UDP `connect()`; unconnected-UDP
-    // `sendmsg4` is out of scope (GH #200).
-    let proto = unsafe { (*sock_addr).protocol };
-
-    let vip_host = u32::from_be(user_ip4_nbo);
-    // `user_port` is a u32 in `bpf_sock_addr` whose LOW 16 bits carry
-    // the network-byte-order port (kernel copies `inet_sk->inet_dport`
-    // — already nbo — into the low 16 bits of this field; the high
-    // 16 bits are unused). Truncate to u16 to obtain the nbo port,
-    // THEN byte-swap to host order. Reading `u32::from_be(...) as u16`
-    // would swap the whole u32 and then take the wrong half — always 0.
-    #[allow(clippy::cast_possible_truncation)]
-    let port_host = u16::from_be(user_port_nbo as u16);
-    #[allow(clippy::cast_possible_truncation)]
-    let proto_byte = proto as u8;
-
-    let key = LocalServiceKey { vip_host, port_host, proto: proto_byte, _pad: 0 };
+    let key = LocalServiceKey {
+        vip_host: parts.addr_host,
+        port_host: parts.port_host,
+        proto: parts.proto_byte,
+        _pad: 0,
+    };
 
     // SAFETY: `LOCAL_BACKEND_MAP.get(...)` is the canonical
     // verifier-readable aya-ebpf map access shape. The verifier

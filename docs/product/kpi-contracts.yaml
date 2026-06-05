@@ -9,6 +9,15 @@
 # Observability stack is Cloudflare-native (locked DEVOPS decision): Workers
 # Logs / Workers observability + Cloudflare Web Analytics (browser RUM) + D1
 # (the MCP tool-call analytics log). No OpenTelemetry, no Datadog/Prometheus/ELK.
+#
+# SCOPE — this file is the docs-platform feature's contract ONLY (feature:
+# docs-platform; KPI-1..6 below are the website KPIs). It is a single-feature
+# SSOT, NOT a workspace-wide KPI registry. Other features record their own
+# outcome-KPI baselines + first-GA measurements in their evolution records,
+# NOT here — injecting them would corrupt this contract (DISTILL decision,
+# unconnected-udp-sendmsg4, 2026-06-05). Example: the unconnected-UDP K1–K5
+# first-GA baselines live in
+# docs/evolution/2026-06-05-unconnected-udp-sendmsg4.md § Outcome measurement.
 
 schema_version: 1
 feature: docs-platform

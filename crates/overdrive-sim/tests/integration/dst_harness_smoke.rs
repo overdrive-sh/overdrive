@@ -134,6 +134,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `service_map_hydrator`); drives the hydrator against
     // bridge-written `service_backends_rows` under Sim adapters.
     "bridge-to-hydrator-handoff",
+    // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3, GH #200) —
+    // `reply-source-rewrite-lockstep` added to `Invariant::ALL` by step 02-01;
+    // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
+    // `dst_clean_clone_green.rs`.
+    "reply-source-rewrite-lockstep",
 ];
 
 // -----------------------------------------------------------------------------
