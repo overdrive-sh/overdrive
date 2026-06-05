@@ -285,6 +285,24 @@ struct Inner {
             overdrive_core::workflow::WorkflowResult,
         >,
     >,
+    /// In-memory `workflow_signal` index, keyed by the
+    /// [`SignalKey`](overdrive_core::workflow::SignalKey). Populated on
+    /// every `Signal` `write()` and read by
+    /// [`LocalObservationStore::workflow_signal`] so the engine's live
+    /// `ctx.wait_for_signal` path observes a written signal.
+    ///
+    /// Same shape and rationale as `workflow_terminals` above (ADR-0064
+    /// §4): the signal surface is a LIVE in-process single-node delivery
+    /// (#207 cross-node-under-partition is OUT), so a process-local
+    /// in-memory index — not a durable rkyv envelope — is the correct
+    /// shape. `BTreeMap` for deterministic iteration per
+    /// `.claude/rules/development.md` § "Ordered-collection choice".
+    workflow_signals: std::sync::Mutex<
+        std::collections::BTreeMap<
+            overdrive_core::workflow::SignalKey,
+            overdrive_core::workflow::SignalValue,
+        >,
+    >,
 }
 
 impl LocalObservationStore {
@@ -333,6 +351,7 @@ impl LocalObservationStore {
                 db,
                 subscription_tx,
                 workflow_terminals: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+                workflow_signals: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             }),
         })
     }
@@ -400,7 +419,13 @@ impl ObservationStore for LocalObservationStore {
                 // convergence signal only. Accepted unconditionally (no LWW
                 // key collision is possible — the correlation key is unique
                 // per instance terminal).
-                ObservationRow::WorkflowTerminal { .. } => true,
+                // `WorkflowTerminal` (ADR-0064 §2) AND `Signal`
+                // (ADR-0064 §4) are both LIVE in-process single-node
+                // surfaces — accepted unconditionally (no LWW collision:
+                // the correlation key / signal key is the unique index).
+                // Their in-memory indexes are written on the async side
+                // below, not in the redb txn.
+                ObservationRow::WorkflowTerminal { .. } | ObservationRow::Signal { .. } => true,
             };
             // Commit unconditionally — a rejected write performed only
             // a read inside the transaction; redb handles the no-op
@@ -424,6 +449,18 @@ impl ObservationStore for LocalObservationStore {
             let mut index =
                 self.inner.workflow_terminals.lock().expect("workflow_terminals mutex poisoned");
             index.insert(correlation.clone(), result.clone());
+        }
+
+        // `Signal` (ADR-0064 §4): record the typed signal value in the
+        // in-memory index so `workflow_signal` (the engine's live
+        // `ctx.wait_for_signal` source) observes it. One current value
+        // per key; a re-write replaces it. Process-local state, so done
+        // on the async side rather than in the redb txn.
+        if let ObservationRow::Signal { key, value } = &row {
+            #[allow(clippy::expect_used)]
+            let mut index =
+                self.inner.workflow_signals.lock().expect("workflow_signals mutex poisoned");
+            index.insert(key.clone(), value.clone());
         }
 
         // Suppress emit on LWW reject — subscribers must NEVER observe
@@ -776,6 +813,18 @@ impl ObservationStore for LocalObservationStore {
         let index =
             self.inner.workflow_terminals.lock().expect("workflow_terminals mutex poisoned");
         Ok(index.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    }
+
+    async fn workflow_signal(
+        &self,
+        key: &overdrive_core::workflow::SignalKey,
+    ) -> Result<Option<overdrive_core::workflow::SignalValue>, ObservationStoreError> {
+        // Point lookup against the in-memory signal index. Absence
+        // (`Ok(None)`) is the normal "still blocked" condition the live
+        // `ctx.wait_for_signal` path parks on — never an error.
+        #[allow(clippy::expect_used)]
+        let index = self.inner.workflow_signals.lock().expect("workflow_signals mutex poisoned");
+        Ok(index.get(key).cloned())
     }
 }
 

@@ -564,6 +564,25 @@ pub enum ObservationRow {
         /// The workflow's terminal result.
         result: crate::workflow::WorkflowResult,
     },
+    /// `workflow_signal` row — the typed cross-workflow signal surface a
+    /// `ctx.wait_for_signal(key)` blocks on per ADR-0064 §4. A producer
+    /// satisfies a blocked wait by writing this row keyed by the same
+    /// [`SignalKey`](crate::workflow::SignalKey); the engine's live
+    /// `ctx.wait_for_signal` path reads it via
+    /// [`ObservationStore::workflow_signal`].
+    ///
+    /// In-process single-node delivery (#207 cross-node-under-partition
+    /// is OUT). Keyed by `key` alone — one current value per key; a
+    /// re-write replaces it (the value is opaque to the primitive). This
+    /// is the absent-vs-present surface that makes the blocking honest:
+    /// before this row exists, `ctx.wait_for_signal(key)` stays pending.
+    Signal {
+        /// The signal key the row satisfies — the same key a
+        /// `ctx.wait_for_signal(key)` blocks on.
+        key: crate::workflow::SignalKey,
+        /// The opaque payload the blocked wait receives verbatim.
+        value: crate::workflow::SignalValue,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1412,4 +1431,38 @@ pub trait ObservationStore: Send + Sync + 'static {
     async fn workflow_terminal_rows(
         &self,
     ) -> Result<Vec<(CorrelationKey, crate::workflow::WorkflowResult)>, ObservationStoreError>;
+
+    /// Read the current typed signal value for `key`, if present — the
+    /// surface a `ctx.wait_for_signal(key)` blocks on per ADR-0064 §4.
+    /// In-process single-node delivery (#207 cross-node-under-partition
+    /// is OUT).
+    ///
+    /// # Preconditions
+    /// - None. A key that has never been signalled simply returns
+    ///   `Ok(None)` — that ABSENCE is the load-bearing signal the live
+    ///   `ctx.wait_for_signal` path parks on (it re-reads via the
+    ///   injected [`Clock`](crate::traits::clock::Clock) until the row
+    ///   appears).
+    ///
+    /// # Postconditions
+    /// - Returns `Ok(Some(value))` IFF an `ObservationRow::Signal { key,
+    ///   value }` for this exact `key` has been written (single-node
+    ///   read-after-write is strict). Returns `Ok(None)` otherwise.
+    /// - One current value per key — a re-write of the same key replaces
+    ///   the prior value (the value is opaque; last write wins on log
+    ///   order).
+    ///
+    /// # Edge cases
+    /// - No signal written for `key`: returns `Ok(None)`, not an error —
+    ///   absence is the normal "still blocked" condition, not a failure.
+    ///
+    /// # Observable invariants
+    /// - Calling this method has no side effects (it is a pure read).
+    /// - `workflow_signal(key)` transitions monotonically from
+    ///   `Ok(None)` to `Ok(Some(_))` for a given `key` (a written signal
+    ///   is not un-written within an instance's lifetime).
+    async fn workflow_signal(
+        &self,
+        key: &crate::workflow::SignalKey,
+    ) -> Result<Option<crate::workflow::SignalValue>, ObservationStoreError>;
 }

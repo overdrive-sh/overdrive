@@ -95,8 +95,25 @@ impl JournalCursor for RecordingCursor {
         None
     }
 
-    async fn read_signal(&self, _signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError> {
-        Ok(SignalValue::empty())
+    async fn record_signal_awaited(&self, _signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
+        Ok(())
+    }
+
+    async fn poll_signal(
+        &self,
+        _signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+        // No signal surface wired in this fixture: resolve immediately
+        // (always-live no-op) so a ctx that waits does not block forever.
+        Ok(Some(SignalValue::empty()))
+    }
+
+    async fn record_signal_seen(
+        &self,
+        _signal_key: &SignalKey,
+        _value: &SignalValue,
+    ) -> Result<(), WorkflowCtxError> {
+        Ok(())
     }
 
     async fn replay_emit(&self) -> bool {

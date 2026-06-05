@@ -557,28 +557,60 @@ impl JournalCursor for JournalCursorHandle {
 
     async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
         let mut cursor = self.cursor.lock().await;
-        // A replay hit requires a recorded SignalSeen at the cursor — the
-        // signal was observed satisfied on the live run, so the recorded
-        // value is replayed without re-reading the surface (ADR-0064 §4).
-        // A SignalAwaited with no following SignalSeen (crashed while still
-        // blocked) is NOT a replay hit: this `else` branch returns None so
-        // the live path re-blocks on the SAME signal (step 03-02 proves the
-        // crash-safety). Identity is POSITIONAL — `signal_key` is carried
-        // for diagnostics; the cursor index is the identity.
-        let Some(JournalEntry::SignalSeen { value, .. }) = self.replay_buffer.get(*cursor) else {
+        // A `ctx.wait_for_signal` records a PAIR of entries at distinct
+        // cursor positions: `SignalAwaited` (when blocking begins) then
+        // `SignalSeen { value }` (when the signal is observed satisfied).
+        // On replay the cursor points at the `SignalAwaited`:
+        //
+        // - **Completed wait** — `SignalAwaited` followed by `SignalSeen`:
+        //   a replay HIT. Return the recorded value WITHOUT re-reading the
+        //   surface and advance the cursor PAST BOTH entries (the live run
+        //   received this exact value; ADR-0064 §4). [S-WP-03-02]
+        // - **Crashed while blocked** — `SignalAwaited` with NO following
+        //   `SignalSeen`: NOT a replay hit. Return None so the live path
+        //   re-blocks on the SAME signal; `record_signal_awaited` then
+        //   advances past the lone `SignalAwaited`. [S-WP-03-01]
+        // - **Live / non-signal entry** — None (the live path arms a fresh
+        //   wait).
+        //
+        // Identity is POSITIONAL — `signal_key` is carried for diagnostics;
+        // the cursor index is the identity.
+        if !matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::SignalAwaited { .. })) {
+            drop(cursor);
+            return None;
+        }
+        let Some(JournalEntry::SignalSeen { value, .. }) = self.replay_buffer.get(*cursor + 1)
+        else {
+            // SignalAwaited with no following SignalSeen — crashed while
+            // blocked. NOT a replay hit; re-block on the live path.
             drop(cursor);
             return None;
         };
         let value = value.clone();
-        *cursor += 1;
+        // Advance past BOTH the SignalAwaited and the SignalSeen.
+        *cursor += 2;
         drop(cursor);
         Some(value)
     }
 
-    async fn read_signal(&self, signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError> {
+    async fn record_signal_awaited(&self, signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        // Record the SignalAwaited armed entry (an input — the key the body
-        // blocked on) durably before resolving the value (ADR-0063 §4).
+        // Crash-while-blocked replay: a SignalAwaited is ALREADY recorded
+        // at the cursor (the prior run crashed while blocked, recording
+        // SignalAwaited but never SignalSeen — replay_signal returned None
+        // because there is no following SignalSeen). Do NOT append a
+        // duplicate — advance PAST the recorded SignalAwaited and re-enter
+        // the live block on the SAME key. This is the load-bearing
+        // crash-safety case (S-WP-03-01). POSITIONAL identity — `signal_key`
+        // is carried for diagnostics; the cursor index is the identity.
+        if matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::SignalAwaited { .. })) {
+            *cursor += 1;
+            drop(cursor);
+            return Ok(());
+        }
+        // Live path — record the SignalAwaited armed entry (an input: the
+        // key the body blocked on) durably before the ctx begins blocking
+        // (ADR-0063 §4 fsync-then-suspend).
         let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         let awaited = JournalEntry::SignalAwaited { step, signal_key: signal_key.clone() };
         self.journal
@@ -586,20 +618,45 @@ impl JournalCursor for JournalCursorHandle {
             .await
             .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
         *cursor += 1;
-        // Resolve the signal value from the ObservationStore signal surface
-        // (in-process single-node; #207 cross-node-under-partition is OUT).
-        // Phase-1 single-node delivery: this slice records the await-points
-        // and resolves to the present value; the full crash-safe blocking +
-        // subscription wake lands in step 03-02. A missing signal resolves
-        // to the empty value (present, no payload) — the slice-03-01 surface
-        // does not block on absence (the blocking-on-absence crash-safety is
-        // step 03-02's S-WP-03-01 scope). `obs` is retained (not dropped) so
-        // the 03-02 extension reads the real signal row here.
-        let value = self.resolve_signal_value(signal_key);
-        // Record SignalSeen { value } durably before returning (ADR-0063
-        // §4): the value_digest is the content digest of the observed
-        // value's bytes (an input); the value itself is carried so a
-        // resumed run replays it without re-reading the surface.
+        drop(cursor);
+        Ok(())
+    }
+
+    async fn poll_signal(
+        &self,
+        signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+        // Engine-internal block check — read the typed signal row from the
+        // ObservationStore signal surface (in-process single-node delivery;
+        // #207 cross-node-under-partition is OUT). Does NOT journal: this is
+        // the engine's blocking poll, not a workflow await-point. A missing
+        // row is `Ok(None)` (still blocked); a present row is its value. A
+        // surface READ failure is surfaced as `Signal` (distinct from
+        // "absent"). A handle with no obs wired (the 3-arg DST-harness
+        // `new`) has no signal surface, so resolves to the empty value
+        // (present, no payload) — degenerate always-live behaviour, never
+        // reached by a signal-blocking workflow under the engine.
+        let Some(obs) = self.obs.as_ref() else {
+            return Ok(Some(SignalValue::empty()));
+        };
+        obs.workflow_signal(signal_key)
+            .await
+            .map_err(|err| WorkflowCtxError::Signal { message: err.to_string() })
+    }
+
+    async fn record_signal_seen(
+        &self,
+        signal_key: &SignalKey,
+        value: &SignalValue,
+    ) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // Record SignalSeen { value } durably at the NEXT cursor position
+        // (ADR-0063 §4): the value_digest is the content digest of the
+        // observed value's bytes (an input); the value itself is carried so
+        // a resumed run replays it without re-reading the surface. Recorded
+        // at a DISTINCT cursor position from SignalAwaited, so a crash
+        // BETWEEN them leaves SignalAwaited with no SignalSeen — the
+        // re-block-on-resume shape.
         let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         let value_digest = ContentHash::of(value.as_str().as_bytes());
         let seen = JournalEntry::SignalSeen {
@@ -614,7 +671,7 @@ impl JournalCursor for JournalCursorHandle {
             .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
         *cursor += 1;
         drop(cursor);
-        Ok(value)
+        Ok(())
     }
 
     async fn replay_emit(&self) -> bool {
@@ -662,28 +719,6 @@ impl JournalCursor for JournalCursorHandle {
         *cursor += 1;
         drop(cursor);
         Ok(())
-    }
-}
-
-impl JournalCursorHandle {
-    /// Resolve the typed signal `signal_key` from the `ObservationStore`
-    /// signal surface (the live `ctx.wait_for_signal` resolution).
-    ///
-    /// Phase-1 single-node, in-process delivery: this slice (03-01)
-    /// resolves the present value without blocking on absence — a missing
-    /// signal resolves to the empty value. The full crash-safe blocking +
-    /// subscription wake (re-block on the SAME signal after a crash) lands
-    /// in step 03-02 (S-WP-03-01). The `obs` handle is threaded so that
-    /// step extends THIS method (into an async ObservationStore read)
-    /// rather than re-plumbing the surface; it is referenced here so the
-    /// wiring is in place.
-    fn resolve_signal_value(&self, _signal_key: &SignalKey) -> SignalValue {
-        // `obs` is retained (not dropped) so the 03-02 extension reads the
-        // real signal row here. For 03-01 the emit surface is the
-        // acceptance target; the signal resolves to the present-no-payload
-        // value.
-        let _obs = self.obs.as_ref();
-        SignalValue::empty()
     }
 }
 

@@ -379,6 +379,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-05T18:09:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:11:26Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:27:11Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:42:04Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the 4 DST acceptance tests fully pin the cursor semantics \u2014 S-WP-03-01/02 directly exercise the SignalAwaited-without-SignalSeen replay case (re-block) and the SignalAwaited+SignalSeen pair (replay-past); falsifiability confirmed (neutering the block reds S-WP-03-01). No focused unit test adds unique behavioral coverage.",
+      "t": "2026-06-05T18:42:04Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:49:45Z"
     }
   ]
 }

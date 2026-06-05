@@ -31,7 +31,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 
-use crate::workflow::{Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec};
+use crate::reconcilers::Action;
+use crate::workflow::{
+    SignalKey, Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec,
+};
 
 /// The canonical slice-01 reference workflow: perform one external
 /// effect inside a `ctx.run` durable step (the provision-write), then
@@ -151,6 +154,94 @@ impl ProvisionRecordWithSleep {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
         }
+    }
+}
+
+/// The canonical slice-03 reference workflow: the thinnest durable
+/// sequence that exercises `ctx.wait_for_signal` followed by
+/// `ctx.emit_action` — a `ctx.wait_for_signal → ctx.emit_action →
+/// terminal` shape (slice-03 consumer per US-WP-5). Authored as one
+/// ordinary `async fn run`.
+///
+/// **Distinct from [`ProvisionRecord`] / [`ProvisionRecordWithSleep`],
+/// not a mutation of either.** The slice-01/02 invariants depend on
+/// those fixtures keeping their exact await shapes — this is a separate
+/// fixture added alongside them so the slice-03 signal + emit
+/// await-surfaces have a real consumer without disturbing the earlier
+/// slices' invariants.
+///
+/// The workflow BLOCKS on `ctx.wait_for_signal(signal)` until the
+/// signal row is present in the `ObservationStore` (in-process
+/// single-node delivery), then emits one `Action` and returns
+/// [`WorkflowResult::Success`]. This is the honest blocking shape
+/// step 03-02 proves crash-safe (S-WP-03-01): a crash WHILE blocked on
+/// the absent signal re-blocks on the SAME signal on resume.
+pub struct ProvisionRecordWithSignalEmit {
+    /// The signal key the workflow blocks on via `ctx.wait_for_signal`.
+    signal: SignalKey,
+    /// The Action emitted via `ctx.emit_action` once the signal fires.
+    action: Action,
+}
+
+impl ProvisionRecordWithSignalEmit {
+    /// The workflow name this fixture provisions under.
+    pub const WORKFLOW_NAME: &'static str = "provision-record-with-signal-emit";
+
+    /// The canonical signal key this fixture blocks on. A producer
+    /// satisfies the wait by writing an `ObservationRow::Signal` keyed by
+    /// this same key.
+    pub const SIGNAL_KEY: &'static str = "cert-ready";
+
+    /// Construct a `ProvisionRecordWithSignalEmit` blocking on `signal`
+    /// and emitting `action` once the signal fires.
+    #[must_use]
+    pub const fn new(signal: SignalKey, action: Action) -> Self {
+        Self { signal, action }
+    }
+
+    /// The canonical [`SignalKey`] this fixture blocks on.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: [`Self::SIGNAL_KEY`] is a compile-time kebab
+    /// constant satisfying the `SignalKey` grammar.
+    #[must_use]
+    pub fn signal_key() -> SignalKey {
+        SignalKey::new(Self::SIGNAL_KEY)
+            .unwrap_or_else(|_| unreachable!("SIGNAL_KEY is a valid kebab constant"))
+    }
+
+    /// The concrete [`WorkflowSpec`] this fixture corresponds to.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: [`Self::WORKFLOW_NAME`] is a compile-time
+    /// kebab constant that satisfies the `WorkflowName` grammar.
+    #[must_use]
+    pub fn spec() -> WorkflowSpec {
+        WorkflowSpec {
+            name: WorkflowName::new(Self::WORKFLOW_NAME)
+                .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+        }
+    }
+}
+
+#[async_trait]
+impl Workflow for ProvisionRecordWithSignalEmit {
+    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+        // Block on the typed signal until it is present in the
+        // ObservationStore (genuine blocking on an absent signal — the
+        // honest shape step 03-02 proves crash-safe). On resume after a
+        // crash WHILE blocked, this re-blocks on the SAME signal.
+        if ctx.wait_for_signal(self.signal.clone()).await.is_err() {
+            return WorkflowResult::Failed { reason: "signal wait failed".to_string() };
+        }
+        // Emit one typed Action (idempotent across a crash — a recorded
+        // `ActionEmitted` makes a resumed run NOT re-emit).
+        if ctx.emit_action(self.action.clone()).await.is_err() {
+            return WorkflowResult::Failed { reason: "emit_action failed".to_string() };
+        }
+        WorkflowResult::Success
     }
 }
 

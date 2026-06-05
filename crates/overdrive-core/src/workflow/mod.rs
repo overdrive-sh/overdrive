@@ -33,6 +33,18 @@ use thiserror::Error;
 use crate::reconcilers::Action;
 use crate::traits::{Clock, Entropy, Transport};
 
+/// The Clock-park interval the live `ctx.wait_for_signal` block re-polls
+/// the signal surface at while the signal is ABSENT (ADR-0064 §4).
+///
+/// This is a *deadline park*, not a busy-spin: under `SimClock` the
+/// harness advances logical time past this interval to wake the park
+/// (and writes the signal row in the same advance window); under
+/// `SystemClock` it is a real Tokio timer. The value is the poll
+/// granularity of the in-process single-node signal delivery — small
+/// enough that a freshly-written signal is observed promptly, large
+/// enough that an absent signal does not burn CPU.
+const SIGNAL_POLL: Duration = Duration::from_millis(50);
+
 /// A durable-async workflow. The author writes one ordinary `async fn
 /// run`; the engine (later slices) drives it to a terminal
 /// [`WorkflowResult`], journaling each `ctx` await-point for
@@ -300,25 +312,70 @@ pub trait JournalCursor: Send + Sync {
     ///   hit records `SignalSeen { value }` before returning the value.
     async fn replay_signal(&self, signal_key: &SignalKey) -> Option<SignalValue>;
 
-    /// Read the typed signal `signal_key` from the engine's signal surface
-    /// (the `ObservationStore`, in-process single-node per #207-OUT), the
-    /// live path of `ctx.wait_for_signal`. Records the `SignalAwaited`
-    /// armed entry, then resolves the signal value, then records
-    /// `SignalSeen { value }` durably BEFORE returning (ADR-0063 §4
-    /// fsync-then-suspend), and advances the cursor.
+    /// Durably record the `SignalAwaited` armed entry for `signal_key`
+    /// (ADR-0063 §4 fsync-then-suspend) and advance the cursor — the FIRST
+    /// half of the live `ctx.wait_for_signal` path, BEFORE the engine
+    /// begins blocking.
     ///
     /// # Postconditions
     ///
-    /// On `Ok(value)` the `SignalAwaited` + `SignalSeen { value }` entries
-    /// are durably journaled and the cursor has advanced, so a subsequent
-    /// resume replays the value via [`replay_signal`](Self::replay_signal)
-    /// without re-reading the signal surface.
+    /// - **Live (cursor at journal end):** appends a `SignalAwaited
+    ///   { signal_key }` entry durably and advances the cursor, then
+    ///   returns `Ok(())`. The ctx then enters its Clock-driven block on
+    ///   the signal surface.
+    /// - **Crash-while-blocked replay (cursor points to a `SignalAwaited`
+    ///   with no following `SignalSeen`):** the entry is ALREADY recorded
+    ///   (the prior run crashed while blocked), so this does NOT append a
+    ///   duplicate — it advances the cursor PAST the recorded
+    ///   `SignalAwaited` and returns `Ok(())`. The ctx re-enters the live
+    ///   block on the SAME `signal_key` (read from the recorded entry).
+    ///   This is the load-bearing crash-safety case (S-WP-03-01).
     ///
     /// # Errors
     ///
-    /// - [`WorkflowCtxError::Signal`] — the signal surface read failed.
-    /// - [`WorkflowCtxError::JournalRecord`] — a durable record failed.
-    async fn read_signal(&self, signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError>;
+    /// - [`WorkflowCtxError::JournalRecord`] — the durable append failed.
+    async fn record_signal_awaited(&self, signal_key: &SignalKey) -> Result<(), WorkflowCtxError>;
+
+    /// Poll the engine's signal surface (the `ObservationStore`, in-process
+    /// single-node per #207-OUT) for `signal_key` — the engine-internal
+    /// block check the ctx loops on. Returns `Ok(Some(value))` when the
+    /// signal is PRESENT, `Ok(None)` when it is still ABSENT (the ctx parks
+    /// on the injected `Clock` and re-polls). This does NOT journal — it is
+    /// engine-internal blocking, not a workflow await-point.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowCtxError::Signal`] — the signal surface read failed
+    ///   (distinct from "signal absent", which is `Ok(None)`).
+    async fn poll_signal(
+        &self,
+        signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError>;
+
+    /// Durably record the `SignalSeen { value }` entry for `signal_key`
+    /// (ADR-0063 §4) and advance the cursor — the SECOND half of the live
+    /// `ctx.wait_for_signal` path, AFTER the engine observed the signal
+    /// present. Records the observed `value` as an input so a resumed run
+    /// replays it via [`replay_signal`](Self::replay_signal) without
+    /// re-reading the surface.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(())` the `SignalSeen { signal_key, value }` entry is durably
+    /// journaled and the cursor has advanced. Because `SignalAwaited` (via
+    /// [`record_signal_awaited`](Self::record_signal_awaited)) and
+    /// `SignalSeen` are recorded at DISTINCT cursor positions, a crash
+    /// BETWEEN them leaves `SignalAwaited` with no `SignalSeen` — the
+    /// re-block-on-resume shape.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowCtxError::JournalRecord`] — the durable append failed.
+    async fn record_signal_seen(
+        &self,
+        signal_key: &SignalKey,
+        value: &SignalValue,
+    ) -> Result<(), WorkflowCtxError>;
 
     /// Check the cursor for a recorded `ctx.emit_action` at the current
     /// step (the slice-03 emit await-surface, ADR-0064 §4).
@@ -390,11 +447,29 @@ impl JournalCursor for AlwaysLiveCursor {
         None
     }
 
-    async fn read_signal(&self, _signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError> {
-        // A non-durable, signal-less execution: no signal surface is wired,
-        // so the always-live handle resolves to the empty signal value. The
-        // durable engine handle (control-plane) reads the real signal row.
-        Ok(SignalValue::empty())
+    async fn record_signal_awaited(&self, _signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
+        // Non-durable always-live handle: nothing is journaled.
+        Ok(())
+    }
+
+    async fn poll_signal(
+        &self,
+        _signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+        // No signal surface is wired in the always-live handle; resolve to
+        // the empty value immediately (present, no payload) so a
+        // signalless execution does not block forever. The durable engine
+        // handle (control-plane) polls the real signal row.
+        Ok(Some(SignalValue::empty()))
+    }
+
+    async fn record_signal_seen(
+        &self,
+        _signal_key: &SignalKey,
+        _value: &SignalValue,
+    ) -> Result<(), WorkflowCtxError> {
+        // Non-durable always-live handle: nothing is journaled.
+        Ok(())
     }
 
     async fn replay_emit(&self) -> bool {
@@ -572,9 +647,22 @@ impl WorkflowCtx {
     ///   signal surface (the workflow body received this exact value on the
     ///   live run). A `SignalAwaited` with no matching `SignalSeen` (crashed
     ///   while still blocked) re-blocks on the SAME signal on the live path.
-    /// - **Live:** the cursor records `SignalAwaited`, reads the signal
-    ///   surface, and on a hit records `SignalSeen { value }` durably (fsync
-    ///   per ADR-0063 §4) before returning the value.
+    /// - **Live:** the ctx records `SignalAwaited`, then BLOCKS — it polls
+    ///   the signal surface and, while the signal is ABSENT, parks on the
+    ///   injected [`Clock`] (a deadline-park, NOT a busy-spin: under
+    ///   `SimClock` the harness advances logical time and writes the signal
+    ///   row, waking the park; under `SystemClock` the park is a Tokio
+    ///   timer). When the signal is PRESENT it records `SignalSeen { value }`
+    ///   durably (fsync per ADR-0063 §4) and returns the value. The
+    ///   `SignalAwaited` and `SignalSeen` records are at DISTINCT cursor
+    ///   positions, so a crash WHILE blocked leaves `SignalAwaited` with no
+    ///   following `SignalSeen` — the re-block-on-resume shape
+    ///   (S-WP-03-01).
+    ///
+    /// The block uses the injected `Clock` + `ObservationStore` ports only
+    /// (`development.md` § "Production code is not shaped by simulation" —
+    /// the same Clock-driven poll is the genuine in-process single-node
+    /// production mechanism; there is no DST-only branch).
     ///
     /// # Errors
     ///
@@ -585,13 +673,36 @@ impl WorkflowCtx {
         signal_key: SignalKey,
     ) -> Result<SignalValue, WorkflowCtxError> {
         // Replay path — return the recorded SignalSeen value, never
-        // re-read the signal surface.
+        // re-read the signal surface. A SignalAwaited with no following
+        // SignalSeen is NOT a replay hit (replay_signal returns None), so
+        // the live block below re-enters on the SAME signal.
         if let Some(value) = self.journal.replay_signal(&signal_key).await {
             return Ok(value);
         }
-        // Live path — the engine records SignalAwaited, resolves the signal
-        // value from the ObservationStore, records SignalSeen, advances.
-        self.journal.read_signal(&signal_key).await
+        // Live path, first half — record SignalAwaited durably (fsync per
+        // ADR-0063 §4) and advance the cursor. On a crash-while-blocked
+        // resume the SignalAwaited is already at the cursor: this advances
+        // past it WITHOUT appending a duplicate (see
+        // `record_signal_awaited`).
+        self.journal.record_signal_awaited(&signal_key).await?;
+
+        // Live path, block — poll the signal surface; while ABSENT, park on
+        // the injected Clock and re-poll. This is a genuine block on an
+        // absent signal (the run future stays pending), not an immediate
+        // resolve. Under SimClock the harness advances logical time and
+        // writes the signal row; under SystemClock the park is a real
+        // timer. No busy-spin: each absent poll parks for SIGNAL_POLL.
+        let value = loop {
+            if let Some(value) = self.journal.poll_signal(&signal_key).await? {
+                break value;
+            }
+            self.clock.sleep(SIGNAL_POLL).await;
+        };
+
+        // Live path, second half — record SignalSeen { value } durably at
+        // the NEXT cursor position and return the value.
+        self.journal.record_signal_seen(&signal_key, &value).await?;
+        Ok(value)
     }
 
     /// Emit a typed cluster-mutation [`Action`] onto the SAME Action channel

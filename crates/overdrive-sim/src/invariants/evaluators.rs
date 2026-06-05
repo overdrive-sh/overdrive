@@ -34,11 +34,14 @@ use std::time::Duration;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::reconcilers::Action;
 use overdrive_core::reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler, TickContext,
     WorkloadLifecycle,
 };
-use overdrive_core::testing::workflow::{ProvisionRecord, ProvisionRecordWithSleep};
+use overdrive_core::testing::workflow::{
+    ProvisionRecord, ProvisionRecordWithSignalEmit, ProvisionRecordWithSleep,
+};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -46,7 +49,9 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, ObservationRow, ObservationStore,
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{
+    JournalCursor, SignalValue, WorkflowCtx, WorkflowResult, WorkflowSpec,
+};
 
 use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{
@@ -844,7 +849,315 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
         return fail(cause);
     }
 
+    // Slice 03 (step 03-02): extend the SAME named invariant again — not a
+    // new family — to also exercise the `ctx.wait_for_signal →
+    // ctx.emit_action → terminal` shape across a crash WHILE blocked on the
+    // signal. Replay-equivalence (K4) must hold across the durable signal
+    // wait + emit, seeded and reproducible. SINGLE-NODE only (D3 / #205).
+    if let Some(cause) = check_replay_equivalence_across_signal_emit(seed).await {
+        return fail(cause);
+    }
+
     result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// ReplayEquivalenceProvisionRecord — slice 03 signal+emit extension (03-02)
+// ---------------------------------------------------------------------------
+//
+// Drives `ProvisionRecordWithSignalEmit` (the slice-03 `ctx.wait_for_signal
+// → ctx.emit_action → terminal` reference consumer) through a crash-resume
+// shape where the crash lands WHILE blocked on the ABSENT signal: the
+// pre-crash run records `SignalAwaited` and parks on the absent signal
+// (NEVER reaching `SignalSeen` / `ActionEmitted` / `Terminal`); on resume
+// the recorded `SignalAwaited` is replayed-past (no duplicate) and the run
+// RE-BLOCKS on the SAME signal, then — once the signal is written —
+// records `SignalSeen`, emits exactly once, and reaches terminal. The
+// resumed trajectory is byte-identical (entry kinds) to an uninterrupted
+// run, and the downstream effect fires exactly once across the crash (K1).
+// ADR-0063 §2, ADR-0064 §4/§6.
+
+/// The signal value the signal+emit reference workflow's producer writes.
+const WF_SIGNAL_VALUE: &str = "provision-signal-ready";
+
+/// Construct the instance correlation + id + spec for a
+/// `ProvisionRecordWithSignalEmit` instance. Deterministic — fixed instance
+/// id, so twin runs reproduce bit-for-bit.
+fn provision_signal_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
+    let spec = ProvisionRecordWithSignalEmit::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-provision-signal-inv-0001",
+        &ContentHash::of(ProvisionRecordWithSignalEmit::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-provision-signal-inv-0001")
+        .unwrap_or_else(|_| unreachable!("wf-provision-signal-inv-0001 is a valid instance id"));
+    (correlation, workflow_id, spec)
+}
+
+/// Build a `WorkflowEngine` over the SHARED `journal` + `obs`, a fresh set
+/// of `Sim*` ports, resolving `ProvisionRecordWithSignalEmit`. Returns the
+/// `SimClock` so the caller can advance logical time (the harness owns
+/// logical time — `SimClock::sleep` parks, it never auto-advances).
+fn provision_signal_engine(
+    seed: u64,
+    journal: Arc<dyn JournalStore>,
+    obs: Arc<dyn ObservationStore>,
+) -> (WorkflowEngine, Arc<SimClock>) {
+    let sim_clock = Arc::new(SimClock::new());
+    let transport: Arc<dyn TransportTrait> = Arc::new(SimTransport::new());
+    let clock: Arc<dyn Clock> = sim_clock.clone();
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(ProvisionRecordWithSignalEmit::spec().name, || {
+        Box::new(ProvisionRecordWithSignalEmit::new(
+            ProvisionRecordWithSignalEmit::signal_key(),
+            Action::Noop,
+        ))
+    });
+
+    let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
+    (engine, sim_clock)
+}
+
+/// Count Actions emitted on the engine's Action channel within a drain
+/// budget — the per-boot emit-fire count.
+async fn drained_emit_count(
+    rx: &mut overdrive_control_plane::workflow_runtime::ActionEmitReceiver,
+) -> usize {
+    let mut count = 0usize;
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(20), rx.recv()).await {
+        count += 1;
+    }
+    count
+}
+
+/// Write the matching signal row, then drive the engine to terminal,
+/// advancing the `SimClock` so the live/replay signal poll resolves.
+async fn drive_signal_to_terminal(
+    engine: &WorkflowEngine,
+    obs: &Arc<dyn ObservationStore>,
+    clock: &Arc<SimClock>,
+) {
+    let _ = obs
+        .write(ObservationRow::Signal {
+            key: ProvisionRecordWithSignalEmit::signal_key(),
+            value: SignalValue::new(WF_SIGNAL_VALUE),
+        })
+        .await;
+    let driver = Arc::clone(clock);
+    let ticker = tokio::spawn(async move {
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+            driver.tick(Duration::from_millis(100));
+        }
+    });
+    engine.join_all().await;
+    let _ = ticker.await;
+}
+
+/// Drive an uninterrupted `ProvisionRecordWithSignalEmit` run to terminal;
+/// return the loaded journal trajectory + terminal result.
+async fn run_signal_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResult>) {
+    let (correlation, workflow_id, spec) = provision_signal_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let (engine, clock) = provision_signal_engine(seed, Arc::clone(&journal), Arc::clone(&obs));
+    let _emits = engine.take_action_emit_receiver().await;
+    let Ok(mut subscription) = obs.subscribe_all().await else {
+        return (Vec::new(), None);
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    drive_signal_to_terminal(&engine, &obs, &clock).await;
+    let trajectory = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let terminal = drain_terminal(&mut subscription, &correlation).await;
+    (trajectory, terminal)
+}
+
+/// Drive a `ProvisionRecordWithSignalEmit` run that crashes WHILE blocked
+/// on the ABSENT signal: start the run, advance logical time WITHOUT
+/// writing the signal (so the wait stays blocked), then drop the engine +
+/// task at the end of this scope — a process-local kill DURING the block.
+/// Returns `(pre_crash_emit_count, persisted_journal)` on success, or
+/// `Err(cause)` if the emit receiver could not be taken.
+async fn run_signal_until_crash_while_blocked(
+    seed: u64,
+    journal: &Arc<dyn JournalStore>,
+    obs: &Arc<dyn ObservationStore>,
+    spec: &WorkflowSpec,
+    correlation: &CorrelationKey,
+    workflow_id: &WorkflowId,
+) -> Result<(usize, Vec<JournalEntry>), String> {
+    let (engine, clock) = provision_signal_engine(seed, Arc::clone(journal), Arc::clone(obs));
+    let Some(mut emits) = engine.take_action_emit_receiver().await else {
+        return Err("crash engine had no emit receiver".to_owned());
+    };
+    let _ = engine.start(spec, correlation, workflow_id).await;
+    // Advance logical time WITHOUT writing the signal — the wait must stay
+    // blocked. The engine + task drop at the end of this fn model the crash
+    // WHILE blocked.
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+        clock.tick(Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let emit_count = drained_emit_count(&mut emits).await;
+    let trajectory = journal.load_journal(workflow_id).await.unwrap_or_default();
+    Ok((emit_count, trajectory))
+}
+
+/// Slice-03 signal+emit extension of `ReplayEquivalenceProvisionRecord`
+/// (K4). Drives a crash WHILE blocked on the absent signal, then resumes
+/// and satisfies the signal. Returns `None` on success, or `Some(cause)`
+/// naming the first violated property.
+async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String> {
+    // (1) Uninterrupted run — the reference trajectory across signal+emit.
+    let (uninterrupted, uninterrupted_terminal) = run_signal_uninterrupted(seed).await;
+    let uninterrupted_terminal = uninterrupted_terminal?;
+    for kind in ["SignalAwaited", "SignalSeen", "ActionEmitted"] {
+        if !entry_kinds(&uninterrupted).contains(&kind) {
+            return Some(format!(
+                "uninterrupted signal+emit run missing {kind}: {uninterrupted:?}"
+            ));
+        }
+    }
+
+    // (2) Crash-injected run on a fresh SHARED journal+obs: start blocked on
+    //     the ABSENT signal, advance logical time (which must NOT satisfy
+    //     the wait), then crash mid-block. The journal must carry
+    //     SignalAwaited with NO SignalSeen / ActionEmitted / Terminal.
+    let (correlation, workflow_id, spec) = provision_signal_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let (crash_pre_emits, pre_resume) = match run_signal_until_crash_while_blocked(
+        seed,
+        &journal,
+        &obs,
+        &spec,
+        &correlation,
+        &workflow_id,
+    )
+    .await
+    {
+        Ok(out) => out,
+        Err(cause) => return Some(cause),
+    };
+    if crash_pre_emits != 0 {
+        return Some(format!(
+            "crash run emitted {crash_pre_emits} Actions while blocked on the signal (expected 0)"
+        ));
+    }
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::SignalAwaited { .. })) {
+        return Some(format!("crash run did not block (no SignalAwaited): {pre_resume:?}"));
+    }
+    if pre_resume.iter().any(|e| matches!(e, JournalEntry::SignalSeen { .. })) {
+        return Some(format!(
+            "crash run was NOT blocked (SignalSeen present) — the signal resolved prematurely: \
+             {pre_resume:?}"
+        ));
+    }
+    if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+        return Some(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
+    }
+
+    // (3) Resume: re-block on the SAME signal (advance time, no signal yet),
+    //     then write the signal and drive to terminal. The recorded
+    //     SignalAwaited is replayed-past (no duplicate); the emit fires once.
+    let (engine, clock) = provision_signal_engine(seed, Arc::clone(&journal), Arc::clone(&obs));
+    let Some(mut resume_emits) = engine.take_action_emit_receiver().await else {
+        return Some("resume engine had no emit receiver".to_owned());
+    };
+    let mut resume_sub = match obs.subscribe_all().await {
+        Ok(s) => s,
+        Err(err) => return Some(format!("resume subscribe_all failed: {err}")),
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    // Re-block check: advance time WITHOUT the signal — must stay blocked.
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+        clock.tick(Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    if drained_emit_count(&mut resume_emits).await != 0 {
+        return Some(
+            "resumed run emitted before the signal arrived (lost the re-block)".to_owned(),
+        );
+    }
+    // Satisfy the signal; drive to terminal.
+    drive_signal_to_terminal(&engine, &obs, &clock).await;
+    let resume_fires = drained_emit_count(&mut resume_emits).await;
+    if resume_fires != 1 {
+        return Some(format!(
+            "resumed run emitted {resume_fires} Actions (expected exactly 1 — the post-block emit)"
+        ));
+    }
+
+    let Some(resumed_terminal) = drain_terminal(&mut resume_sub, &correlation).await else {
+        return Some(
+            "resumed signal+emit run did not reach a terminal WorkflowResult (no bounded progress)"
+                .to_owned(),
+        );
+    };
+
+    // (4) K4 — replay-equivalence across signal+emit (extracted helper).
+    let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    assert_signal_replay_equivalence(
+        &resumed,
+        &uninterrupted,
+        &resumed_terminal,
+        &uninterrupted_terminal,
+    )
+}
+
+/// K4 replay-equivalence assertion across the signal+emit shape: the
+/// resumed trajectory must match the uninterrupted one in (a) entry-kind
+/// sequence and (b) recorded-step contents, carry exactly ONE
+/// `SignalAwaited` (the resume re-blocked on the SAME one, appending no
+/// duplicate), append a `Terminal`, and reach the same terminal result.
+/// Returns `None` on equivalence, `Some(cause)` on the first violation.
+fn assert_signal_replay_equivalence(
+    resumed: &[JournalEntry],
+    uninterrupted: &[JournalEntry],
+    resumed_terminal: &WorkflowResult,
+    uninterrupted_terminal: &WorkflowResult,
+) -> Option<String> {
+    if !entry_kinds_match(resumed, uninterrupted) {
+        return Some(format!(
+            "resumed signal+emit entry-kind sequence differs from uninterrupted: {resumed:?} vs \
+             {uninterrupted:?}"
+        ));
+    }
+    if recorded_run_steps(resumed) != recorded_run_steps(uninterrupted) {
+        return Some(format!(
+            "resumed signal+emit recorded steps differ from uninterrupted: {resumed:?} vs \
+             {uninterrupted:?}"
+        ));
+    }
+    let awaited_count =
+        resumed.iter().filter(|e| matches!(e, JournalEntry::SignalAwaited { .. })).count();
+    if awaited_count != 1 {
+        return Some(format!(
+            "resumed run has {awaited_count} SignalAwaited entries (expected 1 — re-block appends \
+             no duplicate): {resumed:?}"
+        ));
+    }
+    if !resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+        return Some(format!("resumed signal+emit run did not append a Terminal: {resumed:?}"));
+    }
+    if resumed_terminal != uninterrupted_terminal {
+        return Some(format!(
+            "resumed signal+emit terminal {resumed_terminal:?} != uninterrupted \
+             {uninterrupted_terminal:?}"
+        ));
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

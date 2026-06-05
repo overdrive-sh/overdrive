@@ -63,7 +63,7 @@ use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationSubscription, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
 };
-use overdrive_core::workflow::WorkflowResult;
+use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowResult};
 use std::net::Ipv4Addr;
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
@@ -129,6 +129,13 @@ struct PeerState {
     /// deterministic iteration across seeds
     /// (`.claude/rules/development.md` § "Ordered-collection choice").
     by_issued_certificate: Mutex<BTreeMap<CertSerial, IssuedCertificateRow>>,
+    /// `workflow_signal` index — keyed by [`SignalKey`] per ADR-0064 §4.
+    /// One current value per key; a re-write replaces it (the value is
+    /// opaque to the primitive). The LIVE surface a `ctx.wait_for_signal`
+    /// blocks on (in-process single-node delivery; #207 is OUT).
+    /// `BTreeMap` for deterministic iteration per
+    /// `.claude/rules/development.md` § "Ordered-collection choice".
+    by_signal: Mutex<BTreeMap<SignalKey, SignalValue>>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Test-only FIFO of write failures to inject. Each call to
     /// [`SimObservationStore::write`] pops the front entry; when the
@@ -150,6 +157,7 @@ impl PeerState {
             by_reconcile_conflict: Mutex::new(BTreeMap::new()),
             by_probe_results: Mutex::new(BTreeMap::new()),
             by_issued_certificate: Mutex::new(BTreeMap::new()),
+            by_signal: Mutex::new(BTreeMap::new()),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
         })
@@ -173,6 +181,17 @@ impl PeerState {
             // is pushed to `rows` + broadcast by the shared accept branch
             // below, same as every other accepted row.
             ObservationRow::WorkflowTerminal { .. } => true,
+            // `Signal` (ADR-0064 §4) — the LIVE in-process single-node
+            // signal surface a `ctx.wait_for_signal` blocks on. Record the
+            // current value in the `by_signal` index (one value per key; a
+            // re-write replaces it) AND accept so it fans out on the
+            // broadcast channel (a subscription-driven wake is possible in
+            // later slices). The point-lookup `workflow_signal` reads the
+            // index, NOT the broadcast stream.
+            ObservationRow::Signal { key, value } => {
+                self.by_signal.lock().insert(key.clone(), value.clone());
+                true
+            }
         };
 
         if accepted {
@@ -583,6 +602,16 @@ impl ObservationStore for SimObservationStore {
             }
         }
         Ok(by_correlation.into_iter().collect())
+    }
+
+    async fn workflow_signal(
+        &self,
+        key: &SignalKey,
+    ) -> Result<Option<SignalValue>, ObservationStoreError> {
+        // Point lookup against the `by_signal` index. Absence
+        // (`Ok(None)`) is the normal "still blocked" condition the live
+        // `ctx.wait_for_signal` path parks on — never an error.
+        Ok(self.inner.by_signal.lock().get(key).cloned())
     }
 }
 
