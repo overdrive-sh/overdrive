@@ -30,9 +30,12 @@
 use std::sync::Arc;
 
 use overdrive_control_plane::ca_boot::{self, CaBootError};
-use overdrive_core::SpiffeId;
 use overdrive_core::ca::kek::KEK_LEN;
+use overdrive_core::traits::ca::{
+    Ca, CaError, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
+};
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::{RcgenCa, RootKeyAeadCodec, SystemdCredsKeyring};
 use serial_test::serial;
@@ -227,18 +230,69 @@ async fn boot_refuses_to_start_when_kek_absent_from_keyring() {
 // US-CA-03 / S-03 — Intermediate signing failure fails loudly
 // ---------------------------------------------------------------------------
 
+/// A `Ca` whose `issue_intermediate` always fails with a signing error,
+/// modelling "root key unavailable (decrypt failed upstream)" — the exact
+/// sad path node bootstrap must fail loudly on. `root` succeeds (the root
+/// was already composed at control-plane boot); only the per-node
+/// intermediate signing step is unable to reach the root key.
+struct RootKeyUnavailableCa;
+
+impl Ca for RootKeyUnavailableCa {
+    fn root(&self) -> Result<RootCaHandle, CaError> {
+        host_ca().root()
+    }
+
+    fn issue_intermediate(&self, _node: &NodeId) -> Result<IntermediateHandle, CaError> {
+        // Upstream decrypt failed: the root signing key is unavailable, so the
+        // intermediate cannot be signed by the root.
+        Err(CaError::signing_failed("root key unavailable (decrypt failed upstream)"))
+    }
+
+    fn issue_svid(&self, _req: &SvidRequest) -> Result<SvidMaterial, CaError> {
+        unreachable!("issue_svid is not exercised by the node-bootstrap sad path")
+    }
+
+    fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
+        unreachable!("trust_bundle is not exercised by the node-bootstrap sad path")
+    }
+}
+
 /// `@real-io` `@adapter-integration` `@S-03` `@error` — SSOT journey
 /// `error_paths` step 2: when the root key is unavailable at node bootstrap
 /// (decrypt failed upstream), `issue_intermediate` surfaces a typed
 /// `CaError`; node bootstrap fails loudly rather than running workloads it
 /// cannot issue identities for (no half-provisioned state).
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn intermediate_signing_failure_fails_node_bootstrap_loudly() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03 / root key unavailable at node bootstrap -> \
-         issue_intermediate surfaces a typed CaError -> node bootstrap fails loudly, no \
-         half-provisioned state)"
+#[tokio::test]
+async fn intermediate_signing_failure_fails_node_bootstrap_loudly() {
+    // GIVEN a persisted intent store and a `Ca` whose root key is unavailable
+    // for intermediate signing (decrypt failed upstream).
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let intent = intent_store(&store_dir);
+    let ca = RootKeyUnavailableCa;
+    let node = NodeId::new("overdrive-node-0").expect("valid NodeId");
+
+    // WHEN node bootstrap issues the single node intermediate through the
+    // node-bootstrap driving port.
+    let result = ca_boot::bootstrap_node_intermediate(&ca, &node, &intent).await;
+
+    // THEN node bootstrap fails loudly with the typed CA error surfaced from
+    // `issue_intermediate` (no panic, no silent skip). `health.startup.refused`
+    // is emitted by the boot path before this return (structural to the variant).
+    assert!(
+        matches!(result, Err(CaBootError::Ca { .. })),
+        "intermediate signing failure must fail node bootstrap loudly with a typed CaError, got \
+         {result:?}"
+    );
+
+    // AND no half-provisioned state is left behind: the intermediate was never
+    // persisted (reconciler-discipline — no adopt-and-skip of a partial; the
+    // node does not run workloads it cannot identify).
+    let persisted =
+        intent.get(b"ca/node/intermediate-material/v1").await.expect("intent store get");
+    assert!(
+        persisted.is_none(),
+        "no node-intermediate material must be persisted when issuance fails (no half-provisioned \
+         state)"
     );
 }
 

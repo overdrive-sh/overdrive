@@ -27,11 +27,13 @@
 
 use std::sync::Arc;
 
-use overdrive_core::CertSerial;
 use overdrive_core::ca::kek::{Kek, KekError};
 use overdrive_core::ca::root_key_envelope::{KekId, RootCaKeyRecord};
-use overdrive_core::traits::ca::{Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, RootCaHandle};
+use overdrive_core::traits::ca::{
+    Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle,
+};
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::{CertSerial, NodeId};
 use overdrive_host::ca::RootKeyAeadCodec;
 
 /// IntentStore key under which the sealed root-key envelope bytes live.
@@ -42,6 +44,12 @@ const ROOT_KEY_ENVELOPE_KEY: &[u8] = b"ca/root/key-envelope/v1";
 /// lets a subsequent boot present the byte-identical root identity without
 /// re-self-signing (which would change the cert even at the same key).
 const ROOT_CERT_MATERIAL_KEY: &[u8] = b"ca/root/cert-material/v1";
+
+/// IntentStore key under which the single node-intermediate public cert
+/// material lives (PEM + DER + serial, newline-framed). Single-node scope:
+/// one node → one intermediate (multi-node per-node intermediates + node
+/// attestation are tracked in #36, not built here).
+const NODE_INTERMEDIATE_MATERIAL_KEY: &[u8] = b"ca/node/intermediate-material/v1";
 
 /// A CA boot failure — fail-closed startup refusal (ADR-0063 D3 Earned Trust).
 #[derive(Debug, thiserror::Error)]
@@ -152,6 +160,85 @@ pub async fn boot_ca(
         }
         None => generate_and_persist_root(ca, kek, kek_id, codec, intent).await,
     }
+}
+
+/// Bootstrap the single node intermediate CA (single-node: one node → one
+/// intermediate), signed by the root that `boot_ca` composed.
+///
+/// # Behaviour
+///
+/// Issues the node intermediate through [`Ca::issue_intermediate`] and, on
+/// success, persists its public cert material to the [`IntentStore`]. The
+/// intermediate is what the node presents to issue workload SVIDs under — the
+/// node does not run workloads it cannot identify.
+///
+/// # Fail-loud (ADR-0063, reconciler-discipline)
+///
+/// When the root key is unavailable (decrypt failed upstream), the signing
+/// failure surfaces from `issue_intermediate` as a typed [`CaError`]; this fn
+/// emits `health.startup.refused` and returns [`CaBootError::Ca`] WITHOUT
+/// persisting anything. No half-provisioned state is left behind — there is no
+/// adopt-and-skip of a partial intermediate.
+///
+/// # Errors
+///
+/// [`CaBootError::Ca`] when the intermediate cannot be signed (root key
+/// unavailable); [`CaBootError::Intent`] when persistence fails.
+///
+/// Single-node only: multi-node per-node intermediates + node attestation are
+/// tracked in #36 and are NOT built here.
+pub async fn bootstrap_node_intermediate(
+    ca: &dyn Ca,
+    node: &NodeId,
+    intent: &Arc<dyn IntentStore>,
+) -> Result<IntermediateHandle, CaBootError> {
+    // Sign the node intermediate by the root. A root-key-unavailable (decrypt
+    // failed upstream) signing failure surfaces here as a typed `CaError`. Fail
+    // loudly: emit `health.startup.refused` and return BEFORE any persistence,
+    // so no half-provisioned intermediate is left behind (reconciler-discipline
+    // — no adopt-and-skip of a partial; the node does not run workloads it
+    // cannot identify).
+    let intermediate = ca.issue_intermediate(node).map_err(|source| {
+        tracing::error!(
+            name: "health.startup.refused",
+            node = %node,
+            cause = %source,
+            "node-intermediate signing failed (root key unavailable); node bootstrap refusing to \
+             start (no half-provisioned state)",
+        );
+        CaBootError::Ca { source }
+    })?;
+
+    // Only on a successful signature do we persist the intermediate's public
+    // cert material — the persistence happens strictly after issuance, so the
+    // failure path above leaves the IntentStore untouched.
+    intent
+        .put(NODE_INTERMEDIATE_MATERIAL_KEY, &encode_intermediate_material(&intermediate))
+        .await?;
+
+    Ok(intermediate)
+}
+
+/// Newline-framed encoding of the public node-intermediate cert material: PEM,
+/// DER (base16), serial. All three are public — no secret is persisted here.
+fn encode_intermediate_material(intermediate: &IntermediateHandle) -> Vec<u8> {
+    let der_hex = intermediate.cert_der().as_der().iter().fold(
+        String::with_capacity(intermediate.cert_der().as_der().len() * 2),
+        |mut acc, b| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "{b:02x}");
+            acc
+        },
+    );
+    let pem = intermediate.cert_pem().as_pem();
+    format!(
+        "{pem_len}\n{pem}{der_hex}\n{serial}\n",
+        pem_len = pem.len(),
+        pem = pem,
+        der_hex = der_hex,
+        serial = intermediate.serial(),
+    )
+    .into_bytes()
 }
 
 /// First boot: mint the root, seal its key under the KEK, persist both the
