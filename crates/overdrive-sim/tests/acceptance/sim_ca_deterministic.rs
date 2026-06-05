@@ -24,17 +24,46 @@
 //! identity assertion (mirror `tests/acceptance/sim_adapters_deterministic.rs`).
 
 /// `@in-memory` `@S-01` — KPI K5: `SimCa::root()` at seed `0x5EED` (fixture
-/// key `ca-fixture-p256.pem`) produces bit-identical root material across
-/// two independent runs.
+/// P-256 key) produces bit-identical root material across two independent
+/// runs.
 ///
-/// DELIVER: build two `SimCa` instances over `SeededEntropy::new(0x5EED)`,
-/// call `root()` on each, assert the PEM/DER bytes are byte-equal.
+/// Port-to-port: enters through the `Ca` driving port (`root()`), asserts on
+/// the observable `RootCaHandle` byte surface (cert PEM, cert DER, serial).
+/// Two `SimCa` instances each over their own `SimEntropy::new(0x5EED)` draw
+/// the serial from the same seeded sequence, so the whole handle is
+/// byte-identical — the load-bearing DST determinism claim.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn sim_ca_root_is_bit_identical_across_two_runs_at_same_seed() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-01 / SimCa::root() at seed 0x5EED produces \
-         bit-identical root material across two runs)"
+    use std::sync::Arc;
+
+    use overdrive_core::traits::ca::Ca;
+    use overdrive_sim::adapters::ca::SimCa;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+
+    const SEED: u64 = 0x5EED;
+
+    let ca_a = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+    let ca_b = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+
+    let root_a = ca_a.root().expect("sim root issuance succeeds for the fixture key");
+    let root_b = ca_b.root().expect("sim root issuance succeeds for the fixture key");
+
+    // Observable byte surface of the root handle, drawn through the trait
+    // accessors only — never internal fields.
+    assert_eq!(
+        root_a.cert_pem().as_pem(),
+        root_b.cert_pem().as_pem(),
+        "root cert PEM must be bit-identical across two same-seed runs",
+    );
+    assert_eq!(
+        root_a.cert_der().as_der(),
+        root_b.cert_der().as_der(),
+        "root cert DER must be bit-identical across two same-seed runs",
+    );
+    assert_eq!(
+        root_a.serial().as_str(),
+        root_b.serial().as_str(),
+        "root serial (drawn via seeded Entropy) must be identical across two same-seed runs",
     );
 }
 

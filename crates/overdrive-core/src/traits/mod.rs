@@ -13,6 +13,7 @@
 //! direct `aya-rs` / kernel calls from anywhere that is not a wiring
 //! crate.
 
+pub mod ca;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod dataplane;
@@ -27,6 +28,10 @@ pub mod observation_store;
 pub mod prober;
 pub mod transport;
 
+pub use ca::{
+    Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
+    SvidRequest, TrustBundle, TrustBundlePem,
+};
 pub use cgroup_fs::{CgroupFs, ProbeError};
 pub use clock::Clock;
 pub use dataplane::Dataplane;
