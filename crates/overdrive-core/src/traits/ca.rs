@@ -596,3 +596,85 @@ pub trait Ca: Send + Sync {
     /// anchors compose to byte-identical bundle PEM.
     fn trust_bundle(&self) -> Result<TrustBundle>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CaCertDer, CaCertPem, CaKeyPem, TrustBundle, TrustBundlePem};
+
+    /// The PEM/key/bundle string byte-newtypes round-trip raw text through
+    /// their `as_pem` accessor. Newtype-completeness mandate
+    /// (`.claude/rules/development.md` § "Newtype completeness"): the accessor
+    /// returns the wrapped text verbatim, so a mutation replacing the body
+    /// with `""` or a stub literal is killed by a non-trivial multi-line PEM.
+    #[test]
+    fn pem_string_newtypes_borrow_their_wrapped_text_verbatim() {
+        let cert_text =
+            "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n".to_owned();
+        let key_text =
+            "-----BEGIN PRIVATE KEY-----\nMIIBkey\n-----END PRIVATE KEY-----\n".to_owned();
+        let bundle_text = format!("{cert_text}{cert_text}");
+
+        assert_eq!(CaCertPem::new(cert_text.clone()).as_pem(), cert_text);
+        assert_eq!(CaKeyPem::new(key_text.clone()).as_pem(), key_text);
+        assert_eq!(TrustBundlePem::new(bundle_text.clone()).as_pem(), bundle_text);
+    }
+
+    /// `CaCertDer::as_der` borrows the wrapped DER bytes verbatim. The value is
+    /// a multi-byte non-trivial slice so the `vec![0]` / `vec![1]` / leaked-vec
+    /// mutations on the accessor body all fail (each would return a slice that
+    /// is not equal to the input).
+    #[test]
+    fn cert_der_newtype_borrows_its_wrapped_bytes_verbatim() {
+        let der = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        assert_eq!(CaCertDer::new(der.clone()).as_der(), der.as_slice());
+    }
+
+    /// `TrustBundle::intermediate_chain` exposes the intermediate when present
+    /// (`Some(&intermediate)`) and `None` when the bundle is root-only. The
+    /// Some-case kills the `-> None` mutant on the accessor; the None-case pins
+    /// the root-only branch.
+    #[test]
+    fn intermediate_chain_reflects_whether_an_intermediate_is_present() {
+        let root =
+            CaCertPem::new("-----BEGIN CERTIFICATE-----\nROOT\n-----END CERTIFICATE-----\n".into());
+        let intermediate = CaCertPem::new(
+            "-----BEGIN CERTIFICATE-----\nINTERMEDIATE\n-----END CERTIFICATE-----\n".into(),
+        );
+
+        let with_intermediate = TrustBundle::new(root.clone(), Some(intermediate.clone()));
+        assert_eq!(with_intermediate.intermediate_chain(), Some(&intermediate));
+
+        let root_only = TrustBundle::new(root, None);
+        assert_eq!(root_only.intermediate_chain(), None);
+    }
+
+    /// `TrustBundle::bundle_pem` composes the root anchor first, the
+    /// intermediate chain material appended (`<root>\n<intermediate>`), with a
+    /// single separating newline inserted only when the root does not already
+    /// end in one (ADR-0063 D1 root-anchor-first wire-format).
+    ///
+    /// The root anchor here deliberately does NOT end in `\n`, so the
+    /// `if !pem.ends_with('\n')` branch fires and inserts the separator. Deleting
+    /// the `!` flips the branch — the separator is skipped — and the composed
+    /// output becomes `<root><intermediate>` with no newline between the two
+    /// PEM blocks, which is not equal to the asserted bytes. The mutant dies
+    /// deterministically (no timeout, no L3 path).
+    #[test]
+    fn bundle_pem_composes_root_anchor_first_with_intermediate_separator() {
+        // No trailing newline on the root — forces the separator-insertion branch.
+        let root =
+            CaCertPem::new("-----BEGIN CERTIFICATE-----\nROOT\n-----END CERTIFICATE-----".into());
+        let intermediate = CaCertPem::new(
+            "-----BEGIN CERTIFICATE-----\nINTERMEDIATE\n-----END CERTIFICATE-----\n".into(),
+        );
+
+        let with_intermediate = TrustBundle::new(root.clone(), Some(intermediate.clone()));
+        let expected = format!("{}\n{}", root.as_pem(), intermediate.as_pem());
+        assert_eq!(with_intermediate.bundle_pem().as_pem(), expected);
+
+        // Root-only: the composed PEM is exactly the root anchor, with no
+        // phantom intermediate material appended.
+        let root_only = TrustBundle::new(root.clone(), None);
+        assert_eq!(root_only.bundle_pem().as_pem(), root.as_pem());
+    }
+}

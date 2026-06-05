@@ -292,3 +292,31 @@ impl CertSpecError {
         Self::InvalidSubject { role, reason }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::KeyUsage;
+
+    /// `KeyUsage::as_str` returns the canonical X.509 extension name for
+    /// every variant. The newtype-completeness mandate
+    /// (`.claude/rules/development.md` § "Label enums own their string
+    /// representation") requires each label enum's `as_str` round-trip; this
+    /// pins the exact canonical string per variant so a mutation replacing the
+    /// body with `""` / a stub literal is killed. Input variations of the same
+    /// behaviour are one parametrized table (Mandate 5).
+    #[test]
+    fn as_str_returns_canonical_key_usage_name_for_every_variant() {
+        let cases = [
+            (KeyUsage::KeyCertSign, "keyCertSign"),
+            (KeyUsage::CrlSign, "cRLSign"),
+            (KeyUsage::DigitalSignature, "digitalSignature"),
+        ];
+        for (variant, canonical) in cases {
+            assert_eq!(
+                variant.as_str(),
+                canonical,
+                "{variant:?} must render its canonical X.509 extension name"
+            );
+        }
+    }
+}
