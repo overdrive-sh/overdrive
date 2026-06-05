@@ -114,6 +114,15 @@ mod integration {
     /// `veth_provisioner::provision`: creates-when-absent +
     /// adopts-pre-existing-without-recreating.
     mod veth_provision_idempotent;
+    /// workflow-primitive DISTILL (GH #39, J-PLAT-005) — `@real-io`
+    /// journal-persistence scenario S-WP-01-04 (US-WP-2 AC1/AC2, K5/O6).
+    /// Exercises a REAL `RedbJournalStore` (real redb file) per
+    /// `.claude/rules/testing.md` § "Integration vs unit gating".
+    /// `#[should_panic(expected = "RED scaffold")]` until DELIVER slice 01
+    /// lands `RedbJournalStore` + the `JournalStore` port (ADR-0063).
+    pub mod workflow_journal {
+        mod journal_writes_to_redb;
+    }
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads

@@ -471,3 +471,170 @@ DESIGN; all cite real issues per CLAUDE.md):
 - **`JournalEntry` digest resolution for full-body observability** — a future #206/#208 concern; replay needs only the digest.
 - **Outcome Collision Check:** registry `docs/product/outcomes/registry.yaml`
   not present — skipped (no fabrication).
+
+---
+
+## Wave: DISTILL / [REF] Reconciliation result
+
+Wave: DISTILL (Quinn / nw-acceptance-designer) · Date: 2026-06-05 · Density:
+lean. Architecture **locked to B′**; ATs designed OVER it (not re-litigated).
+
+**Reconciliation passed — 0 contradictions.** Confirmed (orchestrator
+pre-cleared): no DEVOPS wave (WARN — DST-internal primitive, no env-matrix
+dependency; defaults used). DISCUSS vs DESIGN are mutually consistent on every
+load-bearing decision — redb-not-libSQL (D-INH-2 / DDD-1/2 / K5), CBOR codec
+(DDD-2), single-node crash-resume only (D3 / #205), all non-determinism through
+`ctx` (D-INH-4), no Raft bypass (slice-03 AC2), no `overdrive workflow` CLI verb
+(D4 / #206), engine-off-shim + reconciler-pure (DDD-5). No NEW contradiction
+found beyond the orchestrator's clearance.
+
+## Wave: DISTILL / [REF] Scenario list with tags
+
+`.feature` files are forbidden here (`.claude/rules/testing.md`); the scenario
+SSOT is `distill/test-scenarios.md` (GWT spec, prose-only) and the executable
+RED scaffolds are Rust `#[should_panic(expected = "RED scaffold")]` tests.
+
+| Scenario | Title | Tags | AC | KPI/ODI | Scaffold file |
+|---|---|---|---|---|---|
+| S-WP-01-01 | Author writes one ordinary async sequence → terminal | `@driving_port @in-memory @kpi` | US-WP-1 AC1 | K6/O3 | `overdrive-core/tests/acceptance/workflow_trait_drives_to_terminal.rs` |
+| S-WP-01-02 | A durable body has zero step-machine boilerplate | `@driving_port @in-memory @property @kpi` | US-WP-1 AC1 (K6) | K6/O3 | `overdrive-core/tests/acceptance/workflow_body_has_no_step_machine.rs` |
+| S-WP-01-03 | Non-determinism flows through `ctx`, never the runtime | `@driving_port @in-memory @property @error` | US-WP-1 AC2 | O5 | `overdrive-core/tests/acceptance/workflow_body_routes_nondeterminism_through_ctx.rs` |
+| S-WP-01-04 | A completed step is recorded in real redb before suspend | `@driving_port @real-io @kpi` | US-WP-2 AC1/AC2 | K5/O6 | `overdrive-control-plane/tests/integration/workflow_journal/journal_writes_to_redb.rs` |
+| S-WP-01-05 | The journal records inputs, not a derived cache | `@in-memory @property` | US-WP-2 AC3 | O6 | `overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs` |
+| S-WP-01-06 | **WS:** kill mid-run → completed step not repeated | `@walking_skeleton @driving_port @dst @in-memory @error @property @kpi` | US-WP-3 AC1/2/3/4; slice-01 AC1/2/5 | K1/K2/K3 (O1/O2/O4) | `overdrive-sim/tests/acceptance/workflow_crash_resume_exactly_once.rs` |
+| S-WP-01-07 | A committed step survives the crash (not lost) | `@dst @in-memory @error @kpi` | US-WP-3 AC2 | K2/O2 | `overdrive-sim/tests/acceptance/workflow_committed_step_survives_crash.rs` |
+| S-WP-01-08 | Lifecycle reconciler re-hydrates running instance on restart | `@driving_port @in-memory @kpi` | US-WP-3 AC4 | O2 | `overdrive-control-plane/tests/acceptance/lifecycle_reconciler_rehydrates_on_restart.rs` |
+| S-WP-01-09 | Replay-equivalence is a named DST invariant, seeded | `@dst @in-memory @property @kpi` | US-WP-4 AC1/2/3; slice-01 AC3 | **K4/O5 (load-bearing)** | `overdrive-sim/tests/acceptance/replay_equivalence_provision_record_invariant.rs` |
+| S-WP-01-10 | fsync failure does not advance the journal cursor | `@dst @in-memory @error @property @kpi` | US-WP-2 AC2 | O1/O6 | `overdrive-sim/tests/acceptance/workflow_journal_write_ordering.rs` |
+| S-WP-01-11 | Action-shim dispatches StartWorkflow to the engine off the shim, not a reconcile loop | `@driving_port @in-memory @kpi` | DDD-5 / ADR-0064 §5 | O3 (R3) | `overdrive-control-plane/tests/acceptance/action_shim_dispatches_start_workflow_to_engine.rs` |
+| S-WP-02-01 | Crash spanning the sleep window does not repeat pre-sleep step | `@driving_port @dst @in-memory @error @property @kpi` | slice-02 AC1 | K1/O1 | `overdrive-sim/tests/acceptance/workflow_sleep_crash_pre_sleep_step_not_repeated.rs` |
+| S-WP-02-02 | Post-sleep step fires only at/after the original deadline | `@dst @in-memory @error @property @kpi` | slice-02 AC2 | K3/O4 | `overdrive-sim/tests/acceptance/workflow_sleep_resumes_to_original_deadline.rs` |
+| S-WP-02-03 | Sleep entry records deadline (input), not "remaining" | `@in-memory @property` | slice-02 AC4 | O3/O6 | `overdrive-sim/tests/acceptance/workflow_sleep_records_deadline_not_remaining.rs` |
+| S-WP-02-04 | Replay-equivalence holds across the sleep, seeded | `@dst @in-memory @property @kpi` | slice-02 AC3 | K4/O5 | `overdrive-sim/tests/acceptance/replay_equivalence_holds_across_sleep.rs` |
+| S-WP-03-01 | Blocked-on-signal re-blocks on the SAME signal after crash | `@driving_port @dst @in-memory @error @property @kpi` | US-WP-5 AC1 | K1/O1 | `overdrive-sim/tests/acceptance/workflow_signal_wait_reblocks_after_crash.rs` |
+| S-WP-03-02 | A satisfied signal is not re-waited on resume | `@dst @in-memory @error @property` | slice-03 AC1 | O1 | `overdrive-sim/tests/acceptance/workflow_signal_already_seen_not_rewaited.rs` |
+| S-WP-03-03 | `ctx.emit_action` lands in Raft channel, no IntentStore write | `@driving_port @in-memory @property @kpi` | US-WP-5 AC2 | O3 | `overdrive-control-plane/tests/acceptance/workflow_emit_action_lands_in_raft_channel.rs` |
+| S-WP-03-04 | An emitted Action is not re-emitted after a crash | `@dst @in-memory @error @property @kpi` | US-WP-5 AC3 | K1/O1 | `overdrive-sim/tests/acceptance/workflow_emit_action_not_re_emitted_after_crash.rs` |
+| S-WP-03-05 | Replay-equivalence holds across signal wait + emit, seeded | `@dst @in-memory @property @kpi` | US-WP-5 AC4 | K4/O5 | `overdrive-sim/tests/acceptance/replay_equivalence_holds_across_signal_and_emit.rs` |
+
+**20 scenarios** · **9 `@error` scenarios (~45%, ≥40% gate met)** · **1
+`@walking_skeleton`** · every US-WP-1..5 AC mapped · S-WP-01-11 added in the
+consolidated review to give the action-shim `StartWorkflow` dispatch arm
+(DDD-5, the RATIFY-flagged engine↔reconciler boundary) dedicated coverage.
+
+## Wave: DISTILL / [REF] WS strategy
+
+**Strategy B (thinnest end-to-end vertical slice).** Slice 01 IS the walking
+skeleton; the ONE `@walking_skeleton` scenario is **S-WP-01-06** — "Devon kills
+the process mid-run and the completed step is not repeated on restart" — which
+closes the full durable-execution loop (author surface → `ctx.call` → redb
+journal write → lifecycle-reconciler bring-up via `Action::StartWorkflow` →
+single-node crash-resume under DST → exactly-once effect → byte-identical
+terminal → observable ObservationStore terminal row). Justification: a
+non-technical stakeholder reads it and confirms "yes, that is what durable
+execution must do" (Mandate 5 litmus); it is the demo-able user-value E2E, not
+a layer-connectivity proof.
+
+## Wave: DISTILL / [REF] Adapter coverage table
+
+Per Mandate 6, every DRIVEN port from DESIGN mapped to ≥1 scenario. In this DST
+primitive the in-process "real" driven-internal adapter is the `Sim*` adapter
+(it honours the same trait contract — per the project ATDD Infrastructure
+Policy). The `JournalStore` (NEW) additionally has a **real-redb** persistence
+scenario (`@real-io`, `integration-tests`) per AC4/O6.
+
+| Driven port | Sim adapter (default lane) | Real-IO scenario | Covered by |
+|---|---|---|---|
+| `JournalStore` (NEW) | `SimJournalStore` | **YES** — S-WP-01-04 (`@real-io`, real `RedbJournalStore`) | S-WP-01-04, 01-05, 01-07, 01-10 |
+| `Transport` (REUSE) | `SimTransport` | covered via DST (call-count == 1) | S-WP-01-06, 02-01 |
+| `Clock` (REUSE) | `SimClock` | covered via DST (deadline park) | S-WP-02-02 |
+| `Entropy` (REUSE) | `SeededEntropy` | covered via seed reproduction | S-WP-01-09, 02-04, 03-05 |
+| `ObservationStore` (REUSE) | `SimObservationStore` | covered via DST (terminal row + signals) | S-WP-01-06, 03-01, 03-02 |
+| Action channel → Raft (REUSE) | sim harness | covered via DST (emit lands in channel) | S-WP-03-03, 03-04 |
+
+Zero "NO — MISSING" rows. The one NEW driven port (`JournalStore`) carries the
+real-redb integration scenario; the REUSE ports are exercised through their
+existing `Sim*` adapters in the DST lane (their real-adapter integration tests
+already exist in the brownfield substrate).
+
+## Wave: DISTILL / [REF] Scaffolds
+
+21 RED scaffold files (all `#[should_panic(expected = "RED scaffold")]`,
+RED-not-BROKEN, import no unbuilt production type):
+
+- **overdrive-core** `tests/acceptance/`: `workflow_trait_drives_to_terminal.rs`, `workflow_body_has_no_step_machine.rs`, `workflow_body_routes_nondeterminism_through_ctx.rs` (S-WP-01-01/02/03).
+- **overdrive-sim** `tests/acceptance/`: `journal_records_inputs_not_derived.rs`, `workflow_crash_resume_exactly_once.rs`, `workflow_committed_step_survives_crash.rs`, `replay_equivalence_provision_record_invariant.rs`, `workflow_journal_write_ordering.rs` (slice 01); `workflow_sleep_crash_pre_sleep_step_not_repeated.rs`, `workflow_sleep_resumes_to_original_deadline.rs`, `workflow_sleep_records_deadline_not_remaining.rs`, `replay_equivalence_holds_across_sleep.rs` (slice 02); `workflow_signal_wait_reblocks_after_crash.rs`, `workflow_signal_already_seen_not_rewaited.rs`, `workflow_emit_action_not_re_emitted_after_crash.rs`, `replay_equivalence_holds_across_signal_and_emit.rs` (slice 03).
+- **overdrive-control-plane** `tests/acceptance/`: `action_shim_dispatches_start_workflow_to_engine.rs` (S-WP-01-11), `lifecycle_reconciler_rehydrates_on_restart.rs` (S-WP-01-08), `workflow_emit_action_lands_in_raft_channel.rs` (S-WP-03-03).
+- **overdrive-control-plane** `tests/integration/workflow_journal/`: `journal_writes_to_redb.rs` (S-WP-01-04, `@real-io`, `integration-tests`).
+
+Wired into `overdrive-core/tests/acceptance.rs`, `overdrive-sim/tests/acceptance.rs`,
+`overdrive-control-plane/tests/acceptance.rs`, and
+`overdrive-control-plane/tests/integration.rs` (the `mod integration { mod
+workflow_journal { … } }` subtree). RED-classification: `distill/red-classification.md`.
+
+## Wave: DISTILL / [REF] Test placement
+
+- **Default DST lane** (`tests/acceptance/*.rs`, `Sim*` in-process, `cargo dst`): all 17 non-real-IO scenarios. Precedent: `reconciler_is_pure_with_workload_lifecycle.rs` and `sim_view_store.rs` — sibling `Sim*`-adapter DST acceptance tests in the same `overdrive-sim/tests/acceptance/` directory. The DST invariant scenarios NAME the future `ReplayEquivalenceProvisionRecord` / `WorkflowJournalWriteOrdering` / `WorkflowExactlyOnceEffectOnResume` variants.
+- **Real-redb lane** (`tests/integration/workflow_journal/journal_writes_to_redb.rs`, gated `integration-tests`): the ONE journal-persistence scenario that opens a real redb file (S-WP-01-04), per `.claude/rules/testing.md` § "Integration vs unit gating" (real filesystem I/O → `integration-tests` feature + `tests/integration/`). Precedent: `tests/integration/redb_view_store.rs` (the sibling real-redb `ViewStore` test).
+
+## Wave: DISTILL / [REF] Driving Adapter coverage
+
+- **Author surface (`impl Workflow` / `ctx.*`):** S-WP-01-01/02/03 (the `Workflow` trait + `WorkflowCtx` surface), S-WP-02-* (`ctx.sleep`), S-WP-03-* (`ctx.wait_for_signal`, `ctx.emit_action`).
+- **Lifecycle trigger (`Action::StartWorkflow { spec, correlation }`):** S-WP-01-06 (bring-up), S-WP-01-08 (re-hydrate on restart), S-WP-01-11 (the action-shim dispatch arm hands the instance to `WorkflowEngine::start` off the shim, not a reconcile loop — the DDD-5 engine↔reconciler boundary).
+- **NO CLI verb exists (#206).** There is NO `overdrive workflow` subcommand (cli.rs: deploy/job/node/alloc/cluster only). No scenario invents one. Ana's (operator) Phase-1 observable surface is the ObservationStore terminal-result row + structured lifecycle event + the `replay_equivalence_*` DST invariant as executable evidence — asserted by S-WP-01-06 (terminal row) and S-WP-01-09 (the named invariant).
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+DESIGN driving/driven ports + the brownfield substrate the scenarios depend on:
+
+- **Driving:** `Workflow` trait + `WorkflowCtx` (core, NEW — DELIVER), `Action::StartWorkflow` (core, EXTEND placeholder `reconcilers/mod.rs:373`).
+- **Driven (NEW):** `JournalStore` port + `RedbJournalStore` (control-plane) + `SimJournalStore` (sim) — ADR-0063.
+- **Driven (REUSE, brownfield-verified):** reconciler runtime, redb ViewStore (shared `Arc<Database>`), Action channel → Raft, `ObservationStore`, `Clock`/`Transport`/`Entropy` port traits, `CorrelationKey`/`HttpCall` machinery, the DST harness.
+- **Graduated:** the `ReplayEquivalentEmptyWorkflow` placeholder invariant (`overdrive-sim/src/invariants/mod.rs:136`) becomes `ReplayEquivalenceProvisionRecord` (K4) — DELIVER slice 01.
+- **No external dependency outside the workspace.** No DEVOPS env-matrix (DST-internal). No new external/non-deterministic driven port (no clock/email/SMS/payment/LLM/API fake needed).
+
+## Wave: DISTILL / [REF] DST invariant catalogue delta
+
+Three `overdrive-sim::invariants::Invariant` variants the DISTILL scaffolds
+NAME; they LAND (graduate) in DELIVER (ADR-0064 §6, ADR-0063 §6):
+
+1. **`ReplayEquivalenceProvisionRecord`** — graduates the placeholder `ReplayEquivalentEmptyWorkflow` (`mod.rs:136`); replaces the `evaluate_replay_equivalent_empty_workflow` two-SimEntropy-transcript stub with a real journal replay against the engine + `SimJournalStore`. Uninterrupted-vs-crash-resumed trajectory byte-equality + `assert_eventually!(is_terminal)` bounded progress. **K4, on the CI critical path.** (S-WP-01-09; extended for S-WP-02-04 / S-WP-03-05.)
+2. **`WorkflowJournalWriteOrdering`** — under `SimJournalStore` with injected fsync-failure on the next append, the engine does not advance the cursor / suspend (mirrors ADR-0035 `WriteThroughOrdering`). (S-WP-01-10.)
+3. **`WorkflowExactlyOnceEffectOnResume`** — crash after `ctx.call` records but before terminal → resume → `SimTransport` call count == 1 (K1). (S-WP-01-06.)
+
+DISTILL scaffolds the acceptance tests that NAME these; DELIVER lands the enum
+variants + evaluators.
+
+## Wave: DISTILL / [REF] Self-review + mandate compliance
+
+- **WS strategy declared:** Strategy B; WS scenario S-WP-01-06 tagged `@walking_skeleton @driving_port @dst`. ✔
+- **Every driven port has a scenario; `JournalStore` (NEW) has a `@real-io` real-redb scenario** (S-WP-01-04). ✔
+- **What `Sim*` doubles CANNOT model (documented):** wall-clock fidelity (DST drives logical time — production `SystemClock` is the same trait, no extra surface, slice-02 OUT-of-scope note); real-kernel/multi-node behaviour (single-node only, #205); cross-node signal delivery under partition (#207). These are honestly OUT of Phase-1 scope, not silently asserted.
+- **RED-not-BROKEN confirmed:** all 3 crates compile `--no-run` in Lima; the 20 scaffolds run and PASS at the bar via `#[should_panic(expected = "RED scaffold")]`. No IMPORT_ERROR / SETUP_FAILURE. ✔
+- **Scaffold convention applied:** project `.claude/rules/testing.md` § "RED scaffolds" shape (`#[should_panic(expected = "RED scaffold")]` + `panic!("Not yet implemented -- RED scaffold (S-WP-NN-NN / …)")`), NOT the generic `__SCAFFOLD__` marker (Rust override). ✔
+- **Honesty constraints:** no `overdrive workflow` CLI verb (#206); no cross-node resume claimed (#205, D3 — every crash-resume scenario notes single-node); journal on redb-CBOR not libSQL (K5 asserted S-WP-01-04); all non-determinism through `ctx` (S-WP-01-03 + negative test); `ctx.emit_action` → Raft channel, no IntentStore bypass (S-WP-03-03). ✔
+- **CM-A (Mandate 1, hexagonal):** scaffolds enter through the author surface (`impl Workflow`/`ctx.*`), the lifecycle trigger (`Action::StartWorkflow`), or the named DST invariant — never an internal component. **CM-B (Mandate 2, business language):** scenario titles are business outcomes (resume exactly-once, prove replay-equivalence, signal re-blocks). **CM-C (Mandate 3, journeys):** the WS is the complete crash-resume journey with observable terminal. **Mandate 9 (PBT mode):** the `replay_equivalence_*` invariant IS the property (any seed → bit-identical); slice-03 sad paths are example-pinned (Mandate 11). **Mandate 10:** Tier B state-machine PBT is NOT emitted — the journey's rich behaviour is already covered by the DST replay invariant (the project's native equivalent), and the input space is digest/seed-shaped, not domain-rich free-text; Tier A (DST + named invariant) is the correct single tier here.
+
+### Consolidated review (the mandatory end-of-DISTILL gate)
+
+Two reviewers dispatched in parallel (Haiku) against the full `feature-delta.md`
++ the `.feature`-replacement GWT spec + the 21 scaffolds (the product-owner and
+platform-architect reviewers were scoped out — DISCUSS was already APPROVED by
+Eclipse and unchanged in DISTILL, and this feature has no DEVOPS wave):
+
+- **`nw-acceptance-designer-reviewer` (Sentinel) — APPROVED**, 0 blockers / 0
+  high / 0 low. AC + KPI completeness, WS integrity, adapter coverage, error-path
+  %, RED convention, traceability, honesty all PASS.
+- **`nw-solution-architect-reviewer` (Architect) — CONDITIONALLY_APPROVED**, 0
+  blocker / 1 high / 0 low. The high finding: the engine↔reconciler boundary
+  (DDD-5, the RATIFY-flagged "subtlest decision") was under-covered — the
+  action-shim `StartWorkflow` dispatch arm (a DESIGN EXTEND component) had only
+  *implicit* coverage via the walking skeleton. **Resolved in-wave** (not
+  deferred to DELIVER): added dedicated scenario **S-WP-01-11** asserting the
+  shim hands the instance to `WorkflowEngine::start` off the shim (not a
+  reconcile loop), and strengthened **S-WP-01-08** to name that `ReconcilerIsPure`
+  holds with the workflow-lifecycle reconciler registered. Both new/edited
+  scaffolds re-compiled RED-not-BROKEN in Lima. No remaining blocker or high.
+
+DELIVER handoff cleared: both verdicts APPROVED / CONDITIONALLY_APPROVED with the
+sole high finding resolved in-wave.

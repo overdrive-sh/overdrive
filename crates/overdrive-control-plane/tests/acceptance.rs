@@ -248,4 +248,16 @@ mod acceptance {
     // `reconciler.output.invariant_violation` tracing event, skip
     // dispatch, persist the View, and NOT stop (surface-then-continue).
     mod reconcile_conflict_observation;
+
+    // workflow-primitive DISTILL (GH #39, J-PLAT-005) — control-plane-side
+    // (engine↔reconciler boundary + emit) RED scaffolds per
+    // `docs/feature/workflow-primitive/distill/test-scenarios.md`. Both
+    // `#[should_panic(expected = "RED scaffold")]`; the workflow-lifecycle
+    // reconciler (ADR-0064 §5) + `ctx.emit_action` action-channel handoff
+    // (ADR-0064 §4) land in DELIVER slices 01 / 03. Default lane (Sim*
+    // in-process); the real-redb journal-persistence scenario (S-WP-01-04)
+    // lives under `tests/integration/workflow_journal/`.
+    mod action_shim_dispatches_start_workflow_to_engine; // S-WP-01-11
+    mod lifecycle_reconciler_rehydrates_on_restart; // S-WP-01-08
+    mod workflow_emit_action_lands_in_raft_channel; // S-WP-03-03
 }

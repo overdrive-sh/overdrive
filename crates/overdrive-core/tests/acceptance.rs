@@ -205,4 +205,14 @@ mod acceptance {
     // (KPI K2, `@property`) + role->extension mapping live in core so they
     // are DST-testable and dst-lint-clean. Layer 1, PBT-full per Mandate 9.
     mod ca_cert_spec_policy;
+    // workflow-primitive DISTILL (GH #39, J-PLAT-005) — slice-01 author-
+    // surface RED scaffolds per
+    // `docs/feature/workflow-primitive/distill/test-scenarios.md`
+    // (S-WP-01-01/02/03). The `Workflow` trait + `WorkflowCtx` +
+    // `WorkflowResult` land in `overdrive-core::workflow` during DELIVER
+    // slice 01 (ADR-0064 §1); these scaffolds are `#[should_panic
+    // (expected = "RED scaffold")]` and import no unbuilt production type.
+    mod workflow_body_has_no_step_machine;
+    mod workflow_body_routes_nondeterminism_through_ctx;
+    mod workflow_trait_drives_to_terminal;
 }
