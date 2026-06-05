@@ -2,7 +2,7 @@
 # Feature Delta — unconnected-udp-sendmsg4
 
 **Feature-id:** `unconnected-udp-sendmsg4` · **GH:** [#200](https://github.com/overdrive-sh/overdrive/issues/200)
-· **Waves present:** DIVERGE (accepted) → **DISCUSS** (this wave)
+· **Waves present:** DIVERGE (accepted) → DISCUSS (approved) → **DESIGN** (this wave)
 · **Density:** lean + ask-intelligent (resolved from `~/.nwave/global-config.json`)
 
 > Single narrative file per the nw-discuss Outputs contract. DISCUSS
@@ -639,6 +639,215 @@ Praise: (1) the sibling-journey decision prevents a class of bug rather than
 merely documenting it; (2) the walking skeleton refuses to ship forward-only
 and frames the Tier-3-fixture SPIKE honestly.
 
+---
+
+## Wave: DESIGN / [REF] Overview
+
+**Architect:** Morgan. **Date:** 2026-06-05. **Mode:** GUIDE (framing pass
+complete; all decisions user-locked). **Density:** lean + ask-intelligent.
+**Paradigm:** object-oriented (project CLAUDE.md; `@nw-software-crafter` for
+implementation — not re-asked).
+
+**SSOT for this DESIGN wave:** **ADR-0053 revision 2026-06-05** +
+`docs/product/architecture/brief.md` § "Unconnected-UDP sendmsg4 extension"
++ `docs/product/architecture/c4-diagrams.md` § "Unconnected-UDP sendmsg4 +
+recvmsg4". This feature-delta section is the decision-and-reuse summary; it
+does not supersede the ADR.
+
+**Per-wave architect review:** DEFERRED to the mandatory consolidated review
+at end of DISTILL (per the nWave per-wave-review-optional rule); NOT
+self-invoked here.
+
+---
+
+## Wave: DESIGN / [REF] DDD decisions
+
+| # | Decision | Verdict | One-line rationale |
+|---|---|---|---|
+| **DDD-1** | Reverse store = a second BPF map `REVERSE_LOCAL_MAP` (`BPF_MAP_TYPE_HASH`), written in ordered (reverse-first) sequence by `register_local_backend` (two map syscalls, not one transaction — an ordering guarantee, not atomicity). | LOCKED | A reverse scan is O(N)/datagram on the recvmsg hot path; conntrack models flow state UDP doesn't have; a second point-lookup map is the only stateless O(1) reply store. (ADR-0053 rev D1.) |
+| **DDD-2** | Reverse key = `(backend_ip, backend_port, proto)` reusing the existing `BackendKey` newtype. | LOCKED | `backend_ip` alone is ambiguous when two services share a backend IP on different ports; `BackendKey` reuse buys byte-parity with the three existing keys + a free Sim mirror. (ADR-0053 rev D2.) |
+| **DDD-3** | Reverse-miss = rewrite-to-sentinel `192.0.2.1` (RFC 5737) + counted miss reason; recvmsg4 CANNOT deny (verifier `[1,1]`). | LOCKED | Evidence-backed (research Q1, triangulated): drop is impossible at any layer; sentinel rewrite is the only no-leak-to-app option and is strictly stronger than Cilium's pass-through-leak. (ADR-0053 rev D3.) |
+| **DDD-3a** | AC reframing US-01/US-03/K2/K5: wire-layer → application-sockaddr-layer. | LOCKED (back-prop REQUIRED) | recvmsg4 fires after the skb is on the socket queue; `tcpdump -i lo` shows the backend source regardless. Wire no-leak is XDP's domain, not recvmsg4's. Layer/wording correction, not scope change. (ADR-0053 rev D3; `design/upstream-changes.md`.) |
+| **DDD-4** | Option 3 — ONE shared `#[inline(always)]` `build_local_service_key` helper (key-build + NBO ONLY) across connect4 + sendmsg4 + recvmsg4; ONE attach orchestration + ONE probe set. Map lookup + rewrite direction differ per hook and stay in each program body. | LOCKED (user override of Morgan's Option-2) | Single key-construction + NBO site across three hooks; connect4/sendmsg4 look up `LOCAL_BACKEND_MAP` (forward dest-rewrite), recvmsg4 looks up `REVERSE_LOCAL_MAP` (reverse source-rewrite) — one helper MUST NOT serve both rewrite directions. REFACTORS shipped connect4 (behavior-preserving, Tier-3-reverified, no Tier-2 backstop). (ADR-0053 rev D4.) |
+| **DDD-5a** | `register_local_backend` writes BOTH maps reverse-first; NO new trait method; contract rustdoc amended (postcondition + observable invariant + edge case). | LOCKED | One logical write installs forward+reverse; the existing method body extends, the trait surface does not grow. (ADR-0053 rev D5a.) |
+| **DDD-5b/c** | Probe attaches both new hooks + round-trips a `REVERSE_LOCAL_MAP` sentinel; the `attach()` syscall IS the below-floor preflight; `#[from]`-routed error variant(s), never `Internal(String)`. | LOCKED | The kernel-authoritative attach is the honest floor check; `/proc`/`uname` parsing would re-introduce the `unwrap_or_default` boundary-read footgun. (ADR-0053 rev D5b/c.) |
+| **DDD-5d** | `SimDataplane` reply mirror `BTreeMap<BackendKey, Ipv4Addr>` under the SAME mutex acquisition as `local_backends`; `reply_source_for()` test accessor; models the observable contract only. | LOCKED | Tier-1 reply-path equivalence pin without a kernel; MUST NOT shape production (the production reverse-first dual-write is written to the contract; the Sim mirrors the post-state). (ADR-0053 rev D5d.) |
+| **DDD-5e** | `user_port` low-16-NBO read idiom copied verbatim into the shared `build_local_service_key` helper; recvmsg4 writable fields confirmed = `user_ip4`/`user_port` (`msg_src_ip4` is sendmsg-only). | LOCKED | One correct read-side NBO site for all three hooks; the write-side (rewrite) NBO stays per-hook; research Q2 verified the recvmsg4 source-rewrite handles. (ADR-0053 rev D5e.) |
+
+---
+
+## Wave: DESIGN / [REF] Component decomposition
+
+| Component | Path | Change type |
+|---|---|---|
+| `cgroup_sendmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs` | **CREATE NEW** |
+| `cgroup_recvmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs` | **CREATE NEW** |
+| `build_local_service_key` shared helper (key-build + NBO only; no lookup, no rewrite) | `crates/overdrive-bpf/src/shared/build_local_service_key.rs` | **CREATE NEW** |
+| `REVERSE_LOCAL_MAP` kernel map | `crates/overdrive-bpf/src/maps/reverse_local_map.rs` | **CREATE NEW** |
+| `REVERSE_LOCAL_MISS_COUNTER` (PERCPU_ARRAY) | `crates/overdrive-bpf/src/maps/` | **CREATE NEW** |
+| `ReverseLocalMapHandle` userspace handle | `crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs` | **CREATE NEW** |
+| `cgroup_connect4_service` key-build / NBO | `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs` | **EXTEND** (key-build + NBO refactored to call the shared helper; own `LOCAL_BACKEND_MAP` lookup + forward dest-rewrite stay in body — behavior-preserving, Tier-3-reverified) |
+| `Dataplane::register_local_backend` / `deregister_local_backend` | `crates/overdrive-core/src/traits/dataplane.rs` | **EXTEND** (body: reverse-first dual-write; rustdoc contract amended) |
+| `EbpfDataplane::register_local_backend` | `crates/overdrive-dataplane/src/lib.rs` | **EXTEND** (write `REVERSE_LOCAL_MAP` reverse-first; attach+probe both new hooks) |
+| `SimDataplane` | `crates/overdrive-sim/src/adapters/dataplane.rs` | **EXTEND** (reply mirror + `reply_source_for()`) |
+| `DataplaneError` / `DataplaneBootError` | `crates/overdrive-core/src/traits/dataplane.rs` (+ dataplane boot error home) | **EXTEND** (`CgroupSendRecvAttach`, `ReverseLocalProbe` `#[from]`-routed) |
+| `LOCAL_BACKEND_MAP`, `BackendKey`, `Proto`, hydrator classifier, `Action::RegisterLocalBackend`, `cgroup_attach_path` | (shipped) | **REUSE** (unchanged) |
+
+---
+
+## Wave: DESIGN / [REF] C4 delta (Mermaid)
+
+**L1 System Context: UNCHANGED.** No new external actor/system; the delta
+(two cgroup hook types + one kernel map) is internal to the existing
+`overdrive ↔ kernel` relationship. No L1 reproduced (redundant). **L3:** not
+warranted — the shared-helper call graph is captured in the component
+decomposition above. Canonical L2 lives in
+`docs/product/architecture/c4-diagrams.md` § "Unconnected-UDP sendmsg4 +
+recvmsg4"; reproduced here for the DELIVER reader:
+
+```mermaid
+C4Container
+  title Container delta — Unconnected-UDP sendmsg4 + recvmsg4 (GH #200)
+
+  Person(ana, "Platform Engineer (Ana)", "overdrive deploy + unconnected dig @<vip>")
+  Container(dp, "overdrive-dataplane (Ebpf)", "adapter-host", "NEW ReverseLocalMapHandle; register_local_backend writes REVERSE_LOCAL_MAP reverse-first then LOCAL_BACKEND_MAP; probe attaches both new hooks")
+  Container(bpf, "overdrive-bpf", "no_std BPF", "NEW sendmsg4 + recvmsg4 programs; NEW shared build_local_service_key helper (key-build + NBO only; per-hook lookup + rewrite stay in each program; connect4 refactored to call it)")
+  Container(sim, "overdrive-sim", "adapter-sim", "reply mirror BTreeMap<BackendKey,Ipv4Addr> under one mutex; reply_source_for() accessor")
+
+  System_Boundary(kern, "Linux kernel, overdrive.slice cgroup") {
+    Container(connect4, "cgroup/connect4 (shipped, REFACTORED)", "BPF_CGROUP_INET4_CONNECT", "TCP + connected-UDP forward dst rewrite; key via shared helper, own LOCAL_BACKEND_MAP lookup")
+    Container(sendmsg4, "cgroup/sendmsg4 (NEW, >=4.18)", "BPF_CGROUP_UDP4_SENDMSG", "Unconnected forward dst rewrite VIP->backend; key via shared helper, own LOCAL_BACKEND_MAP lookup")
+    Container(recvmsg4, "cgroup/recvmsg4 (NEW, >=4.20)", "BPF_CGROUP_UDP4_RECVMSG", "Reply src rewrite backend->VIP; [1,1] cannot-deny; miss -> sentinel 192.0.2.1 + counter")
+    ContainerDb(fwdmap, "LOCAL_BACKEND_MAP (shipped)", "HASH", "(vip,vip_port,proto)->backend")
+    ContainerDb(revmap, "REVERSE_LOCAL_MAP (NEW)", "HASH", "BackendKey(ip,port,proto)->VIP")
+    ContainerDb(xdp, "SERVICE_MAP / REVERSE_NAT (shipped, XDP)", "BPF maps", "DISTINCT wire path for remote/connected — untouched")
+  }
+
+  Rel(ana, sendmsg4, "Unconnected sendto(VIP:53)")
+  Rel(dp, revmap, "1. upsert reverse (FIRST)")
+  Rel(dp, fwdmap, "2. upsert forward")
+  Rel(sendmsg4, fwdmap, "key via shared helper -> own lookup -> forward dst rewrite")
+  Rel(recvmsg4, revmap, "key via shared helper -> own lookup -> reverse src rewrite to VIP / sentinel on miss")
+  Rel(connect4, fwdmap, "key via shared helper -> own lookup (REFACTORED)")
+```
+
+---
+
+## Wave: DESIGN / [REF] Ports and adapters
+
+**Driving ports (none new).** The operator surface is unchanged
+`overdrive deploy <SPEC>`. The two new cgroup hooks are **driven** by the
+kernel (the kernel invokes them at `sendmsg`/`recvmsg` syscall time); they
+are not a driving port. No new CLI verb, no new HTTP route.
+
+**Driven ports + adapters.**
+
+| Port (trait) | Adapter(s) | Delta |
+|---|---|---|
+| `Dataplane` (`register_local_backend`/`deregister_local_backend`) | `EbpfDataplane` (host), `SimDataplane` (sim) | Bodies write `REVERSE_LOCAL_MAP` reverse-first (host) / the reply mirror under one lock (sim). NO new trait method. |
+| `Dataplane` (boot/probe path) | `EbpfDataplane::probe` | Attaches sendmsg4 + recvmsg4 + round-trips `REVERSE_LOCAL_MAP` sentinel; attach IS the below-floor preflight. |
+| (kernel-driven) `cgroup/sendmsg4`, `cgroup/recvmsg4` | the two new BPF programs | New driven adapters; each builds its key via the shared `build_local_service_key` helper, then does its own map lookup + its own rewrite direction. |
+
+**External integrations:** none. No third-party API, webhook, or OAuth
+provider — the only "external" surface is the Linux kernel BPF ABI, which is
+not a consumer-driven-contract target. **No contract-test annotation.**
+
+---
+
+## Wave: DESIGN / [REF] Technology choices
+
+| Choice | Value | Rationale | License |
+|---|---|---|---|
+| BPF userspace loader | `aya` (existing) | Already the workspace BPF loader; no new dep. | MIT/Apache-2.0 (OSS) |
+| Reverse map type | `BPF_MAP_TYPE_HASH` | Point-access reply lookup; mirrors `LOCAL_BACKEND_MAP`; no HoM (no atomic-swap-of-set requirement). | kernel |
+| Miss counter | `BPF_MAP_TYPE_PERCPU_ARRAY` | The shipped `DROP_COUNTER` precedent; per-CPU avoids contention. | kernel |
+| Kernel floor | 4.18 (sendmsg4) / 4.20 (recvmsg4) | Both below the 5.10 LTS floor — **no matrix bump**. | — |
+| Reverse key type | `BackendKey {ip,port,proto}` (in-repo) | REUSE; byte-parity with three existing keys; free Sim mirror. | — |
+| Sentinel value | `192.0.2.1` (RFC 5737 TEST-NET-1) | Non-routable, never collides with backend/VIP, visibly "documentation". | — |
+
+**Enforcement (architecture rules).** `dst-lint` (the existing crate-class
+gate) keeps `overdrive-bpf`/`overdrive-host` out of `core` compile paths and
+flags `std::fs` in async host bodies; the `BackendKey`/`Proto` newtype
+discipline is enforced by the existing proptest roundtrips. No new
+language-level architecture-test tool is warranted — the structural
+boundaries (sim vs host vs core) are already `dst-lint`-enforced.
+
+---
+
+## Wave: DESIGN / [REF] Decisions table
+
+| ID | Decision | SSOT |
+|---|---|---|
+| DDD-1 | Second map `REVERSE_LOCAL_MAP`, ordered (reverse-first) dual-write | ADR-0053 rev D1 |
+| DDD-2 | Reverse key = `BackendKey (ip,port,proto)` | ADR-0053 rev D2 |
+| DDD-3 | Reverse-miss = sentinel `192.0.2.1` + counted miss; recvmsg4 `[1,1]` cannot-deny | ADR-0053 rev D3 |
+| DDD-3a | AC reframing wire → app-sockaddr | upstream-changes.md |
+| DDD-4 | Option 3 shared `build_local_service_key` helper (key-build + NBO only; per-hook lookup + rewrite); refactors connect4 | ADR-0053 rev D4 |
+| DDD-5a | dual-write in `register_local_backend`; no new method; contract amended | ADR-0053 rev D5a |
+| DDD-5b/c | probe attaches both hooks; attach = below-floor preflight; `#[from]` errors | ADR-0053 rev D5b/c |
+| DDD-5d | Sim reply mirror; test accessor; no production shaping | ADR-0053 rev D5d |
+| DDD-5e | NBO idiom verbatim in shared helper; recvmsg4 fields confirmed | ADR-0053 rev D5e |
+
+---
+
+## Wave: DESIGN / [REF] Reuse Analysis (HARD GATE)
+
+| Component | Disposition | Justification |
+|---|---|---|
+| `REVERSE_LOCAL_MAP` kernel map | **CREATE NEW** | No existing reply store for the same-host cgroup path; the XDP `REVERSE_NAT` is a different hook/class (remote/connected). |
+| `ReverseLocalMapHandle` | **CREATE NEW** | Typed userspace handle for the new map; mirrors `LocalBackendMapHandle` shape. |
+| `cgroup_sendmsg4_service` program | **CREATE NEW** | No unconnected-UDP forward hook exists today (Amendment 4 scoped it out). |
+| `cgroup_recvmsg4_service` program | **CREATE NEW** | No reply-source-rewrite hook exists today. |
+| `build_local_service_key` shared helper | **CREATE NEW** | Factored from connect4's inline key-build + NBO (Option 3); the single key-construction site. Does NOT perform a lookup or a rewrite — those stay per-hook (connect4/sendmsg4 → `LOCAL_BACKEND_MAP` forward dest-rewrite; recvmsg4 → `REVERSE_LOCAL_MAP` reverse source-rewrite). |
+| `REVERSE_LOCAL_MISS_COUNTER` | **CREATE NEW** | New reply-path reason; NOT a `DropClass` variant (recvmsg4 does not drop). |
+| `cgroup_connect4_service` | **EXTEND** | Lookup body refactored to call the shared helper (was UNCHANGED under DISCUSS DD6; now EXTEND per D4). |
+| `register_local_backend` / `deregister_local_backend` (trait + both adapters) | **EXTEND** | Bodies gain the reverse map write / reply mirror; contract amended. NO new method. |
+| `EbpfDataplane` probe/boot | **EXTEND** | Attach both new hooks + sentinel round-trip. |
+| `DataplaneError`/`DataplaneBootError` | **EXTEND** | New `#[from]`-routed variant(s). |
+| `BackendKey` | **REUSE** | The reverse key (D2). |
+| `Proto` | **REUSE** | `backend_key::Proto` (IANA byte). |
+| `LOCAL_BACKEND_MAP` (+ handle) | **REUSE** | sendmsg4 + connect4 forward lookup; unchanged shape. |
+| `Action::RegisterLocalBackend` / hydrator classifier | **REUSE** | The reverse write is adapter-internal; no action field, no classifier change. |
+| `cgroup_attach_path` config | **REUSE** | All three hooks attach to the same configured slice. |
+
+**Net CREATE NEW = 6 components** (the new map, its handle, two programs,
+the shared helper, the miss counter). Everything else EXTEND or REUSE.
+**connect4 moved from UNCHANGED (DISCUSS DD6) to EXTEND** due to the D4
+shared-helper refactor — this is the one item the framing pass flipped.
+
+---
+
+## Wave: DESIGN / [REF] Open questions (to DELIVER / Tier-3)
+
+1. **Sentinel resolver-rejection (Tier-3 empirical check, NOT a tracking
+   issue).** Confirm `dig`, glibc `getaddrinfo`, and musl cleanly **reject**
+   a `192.0.2.1`-sourced reply (source-validation mismatch → clean failure)
+   rather than surprisingly accept it. The *mechanism* (sentinel + counter)
+   is sound regardless of the value; if a resolver does not cleanly reject
+   `192.0.2.1`, swap for another reserved-range address with no design
+   change. Per research Gap 2; surfaced for user awareness per
+   `feedback_no_unilateral_gh_issues` (no `gh issue create`).
+2. **Research Gap 1 (non-blocking citation).** The exact verifier
+   `check_return_code` file:line for the recvmsg4 `[1,1]` range and the v5.10
+   `udp_recvmsg` `RECVMSG_LOCK` call site were not pinned (Bootlin/raw fetch
+   blocked). The *facts* are established by the selftest error string and the
+   commit hunk; only the line citation is missing. Optional for the crafter to
+   pin in a local 5.10 checkout.
+3. **Research Gap 2** = open question 1 above (same item; the resolver
+   behaviour on the sentinel).
+
+---
+
+## Wave: DESIGN / [REF] Changed Assumptions (back-propagation)
+
+Two DISCUSS-wave assumptions are corrected by DESIGN. Full verbatim
+quotes + new wording + rationale in `design/upstream-changes.md`; summary:
+
+| # | Prior-wave assumption (verbatim, abbreviated) | New | Rationale |
+|---|---|---|---|
+| CA-1 | DD6 / K4: *"Pure addition: connect4 … UNCHANGED"* / *"0 changes to connect4 / forward-map shape / hydrator classifier (pure addition; diff is additive only)"* | connect4 is **EXTEND** — its key-build + NBO is refactored to call the shared `build_local_service_key` helper (D4); its own `LOCAL_BACKEND_MAP` lookup + forward dest-rewrite stay in its body. Net-new connect4 *behavior* = 0; *diff* is non-zero, Tier-3-reverified. | The user overrode Morgan's Option-2 to Option-3 (shared helper). A shared key-build helper across three hooks necessarily refactors the shipped third hook (connect4). |
+| CA-2 | US-01/US-03 + K2/K5 wire-layer ACs: *"tcpdump shows the reply source = the VIP"* / *"no backend-IP-sourced reply leaves the host"* | Application-sockaddr layer: *"the source the client app reads via recvfrom/msg_name is the VIP"* (K2) / *"on a reverse miss the app reads a non-backend sentinel, never the backend IP, and the miss is counted"* (K5). | recvmsg4 fires after the skb is on the socket queue; a `tcpdump -i lo` shows the backend source regardless (research Q4). Wire no-leak is XDP's domain; recvmsg4 cannot deny (research Q1). Layer/wording correction, intent preserved. |
+
 Non-blocking findings, all actioned in this revision: nitpick #1 (the
 "≤1 day target" header overstated Slice 01's ~1–1.5d estimate — softened
 above); nitpick #2 (the stale "peer review SKIPPED" line — corrected above);
@@ -646,3 +855,36 @@ suggestion #3 for DESIGN (pin the reverse-key *composition* — `backend_ip`
 vs `(backend_ip, backend_port)` — explicitly in the ADR-0053 amendment;
 folded into the DESIGN handoff above). No revision to user stories, ACs,
 KPIs, slices, journeys, or persona was required.
+
+## Wave: DESIGN / [REF] Peer review
+
+**Reviewer:** Atlas (nw-solution-architect-reviewer, run on inherited Opus
+per `rigor.reviewer_model = inherit`) · **Date:** 2026-06-05 ·
+**Verdict: APPROVED** (pre-handoff architecture gate cleared; 0 blocking,
+0 critical, 0 high).
+
+All 9 validation axes PASS. Praise: (1) the D3 `[1,1]` verifier
+cannot-deny claim is VERIFIED-PRIMARY (kernel selftest verbatim diagnostic
++ commit `983695fa6765` + Cilium `SYS_PROCEED`), with the inferred
+mechanism honestly separated from the verified range — the design rests
+only on the verified half; (2) the D4 connect4-refactor honesty (Tier-3-only
+regression surface named, same-PR mitigation pinned, K4/DD6 back-propagated
+verbatim).
+
+Four `low`, non-blocking findings — all DELIVER-actionable, none gate the
+DISTILL handoff:
+
+| # | Finding | Action site |
+|---|---|---|
+| F-1 (most important for the crafter) | Helper named `local_backend_lookup` + "consumed by all three hooks" oversells the shared surface: recvmsg4 shares the **key-build + NBO primitive** but looks up a *different* map (`REVERSE_LOCAL_MAP`), and does a **reverse source-rewrite**, not the forward dest-rewrite connect4/sendmsg4 do. ADR substance is correct (rewrites kept per-hook); the *naming* invites an implementer to write one function doing both. | **ACTIONED in-revision (2026-06-05).** Helper renamed `build_local_service_key` (key-build + NBO ONLY — no lookup, no rewrite) across ADR D4/D5e, brief, c4-diagrams, and this section; per-hook map lookup (`LOCAL_BACKEND_MAP` forward vs `REVERSE_LOCAL_MAP` reverse) and per-hook rewrite direction (forward dest vs reverse source) now stated explicitly. DELIVER: implement accordingly — one helper MUST NOT serve both rewrite directions. |
+| F-2 | "atomically reverse-first" prose overstates — the guarantee is an **ordering** guarantee (two BPF map syscalls), not atomicity. The trait contract (5a) already states it correctly as a one-directional implication ("any visible forward entry implies a visible reverse entry"). | **ACTIONED in-revision (2026-06-05).** "atomically/atomic reverse-first" replaced with "ordered (reverse-first)" in ADR D1/D3/D5d, brief, and this section; the trait-contract (5a) one-directional-implication wording left as-is (already correct). |
+| F-3 | The two-VIPs→one-identical-backend-socket collision (reverse slot last-writer-wins) is implied by "single VIP per backend key" but not named as the operator-misconfig it is. | **ACTIONED in-revision (2026-06-05).** One sentence added to ADR D2 naming two-VIPs→one-identical-backend-socket as last-writer-wins operator misconfiguration / unsupported topology, not a silent assumption; key design unchanged. |
+| F-4 | Sentinel (`192.0.2.1`, RFC 5737 TEST-NET-1) resolver-rejection — correctly deferred to Tier-3 as an open question, surfaced not assumed; no tracking issue (per `feedback_no_unilateral_gh_issues`). | DELIVER Tier-3 empirical check; swap sentinel with no design change if needed. |
+
+F-1, F-2, and F-3 are prose/naming accuracy fixes — per CLAUDE.md they
+route through the architect, not inline crafter edits; all three are now
+**actioned in-revision** (architect pass 2026-06-05) across ADR-0053 rev,
+brief, and c4-diagrams, with F-1's implementation guidance carried into
+DELIVER. F-4 stays a DELIVER Tier-3 open question. No revision to the
+locked decisions (D1–D5) was required — these are wording/naming
+corrections to the frozen SSOT, not decision changes.
