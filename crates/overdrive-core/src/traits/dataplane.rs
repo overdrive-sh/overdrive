@@ -69,6 +69,59 @@ pub enum DataplaneError {
     /// "wire then probe then use" invariant per ADR-0052 § 3.
     #[error("LOCAL_BACKEND_MAP probe round-trip failed: {message}")]
     LocalBackendProbe { message: String },
+    /// One of the two unconnected-UDP same-host cgroup hooks
+    /// (`cgroup_sendmsg4_service` / `cgroup_recvmsg4_service`) failed to
+    /// load or attach (ADR-0053 rev D5b/c, GH #200). **The `attach()`
+    /// syscall IS the below-floor preflight**: a host below the recvmsg4
+    /// floor (< 4.20) rejects the `cgroup/recvmsg4` attach, and a host
+    /// below the sendmsg4 floor (< 4.18) rejects `cgroup/sendmsg4`
+    /// (`EOPNOTSUPP` / `ENOSYS`). NO `/proc` / `uname` parse exists — the
+    /// kernel IS the floor oracle, which sidesteps the `unwrap_or_default`
+    /// boundary-read footgun (`.claude/rules/debugging.md` § 8).
+    ///
+    /// Distinct variant per `.claude/rules/development.md` § Errors:
+    /// collapsing this into `LoadFailed(String)` would mask which hook
+    /// refused and prevent the composition root from routing the
+    /// below-floor refusal to `health.startup.refused` without
+    /// `Display`-grepping. `hook` names the offending program;
+    /// `source` carries the underlying `io::Error` (the `EOPNOTSUPP`
+    /// errno on a below-floor kernel) extracted from the aya
+    /// `ProgramError`. Mirrors the `IfaceXdpSlotBusy` typed-classification
+    /// precedent.
+    #[error(
+        "unconnected-UDP cgroup hook '{hook}' failed to attach: {source}\n\
+         \n\
+         This is the below-floor preflight (ADR-0053 D5b/c): the attach() syscall is the \
+         kernel-version oracle. A host below the recvmsg4 floor (< 4.20) — or the sendmsg4 \
+         floor (< 4.18) — rejects the cgroup_sock_addr attach. The platform refuses to start \
+         rather than ship a forward-only half-working service. No /proc or uname parse is \
+         involved."
+    )]
+    CgroupSendRecvAttach {
+        /// The kernel-side program name that failed
+        /// (`cgroup_sendmsg4_service` or `cgroup_recvmsg4_service`).
+        hook: &'static str,
+        /// Underlying `io::Error` from the attach syscall — `EOPNOTSUPP`
+        /// / `ENOSYS` on a below-floor kernel, `EPERM` on a capability
+        /// failure, etc.
+        #[source]
+        source: std::io::Error,
+    },
+    /// `REVERSE_LOCAL_MAP` probe sentinel round-trip failed (ADR-0053
+    /// rev D5b/c Earned-Trust probe extension, GH #200). The probe
+    /// attaches both unconnected-UDP hooks AND verifies the reverse
+    /// backend→VIP lookup path by writing, reading-back, and deleting a
+    /// `REVERSE_LOCAL_MAP` sentinel before the dataplane is declared
+    /// usable ("wire → probe → use"). A miss here means the kernel
+    /// accepted the programs at load time but the reverse map is not
+    /// programmable end-to-end — the dataplane MUST NOT be trusted.
+    ///
+    /// Distinct variant per `.claude/rules/development.md` § Errors,
+    /// mirroring `LocalBackendProbe`: collapsing into `LoadFailed(String)`
+    /// would lose the "reverse path specifically" signal the composition
+    /// root surfaces as `health.startup.refused`.
+    #[error("REVERSE_LOCAL_MAP probe round-trip failed: {message}")]
+    ReverseLocalProbe { message: String },
     /// An XDP program attach returned `EBUSY` — the kernel permits
     /// exactly one program per netdev XDP hook, and that hook on
     /// `iface` is already occupied (ADR-0061 § 5 / D3). Surfaces when

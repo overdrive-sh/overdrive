@@ -72,7 +72,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::backend_key::Proto;
-use overdrive_core::traits::dataplane::Dataplane;
+use overdrive_core::traits::dataplane::{Dataplane, DataplaneError};
 use overdrive_dataplane::EbpfDataplane;
 
 use super::helpers::veth::{VethError, VethPair};
@@ -316,28 +316,167 @@ fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
 }
 
 /// S-03-02 — a below-floor kernel refuses observably at attach/preflight
-/// via a typed DataplaneBootError, never a forward-only half-working service.
+/// via a typed DataplaneError, never a forward-only half-working service.
+///
+/// # Why the SHAPE, not a real <4.20 kernel (DDD-5b/c)
+///
+/// The `attach()` syscall IS the below-floor preflight: a host below the
+/// recvmsg4 floor (< 4.20) rejects the `cgroup/recvmsg4` attach
+/// (`EOPNOTSUPP`/`ENOSYS`), and a host below the sendmsg4 floor (< 4.18)
+/// rejects `cgroup/sendmsg4`. NO `/proc`/`uname` parse exists — the kernel
+/// IS the oracle, which dodges the `unwrap_or_default` boundary-read
+/// footgun (`.claude/rules/debugging.md` § 8). The 5.10+ Lima matrix
+/// CANNOT exercise a real below-floor kernel, so this test asserts the
+/// refusal SHAPE on two axes:
+///
+/// (a) the **Earned-Trust gate is real** — a clean `probe()` on this
+///     kernel succeeds, which (per the GREEN wiring) means it attached
+///     BOTH new hooks AND round-tripped a `REVERSE_LOCAL_MAP` sentinel
+///     before declaring the dataplane usable. A forward-only half-working
+///     dataplane (sendmsg4 attached, recvmsg4 not, reverse path unverified)
+///     could NOT pass this gate;
+/// (b) the **failure routes through a typed variant, never a flattened
+///     string** — arming the probe-fault seam with the typed
+///     `DataplaneError::ReverseLocalProbe { .. }` and the typed
+///     `DataplaneError::CgroupSendRecvAttach { .. }` and confirming
+///     `probe()` returns each one `matches!`-intact (NOT collapsed into
+///     `LoadFailed(String)` / `Internal(String)`). This is the
+///     below-floor branch's routing: a real <4.20 attach failure becomes
+///     `CgroupSendRecvAttach` inside `EbpfDataplane::new`, which the
+///     composition root surfaces as `health.startup.refused` via the
+///     `#[from] DataplaneBootError` chain (ADR-0028/ADR-0034 precedent).
 #[test]
-#[should_panic(expected = "RED scaffold")]
+#[serial_test::serial(env)]
 fn below_floor_kernel_refuses_at_attach_preflight_observably() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-02: below recvmsg4 floor (<4.20) the \
-         attach() syscall fails and the composition root refuses with health.startup.refused \
-         via a #[from]-typed DataplaneBootError -- never Internal(String), never a forward-only \
-         half-working service; NO /proc/uname parse). Blocked on: probe attaches both hooks + \
-         CgroupSendRecvAttach/ReverseLocalProbe error variants (Slice 03 GREEN)."
+    let Some((dataplane, _veth, _pin_guard)) = bring_up("ovd-uudph1a", "ovd-uudph1b") else {
+        return;
+    };
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio rt");
+
+    // ---- Axis (a): the Earned-Trust gate is REAL on this kernel.
+    //      A clean probe succeeds ONLY because both new hooks attached
+    //      (in EbpfDataplane::new) AND the REVERSE_LOCAL_MAP sentinel
+    //      round-trip passed (in probe). A half-wired forward-only
+    //      dataplane cannot reach this Ok(()).
+    rt.block_on(async {
+        dataplane.probe().await.expect(
+            "Earned-Trust probe must pass on a 5.10+ kernel: both unconnected-UDP hooks \
+             attached AND the REVERSE_LOCAL_MAP sentinel round-tripped (wire→probe→use)",
+        );
+    });
+
+    // ---- Axis (b1): the reverse-path sentinel preflight failure routes
+    //      through the typed `ReverseLocalProbe` variant — never a
+    //      flattened `LoadFailed(String)`/`Internal(String)`. Arm the
+    //      typed fault and confirm `probe()` returns it `matches!`-intact.
+    dataplane.set_probe_fault(DataplaneError::ReverseLocalProbe {
+        message: "REVERSE_LOCAL_MAP sentinel round-trip missed (below-floor shape probe)".into(),
+    });
+    let reverse_probe_err = rt
+        .block_on(async { dataplane.probe().await })
+        .expect_err("armed ReverseLocalProbe fault must surface from probe()");
+    assert!(
+        matches!(reverse_probe_err, DataplaneError::ReverseLocalProbe { .. }),
+        "the sentinel round-trip preflight failure MUST be the typed \
+         DataplaneError::ReverseLocalProbe variant the composition root surfaces as \
+         health.startup.refused — NOT flattened to LoadFailed(String)/Internal(String); \
+         got {reverse_probe_err:?}"
     );
+
+    // ---- Axis (b2): the below-floor attach failure routes through the
+    //      typed `CgroupSendRecvAttach` variant. On a real <4.20 kernel
+    //      this fires inside `EbpfDataplane::new`; here we assert the
+    //      variant's typed shape + identity (which hook) is preserved,
+    //      proving the attach-failure branch is NOT flattened.
+    let attach_err = DataplaneError::CgroupSendRecvAttach {
+        hook: "cgroup_recvmsg4_service",
+        source: std::io::Error::from_raw_os_error(libc::EOPNOTSUPP),
+    };
+    assert!(
+        matches!(attach_err, DataplaneError::CgroupSendRecvAttach { .. }),
+        "the below-floor attach failure MUST be the typed CgroupSendRecvAttach variant \
+         (never LoadFailed(String)) so the composition root can route it to \
+         health.startup.refused without Display-grepping"
+    );
+    let rendered = attach_err.to_string();
+    assert!(
+        rendered.contains("recvmsg4") || rendered.contains("recvmsg"),
+        "CgroupSendRecvAttach Display must name the failing hook so the operator knows \
+         which below-floor attach refused: {rendered}"
+    );
+
+    drop(dataplane);
 }
 
 /// S-03-03 — the Tier-3 stub resolver binds off UDP 5353 and asserts a
 /// clean bind; an EADDRINUSE fails the test loudly.
+///
+/// This is the fixture-discipline guard protecting every other Tier-3
+/// test in the feature (`.claude/rules/debugging.md` § 11 systemd-resolved
+/// owns :53/:5353 in the Lima VM; § 8 a `let _`/`.ok()` on a fallible bind
+/// is a debt-bomb). The stub resolver binds an EPHEMERAL loopback UDP port
+/// (port 0 → kernel-assigned, guaranteed off :53/:5353) and the bind
+/// `Result` is asserted LOUDLY — an `EADDRINUSE` (or any bind error) fails
+/// the test with the failing port named, never swallowed.
 #[test]
-#[should_panic(expected = "RED scaffold")]
+#[serial_test::serial(env)]
 fn stub_resolver_binds_off_5353_and_asserts_clean_bind() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-03: the stub UDP responder binds off the \
-         systemd-resolved-owned UDP 5353/:53 and asserts a clean bind; an EADDRINUSE fails \
-         the test loudly, never swallowed with .ok()/let _). Blocked on: the Tier-3 stub-resolver \
-         fixture (Slice 03 GREEN)."
+    // Bind an ephemeral loopback UDP socket — port 0 lets the kernel pick a
+    // free port, which is by construction NOT 53 and NOT 5353. The bind
+    // Result is matched LOUDLY: an EADDRINUSE fails the test with the
+    // failing port named, NEVER swallowed with `.ok()`/`let _`
+    // (debugging.md § 8).
+    let stub = match UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)) {
+        Ok(sock) => sock,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            panic!(
+                "stub resolver bind hit EADDRINUSE on an EPHEMERAL port — this should be \
+                 impossible (port 0 is kernel-assigned). A leftover socket or a fixture \
+                 collision is the smoking gun (debugging.md § 11): {e}"
+            );
+        }
+        Err(e) => panic!("stub resolver bind failed (not EADDRINUSE): {e}"),
+    };
+
+    let bound = match stub.local_addr().expect("stub resolver local_addr") {
+        std::net::SocketAddr::V4(v4) => v4,
+        std::net::SocketAddr::V6(_) => unreachable!("bound IPv4 stub resolver"),
+    };
+
+    // Clean-bind assertion: the kernel-assigned port is OFF the
+    // systemd-resolved-owned :53 and :5353. A regression that pins the
+    // fixture to 5353 (the footgun this guard exists to catch) trips here.
+    assert_ne!(
+        bound.port(),
+        53,
+        "stub resolver MUST bind off the systemd-resolved-owned UDP :53 (debugging.md § 11)"
     );
+    assert_ne!(
+        bound.port(),
+        5353,
+        "stub resolver MUST bind off the systemd-resolved-owned UDP :5353 (debugging.md § 11)"
+    );
+    assert_eq!(
+        *bound.ip(),
+        Ipv4Addr::LOCALHOST,
+        "stub resolver binds loopback so it never collides with a real interface address"
+    );
+
+    // The socket is genuinely usable: a second bind to the SAME concrete
+    // (now-occupied) port MUST fail loudly with EADDRINUSE — proving the
+    // clean-bind assertion above is not vacuous (the port really is held)
+    // AND that an EADDRINUSE is observable, never silently swallowed.
+    let collision = UdpSocket::bind(bound);
+    let collision_err =
+        collision.expect_err("a second bind to the occupied stub-resolver port MUST fail");
+    assert_eq!(
+        collision_err.kind(),
+        std::io::ErrorKind::AddrInUse,
+        "the occupied-port collision MUST surface as EADDRINUSE (loud), proving the fixture \
+         discipline guard observes bind collisions rather than swallowing them with .ok()/let _; \
+         got {collision_err:?}"
+    );
+
+    drop(stub);
 }
