@@ -79,6 +79,16 @@ pub enum CaBootError {
         source: CaError,
     },
 
+    /// The root-key envelope failed to SERIALIZE before persistence (the
+    /// write-side counterpart to [`EnvelopeDecrypt`](Self::EnvelopeDecrypt)).
+    /// The structured cause is rkyv-archival shape, never key plaintext.
+    #[error("root-key envelope serialization failed: {source}")]
+    Envelope {
+        /// The underlying envelope-archive failure.
+        #[from]
+        source: overdrive_core::codec::EnvelopeError,
+    },
+
     /// The IntentStore read/write failed while persisting or loading the root.
     #[error(transparent)]
     Intent(#[from] overdrive_core::traits::intent_store::IntentStoreError),
@@ -158,8 +168,7 @@ async fn generate_and_persist_root(
     // Seal the root private key (PEM bytes) under the KEK.
     let key_pem = root.signing_key().as_pem().as_bytes();
     let record = codec.seal(kek, kek_id, key_pem).map_err(|source| CaBootError::Ca { source })?;
-    let envelope_bytes =
-        record.archive_for_store().map_err(|source| CaBootError::Intent(envelope_io(&source)))?;
+    let envelope_bytes = record.archive_for_store()?;
 
     intent.put(ROOT_KEY_ENVELOPE_KEY, envelope_bytes.as_ref()).await?;
     intent.put(ROOT_CERT_MATERIAL_KEY, &encode_cert_material(&root)).await?;
@@ -207,15 +216,6 @@ async fn load_persistent_root(
         })?;
 
     decode_cert_material(&cert_material, key_der)
-}
-
-/// Wrap an envelope-archive failure as an IntentStore I/O error.
-fn envelope_io(
-    source: &overdrive_core::codec::EnvelopeError,
-) -> overdrive_core::traits::intent_store::IntentStoreError {
-    overdrive_core::traits::intent_store::IntentStoreError::Io(std::io::Error::other(format!(
-        "archive root-key envelope: {source}"
-    )))
 }
 
 /// Newline-framed encoding of the public root cert material: PEM, DER (base16),
