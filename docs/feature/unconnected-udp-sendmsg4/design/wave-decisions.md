@@ -60,6 +60,20 @@ item DISCUSS called UNCHANGED, now EXTEND per D4), `register_local_backend`/
 `deregister_local_backend` (trait + both adapters), `EbpfDataplane`
 probe/boot, `DataplaneError`/`DataplaneBootError`.
 
+> **Superseding note (2026-06-05 / DDD-5a, commit `3559e4e2`, GH #211).**
+> After this DESIGN artifact was written, `deregister_local_backend`
+> gained a `backend: SocketAddrV4` argument and `Action::DeregisterLocalBackend`
+> gained a matching `backend` field. The reverse `REVERSE_LOCAL_MAP`
+> removal is now keyed on the caller-supplied backend (NOT on a read-back
+> of the forward `LOCAL_BACKEND_MAP` entry, which the teardown destroys),
+> making a partial-failure retry safe. The dual-removal idempotency relies
+> on swallowing BOTH aya absent-key shapes (`KeyNotFound` AND
+> `SyscallError(ENOENT)`) via the shared `is_absent_key` classifier. The
+> reverse-first registration ordering and the forward-THEN-reverse
+> teardown ordering are unchanged. Authoritative contract: ADR-0053
+> § "Revision 2026-06-05 — DDD-5a" + the trait rustdoc in
+> `crates/overdrive-core/src/traits/dataplane.rs`.
+
 **REUSE:** `BackendKey`, `Proto`, `LOCAL_BACKEND_MAP` (+ handle),
 `Action::RegisterLocalBackend`, hydrator classifier, `cgroup_attach_path`.
 

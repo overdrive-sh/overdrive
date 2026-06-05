@@ -313,6 +313,21 @@ pub trait Dataplane: Send + Sync + 'static {
 }
 ```
 
+> **SUPERSEDED signature — see later revisions.** The
+> `register_local_backend` / `deregister_local_backend` signatures and
+> the deregister observable invariant shown above are the original
+> 2026-05-23 form and are **stale**. They were amended twice:
+> (1) 2026-06-03 added `proto: Proto` to both methods (per-proto keying);
+> (2) **2026-06-05 / DDD-5a (caller-supplied backend, GH #211)** added
+> `backend: SocketAddrV4` to `deregister_local_backend` so its reverse
+> removal is retry-safe. The authoritative current contract is the
+> trait rustdoc in `crates/overdrive-core/src/traits/dataplane.rs`,
+> restated in the **Revision 2026-06-05 → D5a** excerpt below and pinned
+> by the **Revision 2026-06-05 → DDD-5a (caller-supplied deregister
+> backend; retry-safe dual-removal)** block. Read those for the live
+> shape; the block above is preserved only as the historical record.
+```
+
 The docstring pins the four properties the rule requires
 (preconditions, postconditions, edge cases, observable invariants).
 The DST equivalence harness (per the same rule's "structural guard"
@@ -343,6 +358,15 @@ DeregisterLocalBackend {
     correlation: CorrelationKey,
 },
 ```
+
+> **SUPERSEDED shape — see later revisions.** `DeregisterLocalBackend`
+> shown above is the original 2026-05-23 form. It gained `proto: Proto`
+> (Revision 2026-06-03, Amendment 3) and **`backend: SocketAddrV4`**
+> (Revision 2026-06-05 / DDD-5a, GH #211) so the dispatched deregister
+> carries the backend identity its reverse removal needs to be
+> retry-safe. The authoritative variant is in
+> `crates/overdrive-core/src/reconcilers/mod.rs`; the current shape is
+> listed in the **Revision 2026-06-05 → DDD-5a** block below.
 
 The action-shim wrapper lives at
 `crates/overdrive-control-plane/src/action_shim/register_local_backend.rs`
@@ -976,10 +1000,28 @@ DeregisterLocalBackend {
     service_id:  ServiceId,
     vip:         Ipv4Addr,
     vip_port:    u16,
-    proto:       Proto,        // NEW
+    proto:       Proto,        // NEW (this amendment, 2026-06-03)
     correlation: CorrelationKey,
 },
 ```
+
+> **`DeregisterLocalBackend` gained a further field after this
+> amendment.** Revision 2026-06-05 / DDD-5a (GH #211) added
+> `backend: SocketAddrV4` to this variant — mirroring
+> `RegisterLocalBackend::backend` — so the deregister dispatch carries
+> the backend identity its reverse `REVERSE_LOCAL_MAP` removal needs to
+> be retry-safe. The shipped variant is:
+> ```rust
+> DeregisterLocalBackend {
+>     service_id:  ServiceId,
+>     vip:         Ipv4Addr,
+>     vip_port:    u16,
+>     proto:       Proto,
+>     backend:     SocketAddrV4,   // NEW (Revision 2026-06-05 / DDD-5a, GH #211)
+>     correlation: CorrelationKey,
+> },
+> ```
+> See the **Revision 2026-06-05 → DDD-5a** block below.
 
 The `ServiceMapHydrator` (Decision 4) already has proto per-listener
 once ADR-0060's site #8 lands (the desired projection sourced from a
@@ -1049,8 +1091,8 @@ migration. Per `feedback_single_cut_greenfield_migrations.md`.
 | Decision 1 § 1 — adopt `cgroup_sock_addr` connect-time rewrite | **Preserved.** The mechanism is unchanged; only the lookup key widens. |
 | Decision 1 § 1 — `LOCAL_BACKEND_MAP` "one entry per `(VIP, vip_port)`" | **Amended** to "one entry per `(VIP, vip_port, proto)`." |
 | Decision 1 § 1 — connect4 in scope; SENDMSG/RECVMSG out of scope | **Preserved and sharpened** (Amendment 4): connected-UDP `connect4` is in; unconnected-UDP sendmsg4 is explicitly a separate, undelivered hook. |
-| Decision 2 — `register_local_backend` / `deregister_local_backend` trait methods | **Extended** — gain a `proto: Proto` parameter; contract re-pinned per-proto. |
-| Decision 3 — `Action::RegisterLocalBackend` / `DeregisterLocalBackend` | **Extended** — gain a `proto: Proto` field. |
+| Decision 2 — `register_local_backend` / `deregister_local_backend` trait methods | **Extended** — gain a `proto: Proto` parameter; contract re-pinned per-proto. (`deregister_local_backend` later gains `backend: SocketAddrV4` too — Revision 2026-06-05 / DDD-5a, GH #211.) |
+| Decision 3 — `Action::RegisterLocalBackend` / `DeregisterLocalBackend` | **Extended** — gain a `proto: Proto` field. (`DeregisterLocalBackend` later gains `backend: SocketAddrV4` too — Revision 2026-06-05 / DDD-5a, GH #211.) |
 | Decision 4 — hydrator Local-vs-Remote classifier | **Extended** — threads per-listener proto into `RegisterLocalBackend`; sources proto from the listener-bearing fact (ADR-0060 site #8), never a `Tcp` default. |
 | Decision 5 (XDP programs unchanged), 6 (Earned-Trust probe), 7 (operator config), 8 (walking-skeleton) | **Preserved.** The probe's sentinel upsert gains a proto arg (`(vip=0,port=0,proto=tcp)`); otherwise unchanged. |
 | Out of scope § "IPv6 service VIPs" | **Preserved** — IPv6 + `BPF_CGROUP_INET6_CONNECT` still out of scope (GH #155 territory). |
@@ -1344,7 +1386,11 @@ of the request path — there is no window in which a request could be
 forward-rewritten and routed to a backend whose reply has no reverse
 entry yet. (The request rewrite is what *causes* the backend to send a
 reply; if forward landed first, a fast backend could reply into a
-reverse-map gap.) `deregister_local_backend` removes both symmetrically.
+reverse-map gap.) `deregister_local_backend` removes both — forward
+THEN reverse, the inverse teardown ordering — with the reverse removal
+keyed on the **caller-supplied `backend`**, NOT on a read-back of the
+forward entry (Revision 2026-06-05 / DDD-5a, GH #211; the read-back was
+not retry-safe — see that block).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1681,12 +1727,23 @@ bodies. The trait-method rustdoc's 4-property contract is amended:
 > corresponding reverse `REVERSE_LOCAL_MAP` entry — the reverse write
 > commits first (reverse-write-first ordering), so any visible forward
 > entry implies a visible reverse entry.
-> **Edge case (amended):** `deregister_local_backend(vip, vip_port,
-> proto)` removes both the forward `(vip, vip_port, proto)` entry and
-> the reverse `BackendKey(backend, proto)` entry; a co-located
-> other-proto entry on the same `(vip, vip_port)` and the same backend
-> is left intact (per-proto granularity, parity with the 2026-06-03
-> per-proto purge).
+> **Edge case (amended; superseded shape — see DDD-5a below):**
+> `deregister_local_backend` removes both the forward
+> `(vip, vip_port, proto)` entry and the reverse `BackendKey(backend,
+> proto)` entry; a co-located other-proto entry on the same
+> `(vip, vip_port)` and the same backend is left intact (per-proto
+> granularity, parity with the 2026-06-03 per-proto purge).
+>
+> **Note — the deregister signature shown in this D5a excerpt
+> (`deregister_local_backend(vip, vip_port, proto)`) is stale.** The
+> shipped method takes a fourth argument, `backend: SocketAddrV4`, and
+> derives the reverse key from that caller-supplied tuple — NOT from a
+> read-back of the forward entry. The reverse removal is unconditional,
+> idempotent, and retry-safe as a result. This is the **Revision
+> 2026-06-05 / DDD-5a (caller-supplied deregister backend)** correction
+> below; it is the authoritative current contract and matches the
+> trait rustdoc in
+> `crates/overdrive-core/src/traits/dataplane.rs`.
 
 **D5b / D5c — probe extension: attach + sentinel-round-trip BOTH new
 hooks; the `attach()` IS the below-floor preflight.** The Earned-Trust
@@ -2035,6 +2092,187 @@ from intent); no schema-evolution envelope bump.
 | 2026-06-05b | **D3 miss-handling correction (UI-1; closes the #200 back-prop finding).** Supersedes the 2026-06-05 D3 "rewrite-to-sentinel `192.0.2.1` on a `REVERSE_LOCAL_MAP` miss." Corrected contract: recvmsg4 rewrites source→VIP on a **HIT** and is a **pure no-op on a MISS** (real source left intact; `REVERSE_LOCAL_MISS_COUNTER` bumped for observability only). WHY the sentinel was wrong: recvmsg4 attaches at a cgroup *ancestor* and fires on EVERY unconnected-UDP recv from any descendant, so a reverse-map miss = "not a service reply at all" (a backend's own inbound-query `recvfrom`, any unrelated UDP), NOT "a service reply with a lost reverse entry" — sentinel-ing every miss corrupts the source every non-service datagram's app reads (observed/fixed in DELIVER step 01-03, Tier-3-green, commit `e71ad780`). This is **Cilium-aligned** (`cil_sock4_recvmsg` returns `SYS_PROCEED`; `__sock4_xlate_rev` leaves the source unchanged on a reverse-SK miss), NOT "strictly stronger than Cilium" as the superseded D3 / research Q5 claimed. recvmsg4 still cannot deny (`[1,1]`). K5's no-leak guarantee is **preserved by a different mechanism** — the D1 reverse-first dual-write makes every genuine service reply *always hit* → always VIP-rewritten — NOT by a miss-path sentinel. The `SENTINEL_SOURCE_HOST` constant is now dead code (deleted when S-03-01 lands, per deletion discipline). The miss-counter operational semantics (it counts all non-service UDP; can't isolate the evicted-reply case) is a DEVOPS/acceptance-designer metric-semantics decision; the prior sentinel-resolver-rejection open question is moot. Evidence: research addendum "UI-1 adjudication (2026-06-05)" (High; verdict crafter CORRECT, Q5 WRONG). AC/SPEC for the acceptance-designer (S-03-01 re-scope + K5 reframing) in `feature-delta.md` CA-3. — Morgan. |
 | 2026-06-05 | D5d clarification (final-gate review): the Sim reply-mirror test contract documents BOTH sanctioned Tier-1 accessors — `reply_source_for(key: BackendKey) -> Option<Ipv4Addr>` (forward direction; reply source = VIP) AND `reply_mirror_entries() -> Vec<(BackendKey, Ipv4Addr)>` (reverse/enumeration direction; no stale reverse entry — the deregister-leaves-a-reverse asymmetry, mirror of the forward-only asymmetry). Both are test-only (not on the production `Dataplane` trait), parity with `reverse_nat_lookup`/`reverse_nat_entries`. The `reply-source-rewrite-lockstep` invariant's reverse-direction orphan-detection loop calls `reply_mirror_entries()`; this clarification completes the test-contract surface it relies on. No locked decision changed; no production-trait/map/kernel change. — Morgan. |
 | 2026-06-05 | Unconnected-UDP delivery DELIVERED (closes #200; supersedes Amendment 4's out-of-scope note). Two new cgroup hooks: `cgroup_sendmsg4_service` (forward request rewrite over `LOCAL_BACKEND_MAP`) + `cgroup_recvmsg4_service` (reply source rewrite over the NEW `REVERSE_LOCAL_MAP`). `REVERSE_LOCAL_MAP` = `BPF_MAP_TYPE_HASH`, key = existing `BackendKey {ip,port,proto}` (D2), value = VIP `u32`; written in ordered (reverse-first) sequence by `register_local_backend` (D1/D5a; two map syscalls, not one transaction — an ordering guarantee, not atomicity; NO new trait method; contract amended for the reverse entry + observable invariant). recvmsg4 CANNOT deny (verifier `[1,1]`, research Q1) → reverse-miss handling = rewrite-to-sentinel `192.0.2.1` (RFC 5737) + counted miss reason, strictly stronger than Cilium's pass-through-leak (D3). AC reframed wire→application-sockaddr layer for US-01/US-03/K2/K5 (D3, back-prop). Option 3 shared `#[inline(always)]` `build_local_service_key` helper (key-build + NBO only; per-hook map lookup + per-hook rewrite direction stay in each program body) across all three hooks; REFACTORS shipped connect4 (behavior-preserving, Tier-3-reverified, no Tier-2 backstop) — changes DISCUSS K4/DD6 "0 connect4 changes" (D4, back-prop). Probe extension: attach both new hooks + `REVERSE_LOCAL_MAP` sentinel round-trip; the attach() IS the below-floor preflight (4.18/4.20 floors, both <5.10), no `/proc`/`uname` parse; new `#[from]`-routed error variant(s) (D5b/c). SimDataplane reply mirror `BTreeMap<BackendKey, Ipv4Addr>` under the same mutex acquisition + `reply_source_for` test accessor; models the observable contract only, does not shape production (D5d). `user_port` low-16-NBO idiom copied verbatim into the shared helper; recvmsg4 writable fields = `user_ip4`/`user_port` (msg_src_ip4 is sendmsg-only), research Q2 (D5e). Single-cut hydrator-repopulated migration; no shim. Sentinel-resolver-rejection empirical check surfaced as a Tier-3 DELIVER open question (not a tracking issue). — Morgan (all decisions user-locked). |
+
+## Revision 2026-06-05 — DDD-5a: caller-supplied deregister backend; retry-safe dual-removal (reconciles to commit `3559e4e2`)
+
+### Status
+
+Amendment. 2026-06-05. Decision-maker: Morgan. **Documents a
+superseding decision already shipped in code** — this revision
+reconciles the ADR TO the bugfix landed in commit `3559e4e2`
+(`fix(dataplane): deregister_local_backend takes backend so retries
+don't depend on a since-removed forward entry`). The amended trait
+rustdoc in `crates/overdrive-core/src/traits/dataplane.rs` is the
+authoritative contract; this block makes the ADR agree with it. Tags:
+phase-1, dataplane, cgroup-bpf, local-backend, reverse-local-map,
+retry-safety, deregister, gh-211.
+
+**Code SSOT (authoritative)**:
+- `crates/overdrive-core/src/traits/dataplane.rs` —
+  `deregister_local_backend(vip, vip_port, backend, proto)` rustdoc
+  (the 4-property contract, retry-safety clause, idempotency clause).
+- `crates/overdrive-core/src/reconcilers/mod.rs` —
+  `Action::DeregisterLocalBackend` now carries `backend: SocketAddrV4`.
+- `crates/overdrive-dataplane/src/lib.rs` —
+  `EbpfDataplane::deregister_local_backend` (forward-THEN-reverse
+  unconditional idempotent removal, reverse keyed on caller-supplied
+  `backend`).
+- `crates/overdrive-dataplane/src/maps/mod.rs` — the shared
+  `is_absent_key` classifier that makes the handles' `remove()`
+  genuinely idempotent on real aya 0.13.
+
+**Implementing commit**: `3559e4e2`.
+
+### Why this revision — the bug the original (D5a / 2026-06-03) design caused
+
+D5a (Revision 2026-06-05) and the 2026-06-03 amendment together left
+`deregister_local_backend(vip, vip_port, proto)` with **no `backend`
+argument**. The only way for the adapter to find the reverse
+`REVERSE_LOCAL_MAP` key was to read the forward `LOCAL_BACKEND_MAP`
+entry for `(vip, vip_port, proto)` *before* removing it, then derive
+`BackendKey(backend.ip(), backend.port(), proto)` from the value it
+read. That read-then-remove derivation is **not retry-safe**:
+
+1. Forward removal succeeds; the `(vip, vip_port, proto) → backend`
+   entry is gone.
+2. Reverse removal fails with a non-absent-key error (transient
+   kernel/syscall failure); the method returns `Err`.
+3. The caller (action-shim / reconciler retry) re-invokes
+   `deregister_local_backend(vip, vip_port, proto)`.
+4. The forward read now returns `None` (the entry was removed in step
+   1), so the reverse-removal branch is **skipped** and the method
+   returns `Ok(())`.
+5. The stale `REVERSE_LOCAL_MAP` entry is now **permanently
+   stranded** — and `cgroup_recvmsg4_service` will mis-rewrite the
+   reply source of any future datagram from that backend address to a
+   deregistered VIP.
+
+Root cause: the reverse key was derivable **only** from the forward
+entry, which the teardown itself destroys. A retry after a partial
+failure has lost the one input it needed.
+
+### The superseding decision (shipped)
+
+- **`deregister_local_backend` gains a `backend: SocketAddrV4`
+  argument** — the caller supplies the backend, mirroring
+  `register_local_backend`. Shipped signature:
+
+  ```rust
+  async fn deregister_local_backend(
+      &self,
+      vip: Ipv4Addr,
+      vip_port: u16,
+      backend: SocketAddrV4,   // NEW — caller-supplied; reverse key source
+      proto: Proto,
+  ) -> Result<(), DataplaneError>;
+  ```
+
+  The forward-entry `get()` read-back is **deleted**.
+
+- **Reverse removal is now unconditional and idempotent**, keyed on
+  the caller-supplied `backend` — no longer gated on the forward entry
+  having existed. A retry still carries the backend identity and
+  completes the reverse removal; nothing is stranded.
+
+- **Forward-THEN-reverse removal ordering is preserved.** The
+  no-forward-without-reverse teardown invariant from D1/D5a is
+  unchanged: the forward entry is removed first (so no
+  `connect`/`sendmsg` can be rewritten toward a backend whose reverse
+  entry is already gone), then the reverse.
+
+- **`Action::DeregisterLocalBackend` gains `backend: SocketAddrV4`**
+  (mirrors `Action::RegisterLocalBackend::backend`). The shipped
+  variant:
+
+  ```rust
+  DeregisterLocalBackend {
+      service_id:  ServiceId,
+      vip:         Ipv4Addr,
+      vip_port:    u16,
+      proto:       Proto,
+      backend:     SocketAddrV4,   // NEW (GH #211)
+      correlation: CorrelationKey,
+  },
+  ```
+
+### Idempotency clarification — both aya absent-key shapes
+
+The original D5a contract claimed the dual-removal was idempotent
+("`KeyNotFound` is swallowed inside the typed handles"). On **real aya
+0.13 BPF HASH maps**, deleting an absent key does NOT always surface as
+`aya::maps::MapError::KeyNotFound` — the kernel returns `ENOENT` and
+aya passes it through as `MapError::SyscallError(e)` with
+`e.io_error.raw_os_error() == Some(libc::ENOENT)`. Swallowing only
+`KeyNotFound` was therefore not genuinely idempotent: a retry whose
+forward entry was already gone would error on the second forward
+delete and never reach the reverse removal — the exact GH #211 strand.
+
+The fix added a shared `is_absent_key` classifier
+(`crates/overdrive-dataplane/src/maps/mod.rs`) that swallows **both**
+shapes — `MapError::KeyNotFound` AND
+`MapError::SyscallError(ENOENT)` — as the single source of truth so
+`LocalBackendMapHandle::remove` and `ReverseLocalMapHandle::remove`
+cannot drift. The contract's "idempotent" clause is honest only when
+both absent-key shapes are named; the trait rustdoc and this ADR now
+do so.
+
+### What this supersedes vs preserves
+
+| Prior decision | Status |
+|---|---|
+| D5a / 2026-06-03 — `deregister_local_backend(vip, vip_port, proto)` derives the reverse key by reading the forward entry before removal | **Superseded.** The read-back is deleted; the reverse key comes from a caller-supplied `backend: SocketAddrV4`. The read-then-remove derivation was not retry-safe (forward removed → retry reads `None` → reverse stranded). |
+| D5a — `deregister_local_backend` "removes both symmetrically" | **Re-pinned.** Still dual-removal, still forward-THEN-reverse ordered; the reverse removal is now unconditional/idempotent on the caller-supplied backend, not conditional on the forward read. |
+| D1/D5a — forward-THEN-reverse teardown ordering (no-forward-without-reverse) | **Preserved verbatim.** Ordering is unchanged; only the reverse-key *source* changed. |
+| 2026-06-03 / Amendment 3 — `Action::DeregisterLocalBackend` shape | **Extended** — gains `backend: SocketAddrV4` (mirrors `RegisterLocalBackend`). |
+| D5a — "idempotent; `KeyNotFound` swallowed" | **Corrected.** Idempotency on real aya 0.13 requires swallowing BOTH `KeyNotFound` AND `SyscallError(ENOENT)` (shared `is_absent_key` classifier). |
+| All other D-decisions (D1 reverse-store map, D2 BackendKey, D3 miss no-op, D4 reverse-value `(addr, port)`, D5b–D5e) | **Preserved.** Unchanged by this revision. |
+
+### Consequences
+
+- **Correctness — retry-safety closed**: positive (large). A
+  partial-failure retry of teardown no longer strands a reverse entry;
+  the reply-source-rewrite invariant holds across retries. Removes the
+  GH #211 mis-rewrite class.
+- **Maintainability**: positive (small). The deregister method no
+  longer reads-then-writes the same map; the reverse key is an explicit
+  input, not a derived value (parity with
+  `.claude/rules/development.md` § "Persist inputs, not derived state"
+  applied to a transient teardown key).
+- **Producer is ahead of consumer (GH #211).** No reconciler emits
+  `Action::DeregisterLocalBackend` yet — the consumer stack (action
+  variant, action-shim, trait method, both adapters) exists *ahead of
+  its producer*. The producer is workload-deletion + service/dataplane
+  teardown, tracked as
+  [#211](https://github.com/overdrive-sh/overdrive/issues/211); when
+  #211 lands it wires the producer against this retry-safe
+  caller-supplied-backend signature. Surfaced for the next reader; no
+  new issue created.
+
+### Cross-references
+
+- Commit `3559e4e2` — `fix(dataplane): deregister_local_backend takes
+  backend so retries don't depend on a since-removed forward entry`
+  (the implementing change this revision reconciles the ADR to).
+- [#211](https://github.com/overdrive-sh/overdrive/issues/211) —
+  workload deletion + service/dataplane teardown; the future producer
+  of `Action::DeregisterLocalBackend`.
+- `crates/overdrive-core/src/traits/dataplane.rs` — authoritative
+  `deregister_local_backend` rustdoc (retry-safety + idempotency
+  clauses).
+- `crates/overdrive-dataplane/src/maps/mod.rs` — `is_absent_key`
+  (both absent-key shapes; the single SSOT for "absent key is
+  `Ok(())`").
+- `.claude/rules/development.md` § "Persist inputs, not derived state"
+  (the reverse key is now a caller-supplied input, not a forward-read
+  derivation), § "Distinct failure modes get distinct error variants"
+  (the `is_absent_key` classifier preserves non-absent errors while
+  swallowing both absent shapes).
+
+### Changelog (Revision 2026-06-05 — DDD-5a caller-supplied deregister backend)
+
+| Date | Change |
+|---|---|
+| 2026-06-05 | **Deregister is retry-safe via a caller-supplied backend (reconciles ADR to shipped commit `3559e4e2`).** `Dataplane::deregister_local_backend` gains `backend: SocketAddrV4`; the forward-entry read-back that derived the reverse key is deleted; the reverse `REVERSE_LOCAL_MAP` removal is now unconditional and idempotent, keyed on the caller-supplied backend. Forward-THEN-reverse teardown ordering preserved. Root cause of the superseded design: the reverse key was derivable only from the forward entry the teardown destroys, so a retry after a partial failure (forward removed, reverse errored) read `None`, skipped the reverse removal, and permanently stranded a stale reverse entry that mis-rewrote reply source addresses to a deregistered VIP (GH #211). `Action::DeregisterLocalBackend` gains `backend: SocketAddrV4` (mirrors `RegisterLocalBackend`). Idempotency clause corrected: on real aya 0.13 a deleted absent key surfaces as EITHER `MapError::KeyNotFound` OR `MapError::SyscallError(ENOENT)`; the shared `is_absent_key` classifier (`maps/mod.rs`) swallows both as the single SSOT. Consumer stack exists ahead of its producer; #211 (workload deletion + teardown) will wire the producer against this signature. — Morgan (documents shipped code). |
 
 ## Changelog
 
