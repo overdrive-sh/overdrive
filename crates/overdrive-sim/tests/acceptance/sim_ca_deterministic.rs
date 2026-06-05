@@ -70,12 +70,99 @@ fn sim_ca_root_is_bit_identical_across_two_runs_at_same_seed() {
 /// `@in-memory` `@S-03` — `SimCa::issue_intermediate(&node)` at a fixed
 /// seed is deterministic across two runs (same intermediate material,
 /// same serial via `SeededEntropy`), and chains to the fixture root.
+///
+/// Port-to-port: enters through the `Ca` driving port (`issue_intermediate`),
+/// asserts on the observable `IntermediateHandle` byte surface (cert PEM, cert
+/// DER, serial) plus the `RootCaHandle` surface for the chains-to-root
+/// linkage. Two `SimCa` instances each over their own `SimEntropy::new(SEED)`
+/// draw the second serial from the same seeded sequence (the root draw is the
+/// first), so the whole intermediate handle is byte-identical.
+///
+/// Chains-to-fixture-root is observed WITHOUT parsing crypto (the sim is
+/// opaque): the fixture intermediate is a real `openssl`-minted cert signed by
+/// the fixture root key, so its X.509 **issuer** field carries the root's
+/// subject DN (`O=overdrive-sim-fixture`). That DN's DER-encoded RDN sequence
+/// is therefore a substring of BOTH the root cert DER (self-signed: issuer ==
+/// subject) and the intermediate cert DER (issuer == root subject) — the
+/// accessor-observable linkage. A self-signed or wrongly-issued intermediate
+/// would NOT carry the root DN as its issuer and this assertion would fail RED.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn sim_ca_intermediate_is_deterministic_and_chains_to_fixture_root() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03 / SimCa::issue_intermediate at a fixed seed \
-         is deterministic across two runs and chains to the fixture root)"
+    use std::sync::Arc;
+
+    use overdrive_core::NodeId;
+    use overdrive_core::traits::ca::Ca;
+    use overdrive_sim::adapters::ca::SimCa;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+
+    const SEED: u64 = 0x5EED;
+
+    // The DER-encoded RDN sequence for `O=overdrive-sim-fixture` — the fixture
+    // root's subject DN. An intermediate that chains to the root carries this
+    // exact byte sequence as its issuer field.
+    const ROOT_SUBJECT_DN_RDN: &[u8] = &[
+        0x31, 0x1e, 0x30, 0x1c, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x0c, 0x15, 0x6f, 0x76, 0x65, 0x72,
+        0x64, 0x72, 0x69, 0x76, 0x65, 0x2d, 0x73, 0x69, 0x6d, 0x2d, 0x66, 0x69, 0x78, 0x74, 0x75,
+        0x72, 0x65,
+    ];
+
+    fn is_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    let node = NodeId::new("node-a").expect("`node-a` is a valid NodeId");
+
+    let ca_a = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+    let ca_b = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+
+    let int_a = ca_a.issue_intermediate(&node).expect("sim intermediate issuance succeeds");
+    let int_b = ca_b.issue_intermediate(&node).expect("sim intermediate issuance succeeds");
+
+    // (a) cert PEM byte-equal across two same-seed runs.
+    assert_eq!(
+        int_a.cert_pem().as_pem(),
+        int_b.cert_pem().as_pem(),
+        "intermediate cert PEM must be bit-identical across two same-seed runs",
+    );
+    // (b) cert DER byte-equal across two same-seed runs.
+    assert_eq!(
+        int_a.cert_der().as_der(),
+        int_b.cert_der().as_der(),
+        "intermediate cert DER must be bit-identical across two same-seed runs",
+    );
+    // (c) serial (drawn via seeded Entropy) equal across two same-seed runs.
+    assert_eq!(
+        int_a.serial().as_str(),
+        int_b.serial().as_str(),
+        "intermediate serial (drawn via seeded Entropy) must be identical across two same-seed runs",
+    );
+
+    // (d) chains-to-fixture-root linkage, observed through the trait accessors
+    // only (no PEM/DER parsing — the sim is opaque).
+    let root = ca_a.root().expect("sim root issuance succeeds for the fixture key");
+
+    // The intermediate's issuer field carries the root's subject DN.
+    assert!(
+        is_subsequence(int_a.cert_der().as_der(), ROOT_SUBJECT_DN_RDN),
+        "intermediate cert DER must carry the fixture root subject DN as its issuer (chains to root)",
+    );
+    // The self-signed root carries the same DN (issuer == subject) — the anchor
+    // the intermediate's issuer points at.
+    assert!(
+        is_subsequence(root.cert_der().as_der(), ROOT_SUBJECT_DN_RDN),
+        "fixture root cert DER must carry its own subject DN as issuer (self-signed anchor)",
+    );
+    // The intermediate is a distinct certificate, not the root re-returned: it
+    // has its own material and its own signing key.
+    assert_ne!(
+        int_a.cert_der().as_der(),
+        root.cert_der().as_der(),
+        "intermediate must be a distinct cert from the root, not the root re-returned",
+    );
+    assert_ne!(
+        int_a.signing_key().as_pem(),
+        root.signing_key().as_pem(),
+        "intermediate must hold its own signing key, distinct from the root's",
     );
 }
 
