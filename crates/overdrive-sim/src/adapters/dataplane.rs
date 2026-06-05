@@ -186,7 +186,9 @@ impl SimDataplane {
     /// proto)` — the `REVERSE_LOCAL_MAP` reply-mirror lookup (ADR-0053
     /// rev 2026-06-05 DDD-5d). `Some(vip)` means recvmsg4 would rewrite
     /// the reply source to `vip`; `None` means a reverse miss (the
-    /// production kernel substitutes the sentinel `192.0.2.1`).
+    /// production kernel leaves the source untouched — a pure no-op —
+    /// and bumps `REVERSE_LOCAL_MISS_COUNTER` for observability only, per
+    /// ADR-0053 § D3 rev 2026-06-05b / UI-1).
     ///
     /// This is the test-only accessor the Tier-1
     /// `reply-source-rewrite-lockstep` invariant asserts against:

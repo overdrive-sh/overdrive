@@ -63,13 +63,14 @@
 //!
 //! # Scope split (Slice 01 vs Slice 03)
 //!
-//! Slice 01 (this step) lands the happy path: a `REVERSE_LOCAL_MAP` HIT
-//! rewrites the source sockaddr to the VIP. The MISS branch is present
-//! (sentinel `192.0.2.1` rewrite + `REVERSE_LOCAL_MISS_COUNTER` bump) so
-//! the program is structurally complete and verifier-legal, but its miss
-//! BEHAVIOR is asserted only in Slice 03 (step 03-01) — the happy-path
-//! round-trip never exercises it under the ordered reverse-first
-//! dual-write.
+//! Slice 01 lands the happy path: a `REVERSE_LOCAL_MAP` HIT rewrites the
+//! source sockaddr to the VIP. The MISS branch is the pure no-op (source
+//! untouched + `REVERSE_LOCAL_MISS_COUNTER` bump for observability only,
+//! per UI-1) — structurally complete and verifier-legal. Its miss
+//! BEHAVIOR (the counter bump under non-service traffic) is asserted in
+//! Slice 03 (step 03-01); the happy-path round-trip never exercises it
+//! under the ordered reverse-first dual-write (a genuine service reply
+//! always hits).
 
 #![allow(dead_code)]
 

@@ -18,10 +18,14 @@
 //! BPF map syscalls, the guarantee is ordering (no observer sees a
 //! forward entry without its reverse), not atomicity (DDD-1, F-2).
 //!
-//! On a miss, recvmsg4 rewrites the source to the sentinel `192.0.2.1`
-//! (RFC 5737) and bumps `REVERSE_LOCAL_MISS_COUNTER` — recvmsg4 CANNOT
-//! deny (verifier `[1,1]`, research Q1), so the fail-safe is a source
-//! rewrite, not a drop (DDD-3).
+//! On a miss, recvmsg4 leaves the source byte-for-byte intact (a pure
+//! no-op) and bumps `REVERSE_LOCAL_MISS_COUNTER` for observability only
+//! (ADR-0053 § D3 rev 2026-06-05b / UI-1). recvmsg4 fires on EVERY
+//! unconnected-UDP recv from a cgroup descendant, so a miss means "this
+//! datagram is not a service reply at all" — rewriting its source would
+//! corrupt unrelated traffic. recvmsg4 CANNOT deny (verifier `[1,1]`,
+//! research Q1); the K5 no-leak guarantee is preserved by the reverse-first
+//! dual-write's always-hit property, NOT by a miss-path sentinel (DDD-3).
 //!
 //! Endianness lockstep per ADR-0041 / architecture.md § 11: userspace
 //! writes host-order; the kernel-side program converts at the boundary.
@@ -61,8 +65,8 @@ pub const MAX_ENTRIES: u32 = 4096;
 
 /// `REVERSE_LOCAL_MAP` — `BPF_MAP_TYPE_HASH` keyed on
 /// `ReverseLocalKey` → `vip_host: u32`. One lookup per unconnected
-/// `recvmsg(2)`; hit → rewrite reply source to the VIP; miss → rewrite
-/// to the sentinel `192.0.2.1` + bump the miss counter.
+/// `recvmsg(2)`; hit → rewrite reply source to the VIP; miss → pure
+/// no-op (source untouched) + bump the miss counter for observability.
 #[map]
 pub static REVERSE_LOCAL_MAP: HashMap<ReverseLocalKey, u32> =
     HashMap::with_max_entries(MAX_ENTRIES, 0);
