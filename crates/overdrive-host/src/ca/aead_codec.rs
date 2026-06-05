@@ -137,7 +137,7 @@ impl RootKeyAeadCodec {
         let mut in_out = root_key_der.to_vec();
         let nonce = Nonce::assume_unique_for_key(nonce_bytes);
         let tag = key
-            .seal_in_place_separate_tag(nonce, Aad::from(kek_id.as_str().as_bytes()), &mut in_out)
+            .seal_in_place_separate_tag(nonce, Aad::from(aad_bytes(kek_id)), &mut in_out)
             .map_err(|_| CaError::signing_failed("AES-256-GCM seal failed"))?;
 
         Ok(RootCaKeyRecord {
@@ -205,7 +205,7 @@ impl RootKeyAeadCodec {
         let plaintext = key
             .open_in_place_separate_tag(
                 nonce,
-                Aad::from(record.kek_id.as_str().as_bytes()),
+                Aad::from(aad_bytes(&record.kek_id)),
                 tag,
                 &mut in_out,
                 0..,
@@ -214,6 +214,21 @@ impl RootKeyAeadCodec {
 
         Ok(plaintext.to_vec())
     }
+}
+
+/// The AES-GCM additional-authenticated-data for a record: the `kek_id` bytes,
+/// binding the ciphertext to its KEK identity (defends KEK-confusion —
+/// ADR-0063 D4).
+///
+/// Single source of truth for the AAD derivation: both [`seal`] and [`open`]
+/// route through here so the two sides cannot diverge on what bytes are
+/// authenticated. The AAD is the `kek_id` — never the HKDF `info` label, which
+/// is a key-derivation input, not an authentication input.
+///
+/// [`seal`]: RootKeyAeadCodec::seal
+/// [`open`]: RootKeyAeadCodec::open
+fn aad_bytes(kek_id: &KekId) -> &[u8] {
+    kek_id.as_str().as_bytes()
 }
 
 /// HKDF-SHA256-derive the AES-256-GCM subkey from the KEK + salt, using the
