@@ -1,0 +1,200 @@
+{
+  "roadmap": {
+    "project_id": "unconnected-udp-sendmsg4",
+    "created_at": "2026-06-05T00:00:00Z",
+    "total_steps": 7
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 01 — Unconnected-UDP same-host round-trip (WALKING SKELETON; US-01, GH #200, ADR-0053 rev 2026-06-05)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "D4 shared build_local_service_key helper (key-build + NBO only) + behavior-preserving connect4 refactor to consume it (K4 regression guard)",
+          "criteria": [
+            "build_local_service_key (crates/overdrive-bpf/src/shared/build_local_service_key.rs) is a real #[inline(always)] helper constructing the LOCAL_BACKEND_MAP / forward lookup key (vip_host:u32, port_host:u16, proto:u8, _pad:0) from a bpf_sock_addr-shaped input, reading user_port as low-16-NBO (cast to u16, then from_be — never byte-swap the full u32, .claude/rules/development.md § user_port) and proto zero-translation from bpf_sock_addr.protocol; the todo!(\"RED scaffold\") body + #[expect(clippy::todo)] are removed (DDD-4 / DDD-5e, ADR-0053 rev D4/D5e)",
+            "cgroup_connect4_service (crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs) is refactored to build its key via the shared helper; its own LOCAL_BACKEND_MAP lookup + forward dest-rewrite stay in the program body (the helper does key-build + NBO ONLY, never a map lookup and never a rewrite — it MUST NOT serve both rewrite directions)",
+            "Net-new connect4 behavior is ZERO: the diff is the key-build extraction only; the shipped connected-UDP / TCP forward dest-rewrite path is byte-for-byte equivalent through the helper (K4 — pure-addition guarantee re-stated, CA-1 / DDD-4)",
+            "K4 regression guard: the shipped Tier-3 acceptance crates/overdrive-dataplane/tests/integration/local_backend_proto_connect.rs (the connect4 LOCAL_BACKEND_MAP real-cgroup connect test) is re-run under Lima and still passes against the helper-backed connect4 — this is the only regression gate for the refactor (no Tier-2 BPF_PROG_TEST_RUN backstop for cgroup_sock_addr; ENOTSUPP <= 6.8)",
+            "Single-cut: no proto-less / pre-helper fallback key-build path remains in connect4; a grep for a parallel inline key construction in cgroup_connect4_service.rs finds only the shared-helper call (feedback_single_cut_greenfield_migrations.md)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/local_backend_proto_connect.rs (shipped connect4 Tier-3 acceptance, re-run as the behavior-preserving K4 regression guard; Lima, integration-tests-gated)",
+          "scenario_name": "K4 / DDD-4 connect4 helper-refactor regression (shipped local_backend_proto_connect.rs re-run; adapter coverage table § cgroup/connect4 EXTEND)",
+          "implementation_notes": "Flips GREEN: the build_local_service_key.rs __SCAFFOLD__ / todo!(\"RED scaffold\") production-side scaffold (red-classification.md § Production-side RED scaffolds). Locked decision: ADR-0053 rev D4 (Option 3 — ONE shared key-build + NBO helper across connect4 + sendmsg4 + recvmsg4) and D5e (NBO idiom verbatim in the helper). Lands FIRST because it is the shared abstraction the two new programs consume; behavior-preserving over shipped connect4 (CA-1) so its acceptance IS the shipped connect4 Tier-3 re-run, not a new scaffold. No Tier-2 triptych (cgroup_sock_addr has no BPF_PROG_TEST_RUN). EXEMPT FROM PARADIGM: kernel-side no_std program correctness is Tier-3-verified single-example; the NBO read idiom is additionally exercised by the userspace handle proptest roundtrips already shipped.",
+          "deps": [],
+          "files_to_modify": [
+            "crates/overdrive-bpf/src/shared/build_local_service_key.rs",
+            "crates/overdrive-bpf/src/shared/mod.rs",
+            "crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs"
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "REVERSE_LOCAL_MAP kernel map + REVERSE_LOCAL_MISS_COUNTER + ReverseLocalMapHandle userspace handle (the reply store, before the recvmsg4 program that reads it)",
+          "criteria": [
+            "REVERSE_LOCAL_MAP (crates/overdrive-bpf/src/maps/reverse_local_map.rs) is a real BPF_MAP_TYPE_HASH keyed by the existing BackendKey {ip, port, proto} newtype mapping to the VIP (Ipv4Addr / u32 host-order); the #[map] attribute is present (the kernel-side RED convention's attribute-absence scaffold is removed) and the POD key layout is byte-parity with the three shipped keys (DDD-1 second-map, DDD-2 BackendKey reuse; ADR-0053 rev D1/D2)",
+            "REVERSE_LOCAL_MISS_COUNTER (crates/overdrive-bpf/src/maps/reverse_local_miss_counter.rs) is a real BPF_MAP_TYPE_PERCPU_ARRAY (the shipped DROP_COUNTER precedent); #[map] attribute present",
+            "ReverseLocalMapHandle (crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs) exposes upsert(BackendKey, vip) / remove(BackendKey) and a reverse_local_map_entries() dump accessor (the bpftool-equivalent surface, mirroring local_backend_map_handle.rs); all method bodies replace todo!(\"RED scaffold\") with real aya map operations writing host-order bytes (endianness lockstep: userspace stores host-order, kernel converts at the read boundary)",
+            "A userspace proptest roundtrips the BackendKey -> vip host-order write against a host-order read for any (IPv4 backend_ip, NonZeroU16 backend_port, proto in {Tcp,Udp}) — byte-identical, proto at the BackendKey offset, pad zeroed (newtype roundtrip mandate, .claude/rules/testing.md § Property-based testing)"
+          ],
+          "test_file": "crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs (inline #[cfg(test)] mod tests — host-order roundtrip proptest, sibling to the local_backend_map_handle.rs precedent)",
+          "scenario_name": "S-01-02 (REVERSE_LOCAL_MAP handle + reverse_local_map_entries accessor; adapter coverage table § REVERSE_LOCAL_MAP)",
+          "implementation_notes": "Flips GREEN: the reverse_local_map.rs, reverse_local_miss_counter.rs (#[map]-absent kernel-side scaffolds) and reverse_local_map_handle.rs (todo! method bodies) production-side __SCAFFOLD__s (red-classification.md). Locked decisions: ADR-0053 rev D1 (REVERSE_LOCAL_MAP = BPF_MAP_TYPE_HASH, ordered reverse-first dual-write), D2 (key = BackendKey ip,port,proto reuse). The map + handle land before 01-03's recvmsg4 program which reads them and before the dual-write. PARADIGM: proptest! full for the userspace handle host-order roundtrip (Mandate-8 universe = the full BackendKey byte layout). Map presence itself (S-01-02 Tier-3 dump) is asserted end-to-end in 01-03 once the dual-write exists.",
+          "deps": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-bpf/src/maps/reverse_local_map.rs",
+            "crates/overdrive-bpf/src/maps/reverse_local_miss_counter.rs",
+            "crates/overdrive-bpf/src/maps/mod.rs",
+            "crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs",
+            "crates/overdrive-dataplane/src/maps/mod.rs"
+          ]
+        },
+        {
+          "id": "01-03",
+          "name": "sendmsg4 + recvmsg4 programs + register_local_backend reverse-first dual-write (trait body + Ebpf adapter + action shim) + probe attaches both hooks: closes the unconnected round-trip (S-01-01/02/03 Tier-3 GREEN)",
+          "criteria": [
+            "Given a deployed same-host DNS-shape UDP service on VIP 10.96.0.10:53 with one local stub-resolver backend bound off systemd-resolved ports (NOT 53, NOT 5353), a same-host client sends an unconnected sendto(10.96.0.10:53) (no prior connect) and reads the reply via recvfrom; the source address the client app reads from recvfrom is 10.96.0.10 (the VIP), NOT the backend IP (S-01-01, app-sockaddr assertion per DDD-3a, NOT tcpdump) — the cgroup_sendmsg4_service program forward-rewrites VIP->backend over LOCAL_BACKEND_MAP and cgroup_recvmsg4_service reverse-rewrites the reply source backend->VIP over REVERSE_LOCAL_MAP",
+            "After one register_local_backend(vip=10.96.0.10, vip_port=53, backend, Udp), the reverse_local_map_entries() dump shows (backend_ip, backend_port, udp) -> 10.96.0.10 AND local_backend_map_entries() shows (10.96.0.10, 53, udp) -> backend; both present after the SAME single registration (S-01-02). The dual-write is ordered reverse-first (REVERSE_LOCAL_MAP upserted before LOCAL_BACKEND_MAP) so no observer sees a forward entry without its reverse (DDD-1 / DDD-5a, ADR-0053 rev D1/D5a)",
+            "A SECOND unconnected sendto(10.96.0.10:53) for a different query name immediately after the first is served by the SAME LOCAL_BACKEND_MAP / REVERSE_LOCAL_MAP entries by point-lookup; the second reply's recvfrom source is again 10.96.0.10; no per-flow state is created between the two queries (S-01-03 — UDP stateless, no conntrack, DD7 / DDD-1)",
+            "cgroup_sendmsg4_service (BPF_CGROUP_UDP4_SENDMSG, >= 4.18) and cgroup_recvmsg4_service (BPF_CGROUP_UDP4_RECVMSG, >= 4.20) each build their key via the shared build_local_service_key helper, then do their OWN map lookup + OWN rewrite direction; the #[cgroup_sock_addr(sendmsg4)] / #[cgroup_sock_addr(recvmsg4)] attributes are present (kernel-side scaffold attribute-absence removed); recvmsg4 returns the only verifier-legal verdict 1 (cannot deny, [1,1])",
+            "Dataplane::register_local_backend / deregister_local_backend (crates/overdrive-core/src/traits/dataplane.rs) bodies write both maps reverse-first; NO new trait method is added; the rustdoc contract is amended with the dual-write postcondition + the observable invariant (every forward entry has a matching reverse entry) + the deregister edge case (DDD-5a)",
+            "EbpfDataplane::register_local_backend (crates/overdrive-dataplane/src/lib.rs) writes REVERSE_LOCAL_MAP via ReverseLocalMapHandle reverse-first then LOCAL_BACKEND_MAP; EbpfDataplane::probe attaches BOTH new cgroup hooks to overdrive.slice alongside the shipped connect4 attach (DDD-5b)",
+            "The driving path is exercised end-to-end: overdrive deploy <udp-spec> -> hydrator emits RegisterLocalBackend (proto-carrying, shipped) -> register_local_backend dual-writes -> the unconnected round-trip answers (S-01-01 walking skeleton, @driving_adapter). EXEMPT FROM PARADIGM: Tier-3 verifies wiring end-to-end, example-pinned single round-trip (no Tier-2 backstop; Mandate-9 example-pinned)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs (Lima, integration-tests-gated; unskips unconnected_sendto_recvfrom_reads_vip_sourced_reply, forward_and_reverse_map_entries_present_after_one_register, second_unconnected_query_reuses_same_mapping_statelessly)",
+          "scenario_name": "S-01-01 (WALKING SKELETON), S-01-02, S-01-03",
+          "implementation_notes": "Flips GREEN: the three #[should_panic(expected=\"RED scaffold\")] Tier-3 tests in unconnected_udp_roundtrip.rs (swap each panic! for the real EbpfDataplane-driven assertion; drop the #[should_panic]). Also flips the cgroup_sendmsg4_service.rs / cgroup_recvmsg4_service.rs kernel-side __SCAFFOLD__s (attribute-absence -> real #[cgroup_sock_addr(...)] programs). Lands the DELIVER-deferred EXTEND surfaces: register_local_backend dual-write (trait body + Ebpf adapter + the two action-shim wrappers) + probe attach of both hooks (red-classification.md § Deferred to DELIVER). Locked decisions: ADR-0053 rev D1 (reverse-first ordering), D5a (dual-write, no new method, contract amended), D5b (probe attaches both hooks). The recvmsg4 sentinel-on-miss + miss-counter increment branch is scaffolded here returning verdict 1 but its miss BEHAVIOR is asserted in Slice 03 (03-01); this step asserts the happy-path round-trip only. No Tier-2 triptych. EXEMPT FROM PARADIGM: Tier-3 single-example wiring verification (cgroup_sock_addr ENOTSUPP under BPF_PROG_TEST_RUN).",
+          "deps": ["01-01", "01-02"],
+          "files_to_modify": [
+            "crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs",
+            "crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs",
+            "crates/overdrive-bpf/src/programs/mod.rs",
+            "crates/overdrive-core/src/traits/dataplane.rs",
+            "crates/overdrive-dataplane/src/lib.rs",
+            "crates/overdrive-control-plane/src/action_shim/register_local_backend.rs",
+            "crates/overdrive-control-plane/src/action_shim/deregister_local_backend.rs",
+            "crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 02 — Sim≡kernel reply-path equivalence lockstep (US-02; the no-Tier-2-backstop structural defense; K3)",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "SimDataplane reply-mirror WRITE in register_local_backend + flip reply_source_rewrite_lockstep to the real evaluator + drop the 4 walk #[should_panic] (S-02-01 / S-02-02 Tier-1 GREEN; the forward-only mutation must turn it RED)",
+          "criteria": [
+            "SimDataplane::register_local_backend (crates/overdrive-sim/src/adapters/dataplane.rs) writes the reply mirror entry BackendKey(backend_ip, backend_port, proto) -> vip under the SAME mutex acquisition as the local_backends forward write (the commented-out reply_mirror.insert scaffold is activated); deregister removes it under the same lock; the mirror models the observable post-state contract only and MUST NOT shape production (DDD-5d, ADR-0053 rev D5d)",
+            "Given a SimDataplane registered via register_local_backend(vip=10.96.0.10, vip_port=53, backend, Udp), reply_source_for(BackendKey(backend_ip, backend_port, udp)) returns Some(10.96.0.10) — the Sim reply source equals the VIP, not the backend (S-02-01)",
+            "The reply_source_rewrite_lockstep invariant (crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs) evaluator body replaces todo!(\"RED scaffold\") with the real DST install-walk-assert: for every forward local_backend entry there is a matching reply-mirror entry mapping the backend identity back to its VIP (lockstep), mirroring reverse_nat_lockstep.rs (N services x M backends, install / shrink / restore / per-proto co-resident); the #[expect(clippy::todo, clippy::unused_async)] gate is removed; the invariant stays in Invariant::ALL and runs on the per-PR critical path / default lane (S-02-01, K3)",
+            "S-02-02 forward-only mutation kill: when register_local_backend is mutated to write the forward local_backend entry but NOT the reply mirror, reply_source_for(...) returns None (or the backend IP) and the invariant turns RED — verified by a deliberate RED scaffold or a cargo-mutants target, NOT by inspection (the #163-class asymmetry this slice exists to kill)",
+            "The 4 downstream full-invariant-walk tests drop their #[should_panic(expected=\"RED scaffold\")] in the same commit: run_boots_the_default_number_of_hosts_and_reports_every_invariant (harness.rs), harness_run_is_deterministic_under_fixed_seed (harness_determinism.rs), default_harness_run_passes_all_three_reconciler_invariants + full_default_catalogue_includes_three_view_store_invariants_and_passes_them (reconciler_invariants_pass.rs) — they now PASS by reaching the real evaluator instead of the panicking scaffold (.claude/rules/testing.md § Downstream fallout)"
+          ],
+          "test_file": "crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs (the Tier-1 DST evaluator; default lane) + the 4 walk tests in crates/overdrive-sim/src/harness.rs, tests/harness_determinism.rs, tests/acceptance/reconciler_invariants_pass.rs",
+          "scenario_name": "S-02-01, S-02-02 (reply-source-rewrite-lockstep invariant)",
+          "implementation_notes": "Flips GREEN: the reply_source_rewrite_lockstep.rs evaluator todo!(\"RED scaffold\") (red-classification.md § Tier-1 DST invariant) and activates the commented reply-mirror WRITE in SimDataplane (red-classification.md § Production-side, sim row). Removes the 4 #[should_panic] walk-test attributes (the panic-based downstream-fallout guard) in the same commit per the project RED-scaffold convention. Locked decision: ADR-0053 rev D5d (Sim reply mirror BTreeMap<BackendKey,Ipv4Addr> under one lock; reply_source_for() accessor; no production shaping). This is the load-bearing structural defense BELOW Tier-3 (no Tier-2 backstop for cgroup_sock_addr). PARADIGM: the invariant body is the DST evaluate_* install-walk-assert shape (a RuleBasedStateMachine-free evaluator per the reverse_nat_lockstep.rs precedent), NOT a Hypothesis @given — Tier-1 default lane, in-process, no kernel.",
+          "deps": ["01-03"],
+          "files_to_modify": [
+            "crates/overdrive-sim/src/adapters/dataplane.rs",
+            "crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs",
+            "crates/overdrive-sim/src/harness.rs",
+            "crates/overdrive-sim/tests/harness_determinism.rs",
+            "crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs"
+          ]
+        },
+        {
+          "id": "02-02",
+          "name": "Tier-3 kernel reply rewrite meets the Tier-1 reply mirror at the shared backend identity (S-02-03 — the two-pronged pin's kernel prong)",
+          "criteria": [
+            "Given the deployed service from S-01-01 and the real recvmsg4 hook, a real unconnected round-trip completes (the S-01-01 path) and the recvfrom source the app reads is the VIP 10.96.0.10 (the kernel reply rewrite), app-sockaddr assertion NOT tcpdump (DDD-3a)",
+            "REVERSE_LOCAL_MAP's (backend_ip, backend_port, udp) -> vip entry (via reverse_local_map_entries()) matches the Tier-1 reply mirror's reply_source_for(BackendKey(backend_ip, backend_port, udp)) for the SAME backend identity — the two prongs meet at the shared backend key (mirroring ReverseNatLockstep's meet-at-backend structure retargeted to the cgroup reply path)",
+            "Removing the kernel reply rewrite (recvmsg4 source-rewrite) would fail this Tier-3 acceptance — the recvfrom source would read the backend IP, not the VIP (the kernel prong of the regression gate; K3)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs (Lima, integration-tests-gated; unskips kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity)",
+          "scenario_name": "S-02-03",
+          "implementation_notes": "Flips GREEN: the kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity #[should_panic(expected=\"RED scaffold\")] Tier-3 test (red-classification.md § Tier-3, S-02-03 row). Re-uses S-01-01's round-trip (chained); the NEW assertion is the meet-at-backend-identity equivalence (Tier-1 reply_source_for == Tier-3 reverse_local_map_entries for the same BackendKey). Locked decision: ADR-0053 rev D5d (the Sim mirrors the post-state the kernel produces) + DDD-3a (app-sockaddr source, NOT tcpdump — recvmsg4 fires post-dequeue and never touches the wire). Depends on 02-01 (the Tier-1 mirror) + 01-03 (the kernel rewrite). No Tier-2. EXEMPT FROM PARADIGM: Tier-3 single-example equivalence pin.",
+          "deps": ["02-01", "01-03"],
+          "files_to_modify": [
+            "crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 03 — Reply-path error hardening (sentinel no-leak, below-floor refusal, fixture discipline; US-03; K5)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "recvmsg4 reverse-miss rewrites source to sentinel 192.0.2.1 + REVERSE_LOCAL_MISS_COUNTER increment (no backend-IP leak to the app; S-03-01)",
+          "criteria": [
+            "Given the forward LOCAL_BACKEND_MAP entry present but the backend's REVERSE_LOCAL_MAP entry forced absent (eviction/corruption case), when an unconnected reply traverses recvmsg4, the source address the client app reads from recvfrom is the sentinel 192.0.2.1 (RFC 5737 TEST-NET-1) — NEVER the backend IP (S-03-01, app-sockaddr assertion per DDD-3a; the recvmsg4-cannot-deny [1,1] fail-safe is a source rewrite, strictly stronger than Cilium's pass-through-leak)",
+            "On the reverse miss, REVERSE_LOCAL_MISS_COUNTER increments (the miss is observable, not silent) — asserted via the percpu-array dump",
+            "recvmsg4 does NOT drop the datagram on a reverse miss (it cannot — verifier [1,1], DDD-3) — it rewrites to the sentinel and returns verdict 1",
+            "DELIVER/Tier-3 empirical check (NOT a tracking issue, NOT a separate step): confirm dig / glibc / musl cleanly reject a 192.0.2.1-sourced reply; if a resolver accepts it, swap the sentinel value (no design change — DESIGN open-Q 1 / F-4, ADR-0053 rev D3)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/unconnected_udp_reply_hardening.rs (Lima, integration-tests-gated; unskips reverse_miss_rewrites_source_to_sentinel_not_backend_ip)",
+          "scenario_name": "S-03-01",
+          "implementation_notes": "Flips GREEN: the reverse_miss_rewrites_source_to_sentinel_not_backend_ip #[should_panic(expected=\"RED scaffold\")] Tier-3 test (red-classification.md § Tier-3, S-03-01 row). Lands the recvmsg4 sentinel-miss branch (rewrite source -> 192.0.2.1) + the REVERSE_LOCAL_MISS_COUNTER increment scaffolded in 01-03. Locked decision: ADR-0053 rev D3 (reverse-miss = sentinel 192.0.2.1 + counted miss; recvmsg4 cannot deny) + DDD-3a (app-sockaddr, NOT tcpdump/wire). The sentinel-resolver-rejection empirical check is an in-step Tier-3 acceptance detail, not a deferral. No Tier-2. EXEMPT FROM PARADIGM: Tier-3 single-example error-path verification.",
+          "deps": ["01-03", "02-02"],
+          "files_to_modify": [
+            "crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs",
+            "crates/overdrive-dataplane/tests/integration/unconnected_udp_reply_hardening.rs"
+          ]
+        },
+        {
+          "id": "03-02",
+          "name": "Below-floor attach refusal via structured health.startup.refused + typed #[from] DataplaneError variants + Tier-3 stub-resolver fixture binds off 5353 (S-03-02 / S-03-03)",
+          "criteria": [
+            "Given a host whose kernel predates recvmsg4 (< 4.20), when the platform attaches the same-host UDP hooks (the Earned-Trust probe), the attach() syscall fails and the composition root refuses to start with a structured health.startup.refused event; the platform does NOT deliver a forward-only half-working service (S-03-02). The attach() syscall IS the below-floor preflight — NO /proc or uname parse (avoids the unwrap_or_default boundary-read footgun), DDD-5b/c",
+            "The attach/probe failure routes through a #[from]-typed DataplaneError variant (CgroupSendRecvAttach for the attach failure, ReverseLocalProbe for the sentinel round-trip preflight), never a flattened Internal(String); the control-plane boot path surfaces it as health.startup.refused (DDD-5b/c, ADR-0053 rev D5b/c; mirrors ADR-0028/ADR-0034 cgroup-preflight refusal precedent). On the 5.10+ Lima matrix the refusal SHAPE is asserted via the typed-error path + the probe's structured-refusal contract (the below-floor branch is the attach-failure branch; a real <4.20 kernel is not on the matrix)",
+            "Given the Tier-3 stub-resolver fixture in the Lima VM, when it binds its UDP backend socket, it binds off the systemd-resolved-owned UDP 5353 (and :53) and a clean bind is asserted — an EADDRINUSE fails the test loudly, NOT swallowed with .ok() / let _ (S-03-03; codifies .claude/rules/debugging.md § 11 + § 8). This is the fixture-discipline guard protecting every other Tier-3 test in the feature",
+            "EbpfDataplane::probe round-trips a REVERSE_LOCAL_MAP sentinel as the wire-then-probe-then-use Earned-Trust gate (DDD-5b/c): probe attaches both new hooks AND verifies the reverse-lookup path before the dataplane is declared usable"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/unconnected_udp_reply_hardening.rs (Lima, integration-tests-gated; unskips below_floor_kernel_refuses_at_attach_preflight_observably and stub_resolver_binds_off_5353_and_asserts_clean_bind)",
+          "scenario_name": "S-03-02, S-03-03",
+          "implementation_notes": "Flips GREEN: the below_floor_kernel_refuses_at_attach_preflight_observably and stub_resolver_binds_off_5353_and_asserts_clean_bind #[should_panic(expected=\"RED scaffold\")] Tier-3 tests (red-classification.md § Tier-3, S-03-02/03 rows). Lands the probe attach-both-hooks + sentinel-round-trip preflight + the #[from]-routed DataplaneError variants (CgroupSendRecvAttach, ReverseLocalProbe) deferred from DISTILL (red-classification.md § Deferred to DELIVER). Locked decision: ADR-0053 rev D5b/c (attach() IS the below-floor preflight; #[from] errors never Internal(String); structured health.startup.refused). The startup-refusal event home is the control-plane boot path; the typed variants live on DataplaneError in traits/dataplane.rs. No Tier-2. EXEMPT FROM PARADIGM: Tier-3 single-example refusal-shape + fixture-discipline verification.",
+          "deps": ["01-03", "03-01"],
+          "files_to_modify": [
+            "crates/overdrive-dataplane/src/lib.rs",
+            "crates/overdrive-core/src/traits/dataplane.rs",
+            "crates/overdrive-control-plane/src/error.rs",
+            "crates/overdrive-control-plane/src/probe_runner_boot.rs",
+            "crates/overdrive-dataplane/tests/integration/unconnected_udp_reply_hardening.rs"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-bpf/src/shared/",
+      "crates/overdrive-bpf/src/maps/",
+      "crates/overdrive-bpf/src/programs/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-dataplane/src/maps/",
+      "crates/overdrive-dataplane/src/",
+      "crates/overdrive-sim/src/adapters/",
+      "crates/overdrive-sim/src/invariants/",
+      "crates/overdrive-control-plane/src/action_shim/",
+      "crates/overdrive-control-plane/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-dataplane/tests/integration/",
+      "crates/overdrive-sim/tests/",
+      "crates/overdrive-sim/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "crates/overdrive-bpf/tests/integration/** (no Tier-2 BPF_PROG_TEST_RUN backstop for cgroup_sock_addr — ENOTSUPP <= 6.8; do NOT scaffold a triptych for sendmsg4/recvmsg4)"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  },
+  "reviews": []
+}
