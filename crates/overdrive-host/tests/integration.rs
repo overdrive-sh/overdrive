@@ -32,4 +32,7 @@ mod integration {
     // built-in-ca (GH #28) — RcgenCa real-crypto acceptance.
     mod rcgen_ca_chain_verify;
     mod rcgen_ca_root_key_envelope;
+    // built-in-ca (GH #28, ADR-0063 D3) — SystemdCredsKeyring holds the KEK
+    // in the real Linux kernel keyring (add_key/keyctl).
+    mod systemd_creds_keyring;
 }

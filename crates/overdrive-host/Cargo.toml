@@ -44,6 +44,12 @@ rcgen                    = { workspace = true }
 # root CA private key at rest. Production crypto dep, not transitive.
 # `overdrive-core` stays ring-free (dst-lint).
 ring                     = { workspace = true }
+# `linux-keyutils` — `SystemdCredsKeyring` holds the resolved KEK in the
+# Linux kernel session keyring (`add_key` user-type key; read back via
+# `keyctl` search+read) per ADR-0063 D3, so the persistent holder across
+# the process lifetime is kernel space, not the process heap. Pure-Rust
+# safe wrapper — preserves the crate's `#![forbid(unsafe_code)]`.
+linux-keyutils.workspace = true
 tokio.workspace          = true
 # `tracing` — `SystemdCredsKeyring` (the production `Kek` provider) emits
 # the gated-dev-fallback warnings (`ca.kek.dev_fallback_refused` /
@@ -65,6 +71,12 @@ uuid                     = { workspace = true }
 # the integration tests under `tests/integration/` consume them.
 x509-parser.workspace    = true
 tempfile.workspace       = true
+# `serial_test` — the `SystemdCredsKeyring` kernel-keyring integration suite
+# has an env-mutating absent-KEK case (clears `OVERDRIVE_CA_KEK` /
+# `OVERDRIVE_CA_KEK_DEV_OPT_IN`); `#[serial(env)]` serialises it against
+# other env-touching tests per `.claude/rules/testing.md` § "Tests that
+# mutate process-global state".
+serial_test.workspace    = true
 
 [lints]
 workspace = true

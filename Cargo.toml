@@ -76,6 +76,14 @@ sha2            = "0.10"
 blake3          = "1"
 ring            = "0.17"
 aws-lc-rs       = "1"
+# `linux-keyutils` — pure-Rust (no libkeyutils C dependency) safe wrapper
+# over the Linux kernel key-management facility (`add_key`/`keyctl`).
+# `SystemdCredsKeyring` (the production `Kek` provider) holds the root-key
+# KEK in kernel space via the session keyring per ADR-0063 D3 — the
+# persistent holder across the process lifetime is the kernel, not a heap
+# field. The crate's safe interface keeps `overdrive-host`'s
+# `#![forbid(unsafe_code)]` intact.
+linux-keyutils  = "0.2"
 rcgen           = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rustls          = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
 
