@@ -166,32 +166,142 @@ fn sim_ca_intermediate_is_deterministic_and_chains_to_fixture_root() {
     );
 }
 
+/// The fixture SVID workload identity the sim adapter mints a leaf for. The
+/// embedded fixture leaf cert carries exactly this `spiffe://` URI as its sole
+/// SAN (a real `openssl`-minted leaf signed by the fixture intermediate).
+const FIXTURE_SVID_SPIFFE: &str = "spiffe://overdrive.local/workload/sim-svid";
+
 /// `@in-memory` `@S-04` — KPI K5: `SimCa::issue_svid(&req)` serial (drawn
 /// via `SeededEntropy::fill`) is identical across two runs at the same
 /// seed AND is at least 64 bits wide (CA/B Forum floor, research Finding 10).
 ///
-/// DELIVER: twin-run at seed `0x5EED`, assert serial bytes equal and
-/// `serial.len() * 8 >= 64`. Wraps `CertSerial`.
+/// Port-to-port: enters through the `Ca` driving port (`issue_svid`), asserts
+/// on the observable `SvidMaterial` byte surface (cert PEM, cert DER, serial).
+/// Two `SimCa` instances each over their own `SimEntropy::new(SEED)` draw the
+/// SVID serial from the same seeded sequence (the same draw ordinal), so the
+/// whole leaf handle is byte-identical — the load-bearing DST determinism claim
+/// (testing.md K3 seed → bit-identical). The serial width assertion pins the
+/// CA/B Forum 64-bit floor.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn sim_ca_svid_serial_is_deterministic_and_at_least_64_bits() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / SimCa::issue_svid serial via SeededEntropy \
-         is identical across two same-seed runs and >= 64 bits)"
+    use std::sync::Arc;
+
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::ca::{Ca, SvidRequest};
+    use overdrive_sim::adapters::ca::SimCa;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+
+    const SEED: u64 = 0x5EED;
+
+    let spiffe = SpiffeId::new(FIXTURE_SVID_SPIFFE).expect("fixture SVID SPIFFE id is valid");
+    let req = SvidRequest::new(spiffe);
+
+    let ca_a = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+    let ca_b = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+
+    let svid_a = ca_a.issue_svid(&req).expect("sim SVID issuance succeeds for the fixture leaf");
+    let svid_b = ca_b.issue_svid(&req).expect("sim SVID issuance succeeds for the fixture leaf");
+
+    // (a) cert PEM byte-equal across two same-seed runs.
+    assert_eq!(
+        svid_a.cert_pem().as_pem(),
+        svid_b.cert_pem().as_pem(),
+        "SVID cert PEM must be bit-identical across two same-seed runs",
+    );
+    // (b) cert DER byte-equal across two same-seed runs.
+    assert_eq!(
+        svid_a.cert_der().as_der(),
+        svid_b.cert_der().as_der(),
+        "SVID cert DER must be bit-identical across two same-seed runs",
+    );
+    // (c) serial (drawn via seeded Entropy) equal across two same-seed runs.
+    assert_eq!(
+        svid_a.serial().as_str(),
+        svid_b.serial().as_str(),
+        "SVID serial (drawn via seeded Entropy) must be identical across two same-seed runs",
+    );
+
+    // (d) the serial is at least 64 bits wide (CA/B Forum floor). The serial is
+    // lowercase hex of the drawn bytes, so its byte width is `len() / 2`.
+    let serial_byte_width = svid_a.serial().as_str().len() / 2;
+    assert!(
+        serial_byte_width * 8 >= 64,
+        "SVID serial must be >= 64 bits (CA/B Forum floor); got {} bits",
+        serial_byte_width * 8,
     );
 }
 
-/// `@in-memory` `@S-04` — the `SimCa` SVID carries the chain-shape invariant
-/// observable through the trait accessors: exactly one URI SAN equal to the
-/// requested `SpiffeId`, CA:FALSE. (Sim shares the core `CertSpec` policy, so
-/// this is the same invariant the host adapter enforces — the seam the
-/// `ca_equivalence` contract test pins.)
+/// `@in-memory` `@S-04` — the `SimCa` SVID carries the chain-shape invariant:
+/// exactly one URI SAN equal to the requested `SpiffeId`, CA:FALSE. (Sim shares
+/// the core `CertSpec` policy, so this is the same invariant the host adapter
+/// enforces — the seam the `ca_equivalence` contract test pins.)
+///
+/// Port-to-port: enters through the `Ca` driving port (`issue_svid`), asserts on
+/// the observable `SvidMaterial` surface. The single-URI-SAN identity is
+/// observed through `spiffe_id()` (the contract accessor: the SVID's sole URI
+/// SAN). The CA:FALSE + single-URI-SAN cert *shape* is observed WITHOUT parsing
+/// crypto (the sim is opaque) via DER byte substrings, mirroring the
+/// intermediate chains-to-root assertion: the fixture leaf is a real
+/// `openssl`-minted cert whose DER carries the `spiffe://` URI exactly once and
+/// the CA:FALSE basicConstraints DER fragment. A CA leaf or a multi-SAN leaf
+/// would NOT carry these byte sequences and the assertion would fail RED.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn sim_ca_svid_carries_single_uri_san_and_is_not_a_ca() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / SimCa SVID carries exactly one URI SAN \
-         equal to the requested SpiffeId and is CA:FALSE, via shared core CertSpec policy)"
+    use std::sync::Arc;
+
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::ca::{Ca, SvidRequest};
+    use overdrive_sim::adapters::ca::SimCa;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+
+    const SEED: u64 = 0x5EED;
+
+    /// The DER `subjectAltName` fragment for the single `spiffe://` URI SAN:
+    /// the IA5String-tagged (`0x86`) URI bytes for [`FIXTURE_SVID_SPIFFE`]. A
+    /// leaf carrying exactly this once has exactly one URI SAN equal to the
+    /// `SpiffeId`.
+    const SAN_URI_DER: &[u8] = b"\x86\x2aspiffe://overdrive.local/workload/sim-svid";
+
+    /// The DER `basicConstraints` CA:FALSE fragment: extnID `2.5.29.19`
+    /// (`06 03 55 1d 13`), critical (`01 01 ff`), value `04 02 30 00` — an
+    /// empty SEQUENCE, i.e. cA defaults to FALSE. A CA leaf would instead carry
+    /// `30 03 01 01 ff` (cA TRUE) inside the value.
+    const BASIC_CONSTRAINTS_CA_FALSE_DER: &[u8] =
+        &[0x06, 0x03, 0x55, 0x1d, 0x13, 0x01, 0x01, 0xff, 0x04, 0x02, 0x30, 0x00];
+
+    fn count_subsequences(haystack: &[u8], needle: &[u8]) -> usize {
+        haystack.windows(needle.len()).filter(|w| *w == needle).count()
+    }
+
+    let spiffe = SpiffeId::new(FIXTURE_SVID_SPIFFE).expect("fixture SVID SPIFFE id is valid");
+    let req = SvidRequest::new(spiffe.clone());
+
+    let ca = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+    let svid = ca.issue_svid(&req).expect("sim SVID issuance succeeds for the fixture leaf");
+
+    // (a) the SVID's sole URI SAN identity, observed through the contract
+    // accessor, equals the requested SpiffeId.
+    assert_eq!(
+        svid.spiffe_id(),
+        &spiffe,
+        "SVID's URI SAN identity must equal the requested SpiffeId",
+    );
+
+    // (b) the leaf cert DER carries the `spiffe://` URI SAN EXACTLY ONCE — the
+    // single-URI-SAN cardinality the shared core `CertSpec::svid` policy
+    // enforces, observed on the opaque cert bytes.
+    assert_eq!(
+        count_subsequences(svid.cert_der().as_der(), SAN_URI_DER),
+        1,
+        "SVID leaf cert DER must carry the spiffe:// URI SAN exactly once (single URI SAN)",
+    );
+
+    // (c) the leaf cert DER carries the CA:FALSE basicConstraints fragment — the
+    // CA:FALSE decision the shared core policy made, observed on the opaque
+    // cert bytes (a CA leaf would carry the cA-TRUE fragment instead).
+    assert!(
+        count_subsequences(svid.cert_der().as_der(), BASIC_CONSTRAINTS_CA_FALSE_DER) == 1,
+        "SVID leaf cert DER must carry the CA:FALSE basicConstraints fragment (not a CA)",
     );
 }
 
