@@ -26,18 +26,9 @@
 //! Endianness lockstep per ADR-0041 / architecture.md § 11: userspace
 //! writes host-order; the kernel-side program converts at the boundary.
 //!
-//! # RED scaffold (Slice 01 / S-01-02)
-//!
-//! The `#[map]` attribute is NOT yet emitted — per the kernel-side RED
-//! convention (`crates/overdrive-bpf/src/maps/mod.rs`), the RED signal
-//! for a map scaffold is the absence of the `#[map]` attribute on the
-//! static. Adding it is part of DELIVER's GREEN pass (Slice 01). The
-//! POD key/value structs are real (the userspace handle + the trait
-//! contract reference them); the `#[map]` static itself lands GREEN.
-
 #![allow(dead_code)]
 
-use aya_ebpf::maps::HashMap;
+use aya_ebpf::{macros::map, maps::HashMap};
 
 /// Reverse-map key — the backend identity. 8-byte POD, host-order on
 /// every numeric field. Byte-parity with `LocalServiceKey` so the
@@ -72,9 +63,6 @@ pub const MAX_ENTRIES: u32 = 4096;
 /// `ReverseLocalKey` → `vip_host: u32`. One lookup per unconnected
 /// `recvmsg(2)`; hit → rewrite reply source to the VIP; miss → rewrite
 /// to the sentinel `192.0.2.1` + bump the miss counter.
-///
-/// RED scaffold: `#[map]` attribute lands in DELIVER GREEN (Slice 01).
-// __SCAFFOLD__ — add `#[map]` in DELIVER (Slice 01 GREEN). The absent
-// attribute IS the kernel-side RED signal per maps/mod.rs.
+#[map]
 pub static REVERSE_LOCAL_MAP: HashMap<ReverseLocalKey, u32> =
     HashMap::with_max_entries(MAX_ENTRIES, 0);

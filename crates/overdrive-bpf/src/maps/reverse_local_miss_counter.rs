@@ -13,15 +13,10 @@
 //! Per-CPU avoids contention on the recvmsg hot path; userspace sums
 //! across CPUs at read time (the `aggregate_per_cpu` precedent that
 //! `DROP_COUNTER` uses).
-//!
-//! # RED scaffold (Slice 03 / S-03-01)
-//!
-//! `#[map]` attribute lands in DELIVER GREEN (Slice 03). The absent
-//! attribute IS the kernel-side RED signal per `maps/mod.rs`.
 
 #![allow(dead_code)]
 
-use aya_ebpf::maps::PerCpuArray;
+use aya_ebpf::{macros::map, maps::PerCpuArray};
 
 /// Single slot — the reverse-miss count. Indexed by `0`. A future
 /// per-reason split would widen this; Phase-1 has one reason ("no
@@ -32,8 +27,6 @@ pub const MAX_ENTRIES: u32 = 1;
 pub const SLOT_REVERSE_MISS: u32 = 0;
 
 /// `REVERSE_LOCAL_MISS_COUNTER` — one `u64` per CPU.
-///
-/// RED scaffold: `#[map]` attribute lands in DELIVER GREEN (Slice 03).
-// __SCAFFOLD__ — add `#[map]` in DELIVER (Slice 03 GREEN).
+#[map]
 pub static REVERSE_LOCAL_MISS_COUNTER: PerCpuArray<u64> =
     PerCpuArray::with_max_entries(MAX_ENTRIES, 0);
