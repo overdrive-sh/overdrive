@@ -75,6 +75,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
@@ -131,6 +132,21 @@ const RECONCILE_CONFLICT_TABLE: TableDefinition<&[u8], &[u8]> =
 /// `last_observed_at_unix_ms`.
 const PROBE_RESULTS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_probe_results");
+
+/// Holds the rkyv-archived bytes of every `IssuedCertificateRow`
+/// (`issued_certificates` audit row, ADR-0063 D6), keyed on the issued
+/// certificate's serial bytes. The audit surface is **append-only** —
+/// one row per distinct issued serial, never overwritten (serials are
+/// CSPRNG-drawn, so a collision is the issuance bug, not an LWW case).
+/// The row is OBSERVATION (the record of what was issued), persisted in
+/// the production observation store alongside `alloc_status` /
+/// `node_health`. The `ObservationStore` *trait* is unchanged; this
+/// table is reached via inherent methods on `LocalObservationStore`
+/// because the `issued_certificates` row is not a variant of the closed
+/// `ObservationRow` write enum. New table; additive-only, never alters
+/// existing tables.
+const ISSUED_CERTIFICATES_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_issued_certificates");
 
 /// Encode the composite `(alloc_id, probe_idx)` key as a byte
 /// sequence. Sort order on the underlying redb `BTree` mirrors the
@@ -281,6 +297,9 @@ impl LocalObservationStore {
                 // Probe-results table — ADR-0054 §5. New table;
                 // never alters existing tables.
                 let _ = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
+                // Issued-certificates audit table — ADR-0063 D6. New
+                // table; additive-only, never alters existing tables.
+                let _ = write.open_table(ISSUED_CERTIFICATES_TABLE).map_err(map_to_io)?;
             }
             write.commit().map_err(map_to_io)?;
         }
@@ -294,6 +313,111 @@ impl LocalObservationStore {
         // `send` returns `Err` only when there are no active
         // subscribers — that's not a failure.
         let _ = self.inner.subscription_tx.send(row);
+    }
+
+    // -------------------------------------------------------------------
+    // `issued_certificates` audit surface — ADR-0063 D6.
+    //
+    // Inherent methods (NOT trait methods): the `issued_certificates`
+    // row is OBSERVATION (the record of what was issued), persisted in
+    // the production observation store alongside `alloc_status` /
+    // `node_health`, but it is not a variant of the closed
+    // `ObservationRow` write enum, so it does not route through
+    // `ObservationStore::write`. The `ObservationStore` trait is
+    // unchanged. The row's bytes go through the same rkyv versioned-
+    // envelope codec the other observation rows use — the typed
+    // `IssuedCertificateRow::archive_for_store` / `from_store_bytes`
+    // co-located on the row (ADR-0048).
+    // -------------------------------------------------------------------
+
+    /// Write one `issued_certificates` audit row (ADR-0063 D6).
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(())`, the row is durable and a subsequent
+    /// [`Self::issued_certificate_rows`] includes it. The table is
+    /// append-only — keyed by the issued certificate's serial bytes, so
+    /// each distinct issuance lands in its own row (CSPRNG serials make a
+    /// key collision an issuance bug, not an overwrite case). The row is
+    /// wrapped in its versioned envelope via
+    /// [`IssuedCertificateRow::archive_for_store`] at the write boundary —
+    /// the on-disk shape is the envelope, never the bare payload.
+    ///
+    /// # Errors
+    ///
+    /// [`ObservationStoreError::Io`] on a redb / archival failure;
+    /// [`ObservationStoreError::Envelope`] if archival of the row fails
+    /// (unreachable for valid rows).
+    pub async fn write_issued_certificate(
+        &self,
+        row: IssuedCertificateRow,
+    ) -> Result<(), ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            // Archive through the typed codec on the row (ADR-0048):
+            // wraps in the latest envelope and rkyv-serialises to
+            // canonical bytes. The audit key is the issued serial.
+            let key = row.serial.as_str().as_bytes().to_vec();
+            let bytes = row.archive_for_store().map_err(ObservationStoreError::from)?;
+            let write = inner.db.begin_write().map_err(map_to_io)?;
+            {
+                let mut table = write.open_table(ISSUED_CERTIFICATES_TABLE).map_err(map_to_io)?;
+                table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
+            }
+            write.commit().map_err(map_to_io)?;
+            Ok::<_, ObservationStoreError>(())
+        })
+        .await
+        .map_err(map_to_io)??;
+        Ok(())
+    }
+
+    /// Read back every `issued_certificates` audit row this peer holds
+    /// (ADR-0063 D6) — the operator-observable audit surface.
+    ///
+    /// # Postconditions
+    ///
+    /// Iteration order is deterministic — ascending by serial-key bytes
+    /// (redb `BTree` order). Each row is projected back through
+    /// [`IssuedCertificateRow::from_store_bytes`] (the observation
+    /// log-and-skip read path per ADR-0048 § 3): a row whose envelope
+    /// bytes fail to decode (corrupt / unknown future version) is skipped
+    /// with a `tracing::warn!`, and the surviving rows are returned —
+    /// convergence proceeds (observation tolerates, asymmetric vs intent
+    /// fail-fast).
+    ///
+    /// # Errors
+    ///
+    /// [`ObservationStoreError::Io`] on a redb read failure. A per-row
+    /// decode failure does NOT error — it is logged and skipped.
+    pub async fn issued_certificate_rows(
+        &self,
+    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let rows = tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(ISSUED_CERTIFICATES_TABLE).map_err(map_to_io)?;
+            let mut out: Vec<IssuedCertificateRow> = Vec::new();
+            let iter = table.iter().map_err(map_to_io)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_to_io)?;
+                // Observation log-and-skip (ADR-0048 § 3): the row's own
+                // `from_store_bytes` emits the `observation.row.skipped`
+                // warn and returns `Err` on a decode failure; we drop the
+                // offending row and keep the surviving ones. The key is
+                // surfaced for operator diagnosis.
+                let key = String::from_utf8_lossy(k.value());
+                if let Ok(row) =
+                    IssuedCertificateRow::from_store_bytes(v.value(), Some(key.as_ref()))
+                {
+                    out.push(row);
+                }
+            }
+            Ok::<_, ObservationStoreError>(out)
+        })
+        .await
+        .map_err(map_to_io)??;
+        Ok(rows)
     }
 }
 

@@ -519,6 +519,111 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-05T17:50:14Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:56:33Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:57:19Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: golden-bytes + discriminant-offset triangulation + unknown-version probe ARE the L1 archive coverage (pure rkyv, no I/O); they exercise the public envelope/codec surface port-to-port. No GREEN decomposition needs additional unit tests \u2014 mirrors GREEN sibling 02-01 (root_ca_key.rs).",
+      "t": "2026-06-05T17:57:27Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:02:30Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:04:09Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:09:33Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:15:50Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: ATs fully drove GREEN \u2014 S-05-02 trust_bundle composition + S-05-01 faithful per-call serial observable need no decomposition unit tests (port-to-port through Ca trait); no complex GREEN to decompose",
+      "t": "2026-06-05T18:15:50Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:15:50Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS commit=922f2c39",
+      "t": "2026-06-05T18:18:34Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:19:07Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:23:52Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:34:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: L3 acceptance tests over real LocalObservationStore + a failing audit double at the driven-port boundary fully drive GREEN port-to-port (issuance+audit binding, read-back match, no-silent-issuance, re-issue freshness); no separate PBT unit test adds behavioral coverage.",
+      "t": "2026-06-05T18:34:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:34:02Z"
     }
   ]
 }
