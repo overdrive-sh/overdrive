@@ -89,6 +89,13 @@ pub mod reconcilers;
 // 01 / 04 / 05 / 08.
 pub mod service_lifecycle;
 pub mod traits;
+// `Workflow` trait + `WorkflowCtx` + `WorkflowResult` + `WorkflowSpec` —
+// the durable-async §18 peer primitive to `Reconciler`. Trait-only in
+// core (no tokio); the async signature uses `async_trait`, all
+// non-determinism flows through `WorkflowCtx`'s injected ports. The
+// async engine lives in `overdrive-control-plane` (later slices). Per
+// ADR-0064 §1.
+pub mod workflow;
 // `UnixInstant` — portable wall-clock instant for persistable
 // deadlines. See `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`
 // for the design rationale; subsequent steps under issue #141 wire it

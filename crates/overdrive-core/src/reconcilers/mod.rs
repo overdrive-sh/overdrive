@@ -562,9 +562,12 @@ pub enum RestartReason {
     },
 }
 
-/// Placeholder for the workflow spec. Phase 3 replaces with real shape.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowSpec;
+// `WorkflowSpec` is the concrete shape defined in `crate::workflow`
+// (ADR-0064 §1, replacing the former unit placeholder). It is
+// re-exported here so `Action::StartWorkflow` (above) and existing
+// `reconcilers::WorkflowSpec` references keep resolving against this
+// path.
+pub use crate::workflow::WorkflowSpec;
 
 // ---------------------------------------------------------------------------
 // ReconcilerName newtype
