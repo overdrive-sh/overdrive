@@ -387,18 +387,3 @@ fn rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile() {
     let window_secs = validity.not_after.timestamp() - validity.not_before.timestamp();
     assert_eq!(window_secs, 3600, "SVID validity window is ~1 hour (3600s)");
 }
-
-/// `@real-io` `@adapter-integration` `@S-04` `@error` — KPI K2 rejection
-/// path at the real adapter: a `SvidRequest` whose `SpiffeId` would yield 0
-/// or >=2 URI SANs is rejected by `RcgenCa::issue_svid` with
-/// `CaError::InvalidSan` BEFORE any certificate bytes are produced (the
-/// core `CertSpec` guard, D5, fires in the host adapter too). Sad path,
-/// example-based.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / RcgenCa::issue_svid rejects 0 or >=2 URI-SAN \
-         request with CaError::InvalidSan before producing any cert bytes)"
-    );
-}

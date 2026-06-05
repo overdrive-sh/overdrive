@@ -32,8 +32,14 @@
 //!   - intermediate: `is_ca`, `path_len=0`, chains-to-root, `key_usages`
 //!   - svid: `is_ca=false`, `san_uris` (cardinality + value), `key_usages`,
 //!     issuer linkage
-//!   - error parity: a bad-SAN `SvidRequest` yields the SAME `CaError` variant
-//!     (`InvalidSan`) from BOTH adapters, before any cert
+//!
+//! There is no bad-SAN error-parity scenario: under the ratified Option A
+//! (ADR-0063 D5 amendment, 2026-06-06) the single-URI-SAN invariant is honored
+//! BY CONSTRUCTION — a [`SvidRequest`] holds exactly one validated `SpiffeId`,
+//! so a 0-or-≥2-URI-SAN request is unrepresentable at the `Ca` boundary and
+//! there is no adapter cardinality-reject path to compare. The one fallible
+//! parse of raw SAN cardinality is the pure-core `CertSpec::svid` policy,
+//! tested at L1.
 //!
 //! Tags: `@real-io` `@adapter-integration` `@S-01` `@S-03` `@S-04`.
 //!
@@ -44,7 +50,7 @@
 
 use std::sync::Arc;
 
-use overdrive_core::traits::ca::{Ca, IntermediateHandle, RootCaHandle};
+use overdrive_core::traits::ca::{Ca, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest};
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
@@ -244,32 +250,148 @@ fn ca_equivalence_intermediate_profile_matches_across_host_and_sim() {
     );
 }
 
+/// The contract-observable SVID leaf profile, parsed from a [`SvidMaterial`]'s
+/// real cert DER via the trait accessor (`cert_der`). The equivalence Universe
+/// for a leaf: `is_ca` (false), the URI-SAN set (cardinality + value), the
+/// key-usage set, `key_usage_critical`, and `chains_to_issuer` (issuer DN
+/// equals the adapter's own intermediate subject DN) — NEVER the serial / key
+/// bytes (the sim fixture key differs from the host-generated key by
+/// construction — research Finding 11) and NEVER the concrete subject/issuer DN
+/// strings (the sim fixture DN differs from the host-derived DN by
+/// construction; only the *chains-to-issuer* relationship is
+/// contract-observable). Reading the public cert bytes (not internal adapter
+/// fields) keeps the assertion refactor-resilient.
+#[derive(Debug, PartialEq, Eq)]
+struct SvidProfile {
+    is_ca: bool,
+    /// The `spiffe://` URI SANs the leaf carries — both cardinality and value
+    /// are contract-observable (the single-URI-SAN rule is the headline
+    /// invariant, K2).
+    san_uris: Vec<String>,
+    key_usages: Vec<&'static str>,
+    key_usage_critical: bool,
+    /// The leaf's issuer DN equals its adapter's intermediate subject DN — the
+    /// chains-to-issuer linkage, a structural property both adapters share even
+    /// though the concrete DN differs by construction.
+    chains_to_issuer: bool,
+}
+
+fn svid_profile(svid: &SvidMaterial, intermediate: &IntermediateHandle) -> SvidProfile {
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(svid.cert_der().as_der())
+        .expect("parse svid DER");
+    let (_, inter_cert) =
+        x509_parser::certificate::X509Certificate::from_der(intermediate.cert_der().as_der())
+            .expect("parse intermediate DER");
+
+    // basicConstraints CA:FALSE — a leaf signs nothing. The extension may be
+    // absent (treated as CA:FALSE) or present with the CA bit unset.
+    let is_ca =
+        cert.basic_constraints().expect("basicConstraints parses").is_some_and(|ext| ext.value.ca);
+
+    let san = cert
+        .subject_alternative_name()
+        .expect("subjectAltName parses")
+        .expect("subjectAltName present");
+    let san_uris: Vec<String> = san
+        .value
+        .general_names
+        .iter()
+        .filter_map(|gn| match gn {
+            x509_parser::extensions::GeneralName::URI(uri) => Some((*uri).to_owned()),
+            _ => None,
+        })
+        .collect();
+
+    let ku = cert.key_usage().expect("keyUsage parses").expect("keyUsage present");
+    let mut key_usages = Vec::new();
+    if ku.value.key_cert_sign() {
+        key_usages.push("keyCertSign");
+    }
+    if ku.value.crl_sign() {
+        key_usages.push("cRLSign");
+    }
+    if ku.value.digital_signature() {
+        key_usages.push("digitalSignature");
+    }
+
+    SvidProfile {
+        is_ca,
+        san_uris,
+        key_usages,
+        key_usage_critical: ku.critical,
+        chains_to_issuer: cert.issuer().to_string() == inter_cert.subject().to_string(),
+    }
+}
+
 /// `@real-io` `@adapter-integration` `@S-04` — SVID profile equivalence:
 /// both adapters' `issue_svid(&req)` for the same `SpiffeId` produce a leaf
 /// with CA:FALSE, exactly ONE URI SAN equal to that `SpiffeId`,
-/// keyUsage=digitalSignature critical. This pins the highest-value
-/// invariant (single URI SAN, K2) as a SHARED contract — proving the sim
-/// adapter does not diverge on policy (it consumes the same core `CertSpec`).
+/// keyUsage=digitalSignature critical (NO keyCertSign/cRLSign), and chaining
+/// to their respective intermediates. This pins the highest-value invariant
+/// (single URI SAN, K2) as a SHARED contract — proving the sim adapter does
+/// not diverge on the leaf profile (it consumes the same core `CertSpec`).
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn ca_equivalence_svid_profile_matches_across_host_and_sim() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / RcgenCa and SimCa issue_svid agree: CA:FALSE \
-         + exactly one URI SAN = requested SpiffeId + digitalSignature critical)"
-    );
-}
+    // GIVEN both adapters and a single workload identity. Each adapter mints its
+    // OWN root + intermediate (cross-adapter chain mixing is NOT asserted —
+    // different roots by construction); the leaf chains to its own intermediate.
+    //
+    // The workload identity is the one the SIM fixture leaf actually carries
+    // as its embedded URI SAN (`spiffe://overdrive.local/workload/sim-svid`):
+    // `SimCa::issue_svid` returns an opaque, pre-minted fixture cert whose SAN
+    // is fixed at the byte level (research Finding 11 — the sim never re-mints
+    // crypto), so the only identity for which BOTH adapters carry the SAME
+    // single URI SAN in their REAL cert bytes is the fixture's own identity.
+    // The host adapter mints a genuine leaf for whatever SpiffeId is requested,
+    // so requesting the fixture identity makes the host's real SAN equal the
+    // sim's — the honest cross-adapter byte-level equivalence the SVID-profile
+    // postcondition pins (the SAN-value-equals-request contract is proven
+    // per-adapter in the S-04-08 host test and the sim acceptance suite).
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let host: RcgenCa = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let sim: SimCa = SimCa::new(Arc::new(SimEntropy::new(0xCA_5E)));
+    let node = NodeId::new("node-a").expect("NodeId parses");
+    let workload = SpiffeId::new("spiffe://overdrive.local/workload/sim-svid")
+        .expect("workload SpiffeId parses");
+    let req = SvidRequest::new(workload.clone());
 
-/// `@real-io` `@adapter-integration` `@S-04` `@error` — error-parity: a
-/// `SvidRequest` whose `SpiffeId` yields 0 or >=2 URI SANs is rejected by
-/// BOTH adapters with the SAME `CaError::InvalidSan` variant, before any
-/// cert is produced. Divergent error behaviour here would mean the policy
-/// lives in the adapter (rejected design A2) rather than in core `CertSpec`.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn ca_equivalence_bad_san_request_rejected_identically_by_both() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / a 0-or->=2-URI-SAN SvidRequest is rejected by \
-         BOTH RcgenCa and SimCa with CaError::InvalidSan, before any cert; shared core CertSpec policy)"
+    // WHEN each produces its intermediate + workload SVID (driving port). The
+    // intermediate is captured so the leaf's chains-to-issuer linkage is
+    // observable against the SAME adapter's intermediate.
+    let host_inter =
+        host.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
+    let sim_inter = sim.issue_intermediate(&node).expect("SimCa::issue_intermediate loads fixture");
+    let host_svid = host.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf");
+    let sim_svid = sim.issue_svid(&req).expect("SimCa::issue_svid mints a leaf");
+
+    // THEN the contract-observable SVID profile is equivalent across host and
+    // sim — both CA:FALSE, both carrying exactly one URI SAN, both
+    // keyUsage=digitalSignature critical (NO keyCertSign/cRLSign), each chaining
+    // to its own intermediate. This proves both adapters derive the SAME leaf
+    // profile from the one core `CertSpec::svid` policy (ADR-0063 D8), with
+    // serial/key/DN excluded from the Universe (differ by construction —
+    // research Finding 11).
+    let host_profile = svid_profile(&host_svid, &host_inter);
+    let sim_profile = svid_profile(&sim_svid, &sim_inter);
+    assert_eq!(
+        host_profile, sim_profile,
+        "host and sim SVIDs must agree on the contract-observable profile"
+    );
+
+    // AND the shared profile is the leaf profile the contract pins: CA:FALSE,
+    // exactly one URI SAN equal to the requested SpiffeId, digitalSignature
+    // critical, chaining to the intermediate.
+    assert_eq!(
+        host_profile,
+        SvidProfile {
+            is_ca: false,
+            san_uris: vec![workload.as_str().to_owned()],
+            key_usages: vec!["digitalSignature"],
+            key_usage_critical: true,
+            chains_to_issuer: true,
+        },
+        "the shared SVID profile matches the Ca::issue_svid contract"
     );
 }
 

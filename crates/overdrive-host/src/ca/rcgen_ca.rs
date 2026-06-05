@@ -24,7 +24,7 @@ use std::time::Duration;
 use overdrive_core::traits::ca::{Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, RootCaHandle};
 use overdrive_core::traits::ca::{IntermediateHandle, SvidMaterial, SvidRequest, TrustBundle};
 use overdrive_core::traits::entropy::Entropy;
-use overdrive_core::{CertSerial, CertSpec, CertSpecError, KeyUsage, NodeId, SpiffeId};
+use overdrive_core::{CertSerial, CertSpec, KeyUsage, NodeId, SpiffeId};
 use rcgen::string::Ia5String;
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
@@ -297,22 +297,6 @@ impl RcgenCa {
         vec![req.spiffe_id().clone()]
     }
 
-    /// Map a [`CertSpecError`] from the core SVID policy to the dedicated
-    /// [`CaError`] variant the trait contract names.
-    ///
-    /// A SAN-cardinality rejection ([`CertSpecError::InvalidSan`]) surfaces as
-    /// the dedicated [`CaError::InvalidSan`] (carrying the offending count) —
-    /// NOT flattened into a `Policy` pass-through — so the load-bearing
-    /// single-URI signal (KPI K2) keeps its structured cardinality across the
-    /// adapter boundary (S-04-09). Any other policy rejection passes through as
-    /// [`CaError::Policy`] via `#[from]`.
-    fn map_svid_policy_error(error: CertSpecError) -> CaError {
-        match error {
-            CertSpecError::InvalidSan { found } => CaError::invalid_san(found),
-            other @ CertSpecError::InvalidSubject { .. } => CaError::from(other),
-        }
-    }
-
     /// Seconds of wall-clock elapsed since the Unix epoch, read at the signing
     /// boundary.
     ///
@@ -403,16 +387,17 @@ impl Ca for RcgenCa {
 
     fn issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial, CaError> {
         // The pure DECISION FIRST, before any certificate material is produced:
-        // the single-URI-SAN cardinality + CA:FALSE leaf-profile policy lives in
-        // core `CertSpec::svid` (ADR-0063 D5 reconciliation B) — the host does
-        // NOT fork the SAN rule. The SAN projection is derived from the request;
-        // a projection that is not exactly one URI SAN is rejected by the policy
-        // BEFORE the intermediate is even consulted, so no cert bytes escape on
-        // the reject path. `CertSpecError::InvalidSan` maps to the dedicated
-        // `CaError::InvalidSan` variant (NOT a flattened `Policy` pass-through)
-        // so the load-bearing single-URI signal (KPI K2) keeps its structured
-        // cardinality across the adapter boundary (S-04-09).
-        let spec = CertSpec::svid(Self::project_sans(req)).map_err(Self::map_svid_policy_error)?;
+        // the CA:FALSE leaf-profile policy lives in core `CertSpec::svid`
+        // (ADR-0063 D5) — the host does NOT fork the SAN rule. Under Option A
+        // (ADR-0063 D5 amendment) the SAN projection is the singleton derived
+        // from the request's single validated `SpiffeId`, so the cardinality is
+        // always exactly one and the `CertSpec::svid` cardinality reject is
+        // unreachable here — the bad-cardinality case is foreclosed by the
+        // `SvidRequest` type, not by an adapter guard. Any policy rejection
+        // surfaces through `CaError`'s `#[from] CertSpecError` (the `Policy`
+        // variant) via `?` — identical to `SimCa`, so both adapters map a
+        // `CertSpec` rejection uniformly (no divergent error mapping).
+        let spec = CertSpec::svid(Self::project_sans(req))?;
 
         // Precondition: the persistent root + a node intermediate exist. The
         // leaf is signed by the INTERMEDIATE (not the root), so the SVID chains

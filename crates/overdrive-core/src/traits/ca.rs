@@ -327,24 +327,18 @@ impl TrustBundle {
 /// A certificate-authority operation failure.
 ///
 /// Distinct per failure mode (`.claude/rules/development.md` § "Distinct
-/// failure modes get distinct error variants"). In particular an invalid URI
-/// SAN cardinality surfaces [`InvalidSan`](CaError::InvalidSan) — it is NEVER
-/// flattened into a generic `Internal(String)`, so the load-bearing
-/// single-URI-SAN signal (KPI K2) cannot be swallowed. The pure-policy
-/// [`CertSpecError`] passes through via `#[from]` so a policy rejection keeps
-/// its structured shape across the adapter boundary.
+/// failure modes get distinct error variants"). The pure-policy
+/// [`CertSpecError`] passes through via `#[from]` (the [`Policy`](CaError::Policy)
+/// variant) so a policy rejection keeps its structured shape across the adapter
+/// boundary — both adapters surface a `CertSpec` rejection identically. There is
+/// no dedicated SAN-cardinality variant: under Option A (ADR-0063 D5 amendment)
+/// the single-URI-SAN invariant is honored by the [`SvidRequest`] type itself,
+/// so a bad-cardinality request is unrepresentable at the [`Ca::issue_svid`]
+/// boundary; the one fallible SAN-cardinality parse is the pure-core
+/// [`CertSpec::svid`](crate::ca::CertSpec::svid) policy, which surfaces
+/// [`CertSpecError::InvalidSan`] through the `Policy` pass-through.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CaError {
-    /// The request would yield an invalid number of `spiffe://` URI SANs.
-    /// A SPIFFE-compliant SVID carries exactly one; zero or two-or-more is
-    /// rejected before any certificate is produced (KPI K2, research
-    /// Finding 2).
-    #[error("invalid SAN cardinality: expected exactly one spiffe:// URI SAN, found {found}")]
-    InvalidSan {
-        /// The number of URI SANs the rejected request would have produced.
-        found: usize,
-    },
-
     /// The subject identity is invalid for the requested role (e.g. a CA
     /// subject carrying a path component where the trust domain alone is
     /// required).
@@ -404,13 +398,6 @@ pub enum CaError {
 }
 
 impl CaError {
-    /// Construct an [`InvalidSan`](CaError::InvalidSan) for a rejected SAN
-    /// cardinality.
-    #[must_use]
-    pub const fn invalid_san(found: usize) -> Self {
-        Self::InvalidSan { found }
-    }
-
     /// Construct an [`InvalidSubject`](CaError::InvalidSubject).
     #[must_use]
     pub const fn invalid_subject(role: &'static str, reason: &'static str) -> Self {
@@ -502,31 +489,44 @@ pub trait Ca: Send + Sync {
     /// Mint a workload SVID leaf.
     ///
     /// # Preconditions
-    /// The `req`'s [`SpiffeId`] projects to **exactly one** `spiffe://` URI
-    /// SAN. **Zero or two-or-more URI SANs is rejected with
-    /// [`CaError::InvalidSan`] before any certificate is produced** — the
-    /// SPIFFE spec's hardest rule and the highest-value invariant in the
-    /// feature (KPI K2, research Finding 2). The intermediate
-    /// ([`issue_intermediate`](Ca::issue_intermediate)) exists and signs the
-    /// leaf.
+    /// The intermediate ([`issue_intermediate`](Ca::issue_intermediate)) exists
+    /// and signs the leaf. The single-URI-SAN invariant is **honored by
+    /// construction**, not by a runtime cardinality guard: a [`SvidRequest`]
+    /// holds exactly one validated [`SpiffeId`], so a request projecting to
+    /// zero or two-or-more `spiffe://` URI SANs is *unrepresentable* at this
+    /// boundary — there is no `CaError::InvalidSan` branch in `issue_svid` to
+    /// reach. The single fallible parse of raw SAN cardinality is the pure-core
+    /// [`CertSpec::svid`](crate::ca::CertSpec::svid) policy, which rejects 0 or
+    /// ≥2 with [`CertSpecError`] (ADR-0063 D5; SPIFFE X.509-SVID §2). The
+    /// SPIFFE-spec-mandated *runtime* reject (§5.2) lives at the relying-party
+    /// verifier (#26 sockops/kTLS mTLS), not at this issuer.
     ///
     /// # Postconditions
     /// On `Ok`, the returned [`SvidMaterial`] is `CA:FALSE` with `keyUsage` =
     /// `digitalSignature` marked **critical**, carries **exactly one** URI SAN
-    /// equal to `req.spiffe_id()`, and a CSPRNG serial drawn via the `Entropy`
-    /// port (≥64 bits, CA/B Forum floor — research Finding 10).
+    /// equal to `req.spiffe_id()`, NO `keyCertSign`/`cRLSign`, and a CSPRNG
+    /// serial drawn via the `Entropy` port (≥64 bits, CA/B Forum floor —
+    /// research Finding 10). The single URI SAN is a structural consequence of
+    /// the single-identity request, not a checked-then-asserted property.
     ///
     /// # Edge cases
-    /// **Re-issue is not cached**: calling `issue_svid` twice for the *same*
-    /// [`SpiffeId`] yields a **fresh** certificate each time — a distinct
-    /// serial and a new validity window (the re-issue mechanism the #40
-    /// rotation workflow drives). A signing failure surfaces
-    /// [`CaError::SigningFailed`].
+    /// There is **no bad-SAN-cardinality edge case at this method** — the
+    /// request type forecloses it (see Preconditions). **Re-issue is not
+    /// cached**: calling `issue_svid` twice for the *same* [`SpiffeId`] yields a
+    /// **fresh** certificate each time — a distinct serial and a new validity
+    /// window (the re-issue mechanism the #40 rotation workflow drives). A
+    /// signing-backend failure surfaces [`CaError::SigningFailed`]; an issuance
+    /// whose audit row cannot be written surfaces a [`CaError`] rather than
+    /// handing out an unaudited certificate (no silent issuance; ADR-0063 D6).
     ///
     /// # Observable invariants
-    /// Determinism is **per-call-sequence**, not per-`SpiffeId`-cached: under
-    /// the same seed the same call sequence yields the same serials, but two
-    /// calls within one sequence draw distinct serials.
+    /// Every minted [`SvidMaterial`] carries exactly one URI SAN equal to
+    /// `req.spiffe_id()` and is `CA:FALSE` — across both adapters, this is the
+    /// equivalence the `ca_equivalence` DST test pins via S-04-06 (the
+    /// SVID-profile equivalence, SAN cardinality included). Determinism is
+    /// **per-call-sequence**, not per-`SpiffeId`-cached: under the same seed the
+    /// same call sequence yields the same serials, but two calls within one
+    /// sequence draw distinct serials.
     fn issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial>;
 
     /// Compose the trust bundle a relying party verifies an SVID against.
