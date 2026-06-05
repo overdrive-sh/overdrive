@@ -45,6 +45,11 @@ rcgen                    = { workspace = true }
 # `overdrive-core` stays ring-free (dst-lint).
 ring                     = { workspace = true }
 tokio.workspace          = true
+# `tracing` — `SystemdCredsKeyring` (the production `Kek` provider) emits
+# the gated-dev-fallback warnings (`ca.kek.dev_fallback_refused` /
+# `ca.kek.dev_fallback_used`) so the dev `OVERDRIVE_CA_KEK` path is never
+# silent (ADR-0063 D3 / Earned Trust). Structured-event names only.
+tracing.workspace        = true
 # `uuid` v4 — used by `RealCgroupFs::probe` to mint a per-call probe
 # directory under `<probe_root>/.overdrive-probe-<uuid>/`. Parallel
 # probes (under test or in production composition root races) MUST

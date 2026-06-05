@@ -45,6 +45,9 @@
 
 pub mod action_shim;
 pub mod api;
+// built-in-ca (GH #28, ADR-0063 D2/D3/D8) — CA boot composition root:
+// generate-or-load the persistent root + Earned-Trust probe + refuse-to-start.
+pub mod ca_boot;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
 // backend-discovery-bridge-service-reachability step 02-01 —

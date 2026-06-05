@@ -7,7 +7,9 @@
 //! `overdrive-core` compile path stays crypto-free (dst-lint).
 
 pub mod aead_codec;
+pub mod keyring;
 pub mod rcgen_ca;
 
 pub use aead_codec::RootKeyAeadCodec;
+pub use keyring::SystemdCredsKeyring;
 pub use rcgen_ca::RcgenCa;

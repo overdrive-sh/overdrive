@@ -1972,6 +1972,7 @@ dependencies = [
  "ring",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
  "x509-parser",
 ]

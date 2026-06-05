@@ -27,25 +27,98 @@
 //! `#[should_panic(expected = "RED scaffold")]`; no import of unbuilt CA
 //! wiring. DELIVER replaces with real boot/issuance assertions.
 
+use std::sync::Arc;
+
+use overdrive_control_plane::ca_boot::{self, CaBootError};
+use overdrive_core::SpiffeId;
+use overdrive_core::ca::kek::KEK_LEN;
+use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_host::OsEntropy;
+use overdrive_host::ca::{RcgenCa, RootKeyAeadCodec, SystemdCredsKeyring};
+use serial_test::serial;
+use tempfile::TempDir;
+
+/// Trust-domain subject the test root is minted for.
+fn trust_domain_subject() -> SpiffeId {
+    SpiffeId::new("spiffe://overdrive.local/overdrive/ca").expect("trust-domain SpiffeId parses")
+}
+
+/// A host `RcgenCa` over real OS entropy and the trust-domain subject.
+fn host_ca() -> RcgenCa {
+    RcgenCa::new(Arc::new(OsEntropy), trust_domain_subject())
+}
+
+/// Stage a 32-byte systemd-creds credential file named for the boot KEK id
+/// under `dir`, so `SystemdCredsKeyring::with_credentials_dir(dir)` resolves
+/// the KEK with no environment dependency.
+fn stage_kek_credential(dir: &TempDir, byte: u8) {
+    let kek_id = ca_boot::root_kek_id();
+    std::fs::write(dir.path().join(kek_id.as_str()), [byte; KEK_LEN])
+        .expect("write systemd-creds KEK credential");
+}
+
+/// Open a `LocalIntentStore` at `intent.redb` under `dir` as an
+/// `Arc<dyn IntentStore>`.
+fn intent_store(dir: &TempDir) -> Arc<dyn IntentStore> {
+    Arc::new(
+        overdrive_store_local::LocalIntentStore::open(dir.path().join("intent.redb"))
+            .expect("LocalIntentStore::open"),
+    )
+}
+
 // ---------------------------------------------------------------------------
-// US-CA-02 / S-02 — Persistent root reused across restart (happy path)
+// US-CA-02 / S-02-05 — Persistent root reused across restart (happy path)
 // ---------------------------------------------------------------------------
 
 /// `@real-io` `@adapter-integration` `@S-02` — persistence: first boot
 /// generates + envelope-encrypts + persists the root to the `IntentStore`;
 /// second boot (same KEK) decrypts and REUSES the same root identity (same
 /// public key / same cert). This is what supersedes ADR-0010's ephemerality.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn root_ca_is_reused_across_control_plane_restart() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02 / first boot persists the root; second boot \
-         decrypts and reuses the SAME root identity (same public key) across restart)"
+#[tokio::test]
+async fn root_ca_is_reused_across_control_plane_restart() {
+    // GIVEN a persisted intent store, a staged KEK credential, and the codec.
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+
+    // Each boot opens its OWN handle on the SAME redb file — a genuine restart
+    // (the first store is dropped before the second opens), so reuse is proven
+    // through on-disk persistence, not in-process caching.
+    let first = {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+            .await
+            .expect("first boot generates + persists the root")
+    };
+
+    let second = {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+            .await
+            .expect("second boot decrypts + reuses the persisted root")
+    };
+
+    // THEN the second boot reuses the SAME root identity: byte-identical public
+    // cert (PEM + DER) and serial. A fresh `ca.root()` on the second boot would
+    // mint a new keypair → different cert; equality proves reuse-from-disk.
+    assert_eq!(
+        first.cert_pem(),
+        second.cert_pem(),
+        "second boot must present the byte-identical root cert PEM (same public key)"
     );
+    assert_eq!(
+        first.cert_der(),
+        second.cert_der(),
+        "second boot must present the byte-identical root cert DER"
+    );
+    assert_eq!(first.serial(), second.serial(), "second boot must present the same root serial");
 }
 
 // ---------------------------------------------------------------------------
-// US-CA-02 / S-02 — Refuse-to-start on decrypt failure (Earned Trust)
+// US-CA-02 / S-02-06 — Refuse-to-start on decrypt failure (Earned Trust)
 // ---------------------------------------------------------------------------
 
 /// `@real-io` `@adapter-integration` `@S-02` `@error` — SSOT journey
@@ -53,13 +126,57 @@ fn root_ca_is_reused_across_control_plane_restart() {
 /// the boot-time Earned-Trust probe FAIL; the control plane REFUSES to
 /// start with a typed `CaError` + `health.startup.refused`, and does NOT
 /// silently re-mint a new root (which would orphan every issued identity).
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02 / undecryptable persisted envelope -> \
-         Earned-Trust probe fails -> control plane refuses to start (health.startup.refused), \
-         no silent re-mint)"
+#[tokio::test]
+async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
+    // GIVEN a control plane that persisted its root under the correct KEK.
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+
+    let first = {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+            .await
+            .expect("first boot persists the root under the correct KEK")
+    };
+
+    // WHEN the second boot opens with the WRONG KEK (a different staged
+    // credential), the persisted envelope cannot AES-GCM-open under it.
+    let wrong_creds = TempDir::new().expect("wrong-creds tempdir");
+    stage_kek_credential(&wrong_creds, 0x22);
+    let wrong_kek = SystemdCredsKeyring::with_credentials_dir(wrong_creds.path());
+
+    // Scoped so the redb file lock is released before the recovery boot opens
+    // its own handle on the same file (redb is single-writer-exclusive).
+    let result = {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &wrong_kek, &kek_id, &codec, &intent).await
+    };
+
+    // THEN the boot REFUSES to start with the typed envelope-decrypt error
+    // (Earned-Trust probe (b) failed). `health.startup.refused` is emitted by
+    // the boot path before this return (asserted structurally by the variant).
+    assert!(
+        matches!(result, Err(CaBootError::EnvelopeDecrypt { .. })),
+        "undecryptable envelope must refuse startup with EnvelopeDecrypt, got {result:?}"
+    );
+
+    // AND no NEW root was silently minted: the persisted public cert material
+    // is byte-identical to the first boot's (a re-mint would have overwritten
+    // it). Re-opening with the CORRECT KEK still recovers the ORIGINAL root.
+    let recovered = {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+            .await
+            .expect("the original root is intact and re-openable under the correct KEK")
+    };
+    assert_eq!(
+        first.cert_der(),
+        recovered.cert_der(),
+        "the refused boot must NOT have re-minted or overwritten the persisted root"
     );
 }
 
@@ -68,12 +185,41 @@ fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
 /// opt-in) refuses startup BEFORE any issuance, rather than panicking
 /// mid-issuance or silently generating a throwaway KEK (which would make
 /// at-rest encryption meaningless).
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn boot_refuses_to_start_when_kek_absent_from_keyring() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02 / absent keyring KEK (no OVERDRIVE_CA_KEK \
-         opt-in) -> refuse to start before any issuance, no silent KEK generation)"
+#[tokio::test]
+#[serial(env)]
+async fn boot_refuses_to_start_when_kek_absent_from_keyring() {
+    // GIVEN an EMPTY credentials directory (no KEK credential staged) and no
+    // dev OVERDRIVE_CA_KEK opt-in in the environment.
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let empty_creds = TempDir::new().expect("empty-creds tempdir");
+    // SAFETY: `#[serial(env)]` guarantees exclusive access to the process
+    // environment for the duration of this test, so removing the dev-fallback
+    // vars cannot race another test.
+    unsafe {
+        std::env::remove_var("OVERDRIVE_CA_KEK");
+        std::env::remove_var("OVERDRIVE_CA_KEK_DEV_OPT_IN");
+    }
+    let kek = SystemdCredsKeyring::with_credentials_dir(empty_creds.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+
+    // WHEN the control plane attempts to start.
+    let intent = intent_store(&store_dir);
+    let result = ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent).await;
+
+    // THEN it refuses to start with the typed KEK-unavailable error, BEFORE any
+    // issuance (no throwaway KEK minted).
+    assert!(
+        matches!(result, Err(CaBootError::KekUnavailable { .. })),
+        "absent KEK (no dev opt-in) must refuse startup with KekUnavailable, got {result:?}"
+    );
+
+    // AND nothing was persisted — no root envelope, no throwaway KEK material —
+    // because the KEK probe failed before generate-or-persist.
+    let persisted = intent.get(b"ca/root/key-envelope/v1").await.expect("intent store get");
+    assert!(
+        persisted.is_none(),
+        "no root key envelope must be persisted when the KEK probe refuses startup"
     );
 }
 

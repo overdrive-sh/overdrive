@@ -176,6 +176,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-05T11:46:46Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T11:53:05Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:27:06Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:33:28Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: adapter/composition-root wiring is proven by the three L3 integration ATs driving the ca_boot port over real RcgenCa + LocalIntentStore + SystemdCredsKeyring + RootKeyAeadCodec; no separate mocked unit test would add behavioral coverage (Mandate 4 \u2014 adapters use real-infra integration tests, never mocks)",
+      "t": "2026-06-05T12:33:28Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:35:10Z"
     }
   ]
 }
