@@ -26,6 +26,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -198,6 +199,47 @@ pub trait JournalCursor: Send + Sync {
         correlation: &CorrelationKey,
         response: &CallResponse,
     ) -> Result<(), WorkflowCtxError>;
+
+    /// Check the cursor for a recorded `ctx.sleep` arm at the current
+    /// step (the slice-02 await-surface, ADR-0064 §3 sleep branch).
+    ///
+    /// # Postconditions
+    ///
+    /// - **Replay (cursor < journal length):** returns
+    ///   `Some(recorded_deadline_unix)` — the absolute wall-clock deadline
+    ///   (an INPUT) recorded when the sleep was first armed
+    ///   (`development.md` § "Persist inputs, not derived state"). The
+    ///   caller recomputes the remaining wait as `recorded_deadline −
+    ///   clock.unix_now()` and parks only for what remains (returning
+    ///   immediately if the deadline has already passed). Implementations
+    ///   advance the cursor on a replay hit.
+    /// - **Live (cursor at journal end):** returns `None` — the caller
+    ///   computes the deadline from `clock.unix_now() + duration`, records
+    ///   it via [`record_sleep_armed`](Self::record_sleep_armed), and then
+    ///   parks on the Clock deadline.
+    async fn replay_sleep(&self) -> Option<Duration>;
+
+    /// Record a freshly-armed `ctx.sleep` deadline durably and advance the
+    /// cursor (the live path, ADR-0064 §3 sleep branch).
+    ///
+    /// `deadline_unix` is the ABSOLUTE wall-clock deadline (an input) —
+    /// never a "remaining duration" cache. Resume reads it back via
+    /// [`replay_sleep`](Self::replay_sleep) and recomputes the remaining
+    /// wait against the live clock.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(())` the `SleepArmed { deadline_unix }` entry is durably
+    /// journaled (append + fsync per ADR-0063 §4) and the cursor has
+    /// advanced past this step, so a subsequent resume replays it via
+    /// [`replay_sleep`](Self::replay_sleep) without re-arming.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::JournalRecord`] when the durable
+    /// append/fsync fails — the engine surfaces this rather than continue
+    /// against an unjournaled sleep.
+    async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError>;
 }
 
 /// A trivial [`JournalCursor`] that never replays and never records — it
@@ -222,6 +264,14 @@ impl JournalCursor for AlwaysLiveCursor {
         _correlation: &CorrelationKey,
         _response: &CallResponse,
     ) -> Result<(), WorkflowCtxError> {
+        Ok(())
+    }
+
+    async fn replay_sleep(&self) -> Option<Duration> {
+        None
+    }
+
+    async fn record_sleep_armed(&self, _deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
         Ok(())
     }
 }
@@ -311,8 +361,54 @@ impl WorkflowCtx {
         Ok(response)
     }
 
+    /// Suspend the workflow for `duration` through the injected
+    /// [`Clock`] — the slice-02 await-surface (ADR-0064 §3 sleep branch).
+    ///
+    /// **Check-then-record, deadline-as-input (ADR-0063 §2,
+    /// `development.md` § "Persist inputs, not derived state").**
+    ///
+    /// - **Live:** the absolute deadline is computed as
+    ///   `clock.unix_now() + duration`, durably recorded as a `SleepArmed
+    ///   { deadline_unix }` entry (append + fsync per ADR-0063 §4) BEFORE
+    ///   parking, and the ctx then parks on the Clock deadline. The
+    ///   journal records the DEADLINE (an input), never a "remaining"
+    ///   cache.
+    /// - **Replay:** the cursor returns the recorded deadline; the ctx
+    ///   recomputes the remaining wait as `recorded_deadline −
+    ///   clock.unix_now()` and parks only for what remains — returning
+    ///   immediately if the deadline has already passed.
+    ///
+    /// The same code path runs under `SimClock` (parks until the harness
+    /// advances logical time) and `SystemClock` (parks on the Tokio
+    /// timer) — no DST-only branch (`development.md` § "Production code is
+    /// not shaped by simulation").
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::JournalRecord`] when the live-path
+    /// durable record of the armed deadline fails.
+    pub async fn sleep(&self, duration: Duration) -> Result<(), WorkflowCtxError> {
+        // Replay path — recompute remaining wait from the recorded
+        // absolute deadline (an input), never a persisted remaining cache.
+        if let Some(deadline_unix) = self.journal.replay_sleep().await {
+            let now = self.clock.unix_now();
+            if let Some(remaining) = deadline_unix.checked_sub(now) {
+                self.clock.sleep(remaining).await;
+            }
+            // deadline already passed → return immediately (no re-park).
+            return Ok(());
+        }
+
+        // Live path — compute the absolute deadline, durably record it
+        // (fsync-then-park, ADR-0063 §4), then park on the Clock deadline.
+        let deadline_unix = self.clock.unix_now() + duration;
+        self.journal.record_sleep_armed(deadline_unix).await?;
+        self.clock.sleep(duration).await;
+        Ok(())
+    }
+
     /// The injected clock. Workflow bodies read time only through this
-    /// port (the `ctx.sleep` await-surface lands slice 02).
+    /// port (the `ctx.sleep` await-surface is [`Self::sleep`]).
     #[must_use]
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.clock

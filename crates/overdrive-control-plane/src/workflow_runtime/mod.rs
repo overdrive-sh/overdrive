@@ -33,6 +33,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -386,6 +387,42 @@ impl JournalCursor for JournalCursorHandle {
         // Append + fsync BEFORE returning (ADR-0063 §4). On failure the
         // cursor does NOT advance — the engine must not continue against
         // an unjournaled effect.
+        self.journal
+            .append(&self.workflow_id, &entry)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        *cursor += 1;
+        drop(cursor);
+        Ok(())
+    }
+
+    async fn replay_sleep(&self) -> Option<Duration> {
+        let mut cursor = self.cursor.lock().await;
+        // Replay only while the cursor is within the loaded run AND the
+        // entry at the cursor is a SleepArmed. A cursor past the buffer
+        // (or at a non-sleep entry) is the live path → `None`. The
+        // recorded `deadline_unix` is the absolute deadline (an input);
+        // the ctx recomputes the remaining wait against the live clock.
+        let deadline = match self.replay_buffer.get(*cursor) {
+            Some(JournalEntry::SleepArmed { deadline_unix, .. }) => {
+                *cursor += 1;
+                Some(*deadline_unix)
+            }
+            _ => None,
+        };
+        drop(cursor);
+        deadline
+    }
+
+    async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
+        // Record the ABSOLUTE deadline (an input), never a remaining
+        // cache (`development.md` § "Persist inputs, not derived state").
+        let entry = JournalEntry::SleepArmed { step, deadline_unix };
+        // Append + fsync BEFORE returning (ADR-0063 §4, fsync-then-park).
+        // On failure the cursor does NOT advance — the engine must not
+        // park against an unjournaled sleep.
         self.journal
             .append(&self.workflow_id, &entry)
             .await

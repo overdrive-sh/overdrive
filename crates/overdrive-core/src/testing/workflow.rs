@@ -25,6 +25,7 @@
 //! impl + the `WorkflowSpec` it derives from.
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -83,6 +84,83 @@ impl Workflow for ProvisionRecord {
         match ctx.call(request).await {
             Ok(_response) => WorkflowResult::Success,
             Err(_err) => WorkflowResult::Failed { reason: "provision call failed".to_string() },
+        }
+    }
+}
+
+/// The canonical slice-02 reference workflow: the thinnest durable
+/// sequence that exercises `ctx.sleep` BETWEEN two external effects — a
+/// `ctx.call → ctx.sleep → ctx.call` 3-await shape (slice-02 consumer per
+/// step 02-01 AC5). Authored as one ordinary `async fn run`.
+///
+/// **Distinct from [`ProvisionRecord`], not a mutation of it.** The
+/// slice-01 e2e (01-08) and the `replay_equivalence_provision_record`
+/// invariant (01-07) depend on `ProvisionRecord` staying a
+/// `ctx.call → terminal` shape — this is a separate fixture added
+/// alongside it so the slice-02 `ctx.sleep` await-surface has a real
+/// 3-await consumer without disturbing slice-01's invariants.
+pub struct ProvisionRecordWithSleep {
+    /// Where the first (pre-sleep) provision-write effect is addressed.
+    first_target: SocketAddr,
+    /// Where the second (post-sleep) provision-write effect is addressed.
+    second_target: SocketAddr,
+    /// The logical wait armed via `ctx.sleep` between the two calls.
+    sleep: Duration,
+}
+
+impl ProvisionRecordWithSleep {
+    /// The workflow name this fixture provisions under.
+    pub const WORKFLOW_NAME: &'static str = "provision-record-with-sleep";
+
+    /// The first (pre-sleep) `ctx.call` payload bytes.
+    pub const FIRST_PAYLOAD: &'static [u8] = b"provision-record-pre-sleep";
+
+    /// The second (post-sleep) `ctx.call` payload bytes.
+    pub const SECOND_PAYLOAD: &'static [u8] = b"provision-record-post-sleep";
+
+    /// Construct a `ProvisionRecordWithSleep` addressed at
+    /// `first_target` / `second_target`, sleeping `sleep` between the
+    /// two calls.
+    #[must_use]
+    pub const fn new(first_target: SocketAddr, second_target: SocketAddr, sleep: Duration) -> Self {
+        Self { first_target, second_target, sleep }
+    }
+
+    /// The concrete [`WorkflowSpec`] this fixture corresponds to.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: [`Self::WORKFLOW_NAME`] is a compile-time
+    /// kebab constant that satisfies the `WorkflowName` grammar.
+    #[must_use]
+    pub fn spec() -> WorkflowSpec {
+        WorkflowSpec {
+            name: WorkflowName::new(Self::WORKFLOW_NAME)
+                .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+        }
+    }
+}
+
+#[async_trait]
+impl Workflow for ProvisionRecordWithSleep {
+    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+        let first = CallRequest {
+            target: self.first_target,
+            payload: Bytes::from_static(Self::FIRST_PAYLOAD),
+        };
+        if ctx.call(first).await.is_err() {
+            return WorkflowResult::Failed { reason: "pre-sleep call failed".to_string() };
+        }
+        if ctx.sleep(self.sleep).await.is_err() {
+            return WorkflowResult::Failed { reason: "sleep failed".to_string() };
+        }
+        let second = CallRequest {
+            target: self.second_target,
+            payload: Bytes::from_static(Self::SECOND_PAYLOAD),
+        };
+        match ctx.call(second).await {
+            Ok(_response) => WorkflowResult::Success,
+            Err(_err) => WorkflowResult::Failed { reason: "post-sleep call failed".to_string() },
         }
     }
 }

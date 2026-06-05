@@ -227,6 +227,27 @@ pub enum JournalEntry {
         bytes_sent: usize,
     },
 
+    /// A `ctx.sleep` was armed (slice 02). Records the await-point step
+    /// index and the ABSOLUTE wall-clock `deadline_unix` (an INPUT —
+    /// `clock.unix_now()` at arm time + the sleep duration). Resume
+    /// recomputes the remaining wait as `deadline_unix − clock.unix_now()`
+    /// — there is deliberately NO persisted "remaining duration" field
+    /// (`.claude/rules/development.md` § "Persist inputs, not derived
+    /// state"; a remaining cache would silently desync from the live
+    /// clock on resume).
+    ///
+    /// Additive `#[serde(default)]` per ADR-0063 §2 — a new variant on a
+    /// CBOR `#[serde]` enum is additive by construction (older journals
+    /// never contain it; readers ignore unknown future variants). No
+    /// version bump, no golden fixture.
+    SleepArmed {
+        /// The monotonic await-point index (journal cursor).
+        step: u32,
+        /// Absolute wall-clock deadline (duration since the UNIX epoch)
+        /// computed at arm time — an input, not a derived remaining cache.
+        deadline_unix: std::time::Duration,
+    },
+
     /// The workflow ran to a terminal value (slice 01). Records the
     /// terminal result string form — the engine maps this back to a
     /// `WorkflowResult` on read.
