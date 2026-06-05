@@ -1,0 +1,304 @@
+{
+  "roadmap": {
+    "project_id": "workflow-primitive",
+    "created_at": "2026-06-05T00:00:00Z",
+    "total_steps": 10,
+    "phases": 3,
+    "notes": "Lands the §18 durable-async Workflow primitive (GH #39, J-PLAT-005) over the locked B' direction: distinct Workflow trait + WorkflowCtx (core, no tokio, async_trait), redb-CBOR per-instance journal on the shared ADR-0035 substrate (ADR-0063), async WorkflowEngine driven off the action-shim with reconciler staying pure-sync (ADR-0064), and replay-equivalence as a named DST invariant graduating the ReplayEquivalentEmptyWorkflow placeholder. Three phases = the three carpaccio slices (01 walking skeleton — the heavy slice; 02 ctx.sleep; 03 signals + emit). Slice 01 is decomposed into 6 ordered RED->GREEN->COMMIT steps so each compiles and the acceptance tests it activates can reach GREEN within scope. Every step's test_file + scenario_name is copied VERBATIM from distill/red-classification.md; all 20 scenarios (S-WP-01-01..S-WP-03-05) are covered. HONESTY (enforced, do not violate): journal is redb+CBOR not libSQL (K5); NO `overdrive workflow` CLI verb is invented (#206); NO cross-node resume claimed (#205, single-node only D3); ctx.emit_action goes through the Action channel -> Raft with no IntentStore bypass (slice-03 AC2). Deferrals cite real issues only: cross-node resume #205, CLI verb #206, signals-under-partition #207, journal retention/compaction #208, WASM SDK + version-skew #209.",
+    "reviews": [
+      {
+        "reviewed_at": "2026-06-05",
+        "reviewer": "nw-acceptance-designer-reviewer",
+        "scope": "DELIVER roadmap coverage critique against distill/test-scenarios.md + red-classification.md + feature-delta.md + slices.",
+        "verdict": "APPROVED",
+        "notes": "All 20 scenarios mapped verbatim (test_file + scenario_name exact); zero orphans; S-WP-01-06 walking skeleton in phase 01; dependency DAG compiles in order; honesty constraints (redb+CBOR not libSQL, no CLI verb #206, single-node #205, emit via Action channel->Raft no IntentStore bypass) all verified. Advisory: step 01-06 groups 5 skeleton-closing scaffolds that share one RED->GREEN dependency front — assessed sound, not a sizing violation."
+      }
+    ],
+    "validation": {
+      "status": "approved",
+      "reviewer": "nw-acceptance-designer-reviewer",
+      "approved_at": "2026-06-05"
+    }
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton — durable Workflow engine, redb journal, single-node crash-resume",
+      "description": "Slice 01: the hard core every later slice builds on. Workflow trait + WorkflowCtx (one durable ctx.call) in overdrive-core; JournalStore port + RedbJournalStore + SimJournalStore on the shared redb substrate (ADR-0063); async WorkflowEngine with the journal-cursor replay shape off the action-shim (ADR-0064); pure-sync workflow-lifecycle reconciler bring-up via Action::StartWorkflow; the three DST invariants (replay_equivalence_provision_record graduating the placeholder, WorkflowJournalWriteOrdering, WorkflowExactlyOnceEffectOnResume). First consumer ProvisionRecord (real non-idempotent-to-repeat ctx.call effect). Ships end-to-end with the observable ObservationStore terminal row — NOT infrastructure-only.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Workflow trait, WorkflowCtx, WorkflowResult, concrete WorkflowSpec in core",
+          "description": "Create overdrive-core::workflow: Workflow trait (async_trait, async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult), WorkflowCtx type (injected Clock/Transport/Entropy ports + ctx.call), WorkflowResult enum, concrete WorkflowSpec replacing the placeholder at reconcilers/mod.rs:562. ProvisionRecord impl. No tokio in core; non-determinism flows through ctx only.",
+          "criteria": "Workflow trait + WorkflowCtx + WorkflowResult + concrete WorkflowSpec exist in core; ProvisionRecord drives run to a terminal WorkflowResult; no tokio in core.",
+          "test_file": "crates/overdrive-core/tests/acceptance/workflow_trait_drives_to_terminal.rs",
+          "scenario_name": "provision_record_drives_to_terminal_workflow_result",
+          "acceptance_criteria": [
+            "Workflow trait in overdrive-core::workflow uses async_trait: async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult; the trait declaration pulls no tokio into core (dst-lint passes)",
+            "WorkflowResult is a #[non_exhaustive] core enum (Success, Failed{reason}, Cancelled) per ADR-0064 §2, distinct from TerminalCondition; ProvisionRecord drives run to Success in a #[test]",
+            "concrete WorkflowSpec replaces the unit placeholder at reconcilers/mod.rs:562; Action::StartWorkflow { spec, correlation } still compiles with the new shape",
+            "WorkflowCtx carries injected Arc<dyn Clock/Transport/Entropy> + ctx.call(req) -> Result<Resp> through Transport; the ctx type definition contains no Instant::now/rand/tokio::time (dst-lint clean)",
+            "S-WP-01-01 scaffold workflow_trait_drives_to_terminal.rs goes GREEN (drop #[should_panic], add real assertions)"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/workflow/mod.rs",
+            "crates/overdrive-core/src/lib.rs",
+            "crates/overdrive-core/src/reconcilers/mod.rs",
+            "crates/overdrive-core/tests/acceptance/workflow_trait_drives_to_terminal.rs"
+          ],
+          "implementation_notes": "WorkflowSpec move: the placeholder struct WorkflowSpec; lives in reconcilers/mod.rs:560-562 today because Action carries it; relocate/define the concrete shape in workflow/mod.rs and re-export so Action::StartWorkflow keeps compiling. async_trait is already a core dep (Driver/Transport/Llm use it) — confirm before adding. WorkflowResult inherits the ADR-0037 §5 #[non_exhaustive] + K8s-Condition SemVer convention, NOT the TerminalCondition type. ProvisionRecord is a minimal 2-step (ctx.call -> terminal) sequence.",
+          "deps": [],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "01-02",
+          "name": "Workflow body purity: no step-machine, all nondeterminism through ctx",
+          "description": "Land the K6 structural property (AST/grep over the ProvisionRecord workflow body: zero step-enum decls, zero state-transition match arms) and the D-INH-4 nondeterminism check (no Instant::now/reqwest/tokio::time::sleep/rand in the body — only ctx.*). Two scenarios, both author-surface properties over the core trait shape from 01-01.",
+          "criteria": "K6 AST/grep check confirms zero step-machine boilerplate in a workflow body; a dst-lint-style check confirms nondeterminism routes only through ctx.",
+          "test_file": "crates/overdrive-core/tests/acceptance/workflow_body_has_no_step_machine.rs",
+          "scenario_name": "provision_record_body_has_zero_step_enum_and_zero_transition_match",
+          "acceptance_criteria": [
+            "K6 metric: an AST/grep check over the ProvisionRecord Workflow impl body asserts zero step-enum declarations and zero state-transition match arms (mechanically verifiable, not free-hand review) per US-WP-1 AC1 / Eclipse H1+L1",
+            "S-WP-01-02 scaffold workflow_body_has_no_step_machine.rs goes GREEN",
+            "S-WP-01-03: a clean workflow body routes ALL nondeterminism through ctx (positive fn) AND a body smuggling non-ctx nondeterminism is rejected (negative fn) — the dst-lint-style check flags Instant::now/reqwest/tokio::time::sleep/rand outside ctx (D-INH-4 / US-WP-1 AC2)",
+            "S-WP-01-03 scaffold workflow_body_routes_nondeterminism_through_ctx.rs goes GREEN for both the positive (clean_workflow_body_routes_all_nondeterminism_through_ctx) and negative (workflow_body_smuggling_non_ctx_nondeterminism_is_rejected) functions"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/tests/acceptance/workflow_body_has_no_step_machine.rs",
+            "crates/overdrive-core/tests/acceptance/workflow_body_routes_nondeterminism_through_ctx.rs"
+          ],
+          "implementation_notes": "This step covers two scaffolds (S-WP-01-02, S-WP-01-03); S-WP-01-03 carries a positive + a negative test function (the 29-vs-20 note in red-classification). Both are author-surface property assertions over the trait/ctx shape from 01-01 — no new production component, hence test-only files_to_modify. If the K6 AST check needs a tiny helper it lives in the test module, not production src/.",
+          "deps": [
+            "01-01"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "01-03",
+          "name": "JournalStore port + SimJournalStore (in-memory, injectable fsync-failure)",
+          "description": "Define the JournalStore port in overdrive-control-plane::journal (append, load_journal, probe) per ADR-0063. JournalEntry CBOR enum (ciborium): Started/CallResult/Terminal for slice 01, additive #[serde(default)]. SimJournalStore in overdrive-sim with an inject_fsync_failure handle. Records inputs/digests, never derived caches.",
+          "criteria": "JournalStore trait + JournalEntry CBOR enum defined; SimJournalStore round-trips losslessly and records inputs not derived state; inject_fsync_failure handle exists.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs",
+          "scenario_name": "provision_record_journal_entry_records_inputs_not_a_derived_cache",
+          "acceptance_criteria": [
+            "JournalStore async trait (Send+Sync) in overdrive-control-plane::journal: append (one fsync'd write, ADR-0063 §4), load_journal (range scan (id,0)..=(id,u32::MAX) -> ordered Vec<JournalEntry>), probe (Earned-Trust sentinel write->fsync->readback->delete); typed thiserror JournalStoreError + ProbeError",
+            "JournalEntry is a CBOR (ciborium) #[serde(...)] enum with slice-01 variants Started{spec_digest,input_digest}, CallResult{step,correlation,response_digest}, Terminal{result}; additive evolution via #[serde(default)] (ADR-0063 §2) — no rkyv envelope, no libSQL",
+            "SimJournalStore in overdrive-sim::adapters::journal stores CBOR bytes in a BTreeMap<(WorkflowId,u32),Vec<u8>> (NOT HashMap); proptest round-trip: append then load_journal returns byte-equal ordered entries",
+            "SimJournalStore::inject_fsync_failure() makes the next append return JournalStoreError without persisting (used by the ordering invariant in 01-06); clear_fsync_failure() resets",
+            "journal entries record INPUTS/digests (spec_digest, response_digest), never a derived deadline/remaining cache (development.md Persist inputs, not derived state) — asserted; S-WP-01-05 scaffold journal_records_inputs_not_derived.rs goes GREEN"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/journal/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-sim/src/adapters/journal.rs",
+            "crates/overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs"
+          ],
+          "implementation_notes": "Mirrors ViewStore/SimViewStore almost line-for-line (ADR-0063 Negative consequence: shapes copy-adaptable). JournalEntry lives co-located with JournalStore. ciborium is already in the graph from ADR-0035 — no new dep. Both port + sim adapter behind #[allow(dead_code)] until the engine (01-05) wires them. SimJournalStore in src/adapters/mod.rs + lib.rs re-exports.",
+          "deps": [
+            "01-01"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "01-04",
+          "name": "RedbJournalStore on the shared redb substrate (real-IO, integration-tests)",
+          "description": "RedbJournalStore sharing the RedbViewStore Arc<Database> and redb file per ADR-0063 §1: one __wf_journal__ table, key (WorkflowId,u32), value CBOR JournalEntry. append = one Durability::Immediate write; load_journal = range scan; probe writes a sentinel. Real-redb integration test asserts the CallResult is present and no libSQL table exists (K5/O6).",
+          "criteria": "RedbJournalStore shares the redb file/handle, appends durably, range-scans on load, probes per Earned-Trust; the call result is read back from real redb and no libSQL journal exists.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/workflow_journal/journal_writes_to_redb.rs",
+          "scenario_name": "call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exists",
+          "acceptance_criteria": [
+            "RedbJournalStore::new takes the shared Arc<Database> (same file as RedbViewStore — ADR-0063 §1 one-file-two-layouts); the __wf_journal__ table name uses the reserved prefix outside the ReconcilerName grammar so it cannot collide with a reconciler table",
+            "append executes ONE redb write with Durability::Immediate (fsync before return, ADR-0063 §4); load_journal(id) range-scans (id,0)..=(id,u32::MAX) returning entries in step order; probe writes the (__probe_wf__,0) sentinel, fsyncs, reads back byte-equal, deletes, leaving no state on success",
+            "integration test (under tests/integration/workflow_journal/, integration-tests feature, real fsync via Lima): write a ProvisionRecord CallResult, read it back from the real redb journal byte-equal; grep/dep-graph confirms NO libSQL journal table (K5/O6, US-WP-2 AC1)",
+            "S-WP-01-04 scaffold journal_writes_to_redb.rs goes GREEN; runs via cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests",
+            "dst-lint passes (adapter-host crate, not core); cargo xtask mutants on src/journal/redb.rs achieves kill rate >= 80%"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/journal/redb.rs",
+            "crates/overdrive-control-plane/src/journal/mod.rs",
+            "crates/overdrive-control-plane/tests/integration/workflow_journal/journal_writes_to_redb.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "implementation_notes": "Precedent: tests/integration/redb_view_store.rs (sibling real-redb ViewStore test). Wire the mod integration { mod workflow_journal { mod journal_writes_to_redb; } } subtree in tests/integration.rs. ADR-0063 §1: redb begin_read/begin_write both take &self so the shared Arc<Database> is safe. The probe is part of the boot composition-root 'probe view-store AND journal-store, then use' invariant (wired in 01-05).",
+          "deps": [
+            "01-03"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "01-05",
+          "name": "WorkflowEngine with journal-cursor replay; action-shim dispatches off the shim",
+          "description": "WorkflowEngine in overdrive-control-plane::workflow_runtime (async, tokio task set): on start, load_journal, build WorkflowCtx with the replay buffer + cursor, drive run(&ctx).await; each ctx.* is check-then-record (ADR-0064 §3). Replace the no-op Action::StartWorkflow arm at action_shim/mod.rs:446 with WorkflowEngine::start, off the shim. On terminal, write the ObservationStore terminal-result row keyed by CorrelationKey.",
+          "criteria": "The engine drives run with the cursor replay shape; the action-shim hands StartWorkflow to WorkflowEngine::start off the shim (not run as a reconciler); terminal row written via the sanctioned path.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_dispatches_start_workflow_to_engine.rs",
+          "scenario_name": "start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_as_a_reconciler",
+          "acceptance_criteria": [
+            "WorkflowEngine::start(spec, correlation) takes Arc<dyn JournalStore> + injected ports mandatorily (no builder default); load_journal then spawn run(&ctx) as a tracked tokio task; the cursor replay shape (ADR-0064 §3): replay (cursor<len) returns recorded entry without re-firing the effect, live (cursor==len) performs the effect + appends with fsync BEFORE suspend + advances cursor",
+            "action_shim/mod.rs:446 no-op arm Action::StartWorkflow { .. } => Ok(()) is REPLACED with a dispatch to WorkflowEngine::start, off the shim exactly as Action::StartAllocation -> Driver::start (ADR-0064 §5, DDD-5 — the RATIFY-flagged engine<->reconciler boundary); the workflow body is NOT run as a per-tick reconcile loop",
+            "on run returning a WorkflowResult, the engine writes a terminal-result ObservationStore row keyed by the instance CorrelationKey via the shim's ObservationStore write path (NOT a direct engine write bypassing the channels) — slice-01 AC5",
+            "S-WP-01-11 scaffold action_shim_dispatches_start_workflow_to_engine.rs goes GREEN (the start action is dispatched to the engine off the shim, not run as a reconciler)",
+            "cargo xtask mutants on src/workflow_runtime + the action_shim StartWorkflow arm achieves kill rate >= 80%"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/workflow_runtime/mod.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/tests/acceptance/action_shim_dispatches_start_workflow_to_engine.rs"
+          ],
+          "implementation_notes": "ADR-0064 §5 is the subtlest boundary (DDD-5, RATIFY-flagged): the engine is to workflows what Driver is to allocations — driven off the action-shim (ADR-0023's sanctioned async boundary), NOT a reconciler. The action_shim:446 arm currently groups Noop | StartWorkflow | HttpCall as no-dispatch; split StartWorkflow out into its own arm calling WorkflowEngine::start. Composition root (overdrive-cli) must probe both view-store AND journal-store at boot before the first workflow starts (ADR-0063 §4); refusing startup on probe failure with health.startup.refused is part of the engine wiring.",
+          "deps": [
+            "01-01",
+            "01-04"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "01-06",
+          "name": "Lifecycle reconciler re-hydrate + the three workflow DST invariants (walking skeleton)",
+          "description": "Pure-sync workflow-lifecycle reconciler re-emits Action::StartWorkflow for a running instance with no live engine task on restart (ADR-0064 §5). Graduate the ReplayEquivalentEmptyWorkflow placeholder into ReplayEquivalenceProvisionRecord (real journal replay, byte-equal trajectory + bounded progress, K4); add WorkflowJournalWriteOrdering and WorkflowExactlyOnceEffectOnResume. Lands the @walking_skeleton crash-resume S-WP-01-06.",
+          "criteria": "Lifecycle reconciler re-hydrates on restart (stays pure-sync); the three workflow DST invariants are named, green on the CI path, seed-reproducible; the walking-skeleton crash-resume is demonstrated.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/workflow_crash_resume_exactly_once.rs",
+          "scenario_name": "killing_after_step_records_does_not_repeat_the_effect_on_resume",
+          "acceptance_criteria": [
+            "S-WP-01-06 (@walking_skeleton): under DST, kill the instance AFTER ctx.call records but BEFORE terminal, restart -> the ctx.call effect executes EXACTLY ONCE (SimTransport call count == 1) and the resumed WorkflowResult is byte-identical to the uninterrupted run (K1/K3, O1/O4); scaffold workflow_crash_resume_exactly_once.rs GREEN",
+            "S-WP-01-07: a committed step is read back from the journal and the run resumes from the first unrecorded await (K2/O2, single-node); scaffold workflow_committed_step_survives_crash.rs GREEN",
+            "S-WP-01-08: the workflow-lifecycle reconciler (pure-sync, ADR-0035 shape) re-emits Action::StartWorkflow for a running instance with no live engine task on restart; ReconcilerIsPure still holds with it registered; scaffold lifecycle_reconciler_rehydrates_on_restart.rs GREEN (US-WP-3 AC4)",
+            "S-WP-01-09 (K4 load-bearing): ReplayEquivalenceProvisionRecord is a NAMED overdrive-sim Invariant variant (no inline literal) graduating ReplayEquivalentEmptyWorkflow; real journal replay (uninterrupted vs crash-resumed byte-equal) + assert_eventually!(is_terminal); prints a seed, reproduces bit-for-bit; on the cargo dst critical path; scaffold replay_equivalence_provision_record_invariant.rs GREEN",
+            "S-WP-01-10: WorkflowJournalWriteOrdering invariant — SimJournalStore::inject_fsync_failure on the next append -> the engine does NOT advance the cursor or suspend with an unrecorded step (mirrors ADR-0035 WriteThroughOrdering); WorkflowExactlyOnceEffectOnResume also added; scaffold workflow_journal_write_ordering.rs GREEN; cargo xtask mutants on the evaluators >= 80%"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-sim/src/invariants/mod.rs",
+            "crates/overdrive-sim/src/invariants/evaluators.rs",
+            "crates/overdrive-sim/src/harness.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_crash_resume_exactly_once.rs",
+            "crates/overdrive-control-plane/tests/acceptance/lifecycle_reconciler_rehydrates_on_restart.rs"
+          ],
+          "implementation_notes": "Graduates the placeholder: mod.rs:136 ReplayEquivalentEmptyWorkflow variant -> ReplayEquivalenceProvisionRecord; evaluators.rs:584 evaluate_replay_equivalent_empty_workflow (two-SimEntropy-transcript stub) -> real journal replay against engine + SimJournalStore; harness.rs:404 wiring. The lifecycle reconciler state lands in overdrive-core::reconcilers (AnyState variant) + control-plane registration per ADR-0064 §1 — it does not know cold-start vs crash-resume; the engine's load_journal decides. This step ALSO activates the remaining slice-01 sim/control-plane scaffolds (01-06,07,08,09,10) which all need the engine (01-05) + invariants live; they reach GREEN together as the walking skeleton closes. SINGLE-NODE only (D3/#205) — no AC claims cross-node resume.",
+          "deps": [
+            "01-05"
+          ],
+          "agent": "nw-software-crafter"
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Durable ctx.sleep across a crash",
+      "description": "Slice 02: add ctx.sleep(Duration) as a durable await-point routed through the injected Clock (SimClock parks on a deadline; harness advances logical time). Additive SleepArmed{step,deadline_unix} journal entry (records the DEADLINE input, not 'remaining' — development.md Persist inputs, not derived state). Extend the consumer to ctx.call -> ctx.sleep -> ctx.call. Extend the replay invariant to hold across the sleep. Smaller than slice 01 (one additive ctx method + one additive journal variant + invariant extension).",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "ctx.sleep through Clock; SleepArmed journal variant records deadline",
+          "description": "Add ctx.sleep(Duration) to WorkflowCtx routed through the injected Clock; live writes the SleepArmed{step,deadline_unix} additive CBOR journal entry (the deadline, an input) then parks on the SimClock deadline. Resume recomputes remaining wait from recorded_deadline - clock.now(). Covers the inputs-not-derived journal scenario.",
+          "criteria": "ctx.sleep routes through Clock and journals the deadline (input), not a remaining-duration cache; the SleepArmed variant is additive CBOR.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/workflow_sleep_records_deadline_not_remaining.rs",
+          "scenario_name": "sleep_armed_journal_entry_records_deadline_input_not_a_remaining_duration_cache",
+          "acceptance_criteria": [
+            "ctx.sleep(Duration) added to WorkflowCtx routed through the injected Arc<dyn Clock> (SimClock parks on a deadline, harness advances logical time); no tokio::time::sleep in core (dst-lint clean)",
+            "SleepArmed{step,deadline_unix} added to the JournalEntry enum additively via #[serde(default)] (ADR-0063 §2) — no version bump, no golden fixture; CBOR not rkyv",
+            "the sleep-armed entry records the DEADLINE (an input); resume recomputes remaining wait as recorded_deadline - clock.now() — no persisted 'remaining ms' field (development.md Persist inputs, not derived state; slice-02 AC4)",
+            "S-WP-02-03 scaffold workflow_sleep_records_deadline_not_remaining.rs goes GREEN",
+            "ProvisionRecord (or a slice-02 consumer) extended to a ctx.call -> ctx.sleep -> ctx.call 3-await shape"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/workflow/mod.rs",
+            "crates/overdrive-control-plane/src/journal/mod.rs",
+            "crates/overdrive-control-plane/src/workflow_runtime/mod.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_sleep_records_deadline_not_remaining.rs"
+          ],
+          "implementation_notes": "The ctx.sleep live path: write SleepArmed (fsync) then suspend parking on the Clock deadline (ADR-0064 §3 live branch for sleep). Replay path: ctx.sleep returns immediately if the recorded deadline has passed. The journal-cursor machinery from slice 01 is reused unchanged — this is purely an additive ctx method + entry variant (ADR-0064 §4).",
+          "deps": [
+            "01-06"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "02-02",
+          "name": "Sleep crash-resume invariants + replay-equivalence across the sleep",
+          "description": "Extend the DST surface for the sleep: crash during the sleep window does not repeat the pre-sleep step (SimTransport count); post-sleep step fires only at/after the ORIGINAL deadline regardless of crash timing (SimClock); and replay-equivalence holds across the sleep, seeded and reproducible. Extends the named replay invariant rather than adding a new family.",
+          "criteria": "Crash spanning the sleep window does not repeat the pre-sleep step; the post-sleep step honours the original deadline; replay-equivalence holds across the sleep.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/workflow_sleep_crash_pre_sleep_step_not_repeated.rs",
+          "scenario_name": "crash_during_sleep_window_does_not_repeat_the_pre_sleep_step",
+          "acceptance_criteria": [
+            "S-WP-02-01: under DST, crash during the sleep window -> on resume the pre-sleep ctx.call executes exactly once (SimTransport call count == 1) (K1/O1); scaffold workflow_sleep_crash_pre_sleep_step_not_repeated.rs GREEN",
+            "S-WP-02-02: the post-sleep ctx.call fires only at/after the ORIGINAL recorded deadline, regardless of when the crash occurred (asserted via SimClock advancing logical time) (K3/O4); scaffold workflow_sleep_resumes_to_original_deadline.rs GREEN",
+            "S-WP-02-04: the replay-equivalence invariant holds across a durable sleep, seeded and reproducible bit-for-bit (K4/O5); scaffold replay_equivalence_holds_across_sleep.rs GREEN",
+            "the ReplayEquivalenceProvisionRecord invariant (or its slice-02-extended evaluator) exercises the ctx.call -> ctx.sleep -> ctx.call shape on the cargo dst critical path",
+            "cargo xtask mutants on the extended sleep evaluators achieves kill rate >= 80%"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-sim/src/invariants/evaluators.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_sleep_crash_pre_sleep_step_not_repeated.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_sleep_resumes_to_original_deadline.rs",
+            "crates/overdrive-sim/tests/acceptance/replay_equivalence_holds_across_sleep.rs"
+          ],
+          "implementation_notes": "Extends the existing ReplayEquivalenceProvisionRecord evaluator (from 01-06) to drive the 3-await sleep shape, rather than minting a new invariant family — slice briefs say 'extend an existing named DST invariant'. SINGLE-NODE only (D3/#205). Production wall-clock fidelity is OUT (slice-02 brief): DST drives logical time; production uses SystemClock, same Clock trait, no extra surface.",
+          "deps": [
+            "02-01"
+          ],
+          "agent": "nw-software-crafter"
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Typed signals + workflow-to-cluster Action emission",
+      "description": "Slice 03: ctx.wait_for_signal(SignalKey) on a typed ObservationStore signal (journaled await-point; resume re-checks whether the signal already arrived) and ctx.emit_action(Action) routing a typed cluster mutation through the SAME Action channel the reconciler runtime consumes -> Raft, never a direct IntentStore write (development.md Workflow contract rule 6). Additive SignalAwaited/SignalSeen/ActionEmitted CBOR variants. Extend the DST invariant across a signal wait + emit. In-process single-node signal delivery only (#207).",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "ctx.wait_for_signal + ctx.emit_action; additive journal variants",
+          "description": "Add ctx.wait_for_signal(SignalKey) (ObservationStore signal rows; SignalAwaited/SignalSeen additive CBOR variants) and ctx.emit_action(Action) (routes through the Action channel -> Raft; ActionEmitted additive variant) to WorkflowCtx per ADR-0064 §4. emit_action lands the typed Action in the Raft channel with NO direct IntentStore write. Covers the emit-lands-in-channel scenario.",
+          "criteria": "ctx.wait_for_signal and ctx.emit_action exist; emit_action lands in the Action channel -> Raft with no IntentStore bypass; signal/emit journal variants are additive CBOR.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/workflow_emit_action_lands_in_raft_channel.rs",
+          "scenario_name": "emit_action_lands_in_the_action_channel_and_the_workflow_makes_no_direct_intent_store_write",
+          "acceptance_criteria": [
+            "ctx.wait_for_signal(SignalKey) -> SignalValue added to WorkflowCtx reading typed signals from the ObservationStore; SignalAwaited{step,signal_key} + SignalSeen{step,signal_key,value_digest} added to JournalEntry additively via #[serde(default)] (ADR-0063 §2)",
+            "ctx.emit_action(Action) added routing through the SAME Action channel the reconciler runtime consumes -> Raft (whitepaper §18 Primitive Composition; development.md Workflow contract rule 6 — no Raft bypass); ActionEmitted{step,action_digest} added additively",
+            "S-WP-03-03: ctx.emit_action lands the typed Action in the Action/Raft channel AND the workflow makes NO direct IntentStore write — asserted (US-WP-5 AC2, slice-03 AC2); scaffold workflow_emit_action_lands_in_raft_channel.rs GREEN",
+            "ctx does NOT expose a .put() on IntentStore (development.md Workflow contract rule 6); the emit goes only through ctx.emit_action",
+            "no tokio/Instant/rand smuggled into core; CBOR additive variants only (no rkyv, no libSQL)"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/workflow/mod.rs",
+            "crates/overdrive-control-plane/src/journal/mod.rs",
+            "crates/overdrive-control-plane/src/workflow_runtime/mod.rs",
+            "crates/overdrive-control-plane/tests/acceptance/workflow_emit_action_lands_in_raft_channel.rs"
+          ],
+          "implementation_notes": "Two additive ctx methods + three additive journal variants on the slice-01 machinery (ADR-0064 §4). Signal delivery is in-process single-node via the ObservationStore (#207 cross-node-under-partition is OUT). The emit reuses the existing Action channel -> Raft commit path the reconciler runtime already uses; ActionEmitted makes the emit idempotent on resume (covered by 03-02).",
+          "deps": [
+            "01-06"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "03-02",
+          "name": "Signal + emit crash-safety invariants + replay-equivalence",
+          "description": "Extend the DST surface for signals/emit: crash while blocked on a signal re-blocks on the SAME signal on resume; a signal seen before the crash is not re-waited; an Action emitted before the crash is not re-emitted on resume (ActionEmitted journal entry makes emit idempotent); and replay-equivalence holds across a signal wait + an emit, seeded and reproducible.",
+          "criteria": "Blocked-on-signal re-blocks on the same signal after crash; a seen signal is not re-waited; an emitted Action is not re-emitted; replay-equivalence holds across signal+emit.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/workflow_signal_wait_reblocks_after_crash.rs",
+          "scenario_name": "crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume",
+          "acceptance_criteria": [
+            "S-WP-03-01: crash while blocked on ctx.wait_for_signal -> on resume the workflow blocks on the SAME signal, no duplicate downstream effect (K1/O1, US-WP-5 AC1); scaffold workflow_signal_wait_reblocks_after_crash.rs GREEN",
+            "S-WP-03-02: a signal seen before the crash (SignalSeen recorded) is NOT re-waited on resume — replay returns the recorded value (O1); scaffold workflow_signal_already_seen_not_rewaited.rs GREEN",
+            "S-WP-03-04: an Action emitted before the crash (ActionEmitted recorded) is NOT re-emitted on resume (K1/O1, US-WP-5 AC3); scaffold workflow_emit_action_not_re_emitted_after_crash.rs GREEN",
+            "S-WP-03-05: the replay-equivalence invariant holds across a signal wait + an emit, seeded and reproducible bit-for-bit (K4/O5, US-WP-5 AC4); scaffold replay_equivalence_holds_across_signal_and_emit.rs GREEN",
+            "cargo xtask mutants on the extended signal/emit evaluators achieves kill rate >= 80%; single-node only (#207)"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-sim/src/invariants/evaluators.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_signal_wait_reblocks_after_crash.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_signal_already_seen_not_rewaited.rs",
+            "crates/overdrive-sim/tests/acceptance/workflow_emit_action_not_re_emitted_after_crash.rs",
+            "crates/overdrive-sim/tests/acceptance/replay_equivalence_holds_across_signal_and_emit.rs"
+          ],
+          "implementation_notes": "Extends the ReplayEquivalenceProvisionRecord evaluator to drive the signal-wait + emit shape (slice brief: 'extend the DST invariant'). The check-then-record replay shape (ADR-0064 §3) makes both the signal-wait and the emit idempotent on resume: replay reads SignalSeen / skips a recorded ActionEmitted rather than re-firing. In-process single-node signal delivery only (#207).",
+          "deps": [
+            "03-01"
+          ],
+          "agent": "nw-software-crafter"
+        }
+      ]
+    }
+  ]
+}
