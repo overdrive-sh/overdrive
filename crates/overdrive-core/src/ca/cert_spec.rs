@@ -128,6 +128,38 @@ impl CertSpec {
         Self { role: CertRole::Intermediate { path_len: 0 }, subject }
     }
 
+    /// Build the **workload leaf** (SVID) certificate profile.
+    ///
+    /// The produced profile is `CA:FALSE`, carries exactly `digitalSignature`
+    /// (signing-only — NO `keyCertSign`, NO `cRLSign`), marks `keyUsage`
+    /// critical, and carries NO pathLen constraint ([`CertRole::Svid`]). The
+    /// sole URI SAN is the requested [`SpiffeId`], whose canonical-lowercase
+    /// form is preserved exactly.
+    ///
+    /// # The single-URI-SAN invariant (KPI K2)
+    ///
+    /// `san_uris` is the **SAN projection** for the workload — the set of
+    /// `spiffe://` URI SANs the certificate would carry. A SPIFFE-compliant
+    /// SVID carries **exactly one** URI SAN (SPIFFE spec / research Finding 2).
+    /// This constructor enforces that as a precondition: a projection yielding
+    /// zero or two-or-more URI SANs is rejected with
+    /// [`CertSpecError::InvalidSan`] carrying the offending cardinality — and
+    /// **no partial spec escapes**, since the cardinality is checked before any
+    /// `CertSpec` is constructed. This is the highest-value invariant in the
+    /// built-in-CA feature (ADR-0063 D5 reconciliation B): it lives here in
+    /// `overdrive-core` so it is DST-testable and dst-lint-clean, ahead of any
+    /// `rcgen` translation in the host adapter.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CertSpecError::InvalidSan`] when `san_uris.len() != 1`,
+    /// carrying the count it would have produced.
+    pub fn svid(san_uris: Vec<SpiffeId>) -> Result<Self, CertSpecError> {
+        let [subject] = <[SpiffeId; 1]>::try_from(san_uris)
+            .map_err(|rejected| CertSpecError::invalid_san(rejected.len()))?;
+        Ok(Self { role: CertRole::Svid, subject })
+    }
+
     /// The role this profile plays in the trust hierarchy.
     #[must_use]
     pub const fn role(&self) -> CertRole {
@@ -138,6 +170,20 @@ impl CertSpec {
     #[must_use]
     pub const fn subject(&self) -> &SpiffeId {
         &self.subject
+    }
+
+    /// The `spiffe://` URI SANs this profile carries, in canonical order.
+    ///
+    /// A leaf ([`Svid`](CertRole::Svid)) carries **exactly one** URI SAN — the
+    /// requested workload identity, with its canonical-lowercase form preserved
+    /// (the single-URI-SAN invariant, KPI K2, enforced at [`svid`](Self::svid)
+    /// construction time). The CA roles carry their authority subject as the
+    /// sole URI SAN as well; the observable contract is the URI-SAN set, not
+    /// how the subject is stored internally. Returns an owned `Vec` so the set
+    /// is stable regardless of internal storage.
+    #[must_use]
+    pub fn san_uris(&self) -> Vec<SpiffeId> {
+        vec![self.subject.clone()]
     }
 
     /// Whether the profile is a CA (`basicConstraints` CA:TRUE).

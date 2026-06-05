@@ -26,58 +26,124 @@
 //! below); they import the now-built `CertSpec` policy surface.
 
 use overdrive_core::{CertRole, CertSpec, CertSpecError, KeyUsage, SpiffeId};
+use proptest::prelude::*;
+
+// ---------------------------------------------------------------------------
+// SpiffeId strategies — generators live next to the test that consumes them
+// (`SpiffeId` exposes no `Arbitrary` impl; the canonical-lowercase form is the
+// newtype's own responsibility, so we generate already-lowercase components and
+// never re-normalise here — a `normalize_spiffe_id()` helper would be a
+// missing-newtype-constructor smell per `.claude/rules/development.md`).
+// ---------------------------------------------------------------------------
+
+/// Generate a single valid workload `SpiffeId` of the canonical shape
+/// `spiffe://overdrive.local/job/<name>/alloc/<id>`. Components are drawn from
+/// the lowercase DNS-label class so the generated value is always a valid SVID
+/// identity (never `""`, never a fixed fixture).
+fn workload_spiffe_id() -> impl Strategy<Value = SpiffeId> {
+    ("[a-z][a-z0-9-]{0,20}", "[a-z0-9][a-z0-9]{0,15}").prop_map(|(name, alloc)| {
+        SpiffeId::new(&format!("spiffe://overdrive.local/job/{name}/alloc/{alloc}"))
+            .expect("generated SpiffeId components are valid")
+    })
+}
 
 // ---------------------------------------------------------------------------
 // US-CA-04 / S-04 — Workload SVID leaf profile + single-URI-SAN invariant
 // ---------------------------------------------------------------------------
 
-/// `@in-memory` `@property` `@S-04` — PROPERTY (KPI K2): for ANY `SpiffeId`
-/// whose SAN projection yields exactly one `spiffe://` URI, `CertSpec::svid`
-/// accepts it and the produced spec carries CA:FALSE, exactly that one URI
-/// SAN, keyUsage=digitalSignature critical, and NO keyCertSign/cRLSign.
-///
-/// DELIVER: `proptest!` over a `SpiffeId` strategy
-/// (`spiffe://overdrive.local/job/<name>/alloc/<id>`), assert the
-/// `CertSpec::svid(..)` Ok-profile invariants. The Universe is the spec's
-/// port-exposed observable surface (role, `san_uris`, `is_ca`, `key_usages`) —
-/// never internal builder fields.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn svid_spec_carries_exactly_one_uri_san_and_leaf_key_usage() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / CertSpec::svid accepts one-URI SpiffeId, \
-         profile = CA:FALSE + single URI SAN + digitalSignature-critical, no keyCertSign/cRLSign)"
-    );
+proptest! {
+    /// `@in-memory` `@property` `@S-04` — PROPERTY (KPI K2): for ANY `SpiffeId`
+    /// whose SAN projection yields exactly one `spiffe://` URI, `CertSpec::svid`
+    /// accepts it and the produced spec carries CA:FALSE, exactly that one URI
+    /// SAN, keyUsage=digitalSignature critical, and NO keyCertSign/cRLSign.
+    ///
+    /// The Universe is the spec's port-exposed observable surface — `role`,
+    /// `san_uris`, `is_ca`, `key_usages`, `key_usage_critical`, `path_len`,
+    /// `subject` — asserted by EXACT equality (fail-closed: a stray
+    /// `keyCertSign` / `cRLSign` flips the `key_usages` assertion). Never reads
+    /// internal builder fields.
+    #[test]
+    fn svid_spec_carries_exactly_one_uri_san_and_leaf_key_usage(id in workload_spiffe_id()) {
+        let spec = CertSpec::svid(vec![id.clone()]).expect("exactly one URI SAN is accepted");
+
+        // role — the SVID leaf carries no pathLen field by construction.
+        prop_assert_eq!(spec.role(), CertRole::Svid);
+
+        // is_ca — CA:FALSE (a leaf cannot sign other certificates).
+        prop_assert!(!spec.is_ca(), "SVID must be CA:FALSE");
+
+        // path_len — a non-CA leaf carries no pathLenConstraint.
+        prop_assert_eq!(spec.path_len(), None, "SVID carries no pathLen constraint");
+
+        // san_uris — EXACTLY one URI SAN, equal to the requested identity.
+        prop_assert_eq!(spec.san_uris(), vec![id.clone()], "SVID carries exactly one URI SAN");
+
+        // key_usages — EXACTLY digitalSignature, fail-closed: NO keyCertSign,
+        // NO cRLSign (the load-bearing leaf-vs-CA distinction).
+        prop_assert_eq!(
+            spec.key_usages(),
+            vec![KeyUsage::DigitalSignature],
+            "SVID carries exactly digitalSignature, no keyCertSign/cRLSign"
+        );
+
+        // key_usage_critical — keyUsage marked critical.
+        prop_assert!(spec.key_usage_critical(), "keyUsage must be marked critical");
+
+        // subject — preserved through the SpiffeId newtype.
+        prop_assert_eq!(spec.subject(), &id);
+    }
+
+    /// `@in-memory` `@property` `@S-04` `@error` — PROPERTY (KPI K2, the SPIFFE
+    /// spec's hardest rule, research Finding 2): for ANY SAN projection that
+    /// would yield ZERO or TWO-OR-MORE `spiffe://` URI SANs, `CertSpec::svid`
+    /// is rejected with `CertSpecError::InvalidSan { found }` carrying the
+    /// offending cardinality, BEFORE any certificate material is produced.
+    ///
+    /// The strategy generates projections of length `0` and `2..=8` (every
+    /// non-one cardinality); the assertion pins `Err(InvalidSan { found })`
+    /// with `found == projection.len()`. `svid` returns `Result`, so no partial
+    /// spec can escape — there is no `CertSpec` value to inspect on the `Err`
+    /// path. This is the negative-testing instrument for the single-URI
+    /// invariant (Hebert ch.6 generalising-example via the cardinality axis).
+    #[test]
+    fn svid_spec_rejects_zero_or_multiple_uri_sans_before_any_cert(
+        sans in prop_oneof![
+            Just(Vec::<SpiffeId>::new()),
+            proptest::collection::vec(workload_spiffe_id(), 2..=8),
+        ],
+    ) {
+        let found = sans.len();
+        prop_assert!(found == 0 || found >= 2, "strategy yields only non-one cardinalities");
+
+        let result = CertSpec::svid(sans);
+
+        // Rejected with the distinct InvalidSan variant carrying the exact
+        // offending count — never a flattened catch-all, never a partial spec.
+        prop_assert_eq!(
+            result,
+            Err(CertSpecError::InvalidSan { found }),
+            "0 or >=2 URI SANs is rejected with InvalidSan carrying the cardinality"
+        );
+    }
 }
 
-/// `@in-memory` `@property` `@S-04` `@error` — PROPERTY (KPI K2, the
-/// SPIFFE spec's hardest rule, research Finding 2): for ANY SAN projection
-/// that would yield ZERO or TWO-OR-MORE `spiffe://` URI SANs,
-/// `CertSpec::svid` is rejected with `CertSpecError::InvalidSan` BEFORE any
-/// certificate material is produced.
-///
-/// DELIVER: `proptest!` over a strategy generating `0` and `>=2` URI-SAN
-/// inputs; assert every case returns `Err(CertSpecError::InvalidSan)` and
-/// that no partial spec escapes. This is the negative-testing instrument
-/// for the single-URI invariant (Hebert ch.6).
+/// `@in-memory` `@S-04` — the SVID's sole URI SAN equals the requested
+/// `SpiffeId` exactly (canonical-lowercase form preserved through the newtype).
+/// Example-pinned readability companion to the property above.
 #[test]
-#[should_panic(expected = "RED scaffold")]
-fn svid_spec_rejects_zero_or_multiple_uri_sans_before_any_cert() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / CertSpec::svid rejects 0 or >=2 URI SANs \
-         with CertSpecError::InvalidSan before any cert material is produced)"
-    );
-}
-
-/// `@in-memory` `@S-04` — the SVID subject in the produced spec equals the
-/// requested `SpiffeId` exactly (canonical-lowercase form preserved through
-/// the newtype). Example-pinned readability companion to the property above.
-#[test]
-#[should_panic(expected = "RED scaffold")]
 fn svid_spec_subject_uri_equals_requested_spiffe_id() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / CertSpec::svid for \
-         spiffe://overdrive.local/job/payments/alloc/a1b2c3 carries that exact URI as its sole SAN)"
+    let requested = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+        .expect("valid workload SVID subject");
+
+    let spec = CertSpec::svid(vec![requested.clone()]).expect("exactly one URI SAN is accepted");
+
+    // The sole URI SAN is exactly the requested identity, canonical form intact.
+    assert_eq!(spec.san_uris(), vec![requested.clone()]);
+    assert_eq!(spec.subject(), &requested);
+    assert_eq!(
+        spec.subject().as_str(),
+        "spiffe://overdrive.local/job/payments/alloc/a1b2c3",
+        "canonical-lowercase URI is preserved verbatim as the sole SAN"
     );
 }
 
