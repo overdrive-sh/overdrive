@@ -3,9 +3,12 @@
 > Per the nWave back-propagation contract: when a DESIGN-wave decision
 > contradicts a prior-wave (DISCUSS) assumption, the correction is recorded
 > here with the **verbatim** prior wording + the new wording + the rationale,
-> for the product owner to review and relay. Two corrections this wave.
+> for the product owner to review and relay. Two corrections this wave,
+> plus a 2026-06-05b D3 self-correction (UI-1, back-prop from DELIVER —
+> see Change A § A2 "New (corrected 2026-06-05b)" and feature-delta CA-3).
 >
-> SSOT for the corrected design: **ADR-0053 revision 2026-06-05** (D3, D4).
+> SSOT for the corrected design: **ADR-0053 revision 2026-06-05** (D3, D4),
+> as amended by **D3 sub-revision 2026-06-05b** (reverse-miss no-op).
 > Evidence base:
 > `docs/research/dataplane/recvmsg4-reply-source-rewrite-and-miss-semantics-research.md`.
 
@@ -74,19 +77,35 @@ resolver actually checks.
 - K5 (KPI): *"The reply path … fails safe when the reverse mapping is missing
   … 0 backend-IP-sourced replies leak on a reverse miss."*
 
-**New:**
+**New (corrected 2026-06-05b — UI-1; supersedes the interim "sentinel on
+miss" wording):**
 
-- *"On a reverse-map miss, the source address the client application reads
-  from `recvfrom`/`msg_name` is a non-backend sentinel (`192.0.2.1`, RFC 5737
-  — never the backend IP), and the miss is observable via a counter."* The
-  `tcpdump`/"left the host" framing is **dropped** for this path (it asserts
-  XDP semantics recvmsg4 cannot own; the same-host reply never leaves the
-  host).
+- *"No backend IP ever reaches the client application's `recvfrom`/`msg_name`
+  source on the service reply path: a genuine service reply ALWAYS hits the
+  reverse map (the D1 reverse-first dual-write installs every backend's
+  reverse entry before its forward entry is usable → always-hit) and is
+  ALWAYS rewritten to the VIP. A reverse-map miss is, by attach scope,
+  non-service traffic (a backend's own inbound-query `recvfrom`; any unrelated
+  same-host UDP) — recvmsg4 leaves its real source byte-for-byte intact (pure
+  no-op) and increments `REVERSE_LOCAL_MISS_COUNTER` for observability only.
+  The miss counter is behaviorally inert (it does not affect the source the
+  app reads)."* The `tcpdump`/"left the host" framing remains **dropped** for
+  this path (XDP semantics recvmsg4 cannot own; the same-host reply never
+  leaves the host).
 
-**Rationale:** recvmsg4 cannot drop (verifier `[1,1]`, research Q1), and
-pass-through leaks the backend IP to the app (Cilium's behaviour). The only
-no-leak-to-app option is the sentinel rewrite (research Q5). The guarantee is
-pinned to the app sockaddr — the layer recvmsg4 governs.
+**Rationale:** recvmsg4 cannot drop (verifier `[1,1]`, research Q1) and
+attaches at a cgroup **ancestor** — it fires on every unconnected-UDP recv
+from any descendant, so a reverse-map miss = "not a service reply at all,"
+NOT "a service reply with a lost reverse entry." Rewriting the source to a
+sentinel on a miss corrupts every non-service datagram's sender address
+(Tier-3-observed and fixed in DELIVER step 01-03). No-op-on-miss is
+**Cilium-aligned** (`cil_sock4_recvmsg` returns `SYS_PROCEED`;
+`__sock4_xlate_rev` leaves the source unchanged on a reverse-SK miss) — not
+"strictly stronger than Cilium" as research Q5 wrongly claimed. K5's no-leak
+guarantee is preserved by the always-hit property of the reverse-first
+dual-write, NOT by a miss-path sentinel. Per research addendum "UI-1
+adjudication (2026-06-05)"; ADR-0053 D3 sub-revision 2026-06-05b;
+`deliver/upstream-issues.md` § UI-1.
 
 ---
 
@@ -153,13 +172,23 @@ statement.
    The VIP-sourced-reply and no-backend-leak guarantees are **real and Tier-3-
    verifiable** — at the application's `recvfrom`, which is what a resolver
    source-validates against. recvmsg4 cannot make a wire-level guarantee (that
-   is XDP's job, out of scope here) and cannot drop (verifier `[1,1]`); on a
-   reverse miss it substitutes the sentinel `192.0.2.1` and counts the miss —
-   strictly stronger than Cilium, which leaks the backend IP to the app.
+   is XDP's job, out of scope here) and cannot drop (verifier `[1,1]`).
+   **(Corrected 2026-06-05b, UI-1):** on a reverse-map miss recvmsg4 is a
+   **pure no-op** (real source intact + counter bump), NOT a sentinel rewrite
+   — recvmsg4 fires on all subtree unconnected UDP, so a miss = non-service
+   traffic whose real source must be preserved. The no-backend-leak guarantee
+   holds via the reverse-first dual-write (every service reply always hits →
+   always VIP-rewritten), not a miss-path sentinel. This is Cilium-aligned,
+   not Cilium-exceeding.
 2. **K4 changes from "0 connect4 changes" to "0 net-new connect4 behavior,
    non-zero diff."** The user-locked shared helper (Option 3) refactors
    shipped connect4; behavior is preserved and Tier-3-reverified, but the diff
    is real and there is no Tier-2 backstop for the refactor.
-3. **One DELIVER/Tier-3 open question (no tracking issue):** confirm the
-   target resolvers cleanly reject a `192.0.2.1`-sourced reply; swap the
-   sentinel value if not (no design change).
+3. **One DEVOPS/acceptance-designer open question (no tracking issue):**
+   `REVERSE_LOCAL_MISS_COUNTER` counts ALL non-service unconnected UDP in the
+   cgroup subtree, so it cannot isolate the should-never-happen evicted-reply
+   case from routine non-service misses — whether to keep, demote, or replace
+   it is a metric-semantics decision. The no-op-on-miss behavior is correct
+   regardless. (The prior "confirm resolvers reject a `192.0.2.1`-sourced
+   reply" question is **moot** — no sentinel is written on a miss after the
+   2026-06-05b correction.)

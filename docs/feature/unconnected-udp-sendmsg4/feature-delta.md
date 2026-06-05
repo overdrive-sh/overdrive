@@ -666,7 +666,7 @@ self-invoked here.
 |---|---|---|---|
 | **DDD-1** | Reverse store = a second BPF map `REVERSE_LOCAL_MAP` (`BPF_MAP_TYPE_HASH`), written in ordered (reverse-first) sequence by `register_local_backend` (two map syscalls, not one transaction — an ordering guarantee, not atomicity). | LOCKED | A reverse scan is O(N)/datagram on the recvmsg hot path; conntrack models flow state UDP doesn't have; a second point-lookup map is the only stateless O(1) reply store. (ADR-0053 rev D1.) |
 | **DDD-2** | Reverse key = `(backend_ip, backend_port, proto)` reusing the existing `BackendKey` newtype. | LOCKED | `backend_ip` alone is ambiguous when two services share a backend IP on different ports; `BackendKey` reuse buys byte-parity with the three existing keys + a free Sim mirror. (ADR-0053 rev D2.) |
-| **DDD-3** | Reverse-miss = rewrite-to-sentinel `192.0.2.1` (RFC 5737) + counted miss reason; recvmsg4 CANNOT deny (verifier `[1,1]`). | LOCKED | Evidence-backed (research Q1, triangulated): drop is impossible at any layer; sentinel rewrite is the only no-leak-to-app option and is strictly stronger than Cilium's pass-through-leak. (ADR-0053 rev D3.) |
+| **DDD-3** | Reverse-miss = **pure no-op** (real source intact, `REVERSE_LOCAL_MISS_COUNTER` bumped only); HIT = rewrite source→VIP; recvmsg4 CANNOT deny (verifier `[1,1]`). **Corrected 2026-06-05b (UI-1)** — was "rewrite-to-sentinel `192.0.2.1`." | LOCKED (corrected) | recvmsg4 fires on ALL subtree unconnected UDP (cgroup-ancestor attach), so a miss = "not a service reply"; sentinel-ing it corrupts non-service traffic (Tier-3-observed, step 01-03). The map HIT is the discriminator; no-op-on-miss is Cilium-aligned. K5's no-leak holds via the D1 reverse-first dual-write (always-hit), not a sentinel. (ADR-0053 rev D3 sub-revision 2026-06-05b; research addendum UI-1 adjudication.) |
 | **DDD-3a** | AC reframing US-01/US-03/K2/K5: wire-layer → application-sockaddr-layer. | LOCKED (back-prop REQUIRED) | recvmsg4 fires after the skb is on the socket queue; `tcpdump -i lo` shows the backend source regardless. Wire no-leak is XDP's domain, not recvmsg4's. Layer/wording correction, not scope change. (ADR-0053 rev D3; `design/upstream-changes.md`.) |
 | **DDD-4** | Option 3 — ONE shared `#[inline(always)]` `build_local_service_key` helper (key-build + NBO ONLY) across connect4 + sendmsg4 + recvmsg4; ONE attach orchestration + ONE probe set. Map lookup + rewrite direction differ per hook and stay in each program body. | LOCKED (user override of Morgan's Option-2) | Single key-construction + NBO site across three hooks; connect4/sendmsg4 look up `LOCAL_BACKEND_MAP` (forward dest-rewrite), recvmsg4 looks up `REVERSE_LOCAL_MAP` (reverse source-rewrite) — one helper MUST NOT serve both rewrite directions. REFACTORS shipped connect4 (behavior-preserving, Tier-3-reverified, no Tier-2 backstop). (ADR-0053 rev D4.) |
 | **DDD-5a** | `register_local_backend` writes BOTH maps reverse-first; NO new trait method; contract rustdoc amended (postcondition + observable invariant + edge case). | LOCKED | One logical write installs forward+reverse; the existing method body extends, the trait surface does not grow. (ADR-0053 rev D5a.) |
@@ -717,7 +717,7 @@ C4Container
   System_Boundary(kern, "Linux kernel, overdrive.slice cgroup") {
     Container(connect4, "cgroup/connect4 (shipped, REFACTORED)", "BPF_CGROUP_INET4_CONNECT", "TCP + connected-UDP forward dst rewrite; key via shared helper, own LOCAL_BACKEND_MAP lookup")
     Container(sendmsg4, "cgroup/sendmsg4 (NEW, >=4.18)", "BPF_CGROUP_UDP4_SENDMSG", "Unconnected forward dst rewrite VIP->backend; key via shared helper, own LOCAL_BACKEND_MAP lookup")
-    Container(recvmsg4, "cgroup/recvmsg4 (NEW, >=4.20)", "BPF_CGROUP_UDP4_RECVMSG", "Reply src rewrite backend->VIP; [1,1] cannot-deny; miss -> sentinel 192.0.2.1 + counter")
+    Container(recvmsg4, "cgroup/recvmsg4 (NEW, >=4.20)", "BPF_CGROUP_UDP4_RECVMSG", "Fires on ALL subtree unconnected UDP; map HIT (service reply) -> src rewrite backend->VIP; MISS (non-service) -> no-op + counter; [1,1] cannot-deny")
     ContainerDb(fwdmap, "LOCAL_BACKEND_MAP (shipped)", "HASH", "(vip,vip_port,proto)->backend")
     ContainerDb(revmap, "REVERSE_LOCAL_MAP (NEW)", "HASH", "BackendKey(ip,port,proto)->VIP")
     ContainerDb(xdp, "SERVICE_MAP / REVERSE_NAT (shipped, XDP)", "BPF maps", "DISTINCT wire path for remote/connected — untouched")
@@ -727,7 +727,7 @@ C4Container
   Rel(dp, revmap, "1. upsert reverse (FIRST)")
   Rel(dp, fwdmap, "2. upsert forward")
   Rel(sendmsg4, fwdmap, "key via shared helper -> own lookup -> forward dst rewrite")
-  Rel(recvmsg4, revmap, "key via shared helper -> own lookup -> reverse src rewrite to VIP / sentinel on miss")
+  Rel(recvmsg4, revmap, "key via shared helper -> own lookup -> HIT: reverse src rewrite to VIP / MISS: no-op + counter")
   Rel(connect4, fwdmap, "key via shared helper -> own lookup (REFACTORED)")
 ```
 
@@ -763,7 +763,7 @@ not a consumer-driven-contract target. **No contract-test annotation.**
 | Miss counter | `BPF_MAP_TYPE_PERCPU_ARRAY` | The shipped `DROP_COUNTER` precedent; per-CPU avoids contention. | kernel |
 | Kernel floor | 4.18 (sendmsg4) / 4.20 (recvmsg4) | Both below the 5.10 LTS floor — **no matrix bump**. | — |
 | Reverse key type | `BackendKey {ip,port,proto}` (in-repo) | REUSE; byte-parity with three existing keys; free Sim mirror. | — |
-| Sentinel value | `192.0.2.1` (RFC 5737 TEST-NET-1) | Non-routable, never collides with backend/VIP, visibly "documentation". | — |
+| ~~Sentinel value~~ | ~~`192.0.2.1` (RFC 5737 TEST-NET-1)~~ | **REMOVED (UI-1, ADR-0053 D3 sub-revision 2026-06-05b).** No sentinel is written on the miss path — recvmsg4 is a pure no-op on a miss. `SENTINEL_SOURCE_HOST` is dead code, deleted when S-03-01 lands. | — |
 
 **Enforcement (architecture rules).** `dst-lint` (the existing crate-class
 gate) keeps `overdrive-bpf`/`overdrive-host` out of `core` compile paths and
@@ -780,7 +780,7 @@ boundaries (sim vs host vs core) are already `dst-lint`-enforced.
 |---|---|---|
 | DDD-1 | Second map `REVERSE_LOCAL_MAP`, ordered (reverse-first) dual-write | ADR-0053 rev D1 |
 | DDD-2 | Reverse key = `BackendKey (ip,port,proto)` | ADR-0053 rev D2 |
-| DDD-3 | Reverse-miss = sentinel `192.0.2.1` + counted miss; recvmsg4 `[1,1]` cannot-deny | ADR-0053 rev D3 |
+| DDD-3 | Reverse-miss = **no-op** (real source intact + counted miss); HIT = source→VIP; recvmsg4 `[1,1]` cannot-deny (corrected 2026-06-05b, UI-1 — was sentinel-on-miss) | ADR-0053 rev D3 sub-revision 2026-06-05b |
 | DDD-3a | AC reframing wire → app-sockaddr | upstream-changes.md |
 | DDD-4 | Option 3 shared `build_local_service_key` helper (key-build + NBO only; per-hook lookup + rewrite); refactors connect4 | ADR-0053 rev D4 |
 | DDD-5a | dual-write in `register_local_backend`; no new method; contract amended | ADR-0053 rev D5a |
@@ -819,22 +819,28 @@ shared-helper refactor — this is the one item the framing pass flipped.
 
 ## Wave: DESIGN / [REF] Open questions (to DELIVER / Tier-3)
 
-1. **Sentinel resolver-rejection (Tier-3 empirical check, NOT a tracking
-   issue).** Confirm `dig`, glibc `getaddrinfo`, and musl cleanly **reject**
-   a `192.0.2.1`-sourced reply (source-validation mismatch → clean failure)
-   rather than surprisingly accept it. The *mechanism* (sentinel + counter)
-   is sound regardless of the value; if a resolver does not cleanly reject
-   `192.0.2.1`, swap for another reserved-range address with no design
-   change. Per research Gap 2; surfaced for user awareness per
-   `feedback_no_unilateral_gh_issues` (no `gh issue create`).
+1. **`REVERSE_LOCAL_MISS_COUNTER` operational semantics (metric-semantics
+   decision for DEVOPS / acceptance-designer, NOT a tracking issue).** Because
+   recvmsg4 fires on ALL subtree unconnected UDP (cgroup-ancestor attach), the
+   counter increments on every non-service recv (DNS clients, backend
+   inbound-query recvs, unrelated same-host UDP) — its absolute value is
+   dominated by non-service traffic and is NOT a "service reply failed to
+   translate" alarm. It cannot isolate the should-never-happen evicted-reply
+   case from routine non-service misses. Whether to keep, demote, or replace
+   it (e.g. a control-plane reconciler comparing forward-vs-reverse map
+   cardinality, or a `bpftool map dump` differential) is a metric-semantics
+   decision. The **no-op-on-miss behavior is correct regardless** of how the
+   counter is treated. Per research addendum "Residual Tier-3 open question";
+   surfaced per `feedback_no_unilateral_gh_issues` (no `gh issue create`).
 2. **Research Gap 1 (non-blocking citation).** The exact verifier
    `check_return_code` file:line for the recvmsg4 `[1,1]` range and the v5.10
    `udp_recvmsg` `RECVMSG_LOCK` call site were not pinned (Bootlin/raw fetch
    blocked). The *facts* are established by the selftest error string and the
    commit hunk; only the line citation is missing. Optional for the crafter to
    pin in a local 5.10 checkout.
-3. **Research Gap 2** = open question 1 above (same item; the resolver
-   behaviour on the sentinel).
+3. **~~Sentinel resolver-rejection~~ — MOOT (UI-1, 2026-06-05b).** No sentinel
+   is written on the miss path, so no resolver ever observes a sentinel-sourced
+   reply. (Was research Gap 2; resolved by the no-op-on-miss correction.)
 
 ---
 
@@ -846,7 +852,8 @@ quotes + new wording + rationale in `design/upstream-changes.md`; summary:
 | # | Prior-wave assumption (verbatim, abbreviated) | New | Rationale |
 |---|---|---|---|
 | CA-1 | DD6 / K4: *"Pure addition: connect4 … UNCHANGED"* / *"0 changes to connect4 / forward-map shape / hydrator classifier (pure addition; diff is additive only)"* | connect4 is **EXTEND** — its key-build + NBO is refactored to call the shared `build_local_service_key` helper (D4); its own `LOCAL_BACKEND_MAP` lookup + forward dest-rewrite stay in its body. Net-new connect4 *behavior* = 0; *diff* is non-zero, Tier-3-reverified. | The user overrode Morgan's Option-2 to Option-3 (shared helper). A shared key-build helper across three hooks necessarily refactors the shipped third hook (connect4). |
-| CA-2 | US-01/US-03 + K2/K5 wire-layer ACs: *"tcpdump shows the reply source = the VIP"* / *"no backend-IP-sourced reply leaves the host"* | Application-sockaddr layer: *"the source the client app reads via recvfrom/msg_name is the VIP"* (K2) / *"on a reverse miss the app reads a non-backend sentinel, never the backend IP, and the miss is counted"* (K5). | recvmsg4 fires after the skb is on the socket queue; a `tcpdump -i lo` shows the backend source regardless (research Q4). Wire no-leak is XDP's domain; recvmsg4 cannot deny (research Q1). Layer/wording correction, intent preserved. |
+| CA-2 | US-01/US-03 + K2/K5 wire-layer ACs: *"tcpdump shows the reply source = the VIP"* / *"no backend-IP-sourced reply leaves the host"* | Application-sockaddr layer: *"the source the client app reads via recvfrom/msg_name is the VIP"* (K2) / *"on a reverse miss the app reads a non-backend sentinel, never the backend IP, and the miss is counted"* (K5). **The "sentinel on miss" half of this new wording is itself superseded by CA-3 below** — see CA-3 for the corrected K5. | recvmsg4 fires after the skb is on the socket queue; a `tcpdump -i lo` shows the backend source regardless (research Q4). Wire no-leak is XDP's domain; recvmsg4 cannot deny (research Q1). Layer/wording correction, intent preserved. |
+| **CA-3** (DESIGN self-correction, back-prop from DELIVER UI-1; supersedes the CA-2/DDD-3 "sentinel on miss" wording) | DDD-3 / D3 (2026-06-05): *"on a `REVERSE_LOCAL_MAP` miss, recvmsg4 rewrites the reply source to a non-backend sentinel `192.0.2.1` + counted miss; strictly stronger than Cilium's pass-through-leak"* (and the CA-2 K5 "the app reads a non-backend sentinel" clause). | **No-op-on-miss:** recvmsg4 rewrites source→VIP on a **HIT**; on a **MISS** it leaves the real source intact and bumps the counter only. K5's no-leak guarantee holds via the **D1 reverse-first dual-write (always-hit)**, not a sentinel. Cilium-aligned, not Cilium-exceeding. | recvmsg4 attaches at a cgroup *ancestor* and fires on EVERY unconnected-UDP recv from any descendant, so a reverse-map miss = "not a service reply at all" (a backend's own inbound-query `recvfrom`; any unrelated UDP), NOT "a service reply with a lost reverse entry." Sentinel-ing every miss corrupts the source every non-service datagram's app reads — Tier-3-observed and fixed in DELIVER step 01-03 (commit `e71ad780`). The prior research Q5 "strictly stronger than Cilium" was a category error (it assumed a miss = lost service reply). Per `docs/research/dataplane/recvmsg4-reply-source-rewrite-and-miss-semantics-research.md` § "Addendum — UI-1 adjudication (2026-06-05)" (verdict: crafter CORRECT, Q5 WRONG); ADR-0053 D3 sub-revision 2026-06-05b; `deliver/upstream-issues.md` § UI-1. |
 
 Non-blocking findings, all actioned in this revision: nitpick #1 (the
 "≤1 day target" header overstated Slice 01's ~1–1.5d estimate — softened

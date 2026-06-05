@@ -48,7 +48,7 @@ the default nextest lane the pre-commit gate runs.
 | S-01-02 both maps present | `…::forward_and_reverse_map_entries_present_after_one_register` | `#[should_panic]` | MISSING_FUNCTIONALITY (REVERSE_LOCAL_MAP handle + `reverse_local_map_entries`). |
 | S-01-03 stateless reuse | `…::second_unconnected_query_reuses_same_mapping_statelessly` | `#[should_panic]` | MISSING_FUNCTIONALITY (Slice 01 round-trip). |
 | S-02-03 Tier-3 meets Tier-1 | `…::kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity` | `#[should_panic]` | MISSING_FUNCTIONALITY (reply rewrite + reply mirror, Slice 01+02). |
-| S-03-01 sentinel-on-miss | `unconnected_udp_reply_hardening.rs::reverse_miss_rewrites_source_to_sentinel_not_backend_ip` | `#[should_panic]` | MISSING_FUNCTIONALITY (recvmsg4 sentinel-miss branch + miss counter). App-sockaddr assertion, not wire. |
+| S-03-01 no-op-on-miss | `unconnected_udp_reply_hardening.rs::non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss` | `#[should_panic]` | MISSING_FUNCTIONALITY (recvmsg4 hit-rewrite + no-op-miss branch + miss counter). Three assertions: non-service UDP reads real source (no-op); service reply always hits → VIP; miss counter inert. App-sockaddr, not wire. Corrected per CA-3 / UI-1 (was sentinel-on-miss). |
 | S-03-02 below-floor refusal | `…::below_floor_kernel_refuses_at_attach_preflight_observably` | `#[should_panic]` | MISSING_FUNCTIONALITY (probe attach both hooks + typed `DataplaneBootError` variants). |
 | S-03-03 fixture collision | `…::stub_resolver_binds_off_5353_and_asserts_clean_bind` | `#[should_panic]` | MISSING_FUNCTIONALITY (Tier-3 stub-resolver fixture). |
 

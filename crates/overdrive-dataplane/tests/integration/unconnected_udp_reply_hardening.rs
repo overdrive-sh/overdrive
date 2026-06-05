@@ -1,6 +1,7 @@
 //! S-03-01 / S-03-02 / S-03-03 — unconnected-UDP reply-path error
-//! hardening: sentinel-on-miss (no backend-IP leak to the app),
-//! below-floor attach refusal, and fixture-collision discipline.
+//! hardening: no-op-on-miss (non-service UDP unaffected; no backend-IP
+//! leak via always-hit), below-floor attach refusal, and
+//! fixture-collision discipline.
 //!
 //! Feature: `unconnected-udp-sendmsg4` (GH #200, ADR-0053 rev 2026-06-05).
 //! Story: US-03. Job: J-OPS-004 (primary), J-PLAT-004.
@@ -8,21 +9,35 @@
 //! Tags: `@US-03 @kpi-K5 @tier3 @real-io @adapter-integration @error`.
 //! Tier: **Tier 3 (real kernel — THE GATE).** No Tier-2 backstop.
 //!
-//! # What these prove (the reframed app-sockaddr ACs — DDD-3 / DDD-3a)
+//! # What these prove (the corrected app-sockaddr ACs — DDD-3 / DDD-3a / CA-3 / UI-1)
 //!
-//! - **S-03-01 (sentinel-on-miss):** with the forward LOCAL_BACKEND_MAP
-//!   entry present but the REVERSE_LOCAL_MAP entry forced absent
-//!   (eviction/corruption), the source the client app reads via
-//!   `recvfrom` is the sentinel `192.0.2.1` (RFC 5737) — NEVER the
-//!   backend IP — and REVERSE_LOCAL_MISS_COUNTER increments.
-//!   recvmsg4 CANNOT deny (verifier `[1,1]`, research Q1) — the fail-safe
-//!   is a source rewrite, not a drop. This is the **app-sockaddr** K5,
-//!   NOT a `tcpdump`/wire assertion (recvmsg4 never touches the wire).
-//!   Open question (DELIVER/Tier-3, NOT a tracking issue per
-//!   `feedback_no_unilateral_gh_issues`): confirm `dig`/glibc/musl
-//!   cleanly REJECT a `192.0.2.1`-sourced reply; swap the sentinel value
-//!   (no design change) if a resolver surprisingly accepts it (DESIGN
-//!   open-Q 1 / F-4).
+//! - **S-03-01 (no-op-on-miss; non-service UDP unaffected):** recvmsg4
+//!   attaches at a cgroup ANCESTOR and fires on EVERY unconnected-UDP
+//!   `recvmsg`/`recvfrom` from any descendant — service replies AND all
+//!   unrelated same-host UDP (DNS clients, a backend's own `recvfrom` of
+//!   an inbound query). The REVERSE_LOCAL_MAP lookup is the discriminator.
+//!   Three corrected assertions:
+//!   (a) **non-service unconnected UDP is unaffected** — a same-host
+//!       exchange whose source is NOT a registered backend reads its REAL
+//!       sender address via `recvfrom`/`msg_name`; recvmsg4 leaves it
+//!       byte-for-byte intact (pure no-op on a miss — the load-bearing
+//!       new assertion, the regression the correction fixes);
+//!   (b) **a service reply always HITS → VIP-sourced** — under the D1
+//!       reverse-first dual-write a genuine service reply's source is
+//!       always a registered backend identity, so it always hits and the
+//!       app reads the VIP as the source — no backend-IP-leak path;
+//!   (c) **the miss counter is observable but inert** —
+//!       REVERSE_LOCAL_MISS_COUNTER increments on a non-service recv AND
+//!       the source the app read on that same recv is untouched (counted
+//!       but no source rewrite). recvmsg4 CANNOT deny (verifier `[1,1]`,
+//!       research Q1) — every path returns 1; the no-leak guarantee (K5)
+//!       holds via the always-hit dual-write, NOT a miss-path sentinel.
+//!   App-sockaddr assertions, NOT `tcpdump`/wire (recvmsg4 never touches
+//!   the wire). There is NO sentinel `192.0.2.1` rewrite on the miss
+//!   path — it would corrupt every non-service datagram's sender address
+//!   (Tier-3-observed, fixed in DELIVER step 01-03, commit `e71ad780`).
+//!   No-op-on-miss is Cilium-aligned. Per DDD-3 / feature-delta CA-3 /
+//!   research addendum "UI-1 adjudication (2026-06-05)".
 //! - **S-03-02 (below-floor refusal):** a host below the recvmsg4 floor
 //!   (< 4.20) fails `attach()` and the composition root refuses to start
 //!   with a structured `health.startup.refused` (the `attach()` syscall
@@ -48,17 +63,26 @@
 // the real hardening tests. Per the DISTILL scaffold lint convention.
 #![allow(clippy::missing_panics_doc, clippy::doc_markdown)]
 
-/// S-03-01 — a forced REVERSE_LOCAL_MAP miss never leaks the backend IP
-/// to the app; the source is the sentinel 192.0.2.1 and the miss counts.
+/// S-03-01 — recvmsg4 no-op-on-miss: non-service unconnected UDP reads its
+/// real source; a service reply always hits and is VIP-sourced; the miss
+/// counter increments on non-service recv but is behaviorally inert.
 #[test]
 #[should_panic(expected = "RED scaffold")]
-fn reverse_miss_rewrites_source_to_sentinel_not_backend_ip() {
+fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
     panic!(
-        "Not yet implemented -- RED scaffold (S-03-01: forward entry present, reverse forced \
-         absent; the recvfrom source the app reads is the sentinel 192.0.2.1 (RFC 5737), \
-         NEVER the backend IP; REVERSE_LOCAL_MISS_COUNTER increments; recvmsg4 does not drop \
-         (cannot -- verifier [1,1])). Blocked on: recvmsg4 sentinel-miss branch + miss counter \
-         (Slice 03 GREEN)."
+        "Not yet implemented -- RED scaffold (S-03-01: recvmsg4 fires on ALL subtree \
+         unconnected UDP (cgroup-ancestor attach). Three assertions: (a) a non-service \
+         exchange (source NOT a registered backend -- a backend reading an inbound query, \
+         any unrelated UDP) reads its REAL sender source via recvfrom/msg_name -- recvmsg4 \
+         leaves it byte-for-byte intact (pure no-op on a REVERSE_LOCAL_MAP miss); (b) a \
+         genuine service reply (source IS the registered backend) ALWAYS hits and the app \
+         reads the VIP as the source -- no backend-IP-leak path; (c) REVERSE_LOCAL_MISS_COUNTER \
+         increments on the non-service recv AND the source is untouched on that same recv \
+         (counted but inert -- no source rewrite). recvmsg4 does not drop (cannot -- verifier \
+         (1,1)). NO sentinel 192.0.2.1 rewrite on the miss path -- it would corrupt non-service \
+         senders (fixed step 01-03). No-leak (K5) holds via the D1 reverse-first dual-write \
+         always-hit, not a sentinel. Blocked on: recvmsg4 hit-rewrite + no-op-miss branch + \
+         miss counter (Slice 03 GREEN)."
     );
 }
 

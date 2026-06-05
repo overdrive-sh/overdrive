@@ -17,7 +17,7 @@ complete; all decisions user-locked). **Density:** lean / Tier-1.
 |---|---|---|
 | **DDD-1** | Reverse store = a second BPF map `REVERSE_LOCAL_MAP` (`BPF_MAP_TYPE_HASH`), written **ordered (reverse-first)** by `register_local_backend`. NOT a reverse scan, NOT conntrack (UDP is stateless). | LOCKED |
 | **DDD-2** | Reverse key = `(backend_ip, backend_port, proto)` reusing the existing `BackendKey` newtype. `backend_ip`-alone rejected (ambiguous when two services share a backend IP on different ports). | LOCKED |
-| **DDD-3** | Reverse-miss = rewrite-to-sentinel `192.0.2.1` (RFC 5737) + counted miss reason. recvmsg4 **CANNOT deny** — verifier restricts it to `[1,1]` (research Q1). Strictly stronger than Cilium's pass-through-leak. | LOCKED |
+| **DDD-3** | recvmsg4 rewrites source→VIP on a **HIT**; **pure NO-OP on a MISS** (real source left intact, `REVERSE_LOCAL_MISS_COUNTER` bumped only). The `REVERSE_LOCAL_MAP` lookup IS the service-reply discriminator (recvmsg4 fires on ALL subtree unconnected UDP via cgroup-ancestor attach, so a miss = "not a service reply"). recvmsg4 **CANNOT deny** — verifier restricts it to `[1,1]` (research Q1). K5's no-leak holds via the D1 reverse-first dual-write's always-hit, NOT a sentinel. Cilium-aligned. **Corrected 2026-06-05b (UI-1)** — was "rewrite-to-sentinel `192.0.2.1`." | LOCKED (corrected) |
 | **DDD-3a** | AC reframing US-01/US-03/K2/K5 wire-layer → application-sockaddr-layer (back-prop REQUIRED). | LOCKED |
 | **DDD-4** | Option 3 — ONE shared `#[inline(always)]` `build_local_service_key` helper (service-key construction + `user_port` low-16-NBO handling only) across connect4 + sendmsg4 + recvmsg4; each hook does its OWN map lookup and rewrite direction (connect4/sendmsg4 → `LOCAL_BACKEND_MAP` forward dest-rewrite; recvmsg4 → `REVERSE_LOCAL_MAP` reverse source-rewrite). ONE attach orchestration + ONE probe set. REFACTORS shipped connect4 (behavior-preserving, Tier-3-reverified, no Tier-2 backstop). **User override of Morgan's Option-2.** | LOCKED |
 | **DDD-5a** | `register_local_backend` writes BOTH maps reverse-first; **NO new trait method**; contract rustdoc amended (reverse postcondition + observable invariant + per-proto edge case). | LOCKED |
@@ -38,10 +38,16 @@ from the XDP wire path (the sibling-journey distinction).
 
 **Earned Trust:** every new dependency is probed. The two new hooks are
 attach-probed (the attach syscall is the below-floor preflight); the new
-map is sentinel-round-tripped; the composition root refuses to start
-(`health.startup.refused`) on any probe failure. The reverse-miss sentinel
-+ counter is the Earned-Trust answer to "what if the map lies / is evicted"
-on the reply hot path — it fails clean and observably rather than leaking.
+map is sentinel-round-tripped (a probe-time write, NOT a miss-path rewrite);
+the composition root refuses to start (`health.startup.refused`) on any
+probe failure. The Earned-Trust answer to "what if the map lies / is
+evicted" on the reply hot path is the **D1 reverse-first dual-write's
+always-hit invariant + the counted no-op-on-miss** (a genuine service reply
+always hits and is rewritten to the VIP; a miss is non-service traffic whose
+real source must be preserved): the path fails clean and observably (counter
+bump) rather than corrupting the source of non-service datagrams. K5's
+no-leak holds by construction (always-hit), not by a miss-path sentinel
+(corrected 2026-06-05b / UI-1; see DDD-3).
 
 ## Reuse Analysis (HARD GATE — full table in feature-delta § DESIGN)
 
@@ -63,7 +69,9 @@ No new third-party dependency. `aya` (existing BPF loader, MIT/Apache-2.0);
 `BPF_MAP_TYPE_HASH` (reverse map), `BPF_MAP_TYPE_PERCPU_ARRAY` (miss
 counter) — both kernel-native. Kernel floors 4.18 (sendmsg4) / 4.20
 (recvmsg4), both below the shipped 5.10 LTS floor — no matrix bump.
-Sentinel `192.0.2.1` (RFC 5737). Enforcement: existing `dst-lint`
+No miss-path sentinel value (the `192.0.2.1` RFC 5737 sentinel was removed
+by the D3 sub-revision 2026-06-05b / UI-1 — recvmsg4 is a pure no-op on a
+miss). Enforcement: existing `dst-lint`
 crate-class gate + `BackendKey`/`Proto` newtype proptest roundtrips; no new
 architecture-test tool warranted. No external API → no consumer-driven
 contract test.
@@ -95,17 +103,19 @@ K4/DD6 "0 connect4 changes / pure addition" → connect4 EXTEND (DDD-4).
 - **Tier 3 (Lima, integration lane):** real `dig`/`sendto` unconnected
   round-trip (US-01 / K1); `recvfrom`-sockaddr source = VIP assertion (K2);
   `bpftool map dump` shows both forward + reverse entries after one
-  registration; forced reverse-miss → sentinel + counter, no backend IP at
-  the app sockaddr (US-03 / K5); below-floor attach refusal (US-03);
+  registration; forced reverse-miss → pure no-op (real source intact) +
+  counter bump, with K5's no-leak preserved by the always-hit dual-write
+  rather than a miss-path rewrite (US-03 / K5; corrected 2026-06-05b / UI-1);
+  below-floor attach refusal (US-03);
   connect4 round-trip re-run against the helper-backed connect4 (D4 risk
   mitigation).
 
 ## Open questions (to DELIVER / Tier-3)
 
-1. **Sentinel resolver-rejection** — confirm `dig`/`getaddrinfo`/musl
-   cleanly reject a `192.0.2.1`-sourced reply (research Gap 2). Mechanism is
-   sound regardless of value; swap the address if not. Surfaced for user
-   awareness; NOT a tracking issue (`feedback_no_unilateral_gh_issues`).
+1. **~~Sentinel resolver-rejection~~ — MOOT (corrected 2026-06-05b / UI-1).**
+   No sentinel is written on the miss path (recvmsg4 is a pure no-op on a
+   miss), so no resolver ever observes a sentinel-sourced reply. The former
+   research Gap 2 is resolved by the no-op-on-miss correction; see DDD-3.
 2. **Research Gap 1** (non-blocking) — exact verifier `[1,1]` file:line +
    v5.10 `udp_recvmsg` call site; optional crafter pin in a local checkout.
 

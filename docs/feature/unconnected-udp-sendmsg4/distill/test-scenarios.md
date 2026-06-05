@@ -26,10 +26,22 @@ reframed contract:
   `recvfrom` return), **NOT** via `tcpdump -i lo` (which correctly shows the
   backend source on every round-trip — recvmsg4 fires post-dequeue and never
   touches the wire; research Q4).
-- **K5 / US-03 miss identity** — *"on a `REVERSE_LOCAL_MAP` miss, the source
-  the app reads is the non-backend sentinel `192.0.2.1` (RFC 5737), never the
-  backend IP, and the miss is counted."* recvmsg4 **cannot deny** (verifier
-  `[1,1]`, research Q1) — fail-safe is a source rewrite, not a drop.
+- **K5 / US-03 no-leak via always-hit (NOT sentinel-on-miss)** — *"no backend
+  IP ever reaches the client application's `recvfrom` sockaddr."* The mechanism
+  is the **D1 reverse-first dual-write**: every registered backend has a visible
+  reverse entry before its forward entry is usable, so a genuine service reply's
+  source is always a registered backend identity → always **HITS** → is always
+  rewritten to the VIP. A `REVERSE_LOCAL_MAP` **miss is non-service traffic**
+  (recvmsg4 attaches at a cgroup *ancestor* and fires on EVERY unconnected-UDP
+  recv from any descendant — a backend's own `recvfrom` of an inbound query, a
+  DNS client's upstream answer, any unrelated same-host UDP), and on a miss
+  recvmsg4 is a **pure no-op** (real source left intact, miss counter bumped
+  only). recvmsg4 **cannot deny** (verifier `[1,1]`, research Q1) — every path
+  returns 1. There is **no sentinel rewrite on the miss path** — rewriting the
+  source on a miss would corrupt every non-service datagram's sender address
+  (Tier-3-observed and fixed in DELIVER step 01-03). Corrected per DDD-3 /
+  feature-delta CA-3 / research addendum "UI-1 adjudication (2026-06-05)";
+  supersedes the earlier "sentinel on miss" wording.
 - **K4 / connect4** — connect4 is **EXTEND**, not "0 changes" (CA-1 / DDD-4):
   its key-build + NBO is refactored to call the shared `build_local_service_key`
   helper. Net-new behavior 0; diff non-zero; Tier-3-reverified.
@@ -205,31 +217,49 @@ Notes: the Tier-3 prong of the two-pronged pin. Re-uses S-01-01's round-trip
 
 ---
 
-# Slice 03 — Reply-path error hardening (sentinel, no backend-IP leak, below-floor refusal)
+# Slice 03 — Reply-path error hardening (no-op-on-miss, no backend-IP leak, below-floor refusal)
 
-US-03 · J-OPS-004 (primary), J-PLAT-004 · Tier 3 (Lima) + Tier 1 (sentinel mirror)
+US-03 · J-OPS-004 (primary), J-PLAT-004 · Tier 3 (Lima)
 
-## Scenario S-03-01 — A missing reverse entry never leaks the backend IP to the app (sentinel)
+## Scenario S-03-01 — Non-service unconnected UDP reads its real source; a service reply is VIP-sourced; the miss counter is observable but inert
 
 `@US-03 @kpi-K5 @tier3 @real-io @error`
 
 ```
-Given the forward LOCAL_BACKEND_MAP entry is present but REVERSE_LOCAL_MAP
-  has its entry for the backend forced absent (eviction/corruption case)
-When an unconnected reply traverses recvmsg4
-Then the source address the client app reads from `recvfrom` is the
-      sentinel 192.0.2.1 (RFC 5737) — NEVER the backend IP
-  And the REVERSE_LOCAL_MISS_COUNTER increments (the miss is observable,
-      not silent)
-  And recvmsg4 does NOT drop the datagram (it cannot — verifier [1,1])
+Given a same-host UDP exchange whose source is NOT a registered backend
+  (a plain client/server pair, or a backend reading an inbound query) AND
+  a deployed service whose backend IS registered (forward + reverse present)
+When an unconnected datagram from the NON-registered source traverses recvmsg4
+  via the client's `recvfrom`
+Then the source address the app reads from `recvfrom`/`msg_name` is the REAL
+      sender address — recvmsg4 leaves it byte-for-byte intact (no rewrite)
+  And the REVERSE_LOCAL_MISS_COUNTER increments on that non-service recv
+      (observable), yet the source the app read on that same recv is untouched
+      (the counter is behaviorally inert — counted but no source rewrite)
+When a genuine service reply (source IS the registered backend identity)
+  traverses recvmsg4
+Then it always HITS the REVERSE_LOCAL_MAP and the app reads the VIP 10.96.0.10
+      as the source — there is NO backend-IP-leak path on the service reply
+  And recvmsg4 does NOT drop any datagram (it cannot — verifier [1,1])
 ```
 
-Notes: THE reframed K5 — app-sockaddr sentinel, NOT a `tcpdump`/wire
-assertion. recvmsg4-cannot-deny (DDD-3) means the fail-safe is a source
-rewrite to `192.0.2.1`, strictly stronger than Cilium's pass-through-leak.
-Open question (DELIVER/Tier-3, NOT a tracking issue): confirm `dig`/glibc/musl
-cleanly reject a `192.0.2.1`-sourced reply; swap the sentinel value (no design
-change) if not (DESIGN open-Q 1 / F-4).
+Notes: THE corrected K5 (DDD-3 / CA-3 / UI-1) — app-sockaddr, NOT a
+`tcpdump`/wire assertion. recvmsg4 attaches at a cgroup *ancestor* and fires on
+EVERY unconnected-UDP recv from any descendant, so a `REVERSE_LOCAL_MAP` miss
+means "this datagram is NOT a service reply" (a backend's own inbound-query
+`recvfrom`, any unrelated UDP) — NOT "a service reply with a lost reverse
+entry". The three corrected assertions: **(a)** non-service unconnected UDP
+reads its REAL sender source (recvmsg4 is a pure no-op on a miss — the
+load-bearing new assertion, the regression the correction fixes); **(b)** a
+genuine service reply ALWAYS hits → VIP-sourced (no-leak via the D1
+reverse-first dual-write's always-hit property, not a sentinel); **(c)** the
+`REVERSE_LOCAL_MISS_COUNTER` increments on non-service recv AND the source is
+untouched on that same recv (assert both together to pin "counted but inert").
+There is **NO sentinel `192.0.2.1` rewrite on the miss path** — rewriting the
+source on a miss would corrupt every non-service datagram's sender address
+(Tier-3-observed, fixed DELIVER step 01-03, commit `e71ad780`). No-op-on-miss
+is Cilium-aligned (`cil_sock4_recvmsg` returns `SYS_PROCEED` and
+`__sock4_xlate_rev` leaves the source unchanged on a reverse-SK miss).
 
 ## Scenario S-03-02 — A below-floor kernel refuses observably at attach/preflight
 
@@ -282,7 +312,7 @@ fixture-discipline scenario protecting every other Tier-3 test in the slice.
 | S-02-01 | happy (Tier-1 pin) |
 | S-02-02 | **error** (forward-only mutation) |
 | S-02-03 | happy (Tier-3 meet) |
-| S-03-01 | **error** (reverse miss → sentinel) |
+| S-03-01 | **error** (non-service no-op + miss-counter inert) |
 | S-03-02 | **error** (below-floor refusal) |
 | S-03-03 | **error** (fixture collision) |
 

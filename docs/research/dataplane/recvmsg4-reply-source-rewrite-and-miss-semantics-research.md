@@ -511,3 +511,426 @@ Examined: 9 sources | Cited: 6 | Cross-refs: Q1 triangulated across 3 independen
 primaries | Confidence: High (Q1–Q4 verified-primary; Q5 recommendation is reasoned
 from verified primaries with two clearly-flagged DESIGN-detail gaps) | Output:
 docs/research/dataplane/recvmsg4-reply-source-rewrite-and-miss-semantics-research.md
+
+---
+
+# Addendum — UI-1 adjudication (2026-06-05): reverse-miss handling under cgroup-ancestor attach
+
+**Date**: 2026-06-05 | **Researcher**: nw-researcher (Nova) | **Confidence**: High |
+**New sources**: 3 (kernel cgroup_sockopt attach-hierarchy doc; Cilium kube-proxy-free
+docs cgroup-root attach; re-read of Cilium `bpf/bpf_sock.c` `cil_sock4_recvmsg` /
+`__sock4_xlate_rev` miss path).
+
+> **This addendum ADDS to the findings above; it does not rewrite them.** Q1
+> (recvmsg4 cannot deny — `[1,1]`), Q2 (writable fields are `user_ip4`/`user_port`),
+> and Q4 (the hook fires post-skb-populate, wire-layer is XDP's domain) all stand
+> **unchanged and re-confirmed**. What this addendum corrects is the **Q5
+> recommendation** ("sentinel-on-miss is strictly stronger than Cilium's
+> pass-through") and the **D3 decision built on it** — both of which omitted the
+> attach-scope fact that makes a reverse-map miss mean something different from what
+> Q5 assumed.
+
+## The decision being adjudicated
+
+During DELIVER (step 01-03, commit `e71ad780`, Tier-3-verified GREEN), the crafter
+found ADR-0053 rev 2026-06-05 § D3 — *"on a `REVERSE_LOCAL_MAP` miss, rewrite the
+reply source to a non-backend sentinel `192.0.2.1` + counted miss; strictly stronger
+than Cilium's pass-through-leak"* — **unworkable**, and changed it to **"rewrite
+source→VIP on a HIT; pure NO-OP on a MISS (counter bump only, source left intact)."**
+
+The adjudication question: **is the crafter's correction right, and is the prior
+doc's Q5 recommendation (sentinel-on-miss "strictly stronger than Cilium's
+pass-through") wrong?**
+
+**Verdict, stated first: the crafter is CORRECT. The Q5 recommendation is WRONG on
+the one axis it claimed superiority, and D3-as-locked is unworkable.** The error is
+not in any of Q1–Q4's verified mechanics; it is a single unexamined premise — *that
+a `REVERSE_LOCAL_MAP` miss denotes "a service reply whose reverse entry was lost."*
+Under the actual attach scope, a miss overwhelmingly denotes *"this datagram is not
+a service reply at all,"* and sentinel-rewriting it corrupts unrelated traffic.
+
+---
+
+## Findings
+
+### A-Q1 — Attach scope: does recvmsg4 fire on EVERY unconnected UDP recv in the subtree, or only service-VIP datagrams?
+
+**Hypothesis (the crux):** a `BPF_CGROUP_UDP4_RECVMSG` program attached at a cgroup
+ancestor (`overdrive.slice`, which contains the control plane AND every workload)
+fires for **every** unconnected-UDP `recvmsg`/`recvfrom` issued by **any** process in
+the subtree — not only datagrams whose source is a service backend.
+
+**Predicted finding:** yes, all unconnected UDP recv in the subtree. **Falsifier:**
+the hook is scoped to specific addresses or specific sockets (per-socket attach), so
+it would fire only on the sockets the platform tagged.
+
+**Finding: HYPOTHESIS CONFIRMED. cgroup_sock_addr programs are attached to a cgroup,
+not a socket, and the kernel invokes them on the relevant syscall for EVERY task in
+that cgroup and all descendants.** **[VERIFIED-PRIMARY]**
+
+**Evidence 1 (kernel cgroup-BPF attach hierarchy):** the kernel BPF cgroup
+documentation states that a program attached to a cgroup is *"called every time [a]
+process executes"* the relevant syscall, and that programs *"execute for all
+processes within that cgroup and its descendants"*; when programs attach at multiple
+cgroup levels they run bottom-up (child → parent) over the same syscall invocation.
+There is no per-address or per-socket scoping in the attach model — the unit of
+attachment is the cgroup, and the trigger is "any task in the subtree performs the
+syscall." Source: [kernel.org BPF cgroup sockopt / cgroup-BPF attach semantics](https://docs.kernel.org/bpf/prog_cgroup_sockopt.html),
+accessed 2026-06-05. **[VERIFIED-PRIMARY]**
+
+**Evidence 2 (Cilium production, independent corroboration):** Cilium attaches its
+socket-LB cgroup programs (the connect/sendmsg/recvmsg family) to the **cgroup v2
+root** (`/run/cilium/cgroupv2`), explicitly so the hooks *"apply globally to all
+sockets across all pods … fire for all socket operations system-wide, not per
+individual socket."* Source: [Cilium kube-proxy-free docs](https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/),
+accessed 2026-06-05. This is the same shape Overdrive uses — one LB cgroup ancestor
+covering every process that might issue (or receive a reply to) a VIP datagram. The
+ADR itself states this design intent: *"one host netns, one LB cgroup ancestor for
+every process that might issue a VIP connect"* (ADR-0053 § "Relationship to prior
+ADRs", `feedback_phase1_single_node_scope` line). **[VERIFIED-PRIMARY]**
+
+**Evidence 3 (the shipped program confirms the same reading):** the implemented
+`cgroup_recvmsg4_service` (`crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs:107-122`)
+documents exactly this in-code: *"recvmsg4 is attached at a cgroup ANCESTOR and
+therefore fires on EVERY unconnected UDP `recvmsg`/`recvfrom` from any descendant —
+service replies AND all unrelated UDP (DNS clients, the backends' own recvs, etc.).
+The map lookup is the discriminator."* **[VERIFIED-PRIMARY — the code under audit.]**
+
+**Consequence (the reframe of "miss"):** because the hook fires on all unconnected
+UDP in the subtree, a `REVERSE_LOCAL_MAP` lookup keyed on the datagram's *source*
+identity misses for the overwhelming majority of datagrams — every DNS client
+reading an upstream answer, **the backend's own `recvfrom` of the inbound query**,
+every unrelated same-host UDP exchange. A miss therefore means **"the source of this
+datagram is not a registered backend identity"** — i.e. *not a service reply* — NOT
+"a service reply whose reverse entry was lost." Q5 assumed the latter; the attach
+scope makes it the former. **[VERIFIED-PRIMARY for the mechanism; INFERRED for "the
+overwhelming majority", which follows directly from "fires on all subtree UDP".]**
+
+---
+
+### A-Q2 — Consequence of sentinel-on-miss: does it corrupt non-service traffic?
+
+**Hypothesis:** given A-Q1, rewriting source→sentinel `192.0.2.1` on every miss
+corrupts the sender address that every *non-service* unconnected-UDP datagram's
+application reads. The canonical break: a backend resolver doing its own `recvfrom`
+of an inbound query would see source `192.0.2.1` instead of the real client, and
+reply to `192.0.2.1` — the wrong peer.
+
+**Predicted finding:** yes — sentinel-on-miss mangles every unrelated UDP recv in
+the cgroup; no-op-on-miss (leave the real source intact) is the only correct
+behavior. **Falsifier:** some property of the miss path that excludes non-service
+traffic (e.g. the lookup key being VIP-derived rather than source-derived, so
+non-service datagrams never reach the rewrite).
+
+**Finding: HYPOTHESIS CONFIRMED. Sentinel-on-miss corrupts every non-service
+unconnected-UDP recv in the subtree. This is precisely the breakage the crafter
+observed (it broke the unconnected round-trip AND the connected-UDP K4 path until
+caught).** **[VERIFIED-PRIMARY]**
+
+**Evidence (the lookup is keyed on the datagram source, so non-service datagrams DO
+reach the rewrite):** the shipped program builds its reverse key from the
+kernel-populated source sockaddr — *"the kernel has already populated the source
+sockaddr (`user_ip4`/`user_port`) with the BACKEND identity the datagram arrived
+from"* — and the `ReverseLocalKey` is `{ backend_ip_host, backend_port_host, proto }`
+(`cgroup_recvmsg4_service.rs:84-102`). For a non-service datagram the source is some
+arbitrary peer, the lookup misses, and a sentinel-rewrite branch would then overwrite
+that arbitrary peer's address in `user_ip4` — exactly the field the receiving app
+reads via `recvfrom`/`msg_name`. The in-code rationale states the failure verbatim:
+*"Rewriting the source on a miss would corrupt every unrelated UDP recv in the cgroup
+(e.g. a backend reading a query would have its sender address mangled, so its reply
+would target the wrong peer)."* (`cgroup_recvmsg4_service.rs:114-122`).
+**[VERIFIED-PRIMARY — the code path + the falsifier ruled out: the key IS
+source-derived, so non-service traffic reaches the branch.]**
+
+**Cross-reference (UI-1 finding, independent observation):** the crafter's
+`upstream-issues.md` § UI-1 records the same break empirically — *"Rewriting those
+sources to the sentinel mangles the sender address every non-service datagram's app
+reads — it broke the unconnected round-trip AND the connected-UDP K4 path until
+caught."* This is a Tier-3 observation, independent of the source-code reasoning
+above; the two agree. **[VERIFIED-PRIMARY — Tier-3 evidence + code path.]**
+
+**Conclusion:** **no-op-on-miss (leave the real source intact, bump a counter for
+observability) is the only correct behavior** for a hook that fires on all subtree
+UDP. Any source rewrite on a miss is a correctness bug, not a "strictly stronger"
+hardening.
+
+---
+
+### A-Q3 — What does Cilium actually do, and was Q5 wrong?
+
+**Hypothesis:** Cilium `cil_sock4_recvmsg` / `__sock4_xlate_rev` does HIT → rewrite
+source→service-IP, MISS → `SYS_PROCEED` with no rewrite (pass-through). And — the
+re-evaluation — Cilium's pass-through is **CORRECT** (a miss = non-service traffic
+whose real source must be preserved), making no-op-on-miss **Cilium-aligned** and
+Q5's "strictly stronger sentinel" framing **WRONG**.
+
+**Predicted finding:** Cilium passes through unchanged on miss; this is correct, not
+a "leak" to be improved on; Q5 mislabeled it. **Falsifier:** Cilium sentinel-rewrites
+on miss (then Q5's "Cilium leaks" premise would hold), or Cilium's miss genuinely
+denotes a lost-reverse-entry service reply (then "leak" would be the right word).
+
+**Finding: HYPOTHESIS CONFIRMED. Cilium passes through unchanged on miss, and this is
+the CORRECT behavior — not a leak. Q5's "strictly stronger than Cilium's
+pass-through-leak" conclusion is WRONG.** **[VERIFIED-PRIMARY]**
+
+**Evidence (re-read of Cilium `bpf/bpf_sock.c`, `main`, accessed 2026-06-05):**
+
+- `cil_sock4_recvmsg` calls `__sock4_xlate_rev(ctx, ctx)` and then
+  **unconditionally `return SYS_PROCEED;`** (the function's sole return). **[VERIFIED-PRIMARY]**
+- Inside `__sock4_xlate_rev`, on a `cilium_lb4_reverse_sk` map **hit** the code
+  rewrites `ctx->user_ip4 = val->address` (source → service IP) and returns 0; on a
+  **miss** it returns `-ENXIO` **and leaves `user_ip4` unchanged** — the entry point
+  discards the `-ENXIO` and proceeds. The source the app reads is the **real**
+  source, untouched. **[VERIFIED-PRIMARY]**
+- `#define SYS_REJECT 0` / `#define SYS_PROCEED 1` (`bpf_sock.c` lines 20-21).
+  **[VERIFIED-PRIMARY]**
+
+**Why pass-through is correct, not a leak (the Q5 mislabel):** Cilium attaches at the
+cgroup root (A-Q1, Evidence 2), so — exactly as in Overdrive — `cil_sock4_recvmsg`
+fires on *all* unconnected UDP, and a reverse-SK miss is *non-service traffic*.
+Leaving the real source intact is the **only** correct action: the datagram's true
+source is what its receiving app must see. Q5 reasoned as if the miss were a service
+reply whose VIP-mapping was lost (in which case the unrewritten backend source would
+indeed be an undesirable "leak"). But under the attach scope, the miss is not a
+service reply at all — so there is no backend source to "leak," and "pass-through"
+is preserving a *correct* address, not exposing a wrong one. **The word "leak" in Q5
+and in D3 is a category error.** Cilium is not making a defensible-but-weaker choice;
+it is making the *correct* choice, and Overdrive's no-op-on-miss is **Cilium-aligned,
+not Cilium-exceeding.** **[VERIFIED-PRIMARY for the mechanism; INFERRED for the
+correctness judgment, which follows from A-Q1 + the source.]**
+
+---
+
+### A-Q4 — No-leak guarantee (K5) under reverse-first dual-write, and the residual sentinel role
+
+**Hypothesis:** with the D1 reverse-first dual-write, every registered backend has a
+reverse entry before its forward entry is visible, so a **genuine service reply
+ALWAYS hits** → is always rewritten to the VIP → no backend-IP ever reaches the
+client app. The only miss is non-service traffic. K5's no-leak guarantee therefore
+holds via "always-hit-on-service-reply," not via sentinel-on-miss.
+
+**Predicted finding:** K5 holds by always-hit; the sentinel has no role on the miss
+path. **Falsifier:** a service-reply path that can miss (then the no-leak guarantee
+would have a hole that a HIT-path fail-safe must close).
+
+**Finding: HYPOTHESIS CONFIRMED. K5's no-leak guarantee holds via the always-hit
+property of the reverse-first dual-write, NOT via sentinel-on-miss. The sentinel has
+no correct role on the miss path.** **[VERIFIED-PRIMARY for the dual-write ordering;
+INFERRED for the end-to-end guarantee.]**
+
+**Evidence (D1/D5a ordering, ADR-0053 rev 2026-06-05):** the observable invariant
+amended into the `register_local_backend` contract is *"observers never see a forward
+`LOCAL_BACKEND_MAP` entry without its corresponding reverse `REVERSE_LOCAL_MAP` entry
+— the reverse write commits first … so any visible forward entry implies a visible
+reverse entry"* (ADR-0053 § D5a). A datagram is a service reply only because a client
+forward-translated through `LOCAL_BACKEND_MAP` to reach the backend — which means the
+forward entry was visible, which (by the invariant) means the reverse entry was
+visible. So a genuine service reply's source **is** a registered backend identity and
+**hits** the reverse map → rewritten to VIP. **No backend IP reaches the client app
+on the service path.** **[VERIFIED-PRIMARY for the ordering invariant; INFERRED for
+"every service reply hits", which is the contrapositive of the invariant.]**
+
+**Residual sentinel role — is there a HIT-path corruption case worth handling?** The
+only way a service reply could miss is if its reverse entry were **evicted or
+tampered** after the forward entry was used (map pressure; external `bpftool`
+write). This is the should-never-happen-under-dual-write case. Two observations:
+
+1. It is **not distinguishable at the recvmsg4 layer** from ordinary non-service
+   traffic — both present as "source not in `REVERSE_LOCAL_MAP`." recvmsg4 has no
+   second signal to tell "evicted service reply" from "DNS client's upstream answer."
+   So a sentinel-on-miss fail-safe **cannot** be scoped to only the evicted-service
+   case; it would necessarily also fire on all the non-service traffic (A-Q2's
+   corruption). There is no correct sentinel branch on the miss path. **[INFERRED
+   from A-Q1 + A-Q2 — the miss path carries no discriminator.]**
+2. The honest mitigation for the eviction case is **prevention + observability**, not
+   a recvmsg4 rewrite: size `REVERSE_LOCAL_MAP` to match `LOCAL_BACKEND_MAP` (the ADR
+   sets both to 4096, so co-eviction is structurally avoided), and let the
+   `REVERSE_LOCAL_MISS_COUNTER` make any anomaly visible. A non-zero miss counter on a
+   single-node box that should have only service replies is the diagnostic; the fix
+   is upstream (re-register), not a per-datagram sentinel. **[INFERRED.]**
+
+**Verdict on the sentinel:** **it is should-never-happen-under-dual-write AND not
+special-handleable at the recvmsg4 layer, so it is not worth a code path.** Retaining
+`SENTINEL_SOURCE_HOST` as a dead documentation constant (as the implementation does,
+`cgroup_recvmsg4_service.rs:60-65`) is the correct disposition — it records the
+rejected design without executing it. The honest move under
+`.claude/rules/development.md` § "Deletion discipline" would be to delete the unused
+constant; retaining it as documentation is a defensible judgment call the crafter
+flagged for the S-03-01 re-scope (not a research blocker).
+
+---
+
+## UI-1 verdict
+
+**The crafter's correction is CORRECT.** "Rewrite source→VIP on HIT; pure no-op on
+MISS (counter bump only)" is the right behavior — it is Cilium-aligned, it is the
+only behavior that does not corrupt the non-service unconnected UDP the cgroup-ancestor
+hook unavoidably fires on, and it preserves K5's no-leak guarantee via the
+reverse-first dual-write's always-hit property. ADR-0053 § D3 as locked
+(sentinel-on-miss) is **unworkable** and must be amended.
+
+**The prior doc's Q5 recommendation is WRONG**, specifically on the claim that
+sentinel-on-miss is *"strictly stronger than Cilium's pass-through."* The single
+defective premise: Q5's option table (rows b/c) and its rationale §1 both assumed a
+miss = "a service reply with a lost reverse entry," so pass-through looked like a
+backend-IP "leak." Under the verified attach scope (A-Q1), a miss = "not a service
+reply," pass-through preserves a *correct* source, and the sentinel *corrupts* it.
+Q5 had the right mechanics (Q1–Q4) but reasoned about the wrong population of
+datagrams. See the **Q5 correction** section below for the precise scope of the
+correction.
+
+---
+
+## Corrected D3 contract (one paragraph, for the architect's ADR amendment)
+
+> **D3 (corrected) — reverse-miss handling: rewrite-on-HIT, pure no-op-on-MISS.**
+> `cgroup/recvmsg4` is attached at a cgroup ancestor and therefore fires on every
+> unconnected-UDP `recvmsg`/`recvfrom` from any descendant — service replies and all
+> unrelated same-host UDP alike. The `REVERSE_LOCAL_MAP` lookup, keyed on the
+> datagram's source identity, is the *discriminator*: a **HIT** means the source is a
+> registered backend identity (this is a service reply), and recvmsg4 rewrites the
+> source `user_ip4` the application reads to the VIP. A **MISS** means the source is
+> not a registered backend (this is not a service reply — a DNS client's upstream
+> answer, a backend's own `recvfrom` of an inbound query, any unrelated UDP), and
+> recvmsg4 performs a **pure no-op**: it leaves the real source address intact and
+> increments `REVERSE_LOCAL_MISS_COUNTER` for observability only. recvmsg4 cannot deny
+> (`[1,1]`); every path returns 1. The K5 no-leak guarantee is preserved by the D1
+> reverse-first dual-write, not by the miss path: every registered backend has a
+> visible reverse entry before its forward entry is usable, so a genuine service reply
+> *always* hits and is *always* rewritten to the VIP — no backend IP ever reaches the
+> client application. The sentinel `192.0.2.1` is **NOT** written on the miss path; a
+> source rewrite on a miss would corrupt every non-service datagram's sender address
+> (the bug observed and fixed in DELIVER step 01-03). This is Cilium-aligned behavior
+> (`cil_sock4_recvmsg` returns `SYS_PROCEED` and `__sock4_xlate_rev` leaves the source
+> unchanged on a reverse-SK miss), not weaker than it.
+
+---
+
+## S-03-01 re-scope (for the acceptance-designer)
+
+S-03-01 was *"reverse miss → source is sentinel `192.0.2.1`, never the backend IP."*
+That assertion is now **false** and must be replaced. The re-scoped slice-03
+assertions should be:
+
+1. **Non-service unconnected UDP is unaffected by recvmsg4.** A same-host
+   unconnected-UDP exchange whose source is NOT a registered backend (e.g. a plain
+   client/server pair, or a backend reading an inbound query) reads its **real**
+   sender address from `recvfrom`/`msg_name` — recvmsg4 leaves it byte-for-byte
+   intact. (This is the regression the corrected behavior fixes; it is the
+   load-bearing new assertion.)
+2. **A service reply always hits → VIP-sourced.** Under the reverse-first dual-write,
+   a genuine service reply's source is always a registered backend identity, so it
+   always hits and the app reads the **VIP** as the source — there is no
+   backend-IP-leak path on the service reply. (Restates the HIT assertion S-03-01
+   shared with slice 01/02; unchanged.)
+3. **The miss counter is observable, behaviorally inert.**
+   `REVERSE_LOCAL_MISS_COUNTER` increments on every non-service recv (it will be
+   large and non-zero in any realistic subtree), and its incrementing has **no**
+   effect on the source the app reads. Assert the counter moves on non-service recv
+   AND that the source is untouched on the same recv — the two together pin "counted
+   but inert."
+
+S-03-02 / S-03-03 (the other hardening scenarios) and the K5 / US-03 wording should
+be reviewed for the same "sentinel-on-miss" assumption and reframed to the
+always-hit / no-op-on-miss reality. The K5 no-leak guarantee is **preserved** — only
+its *mechanism* changes (from "sentinel on miss" to "always-hit-on-service-reply via
+dual-write"); the operator-facing promise ("no backend IP ever reaches the client
+application's `recvfrom`") is intact and is now backed by a stronger structural
+argument (the dual-write invariant) rather than a per-datagram fail-safe.
+
+---
+
+## Q5 correction (explicit, for the prior section above)
+
+The original **Q5** ("Honest achievable guarantee + recommended miss-handling") is
+corrected as follows. Its verified mechanics — recvmsg4 cannot deny (Q1), writable
+fields are `user_ip4`/`user_port` (Q2), the wire layer is XDP's not recvmsg4's
+(Q4) — **all stand**. The defective parts are:
+
+- **Q5 option table, row (b) "rewrite to sentinel + proceed" labeled "Achievable:
+  YES … No backend IP reaches the app sockaddr":** CORRECTED. On the cgroup-ancestor
+  attach, row (b) is *achievable but incorrect* — it rewrites the source of **every
+  non-service datagram** in the subtree, not just a lost service reply. It does not
+  "avoid a leak"; it *introduces corruption*. Row (b) must be struck as the
+  recommendation.
+- **Q5 option table, row (c) "pass-through (Cilium's default) … Leak surface:
+  Backend IP does reach the app sockaddr":** CORRECTED. The "leak" label is a category
+  error. On a miss the source is *not* a backend (the datagram is not a service
+  reply), so pass-through preserves the *correct* source. Row (c) — no-op-on-miss — is
+  the **correct recommendation**, not the leaky fallback.
+- **Q5 "Recommendation: Option (b) — rewrite-to-sentinel + counted miss" and its
+  rationale §1 "strictly dominates Cilium's (c) on the no-backend-IP-leak axis":**
+  CORRECTED to **Option (c) — pure no-op-on-miss + counted miss.** There is no axis on
+  which (b) dominates (c); (b) is a correctness regression. Cilium's pass-through is
+  the right answer, and Overdrive matches it.
+- **Q5 rationale §3 "reverse miss is a should-never-happen path … sentinel + counter
+  meets [the bar] and pass-through does not":** CORRECTED. The premise conflated two
+  distinct miss populations. The *should-never-happen* miss (an evicted service
+  reply) is real but **rare and indistinguishable at the recvmsg4 layer** from the
+  *routine and overwhelmingly common* miss (non-service traffic). Because the two
+  cannot be told apart on the miss path, no sentinel branch can be scoped to only the
+  rare case; pass-through is correct for the common case and the rare case is handled
+  by prevention (map sizing) + observability (the counter), not by a rewrite.
+- **Knowledge Gap 2 (resolver behavior on a `0.0.0.0`/`192.0.2.1`-sourced reply):**
+  now **moot for the miss path** — no sentinel is written on a miss, so no resolver
+  ever sees a sentinel-sourced reply on that path. The gap only mattered under the
+  rejected sentinel-on-miss design.
+
+The corrected one-line Q5 takeaway: **on a reverse-map miss, recvmsg4 does nothing
+(no-op) and counts the miss; the no-leak guarantee comes from the reverse-first
+dual-write making every service reply hit, never from a miss-path sentinel. This is
+Cilium-aligned, not Cilium-exceeding.**
+
+---
+
+## Residual Tier-3 open question
+
+One genuine open item remains, narrower than the original Gap 2 and Tier-3-shaped:
+
+> **Does `REVERSE_LOCAL_MISS_COUNTER` carry a usable operational signal, or is it pure
+> noise?** Because the counter increments on *all* non-service unconnected UDP in the
+> subtree (DNS clients, backend inbound-query recvs, unrelated same-host UDP), its
+> absolute value is dominated by non-service traffic and is NOT a "service reply
+> failed to translate" alarm. The Tier-3 question for the acceptance-designer /
+> DEVOPS is whether the counter is worth surfacing at all (it cannot distinguish the
+> should-never-happen evicted-service-reply case from routine non-service misses), or
+> whether the honest observability for the eviction case lives elsewhere (e.g. a
+> control-plane reconciler comparing forward-vs-reverse map cardinality, or a
+> `bpftool map dump` differential). This is a metric-semantics decision, not a
+> correctness blocker — the no-op-on-miss behavior is correct regardless of whether
+> the counter is kept, demoted, or replaced. **No GitHub issue created** (per
+> `feedback_no_unilateral_gh_issues`); surfaced here as a DELIVER/DEVOPS open question
+> for user direction.
+
+A second, lower item: per `.claude/rules/development.md` § "Deletion discipline," the
+now-unused `SENTINEL_SOURCE_HOST` constant (`cgroup_recvmsg4_service.rs:65`) is dead
+code retained as documentation. Whether to delete it or keep it as a rejected-design
+marker is a code-hygiene judgment for the S-03-01 re-scope, not a research finding.
+
+---
+
+## Addendum source analysis
+
+| Source | Domain | Reputation | Type | Access Date | Cross-verified |
+|--------|--------|------------|------|-------------|----------------|
+| kernel.org BPF cgroup attach/invocation semantics (`prog_cgroup_sockopt.html`) | docs.kernel.org | High (1.0) | Official kernel doc | 2026-06-05 | Y (Cilium cgroup-root, shipped program) |
+| Cilium kube-proxy-free docs — cgroup-root attach scope | docs.cilium.io | High (1.0) | Production reference doc | 2026-06-05 | Y (kernel attach doc, ADR design intent) |
+| Cilium `bpf/bpf_sock.c` (`cil_sock4_recvmsg` SYS_PROCEED; `__sock4_xlate_rev` `-ENXIO` no-rewrite miss; SYS_PROCEED/SYS_REJECT) | github.com/cilium/cilium | High (1.0) | Production source | 2026-06-05 | Y (kernel attach doc) |
+| Shipped `cgroup_recvmsg4_service.rs` (attach-scope rationale, source-keyed lookup, no-op-on-miss) | overdrive repo | High (1.0) | Code under audit | 2026-06-05 | Y (UI-1 Tier-3 finding) |
+| `upstream-issues.md` § UI-1 (Tier-3-observed corruption from sentinel-on-miss) | overdrive repo | High (1.0) | DELIVER back-prop log | 2026-06-05 | Y (code path) |
+
+Reputation: High 5/5 (100%). **Independence check:** the attach-scope crux (A-Q1) is
+corroborated by three independent sources — the kernel doc (the authoritative
+semantics), Cilium (an independent production consumer attaching at the cgroup root
+for the same reason), and the shipped program's own rationale. The Cilium miss-path
+behavior (A-Q3) is read directly from upstream source and cross-checked against the
+kernel return-code rule from the original Q1. None cite each other.
+
+## Addendum metadata
+
+New sources examined: 3 web + 2 repo | New cross-refs: A-Q1 triangulated across 3
+independent primaries (kernel doc, Cilium docs, shipped code); A-Q3 verified directly
+against Cilium source | Confidence: High (every load-bearing claim VERIFIED-PRIMARY;
+the few INFERRED labels are clearly flagged and follow deductively from the primaries)
+| Verdict: crafter CORRECT; Q5 WRONG on the "strictly stronger than Cilium" claim;
+D3 amendment + S-03-01 re-scope specified above.

@@ -3927,14 +3927,24 @@ Per `docs/research/dataplane/recvmsg4-reply-source-rewrite-and-miss-semantics-re
 (Nova, High confidence): the kernel verifier restricts
 `BPF_CGROUP_UDP4_RECVMSG` to a return-value range of exactly `[1,1]` — a
 program returning 0 is **rejected at load time**. So "drop on miss" is
-impossible at any layer. On a `REVERSE_LOCAL_MAP` miss, recvmsg4
-**rewrites the reply source to a non-backend/non-VIP sentinel
-(`192.0.2.1`, RFC 5737) and bumps an observable counted miss reason**
-(the `DropClass`-style discipline) — strictly stronger than Cilium,
-which pass-through-leaks the backend source to the app's `recvfrom` on a
-miss. A reverse miss is a should-never-happen path under the ordered
-(reverse-first) dual-write, so the sentinel path is corruption/eviction
-handling, not a routine branch.
+impossible at any layer. recvmsg4 attaches at a cgroup **ancestor** and
+fires on **every** unconnected-UDP recv from any descendant, so the
+`REVERSE_LOCAL_MAP` lookup IS the "this is a service reply"
+discriminator. On a **HIT** (source is a registered backend → a service
+reply) recvmsg4 rewrites the reply source `backend → VIP`; on a **MISS**
+(not a service reply — a backend's own inbound-query `recvfrom`, any
+unrelated same-host UDP) recvmsg4 performs a **pure no-op** — it leaves
+the real source intact and bumps `REVERSE_LOCAL_MISS_COUNTER` for
+observability only. This is **Cilium-aligned** (`cil_sock4_recvmsg`
+returns `SYS_PROCEED` and leaves the source unchanged on a reverse-SK
+miss). The K5 no-leak guarantee is preserved by the **reverse-first
+dual-write** (every registered backend has a visible reverse entry
+before its forward entry is usable, so a genuine service reply ALWAYS
+hits → always VIP-rewritten), NOT by a miss-path sentinel. A source
+rewrite on a miss would corrupt every non-service datagram's sender
+address (observed and fixed in DELIVER step 01-03 — back-prop finding
+UI-1; ADR-0053 D3 sub-revision 2026-06-05b corrects the earlier
+"sentinel on miss" decision).
 
 ### Layer boundary — application sockaddr, NOT wire
 
