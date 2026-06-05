@@ -48,6 +48,7 @@
 //! `RcgenCa` / `SimCa`. DELIVER replaces with the real twin-adapter
 //! call-sequence + accessor-equivalence assertions.
 
+use std::process::Command;
 use std::sync::Arc;
 
 use overdrive_core::traits::ca::{Ca, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest};
@@ -395,17 +396,164 @@ fn ca_equivalence_svid_profile_matches_across_host_and_sim() {
     );
 }
 
+/// The contract-observable trust-bundle composition shape, read through the
+/// [`TrustBundle`] accessors only (never internal adapter fields). The
+/// equivalence Universe for a bundle (ADR-0063 D1 wire-format): is the root
+/// anchor present, is the intermediate present as untrusted chain material,
+/// and is the combined bundle composed **root-anchor-first** (the anchor PEM
+/// is a prefix of the combined `bundle_pem`). NEVER the concrete cert bytes —
+/// the sim fixture certs differ from the host-minted certs by construction
+/// (research Finding 11); only the *composition shape* is contract-observable
+/// and equivalent across adapters.
+#[derive(Debug, PartialEq, Eq)]
+struct TrustBundleShape {
+    root_anchor_present: bool,
+    intermediate_chain_present: bool,
+    /// The combined bundle PEM begins with the root anchor PEM — the
+    /// root-anchor-first composition order the contract pins.
+    anchor_first: bool,
+}
+
+fn trust_bundle_shape(bundle: &overdrive_core::traits::ca::TrustBundle) -> TrustBundleShape {
+    let anchor_pem = bundle.root_anchor().as_pem();
+    TrustBundleShape {
+        root_anchor_present: !anchor_pem.is_empty(),
+        intermediate_chain_present: bundle.intermediate_chain().is_some(),
+        anchor_first: bundle.bundle_pem().as_pem().starts_with(anchor_pem),
+    }
+}
+
 /// `@real-io` `@adapter-integration` `@S-05` — trust-bundle equivalence: a
 /// leaf minted by an adapter verifies against THAT adapter's
 /// `trust_bundle()`, and the bundle composition shape (root anchor +
 /// intermediate as untrusted chain material) is equivalent across host and
 /// sim. (Cross-adapter chain mixing is NOT asserted — different roots.)
+///
+/// The host arm is the REAL-tool proof: the host leaf verifies against the
+/// host bundle via `openssl verify -CAfile <host-bundle.pem> <host-leaf.pem>`
+/// (exit 0) — the bundle's root-anchor-first concatenation IS the single-file
+/// verification material a relying party pins (KPI K1, bundle form). The sim
+/// leaf verifies against the sim bundle via the sim's own opaque-byte path:
+/// the sim cannot sign (it is `adapter-sim`, no crypto), so the fixture leaf's
+/// chains-to-issuer / chains-to-root linkage is observed on the fixture bytes,
+/// exactly as the sim acceptance suite does (research Finding 11; ADR-0063 D7).
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn ca_equivalence_trust_bundle_shape_matches_across_host_and_sim() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-05 / trust_bundle() composition shape (root anchor \
-         + intermediate untrusted chain) is equivalent across RcgenCa and SimCa; each adapter's leaf \
-         verifies against its own bundle)"
+    // GIVEN both adapters and a node identity. Each adapter composes a bundle
+    // from its OWN root + intermediate (cross-adapter chain mixing is NOT
+    // asserted — different roots by construction).
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let host: RcgenCa = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let sim: SimCa = SimCa::new(Arc::new(SimEntropy::new(0xCA_5E)));
+    let node = NodeId::new("node-a").expect("NodeId parses");
+    // The workload identity the SIM fixture leaf actually carries — the host
+    // mints a genuine leaf for the same identity so both leaves share the SAN.
+    let workload = SpiffeId::new("spiffe://overdrive.local/workload/sim-svid")
+        .expect("workload SpiffeId parses");
+    let req = SvidRequest::new(workload);
+
+    // WHEN each adapter produces its root, node intermediate, workload leaf, and
+    // trust bundle through the `Ca` driving port. The intermediate is minted so
+    // the bundle carries it as untrusted chain material.
+    let host_inter =
+        host.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
+    let host_svid = host.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf");
+    let host_bundle = host.trust_bundle().expect("RcgenCa::trust_bundle composes a bundle");
+
+    let sim_root = sim.root().expect("SimCa::root() loads its fixture root");
+    let sim_inter = sim.issue_intermediate(&node).expect("SimCa::issue_intermediate loads fixture");
+    let sim_svid = sim.issue_svid(&req).expect("SimCa::issue_svid mints a leaf");
+    let sim_bundle = sim.trust_bundle().expect("SimCa::trust_bundle composes a bundle");
+
+    // THEN the host leaf verifies against the host bundle: `openssl verify
+    // -CAfile <host-bundle.pem> <host-leaf.pem>` exits 0. The bundle's
+    // root-anchor-first concatenation (root + intermediate) is the single-file
+    // verification material — the relying-party `verify` path on the REAL bytes.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let host_bundle_path = dir.path().join("host_bundle.pem");
+    let host_leaf_path = dir.path().join("host_leaf.pem");
+    std::fs::write(&host_bundle_path, host_bundle.bundle_pem().as_pem().as_bytes())
+        .expect("write host_bundle.pem");
+    std::fs::write(&host_leaf_path, host_svid.cert_pem().as_pem().as_bytes())
+        .expect("write host_leaf.pem");
+    let output = Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&host_bundle_path)
+        .arg(&host_leaf_path)
+        .output()
+        .expect("invoke openssl verify");
+    assert!(
+        output.status.success(),
+        "host leaf must verify against the host trust bundle (root anchor + intermediate chain): \
+         stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    // AND the host bundle's root anchor is the host root cert, and its
+    // intermediate chain material is the host intermediate cert — the bundle
+    // composes the materials the adapter actually issued (not arbitrary bytes).
+    let host_root = host.root().expect("RcgenCa::root() self-signs a real root");
+    assert_eq!(
+        host_bundle.root_anchor().as_pem(),
+        host_root.cert_pem().as_pem(),
+        "host bundle root anchor must be the host root certificate",
+    );
+    assert_eq!(
+        host_bundle.intermediate_chain().map(overdrive_core::traits::ca::CaCertPem::as_pem),
+        Some(host_inter.cert_pem().as_pem()),
+        "host bundle intermediate chain material must be the host intermediate certificate",
+    );
+
+    // AND the SIM leaf verifies against the SIM bundle on the sim's own opaque
+    // path: the sim cannot sign (research Finding 11), so the chains-to-root
+    // linkage is observed on the fixture bytes — the leaf's issuer DN is the
+    // intermediate's subject DN, the intermediate's issuer DN is the root's
+    // subject DN, and the bundle carries those exact root + intermediate certs.
+    // This is the same opaque-byte verification the sim acceptance suite uses.
+    assert_eq!(
+        sim_bundle.root_anchor().as_pem(),
+        sim_root.cert_pem().as_pem(),
+        "sim bundle root anchor must be the sim fixture root certificate",
+    );
+    assert_eq!(
+        sim_bundle.intermediate_chain().map(overdrive_core::traits::ca::CaCertPem::as_pem),
+        Some(sim_inter.cert_pem().as_pem()),
+        "sim bundle intermediate chain material must be the sim fixture intermediate certificate",
+    );
+    // The sim leaf's chains-to-issuer / chains-to-root linkage, observed via the
+    // x509 profile helpers on the fixture bytes (the sim's faithful verify path).
+    let sim_leaf_profile = svid_profile(&sim_svid, &sim_inter);
+    assert!(
+        sim_leaf_profile.chains_to_issuer,
+        "sim leaf must chain to the sim intermediate (its issuer == intermediate subject)",
+    );
+    let sim_inter_profile = intermediate_profile(&sim_inter, &sim_root);
+    assert!(
+        sim_inter_profile.chains_to_root,
+        "sim intermediate must chain to the sim root (its issuer == root subject)",
+    );
+
+    // AND the bundle COMPOSITION SHAPE is equivalent across host and sim — both
+    // carry a root anchor, both carry intermediate chain material, both compose
+    // root-anchor-first. (The concrete cert bytes differ by construction —
+    // research Finding 11; only the composition shape is contract-observable.)
+    let host_shape = trust_bundle_shape(&host_bundle);
+    let sim_shape = trust_bundle_shape(&sim_bundle);
+    assert_eq!(
+        host_shape, sim_shape,
+        "host and sim trust bundles must agree on the contract-observable composition shape",
+    );
+    assert_eq!(
+        host_shape,
+        TrustBundleShape {
+            root_anchor_present: true,
+            intermediate_chain_present: true,
+            anchor_first: true,
+        },
+        "the shared trust-bundle shape matches the Ca::trust_bundle contract (root anchor first, \
+         intermediate as untrusted chain material)",
     );
 }

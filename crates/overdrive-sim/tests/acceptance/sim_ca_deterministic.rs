@@ -306,15 +306,77 @@ fn sim_ca_svid_carries_single_uri_san_and_is_not_a_ca() {
 }
 
 /// `@in-memory` `@S-05` — `SimCa` re-issue: calling `issue_svid` twice for
-/// the SAME `SpiffeId` yields DISTINCT serials / validity windows (fresh leaf
-/// each time) even under the sim adapter; the re-issue mechanism the #40
-/// rotation workflow will later drive. Determinism is per-call-sequence,
-/// not per-SpiffeId-cached.
+/// the SAME `SpiffeId` on the SAME instance yields a FRESH, DISTINCT leaf —
+/// proving issuance is per-CALL-SEQUENCE, NOT per-`SpiffeId`-CACHED (the
+/// re-issue mechanism the #40 rotation workflow will later drive).
+///
+/// Port-to-port: enters through the `Ca` driving port (`issue_svid`), asserts
+/// on the observable `SvidMaterial` surface. The **faithful** sim observable
+/// of "fresh leaf" is the per-call serial: `SimCa` draws each leaf serial
+/// through the seeded `Entropy` port, so two consecutive `issue_svid` calls on
+/// the same instance advance the entropy stream and draw DISTINCT serials —
+/// the structural proof that issuance is not keyed/cached on the `SpiffeId`
+/// (a cached implementation would return the byte-identical handle, same
+/// serial included). The returned `SvidMaterial` still carries the requested
+/// identity as its sole URI SAN on every call.
+///
+/// SIM-FIXTURE FAITHFULNESS BOUNDARY (path A, ADR-0063 D7 / research
+/// Finding 11): `SimCa` is `adapter-sim` and cannot sign — `issue_svid`
+/// returns a pre-minted opaque fixture leaf (`FIXTURE_SVID_CERT_*`) whose
+/// cert bytes and validity window are baked in. Only the `serial()` accessor
+/// (drawn via `SeededEntropy`) and `spiffe_id()` (the request) are genuinely
+/// per-call. So this test asserts re-issue distinctness on the faithful
+/// observable (`serial()`) — which the sim provides honestly — and does NOT
+/// assert cert-byte-level / validity-window distinctness, which the fixed
+/// fixture cannot honestly demonstrate. The byte-level fresh-validity-window
+/// claim is proven against REAL crypto in the host adapter's L3 chain-verify
+/// suite (`rcgen_ca_chain_verify.rs`), where `RcgenCa::issue_svid` mints a
+/// genuine leaf with a `now`-straddling window on every call.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn sim_ca_reissue_for_same_spiffe_id_yields_a_fresh_distinct_leaf() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-05 / SimCa re-issue for the same SpiffeId yields \
-         a fresh leaf with a distinct serial and new validity window, no caching)"
+    use std::sync::Arc;
+
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::ca::{Ca, SvidRequest};
+    use overdrive_sim::adapters::ca::SimCa;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+
+    const SEED: u64 = 0x5EED;
+
+    let spiffe = SpiffeId::new(FIXTURE_SVID_SPIFFE).expect("fixture SVID SPIFFE id is valid");
+    let req = SvidRequest::new(spiffe.clone());
+
+    // A SINGLE SimCa instance — the same adapter re-issues for the same identity
+    // twice in sequence. A per-SpiffeId cache would key on `req` and hand back
+    // the byte-identical material (same serial) on the second call.
+    let ca = SimCa::new(Arc::new(SimEntropy::new(SEED)));
+
+    let first = ca.issue_svid(&req).expect("first sim SVID issuance succeeds");
+    let second =
+        ca.issue_svid(&req).expect("second sim SVID issuance for the SAME SpiffeId succeeds");
+
+    // (a) the re-issued leaf carries a DISTINCT serial — the faithful sim
+    // observable of "fresh leaf". The second `issue_svid` advanced the seeded
+    // entropy stream past the first draw, so the serials differ. A
+    // per-SpiffeId-cached implementation would return the SAME serial here; the
+    // distinctness is the structural proof that issuance is per-call-sequence,
+    // not cached on the identity.
+    assert_ne!(
+        first.serial().as_str(),
+        second.serial().as_str(),
+        "re-issuing for the same SpiffeId must draw a DISTINCT serial (fresh leaf, not cached)",
+    );
+
+    // (b) both leaves still carry the requested identity as their sole URI SAN —
+    // re-issue produces a fresh leaf FOR THE SAME identity, not a different one.
+    assert_eq!(
+        first.spiffe_id(),
+        &spiffe,
+        "the first leaf carries the requested SpiffeId as its sole URI SAN",
+    );
+    assert_eq!(
+        second.spiffe_id(),
+        &spiffe,
+        "the re-issued leaf carries the SAME requested SpiffeId as its sole URI SAN",
     );
 }

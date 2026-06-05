@@ -302,25 +302,70 @@ impl SvidMaterial {
 
 /// The trust bundle a relying party verifies an SVID chain against.
 ///
-/// Composed by [`Ca::trust_bundle`]: the root certificate is the **trust
-/// anchor**; the intermediate is **untrusted chain material** the verifier
-/// uses to build the path but does not itself anchor trust on.
+/// Composed by [`Ca::trust_bundle`] (ADR-0063 D1 wire-format): the root
+/// certificate is the **trust anchor**; the intermediate, when present, is
+/// **untrusted chain material** the verifier uses to build the path but does
+/// not itself anchor trust on.
+///
+/// The two components are observable **separately** — [`root_anchor`] and
+/// [`intermediate_chain`] — so a relying party (or an adapter-equivalence
+/// test) can inspect the composition *shape* (anchor present, chain present /
+/// absent, order) without re-parsing the concatenated PEM. The combined
+/// **root-anchor-first** PEM (`<root>\n<intermediate>`) is exposed via
+/// [`bundle_pem`] for the relying-party `verify` path — `openssl verify
+/// -CAfile <bundle.pem> <leaf.pem>` builds the chain from a single file
+/// because the anchor and chain material are concatenated anchor-first.
+///
+/// [`root_anchor`]: TrustBundle::root_anchor
+/// [`intermediate_chain`]: TrustBundle::intermediate_chain
+/// [`bundle_pem`]: TrustBundle::bundle_pem
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustBundle {
-    anchor_pem: TrustBundlePem,
+    root_anchor: CaCertPem,
+    intermediate_chain: Option<CaCertPem>,
 }
 
 impl TrustBundle {
-    /// Build a trust bundle from its composed anchor PEM.
+    /// Build a trust bundle from its composed parts: the **root anchor**
+    /// (always present) and, when an intermediate has been issued, the
+    /// **intermediate as untrusted chain material**.
     #[must_use]
-    pub const fn new(anchor_pem: TrustBundlePem) -> Self {
-        Self { anchor_pem }
+    pub const fn new(root_anchor: CaCertPem, intermediate_chain: Option<CaCertPem>) -> Self {
+        Self { root_anchor, intermediate_chain }
     }
 
-    /// The bundle PEM (root anchor; intermediate chain material appended).
+    /// The root certificate — the **trust anchor** the relying party pins.
+    /// Always present; composition order is root-anchor-first.
     #[must_use]
-    pub const fn anchor_pem(&self) -> &TrustBundlePem {
-        &self.anchor_pem
+    pub const fn root_anchor(&self) -> &CaCertPem {
+        &self.root_anchor
+    }
+
+    /// The intermediate certificate as **untrusted chain material**, when one
+    /// has been issued — the verifier uses it to build the path but does not
+    /// anchor trust on it. `None` when only the root exists.
+    #[must_use]
+    pub const fn intermediate_chain(&self) -> Option<&CaCertPem> {
+        self.intermediate_chain.as_ref()
+    }
+
+    /// The combined bundle PEM: the root anchor first, the intermediate chain
+    /// material appended when present (`<root>\n<intermediate>`).
+    ///
+    /// This is the single-file relying-party verification material — `openssl
+    /// verify -CAfile <bundle.pem> <leaf.pem>` builds `root → intermediate →
+    /// leaf` from the one concatenated file because the anchor and chain
+    /// material are present anchor-first.
+    #[must_use]
+    pub fn bundle_pem(&self) -> TrustBundlePem {
+        let mut pem = self.root_anchor.as_pem().to_owned();
+        if let Some(chain) = self.intermediate_chain.as_ref() {
+            if !pem.ends_with('\n') {
+                pem.push('\n');
+            }
+            pem.push_str(chain.as_pem());
+        }
+        TrustBundlePem::new(pem)
     }
 }
 

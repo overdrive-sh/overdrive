@@ -317,8 +317,20 @@ impl Ca for SimCa {
         ))
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold; lands GREEN in slice 03")]
     fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
-        todo!("RED scaffold: SimCa::trust_bundle (root anchor; intermediate chain material)")
+        // The trust anchor is the fixture root certificate (opaque bytes); the
+        // chain material is the fixture node-intermediate, included as UNTRUSTED
+        // chain material so a relying party can build root → intermediate → leaf
+        // and anchor trust on the root (ADR-0063 D1 wire-format). The fixture
+        // leaf (`FIXTURE_SVID_CERT_*`) chains to this intermediate, which chains
+        // to this root, so a sim-issued leaf "verifies" against this bundle on
+        // the sim's opaque-byte path (the sim cannot sign — research Finding 11).
+        // Composition order is root-anchor-first; the same `TrustBundle::new`
+        // shape the host adapter composes, so the COMPOSITION SHAPE is equivalent
+        // across adapters even though the concrete cert bytes differ.
+        Ok(TrustBundle::new(
+            CaCertPem::new(FIXTURE_ROOT_CERT_PEM.to_owned()),
+            Some(CaCertPem::new(FIXTURE_INTERMEDIATE_CERT_PEM.to_owned())),
+        ))
     }
 }

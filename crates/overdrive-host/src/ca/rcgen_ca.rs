@@ -492,8 +492,22 @@ impl Ca for RcgenCa {
         ))
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold; lands GREEN in slice 03")]
     fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
-        todo!("RED scaffold: RcgenCa::trust_bundle (root anchor; intermediate chain material)")
+        // The trust anchor is the persistent root certificate (minted once,
+        // cached) — the relying party pins it. The chain material is the cached
+        // single-node intermediate, included as UNTRUSTED chain material so the
+        // verifier can build root → intermediate → leaf from the one bundle but
+        // anchors trust only on the root (ADR-0063 D1 wire-format). Both are
+        // produced through the same cached material `root()` / `issue_svid`'s
+        // intermediate observe, so a leaf this adapter minted verifies against
+        // this adapter's own bundle. Composition order is root-anchor-first;
+        // `TrustBundle::bundle_pem` concatenates the two for the single-file
+        // `openssl verify -CAfile <bundle.pem> <leaf.pem>` path.
+        let root = self.root_material()?;
+        let intermediate = self.svid_intermediate()?;
+        Ok(TrustBundle::new(
+            CaCertPem::new(root.cert_pem.clone()),
+            Some(CaCertPem::new(intermediate.cert_pem.clone())),
+        ))
     }
 }
