@@ -1,13 +1,16 @@
 //! Typed userspace handle for `REVERSE_LOCAL_MAP` per ADR-0053 rev
 //! 2026-06-05 (GH #200).
 //!
-//! Wraps an `aya::maps::HashMap<MapData, ReverseLocalKeyPod, u32>` — the
-//! reply store for the UNCONNECTED-UDP same-host cgroup path. Keyed by
-//! the backend identity `(backend_ip, backend_port, proto)` (the
-//! `BackendKey` newtype, byte-parity with the three existing keys,
-//! DDD-2), value = the original VIP `u32`. The
+//! Wraps an `aya::maps::HashMap<MapData, ReverseLocalKeyPod,
+//! ReverseLocalEntryPod>` — the reply store for the UNCONNECTED-UDP
+//! same-host cgroup path. Keyed by the backend identity
+//! `(backend_ip, backend_port, proto)` (the `BackendKey` newtype,
+//! byte-parity with the three existing keys, DDD-2), value = the
+//! original VIP `(address, port)` (the 8-byte `ReverseLocalEntryPod`,
+//! byte-parity with the kernel `ReverseLocalEntry`). The
 //! `cgroup_recvmsg4_service` program reads it to rewrite the reply
-//! source the app sees backend→VIP.
+//! source the app sees backend→VIP — BOTH address and port (ADR-0053
+//! §D4).
 //!
 //! DISTINCT from `reverse_nat_map_handle` — that is the XDP wire path
 //! (`REVERSE_NAT_MAP`, connected/remote). This is the cgroup reply path
@@ -82,47 +85,79 @@ impl ReverseLocalKeyPod {
     }
 }
 
-/// `REVERSE_LOCAL_MAP` value codec — the original VIP, stored as a
-/// host-order `u32`.
+/// `REVERSE_LOCAL_MAP` value POD — the original VIP `(address, port)`.
+///
+/// 8 bytes, host-order, byte-parity with the kernel `ReverseLocalEntry`.
+/// The value width grew 4→8 in step 01-02 (the VIP port joined the VIP
+/// address) so the recvmsg4 reverse rewrite can restore BOTH the source
+/// address and the source port (ADR-0053 §D4).
+///
+/// `pub _pad` is a load-bearing wire-shape padding field — its byte
+/// position determines the struct's kernel-readable layout. Renaming it
+/// loses the "this is padding" signal at every call site.
+#[allow(clippy::pub_underscore_fields)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C)]
+pub struct ReverseLocalEntryPod {
+    /// Original VIP IPv4, host-order.
+    pub vip_host: u32,
+    /// Original VIP port, host-order.
+    pub vip_port_host: u16,
+    /// Padding to 8-byte alignment. Always zero.
+    pub _pad: u16,
+}
+
+// Compile-time guard: byte-parity with the kernel `ReverseLocalEntry`.
+const _: () = assert!(core::mem::size_of::<ReverseLocalEntryPod>() == 8);
+
+// SAFETY: repr(C), `_pad` always 0, all fields byte-addressable. aya
+// needs the marker for raw map access.
+unsafe impl aya::Pod for ReverseLocalEntryPod {}
+
+/// `REVERSE_LOCAL_MAP` value codec — the original VIP `(address, port)`,
+/// stored as a host-order 8-byte POD.
 ///
 /// Endianness lockstep (ADR-0041): the userspace handle stores the VIP
-/// host-order with NO flip; the `cgroup_recvmsg4_service` program
-/// converts to network-order at the write boundary when it rewrites the
-/// reply source. `encode` is `u32::from(Ipv4Addr)` (host-order on every
-/// supported arch); `decode` is the inverse. A unit struct rather than
-/// free functions so the encode/decode pair is the single named codec
-/// site for the VIP value, mirroring the key's `from_typed`.
+/// address and port host-order with NO flip; the
+/// `cgroup_recvmsg4_service` program converts each to network-order at
+/// the write boundary when it rewrites the reply source. `encode` packs
+/// `(vip, vip_port)` into the POD host-order; `decode` is the inverse. A
+/// unit struct rather than free functions so the encode/decode pair is
+/// the single named codec site for the VIP value, mirroring the key's
+/// `from_typed`.
 pub struct ReverseLocalMapValue;
 
 impl ReverseLocalMapValue {
-    /// Host-order `u32` the handle writes into the map value for `vip`.
+    /// Host-order POD the handle writes into the map value for
+    /// `(vip, vip_port)`.
     #[must_use]
-    pub fn encode(vip: Ipv4Addr) -> u32 {
-        u32::from(vip)
+    pub fn encode(vip: Ipv4Addr, vip_port: u16) -> ReverseLocalEntryPod {
+        ReverseLocalEntryPod { vip_host: u32::from(vip), vip_port_host: vip_port, _pad: 0 }
     }
 
-    /// Recover the VIP from the host-order `u32` map value.
+    /// Recover the VIP `(address, port)` from the host-order POD map
+    /// value.
     #[must_use]
-    pub fn decode(vip_host: u32) -> Ipv4Addr {
-        Ipv4Addr::from(vip_host)
+    pub fn decode(entry: ReverseLocalEntryPod) -> (Ipv4Addr, u16) {
+        (Ipv4Addr::from(entry.vip_host), entry.vip_port_host)
     }
 }
 
 /// Typed handle around `REVERSE_LOCAL_MAP`.
 pub struct ReverseLocalMapHandle {
-    inner: Mutex<HashMap<MapData, ReverseLocalKeyPod, u32>>,
+    inner: Mutex<HashMap<MapData, ReverseLocalKeyPod, ReverseLocalEntryPod>>,
 }
 
 impl ReverseLocalMapHandle {
     /// Wrap a recovered `aya::maps::HashMap`.
     #[must_use]
-    pub const fn new(map: HashMap<MapData, ReverseLocalKeyPod, u32>) -> Self {
+    pub const fn new(map: HashMap<MapData, ReverseLocalKeyPod, ReverseLocalEntryPod>) -> Self {
         Self { inner: Mutex::new(map) }
     }
 
     /// Insert-or-replace the reverse mapping
-    /// `(backend_ip, backend_port, proto) → vip`. Written reverse-first
-    /// in the `register_local_backend` dual-write (DDD-1).
+    /// `(backend_ip, backend_port, proto) → (vip, vip_port)`. Written
+    /// reverse-first in the `register_local_backend` dual-write (DDD-1).
     ///
     /// # Errors
     ///
@@ -133,9 +168,10 @@ impl ReverseLocalMapHandle {
         backend_port: u16,
         proto: Proto,
         vip: Ipv4Addr,
+        vip_port: u16,
     ) -> Result<(), MapError> {
         let key = ReverseLocalKeyPod::from_typed(BackendKey::new(backend_ip, backend_port, proto));
-        let value = ReverseLocalMapValue::encode(vip);
+        let value = ReverseLocalMapValue::encode(vip, vip_port);
         self.inner.lock().insert(key, value, 0)
     }
 
@@ -178,15 +214,15 @@ impl ReverseLocalMapHandle {
         }
     }
 
-    /// Dump every `(ReverseLocalKeyPod, vip_host)` entry — the
-    /// `bpftool map dump`-equivalent surface the Tier-3 acceptance
+    /// Dump every `(ReverseLocalKeyPod, ReverseLocalEntryPod)` entry —
+    /// the `bpftool map dump`-equivalent surface the Tier-3 acceptance
     /// asserts on (S-01-02, S-02-03). Mirrors
     /// `EbpfDataplane::local_backend_map_entries`.
     ///
     /// # Errors
     ///
     /// Returns `MapError` on a kernel-side read failure.
-    pub fn entries(&self) -> Result<Vec<(ReverseLocalKeyPod, u32)>, MapError> {
+    pub fn entries(&self) -> Result<Vec<(ReverseLocalKeyPod, ReverseLocalEntryPod)>, MapError> {
         let guard = self.inner.lock();
         let mut out = Vec::new();
         for entry in guard.iter() {
@@ -219,7 +255,9 @@ mod tests {
     use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
     use proptest::prelude::*;
 
-    use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapValue};
+    use crate::maps::reverse_local_map_handle::{
+        ReverseLocalEntryPod, ReverseLocalKeyPod, ReverseLocalMapValue,
+    };
 
     /// 8-byte key layout is the byte-for-byte contract the kernel-side
     /// `ReverseLocalKey` mirrors (byte-parity with the three shipped
@@ -228,6 +266,17 @@ mod tests {
     #[test]
     fn reverse_local_key_pod_is_eight_bytes() {
         assert_eq!(core::mem::size_of::<ReverseLocalKeyPod>(), 8);
+    }
+
+    /// 8-byte VALUE layout is the byte-for-byte contract the kernel-side
+    /// `ReverseLocalEntry { vip_host: u32, vip_port_host: u16, _pad: u16 }`
+    /// mirrors. The value width grows 4→8 in step 01-02 (ADR-0053 §D4 —
+    /// the reverse rewrite restores BOTH addr and port); a drift off 8
+    /// bytes silently mismatches the kernel value read and corrupts the
+    /// rewritten reply source.
+    #[test]
+    fn reverse_local_entry_pod_is_eight_bytes() {
+        assert_eq!(core::mem::size_of::<ReverseLocalEntryPod>(), 8);
     }
 
     fn arb_proto() -> impl Strategy<Value = Proto> {
@@ -245,17 +294,22 @@ mod tests {
         /// - `backend_port_host` host-order,
         /// - `proto` the IANA byte at offset 6,
         /// - trailing `_pad` (offset 7) zeroed,
-        /// - the VIP `u32` round-trips host-order through the value
-        ///   encode/decode pair.
+        /// - the VIP `(addr, port)` pair round-trips host-order through
+        ///   the value encode/decode pair,
+        /// - the 8-byte value POD lays out `vip_host` (offset 0..4),
+        ///   `vip_port_host` (offset 4..6) host-order, trailing pad
+        ///   (offset 6..8) zeroed.
         ///
         /// Catches a mis-slotted proto byte, a non-zero pad, a sneaky
-        /// endianness flip at the userspace edge, or a VIP byte-swap.
+        /// endianness flip at the userspace edge, a VIP byte-swap, or a
+        /// dropped/byte-swapped VIP port.
         #[test]
         fn reverse_local_key_pod_bytes_match_kernel_build(
             backend_ip in any::<u32>(),
             backend_port in 1u16..=u16::MAX,
             proto in arb_proto(),
             vip in any::<u32>(),
+            vip_port in any::<u16>(),
         ) {
             let backend_v4 = Ipv4Addr::from(backend_ip);
             let vip_v4 = Ipv4Addr::from(vip);
@@ -279,16 +333,33 @@ mod tests {
             prop_assert_eq!(key_bytes[6], proto.as_u8(), "proto byte at offset 6");
             prop_assert_eq!(key_bytes[7], 0u8, "trailing pad byte at offset 7 is zero");
 
-            // VIP value lockstep: the handle stores the VIP as a
-            // host-order u32; encoding then decoding the value byte
-            // sequence round-trips the original host-order VIP (the
-            // recvmsg4 program reads these bytes and converts to NBO at
-            // the write boundary). Exercises the value codec that GREEN
-            // lands; RED against the absent decode helper.
-            let vip_host = ReverseLocalMapValue::encode(vip_v4);
-            let decoded = ReverseLocalMapValue::decode(vip_host);
-            prop_assert_eq!(decoded, vip_v4, "VIP host-order round-trip");
-            prop_assert_eq!(vip_host, vip, "VIP stored host-order, no flip");
+            // VIP (addr, port) value lockstep: the handle stores the VIP
+            // as an 8-byte host-order POD (vip_host:4 + vip_port_host:2 +
+            // _pad:2); encoding then decoding the value round-trips the
+            // original host-order (addr, port) pair (the recvmsg4 program
+            // reads these bytes and converts BOTH to NBO at the write
+            // boundary). Exercises the (addr, port) value codec that
+            // GREEN lands; RED against the IP-only codec.
+            let entry = ReverseLocalMapValue::encode(vip_v4, vip_port);
+            let (decoded_vip, decoded_port) = ReverseLocalMapValue::decode(entry);
+            prop_assert_eq!(decoded_vip, vip_v4, "VIP addr host-order round-trip");
+            prop_assert_eq!(decoded_port, vip_port, "VIP port host-order round-trip");
+            prop_assert_eq!(entry.vip_host, vip, "VIP addr stored host-order, no flip");
+            prop_assert_eq!(entry.vip_port_host, vip_port, "VIP port stored host-order, no flip");
+
+            // Byte-for-byte value layout: vip_host at offset 0..4
+            // host-order, vip_port_host at offset 4..6 host-order,
+            // trailing pad (offset 6..8) zeroed. Pins the 8-byte kernel
+            // value contract (`ReverseLocalEntry`).
+            let entry_bytes: [u8; 8] = unsafe { core::mem::transmute(entry) };
+            prop_assert_eq!(&entry_bytes[0..4], &vip.to_ne_bytes(), "vip_host at offset 0..4");
+            prop_assert_eq!(
+                &entry_bytes[4..6],
+                &vip_port.to_ne_bytes(),
+                "vip_port_host at offset 4..6"
+            );
+            prop_assert_eq!(entry_bytes[6], 0u8, "value pad byte at offset 6 is zero");
+            prop_assert_eq!(entry_bytes[7], 0u8, "value pad byte at offset 7 is zero");
         }
     }
 }
@@ -320,10 +391,13 @@ mod real_map_tests {
     use aya::maps::{HashMap, Map, MapData};
     use overdrive_core::dataplane::backend_key::Proto;
 
-    use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapHandle};
+    use crate::maps::reverse_local_map_handle::{
+        ReverseLocalEntryPod, ReverseLocalKeyPod, ReverseLocalMapHandle, ReverseLocalMapValue,
+    };
 
     /// `BPF_MAP_TYPE_HASH = 1` — stable kernel ABI (matches the
-    /// production REVERSE_LOCAL_MAP shape: 8-byte key, `u32` value).
+    /// production REVERSE_LOCAL_MAP shape: 8-byte key, 8-byte
+    /// `ReverseLocalEntryPod` value).
     const BPF_MAP_TYPE_HASH: u32 = 1;
 
     /// Build a real `ReverseLocalMapHandle` over a freshly kernel-created
@@ -332,12 +406,12 @@ mod real_map_tests {
     fn real_handle() -> ReverseLocalMapHandle {
         let key_size = u32::try_from(core::mem::size_of::<ReverseLocalKeyPod>())
             .expect("ReverseLocalKeyPod is 8 bytes — fits u32");
-        let value_size =
-            u32::try_from(core::mem::size_of::<u32>()).expect("VIP value is 4 bytes — fits u32");
+        let value_size = u32::try_from(core::mem::size_of::<ReverseLocalEntryPod>())
+            .expect("ReverseLocalEntryPod is 8 bytes — fits u32");
         let fd = crate::sys::bpf::bpf_create_map(
             BPF_MAP_TYPE_HASH,
             key_size,   // 8-byte key
-            value_size, // VIP value
+            value_size, // 8-byte VIP (addr, port) value
             64,
             0,
             None,
@@ -345,8 +419,10 @@ mod real_map_tests {
         )
         .expect("bpf(BPF_MAP_CREATE) for a HASH map — needs CAP_BPF / root (Lima default-root)");
         let map_data = MapData::from_fd(fd).expect("MapData::from_fd over the created HASH map");
-        let typed = HashMap::<_, ReverseLocalKeyPod, u32>::try_from(Map::HashMap(map_data))
-            .expect("typed HashMap<ReverseLocalKeyPod, u32> from the created map");
+        let typed = HashMap::<_, ReverseLocalKeyPod, ReverseLocalEntryPod>::try_from(Map::HashMap(
+            map_data,
+        ))
+        .expect("typed HashMap<ReverseLocalKeyPod, ReverseLocalEntryPod> from the created map");
         ReverseLocalMapHandle::new(typed)
     }
 
@@ -367,6 +443,7 @@ mod real_map_tests {
         let backend_port = 34567u16;
         let proto = Proto::Udp;
         let vip = Ipv4Addr::new(10, 96, 0, 10);
+        let vip_port = 53u16;
 
         let want_key = ReverseLocalKeyPod::from_typed(
             overdrive_core::dataplane::backend_key::BackendKey::new(
@@ -375,17 +452,19 @@ mod real_map_tests {
                 proto,
             ),
         );
-        let want_vip = u32::from(vip);
+        let want_value = ReverseLocalMapValue::encode(vip, vip_port);
 
         // Upsert, then confirm the map holds EXACTLY the upserted entry —
         // establishes the subsequent absence is a real deletion, not an
         // empty map to start. Exact-set equality, no membership predicate.
-        handle.upsert(backend_ip, backend_port, proto, vip).expect("upsert reverse entry");
+        handle
+            .upsert(backend_ip, backend_port, proto, vip, vip_port)
+            .expect("upsert reverse entry");
         assert_eq!(
             handle.entries().expect("dump REVERSE_LOCAL_MAP entries (after upsert)"),
-            vec![(want_key, want_vip)],
+            vec![(want_key, want_value)],
             "precondition: after one upsert the reverse map holds exactly the \
-             (backend, proto) → vip entry"
+             (backend, proto) → (vip, vip_port) entry"
         );
 
         // Remove, then confirm the map is EMPTY. This is the assertion the

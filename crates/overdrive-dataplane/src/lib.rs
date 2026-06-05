@@ -384,7 +384,9 @@ impl EbpfDataplane {
 
         use crate::maps::hash_of_maps::HashOfMapsHandle;
         use crate::maps::local_backend_map_handle::LocalBackendMapHandle;
-        use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapHandle};
+        use crate::maps::reverse_local_map_handle::{
+            ReverseLocalEntryPod, ReverseLocalKeyPod, ReverseLocalMapHandle,
+        };
         use crate::maps::{
             BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
         };
@@ -634,13 +636,14 @@ impl EbpfDataplane {
         // `crates/overdrive-bpf/src/maps/reverse_local_map.rs` makes
         // this map present in the loaded ELF. DISTINCT from
         // REVERSE_NAT_MAP (the XDP wire path) — keyed on the backend
-        // identity, value = the original VIP.
-        let reverse_local_map_inner = aya::maps::HashMap::<_, ReverseLocalKeyPod, u32>::try_from(
-            bpf.take_map(REVERSE_LOCAL_MAP_NAME).ok_or_else(|| {
-                DataplaneError::LoadFailed("REVERSE_LOCAL_MAP not found in BPF object".into())
-            })?,
-        )
-        .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP try_from: {e}")))?;
+        // identity, value = the original VIP (address AND port).
+        let reverse_local_map_inner =
+            aya::maps::HashMap::<_, ReverseLocalKeyPod, ReverseLocalEntryPod>::try_from(
+                bpf.take_map(REVERSE_LOCAL_MAP_NAME).ok_or_else(|| {
+                    DataplaneError::LoadFailed("REVERSE_LOCAL_MAP not found in BPF object".into())
+                })?,
+            )
+            .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP try_from: {e}")))?;
         let reverse_local_map = ReverseLocalMapHandle::new(reverse_local_map_inner);
 
         // ADR-0053 § D3 (rev 2026-06-05b / UI-1) — recover the
@@ -1205,16 +1208,23 @@ impl EbpfDataplane {
     /// Returns [`DataplaneError::ReverseLocalProbe`] when the sentinel
     /// insert, read-back, round-trip assertion, or delete fails.
     fn probe_reverse_local(&self) -> Result<(), DataplaneError> {
-        use crate::maps::reverse_local_map_handle::ReverseLocalKeyPod;
+        use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapValue};
         use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 
         let sentinel_backend_ip = Ipv4Addr::UNSPECIFIED;
         let sentinel_backend_port: u16 = 0;
         let sentinel_proto = Proto::Udp;
         let sentinel_vip = Ipv4Addr::UNSPECIFIED;
+        let sentinel_vip_port: u16 = 0;
 
         self.reverse_local_map
-            .upsert(sentinel_backend_ip, sentinel_backend_port, sentinel_proto, sentinel_vip)
+            .upsert(
+                sentinel_backend_ip,
+                sentinel_backend_port,
+                sentinel_proto,
+                sentinel_vip,
+                sentinel_vip_port,
+            )
             .map_err(|e| DataplaneError::ReverseLocalProbe {
                 message: format!("REVERSE_LOCAL_MAP sentinel insert: {e}"),
             })?;
@@ -1224,7 +1234,7 @@ impl EbpfDataplane {
             sentinel_backend_port,
             sentinel_proto,
         ));
-        let sentinel_vip_host = u32::from(sentinel_vip);
+        let sentinel_value = ReverseLocalMapValue::encode(sentinel_vip, sentinel_vip_port);
 
         // Read-back via the dump surface, then verify the round-trip.
         // The sentinel key MUST be present with the sentinel VIP value;
@@ -1240,7 +1250,7 @@ impl EbpfDataplane {
         if let Err(e) = reverse_local_sentinel_verdict(
             self.reverse_local_map.entries(),
             sentinel_key,
-            sentinel_vip_host,
+            sentinel_value,
         ) {
             // Best-effort cleanup before bailing; the verdict failure is
             // the real story so a delete failure here is swallowed.
@@ -1292,8 +1302,13 @@ impl EbpfDataplane {
     /// iteration fails.
     pub fn reverse_local_map_entries(
         &self,
-    ) -> Result<Vec<(crate::maps::reverse_local_map_handle::ReverseLocalKeyPod, u32)>, DataplaneError>
-    {
+    ) -> Result<
+        Vec<(
+            crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
+            crate::maps::reverse_local_map_handle::ReverseLocalEntryPod,
+        )>,
+        DataplaneError,
+    > {
         self.reverse_local_map
             .entries()
             .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP iter: {e}")))
@@ -1505,16 +1520,19 @@ fn empty_backend_purge_keys<'a>(
 /// the probe itself needs a real kernel map and has no Tier-2 backstop.
 fn reverse_local_sentinel_verdict(
     entries: Result<
-        Vec<(crate::maps::reverse_local_map_handle::ReverseLocalKeyPod, u32)>,
+        Vec<(
+            crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
+            crate::maps::reverse_local_map_handle::ReverseLocalEntryPod,
+        )>,
         aya::maps::MapError,
     >,
     sentinel_key: crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
-    sentinel_vip_host: u32,
+    sentinel_value: crate::maps::reverse_local_map_handle::ReverseLocalEntryPod,
 ) -> Result<(), DataplaneError> {
     let entries = entries.map_err(|e| DataplaneError::ReverseLocalProbe {
         message: format!("REVERSE_LOCAL_MAP sentinel read-back: {e}"),
     })?;
-    if entries.iter().any(|(k, v)| *k == sentinel_key && *v == sentinel_vip_host) {
+    if entries.iter().any(|(k, v)| *k == sentinel_key && *v == sentinel_value) {
         Ok(())
     } else {
         Err(DataplaneError::ReverseLocalProbe {
@@ -2066,9 +2084,11 @@ impl Dataplane for EbpfDataplane {
     /// reverse-first dual-write (DDD-1).
     ///
     /// Two BPF map syscalls, reverse BEFORE forward:
-    /// 1. `REVERSE_LOCAL_MAP[(backend_ip, backend_port, proto)] = vip`
-    ///    — the reply store the `cgroup_recvmsg4_service` program reads
-    ///    to rewrite the unconnected reply source backend→VIP.
+    /// 1. `REVERSE_LOCAL_MAP[(backend_ip, backend_port, proto)] =
+    ///    (vip, vip_port)` — the reply store the
+    ///    `cgroup_recvmsg4_service` program reads to rewrite the
+    ///    unconnected reply source backend→VIP (BOTH address and port,
+    ///    ADR-0053 §D4).
     /// 2. `LOCAL_BACKEND_MAP[(vip, vip_port, proto)] = backend`
     ///    — the forward store `cgroup_connect4`/`sendmsg4` read to
     ///    rewrite the destination VIP→backend.
@@ -2085,14 +2105,16 @@ impl Dataplane for EbpfDataplane {
         backend: std::net::SocketAddrV4,
         proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
-        // Reverse FIRST (DDD-1) — keyed on the backend identity → vip.
-        self.reverse_local_map.upsert(*backend.ip(), backend.port(), proto, vip).map_err(|e| {
-            DataplaneError::LocalBackendInsert {
+        // Reverse FIRST (DDD-1) — keyed on the backend identity →
+        // (vip, vip_port). The VIP port is restored alongside the VIP
+        // address on the reply rewrite (ADR-0053 §D4).
+        self.reverse_local_map
+            .upsert(*backend.ip(), backend.port(), proto, vip, vip_port)
+            .map_err(|e| DataplaneError::LocalBackendInsert {
                 source: std::io::Error::other(format!(
                     "aya HashMap::insert (REVERSE_LOCAL_MAP): {e}"
                 )),
-            }
-        })?;
+            })?;
         // Forward SECOND — keyed on (vip, vip_port, proto) → backend.
         self.local_backend_map.upsert(vip, vip_port, backend, proto).map_err(|e| {
             DataplaneError::LocalBackendInsert {
@@ -2238,11 +2260,11 @@ mod tests {
         use aya::maps::MapError;
         use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 
-        use crate::maps::reverse_local_map_handle::ReverseLocalKeyPod;
+        use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapValue};
 
         let sentinel_key =
             ReverseLocalKeyPod::from_typed(BackendKey::new(Ipv4Addr::UNSPECIFIED, 0, Proto::Udp));
-        let sentinel_vip_host = u32::from(Ipv4Addr::UNSPECIFIED);
+        let sentinel_value = ReverseLocalMapValue::encode(Ipv4Addr::UNSPECIFIED, 0);
 
         // 1. Read-back FAILURE — THE regression. The map dump errored;
         //    the verdict must be `Err` so the caller cleans up the
@@ -2250,7 +2272,7 @@ mod tests {
         let read_back_failed = super::reverse_local_sentinel_verdict(
             Err(MapError::KeyNotFound),
             sentinel_key,
-            sentinel_vip_host,
+            sentinel_value,
         );
         assert!(
             read_back_failed.is_err(),
@@ -2261,15 +2283,15 @@ mod tests {
         //    Also `Err` (already-correct path; pinned so the two
         //    non-confirmation branches stay unified).
         let missed =
-            super::reverse_local_sentinel_verdict(Ok(Vec::new()), sentinel_key, sentinel_vip_host);
+            super::reverse_local_sentinel_verdict(Ok(Vec::new()), sentinel_key, sentinel_value);
         assert!(missed.is_err(), "an absent sentinel must be a probe failure");
 
         // 3. CONFIRMED — sentinel present with the expected VIP. The
         //    only `Ok` path; the caller proceeds to delete the sentinel.
         let confirmed = super::reverse_local_sentinel_verdict(
-            Ok(vec![(sentinel_key, sentinel_vip_host)]),
+            Ok(vec![(sentinel_key, sentinel_value)]),
             sentinel_key,
-            sentinel_vip_host,
+            sentinel_value,
         );
         assert!(
             confirmed.is_ok(),

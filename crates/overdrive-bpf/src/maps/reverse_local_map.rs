@@ -1,9 +1,11 @@
 //! `REVERSE_LOCAL_MAP` — kernel-side `BPF_MAP_TYPE_HASH` keyed on the
 //! backend identity `ReverseLocalKey { backend_ip_host: u32,
-//! backend_port_host: u16, proto: u8, _pad: u8 }` → `vip_host: u32`
-//! (the original VIP). The `cgroup_recvmsg4_service` program does one
-//! lookup per unconnected `recvmsg(2)` to rewrite the reply *source*
-//! the app reads (`recvfrom`/`msg_name`) backend→VIP.
+//! backend_port_host: u16, proto: u8, _pad: u8 }` →
+//! `ReverseLocalEntry { vip_host: u32, vip_port_host: u16, _pad: u16 }`
+//! (the original VIP address AND port). The `cgroup_recvmsg4_service`
+//! program does one lookup per unconnected `recvmsg(2)` to rewrite the
+//! reply *source* the app reads (`recvfrom`/`msg_name`) backend→VIP —
+//! BOTH the source address and the source port (ADR-0053 §D4).
 //!
 //! ADR-0053 revision 2026-06-05 (GH #200) — the reply store for the
 //! UNCONNECTED-UDP same-host cgroup path. DISTINCT from the XDP
@@ -59,14 +61,38 @@ pub struct ReverseLocalKey {
 /// at the next mis-keyed recvmsg4 lookup.
 const _: () = assert!(core::mem::size_of::<ReverseLocalKey>() == 8);
 
+/// Reverse-map value — the original VIP `(address, port)`. 8-byte POD,
+/// host-order on every numeric field. Byte-parity with the userspace
+/// `ReverseLocalEntryPod`. The `cgroup_recvmsg4_service` program reads
+/// both fields and converts each to network-order at the write boundary
+/// (ADR-0053 §D4; endianness lockstep per ADR-0041). The trailing
+/// `_pad` is zeroed for deterministic layout.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct ReverseLocalEntry {
+    /// Original VIP IPv4, host-order. `u32::from(Ipv4Addr)`.
+    pub vip_host: u32,
+    /// Original VIP port, host-order.
+    pub vip_port_host: u16,
+    /// Padding to 8-byte alignment. Always zero.
+    pub _pad: u16,
+}
+
+/// Compile-time guard: the reverse value MUST be 8 bytes (byte-parity
+/// with the userspace `ReverseLocalEntryPod`). The value width grew
+/// 4→8 in step 01-02 (the VIP port joined the VIP address); a drift
+/// fails the build here, not silently at the next recvmsg4 value read.
+const _: () = assert!(core::mem::size_of::<ReverseLocalEntry>() == 8);
+
 /// Capacity per ADR-0053 rev — same envelope as `LOCAL_BACKEND_MAP`
 /// (one reverse entry per forward entry).
 pub const MAX_ENTRIES: u32 = 4096;
 
 /// `REVERSE_LOCAL_MAP` — `BPF_MAP_TYPE_HASH` keyed on
-/// `ReverseLocalKey` → `vip_host: u32`. One lookup per unconnected
-/// `recvmsg(2)`; hit → rewrite reply source to the VIP; miss → pure
-/// no-op (source untouched) + bump the miss counter for observability.
+/// `ReverseLocalKey` → `ReverseLocalEntry { vip_host, vip_port_host }`.
+/// One lookup per unconnected `recvmsg(2)`; hit → rewrite reply source
+/// to the VIP address AND port; miss → pure no-op (source untouched) +
+/// bump the miss counter for observability.
 #[map]
-pub static REVERSE_LOCAL_MAP: HashMap<ReverseLocalKey, u32> =
+pub static REVERSE_LOCAL_MAP: HashMap<ReverseLocalKey, ReverseLocalEntry> =
     HashMap::with_max_entries(MAX_ENTRIES, 0);

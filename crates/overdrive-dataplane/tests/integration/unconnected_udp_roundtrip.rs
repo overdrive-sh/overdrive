@@ -279,11 +279,12 @@ fn forward_and_reverse_map_entries_present_after_one_register() {
 
     // Reverse: REVERSE_LOCAL_MAP (backend_ip, backend_port, udp) → vip.
     let rev = dataplane.reverse_local_map_entries().expect("dump REVERSE_LOCAL_MAP");
-    let rev_present = rev.iter().any(|(k, vip_host)| {
+    let rev_present = rev.iter().any(|(k, entry)| {
         k.backend_ip_host == u32::from(*backend.ip())
             && k.backend_port_host == backend.port()
             && k.proto == Proto::Udp.as_u8()
-            && *vip_host == u32::from(VIP)
+            && entry.vip_host == u32::from(VIP)
+            && entry.vip_port_host == VIP_PORT
     });
     assert!(
         rev_present,
@@ -471,11 +472,11 @@ fn kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity() {
     //      the same identity. The two prongs meet here. A
     //      forward-without-reverse regression empties this — reddening.
     let rev = dataplane.reverse_local_map_entries().expect("dump REVERSE_LOCAL_MAP");
-    let tier3_reply_vip = rev.iter().find_map(|(k, vip_host)| {
+    let tier3_reply_vip = rev.iter().find_map(|(k, entry)| {
         (k.backend_ip_host == u32::from(backend_key.ip)
             && k.backend_port_host == backend_key.port
             && k.proto == backend_key.proto.as_u8())
-        .then_some(Ipv4Addr::from(*vip_host))
+        .then_some(Ipv4Addr::from(entry.vip_host))
     });
     let tier3_reply_vip = tier3_reply_vip.expect(
         "Tier-3 prong: REVERSE_LOCAL_MAP must carry the shared backend identity \

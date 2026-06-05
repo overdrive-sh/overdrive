@@ -55,8 +55,15 @@
 //! sourced guarantee is asserted at the app layer, never the wire.
 //!
 //! Writable fields confirmed = `user_ip4` / `user_port` (`msg_src_ip4`
-//! is sendmsg-only; DDD-5e). Kernel floor: `BPF_CGROUP_UDP4_RECVMSG`
-//! since 4.20 (below the 5.10 LTS floor — no matrix bump).
+//! is sendmsg-only; DDD-5e). The reverse rewrite restores BOTH the
+//! source address (`user_ip4 ← VIP`) AND the source port
+//! (`user_port ← VIP_PORT`) per ADR-0053 §D4 — symmetric with the
+//! forward path's full `(addr, port)` NAT. A source-validating resolver
+//! (Unbound, BIND 9) discards a reply whose source ≠ the `(addr, port)`
+//! it queried, so restoring the port is load-bearing for cross-port
+//! services (DNS `VIP:53 → backend:5353`). Kernel floor:
+//! `BPF_CGROUP_UDP4_RECVMSG` since 4.20 (below the 5.10 LTS floor — no
+//! matrix bump).
 //!
 //! NO Tier-2 backstop (ENOTSUPP ≤ 6.8). Tier-3-only correctness +
 //! Tier-1 reply-path equivalence invariant.
@@ -118,7 +125,7 @@ fn try_cgroup_recvmsg4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
     };
 
     // SAFETY: canonical verifier-readable aya-ebpf map access shape.
-    let vip_host = unsafe { REVERSE_LOCAL_MAP.get(&key) };
+    let entry = unsafe { REVERSE_LOCAL_MAP.get(&key) };
 
     // recvmsg4 is attached at a cgroup ANCESTOR and therefore fires on
     // EVERY unconnected UDP `recvmsg`/`recvfrom` from any descendant —
@@ -136,25 +143,36 @@ fn try_cgroup_recvmsg4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
     // (and any sentinel-rewrite fail-safe scoped to service replies) is
     // Slice 03's concern (step 03-01) — NOT asserted here. recvmsg4
     // cannot deny (`[1,1]`); every path returns 1.
-    let Some(vip_host) = vip_host else {
+    let Some(entry) = entry else {
         record_reverse_miss();
         return Ok(1);
     };
 
     // HIT — this datagram came from a registered backend identity, so it
     // is a service reply. Rewrite the source the app reads back to the
-    // VIP. Convert host-order VIP to network-order for the syscall
+    // VIP — BOTH the source address AND the source port (ADR-0053 §D4).
+    // Convert the host-order VIP fields to network-order for the syscall
     // context. Writable fields on the recvmsg4 attach type are
     // `user_ip4` / `user_port` (`msg_src_ip4` is sendmsg-only; DDD-5e).
-    let source_ip_nbo = (*vip_host).to_be();
+    //
+    // `user_port`'s low 16 bits carry the network-byte-order port; widen
+    // the nbo `u16` into the low 16 bits of the `u32` (high 16 bits stay
+    // 0). This is the low-16-NBO idiom — `u32::from(port.to_be())`, the
+    // SAME write shape sendmsg4/connect4 use on the forward path. Do NOT
+    // use `from_be(..) as u16` (the silent-0 trap, `.claude/rules/
+    // development.md` § "`bpf_sock_addr.user_port` — low-16-NBO in a
+    // u32").
+    let source_ip_nbo = entry.vip_host.to_be();
+    let source_port_nbo = u32::from(entry.vip_port_host.to_be());
 
-    // SAFETY: kernel-guaranteed struct layout; `user_ip4` is writable on
-    // the recvmsg4 attach type. Only the source ADDRESS is rewritten —
-    // the source port is left as the kernel populated it (a source-
-    // validating resolver checks the source address against the VIP it
-    // queried; the ephemeral reply port is not part of that check).
+    // SAFETY: kernel-guaranteed struct layout; `user_ip4` / `user_port`
+    // are both writable on the recvmsg4 attach type. Restoring the port
+    // alongside the address makes the reply pass a source-validating
+    // resolver's `(addr, port)` check for cross-port services (DNS
+    // VIP:53 → backend:5353).
     unsafe {
         (*sock_addr).user_ip4 = source_ip_nbo;
+        (*sock_addr).user_port = source_port_nbo;
     }
 
     Ok(1)
