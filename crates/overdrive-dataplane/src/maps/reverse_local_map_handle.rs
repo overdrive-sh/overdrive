@@ -292,3 +292,112 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "integration-tests", target_os = "linux"))]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::missing_panics_doc)]
+mod real_map_tests {
+    //! Deregister-path coverage for [`ReverseLocalMapHandle::remove`]
+    //! against a REAL `aya::maps::HashMap` over a kernel-created
+    //! `BPF_MAP_TYPE_HASH` fd. The in-memory proptest above pins the
+    //! key/value byte layout; it CANNOT exercise `remove`, because the
+    //! handle wraps a live aya map (the layout proptest never touches the
+    //! map). This module is the missing half: it drives the real
+    //! upsert→entries→remove→entries cycle so a no-op `remove` (which the
+    //! body's success path is — `bpf_map_delete_elem`) is observable as a
+    //! still-present entry.
+    //!
+    //! Tier 3 (real kernel — privileged `bpf(BPF_MAP_CREATE)` + map
+    //! delete). Gated behind `integration-tests` + `target_os = "linux"`;
+    //! runs under `cargo xtask lima run -- cargo nextest run ... --features
+    //! integration-tests`. The map is constructed exactly as production
+    //! does at `EbpfDataplane::new` (lib.rs) — `Map::HashMap(MapData)` →
+    //! `HashMap::try_from` → `ReverseLocalMapHandle::new` — except the
+    //! `MapData` is sourced from a self-created fd rather than the loaded
+    //! BPF object, so no ELF / cgroup attach is needed.
+
+    use std::net::Ipv4Addr;
+
+    use aya::maps::{HashMap, Map, MapData};
+    use overdrive_core::dataplane::backend_key::Proto;
+
+    use crate::maps::reverse_local_map_handle::{ReverseLocalKeyPod, ReverseLocalMapHandle};
+
+    /// `BPF_MAP_TYPE_HASH = 1` — stable kernel ABI (matches the
+    /// production REVERSE_LOCAL_MAP shape: 8-byte key, `u32` value).
+    const BPF_MAP_TYPE_HASH: u32 = 1;
+
+    /// Build a real `ReverseLocalMapHandle` over a freshly kernel-created
+    /// HASH map. Mirrors the production `EbpfDataplane::new` construction
+    /// (`Map::HashMap(MapData)` → `HashMap::try_from` → `new`).
+    fn real_handle() -> ReverseLocalMapHandle {
+        let key_size = u32::try_from(core::mem::size_of::<ReverseLocalKeyPod>())
+            .expect("ReverseLocalKeyPod is 8 bytes — fits u32");
+        let value_size =
+            u32::try_from(core::mem::size_of::<u32>()).expect("VIP value is 4 bytes — fits u32");
+        let fd = crate::sys::bpf::bpf_create_map(
+            BPF_MAP_TYPE_HASH,
+            key_size,   // 8-byte key
+            value_size, // VIP value
+            64,
+            0,
+            None,
+            Some("REVLOCAL_TEST"),
+        )
+        .expect("bpf(BPF_MAP_CREATE) for a HASH map — needs CAP_BPF / root (Lima default-root)");
+        let map_data = MapData::from_fd(fd).expect("MapData::from_fd over the created HASH map");
+        let typed = HashMap::<_, ReverseLocalKeyPod, u32>::try_from(Map::HashMap(map_data))
+            .expect("typed HashMap<ReverseLocalKeyPod, u32> from the created map");
+        ReverseLocalMapHandle::new(typed)
+    }
+
+    /// `remove` actually deletes the reverse entry — the deregister-path
+    /// guarantee the `cgroup_recvmsg4_service` reply rewrite depends on. A
+    /// stale entry left after deregister would mis-rewrite a later
+    /// non-service reply's source to a stale VIP.
+    ///
+    /// Load-bearing assertion: after `remove`, the map's full entry set is
+    /// EMPTY. A no-op `remove` (the `remove -> Ok(())` mutant) leaves the
+    /// entry present and fails this test. The assertions compare against the
+    /// exact `(key, vip)` set rather than a membership predicate, so there
+    /// is no compound boolean for a mutator to collapse into a vacuous pass.
+    #[test]
+    fn remove_deletes_the_reverse_entry() {
+        let handle = real_handle();
+        let backend_ip = Ipv4Addr::new(10, 244, 1, 7);
+        let backend_port = 34567u16;
+        let proto = Proto::Udp;
+        let vip = Ipv4Addr::new(10, 96, 0, 10);
+
+        let want_key = ReverseLocalKeyPod::from_typed(
+            overdrive_core::dataplane::backend_key::BackendKey::new(
+                backend_ip,
+                backend_port,
+                proto,
+            ),
+        );
+        let want_vip = u32::from(vip);
+
+        // Upsert, then confirm the map holds EXACTLY the upserted entry —
+        // establishes the subsequent absence is a real deletion, not an
+        // empty map to start. Exact-set equality, no membership predicate.
+        handle.upsert(backend_ip, backend_port, proto, vip).expect("upsert reverse entry");
+        assert_eq!(
+            handle.entries().expect("dump REVERSE_LOCAL_MAP entries (after upsert)"),
+            vec![(want_key, want_vip)],
+            "precondition: after one upsert the reverse map holds exactly the \
+             (backend, proto) → vip entry"
+        );
+
+        // Remove, then confirm the map is EMPTY. This is the assertion the
+        // `remove -> Ok(())` mutant cannot satisfy: a no-op leaves the entry
+        // present, so the set is non-empty and this equality fails.
+        handle.remove(backend_ip, backend_port, proto).expect("remove reverse entry");
+        assert_eq!(
+            handle.entries().expect("dump REVERSE_LOCAL_MAP entries (after remove)"),
+            Vec::new(),
+            "after remove, REVERSE_LOCAL_MAP MUST be empty — a stale reverse entry would \
+             mis-rewrite a later non-service reply's source to a stale VIP. A no-op remove \
+             leaves the entry present and fails here."
+        );
+    }
+}
