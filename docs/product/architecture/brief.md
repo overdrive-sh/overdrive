@@ -1459,6 +1459,8 @@ Rules to enforce:
 | 0060 | `ServiceFrontend` newtype on `Dataplane::update_service` — threads per-service `(ServiceVip [V4-by-construction], NonZeroU16 port, Proto)` so the REVERSE_NAT key set is derivable per declared proto (fixes GH #163 UDP reverse-NAT bypass); per-proto purge on empty backends; three-tier `ReverseNatLockstep` gate. Supersedes phase-2 §5 Q-Sig locked-A (paper, never landed); records shipped option-C as true from-state (Phase 2.2 / udp-service-support) | Accepted |
 | 0062 | Listener-fact in-memory view — `ListenerFactStore` (`Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for stop) replaces the O(S²) per-tick `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row `store.get(&row.service_id)` is O(1) and drops the prior `vip == row.vip` listener scan; boot-rebuilt from intent + edge-maintained on submit/stop (key derived via `ServiceId::derive(&vip, port, "service-map")`); steady-state hydrate pays zero redb reads. Not a persisted View (no durable state — intent store is SSOT; honors "persist inputs, not derived state"). Extends 0035; amends 0042; references 0049 (allocator lifecycle imitated, not extended); preserves 0060 C3. Candidate (d) per reconciler-desired-hydration-efficiency research | Accepted |
 | 0063 | Built-in CA — `Ca` port trait (`overdrive-core`; pure, no rcgen) + `RcgenCa` host adapter (all rcgen/crypto-backend [`ring` today; aws-lc-rs + FIPS pending #204]/HKDF/AES-256-GCM) + `SimCa` sim adapter (fixture P-256 keys); 3-tier hierarchy (self-signed P-256 root → pathLen=0 node intermediate → single-URI-SAN SVID, 1h TTL); single-node (one intermediate). Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore; KEK in Linux kernel keyring delivered per-boot by systemd-creds (TPM/host-key); HKDF-SHA256-from-KEK subkey → AES-256-GCM (reconciliation A); pure `CertSpec` builder in core, host adapter translates to `rcgen::CertificateParams` (reconciliation B). Serials via `Entropy`; key-gen via backend CSPRNG (not injectable, F11). `issued_certificates` ObservationStore audit row. Refuse-to-start on decrypt failure — never silent re-mint. `ca_equivalence` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only (`tls_bootstrap.rs` keeps the control-plane-HTTPS consumer). GH #28 [2.6] | Accepted |
+| 0063 | **Workflow primitive** — workflow `await`-point journal is a **second redb table layout** on the shared runtime-owned substrate (`<data_dir>/reconcilers/memory.redb`), distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`, value = CBOR `JournalEntry` (`ciborium`, ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — mutable runtime memory, additive entry-variants per slice via `#[serde(default)]`); fsync-then-suspend ordering + Earned-Trust `probe()` reused from 0035; `SleepArmed` records the deadline (input, not "remaining"). Resolves DIVERGE D4/open-Q3 in favour of redb (R2); supersedes pre-DIVERGE "per-primitive libSQL" phrasing. Extends 0035. Single-node scope; cross-node resume (#205) not precluded | Accepted |
+| 0064 | **Workflow primitive** — `Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowSpec` in NEW `overdrive-core::workflow` (no tokio in core; injected ports + `async_trait`); durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**. Engine↔reconciler boundary: the workflow-lifecycle reconciler stays a **pure-sync ADR-0035 reconciler** emitting `Action::StartWorkflow` + observing terminal rows; the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`. Check-then-record journal replay ⇒ bit-identical replay (K4); `ctx` surface additive per slice (`call`/`sleep`/`wait_for_signal`/`emit_action`); `WorkflowResult` distinct from `TerminalCondition` (inherits the SemVer convention, not the type); `ctx.emit_action` → Action channel → Raft (no IntentStore bypass). Companion to 0063 | Accepted |
 
 ---
 
@@ -4443,6 +4445,188 @@ new typed reader, the same shape every prior observation row was added
 | mTLS handshake + kTLS session-key install | **Separate consumer feature** (whitepaper §8 Kernel mTLS) |
 | SPIFFE Workload API + SVID distribution to workloads | **Phase 7+** / consumer feature (research Gap 1) |
 | HSM / KMS KEK source | **Later phase** — the `Kek` provider port is the seam |
+## Phase 1 workflow-primitive extension
+
+This section extends the Application Architecture with the decisions
+landed by feature `workflow-primitive` (GH #39, roadmap [3.2], 2026-06-05).
+Nothing prior is rewritten. New ADRs are **ADR-0063** (workflow journal —
+redb second table layout) and **ADR-0064** (`Workflow` trait + `WorkflowCtx`
++ engine↔reconciler boundary). The §18 *durable-async* `Workflow` primitive
+is the §18 peer of the pure-sync `Reconciler` primitive (§19 / §34); this
+section is its application-architecture realisation. Architecture **locked
+to B′** per `docs/feature/workflow-primitive/wave-decisions.md` § "RATIFIED
+DIRECTION" — designed over, not re-litigated.
+
+### 89. The `Workflow` primitive — trait+ctx in core, async engine in control-plane
+
+Per ADR-0064. Mirrors the §34 reconciler split (trait in `overdrive-core`,
+runtime in `overdrive-control-plane`) but with the inverse purity posture:
+the reconciler is pure-sync; the workflow is durable-async.
+
+- **`overdrive-core::workflow`** (NEW module, class `core`): the
+  `Workflow` trait (`async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult`),
+  the `WorkflowCtx` *type* (a bundle of injected ports — `Arc<dyn Clock>`,
+  `Arc<dyn Transport>`, `Arc<dyn Entropy>` — plus a journal-cursor handle,
+  the workflow analogue of `TickContext`), `WorkflowResult` (`Success` /
+  `Failed { reason }` / `Cancelled` — `#[non_exhaustive]`, K8s-`Condition`
+  SemVer per ADR-0037 §5, **distinct from** `TerminalCondition`), and the
+  concrete `WorkflowSpec` (replacing the `reconcilers/mod.rs:562`
+  placeholder). **No `tokio` enters core** — the trait declares an async
+  signature via `async_trait` (already a core dep) and its body's I/O flows
+  through `ctx`'s injected ports; dst-lint scope unchanged.
+- **`overdrive-control-plane::workflow_runtime::WorkflowEngine`** (NEW,
+  class `adapter-host`): the genuinely-async executor that drives `run`,
+  owns the per-instance journal cursor, performs the suspend/resume replay,
+  and holds the live-instance `tokio::task` set. Sits alongside
+  `ReconcilerRuntime` and the action-shim, the same way `RedbViewStore`
+  sits alongside the reconciler runtime.
+- **`overdrive-control-plane::journal`** (NEW): the `JournalStore` port +
+  `RedbJournalStore` adapter (ADR-0063). `SimJournalStore` lives in
+  `overdrive-sim`.
+
+### 90. Workflow journal — a second redb table layout on the shared substrate
+
+Per ADR-0063. The step/`await` journal is a **distinct `JournalStore` port
+and table layout** sharing the **same redb file** as the reconciler `View`
+store (`<data_dir>/reconcilers/memory.redb`, one `Arc<Database>` handle —
+the §17 "second table layout" reconciliation; one durable-memory story for
+both primitives, O6/K5; **no libSQL journal**, K5). One append-only table
+`__wf_journal__`, key `(WorkflowId, u32 step)`, value = CBOR-encoded
+`JournalEntry`. **CBOR via `ciborium`** (the ADR-0035 §3 codec discipline,
+NOT the ADR-0048 rkyv envelope — the journal is mutable runtime memory, not
+a content-addressed/hashed type; additive entry-variants per await-surface
+slice ride `#[serde(default)]`). fsync-then-suspend write-through ordering
++ Earned-Trust `probe()` reused verbatim from ADR-0035. `SleepArmed` records
+the **deadline** (input), not a "remaining" cache (development.md "Persist
+inputs, not derived state").
+
+### 91. Replay mechanism + the engine↔lifecycle-reconciler boundary
+
+Per ADR-0064 §3, §5. The engine re-executes `run` from the top on each
+(re)start; every `ctx.*` await is a **check-then-record** point — on replay
+(cursor < journal length) it returns the recorded result without re-firing
+the effect (exactly-once on resume, K1); live (cursor == length) it performs
+the real effect through the injected port, **appends the entry with fsync
+before returning/suspending**, advances the cursor. All non-determinism
+through `ctx` + journal-replay of completed awaits ⇒ bit-identical replay
+(K4, D-INH-5) by construction.
+
+**The boundary (the subtlest decision):** the **workflow-lifecycle
+reconciler stays a pure-sync ADR-0035 reconciler** — it owns *instance
+lifecycle* (spec → running → journaled → terminated) as desired-vs-actual
+convergence, emitting `Action::StartWorkflow { spec, correlation }` and
+observing terminal ObservationStore rows; it **never `.await`s** the body.
+The **engine runs the async body off the action-shim** (ADR-0023's
+sanctioned async boundary) — exactly where the shim dispatches
+`Action::StartAllocation` to `Driver::start`. The engine is to workflows
+what `Driver` is to allocations: the async executor a pure reconciler drives
+through typed Actions and observes through the ObservationStore. On restart
+(US-WP-3 AC4) the reconciler re-emits the start; the engine's `load_journal`
+finds the persisted journal and *resumes* (replays) rather than restarting —
+the reconciler does not know or care whether a start is cold or a
+crash-resume. This is why the engine is **not itself a reconciler** (the
+rejected Option C, R3): a reconciler converges one desired/actual relation
+and cannot express the inner await/suspension/signal surface ergonomically.
+
+### 92. `WorkflowCtx` surface — additive per slice
+
+Per ADR-0064 §4. The journal-cursor + suspend/resume *machinery* ships whole
+in slice 01; the `ctx` *methods* grow additively, one per await-surface
+slice, each an additive journal entry-variant:
+
+| Method | Slice | Journal entry | Port | Channel |
+|---|---|---|---|---|
+| `ctx.call(req) -> Result<Resp>` | 01 | `CallResult` | `Transport` | — |
+| `ctx.sleep(Duration)` | 02 | `SleepArmed` (deadline) | `Clock` (parks on deadline) | — |
+| `ctx.wait_for_signal(SignalKey) -> SignalValue` | 03 | `SignalAwaited`/`SignalSeen` | ObservationStore (typed signal rows) | — |
+| `ctx.emit_action(Action)` | 03 | `ActionEmitted` | — | Action channel → **Raft** (no IntentStore bypass; slice-03 AC2) |
+| `ctx.activity(...)` | post-skeleton | (forward) | per-activity | — |
+
+Slice 01 ships `ctx.call` only (`ProvisionRecord` — the thinnest sequence
+with a real non-idempotent-to-repeat effect). Cross-workflow coordination
+(`ctx.wait_for_signal`) uses **typed signals in the ObservationStore**
+(whitepaper §18); workflow→cluster mutation (`ctx.emit_action`) goes through
+the **same Action channel the reconciler runtime consumes** — lands in Raft,
+never a direct IntentStore write (development.md Workflow contract rule 6).
+
+### 93. DST invariants — K4 replay-equivalence graduates the placeholder
+
+Per ADR-0064 §6 / ADR-0063 §6. The existing
+`Invariant::ReplayEquivalentEmptyWorkflow` (a two-`SimEntropy`-transcript
+placeholder at `overdrive-sim::invariants::evaluators::evaluate_replay_equivalent_empty_workflow`)
+**graduates** into a real journal replay against the engine +
+`SimJournalStore`, renamed to the slice-specific
+`replay_equivalence_provision_record` (no inline string literal — house
+convention, US-WP-4 AC1). New invariants:
+
+- **`replay_equivalence_provision_record`** — uninterrupted vs crash-resumed
+  trajectory byte-equality + `assert_eventually!(is_terminal)` bounded
+  progress. **K4, the load-bearing KPI, on the CI critical path.**
+- **`WorkflowJournalWriteOrdering`** — fsync-failure injection → engine does
+  not advance/suspend (mirrors `WriteThroughOrdering`).
+- **`WorkflowExactlyOnceEffectOnResume`** — crash after `ctx.call` records →
+  resume → `SimTransport` call count == 1 (K1).
+
+### 94. Reuse Analysis
+
+| Existing component | File | Overlap | Decision | Justification |
+|---|---|---|---|---|
+| `Action::StartWorkflow { spec, correlation }` placeholder | `overdrive-core/src/reconcilers/mod.rs:373` | The reconciler→workflow lifecycle trigger | **EXTEND** | Already the exact shape D-INH-3 names; the engine consumes it off the shim. No new Action variant for start. |
+| `WorkflowSpec` placeholder struct | `overdrive-core/src/reconcilers/mod.rs:562` | The spec the trigger carries | **EXTEND** (make concrete) | Replace the empty placeholder with the real shape; it already lives in core because `Action` is core. |
+| `Invariant::ReplayEquivalentEmptyWorkflow` + evaluator | `overdrive-sim/src/invariants/{mod.rs:136,evaluators.rs:584}` | The replay-equivalence DST invariant | **EXTEND** (graduate) | The placeholder explicitly says "Phase 2 replaces this with an actual workflow journal replay." K4 is that replacement. Rename to `replay_equivalence_provision_record`. |
+| `Action::HttpCall` + `CorrelationKey::derive` + `external_call_results` table | `overdrive-core/src/reconcilers/mod.rs:357`, `id.rs:538` | The `ctx.call`-shaped external-call + correlation machinery | **EXTEND/REUSE** | `ctx.call` reuses the `Transport`-call + `CorrelationKey` correlation precedent; the terminal-result row keys on `CorrelationKey` (slice-01 AC5). Engine reuses the correlation derivation, not the reconciler `HttpCall` path. |
+| `RedbViewStore` / `SimViewStore` / `ViewStore` port | `overdrive-control-plane/src/view_store/{mod.rs,redb.rs}`, `overdrive-sim` | redb durable memory; fsync-then-memory write-through; bulk-load-on-boot; Earned-Trust probe; CBOR codec | **REUSE substrate + discipline; CREATE NEW port** | THE central reuse call (ADR-0063 §1, Alt B). The redb **file + `Arc<Database>` handle + codec + fsync-ordering + probe discipline** are shared. The **trait + table layout** differ (single-blob-overwrite vs append-only-ordered-run) — a distinct `JournalStore` port avoids overloading one trait with two non-overlapping contracts, with zero reuse loss (the substrate IS shared). |
+| Reconciler runtime + action-shim (`dispatch`) | `overdrive-control-plane/src/action_shim/mod.rs`, `reconciler_runtime` | The per-tick pipeline that drives async effects off pure `reconcile` | **EXTEND** | The workflow engine is driven off the same shim (a new arm hands the workflow-start to `WorkflowEngine::start`), exactly as `StartAllocation` → `Driver::start`. The `Action::StartWorkflow` arm at `action_shim/mod.rs:446` (currently a no-op `Ok(())`) becomes the engine-start dispatch. |
+| Port traits `Clock` / `Transport` / `Entropy` | `overdrive-core/src/traits/` | The injected non-determinism `WorkflowCtx` consumes | **EXTEND/REUSE** | `WorkflowCtx` is a new ctx *wrapper* over the existing port traits (the §18 "ctx consumes the same injected traits the reconciler runtime uses"). No new port trait. |
+| `TerminalCondition` (ADR-0037) | `overdrive-core` | Terminal modelling | **DO NOT REUSE (relate)** | `WorkflowResult` is the workflow's *return value*; `TerminalCondition` is the reconciler's *allocation-lifecycle claim*. Different things; not substitutable. `WorkflowResult` inherits the `#[non_exhaustive]` + SemVer *convention*, not the type. |
+| `TickContext` (ADR-0035 §2c) | `overdrive-core::reconcilers` | Injected time bundle | **DO NOT REUSE (analogue)** | `WorkflowCtx` is the workflow analogue but carries the full ctx surface (call/sleep/signal/emit + journal cursor), not just time. Distinct type, same injection principle. |
+| `JournalStore` port + `RedbJournalStore` + `SimJournalStore` | NEW (`overdrive-control-plane::journal`, `overdrive-sim`) | The journal layout | **CREATE NEW** | Justified: no existing trait hosts append-only-ordered-per-instance point-access; overloading `ViewStore` would give it two contracts (§1 / Alt B). Shapes mirror `ViewStore`/`RedbViewStore`/`SimViewStore` line-for-line. |
+| `WorkflowEngine` | NEW (`overdrive-control-plane::workflow_runtime`) | The durable-async executor | **CREATE NEW** | Justified: no existing component runs an async body with journaled await-points; the reconciler runtime is pure-sync and cannot (R3, ADR-0064 Alt C). |
+
+**Verdict: 6 EXTEND/REUSE, 2 DO-NOT-REUSE-(relate), 2 CREATE NEW (both
+justified).** The central call — journal store vs `ViewStore` — is
+**REUSE the substrate + discipline, CREATE NEW the port** (ADR-0063 §1).
+
+### 95. Quality-attribute scenarios (extending prior §-numbered tables)
+
+| Attribute | Target | How addressed |
+|---|---|---|
+| Reliability — recoverability | Single-node crash-resume: kill process mid-run → restart → resume from redb journal, no lost committed step | Engine `load_journal` replay (§91); `replay_equivalence_provision_record` + `WorkflowJournalWriteOrdering` DST invariants (K2/K4) |
+| Reliability — fault tolerance | Recorded external effect re-executes 0 times on resume (call count == 1) | Check-then-record replay (§91); `WorkflowExactlyOnceEffectOnResume` (K1) |
+| Maintainability — testability | Replay-equivalence provable from a seed before ship, on the CI critical path | K4 named SimInvariant, seed-reproducible (US-WP-4) |
+| Maintainability — modifiability | New await-surface = additive ctx method + additive CBOR journal variant; no migration ceremony | §92; ADR-0063 §2 |
+| Maintainability — analyzability (O6) | One durable-memory mechanism for both primitives; no libSQL journal | §90; K5 (grep/dep-graph clean) |
+| Security — integrity | Workflow→cluster mutation goes through Raft, never a direct IntentStore write | `ctx.emit_action` → Action channel (§92; slice-03 AC2) |
+
+### 96. External integrations — none (Phase 1 single-node)
+
+The workflow primitive's `ctx.call` targets are reached through the injected
+`Transport` (DST-controllable). Phase-1 `ProvisionRecord` writes a record
+via the same in-cluster path the reconciler `HttpCall` uses — not an
+external third-party API. **No contract tests recommended for this feature.**
+When real first-party workflows (cert rotation → ACME, Phase 3+) land, the
+external boundary (ACME / DNS provider) is the contract-test surface — the
+engine's `ctx.call` is the seam where consumer-driven contracts (Pact-shaped)
+would attach. Annotated for the platform-architect handoff.
+
+### 97. C4 — see `c4-diagrams.md` § Phase 1 Workflow Primitive
+
+System Context (L1) + Container (L2) + Component (L3 — the workflow engine +
+journal + replay subsystem) added as Mermaid.
+
+#### Forward concerns (tracked, design must not preclude)
+
+Cross-NODE resume — [#205](https://github.com/overdrive-sh/overdrive/issues/205)
+(the journal is `WorkflowId`-keyed node-independent CBOR behind a
+`JournalStore` trait — a Phase-2 HA adapter is not precluded). Operator
+`overdrive workflow` CLI verb — [#206](https://github.com/overdrive-sh/overdrive/issues/206)
+(operators observe via ObservationStore rows; an ad-hoc journal-query view
+is a deferrable read-only projection, not a replay requirement). Typed-signal
+scope under partition — [#207](https://github.com/overdrive-sh/overdrive/issues/207).
+Journal retention/compaction — [#208](https://github.com/overdrive-sh/overdrive/issues/208)
+(a range-delete per terminal `WorkflowId`; the layout supports it). WASM
+workflow SDK + version-skew code-graph hashing — [#209](https://github.com/overdrive-sh/overdrive/issues/209)
+(no design element hinges on code-graph hashing, R1/D-INH-6).
 
 ## Changelog
 
@@ -4451,6 +4635,7 @@ new typed reader, the same shape every prior observation row was added
 | 2026-06-06 | **built-in-ca Reuse-Analysis correction — `ObservationStore` is EXTEND (additive), not REUSE AS-IS (DELIVER back-propagation).** The `issued_certificates` audit row first shipped via a non-compliant concrete-adapter bypass (a parallel redb table + inherent methods on `LocalObservationStore`, which was NOT DST-testable because it never routed through the port). The user directed the correction (2026-06-06) to the faithful "mirroring `AllocStatusRow`/`NodeHealthRow`" shape ADR-0063 D6 always intended: the audit now routes through the `ObservationStore` trait on BOTH `LocalObservationStore` and `SimObservationStore` (commit `aab5a69b`). The fix added TWO purely-additive trait members — `ObservationRow::IssuedCertificate(IssuedCertificateRow)` (a new enum variant, like the 5 existing sibling rows) and `ObservationStore::issued_certificate_rows()` (a typed reader mirroring `alloc_status_rows()`/`node_health_rows()`/`service_backends_rows()`). NO existing `ObservationStore` method signature changed; the additions grow the enum + reader exactly as every prior observation row did. The brief's Reuse-Analysis row + verdict tally are corrected (ObservationStore: REUSE AS-IS → EXTEND; tally 6 REUSE-AS-IS → 5 REUSE-AS-IS + 1 EXTEND); ADR-0063 D6 gains a one-line clarification of what "mirroring `AllocStatusRow`/`NodeHealthRow`" means (additive variant + reader through the port on both adapters, not a concrete-adapter-only surface). No prior decision reversed — D6 always specified the observation-row pattern; this only corrects a brief line that had become factually stale relative to the landed, DST-testable shape. — Morgan. |
 | 2026-06-06 | **built-in-ca `issue_svid` contract clarification — single-URI-SAN enforced by TYPE, not an adapter runtime guard (Option A; DELIVER-surfaced).** DELIVER step 04 found the `Ca::issue_svid` rustdoc + the brief/ADR trait-contract prose claimed the adapter "rejects an empty or oversized SAN set with `CaError::InvalidSan` before any cert" — a rejection the request type (`SvidRequest { spiffe_id: SpiffeId }`, one validated identity by construction) makes *unreachable* (aspirational-doc bug per `development.md` § "No aspirational docs"). User ratified **Option A — type-enforced** (2026-06-06) on the strength of `docs/research/security/svid-request-cardinality-enforcement-research.md` (committed `b6a5278b`; SPIFFE X.509-SVID §2 "exactly one URI SAN" + §5.2 places the runtime MUST-reject at the *relying party*, not the issuer; SPIRE reference impl carries a single `spiffeid.ID` not a SAN slice; "parse, don't validate"). The `## built-in-ca extension` § "`Ca` trait surface" prose is corrected to the three-layer enforcement-location statement: (1) the request type makes ≠1 unrepresentable; (2) the pure-core `CertSpec::svid(Vec<SpiffeId>)` parse is the single fallible boundary (rejects 0/≥2, tested at L1 by S-04-02); (3) the runtime reject lives at the verifier (#26), not `issue_svid`. ADR-0063 D5 gains the same enforcement-location note + an Amendments changelog entry; the `Ca` trait SIGNATURE is unchanged (no widening — `SvidRequest` is correct under Option A). DISTILL scenarios S-04-09 + S-04-10 (which tested the type-unreachable adapter path) are RETIRED as redundant under Option A (S-04-08 already asserts host single-URI-SAN; S-04-06 asserts cross-adapter SAN-cardinality equivalence; S-04-02 tests the live `CertSpec` parse reject); built-in-ca scenario count 39 → 37, `@error` 15/39 → 13/37 (non-gating DISTILL metric, accepted as a consequence of the type-honest design). No prior decision reversed — D5 already put policy in core; this only pins WHERE the runtime reject lives and retires the aspirational claim. The crafter applies the corrected `issue_svid` rustdoc + retires the two scaffolds. — Morgan. |
 | 2026-06-05 | **built-in-ca extension** (GH #28 [2.6]; GUIDE mode — locked decisions from 2026-06-05 Q&A). New `## built-in-ca extension` section under Application Architecture. Added ADR-0063 (built-in CA: `Ca` port trait in `overdrive-core` [pure, no rcgen — dst-lint boundary verified: core is `crate_class = "core"`, bans `rand::*`/FFI] + `RcgenCa` host adapter [all rcgen 0.14.8 `features = ["ring", "pem"]` (bump from current 0.13.2 pin — DELIVER first-compile prerequisite; extension APIs stable 0.13→0.14, builder API changed so `mint_ephemeral_ca` migrates too)/crypto-backend (`ring` today; aws-lc-rs + FIPS pending #204)/HKDF/AES-256-GCM] + `SimCa` sim adapter [fixture P-256 keys, `SeededEntropy` serials]; 3-tier self-signed-P-256-root → pathLen=0-intermediate → single-URI-SAN-SVID hierarchy, single-node = one intermediate). **Reconciliation A resolved**: root-key AEAD = HKDF-SHA256-derive a per-use subkey from the kernel-keyring KEK → AES-256-GCM (passphrase-KDF dropped; HKDF buys domain-separation + rotation seam for #40/HSM). **Reconciliation B resolved**: pure `CertSpec` builder in core owns cert-extension policy (single-URI-SAN rejection, pathLen=0, keyUsage sets — DST-testable), host adapter translates `CertSpec → rcgen::CertificateParams`. Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore (intent, never observation — whitepaper §4); KEK in Linux kernel keyring, delivered per-boot by systemd-creds (TPM/host-key root-of-trust), `OVERDRIVE_CA_KEK` dev-only fallback. Refuse-to-start (`health.startup.refused`) on decrypt failure — never silent re-mint. Serials via `Entropy` (DST-deterministic); key-gen via backend CSPRNG (not injectable, research F11). `issued_certificates` ObservationStore audit row (research F15). Earned-Trust probe (wire→probe→use): KEK-present + envelope-decrypt + credential-present, refuse-to-start on failure. `tests/integration/ca_equivalence.rs` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only — `tls_bootstrap.rs` keeps serving the control-plane-HTTPS / operator-CLI consumer (Phase 5 / #81 replaces it). C4 L1+L2+L3 (Mermaid) added at `c4-diagrams.md` § "Built-in CA". Reuse: 6 REUSE-AS-IS (`IntentStore`/`ObservationStore`/`Entropy`/`SpiffeId`/`CertSerial`/`NodeId`/`VersionedEnvelope`), 1 REUSE-proven-via-new-adapter (rcgen usage from `mint_ephemeral_ca`), 1 LEAVE-AS-IS-distinct-consumer (`tls_bootstrap.rs`), 8 CREATE-NEW (justified). Deferrals all cite existing issues: #40 rotation (needs #39), #36 multi-node CA, #104/#83 multi-region, #81/Phase 5/7 operator-auth/revocation, separate consumer feature for mTLS+kTLS. ADR index grows by 1 (0063). No roadmap (DELIVER owns that). — Morgan. |
+| 2026-06-05 | **Phase 1 workflow-primitive extension (§89–§97)** — the §18 durable-async `Workflow` primitive (GH #39, roadmap [3.2]). Architecture locked to B′ per DIVERGE/DISCUSS. Added **ADR-0063** (workflow `await`-point journal — a **second redb table layout** on the shared runtime-owned substrate `<data_dir>/reconcilers/memory.redb`, distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`; **CBOR via `ciborium`** per ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — additive entry-variants per slice ride `#[serde(default)]`; fsync-then-suspend ordering + Earned-Trust `probe()` reused verbatim; resolves DIVERGE D4/open-Q3 in favour of redb per R2, supersedes the pre-DIVERGE whitepaper "per-primitive libSQL" phrasing). Added **ADR-0064** (`Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowSpec` in NEW `overdrive-core::workflow` — no tokio in core; durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**; engine↔lifecycle-reconciler boundary — the workflow-lifecycle reconciler stays a pure-sync ADR-0035 reconciler emitting `Action::StartWorkflow` and observing terminal rows, the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`; check-then-record journal replay ⇒ bit-identical replay K4; `ctx` surface additive per slice — `call`/`sleep`/`wait_for_signal`/`emit_action`; `WorkflowResult` distinct from `TerminalCondition`). Reuse: 6 EXTEND/REUSE, 2 DO-NOT-REUSE-(relate), 2 CREATE NEW. EXTENDED: `Action::StartWorkflow` placeholder, `WorkflowSpec` placeholder (made concrete), `ReplayEquivalentEmptyWorkflow` invariant (graduated to `replay_equivalence_provision_record`, the load-bearing K4 invariant), action-shim no-op `StartWorkflow` arm (`action_shim/mod.rs:446`), `CorrelationKey`/`HttpCall`/`Transport` machinery. REUSED substrate+discipline (CREATE NEW port): the `RedbViewStore` redb file + `Arc<Database>` + codec + fsync-ordering + probe. CREATE NEW: `JournalStore`/`RedbJournalStore`/`SimJournalStore`, `WorkflowEngine`. No new external dep (redb + ciborium + async_trait already in graph). No external integrations; no contract tests this phase (ACME boundary lands Phase 3+). Single-node scope (D3); cross-node resume not precluded. Deferrals #205–#209 cited by real issue number; no design element hinges on code-graph hashing (R1). C4 L1+L2+L3 added at `c4-diagrams.md` § Phase 1 Workflow Primitive. Outcome Collision Check: N/A (no `docs/product/outcomes/registry.yaml`). — Morgan. |
 | 2026-04-21 | Initial Application Architecture section (Phase 1 foundation) — Morgan. |
 | 2026-06-03 | Listener-fact in-memory view extension (ADR-0062). New `ListenerFactStore` (in-memory `Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator's read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for the stop path) replaces the per-tick cluster-wide `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row read `store.get(&row.service_id)` is O(1) and eliminates the prior `vip == row.vip` listener scan. Boot-rebuilt from intent + edge-maintained on `submit_workload`/`stop_workload` (co-located with the VIP-memo mutation; key derived via `ServiceId::derive(&vip, listener.port, "service-map")`); steady-state hydrate pays zero redb reads (restores ADR-0035 contract without a persisted View). Candidate (d) per `docs/research/control-plane/reconciler-desired-hydration-efficiency.md`. `gather_*` relocated+renamed to `ListenerFactStore::rebuild_from_intent` (boot path; both maps); per-tick caller deleted. DELIVER invariants: (A) zero steady-state `scan_prefix` (counting decorator on the trait-public `IntentStore::scan_prefix`), (B) store byte-equivalent to re-scan over all `ServiceId` entries incl. multi-listener, (C) guard never held across `.await`. Extends ADR-0035; amends ADR-0042; references ADR-0049 (allocator lifecycle imitated, NOT extended); preserves ADR-0060 C3. Reuse: 1 CREATE NEW, 4 EXTEND, 2 DO-NOT-REUSE. — Morgan. (Second-review rekey `WorkloadId`→`ServiceId` + stop-path cleanup index + invariants B/C clarified + `scan_prefix` trait-visibility verified.) |
 | 2026-06-02 | UDP service support extension — `ServiceFrontend` on `update_service`, per-proto reverse-NAT, three-tier lockstep gate (GH #163, ADR-0060) — Morgan. |

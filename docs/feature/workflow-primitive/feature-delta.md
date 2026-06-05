@@ -331,3 +331,143 @@ resolved in this artifact; remaining findings are non-blocking.
 **APPROVED.** DESIGN may proceed. The architecture (B′ distinct durable-async
 `Workflow`, redb journal, lifecycle-reconciler-managed) is locked from DIVERGE;
 DISCUSS defines requirements/AC/slices over it and does not re-open the choice.
+
+---
+
+## Wave: DESIGN / [REF] Design Decisions (DDD)
+
+Density: lean (per `~/.nwave/global-config.json`). Architecture **locked to
+B′** (D-INH-1..6); these DDDs design OVER it. PROPOSE mode — each material
+sub-decision was weighed 2–3 ways (see ADRs for the option matrices); the
+recommended call is recorded here, the 3 warranting user ratification flagged.
+
+- **[DDD-1] Journal store = second redb table layout, NOT an extension of
+  `RedbViewStore`.** Distinct `JournalStore` port + `RedbJournalStore`/
+  `SimJournalStore`, sharing the `RedbViewStore` redb **file + `Arc<Database>`
+  + codec + fsync-ordering + probe discipline**, with a distinct table layout.
+  Rationale: append-only-ordered-per-instance ≠ single-blob-overwrite; one
+  trait must not carry two contracts. Substrate reuse (O6/K5) is identical to
+  the "extend" option, without the trait coupling. ADR-0063 §1. **(RATIFY — the
+  central reuse call.)**
+- **[DDD-2] Journal codec = CBOR (`ciborium`, ADR-0035 §3 discipline), NOT the
+  ADR-0048 rkyv envelope.** The journal is mutable runtime memory (ADR-0035's
+  case), not a content-addressed/hashed type (ADR-0048's case); replay needs
+  deterministic *decode* (CBOR gives it), not zero-copy archived-byte
+  canonicality (buys nothing — never hashed). Additive entry-variants per
+  await-surface slice ride `#[serde(default)]`; rkyv would force a per-slice
+  version-bump + golden-fixture. ADR-0063 §2. **(RATIFY — codec choice.)**
+- **[DDD-3] Replay = engine-owned journal cursor; `ctx.*` check-then-record.**
+  Engine re-executes `run` from the top each (re)start; replay returns recorded
+  results without re-firing effects (exactly-once K1), live performs + appends
+  (fsync-before-suspend) + advances cursor. All non-determinism through `ctx` ⇒
+  bit-identical replay (K4). ADR-0064 §3.
+- **[DDD-4] `WorkflowCtx` surface additive per slice.** Machinery (cursor +
+  suspend/resume) whole in slice 01; methods grow `call`(01)→`sleep`(02)→
+  `wait_for_signal`+`emit_action`(03), each an additive journal variant.
+  ADR-0064 §4.
+- **[DDD-5] Engine↔lifecycle-reconciler boundary: reconciler stays pure-sync;
+  engine runs the async body off the action-shim.** The workflow-lifecycle
+  reconciler is a normal ADR-0035 pure reconciler (emits `StartWorkflow`,
+  observes terminal rows, never `.await`); the engine is the async executor
+  driven off the shim, exactly as `StartAllocation`→`Driver::start`. The engine
+  is to workflows what `Driver` is to allocations. ADR-0064 §5. **(RATIFY — the
+  subtlest boundary.)**
+- **[DDD-6] Crate placement: trait+ctx in `overdrive-core` (no tokio), engine +
+  journal in `overdrive-control-plane`, sim journal + replay invariant in
+  `overdrive-sim`.** Mirrors the reconciler trait-in-core/runtime-in-control-plane
+  split; respects the `core`-has-no-tokio dst-lint rule. ADR-0064 §1.
+- **[DDD-7] `WorkflowResult` is a new core enum, distinct from
+  `TerminalCondition`.** Inherits the `#[non_exhaustive]` + K8s-Condition SemVer
+  *convention* (ADR-0037 §5), not the type — they model different things
+  (workflow return value vs reconciler allocation claim). ADR-0064 §2.
+
+## Wave: DESIGN / [REF] Component Decomposition
+
+| Component | Path | Class | Change |
+|---|---|---|---|
+| `Workflow` trait, `WorkflowCtx`, `WorkflowResult`, concrete `WorkflowSpec` | `overdrive-core/src/workflow/` | core | **CREATE NEW** module (`WorkflowSpec` replaces `reconcilers/mod.rs:562` placeholder) |
+| `Action::StartWorkflow` | `overdrive-core/src/reconcilers/mod.rs:373` | core | **EXTEND** (already the locked shape; made live) |
+| `WorkflowEngine` | `overdrive-control-plane/src/workflow_runtime/` | adapter-host | **CREATE NEW** |
+| `JournalStore` port + `RedbJournalStore` | `overdrive-control-plane/src/journal/` | adapter-host | **CREATE NEW** |
+| workflow-lifecycle reconciler | `overdrive-control-plane` (registration) + `overdrive-core/src/reconcilers` (state/`AnyState` variant) | core/adapter-host | **CREATE NEW** (pure-sync ADR-0035 reconciler) |
+| action-shim `StartWorkflow` arm | `overdrive-control-plane/src/action_shim/mod.rs:446` | adapter-host | **EXTEND** (no-op `Ok(())` → `WorkflowEngine::start`) |
+| `SimJournalStore` | `overdrive-sim/src/adapters/journal` | adapter-sim | **CREATE NEW** |
+| `replay_equivalence_provision_record` (+ ordering + exactly-once invariants) | `overdrive-sim/src/invariants/` | adapter-sim | **EXTEND** (graduate `ReplayEquivalentEmptyWorkflow`) |
+
+## Wave: DESIGN / [REF] Driving Ports
+
+- **Author surface (primary):** `impl Workflow for X` against the core
+  `Workflow` trait (Rust). The inbound surface for platform engineers.
+- **Lifecycle trigger:** `Action::StartWorkflow { spec, correlation }` emitted
+  by a reconciler onto the existing Action channel → workflow-lifecycle
+  reconciler → action-shim → `WorkflowEngine::start`.
+- **Observable surfaces (no CLI):** ObservationStore terminal-result row (keyed
+  by `CorrelationKey`) + structured lifecycle events + the
+  `replay_equivalence_provision_record` DST invariant as executable evidence.
+- **NOT a driving port:** no `overdrive workflow` CLI verb (#206).
+
+## Wave: DESIGN / [REF] Driven Ports + Adapters
+
+| Driven port | Adapter (prod) | Adapter (sim) | Effect |
+|---|---|---|---|
+| `JournalStore` (NEW) | `RedbJournalStore` (shared redb file) | `SimJournalStore` | Durable append-only `await` journal |
+| `Transport` (REUSE) | `TcpTransport` | `SimTransport` | `ctx.call` external effect |
+| `Clock` (REUSE) | `SystemClock` | `SimClock` | `ctx.sleep` deadline park |
+| `Entropy` (REUSE) | `OsEntropy` | `SeededEntropy` | any `ctx` RNG need |
+| `ObservationStore` (REUSE) | `LocalObservationStore` | `SimObservationStore` | terminal-result row; typed signals (slice 03) |
+| Action channel → Raft (REUSE) | reconciler-runtime commit path | sim harness | `ctx.emit_action` (slice 03; no IntentStore bypass) |
+
+## Wave: DESIGN / [REF] Technology Choices (pinned)
+
+- **Language/runtime:** Rust 2024; `tokio` (engine only, in control-plane);
+  `async_trait` (the `Workflow` trait — already a core dep, declares async
+  signature, pulls no runtime into core).
+- **Journal store:** `redb` 2.x (shared substrate); `ciborium` (CBOR codec —
+  already in graph from ADR-0035). **No new external dependency.**
+- **DST:** `turmoil` + `Sim*` adapters; the K4 invariant on the CI critical path.
+- **No proprietary deps; no contract tests this phase** (no external boundary —
+  ACME/DNS lands Phase 3+ with real first-party workflows).
+
+## Wave: DESIGN / [REF] Decisions Table
+
+| ID | Decision | ADR |
+|---|---|---|
+| DDD-1 | Journal = second redb table layout, distinct `JournalStore` port | 0063 §1 |
+| DDD-2 | Journal codec = CBOR (`ciborium`), not rkyv envelope | 0063 §2 |
+| DDD-3 | Replay = engine cursor; `ctx.*` check-then-record | 0064 §3 |
+| DDD-4 | `WorkflowCtx` surface additive per slice | 0064 §4 |
+| DDD-5 | Engine runs off the action-shim; reconciler stays pure-sync | 0064 §5 |
+| DDD-6 | Trait+ctx in core (no tokio); engine+journal in control-plane | 0064 §1 |
+| DDD-7 | `WorkflowResult` distinct from `TerminalCondition` | 0064 §2 |
+
+## Wave: DESIGN / [REF] Reuse Analysis
+
+| Existing component | File | Overlap | Decision | Justification |
+|---|---|---|---|---|
+| `Action::StartWorkflow` placeholder | `reconcilers/mod.rs:373` | lifecycle trigger | **EXTEND** | Already the exact D-INH-3 shape; engine consumes it off the shim |
+| `WorkflowSpec` placeholder | `reconcilers/mod.rs:562` | the spec | **EXTEND** (make concrete) | Already in core (Action is core); replace empty struct |
+| `ReplayEquivalentEmptyWorkflow` invariant + evaluator | `overdrive-sim/.../mod.rs:136`,`evaluators.rs:584` | replay DST invariant | **EXTEND** (graduate) | Placeholder says "Phase 2 replaces with actual journal replay"; K4 is that |
+| `RedbViewStore`/`ViewStore`/`SimViewStore` | `view_store/{mod,redb}.rs` | redb durable memory; fsync ordering; bulk-load; probe; CBOR | **REUSE substrate+discipline; CREATE NEW port** | THE central call (ADR-0063 §1). Substrate shared; trait+layout differ — distinct `JournalStore` avoids two-contracts-on-one-trait, zero reuse loss |
+| action-shim `dispatch` + reconciler runtime | `action_shim/mod.rs:446`, `reconciler_runtime` | per-tick async-effect pipeline | **EXTEND** | Engine driven off the same shim; `StartWorkflow` no-op arm → `engine.start` |
+| `Clock`/`Transport`/`Entropy` port traits | `traits/` | injected non-determinism | **REUSE** | `WorkflowCtx` is a new wrapper over existing ports; no new port |
+| `CorrelationKey`/`HttpCall` machinery | `id.rs:538`, `reconcilers/mod.rs:357` | `ctx.call`-shaped call + correlation | **REUSE** | `ctx.call` reuses `Transport`+`CorrelationKey`; terminal row keyed by it |
+| `TerminalCondition` | `overdrive-core` | terminal modelling | **DO NOT REUSE (relate)** | `WorkflowResult` ≠ allocation claim; inherits SemVer convention not type |
+| `TickContext` | `overdrive-core/reconcilers` | injected bundle | **DO NOT REUSE (analogue)** | `WorkflowCtx` is the analogue; carries full ctx surface, not just time |
+| `JournalStore`/`RedbJournalStore`/`SimJournalStore` | NEW | journal layout | **CREATE NEW** | No existing trait hosts append-only-ordered point-access; mirrors ViewStore line-for-line |
+| `WorkflowEngine` | NEW | durable-async executor | **CREATE NEW** | No existing component runs an async body with journaled awaits; reconciler is pure-sync (R3) |
+
+**Verdict: 6 EXTEND/REUSE, 2 DO-NOT-REUSE-(relate), 2 CREATE NEW (justified).**
+
+## Wave: DESIGN / [REF] Open Questions / Deferrals
+
+Deferred to DISTILL/DELIVER or forward phases (no NEW deferrals introduced by
+DESIGN; all cite real issues per CLAUDE.md):
+
+- **Cross-node resume** — [#205](https://github.com/overdrive-sh/overdrive/issues/205) (journal `WorkflowId`-keyed behind a trait — not precluded).
+- **Operator `overdrive workflow` CLI** — [#206](https://github.com/overdrive-sh/overdrive/issues/206) (ad-hoc journal-query view is a deferrable read-only projection, not a replay requirement).
+- **Signals under partition** — [#207](https://github.com/overdrive-sh/overdrive/issues/207) (slice 03 ships in-process single-node delivery).
+- **Journal retention/compaction** — [#208](https://github.com/overdrive-sh/overdrive/issues/208) (a range-delete per terminal `WorkflowId`; layout supports it).
+- **WASM SDK + version-skew code-graph hashing** — [#209](https://github.com/overdrive-sh/overdrive/issues/209) (no design element hinges on it — R1/D-INH-6).
+- **`JournalEntry` digest resolution for full-body observability** — a future #206/#208 concern; replay needs only the digest.
+- **Outcome Collision Check:** registry `docs/product/outcomes/registry.yaml`
+  not present — skipped (no fabrication).
