@@ -28,7 +28,16 @@ name = "dst"
 path = "src/bin/dst.rs"
 
 [dependencies]
-overdrive-core = { workspace = true }
+# `test-utils` exposes `overdrive_core::testing::workflow::ProvisionRecord`,
+# the canonical slice-01 reference workflow the `cargo dst`
+# `ReplayEquivalenceProvisionRecord` / `WorkflowJournalWriteOrdering` /
+# `WorkflowExactlyOnceEffectOnResume` invariant evaluators drive
+# (workflow-primitive step 01-07; ADR-0064 §3/§6). The DST harness +
+# invariant catalogue are themselves test infrastructure (this is an
+# `adapter-sim`-class crate whose `dst` binary is a runtime test tool),
+# so the reference-workflow fixture is a legitimate non-dev dependency
+# here. Production binaries never depend on `overdrive-sim`.
+overdrive-core = { workspace = true, features = ["test-utils"] }
 async-trait.workspace    = true
 bytes.workspace          = true
 futures.workspace        = true

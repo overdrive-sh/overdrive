@@ -401,8 +401,20 @@ impl Harness {
             Invariant::SimObservationLwwConverges => {
                 evaluators::evaluate_sim_observation_lww(cluster).await
             }
-            Invariant::ReplayEquivalentEmptyWorkflow => {
-                evaluators::evaluate_replay_equivalent_empty_workflow(seed)
+            Invariant::ReplayEquivalenceProvisionRecord => {
+                // workflow-primitive step 01-07 — graduates the slice-1
+                // two-SimEntropy-transcripts placeholder into a real
+                // journal replay driving the `WorkflowEngine` +
+                // `SimJournalStore` through the three-run crash-resume
+                // shape (ADR-0064 §3/§6). K4, on the `cargo dst` critical
+                // path.
+                evaluators::evaluate_replay_equivalence_provision_record(seed).await
+            }
+            Invariant::WorkflowJournalWriteOrdering => {
+                evaluators::evaluate_workflow_journal_write_ordering(seed).await
+            }
+            Invariant::WorkflowExactlyOnceEffectOnResume => {
+                evaluators::evaluate_workflow_exactly_once_effect_on_resume(seed).await
             }
             Invariant::EntropyDeterminismUnderReseed => {
                 evaluators::evaluate_entropy_determinism(seed)

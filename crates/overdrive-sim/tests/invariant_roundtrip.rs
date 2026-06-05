@@ -26,7 +26,9 @@ const ALL_VARIANTS: &[Invariant] = &[
     Invariant::IntentNeverCrossesIntoObservation,
     Invariant::SnapshotRoundtripBitIdentical,
     Invariant::SimObservationLwwConverges,
-    Invariant::ReplayEquivalentEmptyWorkflow,
+    // workflow-primitive step 01-07 — graduated from
+    // `ReplayEquivalentEmptyWorkflow`.
+    Invariant::ReplayEquivalenceProvisionRecord,
     Invariant::EntropyDeterminismUnderReseed,
     // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
     Invariant::AtLeastOneReconcilerRegistered,
@@ -42,6 +44,9 @@ const ALL_VARIANTS: &[Invariant] = &[
     // panics until DELIVER fills the evaluator bodies.
     Invariant::HydratorEventuallyConverges,
     Invariant::HydratorIdempotentSteadyState,
+    // workflow-primitive step 01-07 — sibling workflow durability invariants.
+    Invariant::WorkflowJournalWriteOrdering,
+    Invariant::WorkflowExactlyOnceEffectOnResume,
 ];
 
 fn variant_strategy() -> impl Strategy<Value = Invariant> {
@@ -52,7 +57,8 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         Just(Invariant::IntentNeverCrossesIntoObservation),
         Just(Invariant::SnapshotRoundtripBitIdentical),
         Just(Invariant::SimObservationLwwConverges),
-        Just(Invariant::ReplayEquivalentEmptyWorkflow),
+        // workflow-primitive step 01-07 — graduated variant.
+        Just(Invariant::ReplayEquivalenceProvisionRecord),
         Just(Invariant::EntropyDeterminismUnderReseed),
         // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
         Just(Invariant::AtLeastOneReconcilerRegistered),
@@ -66,6 +72,9 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         // phase-2-xdp-service-map DISTILL — RED scaffolds per DWD-4.
         Just(Invariant::HydratorEventuallyConverges),
         Just(Invariant::HydratorIdempotentSteadyState),
+        // workflow-primitive step 01-07 — sibling workflow invariants.
+        Just(Invariant::WorkflowJournalWriteOrdering),
+        Just(Invariant::WorkflowExactlyOnceEffectOnResume),
     ]
 }
 
@@ -88,8 +97,8 @@ fn display_is_kebab_case_lowercase() {
     );
     assert_eq!(Invariant::SimObservationLwwConverges.to_string(), "sim-observation-lww-converges");
     assert_eq!(
-        Invariant::ReplayEquivalentEmptyWorkflow.to_string(),
-        "replay-equivalent-empty-workflow"
+        Invariant::ReplayEquivalenceProvisionRecord.to_string(),
+        "replay-equivalence-provision-record"
     );
     assert_eq!(
         Invariant::EntropyDeterminismUnderReseed.to_string(),

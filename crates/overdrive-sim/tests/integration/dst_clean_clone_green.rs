@@ -72,7 +72,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "intent-never-crosses-into-observation",
     "snapshot-roundtrip-bit-identical",
     "sim-observation-lww-converges",
-    "replay-equivalent-empty-workflow",
+    // workflow-primitive step 01-07 — graduated from
+    // `replay-equivalent-empty-workflow`.
+    "replay-equivalence-provision-record",
     "entropy-determinism-under-reseed",
     "at-least-one-reconciler-registered",
     "duplicate-evaluations-collapse",
@@ -155,6 +157,10 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // Tier-2 backstop for cgroup_sock_addr). Blessed here so the catalogue
     // length + named-set checks track `Invariant::ALL` exactly.
     "reply-source-rewrite-lockstep",
+    // workflow-primitive step 01-07 — sibling workflow durability
+    // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
+    "workflow-journal-write-ordering",
+    "workflow-exactly-once-effect-on-resume",
 ];
 
 // -----------------------------------------------------------------------------

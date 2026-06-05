@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "workflow-primitive",
     "created_at": "2026-06-05T00:00:00Z",
-    "total_steps": 11,
+    "total_steps": 12,
     "phases": 3,
     "notes": "Lands the §18 durable-async Workflow primitive (GH #39, J-PLAT-005) over the locked B' direction: distinct Workflow trait + WorkflowCtx (core, no tokio, async_trait), redb-CBOR per-instance journal on the shared ADR-0035 substrate (ADR-0063), async WorkflowEngine driven off the action-shim with reconciler staying pure-sync (ADR-0064), and replay-equivalence as a named DST invariant graduating the ReplayEquivalentEmptyWorkflow placeholder. Three phases = the three carpaccio slices (01 walking skeleton — the heavy slice; 02 ctx.sleep; 03 signals + emit). Slice 01 is decomposed into 6 ordered RED->GREEN->COMMIT steps so each compiles and the acceptance tests it activates can reach GREEN within scope. Every step's test_file + scenario_name is copied VERBATIM from distill/red-classification.md; all 20 scenarios (S-WP-01-01..S-WP-03-05) are covered. HONESTY (enforced, do not violate): journal is redb+CBOR not libSQL (K5); NO `overdrive workflow` CLI verb is invented (#206); NO cross-node resume claimed (#205, single-node only D3); ctx.emit_action goes through the Action channel -> Raft with no IntentStore bypass (slice-03 AC2). Deferrals cite real issues only: cross-node resume #205, CLI verb #206, signals-under-partition #207, journal retention/compaction #208, WASM SDK + version-skew #209.",
     "reviews": [
@@ -211,6 +211,34 @@
           "implementation_notes": "Graduates the placeholder: mod.rs:136 ReplayEquivalentEmptyWorkflow variant -> ReplayEquivalenceProvisionRecord; evaluators.rs:584 evaluate_replay_equivalent_empty_workflow (two-SimEntropy-transcript stub) -> real journal replay driving the WorkflowEngine (from 01-05/06) + SimJournalStore; harness.rs:404 wiring. The DST invariant drives the engine to-terminal on the sim executor (await the run future under turmoil) — exactly-once via the §3 replay cursor (no transport re-fire on resume). All four sim scaffolds reach GREEN together over the live pipeline from 01-06. cargo mutants on the evaluators is DEFERRED to Phase 5 (do not run per-step). SINGLE-NODE only (D3/#205) — no AC claims cross-node resume.",
           "deps": [
             "01-06"
+          ],
+          "agent": "nw-software-crafter"
+        },
+        {
+          "id": "01-08",
+          "name": "Full engine boot composition + end-to-end workflow integration test",
+          "description": "Complete C (user decision): wire the real WorkflowEngine into production boot (AppState field + construct-at-boot + dispatch gets the real engine, not None), persist StartWorkflow as workflow-instance intent in the IntentStore, and make the WorkflowLifecycle reconciler's hydrate_desired read that intent / hydrate_actual read the engine live-task set + observed terminal rows. Driven test-first by a real end-to-end integration test: a fixture trigger reconciler emits Action::StartWorkflow -> committed -> the production composition drives ProvisionRecord to terminal -> the ObservationStore carries the WorkflowTerminal row -> the lifecycle reconciler converges the instance to terminated.",
+          "criteria": "A committed Action::StartWorkflow from a fixture reconciler drives a ProvisionRecord to terminal through the real AppState composition; the ObservationStore terminal row appears and the lifecycle reconciler converges to terminated; engine reachable in production.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/workflow_e2e/reconciler_emit_drives_workflow_to_terminal.rs",
+          "scenario_name": "fixture_reconciler_emit_start_workflow_drives_provision_record_to_terminal_through_production_composition",
+          "acceptance_criteria": [
+            "AppState gains a workflow_engine field constructed at boot in run_server_* over the real RedbJournalStore + injected ports + ObservationStore; the action-shim dispatch receives the real engine (the 01-05 Option None is replaced); the ~24 AppState test-fixture construction sites get the field (mechanical ripple, authorized)",
+            "Action::StartWorkflow, when committed, persists a workflow-instance desired-intent (keyed by CorrelationKey/WorkflowId, carrying the WorkflowSpec) into the IntentStore — mirroring how StartAllocation persists alloc intent — so hydrate_desired can read it back",
+            "WorkflowLifecycle hydrate_desired reads the persisted workflow intent; hydrate_actual reads the engine live-task set (running) + the ObservationStore WorkflowTerminal rows (terminated); reconcile stays pure-sync and ReconcilerIsPure still holds",
+            "NEW end-to-end integration test (integration-tests, Lima, real redb + real engine + real ObservationStore): a fixture trigger reconciler emits Action::StartWorkflow -> the production composition drives ProvisionRecord run to terminal -> the WorkflowTerminal ObservationStore row appears keyed by the same CorrelationKey -> the lifecycle reconciler converges the instance to terminated; SimTransport/ctx.call effect fired exactly once",
+            "the fixture trigger reconciler lives in test/fixture scope (overdrive-core::testing or the integration test module), NOT production src — there is no production StartWorkflow producer in Phase 1; this test supplies the trigger to exercise the now-real production composition end-to-end"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-core/src/reconcilers/workflow_lifecycle.rs",
+            "crates/overdrive-control-plane/tests/integration/workflow_e2e/reconciler_emit_drives_workflow_to_terminal.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "implementation_notes": "User-selected option C (full wiring + e2e). This completes the 01-06 AC3 production boot composition that 01-06 honestly left partial. Mirror the StartAllocation -> alloc-intent -> WorkloadLifecycle.hydrate_desired precedent for StartWorkflow -> workflow-intent -> WorkflowLifecycle.hydrate_desired (study workload_lifecycle + reconciler_runtime + lib.rs AppState). The ~24 AppState fixture sites get workflow_engine wired (a real or test engine); mechanical ripple authorized. The fixture trigger reconciler is the made-up emitter the user asked for — it lives in test/fixture scope (NOT production src, honesty: Phase 1 has no production trigger; #206 CLI verb + Phase-3 consumers are the real future triggers). Persisting StartWorkflow intent may touch the IntentStore intent enum / aggregate — if so, that is in-scope for C; keep additive (rkyv envelope discipline per ADR-0048 if a durable intent row is added). If the IntentStore intent surface change is larger than additive, STOP and report before reshaping it. ProvisionRecord stays call->terminal (slice-01 shape) so this e2e remains valid after slices 02/03 extend the engine.",
+          "deps": [
+            "01-07"
           ],
           "agent": "nw-software-crafter"
         }

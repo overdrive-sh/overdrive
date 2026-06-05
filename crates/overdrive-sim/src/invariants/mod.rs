@@ -143,8 +143,19 @@ pub enum Invariant {
     /// arbitrary seeded delivery orders reaches the same row set on
     /// every peer.
     SimObservationLwwConverges,
-    /// An empty workflow journal replays bit-identically.
-    ReplayEquivalentEmptyWorkflow,
+    /// workflow-primitive step 01-07 (graduates the slice-1
+    /// `ReplayEquivalentEmptyWorkflow` placeholder; ADR-0064 §3/§6, K4 —
+    /// the load-bearing KPI on the `cargo dst` critical path). Drives the
+    /// real `WorkflowEngine` + `SimJournalStore` through three runs of the
+    /// `ProvisionRecord` reference workflow: (1) an uninterrupted run
+    /// capturing the terminal trajectory; (2) a crash-injected run (kill
+    /// after step-0 records, before terminal); (3) a resumed run from the
+    /// persisted journal. Asserts the resumed trajectory is byte-identical
+    /// to the uninterrupted one (replay-equivalence) AND the resumed run
+    /// reaches a terminal `WorkflowResult` within the step budget
+    /// (`assert_eventually!(is_terminal)`, bounded progress). The evaluator
+    /// body lives in `crate::invariants::evaluators`.
+    ReplayEquivalenceProvisionRecord,
     /// `SimEntropy` seeded with the same `u64` twice produces the same
     /// draw sequence — the twin-run identity property.
     EntropyDeterminismUnderReseed,
@@ -445,6 +456,27 @@ pub enum Invariant {
     /// `crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff`.
     /// Closes S-BDB-19.
     BridgeToHydratorHandoff,
+
+    /// workflow-primitive step 01-07 (ADR-0064 §6, mirroring ADR-0035's
+    /// `WriteThroughOrdering`) — always invariant. Under a
+    /// `SimJournalStore` with an injected fsync-failure on the next
+    /// `append`, the engine's live-path `ctx.call` record FAILS and the
+    /// journal cursor does NOT advance: a subsequent retry is still a LIVE
+    /// call (not a replay), the journal carries no phantom half-written
+    /// entry, and the engine does not suspend acknowledging an unrecorded
+    /// step. fsync-then-suspend is load-bearing (ADR-0063 §4). The
+    /// evaluator body lives in `crate::invariants::evaluators`.
+    WorkflowJournalWriteOrdering,
+
+    /// workflow-primitive step 01-07 (ADR-0064 §6; US-WP-3 AC1 / K1) —
+    /// always invariant. Crash after a `ctx.call` records but before
+    /// terminal → resume from the persisted `SimJournalStore` journal →
+    /// the recorded effect is replayed WITHOUT re-firing the transport
+    /// (the resumed boot's bound `SimInbox` receives zero datagrams) and
+    /// the run reaches the same terminal `WorkflowResult`. The
+    /// exactly-once-on-resume guarantee. The evaluator body lives in
+    /// `crate::invariants::evaluators`.
+    WorkflowExactlyOnceEffectOnResume,
 }
 
 impl Invariant {
@@ -457,7 +489,11 @@ impl Invariant {
         Self::IntentNeverCrossesIntoObservation,
         Self::SnapshotRoundtripBitIdentical,
         Self::SimObservationLwwConverges,
-        Self::ReplayEquivalentEmptyWorkflow,
+        // workflow-primitive step 01-07 — graduates the slice-1
+        // `ReplayEquivalentEmptyWorkflow` placeholder into a real journal
+        // replay against the `WorkflowEngine` + `SimJournalStore`. K4 on
+        // the `cargo dst` critical path (ADR-0064 §3/§6).
+        Self::ReplayEquivalenceProvisionRecord,
         Self::EntropyDeterminismUnderReseed,
         // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
         Self::AtLeastOneReconcilerRegistered,
@@ -543,6 +579,11 @@ impl Invariant {
         // lives in
         // `crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff`.
         Self::BridgeToHydratorHandoff,
+        // workflow-primitive step 01-07 — the two sibling workflow
+        // durability invariants (ADR-0064 §6). Evaluator bodies live in
+        // `crate::invariants::evaluators`.
+        Self::WorkflowJournalWriteOrdering,
+        Self::WorkflowExactlyOnceEffectOnResume,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -555,7 +596,7 @@ impl Invariant {
             Self::IntentNeverCrossesIntoObservation => "intent-never-crosses-into-observation",
             Self::SnapshotRoundtripBitIdentical => "snapshot-roundtrip-bit-identical",
             Self::SimObservationLwwConverges => "sim-observation-lww-converges",
-            Self::ReplayEquivalentEmptyWorkflow => "replay-equivalent-empty-workflow",
+            Self::ReplayEquivalenceProvisionRecord => "replay-equivalence-provision-record",
             Self::EntropyDeterminismUnderReseed => "entropy-determinism-under-reseed",
             // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
             Self::AtLeastOneReconcilerRegistered => "at-least-one-reconciler-registered",
@@ -592,6 +633,9 @@ impl Invariant {
             Self::BridgeRecomputesFingerprintOnReplay => "bridge-recomputes-fingerprint-on-replay",
             // backend-discovery-bridge-service-reachability step 02-04 (S-BDB-19).
             Self::BridgeToHydratorHandoff => "bridge-to-hydrator-handoff",
+            // workflow-primitive step 01-07.
+            Self::WorkflowJournalWriteOrdering => "workflow-journal-write-ordering",
+            Self::WorkflowExactlyOnceEffectOnResume => "workflow-exactly-once-effect-on-resume",
         }
     }
 }

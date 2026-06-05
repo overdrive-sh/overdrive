@@ -15,18 +15,80 @@
 //! and reproduces bit-for-bit on a second run — the `trust-the-sim`
 //! discipline.
 //!
-//! # RED scaffold (`.claude/rules/testing.md` § "RED scaffolds")
+//! # Port-to-port
 //!
-//! The graduated `ReplayEquivalenceProvisionRecord` invariant variant +
-//! its evaluator (replacing the placeholder
-//! `evaluate_replay_equivalent_empty_workflow`) do not exist yet (DELIVER
-//! slice 01). `#[should_panic(expected = "RED scaffold")]` keeps this
-//! RED-not-BROKEN and compiling without the unbuilt invariant.
+//! The driving port is the DST harness (`Harness::only(...).run(seed)`) —
+//! the same surface `cargo dst --only <NAME>` drives. The observable
+//! outcome is asserted at the `RunReport` boundary: the named invariant is
+//! present, green, and the verdict is bit-stable across a second run at
+//! the same seed.
+
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use std::str::FromStr;
+
+use overdrive_sim::harness::{Harness, InvariantStatus};
+use overdrive_sim::invariants::Invariant;
+
+/// The canonical name is a NAMED enum variant (no inline string literal —
+/// US-WP-4 AC1) and round-trips losslessly through `FromStr → Display`.
+#[test]
+fn replay_equivalence_provision_record_is_a_named_catalogue_variant() {
+    let by_name = Invariant::from_str("replay-equivalence-provision-record")
+        .expect("the graduated variant resolves by its canonical kebab name");
+    assert_eq!(
+        by_name,
+        Invariant::ReplayEquivalenceProvisionRecord,
+        "the canonical name maps to the named variant — no inline literal"
+    );
+    assert_eq!(
+        by_name.to_string(),
+        "replay-equivalence-provision-record",
+        "Display round-trips the canonical name"
+    );
+    // The placeholder it graduated is gone from the catalogue.
+    assert!(
+        Invariant::ALL.contains(&Invariant::ReplayEquivalenceProvisionRecord),
+        "the graduated variant is on the default `cargo dst` critical path"
+    );
+}
 
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn replay_equivalence_provision_record_is_a_named_invariant_green_and_seed_reproducible() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-WP-01-09 / replay_equivalence_provision_record named SimInvariant: replay-equivalent + assert_eventually!(is_terminal) bounded progress, green on CI critical path, seed-reproducible -- K4)"
+    const SEED: u64 = 0x5eed_c0de;
+
+    // Drive the named invariant through the harness — the same surface
+    // `cargo dst --only replay-equivalence-provision-record` drives.
+    let report_a = Harness::new()
+        .only(Invariant::ReplayEquivalenceProvisionRecord)
+        .run(SEED)
+        .expect("harness composes");
+
+    let result_a = report_a
+        .invariants
+        .iter()
+        .find(|r| r.name == "replay-equivalence-provision-record")
+        .expect("the named invariant ran (it is on the critical path)");
+    assert_eq!(
+        result_a.status,
+        InvariantStatus::Pass,
+        "K4 — replay-equivalence is GREEN: {:?}",
+        result_a.cause
+    );
+
+    // Seed-reproducible (the `trust-the-sim` discipline): a second run at
+    // the SAME seed produces a bit-identical verdict for this invariant.
+    let report_b = Harness::new()
+        .only(Invariant::ReplayEquivalenceProvisionRecord)
+        .run(SEED)
+        .expect("harness composes (second run)");
+    let result_b = report_b
+        .invariants
+        .iter()
+        .find(|r| r.name == "replay-equivalence-provision-record")
+        .expect("the named invariant ran on the second pass");
+    assert_eq!(
+        result_a, result_b,
+        "the same seed reproduces the invariant verdict bit-for-bit (seed {SEED:#x})"
     );
 }

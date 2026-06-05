@@ -192,13 +192,44 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
 }
 
 // ---------------------------------------------------------------------------
-// ReplayEquivalentEmptyWorkflow
+// ReplayEquivalenceProvisionRecord (workflow-primitive step 01-07, K4)
 // ---------------------------------------------------------------------------
+//
+// Graduated from the slice-1 `ReplayEquivalentEmptyWorkflow` placeholder:
+// the evaluator now drives the real `WorkflowEngine` + `SimJournalStore`
+// through the three-run crash-resume shape. Direct-evaluator unit witness
+// for fast feedback; the full port-to-port surface (named variant,
+// seed-reproducibility, critical-path membership) is covered by
+// `tests/acceptance/replay_equivalence_provision_record_invariant.rs`.
 
-#[test]
-fn replay_equivalent_empty_workflow_passes_on_deterministic_transcript() {
-    let result = evaluators::evaluate_replay_equivalent_empty_workflow(42);
-    assert_eq!(result.status, InvariantStatus::Pass, "empty workflow replays; got {result:?}");
+#[tokio::test]
+async fn replay_equivalence_provision_record_passes_on_real_journal_replay() {
+    let result = evaluators::evaluate_replay_equivalence_provision_record(42).await;
+    assert_eq!(
+        result.status,
+        InvariantStatus::Pass,
+        "uninterrupted vs crash-resumed trajectory must be replay-equivalent; got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn workflow_journal_write_ordering_passes_under_injected_fsync_failure() {
+    let result = evaluators::evaluate_workflow_journal_write_ordering(42).await;
+    assert_eq!(
+        result.status,
+        InvariantStatus::Pass,
+        "a failed fsync must not advance the cursor or leave a phantom; got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn workflow_exactly_once_effect_on_resume_passes() {
+    let result = evaluators::evaluate_workflow_exactly_once_effect_on_resume(42).await;
+    assert_eq!(
+        result.status,
+        InvariantStatus::Pass,
+        "resume must not re-fire the recorded effect; got {result:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

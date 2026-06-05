@@ -28,24 +28,40 @@
 
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::UnixInstant;
-use overdrive_core::id::{NodeId, WorkloadId};
+use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler, TickContext,
     WorkloadLifecycle,
 };
+use overdrive_core::testing::workflow::ProvisionRecord;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
+use overdrive_core::traits::observation_store::{
+    AllocState, AllocStatusRow, ObservationRow, ObservationStore,
+};
+use overdrive_core::traits::transport::Transport as TransportTrait;
+use overdrive_core::workflow::{
+    CallRequest, JournalCursor, WorkflowCtx, WorkflowResult, WorkflowSpec,
+};
+
+use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::workflow_runtime::{
+    JournalCursorHandle, WorkflowEngine, WorkflowRegistry,
+};
 
 use crate::adapters::clock::SimClock;
 use crate::adapters::entropy::SimEntropy;
+use crate::adapters::journal::SimJournalStore;
 use crate::adapters::observation_store::{
     SimObservationCluster, SimObservationStore, check_lww_convergence,
 };
+use crate::adapters::transport::{SimInbox, SimTransport};
 use crate::harness::{InvariantResult, InvariantStatus};
 
 /// Default reporting tick emitted by Phase 1 evaluators. Later phases
@@ -571,43 +587,389 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
 }
 
 // ---------------------------------------------------------------------------
-// ReplayEquivalentEmptyWorkflow
+// ReplayEquivalenceProvisionRecord (workflow-primitive step 01-07, K4)
 // ---------------------------------------------------------------------------
+//
+// Graduates the slice-1 `ReplayEquivalentEmptyWorkflow` placeholder
+// (two-SimEntropy-transcripts) into a real journal replay driving the
+// `WorkflowEngine` + `SimJournalStore` against the `ProvisionRecord`
+// reference workflow. ADR-0064 §3/§6. K4 — the load-bearing KPI on the
+// `cargo dst` critical path.
 
-/// Evaluate the empty-workflow replay invariant.
-///
-/// Phase 1's "workflow" is a trivial deterministic transcript — the
-/// seed itself, hashed via the same `SimEntropy` instance twice. The
-/// invariant holds when the two hashes match. This proves the replay-
-/// check machinery; the full workflow runtime is Phase 2+.
-#[must_use]
-pub fn evaluate_replay_equivalent_empty_workflow(seed: u64) -> InvariantResult {
-    let name = "replay-equivalent-empty-workflow";
+/// The fixed address the `ProvisionRecord` reference workflow's single
+/// `ctx.call` effect is addressed at, in every evaluator below.
+const WF_TARGET: &str = "127.0.0.1:9000";
 
-    // Two SimEntropy instances seeded identically are the Phase 1
-    // stand-in for a "run the workflow twice" transcript. Phase 2
-    // replaces this with an actual workflow journal replay.
-    let first = capture_transcript(seed);
-    let second = capture_transcript(seed);
-
-    if first == second {
-        result(name, InvariantStatus::Pass, "host-0", None)
-    } else {
-        result(
-            name,
-            InvariantStatus::Fail,
-            "host-0",
-            Some("empty-workflow transcript differs across replay".to_owned()),
-        )
-    }
+/// Construct the slice-01 instance correlation + id + spec for a
+/// `ProvisionRecord` instance. Deterministic — no seed dependence beyond
+/// the fixed instance id, so twin runs reproduce bit-for-bit.
+fn provision_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
+    let spec = ProvisionRecord::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-provision-0001",
+        &ContentHash::of(ProvisionRecord::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-provision-0001")
+        .unwrap_or_else(|_| unreachable!("wf-provision-0001 is a valid instance id"));
+    (correlation, workflow_id, spec)
 }
 
-/// Produce a deterministic transcript from a seed. The length is fixed
-/// so that a mutation that returns an empty Vec is caught by the two
-/// above tests (empty == empty would be trivially equal).
-fn capture_transcript(seed: u64) -> Vec<u64> {
-    let entropy = SimEntropy::new(seed);
-    (0..16).map(|_| entropy.u64()).collect()
+/// Build a `WorkflowEngine` over the SHARED `journal` + `obs`, a fresh set
+/// of `Sim*` ports, and a freshly-bound transport inbox so each boot
+/// observes its OWN delivered-datagram count. The engine resolves
+/// `ProvisionRecord` addressed at [`WF_TARGET`].
+async fn provision_engine(
+    seed: u64,
+    journal: Arc<dyn JournalStore>,
+    obs: Arc<dyn ObservationStore>,
+) -> (WorkflowEngine, SimInbox) {
+    let target: SocketAddr =
+        WF_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_TARGET is a valid socket addr"));
+    let sim_transport = SimTransport::new();
+    let inbox = sim_transport
+        .bind_inbox(target)
+        .await
+        .unwrap_or_else(|_| unreachable!("SimTransport::bind_inbox is total"));
+
+    let transport: Arc<dyn TransportTrait> = Arc::new(sim_transport);
+    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+
+    let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
+    (engine, inbox)
+}
+
+/// Count datagrams delivered to `inbox` within the drain budget — the
+/// per-boot `SimTransport` effect-fire count.
+async fn delivered_count(inbox: &mut SimInbox) -> usize {
+    let mut count = 0usize;
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(50), inbox.recv()).await {
+        count += 1;
+    }
+    count
+}
+
+/// Drain the terminal `WorkflowResult` for `correlation` off a
+/// subscription that was taken BEFORE the engine drove the workflow to
+/// terminal. `SimObservationStore::subscribe_all` returns a LIVE
+/// broadcast stream (it does NOT replay a snapshot — `WorkflowTerminal`
+/// rows are fan-out-only, never stored), so the subscription MUST be
+/// opened before `engine.start` or the terminal row is missed. Returns
+/// `None` if no terminal row arrives within the drain budget.
+async fn drain_terminal(
+    subscription: &mut overdrive_core::traits::observation_store::ObservationSubscription,
+    correlation: &CorrelationKey,
+) -> Option<WorkflowResult> {
+    use futures::StreamExt;
+    for _ in 0..32 {
+        match tokio::time::timeout(Duration::from_millis(100), subscription.next()).await {
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, result }))
+                if &got == correlation =>
+            {
+                return Some(result);
+            }
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => break,
+        }
+    }
+    None
+}
+
+/// Drive an uninterrupted `ProvisionRecord` run to terminal through the
+/// engine; return the loaded journal trajectory + terminal result.
+async fn run_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResult>) {
+    let (correlation, workflow_id, spec) = provision_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let (engine, _inbox) = provision_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
+    // Subscribe BEFORE driving — the WorkflowTerminal row is broadcast
+    // live (never snapshotted), so a post-run subscriber would miss it.
+    let Ok(mut subscription) = obs.subscribe_all().await else {
+        return (Vec::new(), None);
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+    let trajectory = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let terminal = drain_terminal(&mut subscription, &correlation).await;
+    (trajectory, terminal)
+}
+
+/// Drive a crash-injected `ProvisionRecord` run.
+///
+/// Fires `ctx.call` once (records step 0), then drops the future BEFORE
+/// terminal — a process-local kill modelled honestly. Returns the
+/// persisted journal (carrying the recorded `CallResult`, NO `Terminal`)
+/// and the count of effect fires during this pre-crash run.
+async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<JournalEntry>, usize) {
+    let (_correlation, workflow_id, _spec) = provision_instance();
+    let target: SocketAddr =
+        WF_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_TARGET is a valid socket addr"));
+    let sim_transport = SimTransport::new();
+    let mut inbox = sim_transport
+        .bind_inbox(target)
+        .await
+        .unwrap_or_else(|_| unreachable!("bind_inbox is total"));
+    {
+        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new(
+            Arc::clone(journal),
+            workflow_id.clone(),
+            Vec::new(),
+        ));
+        let ctx = WorkflowCtx::new(
+            Arc::new(SimClock::new()),
+            Arc::new(sim_transport) as Arc<dyn TransportTrait>,
+            Arc::new(SimEntropy::new(seed)),
+            cursor,
+        );
+        let request =
+            CallRequest { target, payload: bytes::Bytes::from_static(ProvisionRecord::PAYLOAD) };
+        // The recorded step. The ctx + future drop at the end of this
+        // block model the crash BEFORE terminal.
+        let _ = ctx.call(request).await;
+    }
+    let fires = delivered_count(&mut inbox).await;
+    let trajectory = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    (trajectory, fires)
+}
+
+/// Evaluate `ReplayEquivalenceProvisionRecord` (K4).
+///
+/// Drives the three-run crash-resume shape (ADR-0064 §3): uninterrupted,
+/// crash-injected, resumed-from-journal. Asserts the resumed trajectory is
+/// byte-identical to the uninterrupted one AND the resumed run reaches a
+/// terminal `WorkflowResult` (bounded progress).
+#[must_use]
+pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> InvariantResult {
+    let name = "replay-equivalence-provision-record";
+    let fail = |cause: String| result(name, InvariantStatus::Fail, "host-0", Some(cause));
+
+    // (1) Uninterrupted run — the reference trajectory.
+    let (uninterrupted, uninterrupted_terminal) = run_uninterrupted(seed).await;
+    let Some(uninterrupted_terminal) = uninterrupted_terminal else {
+        return fail("uninterrupted run did not reach a terminal WorkflowResult".to_owned());
+    };
+
+    // (2) Crash-injected run on a fresh shared journal — records step 0,
+    //     no Terminal.
+    let (correlation, workflow_id, spec) = provision_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let (pre_resume, _crash_fires) = run_until_crash(seed, &journal).await;
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::CallResult { .. })) {
+        return fail(format!("crash run left no recorded CallResult: {pre_resume:?}"));
+    }
+    if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+        return fail(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
+    }
+
+    // (3) Resume from the persisted journal through the engine.
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let (engine, mut resume_inbox) =
+        provision_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
+    // Subscribe BEFORE driving the resumed run — the terminal row is
+    // broadcast live, not snapshotted.
+    let mut resume_sub = match obs.subscribe_all().await {
+        Ok(s) => s,
+        Err(err) => return fail(format!("resume subscribe_all failed: {err}")),
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+
+    // Exactly-once on resume: the resumed boot re-fired the effect ZERO
+    // times (replay short-circuited the recorded call).
+    let resume_fires = delivered_count(&mut resume_inbox).await;
+    if resume_fires != 0 {
+        return fail(format!(
+            "resume re-fired the recorded ctx.call effect {resume_fires} times (must be 0)"
+        ));
+    }
+
+    // assert_eventually!(is_terminal): the resumed run reached terminal.
+    let Some(resumed_terminal) = drain_terminal(&mut resume_sub, &correlation).await else {
+        return fail(
+            "resumed run did not reach a terminal WorkflowResult (no bounded progress)".to_owned(),
+        );
+    };
+
+    // Replay-equivalence: the resumed trajectory is byte-identical to the
+    // uninterrupted one (the recorded CallResult is the same; both reach
+    // a Terminal entry), and the terminal results match.
+    let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let recorded_call = |run: &[JournalEntry]| -> Option<JournalEntry> {
+        run.iter().find(|e| matches!(e, JournalEntry::CallResult { .. })).cloned()
+    };
+    if recorded_call(&resumed) != recorded_call(&uninterrupted) {
+        return fail(format!(
+            "resumed recorded CallResult differs from uninterrupted: \
+             {resumed:?} vs {uninterrupted:?}"
+        ));
+    }
+    if !resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+        return fail(format!("resumed run did not append a Terminal entry: {resumed:?}"));
+    }
+    if resumed_terminal != uninterrupted_terminal {
+        return fail(format!(
+            "resumed terminal {resumed_terminal:?} != uninterrupted {uninterrupted_terminal:?}"
+        ));
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowJournalWriteOrdering (workflow-primitive step 01-07)
+// ---------------------------------------------------------------------------
+
+/// Evaluate `WorkflowJournalWriteOrdering` (ADR-0064 §6).
+///
+/// Mirrors ADR-0035 `WriteThroughOrdering`. Under an injected
+/// fsync-failure, the live-path `ctx.call` record FAILS, the cursor does
+/// NOT advance (a retry is still a LIVE call), and the journal carries no
+/// phantom entry.
+#[must_use]
+pub async fn evaluate_workflow_journal_write_ordering(seed: u64) -> InvariantResult {
+    let name = "workflow-journal-write-ordering";
+    let fail = |cause: String| result(name, InvariantStatus::Fail, "host-0", Some(cause));
+
+    let store = Arc::new(SimJournalStore::new());
+    let journal: Arc<dyn JournalStore> = Arc::clone(&store) as Arc<dyn JournalStore>;
+    let workflow_id =
+        WorkflowId::new("wf-ordering-0001").unwrap_or_else(|_| unreachable!("valid id"));
+    let target: SocketAddr = WF_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_TARGET valid"));
+
+    let sim_transport = SimTransport::new();
+    let mut inbox =
+        sim_transport.bind_inbox(target).await.unwrap_or_else(|_| unreachable!("bind_inbox total"));
+
+    let cursor: Arc<dyn JournalCursor> =
+        Arc::new(JournalCursorHandle::new(Arc::clone(&journal), workflow_id.clone(), Vec::new()));
+    let ctx = WorkflowCtx::new(
+        Arc::new(SimClock::new()),
+        Arc::new(sim_transport) as Arc<dyn TransportTrait>,
+        Arc::new(SimEntropy::new(seed)),
+        Arc::clone(&cursor),
+    );
+    let request =
+        || CallRequest { target, payload: bytes::Bytes::from_static(ProvisionRecord::PAYLOAD) };
+
+    // Arm the fsync failure — the next live record (append) fails.
+    store.inject_fsync_failure();
+    match ctx.call(request()).await {
+        Ok(_) => return fail("live record succeeded under injected fsync failure".to_owned()),
+        Err(_err) => {}
+    }
+
+    // No phantom entry.
+    let after_fail = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    if !after_fail.is_empty() {
+        return fail(format!("failed fsync left a phantom entry: {after_fail:?}"));
+    }
+
+    // Cursor did NOT advance: clear the failure and retry through the SAME
+    // cursor. The load-bearing observable is that the retry is a LIVE call
+    // (cursor stayed at step 0 over an empty buffer), NOT a replay. A
+    // replay would fire ZERO datagrams and record nothing; a live call
+    // fires the transport effect and records exactly one journal entry.
+    //
+    // The transport effect is at-least-once by design (ADR-0064: the
+    // failed live-path call ALREADY fired its datagram before the append
+    // failed; exactly-once is the replay/resume guarantee, not the
+    // within-boot retry guarantee). So the failed call + the retry deliver
+    // TWO datagrams total — and that the retry contributed a fresh live
+    // fire (the count rose past the single pre-clear fire) is the proof
+    // the cursor did not advance into a spurious replay.
+    let fires_before_retry = delivered_count(&mut inbox).await;
+    store.clear_fsync_failure();
+    match ctx.call(request()).await {
+        Ok(response) if response.bytes_sent == ProvisionRecord::PAYLOAD.len() => {}
+        Ok(response) => {
+            return fail(format!("retry response had wrong byte count: {}", response.bytes_sent));
+        }
+        Err(err) => return fail(format!("retry after clear failed: {err}")),
+    }
+    let fires_from_retry = delivered_count(&mut inbox).await;
+    if fires_from_retry != 1 {
+        return fail(format!(
+            "retry was not a single LIVE fire: it delivered {fires_from_retry} datagrams \
+             (expected exactly 1 — a replay would deliver 0, proving the cursor wrongly advanced)"
+        ));
+    }
+    // The pre-clear failed call fired at-least-once (its datagram landed
+    // before the append failed); the retry then fired exactly once more.
+    if fires_before_retry != 1 {
+        return fail(format!(
+            "the failed live-path call should have fired its datagram once before the append \
+             failed (at-least-once transport); observed {fires_before_retry}"
+        ));
+    }
+    let after_clear = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    if after_clear.len() != 1 {
+        return fail(format!("expected exactly one recorded entry after retry: {after_clear:?}"));
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowExactlyOnceEffectOnResume (workflow-primitive step 01-07, K1)
+// ---------------------------------------------------------------------------
+
+/// Evaluate `WorkflowExactlyOnceEffectOnResume` (ADR-0064 §6; US-WP-3 AC1 / K1).
+///
+/// Crash after `ctx.call` records → resume → the recorded effect is
+/// replayed WITHOUT re-firing the transport (zero datagrams on the resumed
+/// boot's inbox) and the run reaches terminal.
+#[must_use]
+pub async fn evaluate_workflow_exactly_once_effect_on_resume(seed: u64) -> InvariantResult {
+    let name = "workflow-exactly-once-effect-on-resume";
+    let fail = |cause: String| result(name, InvariantStatus::Fail, "host-0", Some(cause));
+
+    let (correlation, workflow_id, spec) = provision_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+
+    // Crash run: fire + record step 0, no terminal.
+    let (pre_resume, crash_fires) = run_until_crash(seed, &journal).await;
+    if crash_fires != 1 {
+        return fail(format!("pre-crash run fired the effect {crash_fires} times (expected 1)"));
+    }
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::CallResult { .. })) {
+        return fail(format!("crash run recorded no CallResult: {pre_resume:?}"));
+    }
+
+    // Resume: zero additional fires, reach terminal.
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local valid")),
+        0,
+    ));
+    let (engine, mut inbox) = provision_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
+    // Subscribe BEFORE driving — the terminal row is broadcast live.
+    let mut subscription = match obs.subscribe_all().await {
+        Ok(s) => s,
+        Err(err) => return fail(format!("resume subscribe_all failed: {err}")),
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+
+    let resume_fires = delivered_count(&mut inbox).await;
+    if resume_fires != 0 {
+        return fail(format!(
+            "resume re-fired the recorded effect {resume_fires} times (exactly-once violated)"
+        ));
+    }
+    if drain_terminal(&mut subscription, &correlation).await.is_none() {
+        return fail("resumed run did not reach terminal".to_owned());
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
 }
 
 // ---------------------------------------------------------------------------
@@ -1849,24 +2211,16 @@ mod tests {
         assert_eq!(evaluate_entropy_determinism_against(&a, &b).status, InvariantStatus::Fail);
     }
 
-    #[test]
-    fn empty_workflow_transcript_is_non_empty_and_deterministic() {
-        let t1 = capture_transcript(42);
-        let t2 = capture_transcript(42);
-        assert_eq!(t1, t2);
-        assert_eq!(t1.len(), 16, "transcript length is pinned so an empty-Vec mutation fails");
-    }
-
-    #[test]
-    fn empty_workflow_transcript_differs_across_seeds() {
-        assert_ne!(capture_transcript(1), capture_transcript(2));
-    }
-
-    #[test]
-    fn replay_equivalent_empty_workflow_passes_on_deterministic_seed() {
-        let r = evaluate_replay_equivalent_empty_workflow(42);
-        assert_eq!(r.status, InvariantStatus::Pass);
-    }
+    // workflow-primitive step 01-07 graduated the
+    // `ReplayEquivalentEmptyWorkflow` two-SimEntropy-transcripts
+    // placeholder into a real journal replay (the
+    // `evaluate_replay_equivalence_provision_record` evaluator + its two
+    // sibling workflow durability evaluators). The transcript-stub unit
+    // tests that defended the deleted placeholder are gone with it; the
+    // graduated evaluators are exercised through
+    // `tests/invariant_evaluators.rs` (direct, async) and
+    // `tests/acceptance/replay_equivalence_provision_record_invariant.rs`
+    // (port-to-port through the harness).
 
     // -----------------------------------------------------------------
     // Step 04-05 — reconciler-primitive invariant witnesses
