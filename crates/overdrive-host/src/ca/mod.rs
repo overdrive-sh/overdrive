@@ -6,6 +6,8 @@
 //! `rcgen` / `ring` live ONLY in this `adapter-host` module — the
 //! `overdrive-core` compile path stays crypto-free (dst-lint).
 
+pub mod aead_codec;
 pub mod rcgen_ca;
 
+pub use aead_codec::RootKeyAeadCodec;
 pub use rcgen_ca::RcgenCa;

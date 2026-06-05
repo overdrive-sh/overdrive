@@ -25,6 +25,7 @@
 //! as a **required constructor parameter** — never defaulted to a production
 //! binding (`.claude/rules/development.md` § "Port-trait dependencies").
 
+use crate::ca::root_key_envelope::KekId;
 use crate::{CertSerial, CertSpecError, NodeId, SpiffeId};
 
 /// Result alias used throughout the CA port surface.
@@ -373,6 +374,33 @@ pub enum CaError {
         /// Human-readable explanation of the signing failure.
         reason: String,
     },
+
+    /// The persisted root-key envelope failed AES-GCM authentication when
+    /// opened under the **correct** KEK — the ciphertext or tag was tampered
+    /// with / corrupted at rest. Distinct from [`WrongKek`](CaError::WrongKek):
+    /// the supplied KEK's id matches the record's `kek_id` (the AAD), so this
+    /// is integrity failure, not KEK-confusion (ADR-0063 D3/D4). The boot path
+    /// refuses to start on this error — never a silent re-mint.
+    #[error("root-key envelope is corrupt or tampered (AES-GCM auth failed) for kek_id `{kek_id}`")]
+    TamperedEnvelope {
+        /// The KEK identity the (failed-to-authenticate) record was sealed under.
+        kek_id: KekId,
+    },
+
+    /// The persisted root-key envelope was opened with the **wrong** KEK — the
+    /// supplied KEK's identity does not match the record's `kek_id`. AAD =
+    /// `kek_id` binds the ciphertext to its KEK identity, so a KEK-confusion
+    /// attempt is detected structurally and surfaces distinctly from
+    /// [`TamperedEnvelope`](CaError::TamperedEnvelope) (ADR-0063 D3/D4).
+    #[error(
+        "root-key envelope sealed under kek_id `{sealed_under}` cannot be opened with kek_id `{supplied}`"
+    )]
+    WrongKek {
+        /// The `kek_id` the record was sealed under (from the record).
+        sealed_under: KekId,
+        /// The `kek_id` of the KEK the caller supplied.
+        supplied: KekId,
+    },
 }
 
 impl CaError {
@@ -393,6 +421,20 @@ impl CaError {
     #[must_use]
     pub fn signing_failed(reason: impl Into<String>) -> Self {
         Self::SigningFailed { reason: reason.into() }
+    }
+
+    /// Construct a [`TamperedEnvelope`](CaError::TamperedEnvelope) for a record
+    /// that failed AES-GCM authentication under its own KEK.
+    #[must_use]
+    pub const fn tampered_envelope(kek_id: KekId) -> Self {
+        Self::TamperedEnvelope { kek_id }
+    }
+
+    /// Construct a [`WrongKek`](CaError::WrongKek) for an open attempted under
+    /// a KEK whose identity differs from the record's `kek_id`.
+    #[must_use]
+    pub const fn wrong_kek(sealed_under: KekId, supplied: KekId) -> Self {
+        Self::WrongKek { sealed_under, supplied }
     }
 }
 

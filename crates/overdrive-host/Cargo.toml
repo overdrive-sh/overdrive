@@ -38,6 +38,12 @@ rand.workspace           = true
 # `[dependencies]` (production) entry, not a dev-dep: `RcgenCa` is
 # production code. `overdrive-core` stays rcgen/ring-free (dst-lint).
 rcgen                    = { workspace = true }
+# `ring` — the workspace crypto provider (ADR-0063 D4 / #204 for the
+# aws-lc-rs/FIPS switch). `RootKeyAeadCodec` (the root-key AEAD host
+# codec) uses ring's HKDF-SHA256 + AES-256-GCM directly to seal the
+# root CA private key at rest. Production crypto dep, not transitive.
+# `overdrive-core` stays ring-free (dst-lint).
+ring                     = { workspace = true }
 tokio.workspace          = true
 # `uuid` v4 — used by `RealCgroupFs::probe` to mint a per-call probe
 # directory under `<probe_root>/.overdrive-probe-<uuid>/`. Parallel
