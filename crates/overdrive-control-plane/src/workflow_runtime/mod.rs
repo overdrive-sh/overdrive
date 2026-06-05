@@ -38,17 +38,33 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use overdrive_core::id::{ContentHash, CorrelationKey};
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    JournalCursor, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName, WorkflowResult,
-    WorkflowSpec,
+    JournalCursor, SignalKey, SignalValue, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName,
+    WorkflowResult, WorkflowSpec,
 };
 
 use crate::journal::{JournalEntry, JournalStore, WorkflowId};
+
+/// The sender half of the engine's **Action channel** — the same channel
+/// the reconciler runtime consumes (→ Raft commit path). A
+/// `ctx.emit_action` hands its typed [`Action`] to this sender; the
+/// receiver (held by the runtime / a test harness) drains it into the
+/// `action_shim` dispatch path (ADR-0064 §4; `development.md` Workflow
+/// contract rule 6 — workflow→cluster mutations go through Raft, never a
+/// direct `IntentStore` write).
+pub type ActionEmitSender = mpsc::UnboundedSender<Action>;
+
+/// The receiver half of the engine's Action channel. Drained by the
+/// reconciler runtime (production) or a test harness; every item is an
+/// [`Action`] a workflow emitted via `ctx.emit_action`.
+pub type ActionEmitReceiver = mpsc::UnboundedReceiver<Action>;
 
 /// A factory producing a fresh [`Workflow`] trait object on demand. The
 /// engine resolves a [`WorkflowSpec`]'s [`WorkflowName`] to one of these
@@ -128,6 +144,13 @@ pub struct WorkflowEngine {
     /// channels. Mandatory at construction per
     /// `.claude/rules/development.md` § "Port-trait dependencies".
     obs: Arc<dyn ObservationStore>,
+    /// The sender half of the **Action channel** (→ Raft) a workflow's
+    /// `ctx.emit_action` sends on (ADR-0064 §4). Threaded into every
+    /// instance's [`JournalCursorHandle`] so the live emit path hands the
+    /// typed Action to the SAME channel the reconciler runtime consumes —
+    /// NOT a direct `IntentStore` write. Mandatory at construction per
+    /// `.claude/rules/development.md` § "Port-trait dependencies".
+    action_emit: ActionEmitSender,
     registry: Arc<WorkflowRegistry>,
     /// Tracked task set for live instances — the engine owns it the same
     /// way the reconciler runtime owns its tick task (ADR-0023 §4).
@@ -146,6 +169,15 @@ pub struct WorkflowEngine {
     /// deterministic iteration per `.claude/rules/development.md`
     /// § "Ordered-collection choice".
     live_instances: Arc<Mutex<BTreeSet<CorrelationKey>>>,
+    /// The receiver half of the Action channel, parked here until a
+    /// consumer takes it via [`Self::take_action_emit_receiver`]. The
+    /// engine owns BOTH halves so [`Self::new`]'s signature stays
+    /// unchanged (the emit channel is an engine-internal wiring detail,
+    /// not a constructor dependency); the runtime / a test harness takes
+    /// the receiver once after construction and drains emitted Actions
+    /// into the `action_shim` dispatch path. `Mutex<Option<..>>` so the
+    /// take is `&self` and single-shot.
+    action_emit_rx: Mutex<Option<ActionEmitReceiver>>,
 }
 
 impl WorkflowEngine {
@@ -162,16 +194,37 @@ impl WorkflowEngine {
         registry: WorkflowRegistry,
         obs: Arc<dyn ObservationStore>,
     ) -> Self {
+        // The engine owns BOTH halves of the Action channel. The sender is
+        // threaded into every instance's JournalCursorHandle (the live
+        // emit path); the receiver is parked until a consumer takes it via
+        // `take_action_emit_receiver`. An UNBOUNDED channel because the
+        // emit is on the workflow's async task (a bounded send could block
+        // the task across the journal-fsync window); the consumer drains
+        // promptly into the action_shim.
+        let (action_emit, action_emit_rx) = mpsc::unbounded_channel();
         Self {
             journal,
             clock,
             transport,
             entropy,
             obs,
+            action_emit,
             registry: Arc::new(registry),
             tasks: Mutex::new(JoinSet::new()),
             live_instances: Arc::new(Mutex::new(BTreeSet::new())),
+            action_emit_rx: Mutex::new(Some(action_emit_rx)),
         }
+    }
+
+    /// Take the receiver half of the engine's Action channel. Single-shot:
+    /// the first caller receives `Some(receiver)`, subsequent callers
+    /// receive `None`. The consumer (the reconciler runtime in production,
+    /// or a test harness) drains emitted Actions into the `action_shim`
+    /// dispatch path (→ Raft). Per ADR-0064 §4 this is the SAME channel
+    /// path the runtime already commits reconciler-emitted Actions through;
+    /// `ctx.emit_action` reuses it rather than bypassing Raft.
+    pub async fn take_action_emit_receiver(&self) -> Option<ActionEmitReceiver> {
+        self.action_emit_rx.lock().await.take()
     }
 
     /// Snapshot the set of instance [`CorrelationKey`]s with a live
@@ -216,10 +269,12 @@ impl WorkflowEngine {
 
         let replay_buffer = self.journal.load_journal(workflow_id).await?;
 
-        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new(
+        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new_with_channels(
             Arc::clone(&self.journal),
             workflow_id.clone(),
             replay_buffer,
+            self.action_emit.clone(),
+            Arc::clone(&self.obs),
         ));
 
         let ctx = WorkflowCtx::new(
@@ -331,18 +386,78 @@ pub struct JournalCursorHandle {
     /// The current await-point index — advanced on every replay hit and
     /// every live record. Interior-mutable so `&self` ctx ops can move it.
     cursor: Mutex<usize>,
+    /// The sender half of the engine's Action channel (→ Raft). The live
+    /// `ctx.emit_action` path sends the typed Action here — the SAME
+    /// channel the reconciler runtime consumes, NOT a direct `IntentStore`
+    /// write (ADR-0064 §4; `development.md` Workflow contract rule 6).
+    ///
+    /// `None` for the 3-arg [`new`](Self::new) handle used by the DST
+    /// replay-equivalence harness (which drives `ctx.run` / `ctx.sleep`
+    /// only, never `ctx.emit_action`); the engine wires it via
+    /// [`new_with_channels`](Self::new_with_channels).
+    action_emit: Option<ActionEmitSender>,
+    /// The `ObservationStore` the live `ctx.wait_for_signal` path reads
+    /// typed signal rows from (in-process single-node delivery; #207
+    /// cross-node-under-partition is OUT). The full crash-safe signal
+    /// delivery lands in step 03-02; this slice records the
+    /// `SignalAwaited` / `SignalSeen` entries and reads the row surface.
+    ///
+    /// `None` for the 3-arg [`new`](Self::new) handle (the DST harness
+    /// drives no `ctx.wait_for_signal`); the engine wires it via
+    /// [`new_with_channels`](Self::new_with_channels).
+    obs: Option<Arc<dyn ObservationStore>>,
 }
 
 impl JournalCursorHandle {
     /// Construct a handle over `journal` for `workflow_id`, seeded with the
-    /// `replay_buffer` loaded at (re)start, cursor at step 0.
+    /// `replay_buffer` loaded at (re)start, cursor at step 0, with NO
+    /// Action channel and NO signal surface wired.
+    ///
+    /// This is the handle the DST replay-equivalence harness
+    /// (`overdrive-sim`) constructs — it drives `ctx.run` / `ctx.sleep`
+    /// only, never `ctx.emit_action` / `ctx.wait_for_signal`. A workflow
+    /// that emits / waits-for-signal against this handle gets the
+    /// always-live degenerate behaviour (the emit is dropped, the signal
+    /// resolves empty) exactly like [`AlwaysLiveCursor`]. The engine wires
+    /// the real channels via [`new_with_channels`](Self::new_with_channels).
     #[must_use]
     pub fn new(
         journal: Arc<dyn JournalStore>,
         workflow_id: WorkflowId,
         replay_buffer: Vec<JournalEntry>,
     ) -> Self {
-        Self { journal, workflow_id, replay_buffer, cursor: Mutex::new(0) }
+        Self {
+            journal,
+            workflow_id,
+            replay_buffer,
+            cursor: Mutex::new(0),
+            action_emit: None,
+            obs: None,
+        }
+    }
+
+    /// Construct a handle with the engine's Action-channel sender (the live
+    /// `ctx.emit_action` path) and the `ObservationStore` (the live
+    /// `ctx.wait_for_signal` path) wired in addition to the journal +
+    /// replay buffer. The engine uses this for every live instance so the
+    /// emit reaches the Action channel (→ Raft) and the signal read reaches
+    /// the observation surface (ADR-0064 §4).
+    #[must_use]
+    pub fn new_with_channels(
+        journal: Arc<dyn JournalStore>,
+        workflow_id: WorkflowId,
+        replay_buffer: Vec<JournalEntry>,
+        action_emit: ActionEmitSender,
+        obs: Arc<dyn ObservationStore>,
+    ) -> Self {
+        Self {
+            journal,
+            workflow_id,
+            replay_buffer,
+            cursor: Mutex::new(0),
+            action_emit: Some(action_emit),
+            obs: Some(obs),
+        }
     }
 }
 
@@ -438,6 +553,137 @@ impl JournalCursor for JournalCursorHandle {
         *cursor += 1;
         drop(cursor);
         Ok(())
+    }
+
+    async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
+        let mut cursor = self.cursor.lock().await;
+        // A replay hit requires a recorded SignalSeen at the cursor — the
+        // signal was observed satisfied on the live run, so the recorded
+        // value is replayed without re-reading the surface (ADR-0064 §4).
+        // A SignalAwaited with no following SignalSeen (crashed while still
+        // blocked) is NOT a replay hit: this `else` branch returns None so
+        // the live path re-blocks on the SAME signal (step 03-02 proves the
+        // crash-safety). Identity is POSITIONAL — `signal_key` is carried
+        // for diagnostics; the cursor index is the identity.
+        let Some(JournalEntry::SignalSeen { value, .. }) = self.replay_buffer.get(*cursor) else {
+            drop(cursor);
+            return None;
+        };
+        let value = value.clone();
+        *cursor += 1;
+        drop(cursor);
+        Some(value)
+    }
+
+    async fn read_signal(&self, signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // Record the SignalAwaited armed entry (an input — the key the body
+        // blocked on) durably before resolving the value (ADR-0063 §4).
+        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
+        let awaited = JournalEntry::SignalAwaited { step, signal_key: signal_key.clone() };
+        self.journal
+            .append(&self.workflow_id, &awaited)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        *cursor += 1;
+        // Resolve the signal value from the ObservationStore signal surface
+        // (in-process single-node; #207 cross-node-under-partition is OUT).
+        // Phase-1 single-node delivery: this slice records the await-points
+        // and resolves to the present value; the full crash-safe blocking +
+        // subscription wake lands in step 03-02. A missing signal resolves
+        // to the empty value (present, no payload) — the slice-03-01 surface
+        // does not block on absence (the blocking-on-absence crash-safety is
+        // step 03-02's S-WP-03-01 scope). `obs` is retained (not dropped) so
+        // the 03-02 extension reads the real signal row here.
+        let value = self.resolve_signal_value(signal_key);
+        // Record SignalSeen { value } durably before returning (ADR-0063
+        // §4): the value_digest is the content digest of the observed
+        // value's bytes (an input); the value itself is carried so a
+        // resumed run replays it without re-reading the surface.
+        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
+        let value_digest = ContentHash::of(value.as_str().as_bytes());
+        let seen = JournalEntry::SignalSeen {
+            step,
+            signal_key: signal_key.clone(),
+            value_digest,
+            value: value.clone(),
+        };
+        self.journal
+            .append(&self.workflow_id, &seen)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        *cursor += 1;
+        drop(cursor);
+        Ok(value)
+    }
+
+    async fn replay_emit(&self) -> bool {
+        let mut cursor = self.cursor.lock().await;
+        // A replay hit requires a recorded ActionEmitted at the cursor: the
+        // Action was already sent on a prior run, so it is NOT re-sent
+        // (exactly one cluster mutation across a crash — ADR-0064 §4).
+        let is_replay =
+            matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::ActionEmitted { .. }));
+        if is_replay {
+            *cursor += 1;
+        }
+        drop(cursor);
+        is_replay
+    }
+
+    async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // action_digest is the content digest of the emitted Action's
+        // canonical inputs (deterministic over the Action's Debug form —
+        // the enum derives only Debug/Clone/Eq, no Serialize; the Debug
+        // form is a stable canonical projection of the inputs). Per
+        // `development.md` § "Persist inputs, not derived state".
+        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
+        let action_digest = ContentHash::of(format!("{action:?}").as_bytes());
+        // Send the typed Action on the Action channel (→ Raft) — the SAME
+        // channel the reconciler runtime consumes, NEVER a direct
+        // IntentStore write. The send is BEFORE the durable record so the
+        // ActionEmitted entry implies the Action reached the channel. A
+        // handle with no channel wired (the 3-arg DST-harness `new`) drops
+        // the emit — degenerate always-live behaviour, never reached by an
+        // emitting workflow under the engine.
+        if let Some(sender) = &self.action_emit {
+            sender
+                .send(action)
+                .map_err(|err| WorkflowCtxError::ActionChannel { message: err.to_string() })?;
+        }
+        // Record ActionEmitted durably before returning (ADR-0063 §4): a
+        // resumed run sees this entry and does NOT re-send the Action.
+        let entry = JournalEntry::ActionEmitted { step, action_digest };
+        self.journal
+            .append(&self.workflow_id, &entry)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        *cursor += 1;
+        drop(cursor);
+        Ok(())
+    }
+}
+
+impl JournalCursorHandle {
+    /// Resolve the typed signal `signal_key` from the `ObservationStore`
+    /// signal surface (the live `ctx.wait_for_signal` resolution).
+    ///
+    /// Phase-1 single-node, in-process delivery: this slice (03-01)
+    /// resolves the present value without blocking on absence — a missing
+    /// signal resolves to the empty value. The full crash-safe blocking +
+    /// subscription wake (re-block on the SAME signal after a crash) lands
+    /// in step 03-02 (S-WP-03-01). The `obs` handle is threaded so that
+    /// step extends THIS method (into an async ObservationStore read)
+    /// rather than re-plumbing the surface; it is referenced here so the
+    /// wiring is in place.
+    fn resolve_signal_value(&self, _signal_key: &SignalKey) -> SignalValue {
+        // `obs` is retained (not dropped) so the 03-02 extension reads the
+        // real signal row here. For 03-01 the emit surface is the
+        // acceptance target; the signal resolves to the present-no-payload
+        // value.
+        let _obs = self.obs.as_ref();
+        SignalValue::empty()
     }
 }
 

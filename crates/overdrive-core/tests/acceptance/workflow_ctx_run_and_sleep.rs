@@ -24,8 +24,11 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::Bytes;
 
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowCtxError};
+use overdrive_core::workflow::{
+    JournalCursor, SignalKey, SignalValue, WorkflowCtx, WorkflowCtxError,
+};
 
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::transport::SimTransport;
@@ -80,6 +83,27 @@ impl JournalCursor for RecordingCursor {
 
     async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
         self.recorded_sleeps.lock().expect("lock").push(deadline_unix);
+        Ok(())
+    }
+
+    async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
+        // Slice-01/02 fixture: the signal + emit await-surfaces (slice 03)
+        // are not exercised here — their port-to-port coverage lives in the
+        // control-plane JournalCursorHandle tests + the sim DST invariants.
+        // These methods exist only to satisfy the trait after the additive
+        // surface landed; always-live / no-op behaviour.
+        None
+    }
+
+    async fn read_signal(&self, _signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError> {
+        Ok(SignalValue::empty())
+    }
+
+    async fn replay_emit(&self) -> bool {
+        false
+    }
+
+    async fn emit_action(&self, _action: Action) -> Result<(), WorkflowCtxError> {
         Ok(())
     }
 }

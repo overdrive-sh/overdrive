@@ -1160,6 +1160,12 @@ fn entry_kinds(run: &[JournalEntry]) -> Vec<&'static str> {
             JournalEntry::Started { .. } => "Started",
             JournalEntry::RunResult { .. } => "RunResult",
             JournalEntry::SleepArmed { .. } => "SleepArmed",
+            // Slice-03 additive await-surface variants (ADR-0064 §4).
+            // Exhaustiveness extension forced by the additive enum — the
+            // replay-equivalence kind-oracle names each await-point kind.
+            JournalEntry::SignalAwaited { .. } => "SignalAwaited",
+            JournalEntry::SignalSeen { .. } => "SignalSeen",
+            JournalEntry::ActionEmitted { .. } => "ActionEmitted",
             JournalEntry::Terminal { .. } => "Terminal",
         })
         .collect()

@@ -30,6 +30,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::reconcilers::Action;
 use crate::traits::{Clock, Entropy, Transport};
 
 /// A durable-async workflow. The author writes one ordinary `async fn
@@ -129,6 +130,26 @@ pub enum WorkflowCtxError {
     #[error("workflow journal record failed: {message}")]
     JournalRecord {
         /// Cause string from the engine's journal handle.
+        message: String,
+    },
+
+    /// An [`WorkflowCtx::emit_action`] could not hand the typed [`Action`]
+    /// to the engine's Action channel (slice 03, ADR-0064 §4). The channel
+    /// the reconciler runtime consumes (→ Raft) was closed or full — the
+    /// engine surfaces this rather than drop the cluster mutation silently.
+    #[error("workflow ctx.emit_action channel send failed: {message}")]
+    ActionChannel {
+        /// Cause string from the engine's Action-channel sender.
+        message: String,
+    },
+
+    /// A [`WorkflowCtx::wait_for_signal`] could not read the typed signal
+    /// surface (slice 03, ADR-0064 §4). The engine reads typed signal rows
+    /// from the `ObservationStore`; an underlying read failure is surfaced
+    /// rather than treated as "signal absent".
+    #[error("workflow ctx.wait_for_signal failed: {message}")]
+    Signal {
+        /// Cause string from the engine's signal-read path.
         message: String,
     },
 }
@@ -257,6 +278,83 @@ pub trait JournalCursor: Send + Sync {
     /// append/fsync fails — the engine surfaces this rather than continue
     /// against an unjournaled sleep.
     async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError>;
+
+    /// Check the cursor for a recorded `ctx.wait_for_signal` outcome at the
+    /// current step (the slice-03 signal await-surface, ADR-0064 §4).
+    ///
+    /// # Postconditions
+    ///
+    /// - **Replay (cursor < journal length):** returns
+    ///   `Some(recorded_signal_value)` — the [`SignalValue`] recorded in a
+    ///   `SignalSeen` entry when the signal was first observed satisfied
+    ///   (`development.md` § "Persist inputs, not derived state"; the value
+    ///   is the input the workflow body received). The caller returns it
+    ///   WITHOUT re-reading the signal surface. Implementations advance the
+    ///   cursor on a replay hit. A recorded `SignalAwaited` with no matching
+    ///   `SignalSeen` (the workflow crashed while still blocked) is NOT a
+    ///   replay hit — `replay_signal` returns `None` so the live path
+    ///   re-blocks on the SAME signal (the crash-safety contract proven by
+    ///   step 03-02).
+    /// - **Live (cursor at journal end):** returns `None` — the caller
+    ///   records `SignalAwaited`, reads the typed signal surface, and on a
+    ///   hit records `SignalSeen { value }` before returning the value.
+    async fn replay_signal(&self, signal_key: &SignalKey) -> Option<SignalValue>;
+
+    /// Read the typed signal `signal_key` from the engine's signal surface
+    /// (the `ObservationStore`, in-process single-node per #207-OUT), the
+    /// live path of `ctx.wait_for_signal`. Records the `SignalAwaited`
+    /// armed entry, then resolves the signal value, then records
+    /// `SignalSeen { value }` durably BEFORE returning (ADR-0063 §4
+    /// fsync-then-suspend), and advances the cursor.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(value)` the `SignalAwaited` + `SignalSeen { value }` entries
+    /// are durably journaled and the cursor has advanced, so a subsequent
+    /// resume replays the value via [`replay_signal`](Self::replay_signal)
+    /// without re-reading the signal surface.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowCtxError::Signal`] — the signal surface read failed.
+    /// - [`WorkflowCtxError::JournalRecord`] — a durable record failed.
+    async fn read_signal(&self, signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError>;
+
+    /// Check the cursor for a recorded `ctx.emit_action` at the current
+    /// step (the slice-03 emit await-surface, ADR-0064 §4).
+    ///
+    /// # Postconditions
+    ///
+    /// - **Replay (cursor < journal length):** returns `true` — an
+    ///   `ActionEmitted` entry is recorded at the cursor; the caller does
+    ///   NOT re-send the Action on the Action channel (the idempotent-emit
+    ///   contract: exactly one cluster mutation across a crash, proven by
+    ///   step 03-02). Implementations advance the cursor on a replay hit.
+    /// - **Live (cursor at journal end):** returns `false` — the caller
+    ///   sends the Action on the engine's Action channel, then records
+    ///   `ActionEmitted` durably before returning.
+    async fn replay_emit(&self) -> bool;
+
+    /// Send `action` on the engine's Action channel (→ Raft, the same
+    /// channel the reconciler runtime consumes — NEVER a direct
+    /// `IntentStore` write, `development.md` Workflow contract rule 6), then
+    /// record the `ActionEmitted` entry durably and advance the cursor (the
+    /// live path of `ctx.emit_action`). `action_digest` is the content
+    /// digest of the emitted Action's inputs.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(())` the typed Action has been handed to the Action channel
+    /// AND the `ActionEmitted` entry is durably journaled (append + fsync
+    /// per ADR-0063 §4), so a subsequent resume replays it via
+    /// [`replay_emit`](Self::replay_emit) without re-sending the Action.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowCtxError::ActionChannel`] — the Action channel send
+    ///   failed (channel closed / full).
+    /// - [`WorkflowCtxError::JournalRecord`] — the durable record failed.
+    async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError>;
 }
 
 /// A trivial [`JournalCursor`] that never replays and never records — it
@@ -285,6 +383,28 @@ impl JournalCursor for AlwaysLiveCursor {
     }
 
     async fn record_sleep_armed(&self, _deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
+        Ok(())
+    }
+
+    async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
+        None
+    }
+
+    async fn read_signal(&self, _signal_key: &SignalKey) -> Result<SignalValue, WorkflowCtxError> {
+        // A non-durable, signal-less execution: no signal surface is wired,
+        // so the always-live handle resolves to the empty signal value. The
+        // durable engine handle (control-plane) reads the real signal row.
+        Ok(SignalValue::empty())
+    }
+
+    async fn replay_emit(&self) -> bool {
+        false
+    }
+
+    async fn emit_action(&self, _action: Action) -> Result<(), WorkflowCtxError> {
+        // No Action channel is wired in the always-live handle; the emit is
+        // dropped. The durable engine handle (control-plane) sends on the
+        // real Action channel → Raft.
         Ok(())
     }
 }
@@ -438,6 +558,74 @@ impl WorkflowCtx {
         Ok(())
     }
 
+    /// Wait for the typed signal `signal_key` to be present, returning its
+    /// [`SignalValue`] — the slice-03 signal await-surface (ADR-0064 §4).
+    /// The engine reads typed signal rows from the `ObservationStore`
+    /// (in-process single-node delivery; cross-node-under-partition is
+    /// #207-OUT). Cross-workflow coordination uses these typed signals,
+    /// never an ad-hoc `IntentStore` write (whitepaper §18).
+    ///
+    /// **Check-then-record (ADR-0064 §4), POSITIONAL identity.**
+    ///
+    /// - **Replay:** if a `SignalSeen { value }` was recorded at this
+    ///   cursor, the recorded value is returned WITHOUT re-reading the
+    ///   signal surface (the workflow body received this exact value on the
+    ///   live run). A `SignalAwaited` with no matching `SignalSeen` (crashed
+    ///   while still blocked) re-blocks on the SAME signal on the live path.
+    /// - **Live:** the cursor records `SignalAwaited`, reads the signal
+    ///   surface, and on a hit records `SignalSeen { value }` durably (fsync
+    ///   per ADR-0063 §4) before returning the value.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowCtxError::Signal`] — the signal surface read failed.
+    /// - [`WorkflowCtxError::JournalRecord`] — a durable record failed.
+    pub async fn wait_for_signal(
+        &self,
+        signal_key: SignalKey,
+    ) -> Result<SignalValue, WorkflowCtxError> {
+        // Replay path — return the recorded SignalSeen value, never
+        // re-read the signal surface.
+        if let Some(value) = self.journal.replay_signal(&signal_key).await {
+            return Ok(value);
+        }
+        // Live path — the engine records SignalAwaited, resolves the signal
+        // value from the ObservationStore, records SignalSeen, advances.
+        self.journal.read_signal(&signal_key).await
+    }
+
+    /// Emit a typed cluster-mutation [`Action`] onto the SAME Action channel
+    /// the reconciler runtime consumes (→ Raft) — the slice-03 emit
+    /// await-surface (ADR-0064 §4; whitepaper §18 *Primitive Composition*).
+    /// The workflow NEVER writes the `IntentStore` directly and `ctx`
+    /// deliberately exposes no `.put()` surface (`development.md` Workflow
+    /// contract rule 6 — no Raft bypass).
+    ///
+    /// **Check-then-record (ADR-0064 §4), POSITIONAL identity.**
+    ///
+    /// - **Replay:** if an `ActionEmitted` was recorded at this cursor, the
+    ///   Action is NOT re-sent (the idempotent-emit contract: exactly one
+    ///   cluster mutation across a crash — proven by step 03-02).
+    /// - **Live:** the engine sends the Action on the Action channel, then
+    ///   records `ActionEmitted` durably (fsync per ADR-0063 §4) before
+    ///   returning, and advances the cursor.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowCtxError::ActionChannel`] — the Action channel send
+    ///   failed (channel closed / full).
+    /// - [`WorkflowCtxError::JournalRecord`] — the durable record failed.
+    pub async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError> {
+        // Replay path — the Action was already emitted on a prior run; do
+        // NOT re-send it (exactly-one cluster mutation across a crash).
+        if self.journal.replay_emit().await {
+            return Ok(());
+        }
+        // Live path — the engine sends on the Action channel then records
+        // ActionEmitted durably before returning.
+        self.journal.emit_action(action).await
+    }
+
     /// The injected clock. Workflow bodies read time only through this
     /// port (the `ctx.sleep` await-surface is [`Self::sleep`]).
     #[must_use]
@@ -460,6 +648,159 @@ impl WorkflowCtx {
     #[must_use]
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
         &self.entropy
+    }
+}
+
+/// The identity of a typed cross-workflow signal (slice 03, ADR-0064 §4).
+///
+/// A `ctx.wait_for_signal(key)` blocks on the typed signal named by this
+/// key in the `ObservationStore`; a producer satisfies it by writing the
+/// signal row keyed by the same `SignalKey`. Kebab-case,
+/// `^[a-z][a-z0-9-]{0,126}$` — wider interior than `WorkflowName` since
+/// signal keys may embed correlation suffixes.
+///
+/// STRICT newtype per `development.md` § "Newtypes": validating
+/// constructor, `FromStr` / `Display` / `Serialize` / `Deserialize`
+/// matching exactly. Serde is derived through the `String` form so the
+/// wire shape equals `Display` / `FromStr`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SignalKey(String);
+
+/// Maximum length for a signal key (1 lead + up to 126 interior).
+const SIGNAL_KEY_MAX: usize = 127;
+
+impl SignalKey {
+    /// Validating constructor. Rejects empty, over-long, and
+    /// non-`^[a-z][a-z0-9-]{0,126}$` inputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SignalKeyError`] naming the first validation failure.
+    pub fn new(raw: &str) -> Result<Self, SignalKeyError> {
+        if raw.is_empty() {
+            return Err(SignalKeyError::Empty);
+        }
+        if raw.len() > SIGNAL_KEY_MAX {
+            return Err(SignalKeyError::TooLong { max: SIGNAL_KEY_MAX });
+        }
+        let mut chars = raw.chars();
+        let lead = chars.next().unwrap_or_else(|| {
+            unreachable!("non-empty checked above guarantees at least one char")
+        });
+        if !lead.is_ascii_lowercase() {
+            return Err(SignalKeyError::BadShape);
+        }
+        if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+            return Err(SignalKeyError::BadShape);
+        }
+        Ok(Self(raw.to_string()))
+    }
+
+    /// The canonical string form.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SignalKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::str::FromStr for SignalKey {
+    type Err = SignalKeyError;
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::new(raw)
+    }
+}
+
+impl serde::Serialize for SignalKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SignalKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Validation failures for [`SignalKey::new`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SignalKeyError {
+    /// The key was empty.
+    #[error("signal key must not be empty")]
+    Empty,
+    /// The key exceeded the length ceiling.
+    #[error("signal key too long (max {max})")]
+    TooLong {
+        /// The maximum permitted length.
+        max: usize,
+    },
+    /// The key did not match `^[a-z][a-z0-9-]{0,126}$`.
+    #[error("signal key must match ^[a-z][a-z0-9-]{{0,126}}$")]
+    BadShape,
+}
+
+/// The opaque payload a typed signal carries (slice 03, ADR-0064 §4).
+///
+/// A signal producer writes arbitrary bytes; a `ctx.wait_for_signal`
+/// consumer receives them verbatim. The `value_digest` recorded in the
+/// `SignalSeen` journal entry is the content digest of these bytes (an
+/// input, per `development.md` § "Persist inputs, not derived state").
+/// Any UTF-8 payload is valid — the value is opaque to the primitive — so
+/// there is no rejecting constructor; `new` is infallible.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SignalValue(String);
+
+impl SignalValue {
+    /// Construct a signal value from its opaque payload. Infallible — the
+    /// value is opaque to the primitive.
+    #[must_use]
+    pub fn new(raw: impl Into<String>) -> Self {
+        Self(raw.into())
+    }
+
+    /// The empty signal value — the "present, no payload" sentinel a
+    /// signalless live read resolves to.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(String::new())
+    }
+
+    /// The opaque payload bytes.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SignalValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::str::FromStr for SignalValue {
+    type Err = std::convert::Infallible;
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(raw))
+    }
+}
+
+impl serde::Serialize for SignalValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SignalValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::new(String::deserialize(deserializer)?))
     }
 }
 
@@ -560,5 +901,54 @@ mod tests {
             WorkflowName::new(&"a".repeat(WORKFLOW_NAME_MAX + 1)),
             Err(WorkflowNameError::TooLong { .. })
         ));
+    }
+
+    /// `SignalKey` newtype completeness (`development.md` § "Newtypes"):
+    /// the validating constructor accepts the canonical kebab form and its
+    /// `FromStr` / `Display` / serde wire shape round-trip bit-equal. Each
+    /// reject branch (empty / uppercase / overlong) maps to its own
+    /// structured error — the mutation seam the validator must defend.
+    #[test]
+    fn signal_key_accepts_canonical_and_rejects_invalid_inputs() {
+        // Driving port: the SignalKey::new validating constructor.
+        let key = SignalKey::new("cert-ready-aa00").expect("valid kebab signal key");
+        assert_eq!(key.as_str(), "cert-ready-aa00", "canonical form preserved verbatim");
+        // FromStr is the same validation surface as new().
+        assert_eq!("cert-ready-aa00".parse::<SignalKey>().expect("FromStr"), key);
+        // Display round-trips through FromStr (canonical-form equivalence).
+        assert_eq!(key.to_string().parse::<SignalKey>().expect("Display→FromStr"), key);
+        // Each reject branch maps to its own structured variant.
+        assert!(matches!(SignalKey::new(""), Err(SignalKeyError::Empty)));
+        assert!(matches!(SignalKey::new("Cert-Ready"), Err(SignalKeyError::BadShape)));
+        assert!(matches!(
+            SignalKey::new(&"a".repeat(SIGNAL_KEY_MAX + 1)),
+            Err(SignalKeyError::TooLong { .. })
+        ));
+    }
+
+    /// `SignalKey` + `SignalValue` serde wire shape matches `Display` /
+    /// `FromStr` exactly (`development.md` § "Newtype completeness"): both
+    /// CBOR-round-trip bit-equal, the property the `SignalSeen` journal
+    /// variant depends on (it carries a `SignalValue` and is CBOR-encoded
+    /// per ADR-0063 §2). `SignalValue` is opaque — any payload round-trips.
+    #[test]
+    fn signal_key_and_value_cbor_round_trip_bit_equal() {
+        let key = SignalKey::new("provision-done").expect("valid signal key");
+        let mut key_bytes: Vec<u8> = Vec::new();
+        ciborium::into_writer(&key, &mut key_bytes).expect("encode SignalKey");
+        let decoded_key: SignalKey =
+            ciborium::from_reader(key_bytes.as_slice()).expect("decode SignalKey");
+        assert_eq!(decoded_key, key, "SignalKey round-trips through CBOR bit-equal");
+
+        // SignalValue is opaque: an arbitrary (even empty) payload survives.
+        for raw in ["", "ok", "0xDEADBEEF payload"] {
+            let value = SignalValue::new(raw);
+            let mut value_bytes: Vec<u8> = Vec::new();
+            ciborium::into_writer(&value, &mut value_bytes).expect("encode SignalValue");
+            let decoded_value: SignalValue =
+                ciborium::from_reader(value_bytes.as_slice()).expect("decode SignalValue");
+            assert_eq!(decoded_value, value, "SignalValue round-trips through CBOR bit-equal");
+            assert_eq!(decoded_value.as_str(), raw, "opaque payload preserved verbatim");
+        }
     }
 }

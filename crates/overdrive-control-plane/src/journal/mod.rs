@@ -249,6 +249,65 @@ pub enum JournalEntry {
         deadline_unix: std::time::Duration,
     },
 
+    /// A `ctx.wait_for_signal` was armed (slice 03). Records the
+    /// await-point step index and the [`SignalKey`] the workflow blocked
+    /// on (an INPUT — the key the body named). A `SignalAwaited` with no
+    /// following `SignalSeen` is the "crashed while still blocked" shape:
+    /// resume re-blocks on the SAME key (the crash-safety contract proven
+    /// by step 03-02).
+    ///
+    /// Additive `#[serde(default)]` per ADR-0063 §2 — a new variant on a
+    /// CBOR `#[serde]` enum is additive by construction (older journals
+    /// never contain it). No version bump, no golden fixture.
+    SignalAwaited {
+        /// The monotonic await-point index (journal cursor).
+        step: u32,
+        /// The signal key the workflow body blocked on — an input.
+        signal_key: overdrive_core::workflow::SignalKey,
+    },
+
+    /// A `ctx.wait_for_signal` was satisfied (slice 03). Records the
+    /// await-point step index, the [`SignalKey`], and the
+    /// `value_digest` — the content digest of the observed
+    /// [`SignalValue`]'s bytes (an INPUT, per
+    /// `.claude/rules/development.md` § "Persist inputs, not derived
+    /// state"; the digest of the value the body received). The value
+    /// itself is carried in `value` so a resumed run replays the exact
+    /// value the live run observed without re-reading the signal surface.
+    ///
+    /// Additive `#[serde(default)]` per ADR-0063 §2.
+    SignalSeen {
+        /// The monotonic await-point index (journal cursor).
+        step: u32,
+        /// The signal key that was satisfied — an input.
+        signal_key: overdrive_core::workflow::SignalKey,
+        /// SHA-256 digest of the observed signal value's bytes — the
+        /// input replay-equivalence (K4) re-derives and compares.
+        value_digest: overdrive_core::id::ContentHash,
+        /// The observed signal value, carried so a resumed run replays the
+        /// exact value the live run received without re-reading the signal
+        /// surface (ADR-0064 §4, exactly-once on the replay path).
+        value: overdrive_core::workflow::SignalValue,
+    },
+
+    /// A `ctx.emit_action` sent a typed Action on the Action channel
+    /// (slice 03). Records the await-point step index and the
+    /// `action_digest` — the content digest of the emitted Action's
+    /// inputs (per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state"). The presence of this entry at the cursor makes
+    /// the emit idempotent on resume: a resumed run sees `ActionEmitted`
+    /// and does NOT re-send the Action (exactly one cluster mutation
+    /// across a crash — the idempotent-emit contract proven by step
+    /// 03-02). ADR-0064 §4.
+    ///
+    /// Additive `#[serde(default)]` per ADR-0063 §2.
+    ActionEmitted {
+        /// The monotonic await-point index (journal cursor).
+        step: u32,
+        /// SHA-256 digest of the emitted Action's canonical inputs.
+        action_digest: overdrive_core::id::ContentHash,
+    },
+
     /// The workflow ran to a terminal value (slice 01). Records the
     /// terminal result string form — the engine maps this back to a
     /// `WorkflowResult` on read.
