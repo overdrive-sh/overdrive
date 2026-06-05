@@ -263,6 +263,21 @@ pub struct AppState {
     /// in 01-04) is removed in the same commit per
     /// `feedback_single_cut_greenfield_migrations.md`.
     pub host_ipv4: std::net::Ipv4Addr,
+    /// The durable-async workflow executor (ADR-0064 §1, §5). The
+    /// reconciler-runtime's action-shim dispatch hands every committed
+    /// `Action::StartWorkflow` to this engine off the shim — exactly as
+    /// `Action::StartAllocation` → `Driver::start`. The engine is composed
+    /// at boot over the real `RedbJournalStore` + injected ports + the
+    /// `ObservationStore`; the workflow-lifecycle reconciler's
+    /// `hydrate_actual` reads its live-task set
+    /// ([`workflow_runtime::WorkflowEngine::live_instances`]) to mark an
+    /// instance running.
+    ///
+    /// Mandatory at construction per `.claude/rules/development.md`
+    /// § "Port-trait dependencies" — there is no `Option`/`None` shim
+    /// (the 01-05/01-06 `dispatch(... None)` placeholder is gone). Tests
+    /// inject an engine over `Sim*` ports.
+    pub workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -298,6 +313,46 @@ pub fn test_default_allocator(
 #[must_use]
 pub fn test_empty_listener_facts() -> Arc<tokio::sync::Mutex<listener_facts::ListenerFactStore>> {
     Arc::new(tokio::sync::Mutex::new(listener_facts::ListenerFactStore::new()))
+}
+
+/// Test-only helper: build a default [`workflow_runtime::WorkflowEngine`]
+/// for the `AppState` shape (ADR-0064 §5). Wires an empty
+/// [`workflow_runtime::WorkflowRegistry`] over an in-memory
+/// `RedbJournalStore`, host `TcpTransport` / `OsEntropy`, and the
+/// supplied `clock` + `obs`.
+///
+/// Used by the broad fixture surface that constructs `AppState` but does
+/// NOT exercise the workflow primitive — an empty registry means a
+/// committed `StartWorkflow` would surface
+/// `WorkflowEngineError::UnknownWorkflow`, but those fixtures never emit
+/// one. Fixtures that DO drive a workflow end-to-end (the step-01-08 e2e)
+/// build their own engine inline with the `ProvisionRecord` factory
+/// registered + a real on-disk journal. Production callers go through the
+/// real engine composition in `run_server_with_obs_and_driver`.
+///
+/// The journal uses redb's in-memory backend so the helper needs no
+/// tempdir and leaves no on-disk residue — correct for a non-durable
+/// fixture default (the durable path is exercised by the e2e + the
+/// `RedbJournalStore` integration test).
+#[must_use]
+pub fn test_default_workflow_engine(
+    obs: Arc<dyn ObservationStore>,
+    clock: Arc<dyn Clock>,
+) -> Arc<workflow_runtime::WorkflowEngine> {
+    #[allow(clippy::expect_used)]
+    let db = redb::Database::builder()
+        .create_with_backend(redb::backends::InMemoryBackend::new())
+        .expect("in-memory redb journal for test engine");
+    let journal: Arc<dyn journal::JournalStore> =
+        Arc::new(journal::RedbJournalStore::new(Arc::new(db)));
+    Arc::new(workflow_runtime::WorkflowEngine::new(
+        journal,
+        clock,
+        Arc::new(overdrive_host::TcpTransport::default()),
+        Arc::new(overdrive_host::OsEntropy),
+        workflow_runtime::WorkflowRegistry::new(),
+        obs,
+    ))
 }
 
 /// Default capacity for the lifecycle-event broadcast channel.
@@ -354,6 +409,60 @@ impl AppState {
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
         host_ipv4: std::net::Ipv4Addr,
     ) -> Self {
+        // Default-compose a `WorkflowEngine` with an EMPTY registry over an
+        // in-memory journal (ADR-0064 §5). `new` is the broad fixture
+        // convenience constructor: the vast majority of `AppState` callers
+        // do not exercise the workflow primitive, so an empty-registry
+        // engine is the correct default (a committed `StartWorkflow` for an
+        // unregistered kind surfaces `WorkflowEngineError::UnknownWorkflow`,
+        // but those callers never emit one). The PRODUCTION boot path and
+        // the workflow end-to-end test use [`Self::new_with_workflow_engine`]
+        // to inject the real engine (real on-disk journal + registered
+        // workflows). This keeps the engine field mandatory (no `Option`
+        // shim) while the convenience constructor stays
+        // ripple-free for the fixture surface.
+        let workflow_engine = test_default_workflow_engine(Arc::clone(&obs), Arc::clone(&clock));
+        Self::new_with_workflow_engine(
+            store,
+            intent_redb_path,
+            obs,
+            runtime,
+            driver,
+            clock,
+            dataplane,
+            node_id,
+            allocator,
+            listener_facts,
+            host_ipv4,
+            workflow_engine,
+        )
+    }
+
+    /// The full constructor that injects the [`workflow_runtime::WorkflowEngine`]
+    /// explicitly (ADR-0064 §5). The production boot path and the
+    /// end-to-end composition test use this so the real engine (on-disk
+    /// journal + registered workflows) is threaded into `AppState`; the
+    /// convenience [`Self::new`] default-composes an empty-registry engine
+    /// for the broad fixture surface.
+    #[must_use]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Every port-trait dependency plus the workflow engine is required at construction per .claude/rules/development.md § Port-trait dependencies; bundling into a builder would make individual deps optional."
+    )]
+    pub fn new_with_workflow_engine(
+        store: Arc<LocalIntentStore>,
+        intent_redb_path: PathBuf,
+        obs: Arc<dyn ObservationStore>,
+        runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+        driver: Arc<dyn Driver>,
+        clock: Arc<dyn Clock>,
+        dataplane: Arc<dyn Dataplane>,
+        node_id: NodeId,
+        allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+        listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
+        host_ipv4: std::net::Ipv4Addr,
+        workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
+    ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
             store,
@@ -369,6 +478,7 @@ impl AppState {
             allocator,
             listener_facts,
             host_ipv4,
+            workflow_engine,
         }
     }
 }
@@ -1370,7 +1480,38 @@ pub async fn run_server_with_obs_and_driver(
             })?,
     ));
 
-    let state: AppState = AppState::new(
+    // ADR-0064 §5 — compose the durable-async WorkflowEngine into the
+    // production AppState. The engine is built over the real
+    // `RedbJournalStore` (one redb file per node at
+    // `<data_dir>/workflow-journal.redb`, K5) + the injected `Clock`
+    // (same one the convergence loop uses) + host `TcpTransport` /
+    // `OsEntropy` for the workflow `ctx.call` / RNG await-surfaces +
+    // the `ObservationStore` the engine writes terminal rows to.
+    //
+    // Phase 1 has no first-party production workflows (#206 CLI verb +
+    // Phase-3 consumers are the future producers), so the registry is
+    // empty: a committed `StartWorkflow` for an unregistered kind would
+    // surface `WorkflowEngineError::UnknownWorkflow` rather than silently
+    // no-op. The composition itself is what 01-08 makes real — the
+    // engine is now reachable in the production binary, replacing the
+    // 01-05/01-06 `dispatch(... None)` placeholder.
+    let journal_path = config.data_dir.join("workflow-journal.redb");
+    let journal_db = Arc::new(
+        redb::Database::create(&journal_path)
+            .map_err(|e| error::ControlPlaneError::internal("create workflow-journal redb", e))?,
+    );
+    let journal: Arc<dyn journal::JournalStore> =
+        Arc::new(journal::RedbJournalStore::new(journal_db));
+    let workflow_engine = Arc::new(workflow_runtime::WorkflowEngine::new(
+        journal,
+        config.clock.clone(),
+        Arc::new(overdrive_host::TcpTransport::default()),
+        Arc::new(overdrive_host::OsEntropy),
+        workflow_runtime::WorkflowRegistry::new(),
+        Arc::clone(&obs),
+    ));
+
+    let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
         obs,
@@ -1382,6 +1523,7 @@ pub async fn run_server_with_obs_and_driver(
         allocator,
         listener_facts,
         host_ipv4,
+        workflow_engine,
     );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so

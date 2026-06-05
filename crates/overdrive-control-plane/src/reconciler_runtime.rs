@@ -1312,27 +1312,18 @@ pub async fn run_convergence_tick(
         // is permitted. Per-action error isolation lives in the shim.
         // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
         // after every successful `obs.write` per architecture.md §10.
-        action_shim::dispatch(
-            actions,
-            state.driver.as_ref(),
-            state.obs.as_ref(),
-            state.dataplane.as_ref(),
-            state.lifecycle_events.as_ref(),
-            &tick,
-            &state.node_id,
-            std::sync::Arc::clone(&state.allocator),
-            state.runtime.broker_mutex(),
-            // The WorkflowEngine is not yet composed into the
-            // reconciler-runtime boot path — that lands fully exercised in
-            // 01-06's walking skeleton (composition root probing both the
-            // view-store AND journal-store at boot). Until then a
-            // StartWorkflow action is a no-op for this tick; the
-            // level-triggered workflow-lifecycle reconciler re-emits it
-            // once the engine is wired. ADR-0064 §5.
-            None,
-        )
-        .await
-        .map_err(ConvergenceError::Shim)?;
+        //
+        // ADR-0064 §5 — the WorkflowEngine is now composed into AppState
+        // (step 01-08), so the shim receives the REAL engine, replacing
+        // the 01-05/01-06 `None` placeholder. `dispatch_with_workflow_intent`
+        // is the AppState-aware path that ALSO persists workflow-instance
+        // desired-intent for every `Action::StartWorkflow` BEFORE handing
+        // the actions to the engine off the shim — so the workflow-lifecycle
+        // reconciler's `hydrate_desired` can read the instance back on the
+        // next tick (and re-emit on restart).
+        action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+            .await
+            .map_err(ConvergenceError::Shim)?;
     }
 
     // Cooperative yield — every action_shim::dispatch path on the
@@ -1493,20 +1484,21 @@ async fn hydrate_desired(
             Ok(AnyState::WorkloadLifecycle(s))
         }
         // ADR-0064 §5 — the workflow-lifecycle reconciler's hydrate-desired.
-        // Phase-1 single-node: the per-instance running-in-intent
-        // projection (reading workflow-instance intent rows + joining the
-        // engine's live-task set + observed terminal rows) is the
-        // production hydrate path that lands with the engine-in-AppState
-        // boot composition (see step return — AC3 boot-composition scope
-        // friction). Until then this returns an empty instance map, so the
-        // registered reconciler ticks to `Noop` (converged) and never
-        // panics the dispatch — `ReconcilerIsPure` holds and the registry
-        // carries the reconciler. The pure re-emit logic itself is proven
-        // by the `lifecycle_reconciler_rehydrates_on_restart` acceptance
-        // test driving `AnyReconciler::reconcile` directly with a populated
-        // instance map.
+        // Scan the `workflows/` intent prefix (written by the action-shim's
+        // `dispatch_with_workflow_intent` on every committed
+        // `Action::StartWorkflow`); each persisted row is a desired
+        // instance, keyed by its `CorrelationKey`, carrying the workflow
+        // spec's kind name (the input the engine resolves to a factory —
+        // per `development.md` § "Persist inputs, not derived state").
+        //
+        // The reconcile body reads `actual.instances`, so the desired side
+        // marks `running_in_intent = true` for every persisted instance and
+        // leaves the engine/obs-derived fields (`has_live_task`,
+        // `terminal`) at their defaults; `hydrate_actual` produces the
+        // merged per-instance state the reconcile body consumes.
         AnyReconciler::WorkflowLifecycle(_) => {
-            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
+            let instances = hydrate_workflow_desired_instances(state).await?;
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -2055,6 +2047,140 @@ async fn stop_intent_present(
     Ok(stop_bytes.is_some())
 }
 
+/// Read every persisted workflow-instance desired-intent from the
+/// `workflows/` prefix and project it into a per-instance state map keyed
+/// by [`CorrelationKey`] (ADR-0064 §5). Each row's value is the workflow
+/// spec's kind name (the input the engine resolves to a factory); the
+/// returned `WorkflowInstanceState` carries the reconstructed
+/// `WorkflowSpec` and `running_in_intent = true`. The engine/obs-derived
+/// fields (`has_live_task`, `terminal`) are left at their defaults — the
+/// desired side does not know them; `hydrate_workflow_actual_instances`
+/// joins them.
+///
+/// Per `.claude/rules/development.md` § "Persist inputs, not derived
+/// state": the persisted value is the spec NAME (an input), and the
+/// `WorkflowSpec` is recomputed from it on every read.
+async fn hydrate_workflow_desired_instances(
+    state: &AppState,
+) -> Result<
+    std::collections::BTreeMap<
+        overdrive_core::id::CorrelationKey,
+        overdrive_core::reconcilers::WorkflowInstanceState,
+    >,
+    ConvergenceError,
+> {
+    use std::str::FromStr;
+
+    use overdrive_core::id::CorrelationKey;
+    use overdrive_core::reconcilers::WorkflowInstanceState;
+    use overdrive_core::workflow::{WorkflowName, WorkflowSpec};
+
+    let rows = state
+        .store
+        .scan_prefix(IntentKey::workflow_instance_prefix())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+
+    let mut instances = std::collections::BTreeMap::new();
+    for (key, value) in rows {
+        // The key is `workflows/<correlation>`; recover the correlation
+        // half. A malformed key (non-UTF8 or missing prefix) is skipped
+        // with a structured warning — convergence proceeds on surviving
+        // rows (the observation-layer log+skip posture, ADR-0048 § 3).
+        let Ok(key_str) = std::str::from_utf8(key.as_ref()) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.non_utf8_key",
+                "skipping workflow-instance intent row with non-UTF8 key"
+            );
+            continue;
+        };
+        let Some(correlation_str) = key_str.strip_prefix("workflows/") else {
+            continue;
+        };
+        let Ok(correlation) = CorrelationKey::from_str(correlation_str) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.bad_correlation",
+                key = %key_str,
+                "skipping workflow-instance intent row with unparseable correlation"
+            );
+            continue;
+        };
+        // The value is the workflow kind name (the persisted input).
+        let Ok(name_str) = std::str::from_utf8(value.as_ref()) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.non_utf8_value",
+                correlation = %correlation,
+                "skipping workflow-instance intent row with non-UTF8 spec name"
+            );
+            continue;
+        };
+        let Ok(name) = WorkflowName::new(name_str) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.bad_workflow_name",
+                correlation = %correlation,
+                value = %name_str,
+                "skipping workflow-instance intent row with invalid workflow name"
+            );
+            continue;
+        };
+        instances.insert(
+            correlation,
+            WorkflowInstanceState {
+                spec: WorkflowSpec { name },
+                running_in_intent: true,
+                has_live_task: false,
+                terminal: None,
+            },
+        );
+    }
+    Ok(instances)
+}
+
+/// Build the FULL merged per-instance `actual` state the workflow-lifecycle
+/// reconcile body consumes (ADR-0064 §5): start from the desired-intent
+/// projection (spec + `running_in_intent`), then join the engine's
+/// live-task set (`has_live_task`) and the observed `WorkflowTerminal`
+/// rows (`terminal`).
+async fn hydrate_workflow_actual_instances(
+    state: &AppState,
+) -> Result<
+    std::collections::BTreeMap<
+        overdrive_core::id::CorrelationKey,
+        overdrive_core::reconcilers::WorkflowInstanceState,
+    >,
+    ConvergenceError,
+> {
+    // Base: the desired-intent projection (spec + running_in_intent). The
+    // engine/obs joins below overwrite only the actual-side fields.
+    let mut instances = hydrate_workflow_desired_instances(state).await?;
+
+    // Join the engine's live-task set → `has_live_task`.
+    let live = state.workflow_engine.live_instances().await;
+    for correlation in &live {
+        if let Some(instance) = instances.get_mut(correlation) {
+            instance.has_live_task = true;
+        }
+    }
+
+    // Join the observed `WorkflowTerminal` rows → `terminal`.
+    let terminals = state
+        .obs
+        .workflow_terminal_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    for (correlation, result) in terminals {
+        if let Some(instance) = instances.get_mut(&correlation) {
+            instance.terminal = Some(result);
+        }
+    }
+
+    Ok(instances)
+}
+
 /// Hydrate the `actual` cluster-state projection for `reconciler`
 /// against the `AppState`'s `ObservationStore`.
 async fn hydrate_actual(
@@ -2064,14 +2190,18 @@ async fn hydrate_actual(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
-        // ADR-0064 §5 — workflow-lifecycle hydrate-actual. Phase-1 empty
-        // map (see hydrate_desired arm + the AC3 boot-composition scope
-        // note). The reconcile body reads `actual.instances`; an empty map
-        // converges to `Noop`. Full per-instance actual (engine live-task
-        // set ∪ observed `WorkflowTerminal` rows) lands with the
-        // engine-in-AppState boot composition.
+        // ADR-0064 §5 — workflow-lifecycle hydrate-actual. The reconcile
+        // body reads `actual.instances`, so this arm produces the FULL
+        // merged per-instance state: spec + `running_in_intent` from the
+        // `workflows/` intent scan, `has_live_task` from the engine's
+        // live-task set ([`WorkflowEngine::live_instances`]), `terminal`
+        // from the observed `WorkflowTerminal` rows. An instance that is
+        // running-in-intent with no live task and no terminal is the
+        // re-emit trigger (crash-resume); a terminal-observed instance is
+        // converged.
         AnyReconciler::WorkflowLifecycle(_) => {
-            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
+            let instances = hydrate_workflow_actual_instances(state).await?;
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
         }
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;

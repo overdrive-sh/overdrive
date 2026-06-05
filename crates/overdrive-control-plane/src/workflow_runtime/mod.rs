@@ -31,7 +31,7 @@
 //! [`JournalEntry::Terminal`] recording the canonical result string — the
 //! durable terminal surface for slice 01.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -130,6 +130,20 @@ pub struct WorkflowEngine {
     /// Tracked task set for live instances — the engine owns it the same
     /// way the reconciler runtime owns its tick task (ADR-0023 §4).
     tasks: Mutex<JoinSet<()>>,
+    /// The set of instance [`CorrelationKey`]s with a live (running, not
+    /// yet terminal) engine task. Inserted on [`Self::start`], removed by
+    /// the spawned task itself once `run` reaches terminal. This is the
+    /// "engine live-task set" the workflow-lifecycle reconciler's
+    /// `hydrate_actual` reads to populate
+    /// `WorkflowInstanceState::has_live_task` (ADR-0064 §5): a
+    /// running-in-intent instance with no live task and no terminal row
+    /// is the re-emit trigger on restart.
+    ///
+    /// `Arc<Mutex<BTreeSet<..>>>` so the spawned task can drop its own
+    /// entry on terminal without holding `&self`. `BTreeSet` for
+    /// deterministic iteration per `.claude/rules/development.md`
+    /// § "Ordered-collection choice".
+    live_instances: Arc<Mutex<BTreeSet<CorrelationKey>>>,
 }
 
 impl WorkflowEngine {
@@ -154,7 +168,22 @@ impl WorkflowEngine {
             obs,
             registry: Arc::new(registry),
             tasks: Mutex::new(JoinSet::new()),
+            live_instances: Arc::new(Mutex::new(BTreeSet::new())),
         }
+    }
+
+    /// Snapshot the set of instance [`CorrelationKey`]s with a live
+    /// (running, not-yet-terminal) engine task. The workflow-lifecycle
+    /// reconciler's `hydrate_actual` reads this to mark
+    /// `WorkflowInstanceState::has_live_task` (ADR-0064 §5).
+    ///
+    /// On a fresh process boot the set is empty — every
+    /// previously-running instance reads as `has_live_task = false`,
+    /// which is exactly the re-emit trigger the lifecycle reconciler
+    /// needs to crash-resume a running-in-intent instance.
+    #[must_use]
+    pub async fn live_instances(&self) -> BTreeSet<CorrelationKey> {
+        self.live_instances.lock().await.clone()
     }
 
     /// Start (or resume) the workflow instance `workflow_id` for `spec`,
@@ -203,6 +232,13 @@ impl WorkflowEngine {
         let correlation = correlation.clone();
         let workflow_id = workflow_id.clone();
 
+        // Mark this instance live BEFORE spawning so a hydrate_actual that
+        // races the spawn sees the instance as running (has_live_task =
+        // true) — the reconciler must NOT re-emit StartWorkflow for an
+        // instance the engine is already driving (ADR-0064 §5).
+        let live_instances = Arc::clone(&self.live_instances);
+        live_instances.lock().await.insert(correlation.clone());
+
         // Spawn the author's async body as a tracked task (ADR-0064 §5 —
         // the engine owns a tokio task set, the same way the reconciler
         // runtime owns its tick task).
@@ -231,7 +267,7 @@ impl WorkflowEngine {
             // converges the instance. A write failure is surfaced via
             // tracing; the next resume re-drives `run` and re-writes the
             // row (the key is stable, so the re-write is idempotent).
-            let row = ObservationRow::WorkflowTerminal { correlation, result };
+            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), result };
             if let Err(err) = obs.write(row).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -240,6 +276,15 @@ impl WorkflowEngine {
                     "failed to write workflow terminal observation row",
                 );
             }
+            // Drop the live-task entry AFTER the terminal row is written
+            // (ADR-0064 §5). Ordering is load-bearing: a hydrate_actual
+            // that observes `has_live_task = false` MUST also be able to
+            // observe the terminal row, otherwise the reconciler would
+            // see "running-in-intent, no live task, no terminal" and
+            // re-emit StartWorkflow — re-running a workflow that already
+            // completed. Removing the live entry only after the terminal
+            // write closes that window.
+            live_instances.lock().await.remove(&correlation);
         });
         drop(tasks);
         Ok(())

@@ -669,7 +669,14 @@ pub enum ReconcilerNameError {
 // ---------------------------------------------------------------------------
 
 /// Canonical shapes accepted by `TargetResource::new`.
-const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/", "service/"];
+///
+/// `workflow/` is the workflow-lifecycle reconciler's target shape
+/// (ADR-0064 §5). Unlike the per-resource reconcilers, the
+/// workflow-lifecycle reconciler converges ALL instances each tick (its
+/// hydrate scans the `workflows/` intent prefix), so the conventional
+/// target is `workflow/all`; the `/all` id-part is non-empty and so
+/// satisfies the shape rule.
+const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/", "service/", "workflow/"];
 
 /// Target-resource component of the evaluation broker's key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

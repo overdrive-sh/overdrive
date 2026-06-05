@@ -262,6 +262,29 @@ struct Inner {
     /// commit succeeds — subscribers never observe a phantom row that
     /// failed to persist.
     subscription_tx: broadcast::Sender<ObservationRow>,
+    /// In-memory `workflow_terminal` index, keyed by the instance
+    /// [`CorrelationKey`]. Populated on every `WorkflowTerminal`
+    /// `write()` and read by [`LocalObservationStore::workflow_terminal_rows`]
+    /// so the workflow-lifecycle reconciler's `hydrate_actual` can mark
+    /// an instance terminated.
+    ///
+    /// Per the slice-01 doctrine (ADR-0064 §2): the DURABLE terminal
+    /// record is the engine-side redb+CBOR journal (`JournalEntry::Terminal`,
+    /// K5); the observation row is the LIVE convergence signal only, so a
+    /// process-local in-memory index is the correct shape here — it
+    /// matches what `subscribe_all` already provides (live, not
+    /// cold-boot-durable) without minting a versioned rkyv envelope per
+    /// ADR-0048 for a non-durable signal. `BTreeMap` for deterministic
+    /// iteration per `.claude/rules/development.md` § "Ordered-collection
+    /// choice". `std::sync::Mutex` (not `parking_lot`) keeps the dep set
+    /// minimal; the critical section is a single map insert/clone and
+    /// never crosses an `.await`.
+    workflow_terminals: std::sync::Mutex<
+        std::collections::BTreeMap<
+            overdrive_core::id::CorrelationKey,
+            overdrive_core::workflow::WorkflowResult,
+        >,
+    >,
 }
 
 impl LocalObservationStore {
@@ -305,7 +328,13 @@ impl LocalObservationStore {
 
         let (subscription_tx, _) = broadcast::channel(SUBSCRIPTION_CHANNEL_CAPACITY);
 
-        Ok(Self { inner: Arc::new(Inner { db, subscription_tx }) })
+        Ok(Self {
+            inner: Arc::new(Inner {
+                db,
+                subscription_tx,
+                workflow_terminals: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+            }),
+        })
     }
 
     fn emit(&self, row: ObservationRow) {
@@ -381,6 +410,21 @@ impl ObservationStore for LocalObservationStore {
         })
         .await
         .map_err(map_to_io)??;
+
+        // `WorkflowTerminal` (ADR-0064 §2): record the terminal in the
+        // in-memory index so `workflow_terminal_rows` (the
+        // workflow-lifecycle reconciler's hydrate_actual source) surfaces
+        // it. Accepted unconditionally above; the correlation key is
+        // unique per instance terminal, and an idempotent crash-resume
+        // re-write under the same key is a no-op-equivalent overwrite.
+        // Done on the async side (not in the blocking redb task) because
+        // it touches process-local state, not the database.
+        if let ObservationRow::WorkflowTerminal { correlation, result } = &row {
+            #[allow(clippy::expect_used)]
+            let mut index =
+                self.inner.workflow_terminals.lock().expect("workflow_terminals mutex poisoned");
+            index.insert(correlation.clone(), result.clone());
+        }
 
         // Suppress emit on LWW reject — subscribers must NEVER observe
         // a row the store will then refuse to return on read. Matches
@@ -715,6 +759,23 @@ impl ObservationStore for LocalObservationStore {
             decode_failures,
         );
         Ok(rows)
+    }
+
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> Result<
+        Vec<(overdrive_core::id::CorrelationKey, overdrive_core::workflow::WorkflowResult)>,
+        ObservationStoreError,
+    > {
+        // Read the process-local in-memory terminal index (populated on
+        // `WorkflowTerminal` writes). Deterministic iteration via the
+        // `BTreeMap` key ordering. Per ADR-0064 §2 the durable terminal
+        // is the engine journal; this index is the live convergence
+        // signal the workflow-lifecycle reconciler reads.
+        #[allow(clippy::expect_used)]
+        let index =
+            self.inner.workflow_terminals.lock().expect("workflow_terminals mutex poisoned");
+        Ok(index.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }
 }
 

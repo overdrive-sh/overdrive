@@ -123,6 +123,16 @@ mod integration {
     pub mod workflow_journal {
         mod journal_writes_to_redb;
     }
+    /// workflow-primitive slice 01 — step 01-08 — end-to-end production
+    /// composition proof (ADR-0064 §5). A fixture trigger reconciler emits
+    /// `Action::StartWorkflow` → the real `WorkflowEngine` composed into
+    /// `AppState` drives `ProvisionRecord` to terminal → the
+    /// `WorkflowTerminal` observation row appears → the workflow-lifecycle
+    /// reconciler converges to terminated; the `ctx.call` effect fired
+    /// exactly once. Real redb (journal + obs + intent) + real engine.
+    pub mod workflow_e2e {
+        mod reconciler_emit_drives_workflow_to_terminal;
+    }
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads

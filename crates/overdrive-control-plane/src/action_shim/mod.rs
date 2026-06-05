@@ -395,7 +395,7 @@ pub async fn dispatch(
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
-    workflow_engine: Option<(&WorkflowEngine, &WorkflowId)>,
+    workflow_engine: Option<&WorkflowEngine>,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
@@ -425,6 +425,66 @@ pub async fn dispatch(
     first_error.map_or(Ok(()), Err)
 }
 
+/// AppState-aware dispatch that persists workflow-instance desired-intent
+/// for every `Action::StartWorkflow` BEFORE handing the actions to
+/// [`dispatch`] threaded the real engine from `state.workflow_engine`
+/// (ADR-0064 §5).
+///
+/// This is the production commit point for a reconciler-emitted
+/// `StartWorkflow`: a committed action both (1) persists the instance's
+/// desired-intent (`workflows/<correlation>` → the workflow spec inputs,
+/// per `development.md` § "Persist inputs, not derived state") so the
+/// `WorkflowLifecycle` reconciler's `hydrate_desired` can read it back on
+/// every tick (and re-emit on restart), AND (2) drives the engine off the
+/// shim. Intent persistence is FIRST so a crash between the two leaves the
+/// instance re-emittable (the level-triggered reconciler re-drives it).
+///
+/// Mirrors the `StartAllocation → workload-intent → WorkloadLifecycle`
+/// precedent for `StartWorkflow → workflow-intent → WorkflowLifecycle`.
+///
+/// # Errors
+///
+/// - [`ShimError::WorkflowIntent`] — persisting the workflow-instance
+///   intent failed.
+/// - Any error [`dispatch`] surfaces (driver / observation / dataplane /
+///   workflow-engine failure), with per-action isolation.
+pub async fn dispatch_with_workflow_intent(
+    actions: Vec<Action>,
+    state: &crate::AppState,
+    tick: &TickContext,
+) -> Result<(), ShimError> {
+    use overdrive_core::aggregate::IntentKey;
+    use overdrive_core::traits::intent_store::IntentStore;
+
+    // Persist workflow-instance desired-intent for every StartWorkflow
+    // BEFORE dispatch. The value is the workflow spec's kind name (the
+    // input the engine resolves to a factory) — NOT a derived status.
+    for action in &actions {
+        if let Action::StartWorkflow { spec, correlation } = action {
+            let key = IntentKey::for_workflow_instance(correlation);
+            state
+                .store
+                .put(key.as_bytes(), spec.name.as_str().as_bytes())
+                .await
+                .map_err(|err| ShimError::WorkflowIntent { message: err.to_string() })?;
+        }
+    }
+
+    dispatch(
+        actions,
+        state.driver.as_ref(),
+        state.obs.as_ref(),
+        state.dataplane.as_ref(),
+        state.lifecycle_events.as_ref(),
+        tick,
+        &state.node_id,
+        std::sync::Arc::clone(&state.allocator),
+        state.runtime.broker_mutex(),
+        Some(state.workflow_engine.as_ref()),
+    )
+    .await
+}
+
 /// Dispatch a single action. Each variant is independent; the caller
 /// loops over a `Vec<Action>` and aggregates errors.
 #[allow(clippy::too_many_lines)]
@@ -442,7 +502,7 @@ async fn dispatch_single(
     writer_node: &NodeId,
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
-    workflow_engine: Option<(&WorkflowEngine, &WorkflowId)>,
+    workflow_engine: Option<&WorkflowEngine>,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop) and the Phase 3 HttpCall placeholder are
@@ -465,11 +525,17 @@ async fn dispatch_single(
         // it once the engine is composed. This mirrors the
         // StartAllocation arm's tolerance of a level-triggered re-enqueue.
         Action::StartWorkflow { spec, correlation } => {
-            let Some((engine, workflow_id)) = workflow_engine else {
+            let Some(engine) = workflow_engine else {
                 return Ok(());
             };
+            // Derive the per-instance journal id deterministically from the
+            // action's correlation (ADR-0064 §5): the SAME instance always
+            // resolves to the SAME `WorkflowId`, so a crash-resume
+            // re-emit re-targets the same journal (the engine's
+            // `load_journal` then RESUMES rather than cold-starts).
+            let workflow_id = WorkflowId::for_correlation(&correlation);
             engine
-                .start(&spec, &correlation, workflow_id)
+                .start(&spec, &correlation, &workflow_id)
                 .await
                 .map_err(|err| ShimError::WorkflowEngine { message: err.to_string() })
         }
@@ -1062,6 +1128,17 @@ pub enum ShimError {
     #[error("workflow engine start failed: {message}")]
     WorkflowEngine {
         /// Cause string from the engine's typed `WorkflowEngineError`.
+        message: String,
+    },
+
+    /// Persisting a workflow-instance desired-intent on
+    /// `Action::StartWorkflow` commit failed (ADR-0064 §5). The intent
+    /// write is the `hydrate_desired` SSOT the workflow-lifecycle
+    /// reconciler reads back; a failure here means the instance would not
+    /// be re-emittable on restart, so it is surfaced rather than dropped.
+    #[error("workflow intent persistence failed: {message}")]
+    WorkflowIntent {
+        /// Cause string from the `IntentStore` error.
         message: String,
     },
 }

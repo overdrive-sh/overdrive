@@ -104,6 +104,52 @@ impl WorkflowId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Derive a deterministic, valid [`WorkflowId`] for a workflow
+    /// instance from its [`CorrelationKey`].
+    ///
+    /// The engine keys an instance's journal by `WorkflowId`; the
+    /// workflow-lifecycle reconciler keys instances by `CorrelationKey`.
+    /// This is the deterministic bridge between the two: the action-shim
+    /// `StartWorkflow` arm derives the instance journal id from the
+    /// action's correlation, so the SAME instance always resolves to the
+    /// SAME journal id (crash-resume re-derives it identically — ADR-0064
+    /// §5 / `development.md` Reconciler I/O rule 2: correlation links
+    /// cause to response across attempts).
+    ///
+    /// The correlation key's canonical form (`target:purpose/<hex>`)
+    /// carries `:` and `/`, which the `WorkflowId` grammar
+    /// (`^[a-z0-9][a-z0-9-]{0,126}$`) rejects. The derivation maps every
+    /// char outside `[a-z0-9-]` to `-`, lowercases ASCII uppercase, and
+    /// prefixes a stable `wf-` so the leading-char rule holds even if the
+    /// correlation began with a now-mapped char. The result is bounded by
+    /// truncation to [`WORKFLOW_ID_MAX`] (correlation keys are already
+    /// short, so truncation is defensive). The mapping is total and
+    /// deterministic — equal correlations always yield equal ids.
+    #[must_use]
+    pub fn for_correlation(correlation: &overdrive_core::id::CorrelationKey) -> Self {
+        let mut id = String::with_capacity(WORKFLOW_ID_MAX);
+        id.push_str("wf-");
+        for c in correlation.as_str().chars() {
+            let mapped = if c.is_ascii_uppercase() {
+                c.to_ascii_lowercase()
+            } else if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' {
+                c
+            } else {
+                '-'
+            };
+            if id.len() >= WORKFLOW_ID_MAX {
+                break;
+            }
+            id.push(mapped);
+        }
+        // The `wf-` prefix guarantees a valid leading char and a
+        // non-empty body; every interior char is in `[a-z0-9-]` by the
+        // mapping above; length is bounded by the loop guard. The
+        // grammar therefore cannot reject the result.
+        #[allow(clippy::expect_used)]
+        Self::new(&id).expect("WorkflowId::for_correlation produces a grammar-valid id")
+    }
 }
 
 impl std::fmt::Display for WorkflowId {
@@ -386,4 +432,55 @@ pub trait JournalStore: Send + Sync {
     /// Returns a [`ProbeError`] variant naming which stage of the
     /// write → fsync → readback → delete handshake failed.
     async fn probe(&self) -> std::result::Result<(), ProbeError>;
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::WorkflowId;
+    use overdrive_core::id::{ContentHash, CorrelationKey};
+
+    /// `WorkflowId::for_correlation` is total and deterministic over
+    /// every valid correlation key: the derived id is grammar-valid and
+    /// equal correlations yield equal ids (the crash-resume requirement —
+    /// ADR-0064 §5).
+    #[test]
+    fn for_correlation_is_deterministic_and_grammar_valid() {
+        // A derived correlation key carries `:` and `/` — chars the
+        // WorkflowId grammar rejects. The derivation must sanitise them.
+        let corr = CorrelationKey::derive(
+            "127.0.0.1:9000",
+            &ContentHash::of(b"provision-record"),
+            "start-workflow",
+        );
+        let a = WorkflowId::for_correlation(&corr);
+        let b = WorkflowId::for_correlation(&corr);
+        assert_eq!(a, b, "equal correlations must yield equal ids (crash-resume)");
+        // Grammar: leading char ascii-lower/digit, interior in [a-z0-9-].
+        let s = a.as_str();
+        let mut chars = s.chars();
+        let lead = chars.next().expect("non-empty");
+        assert!(lead.is_ascii_lowercase() || lead.is_ascii_digit(), "valid leading char");
+        assert!(
+            chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "every interior char is in the WorkflowId grammar"
+        );
+        assert!(s.starts_with("wf-"), "stable wf- prefix");
+    }
+
+    /// Distinct correlation keys map to distinct ids (no collision for
+    /// the canonical derived shape), and the mapping rejects nothing
+    /// (totality) — a plain non-empty key also derives cleanly.
+    #[test]
+    fn for_correlation_distinguishes_distinct_keys_and_accepts_plain_keys() {
+        let a =
+            WorkflowId::for_correlation(&CorrelationKey::new("alpha:start/aa").expect("valid key"));
+        let b =
+            WorkflowId::for_correlation(&CorrelationKey::new("beta:start/bb").expect("valid key"));
+        assert_ne!(a, b, "distinct correlations derive distinct ids");
+        // Totality: a key with no special chars still derives.
+        let plain =
+            WorkflowId::for_correlation(&CorrelationKey::new("plainkey").expect("valid key"));
+        assert_eq!(plain.as_str(), "wf-plainkey");
+    }
 }

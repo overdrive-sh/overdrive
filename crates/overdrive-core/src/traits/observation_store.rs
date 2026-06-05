@@ -1378,4 +1378,38 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         alloc_id: &AllocationId,
     ) -> Result<Vec<ProbeResultRow>, ObservationStoreError>;
+
+    /// List every observed `workflow_terminal` row — the durable
+    /// terminal surface for workflow instances per ADR-0064 §2. Each row
+    /// is keyed by the instance [`CorrelationKey`] the
+    /// [`WorkflowEngine`](../../../overdrive_control_plane/workflow_runtime/struct.WorkflowEngine.html)
+    /// wrote it under on `run` terminal; the workflow-lifecycle
+    /// reconciler's `hydrate_actual` reads this to mark an instance
+    /// converged (terminated).
+    ///
+    /// # Preconditions
+    /// - None. An instance that has not yet reached terminal contributes
+    ///   no row; the result simply omits it.
+    ///
+    /// # Postconditions
+    /// - One `(correlation, result)` pair per distinct instance
+    ///   correlation that has reached terminal. The terminal write is
+    ///   idempotent on the stable correlation key (a crash-resume
+    ///   re-write of the same instance re-files under the same key), so
+    ///   at most one row per correlation is observable.
+    /// - Iteration order is deterministic across runs — the underlying
+    ///   store iterates by a stable key ordering
+    ///   (`.claude/rules/development.md` § "Ordered-collection choice").
+    ///
+    /// # Edge cases
+    /// - No terminal rows observed: returns `Ok(vec![])`, not an error.
+    ///
+    /// # Observable invariants
+    /// - Calling this method has no side effects.
+    /// - The result reflects every `WorkflowTerminal` write that
+    ///   happens-before this call (single-node read-after-write is
+    ///   strict).
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> Result<Vec<(CorrelationKey, crate::workflow::WorkflowResult)>, ObservationStoreError>;
 }

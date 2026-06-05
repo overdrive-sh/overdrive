@@ -94,7 +94,10 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
         &ContentHash::of(spec.name.as_str().as_bytes()),
         "start-workflow",
     );
-    let workflow_id = WorkflowId::new("wf-provision-0001").expect("valid instance id");
+    // The action-shim derives the instance journal id deterministically
+    // from the action's correlation (ADR-0064 §5). The test re-derives it
+    // the same way to assert against the journal the engine actually used.
+    let workflow_id = WorkflowId::for_correlation(&correlation);
 
     // --- Remaining action-shim ports (untouched by StartWorkflow) -----
     let driver = SimDriver::new(DriverType::Exec);
@@ -132,7 +135,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
         &node,
         Arc::clone(&allocator),
         &broker,
-        Some((&engine, &workflow_id)),
+        Some(&engine),
     )
     .await
     .expect("StartWorkflow dispatch must succeed");
