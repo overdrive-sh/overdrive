@@ -39,6 +39,11 @@
 )]
 
 pub mod aggregate;
+// `ca::cert_spec` — pure certificate-profile policy (`CertRole`, `CertSpec`,
+// `CertSpecError`) for the built-in CA (GH #28, ADR-0063 D5). Class `core`,
+// dst-lint-clean: speaks project newtypes / enums, never `rcgen`. The `Ca`
+// port trait + host/sim adapters + root-key envelope land in later slices.
+pub mod ca;
 // `api::submit` — wire-shape `SubmitSpecInput` enum + per-kind payloads
 // per ADR-0051 (Accepted 2026-05-15). The wire-side member of the
 // three-layer Rust type universe (parser-side `WorkloadSpec` / wire-side
@@ -112,6 +117,7 @@ pub mod transition_reason;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod testing;
 
+pub use ca::cert_spec::{CertRole, CertSpec, CertSpecError, KeyUsage};
 pub use error::{Error, Result};
 pub use id::{
     AllocationId, CertSerial, ContentHash, CorrelationKey, IdParseError, InvestigationId, NodeId,

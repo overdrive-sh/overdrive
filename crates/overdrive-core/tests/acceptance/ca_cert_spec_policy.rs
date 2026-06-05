@@ -18,11 +18,14 @@
 //! US-CA-03 (intermediate pathLen=0 profile), US-CA-01 (root profile).
 //! Tags: `@in-memory` `@property` (S-04 surfaces) and `@in-memory` (S-01/S-03).
 //!
-//! NOTE (RED scaffold convention, .claude/rules/testing.md): each test
-//! body is a self-contained `panic!("Not yet implemented -- RED
-//! scaffold (...)")` under `#[should_panic(expected = "RED scaffold")]`.
-//! It does NOT import unbuilt `CertSpec` production code — nextest reports
-//! PASS (expected panic), clippy is clean, lefthook needs no `--no-verify`.
+//! NOTE (RED scaffold convention, .claude/rules/testing.md): the remaining
+//! `#[should_panic(expected = "RED scaffold")]` bodies (owned by slices 03 /
+//! 04) are self-contained panics that import no unbuilt production code —
+//! nextest reports PASS (expected panic), clippy is clean, lefthook needs no
+//! `--no-verify`. Step 01-01 has activated S-01-01 and S-01-05 (real bodies
+//! below); they import the now-built `CertSpec` policy surface.
+
+use overdrive_core::{CertRole, CertSpec, CertSpecError, KeyUsage, SpiffeId};
 
 // ---------------------------------------------------------------------------
 // US-CA-04 / S-04 — Workload SVID leaf profile + single-URI-SAN invariant
@@ -104,13 +107,43 @@ fn intermediate_spec_is_ca_true_with_path_len_zero_and_key_cert_sign() {
 /// keyCertSign|cRLSign, keyUsage critical, and NO pathLen constraint
 /// (`CertRole::Root`). The subject carries the trust domain only (no path
 /// component — research Finding 2).
+///
+/// Universe (port-exposed observable surface, never internal builder fields):
+/// `{role, is_ca, key_usages, key_usage_critical, path_len, subject}`. The
+/// assertion is exact-equality over that whole surface — fail-closed on any
+/// unexpected extra key usage (e.g. a stray `digitalSignature` that would
+/// blur the CA profile).
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn root_spec_is_self_signed_ca_with_key_cert_sign_and_crl_sign() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-01 / CertSpec::root profile = \
-         CA:TRUE + keyCertSign|cRLSign + keyUsage critical + no pathLen, trust-domain-only subject)"
+    // The root subject identifies the trust domain `overdrive.local`. The
+    // `SpiffeId` newtype requires a path component, so the trust domain is
+    // carried as the authority and the trust-domain-only semantic is the
+    // observable `subject().trust_domain()` (asserted below).
+    let subject = SpiffeId::new("spiffe://overdrive.local/ca/root").expect("valid root subject");
+    let spec = CertSpec::root(subject.clone());
+
+    // role — the sum type carries Root (no pathLen field by construction).
+    assert_eq!(spec.role(), CertRole::Root);
+
+    // is_ca — CA:TRUE.
+    assert!(spec.is_ca(), "root must be CA:TRUE");
+
+    // path_len — NO pathLen constraint on the root.
+    assert_eq!(spec.path_len(), None, "root carries no pathLen constraint");
+
+    // key_usages — exactly keyCertSign + cRLSign, nothing else (fail-closed).
+    assert_eq!(
+        spec.key_usages(),
+        vec![KeyUsage::KeyCertSign, KeyUsage::CrlSign],
+        "root carries exactly keyCertSign + cRLSign"
     );
+
+    // key_usage_critical — keyUsage marked critical.
+    assert!(spec.key_usage_critical(), "keyUsage must be marked critical");
+
+    // subject — the trust domain, preserved through the SpiffeId newtype.
+    assert_eq!(spec.subject(), &subject);
+    assert_eq!(spec.subject().trust_domain(), "overdrive.local");
 }
 
 // ---------------------------------------------------------------------------
@@ -123,11 +156,31 @@ fn root_spec_is_self_signed_ca_with_key_cert_sign_and_crl_sign() {
 /// `CertSpecError::InvalidSan`, distinct from any other validation failure.
 /// Guards against a single `Internal(String)` catch-all swallowing the
 /// load-bearing single-URI signal.
+///
+/// Universe: the `CertSpecError` variant per failure mode. Asserts (a) a bad
+/// SAN cardinality IS the `InvalidSan` variant carrying the offending count,
+/// and (b) it is `!=` a structurally-different failure (`InvalidSubject`) —
+/// i.e. the taxonomy distinguishes failure modes rather than flattening them
+/// into one catch-all.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn cert_spec_error_variants_are_distinct_per_failure_mode() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / CertSpecError::InvalidSan is a distinct \
-         variant, not flattened into a generic Internal(String) catch-all)"
-    );
+    // A SAN cardinality of 0 and of 2 both surface InvalidSan, carrying the
+    // offending count (the load-bearing single-URI-SAN signal, KPI K2).
+    let zero_san = CertSpecError::invalid_san(0);
+    let two_san = CertSpecError::invalid_san(2);
+    assert!(matches!(zero_san, CertSpecError::InvalidSan { found: 0 }));
+    assert!(matches!(two_san, CertSpecError::InvalidSan { found: 2 }));
+
+    // A different failure mode is a DISTINCT variant — not the same
+    // catch-all. InvalidSan != InvalidSubject proves the taxonomy
+    // distinguishes failure modes (a single Internal(String) catch-all could
+    // not satisfy this — both would collapse to the same shape).
+    let bad_subject =
+        CertSpecError::invalid_subject("Root", "subject must be the trust domain only");
+    assert_ne!(zero_san, bad_subject);
+    assert!(matches!(bad_subject, CertSpecError::InvalidSubject { .. }));
+
+    // The two InvalidSan instances differ by their carried count, so the
+    // variant is not a content-free marker — it preserves the cardinality.
+    assert_ne!(zero_san, two_san);
 }
