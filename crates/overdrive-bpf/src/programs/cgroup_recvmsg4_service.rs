@@ -18,11 +18,33 @@
 //!
 //! The verifier restricts `BPF_CGROUP_UDP4_RECVMSG` to a return value of
 //! exactly `[1,1]` — a program returning 0 is rejected at LOAD time. So
-//! "drop on miss" is impossible at any layer. On a `REVERSE_LOCAL_MAP`
-//! miss the program rewrites the source to the sentinel `192.0.2.1`
-//! (RFC 5737 — never the backend IP) and bumps
-//! `REVERSE_LOCAL_MISS_COUNTER` (US-03 / K5). Strictly stronger than
-//! Cilium's pass-through-leak.
+//! "drop on miss" is impossible at any layer.
+//!
+//! ## Miss is a pure no-op (ADR-0053 § D3 rev 2026-06-05b / UI-1)
+//!
+//! recvmsg4 is attached at a cgroup ANCESTOR and therefore fires on EVERY
+//! unconnected-UDP `recvmsg`/`recvfrom` from any descendant — service
+//! replies AND all unrelated same-host UDP (DNS clients, a backend reading
+//! an inbound query). The `REVERSE_LOCAL_MAP` lookup, keyed on the
+//! datagram's source identity, is the discriminator: a HIT means the
+//! source is a registered backend (a service reply) → rewrite the source
+//! to the VIP; a MISS means the source is NOT a registered backend (not a
+//! service reply) → **pure no-op**, leave the real source byte-for-byte
+//! intact and bump `REVERSE_LOCAL_MISS_COUNTER` for observability only.
+//!
+//! There is NO sentinel rewrite on the miss path. A source rewrite on a
+//! miss would corrupt the sender address of every non-service datagram in
+//! the cgroup (a backend reading a query would see a mangled sender and
+//! reply to the wrong peer). The K5 no-leak guarantee — no backend IP ever
+//! reaches the client app — is preserved by the D1 reverse-first
+//! dual-write's always-hit property (every registered backend has a
+//! reverse entry before its forward entry is usable, so a genuine service
+//! reply ALWAYS hits and is ALWAYS rewritten to the VIP), NOT by a
+//! miss-path sentinel. This is Cilium-aligned (`cil_sock4_recvmsg` returns
+//! `SYS_PROCEED`, `__sock4_xlate_rev` leaves the source unchanged on a
+//! reverse-SK miss), not weaker than it. The rejected sentinel-on-miss
+//! design and the Tier-3-observed corruption it caused are recorded in
+//! ADR-0053 § D3 (sub-revision 2026-06-05b) and the feature-delta CA-3.
 //!
 //! ## Layer: application sockaddr, NOT wire (DDD-3a)
 //!
@@ -56,13 +78,6 @@ use aya_ebpf::{macros::cgroup_sock_addr, programs::SockAddrContext};
 use crate::maps::reverse_local_map::{REVERSE_LOCAL_MAP, ReverseLocalKey};
 use crate::maps::reverse_local_miss_counter::{REVERSE_LOCAL_MISS_COUNTER, SLOT_REVERSE_MISS};
 use crate::shared::build_local_service_key::build_local_service_key_parts;
-
-/// Sentinel source the program writes on a `REVERSE_LOCAL_MAP` miss —
-/// RFC 5737 TEST-NET-1 `192.0.2.1`, host-order. NEVER the backend IP, so
-/// a source-validating resolver still discards the reply rather than
-/// silently trusting an unrewritten backend source (strictly stronger
-/// than Cilium's pass-through-leak; DDD-3).
-const SENTINEL_SOURCE_HOST: u32 = 0xC000_0201; // 192.0.2.1
 
 /// `BPF_CGROUP_UDP4_RECVMSG` entry point. The verifier restricts the
 /// return value to exactly 1 (`[1,1]` — recvmsg4 CANNOT deny; a program
@@ -147,9 +162,11 @@ fn try_cgroup_recvmsg4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
 /// Bump the per-CPU reverse-miss counter (observability only). Called on
 /// a `REVERSE_LOCAL_MAP` miss — the common non-service-reply case. Does
 /// NOT rewrite the source: recvmsg4 fires on all cgroup UDP recvs, so a
-/// miss must be a no-op to avoid corrupting unrelated traffic. The
-/// sentinel-source fail-safe (DDD-3) is scoped to service replies and
-/// lands in Slice 03 (step 03-01) — see [`SENTINEL_SOURCE_HOST`].
+/// miss is a pure no-op to avoid corrupting unrelated traffic (UI-1). The
+/// counter is behaviorally inert — its incrementing has no effect on the
+/// source the app reads; it exists only so an anomalous miss rate (which
+/// should-never-happen for service replies under the reverse-first
+/// dual-write) is observable.
 ///
 /// `get_ptr_mut` returns the running CPU's slot pointer; the increment
 /// is per-CPU-local and lock-free (single program context per CPU, no

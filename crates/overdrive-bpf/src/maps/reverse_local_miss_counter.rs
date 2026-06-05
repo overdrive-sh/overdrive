@@ -3,12 +3,16 @@
 //! `cgroup_recvmsg4_service` reply path (ADR-0053 rev 2026-06-05, GH
 //! #200).
 //!
-//! A reverse miss is a should-never-happen path under the ordered
-//! (reverse-first) dual-write, so this counter measures
-//! corruption/eviction, not a routine branch. It is NOT a `DropClass`
-//! variant — recvmsg4 does not drop (verifier `[1,1]`, DDD-3); the miss
-//! is handled by a source rewrite to the sentinel `192.0.2.1` plus this
-//! observable count (DDD-3, US-03 / K5).
+//! recvmsg4 fires on EVERY unconnected-UDP recv from a cgroup descendant
+//! — service replies AND all unrelated same-host UDP — so a `REVERSE_LOCAL_MAP`
+//! miss is the common non-service-reply case. The miss path is a pure
+//! no-op (ADR-0053 § D3 rev 2026-06-05b / UI-1): it leaves the real source
+//! untouched and bumps this counter for observability only. It is NOT a
+//! `DropClass` variant — recvmsg4 does not drop (verifier `[1,1]`, DDD-3) —
+//! and the counter is behaviorally inert (its incrementing has no effect on
+//! the source the app reads). The K5 no-leak guarantee is preserved by the
+//! reverse-first dual-write's always-hit property, NOT by a miss-path
+//! sentinel.
 //!
 //! Per-CPU avoids contention on the recvmsg hot path; userspace sums
 //! across CPUs at read time (the `aggregate_per_cpu` precedent that

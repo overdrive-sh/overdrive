@@ -58,32 +58,261 @@
 //! `EbpfDataplane`-driven assertion (Slice 03 GREEN; depends on Slice 01
 //! + Slice 02).
 
-// RED scaffold doc comments name kernel maps / methods in prose; the
-// canonical backticked form lands when DELIVER replaces these panics with
-// the real hardening tests. Per the DISTILL scaffold lint convention.
-#![allow(clippy::missing_panics_doc, clippy::doc_markdown)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::items_after_statements,
+    clippy::doc_markdown
+)]
+
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::path::PathBuf;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::traits::dataplane::Dataplane;
+use overdrive_dataplane::EbpfDataplane;
+
+use super::helpers::veth::{VethError, VethPair};
+
+/// DNS-shape service VIP. Distinct from any host-assigned address.
+const VIP: Ipv4Addr = Ipv4Addr::new(10, 96, 0, 10);
+/// VIP port — the DNS port 53. Nothing binds 53; the cgroup hooks rewrite
+/// VIP:53 → backend (the backend binds an ephemeral port off :53/:5353 per
+/// `.claude/rules/debugging.md` § 11).
+const VIP_PORT: u16 = 53;
+
+/// Per-test bpffs pin dir, cleaned on construction + on drop.
+struct PinDirGuard(PathBuf);
+impl Drop for PinDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Bring up a veth pair + per-test bpffs pin dir + the production
+/// `EbpfDataplane` with all three cgroup hooks attached at
+/// `/sys/fs/cgroup`. Returns `None` (skip) when `CAP_NET_ADMIN` is absent.
+/// Mirrors `unconnected_udp_roundtrip::bring_up`.
+fn bring_up(host: &str, peer: &str) -> Option<(EbpfDataplane, VethPair, PinDirGuard)> {
+    let veth = match VethPair::create(host, peer) {
+        Ok(v) => v,
+        Err(VethError::CapNetAdminRequired) => {
+            eprintln!(
+                "skip: recvmsg4 no-op-on-miss hardening needs CAP_NET_ADMIN for veth setup — \
+                 run via `cargo xtask lima run --` (default-root)"
+            );
+            return None;
+        }
+        Err(e) => panic!("veth setup failed: {e}"),
+    };
+
+    let pin_dir =
+        PathBuf::from(format!("/sys/fs/bpf/overdrive-test-uudp-hard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    let pin_guard = PinDirGuard(pin_dir.clone());
+
+    let dataplane = EbpfDataplane::new_with_pin_dir(
+        &veth.host,
+        &veth.peer,
+        &pin_dir,
+        std::path::Path::new("/sys/fs/cgroup"),
+    )
+    .expect("EbpfDataplane::new_with_pin_dir with cgroup sendmsg4+recvmsg4 attach");
+
+    Some((dataplane, veth, pin_guard))
+}
+
+/// Spawn a UDP echo responder on an EPHEMERAL loopback port (off
+/// systemd-resolved's :53/:5353). Echoes each datagram back to its sender.
+fn spawn_udp_echo(rounds: usize) -> SocketAddrV4 {
+    let sock = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("bind UDP echo backend (ephemeral port, off :53/:5353)");
+    let bound = match sock.local_addr().expect("udp local_addr") {
+        std::net::SocketAddr::V4(v4) => v4,
+        std::net::SocketAddr::V6(_) => unreachable!("bound IPv4 backend"),
+    };
+    thread::spawn(move || {
+        let mut buf = [0u8; 64];
+        for _ in 0..rounds {
+            match sock.recv_from(&mut buf) {
+                Ok((n, src)) => {
+                    let _ = sock.send_to(&buf[..n], src);
+                }
+                Err(_) => return,
+            }
+        }
+    });
+    bound
+}
+
+/// One unconnected `sendto(VIP:VIP_PORT)` + `recvfrom`. The socket is NEVER
+/// `connect()`ed — sendmsg4 fires here and rewrites VIP:53 → backend.
+fn unconnected_query(payload: &[u8]) -> Option<([u8; 64], usize, SocketAddrV4)> {
+    let client = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).ok()?;
+    client.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    client.send_to(payload, (VIP, VIP_PORT)).ok()?;
+    let mut buf = [0u8; 64];
+    let (n, src) = client.recv_from(&mut buf).ok()?;
+    let src_v4 = match src {
+        std::net::SocketAddr::V4(v4) => v4,
+        std::net::SocketAddr::V6(_) => return None,
+    };
+    Some((buf, n, src_v4))
+}
+
+/// Poll `f` until it returns `Some` or the deadline elapses.
+fn poll_until<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T> {
+    let deadline = Instant::now() + budget;
+    loop {
+        if let Some(v) = f() {
+            return Some(v);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A same-host UDP exchange whose source is NOT a registered backend.
+/// `peer` echoes back to the client on a FREE ephemeral port; the client
+/// `sendto(peer)` directly (no VIP, no `connect()`), and `recvfrom`s the
+/// reply. recvmsg4 fires on this recv (cgroup-ancestor attach) and MUST be
+/// a pure no-op on the `REVERSE_LOCAL_MAP` miss — the source the app reads
+/// MUST be the real `peer` address, byte-for-byte.
+fn non_service_exchange(payload: &[u8]) -> Option<([u8; 64], usize, SocketAddrV4)> {
+    // The peer is a plain echo server on a free ephemeral port — its
+    // address is NOT in REVERSE_LOCAL_MAP, so its reply is a miss.
+    let peer = spawn_udp_echo(1);
+    let client = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).ok()?;
+    client.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    client.send_to(payload, peer).ok()?;
+    let mut buf = [0u8; 64];
+    let (n, src) = client.recv_from(&mut buf).ok()?;
+    let src_v4 = match src {
+        std::net::SocketAddr::V4(v4) => v4,
+        std::net::SocketAddr::V6(_) => return None,
+    };
+    // Real sender source MUST be the peer we sent to — recvmsg4 left it
+    // untouched on the miss.
+    Some((buf, n, src_v4))
+}
 
 /// S-03-01 — recvmsg4 no-op-on-miss: non-service unconnected UDP reads its
 /// real source; a service reply always hits and is VIP-sourced; the miss
 /// counter increments on non-service recv but is behaviorally inert.
+///
+/// THE corrected app-sockaddr ACs (DDD-3 / DDD-3a / CA-3 / UI-1). All three
+/// assertions are made against the same live `EbpfDataplane` so the
+/// counted-but-inert pinning (assertion c) is observed on a real
+/// non-service recv. App-sockaddr (`recvfrom` source), NOT `tcpdump`.
+///
+/// Equivalence pin against shipped behavior: the corrected no-op-on-miss
+/// HIT-rewrite + counter-bump landed in step 01-03 (commit `e71ad780`,
+/// Tier-3 green). This hardening test lands GREEN immediately — it pins the
+/// three corrected assertions against already-shipped production rather
+/// than driving a RED→GREEN transition.
 #[test]
-#[should_panic(expected = "RED scaffold")]
+#[serial_test::serial(env)]
 fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03-01: recvmsg4 fires on ALL subtree \
-         unconnected UDP (cgroup-ancestor attach). Three assertions: (a) a non-service \
-         exchange (source NOT a registered backend -- a backend reading an inbound query, \
-         any unrelated UDP) reads its REAL sender source via recvfrom/msg_name -- recvmsg4 \
-         leaves it byte-for-byte intact (pure no-op on a REVERSE_LOCAL_MAP miss); (b) a \
-         genuine service reply (source IS the registered backend) ALWAYS hits and the app \
-         reads the VIP as the source -- no backend-IP-leak path; (c) REVERSE_LOCAL_MISS_COUNTER \
-         increments on the non-service recv AND the source is untouched on that same recv \
-         (counted but inert -- no source rewrite). recvmsg4 does not drop (cannot -- verifier \
-         (1,1)). NO sentinel 192.0.2.1 rewrite on the miss path -- it would corrupt non-service \
-         senders (fixed step 01-03). No-leak (K5) holds via the D1 reverse-first dual-write \
-         always-hit, not a sentinel. Blocked on: recvmsg4 hit-rewrite + no-op-miss branch + \
-         miss counter (Slice 03 GREEN)."
+    let Some((dataplane, _veth, _pin_guard)) = bring_up("ovd-uudph0a", "ovd-uudph0b") else {
+        return;
+    };
+
+    // Register a genuine service backend so the reverse-first dual-write
+    // populates REVERSE_LOCAL_MAP — assertion (b) needs a real registered
+    // backend whose reply ALWAYS hits.
+    let backend = spawn_udp_echo(1);
+    assert_ne!(backend.port(), 53, "fixture: backend must bind off :53");
+    assert_ne!(backend.port(), 5353, "fixture: backend must bind off :5353");
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio rt");
+    rt.block_on(async {
+        dataplane
+            .register_local_backend(VIP, VIP_PORT, backend, Proto::Udp)
+            .await
+            .expect("register UDP local backend (reverse-first dual-write)");
+    });
+
+    // ---- Assertion (a) — non-service unconnected UDP is unaffected.
+    //      A same-host exchange whose source is NOT a registered backend
+    //      reads its REAL sender address. The miss counter before/after
+    //      brackets this recv so assertion (c) can pin the increment.
+    let miss_before =
+        dataplane.reverse_local_miss_count().expect("dump REVERSE_LOCAL_MISS_COUNTER (before)");
+
+    let probe_ns = b"non-service-unconnected-udp";
+    let (buf_ns, n_ns, ns_src) = poll_until(Duration::from_secs(2), || {
+        let (buf, n, src) = non_service_exchange(probe_ns)?;
+        (&buf[..n] == probe_ns).then_some((buf, n, src))
+    })
+    .expect("non-service unconnected UDP exchange did not round-trip within 2s");
+    assert_eq!(&buf_ns[..n_ns], probe_ns, "non-service echo payload integrity");
+
+    // The load-bearing new assertion (the regression the correction fixes):
+    // recvmsg4 left the real sender source byte-for-byte intact on the miss.
+    // It is the loopback peer's real address — NOT the VIP, NOT the sentinel
+    // 192.0.2.1, NOT mangled. A sentinel/source rewrite on the miss path
+    // would corrupt this.
+    assert_eq!(
+        *ns_src.ip(),
+        Ipv4Addr::LOCALHOST,
+        "non-service recvfrom source MUST be the REAL sender ({}), left untouched by the \
+         recvmsg4 no-op-on-miss — got {}; a miss-path source rewrite (sentinel/VIP) would \
+         corrupt every non-service datagram's sender address",
+        Ipv4Addr::LOCALHOST,
+        ns_src.ip()
     );
+    assert_ne!(
+        *ns_src.ip(),
+        VIP,
+        "non-service recvfrom source must NOT be rewritten to the VIP on a miss"
+    );
+    assert_ne!(
+        *ns_src.ip(),
+        Ipv4Addr::new(192, 0, 2, 1),
+        "non-service recvfrom source must NOT be the rejected sentinel 192.0.2.1 — \
+         no sentinel rewrite exists on the miss path (UI-1)"
+    );
+
+    // ---- Assertion (c), part 1 — the miss counter incremented on the
+    //      non-service recv (observable via the percpu-array dump). It is
+    //      behaviorally inert: assertion (a) above proved the source on the
+    //      SAME class of recv was untouched. Counted but inert, together.
+    let miss_after =
+        dataplane.reverse_local_miss_count().expect("dump REVERSE_LOCAL_MISS_COUNTER (after)");
+    assert!(
+        miss_after > miss_before,
+        "REVERSE_LOCAL_MISS_COUNTER MUST increment on the non-service recv (the source was \
+         not a registered backend → REVERSE_LOCAL_MAP miss); before={miss_before} after={miss_after}"
+    );
+
+    // ---- Assertion (b) — a genuine service reply ALWAYS hits → VIP-sourced.
+    //      Under the reverse-first dual-write the backend's reply source is
+    //      a registered backend identity, so recvmsg4 HITS and rewrites the
+    //      source the app reads to the VIP — no backend-IP-leak path.
+    let probe_svc = b"service-reply-query";
+    let svc_src = poll_until(Duration::from_secs(2), || {
+        let (buf, n, src) = unconnected_query(probe_svc)?;
+        (&buf[..n] == probe_svc).then_some(src)
+    })
+    .expect(
+        "service unconnected sendto(VIP:53) did not round-trip + echo within 2s — \
+         cgroup sendmsg4 forward rewrite (VIP→backend) regression",
+    );
+    assert_eq!(
+        *svc_src.ip(),
+        VIP,
+        "service reply recvfrom source MUST be the VIP {VIP} (recvmsg4 HIT reverse rewrite) — \
+         got {}; the registered backend always hits, so no backend IP ever reaches the app",
+        svc_src.ip()
+    );
+
+    drop(dataplane);
 }
 
 /// S-03-02 — a below-floor kernel refuses observably at attach/preflight

@@ -314,6 +314,17 @@ pub struct EbpfDataplane {
     #[allow(dead_code)]
     _cgroup_recvmsg4_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
 
+    /// Userspace handle to `REVERSE_LOCAL_MISS_COUNTER` — the single-slot
+    /// `BPF_MAP_TYPE_PERCPU_ARRAY<u64>` the `cgroup_recvmsg4_service`
+    /// program bumps on every `REVERSE_LOCAL_MAP` miss (ADR-0053 § D3
+    /// rev 2026-06-05b / UI-1). A miss is the common non-service-reply
+    /// case (recvmsg4 fires on ALL subtree unconnected UDP); the counter
+    /// is observable-but-inert — its incrementing has no effect on the
+    /// source the app reads (the miss path is a pure no-op). Read-back
+    /// via [`Self::reverse_local_miss_count`] sums per-CPU at read time
+    /// (the `DROP_COUNTER` `aggregate_per_cpu` precedent).
+    reverse_local_miss_counter: aya::maps::PerCpuArray<aya::maps::MapData, u64>,
+
     /// Attach path the `cgroup_connect4_service` program is bound
     /// to. Retained for the operator-surfaced
     /// `DataplaneError::LocalBackendProbe` error message context
@@ -632,6 +643,24 @@ impl EbpfDataplane {
         .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP try_from: {e}")))?;
         let reverse_local_map = ReverseLocalMapHandle::new(reverse_local_map_inner);
 
+        // ADR-0053 § D3 (rev 2026-06-05b / UI-1) — recover the
+        // REVERSE_LOCAL_MISS_COUNTER PerCpuArray<u64>. The kernel
+        // `#[map]` declaration in
+        // `crates/overdrive-bpf/src/maps/reverse_local_miss_counter.rs`
+        // makes this map present in the loaded ELF. Single slot
+        // (`SLOT_REVERSE_MISS = 0`); userspace sums per-CPU at read time
+        // (the DROP_COUNTER `aggregate_per_cpu` precedent).
+        let reverse_local_miss_counter = aya::maps::PerCpuArray::<_, u64>::try_from(
+            bpf.take_map("REVERSE_LOCAL_MISS_COUNTER").ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "REVERSE_LOCAL_MISS_COUNTER not found in BPF object".into(),
+                )
+            })?,
+        )
+        .map_err(|e| {
+            DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MISS_COUNTER try_from: {e}"))
+        })?;
+
         // ADR-0053 § 1 — load + attach cgroup_connect4_service.
         // Open the cgroup directory FD (read-only is sufficient;
         // aya's `attach` passes it through to
@@ -739,6 +768,7 @@ impl EbpfDataplane {
             _cgroup_connect4_link: cgroup_link_id,
             _cgroup_sendmsg4_link: cgroup_sendmsg4_link_id,
             _cgroup_recvmsg4_link: cgroup_recvmsg4_link_id,
+            reverse_local_miss_counter,
             cgroup_attach_path: cgroup_attach_path.to_path_buf(),
             #[cfg(any(test, feature = "integration-tests"))]
             probe_fault: parking_lot::Mutex::new(None),
@@ -1183,6 +1213,36 @@ impl EbpfDataplane {
         self.reverse_local_map
             .entries()
             .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_LOCAL_MAP iter: {e}")))
+    }
+
+    /// Read-back surface for `REVERSE_LOCAL_MISS_COUNTER` (ADR-0053 § D3
+    /// rev 2026-06-05b / UI-1, GH #200) — the percpu-array dump the
+    /// Tier-3 hardening test asserts on (S-03-01 assertion c). Returns
+    /// the count of `cgroup_recvmsg4_service` `REVERSE_LOCAL_MAP` misses
+    /// summed across every online CPU (the `aggregate_per_cpu` fold the
+    /// `DROP_COUNTER` read path uses).
+    ///
+    /// A miss is the common non-service-reply case — recvmsg4 fires on
+    /// ALL subtree unconnected UDP, and only a registered backend's reply
+    /// hits. The counter is observable-but-inert: its incrementing has no
+    /// effect on the source the app reads (the miss path is a pure no-op,
+    /// not a sentinel rewrite).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] when the underlying per-CPU
+    /// slot read fails.
+    pub fn reverse_local_miss_count(&self) -> Result<u64, DataplaneError> {
+        // Single-slot counter; slot 0 is the reverse-miss count
+        // (lockstep with `reverse_local_miss_counter.rs`'s
+        // `SLOT_REVERSE_MISS` / `MAX_ENTRIES = 1`).
+        const SLOT_REVERSE_MISS: u32 = 0;
+        let per_cpu = self.reverse_local_miss_counter.get(&SLOT_REVERSE_MISS, 0).map_err(|e| {
+            DataplaneError::LoadFailed(format!(
+                "REVERSE_LOCAL_MISS_COUNTER PerCpuArray::get(slot={SLOT_REVERSE_MISS}): {e}"
+            ))
+        })?;
+        Ok(overdrive_core::dataplane::aggregate_per_cpu(&per_cpu))
     }
 
     /// Returns the LOCAL_BACKEND_MAP entry for `(vip, vip_port)`,
