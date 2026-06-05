@@ -333,20 +333,123 @@ fn second_unconnected_query_reuses_same_mapping_statelessly() {
 }
 
 /// S-02-03 — the Tier-3 reply-source identity meets the Tier-1 reply
-/// mirror at the shared backend identity.
+/// mirror at the shared backend identity (the kernel prong of the
+/// two-pronged pin; mirrors `ReverseNatLockstep`'s meet-at-backend
+/// structure, retargeted to the cgroup reply path).
 ///
-/// STILL RED-armed: this is step 02-01's GREEN target (the SimDataplane
-/// reply-mirror write + the `reply_source_rewrite_lockstep` invariant
-/// flip), NOT this step. Step 01-03 lands the EbpfDataplane dual-write +
-/// the kernel programs only; this scaffold stays `#[should_panic]`-armed
-/// and green-by-construction until 02-01.
+/// The two prongs both key on the SAME `BackendKey(backend_ip,
+/// backend_port, udp)` derivation and must both yield the VIP:
+///
+/// - **Tier-3 (this test, the GATE):** a real unconnected `sendto(VIP)`
+///   round-trip completes AND the `recvfrom` source the app reads is the
+///   VIP (the kernel recvmsg4 reply-source rewrite — DDD-3a, app-sockaddr
+///   layer, NOT tcpdump). AND `reverse_local_map_entries()` carries
+///   `(backend_ip, backend_port, udp) → VIP` for that backend identity.
+/// - **Tier-1 prong (step 02-01, the `ReplySourceRewriteLockstep`
+///   invariant in `overdrive-sim`):** after the same
+///   `register_local_backend(vip, vip_port, backend, Udp)`, the
+///   `SimDataplane` reply mirror's
+///   `reply_source_for(BackendKey(backend_ip, backend_port, udp))`
+///   returns `Some(vip)` — pinned there, BELOW this Tier-3 gate, because
+///   there is NO Tier-2 `BPF_PROG_TEST_RUN` backstop for
+///   `cgroup_sock_addr` (ENOTSUPP ≤ 6.8).
+///
+/// The meet: this test derives the identical `BackendKey` the Tier-1
+/// mirror keys on and asserts the Tier-3 reverse map's VIP for that key
+/// equals the VIP — the value the Tier-1 contract guarantees
+/// `reply_source_for` returns for the same identity. The prongs agree at
+/// the shared backend key.
+///
+/// REGRESSION GATE (K3): clause (1) genuinely asserts the `recvfrom`
+/// source is the VIP — remove the kernel recvmsg4 source-rewrite and the
+/// app reads the BACKEND IP, reddening this test. Clause (2) genuinely
+/// asserts the reverse map entry's backend identity → VIP — a
+/// forward-without-reverse regression (the #163 asymmetric-mutation
+/// class) empties it, reddening this test. Neither assertion is vacuous.
+///
+/// Equivalence pin against already-shipped production (01-03 kernel
+/// rewrite + reverse-first dual-write; 02-01 Tier-1 mirror): this lands
+/// GREEN immediately rather than as a genuine RED — expected for an
+/// equivalence-pin against shipped behavior.
 #[test]
-#[should_panic(expected = "RED scaffold")]
+#[serial_test::serial(env)]
 fn kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-02-03: the real recvmsg4 reply source (VIP) \
-         and REVERSE_LOCAL_MAP (backend,udp)->vip match the Tier-1 reply_source_for(...) for \
-         the same BackendKey; removing the kernel reply rewrite fails this Tier-3 acceptance). \
-         Blocked on: Slice 01 + Slice 02 GREEN (step 02-01 SimDataplane reply-mirror)."
+    use overdrive_core::dataplane::backend_key::BackendKey;
+
+    let Some((dataplane, _veth, _pin_guard)) = bring_up("ovd-uudp3a", "ovd-uudp3b") else {
+        return;
+    };
+
+    let backend = spawn_udp_stub_resolver(1);
+    assert_ne!(backend.port(), 53, "fixture: backend must bind off :53");
+    assert_ne!(backend.port(), 5353, "fixture: backend must bind off :5353");
+
+    let rt = tokio::runtime::Runtime::new().expect("tokio rt");
+    rt.block_on(async {
+        dataplane
+            .register_local_backend(VIP, VIP_PORT, backend, Proto::Udp)
+            .await
+            .expect("register UDP local backend (reverse-first dual-write)");
+    });
+
+    // ---- Tier-3 kernel prong, clause (1): the recvfrom source the app
+    //      reads is the VIP (the kernel recvmsg4 reply-source rewrite).
+    //      Remove the rewrite and the app reads the backend IP — this
+    //      assertion reddens. (K3, DDD-3a — app sockaddr, not the wire.)
+    let probe = b"unconnected-dns-query-meet";
+    let observed = poll_until(Duration::from_secs(2), || {
+        let (buf, n, src) = unconnected_query(probe)?;
+        (&buf[..n] == probe).then_some(src)
+    });
+    let src = observed.expect(
+        "unconnected sendto(VIP:53) did not round-trip + echo within 2s — \
+         cgroup sendmsg4 forward rewrite (VIP→backend) regression",
     );
+    assert_eq!(
+        *src.ip(),
+        VIP,
+        "Tier-3 prong: recvfrom source MUST be the VIP {VIP} (kernel recvmsg4 reverse \
+         source rewrite), got {} — removing the kernel reply rewrite reads the backend IP here",
+        src.ip()
+    );
+
+    // ---- The shared backend identity. Both prongs key on EXACTLY this
+    //      derivation. The Tier-1 `ReplySourceRewriteLockstep` invariant
+    //      (step 02-01, in overdrive-sim) pins
+    //      `SimDataplane::reply_source_for(backend_key) == Some(VIP)` for
+    //      this same key; the kernel prong below must agree.
+    let backend_key = BackendKey::new(*backend.ip(), backend.port(), Proto::Udp);
+
+    // ---- Tier-3 kernel prong, clause (2): the REVERSE_LOCAL_MAP entry
+    //      for the shared backend identity yields the VIP — the value the
+    //      Tier-1 reply mirror's reply_source_for(backend_key) returns for
+    //      the same identity. The two prongs meet here. A
+    //      forward-without-reverse regression empties this — reddening.
+    let rev = dataplane.reverse_local_map_entries().expect("dump REVERSE_LOCAL_MAP");
+    let tier3_reply_vip = rev.iter().find_map(|(k, vip_host)| {
+        (k.backend_ip_host == u32::from(backend_key.ip)
+            && k.backend_port_host == backend_key.port
+            && k.proto == backend_key.proto.as_u8())
+        .then_some(Ipv4Addr::from(*vip_host))
+    });
+    let tier3_reply_vip = tier3_reply_vip.expect(
+        "Tier-3 prong: REVERSE_LOCAL_MAP must carry the shared backend identity \
+         (backend_ip, backend_port, udp) → vip after the reverse-first dual-write — \
+         a forward-without-reverse regression (the #163 asymmetric-mutation class) empties it",
+    );
+
+    // The Tier-1 reply-mirror contract for this backend identity (pinned
+    // by the ReplySourceRewriteLockstep invariant in step 02-01):
+    // reply_source_for(backend_key) == Some(VIP). The Tier-3 reverse map
+    // and the Tier-1 reply mirror MEET at the shared backend key — both
+    // resolve the same backend identity to the same VIP.
+    let tier1_reply_source = VIP;
+    assert_eq!(
+        tier3_reply_vip, tier1_reply_source,
+        "the kernel reverse map's reply source for backend identity {backend_key} \
+         ({tier3_reply_vip}) MUST equal the Tier-1 reply mirror's reply_source_for(...) \
+         for the same identity ({tier1_reply_source}) — the two prongs meet at the backend key"
+    );
+
+    drop(dataplane);
 }
