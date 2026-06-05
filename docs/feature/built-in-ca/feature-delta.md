@@ -812,9 +812,10 @@ full table. Summary:
   builder, `RootCaKeyEnvelope`, `IssuedCertificateRowEnvelope`, `Kek` provider
   port. dst-lint boundary verified — `overdrive-core/Cargo.toml` declares
   `crate_class = "core"`; the gate bans `rand::*`/FFI on its compile path, so
-  `rcgen`/`aws-lc-rs` (both pull entropy + FFI) cannot enter.
-- **`overdrive-host`** (class `adapter-host`): `RcgenCa` (all rcgen/aws-lc-rs/
-  HKDF/AES-256-GCM), root-key AEAD codec, `SystemdCredsKeyring` (`Kek`).
+  `rcgen`/`ring` (both pull entropy + FFI) cannot enter.
+- **`overdrive-host`** (class `adapter-host`): `RcgenCa` (all rcgen 0.14.8 +
+  `ring` HKDF-SHA256/AES-256-GCM), root-key AEAD codec, `SystemdCredsKeyring`
+  (`Kek`).
 - **`overdrive-sim`** (class `adapter-sim`): `SimCa` (fixture P-256 keys),
   fixture `Kek`.
 - **`overdrive-control-plane` / `overdrive-worker`**: boot/issuance wiring
@@ -864,14 +865,20 @@ call sequence, asserting observable equivalence.
 ## Wave: DESIGN / [REF] Technology Choices
 
 See `brief.md` § "built-in-ca extension" → "Technology choices". All OSS,
-all already in-graph: `rcgen` 0.13 (`aws_lc_rs`), `aws-lc-rs` 1.x (FIPS Cert
-#4816; `fips` feature available not forced), Linux kernel keyring,
-systemd-creds, `rkyv` (existing envelope machinery). No proprietary tech.
-P-256 (ECDSA) is the research default. **Version note**: workspace declares
-`rcgen = "0.13"` (research assumed 0.14) — `RcgenCa` must confirm
-`IsCa::Ca(BasicConstraints::Constrained(0))` / `SanType::Uri` against 0.13 at
-first compile; low risk since `mint_ephemeral_ca` already compiles the adjacent
-0.13 APIs.
+all already in-graph: `rcgen` 0.14.8 (`features = ["ring", "pem"]`, MSRV 1.88
+— bumped from 0.13.2 and committed in `35958ecb`), crypto provider = **`ring`**
+(the workspace provider today; ADR-0039's intended `aws-lc-rs` switch is
+**unimplemented**, and FIPS 140-3 Cert #4816 is **contingent on #204** — `ring`
+is not FIPS-validated), Linux kernel keyring, systemd-creds, `rkyv` (existing
+envelope machinery). No proprietary tech. P-256 (ECDSA) is the research default;
+`ring` provides ECDSA P-256 + AES-256-GCM + HKDF-SHA256, so the hierarchy and
+root-key envelope work on `ring` today. **Version note**: the `rcgen` 0.14.8
+pin is already in place and `mint_ephemeral_ca` is already migrated to the 0.14
+builder API (`Issuer::from_params(&params, &key)` + 2-arg `signed_by(&key,
+&issuer)`), so there is **no rcgen bump step** in DELIVER. `RcgenCa` confirms
+`IsCa::Ca(BasicConstraints::Constrained(0))` / `SanType::URI(Ia5String)` /
+`KeyUsagePurpose` against 0.14.8 (all present) at first compile; low risk since
+`mint_ephemeral_ca` already compiles the adjacent 0.14.8 APIs.
 
 ---
 
@@ -898,7 +905,8 @@ Full table with evidence in `brief.md` § "built-in-ca extension" → "Reuse
 Analysis". Verdict: **6 REUSE-AS-IS** (`IntentStore`, `ObservationStore`,
 `Entropy`, `SpiffeId`, `CertSerial`/`NodeId`, `VersionedEnvelope`/
 `codec::envelope`) · **1 REUSE-proven-via-new-adapter** (the rcgen usage in
-`mint_ephemeral_ca` de-risks `RcgenCa` — same 0.13 APIs, new structure) ·
+`mint_ephemeral_ca` de-risks `RcgenCa` — same rcgen 0.14.8 APIs, already
+migrated to the 0.14 `Issuer` builder; new structure) ·
 **1 LEAVE-AS-IS-distinct-consumer** (`tls_bootstrap.rs` — serves control-plane
 HTTPS, NOT workload identity; D-CA-5; Phase 5 / #81 replaces it) ·
 **8 CREATE-NEW (justified)** (`Ca` trait, `CertSpec`, `RcgenCa`, `SimCa`,
@@ -908,7 +916,7 @@ stack, state layers, newtypes, and envelope machinery all pre-exist; the
 feature is the *composition* behind a new port trait.
 
 Codebase evidence verified this wave (Grep/Read):
-- `overdrive-core/Cargo.toml` → `crate_class = "core"`; no rcgen/aws-lc-rs/rand
+- `overdrive-core/Cargo.toml` → `crate_class = "core"`; no rcgen/`ring`/rand
   in `[dependencies]`. dst-lint (`xtask/src/dst_lint.rs`) bans `rand::*` /
   `tokio::net::*` / FFI on core. Boundary constraint confirmed.
 - `id.rs` → `SpiffeId` (canonical-lowercase + trust-domain/path accessors),
@@ -923,8 +931,10 @@ Codebase evidence verified this wave (Grep/Read):
 - `traits/observation_store.rs` → `AllocStatusRow`/`NodeHealthRow`
   alias-to-payload + `…V1` envelope pattern to mirror for
   `issued_certificates`.
-- `tls_bootstrap.rs` → `mint_ephemeral_ca` exercises rcgen 0.13 `IsCa`,
-  `SanType`, `KeyUsagePurpose`, `self_signed`/`signed_by`, P-256 — proven.
+- `tls_bootstrap.rs` → `mint_ephemeral_ca` exercises rcgen 0.14.8 `IsCa`,
+  `SanType`, `KeyUsagePurpose`, `self_signed` / `Issuer::from_params` + 2-arg
+  `signed_by`, P-256 — proven (already migrated to the 0.14 builder API,
+  committed `35958ecb`).
 
 ---
 
@@ -959,8 +969,13 @@ Codebase evidence verified this wave (Grep/Read):
 2. **Earned-Trust fault-injection scenario set** for the probes (tampered
    ciphertext, wrong KEK, absent systemd credential) — DISTILL authors these
    as graduating `O`/`E` expectations + Tier-3 tests.
-3. **rcgen 0.13 API + `aws_lc_rs` feature-conflict confirmation** (research
-   Gap 3 + version delta) — first-compile check in DELIVER Slice 01, no spike.
+3. **rcgen 0.14.8 builder/extension API already in place** — the `rcgen = "0.14"`
+   (`features = ["ring", "pem"]`) bump and the `mint_ephemeral_ca` migration to
+   the 0.14 `Issuer` builder API are **already committed** (`35958ecb`), so there
+   is **no rcgen-bump step**. `RcgenCa` confirms the extension APIs
+   (`IsCa::Ca(BasicConstraints::Constrained(0))`, `SanType::URI(Ia5String)`,
+   `KeyUsagePurpose` — all present in 0.14.8) at first compile. Provider = `ring`
+   (aws-lc-rs/FIPS → #204).
 4. **`ca_equivalence` DST test** design — the trait-contract enforcement;
    DISTILL specifies the call sequence and observable-equivalence assertions.
 5. **Tier-2 expansion recommendations** (NOT auto-expanded; lean default):
@@ -981,8 +996,11 @@ Codebase evidence verified this wave (Grep/Read):
   `issued_certificates` row) graduate to `verification/expectations/`.
 - **To DELIVER (nw-software-crafter, OOP)**: ADR-0063 + brief § "built-in-ca
   extension" + C4 L1/L2/L3. Component decomposition is per-crate; the slice
-  order (S01→S05) from DISCUSS holds (linear dependency chain). First-compile
-  rcgen-0.13 + `aws_lc_rs` confirmation is Slice 01.
+  order (S01→S05) from DISCUSS holds (linear dependency chain). The rcgen 0.14.8
+  (`features = ["ring", "pem"]`) pin + the `mint_ephemeral_ca` 0.14 `Issuer`-API
+  migration are **already committed** (`35958ecb`) — no rcgen-bump step; provider
+  is `ring` (aws-lc-rs/FIPS → #204). `RcgenCa` confirms the 0.14.8 extension
+  APIs at first compile in Slice 01.
 - **To DEVOPS (nw-platform-architect)**: KPIs K1–K5; the keyring +
   systemd-creds boot dependency (operationalize the per-boot KEK delivery +
   the `OVERDRIVE_CA_KEK` dev-only gate); the refuse-to-start
