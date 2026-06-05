@@ -260,6 +260,7 @@ async fn dispatch_release(
         &writer_node,
         Arc::clone(&allocator),
         &test_broker,
+        None,
     )
     .await
     .expect("dispatch must succeed");

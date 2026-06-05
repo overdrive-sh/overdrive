@@ -300,6 +300,7 @@ mod tests {
             step,
             correlation: format!("provision-record/{step}"),
             response_digest: ContentHash::of(b"resp"),
+            bytes_sent: 0,
         }
     }
 

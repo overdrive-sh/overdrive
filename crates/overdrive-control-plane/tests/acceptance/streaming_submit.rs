@@ -961,6 +961,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         &state.node_id,
         std::sync::Arc::clone(&state.allocator),
         &test_broker,
+        None,
     )
     .await
     .expect("dispatch succeeds");

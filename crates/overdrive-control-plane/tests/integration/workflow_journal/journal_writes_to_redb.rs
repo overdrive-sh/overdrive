@@ -71,6 +71,7 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
         step: 0,
         correlation: "provision-record/0".to_string(),
         response_digest: ContentHash::of(b"provision-write-response"),
+        bytes_sent: 0,
     };
 
     // --- Append through the production adapter on a REAL redb file. ---

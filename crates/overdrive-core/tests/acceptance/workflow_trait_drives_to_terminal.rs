@@ -17,7 +17,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{Workflow, WorkflowCtx, WorkflowResult};
+use overdrive_core::workflow::{
+    AlwaysLiveCursor, JournalCursor, Workflow, WorkflowCtx, WorkflowResult,
+};
 
 // `ProvisionRecord` (struct + `impl Workflow`) was promoted to the
 // shared `overdrive-core::testing::workflow` fixture in step 01-03 so
@@ -40,7 +42,10 @@ async fn provision_record_drives_to_terminal_workflow_result() {
     let transport: Arc<dyn Transport> = Arc::new(SimTransport::new());
     let target: SocketAddr = "127.0.0.1:9000".parse().expect("valid addr");
 
-    let ctx = WorkflowCtx::new(clock, transport, entropy);
+    // No durable journal in the author-surface test — every ctx.call
+    // fires live and records nothing (AlwaysLiveCursor).
+    let journal: Arc<dyn JournalCursor> = Arc::new(AlwaysLiveCursor);
+    let ctx = WorkflowCtx::new(clock, transport, entropy, journal);
 
     let workflow = ProvisionRecord::new(target);
 

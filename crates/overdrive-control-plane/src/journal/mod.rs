@@ -171,6 +171,14 @@ pub enum JournalEntry {
         /// replay-equivalence; the full body lives in the
         /// `external_call_results` observation row.
         response_digest: overdrive_core::id::ContentHash,
+        /// The slice-01 `CallResponse` value — bytes delivered by the
+        /// transport effect. Carried so a resumed run replays a
+        /// byte-equal `CallResponse` without re-firing the effect
+        /// (ADR-0064 §3, the exactly-once guarantee). Additive
+        /// `#[serde(default)]` per ADR-0063 §2 (no version bump); older
+        /// `CallResult` bytes lacking the field decode `bytes_sent = 0`.
+        #[serde(default)]
+        bytes_sent: usize,
     },
 
     /// The workflow ran to a terminal value (slice 01). Records the

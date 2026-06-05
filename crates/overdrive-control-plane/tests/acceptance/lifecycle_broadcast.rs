@@ -266,7 +266,7 @@ proptest! {
             let test_broker = parking_lot::Mutex::new(
                 overdrive_core::eval_broker::EvaluationBroker::new(),
             );
-            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node, allocator, &test_broker)
+            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node, allocator, &test_broker, None)
                 .await
                 .expect("dispatch must succeed");
 
@@ -337,6 +337,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         &writer_node,
         allocator,
         &test_broker,
+        None,
     )
     .await
     .expect("dispatch must succeed even on driver failure (failure is recorded)");
@@ -481,6 +482,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         &writer_node,
         allocator,
         &test_broker,
+        None,
     )
     .await
     .expect("dispatch must succeed");

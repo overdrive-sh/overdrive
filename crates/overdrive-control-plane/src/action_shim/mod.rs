@@ -35,6 +35,8 @@ use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServic
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
+use crate::journal::WorkflowId;
+use crate::workflow_runtime::WorkflowEngine;
 
 /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
 /// module docstring of [`dataplane_update_service`] for the
@@ -393,6 +395,7 @@ pub async fn dispatch(
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
+    workflow_engine: Option<(&WorkflowEngine, &WorkflowId)>,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
@@ -407,6 +410,7 @@ pub async fn dispatch(
             writer_node,
             &allocator,
             broker,
+            workflow_engine,
         )
         .await;
         if let Err(err) = result {
@@ -438,12 +442,37 @@ async fn dispatch_single(
     writer_node: &NodeId,
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
+    workflow_engine: Option<(&WorkflowEngine, &WorkflowId)>,
 ) -> Result<(), ShimError> {
     match action {
-        // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
-        // HttpCall placeholder are all "no dispatch needed" — the
-        // action is observation-only or deferred.
-        Action::Noop | Action::StartWorkflow { .. } | Action::HttpCall { .. } => Ok(()),
+        // No-op (Action::Noop) and the Phase 3 HttpCall placeholder are
+        // "no dispatch needed" — observation-only or deferred. (Per
+        // ADR-0064 §5 `StartWorkflow` is NO LONGER in this no-op group —
+        // it has its own arm below that hands the instance to the
+        // WorkflowEngine off the shim.)
+        Action::Noop | Action::HttpCall { .. } => Ok(()),
+        // StartWorkflow: hand the instance to the WorkflowEngine off the
+        // shim — exactly as Action::StartAllocation -> Driver::start
+        // (ADR-0064 §5, DDD-5, the RATIFY-flagged engine↔reconciler
+        // boundary). The engine spawns the author's `async fn run` as a
+        // tracked async task and journals its terminal; it is NOT run as
+        // a per-tick reconcile loop. The emitting workflow-lifecycle
+        // reconciler stays pure-sync.
+        //
+        // When no engine is wired (the production reconciler-runtime path
+        // until 01-06's full boot composition lands), the start is a
+        // no-op for this tick — the level-triggered reconciler re-emits
+        // it once the engine is composed. This mirrors the
+        // StartAllocation arm's tolerance of a level-triggered re-enqueue.
+        Action::StartWorkflow { spec, correlation } => {
+            let Some((engine, workflow_id)) = workflow_engine else {
+                return Ok(());
+            };
+            engine
+                .start(&spec, &correlation, workflow_id)
+                .await
+                .map_err(|err| ShimError::WorkflowEngine { message: err.to_string() })
+        }
         // FinalizeFailed: the reconciler has decided this allocation
         // has reached a terminal lifecycle moment. Per ADR-0037 §4 the
         // shim threads the `Action.terminal` value onto BOTH
@@ -1026,4 +1055,13 @@ pub enum ShimError {
     /// `deregister_local_backend` shim dispatch failed (ADR-0053 § 3).
     #[error("deregister_local_backend dispatch failed")]
     DeregisterLocalBackend(#[from] deregister_local_backend::DeregisterLocalBackendDispatchError),
+    /// The `WorkflowEngine::start` dispatch failed (ADR-0064 §5) — the
+    /// engine could not resolve the workflow kind or load its journal.
+    /// The shim surfaces this as a typed `ShimError` rather than swallow
+    /// it, mirroring the StartAllocation driver-failure surface.
+    #[error("workflow engine start failed: {message}")]
+    WorkflowEngine {
+        /// Cause string from the engine's typed `WorkflowEngineError`.
+        message: String,
+    },
 }

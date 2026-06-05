@@ -1237,6 +1237,14 @@ pub async fn run_convergence_tick(
             &state.node_id,
             std::sync::Arc::clone(&state.allocator),
             state.runtime.broker_mutex(),
+            // The WorkflowEngine is not yet composed into the
+            // reconciler-runtime boot path — that lands fully exercised in
+            // 01-06's walking skeleton (composition root probing both the
+            // view-store AND journal-store at boot). Until then a
+            // StartWorkflow action is a no-op for this tick; the
+            // level-triggered workflow-lifecycle reconciler re-emits it
+            // once the engine is wired. ADR-0064 §5.
+            None,
         )
         .await
         .map_err(ConvergenceError::Shim)?;

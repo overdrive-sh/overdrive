@@ -31,6 +31,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use thiserror::Error;
 
+use crate::id::CorrelationKey;
 use crate::traits::transport::TransportError;
 use crate::traits::{Clock, Entropy, Transport};
 
@@ -114,6 +115,115 @@ pub enum WorkflowCtxError {
     /// The underlying [`Transport`] effect failed.
     #[error("workflow ctx.call transport error: {0}")]
     Transport(#[from] TransportError),
+
+    /// The engine's journal-cursor handle failed to durably record a
+    /// live `ctx` await-point (append + fsync + advance). Per ADR-0063
+    /// §4 (fsync-then-suspend) the engine MUST surface this rather than
+    /// continue against an unjournaled effect — a resume would re-fire
+    /// the effect, breaking exactly-once.
+    #[error("workflow journal record failed: {message}")]
+    JournalRecord {
+        /// Cause string from the engine's journal handle.
+        message: String,
+    },
+}
+
+/// The engine-owned **journal-cursor handle** the [`WorkflowCtx`] consults
+/// at every await-point — the core-side surface of the durable replay
+/// cursor (ADR-0064 §1, §3).
+///
+/// # Why this is a trait in `overdrive-core`
+///
+/// Per ADR-0064 §1 the `WorkflowCtx` *type* lives in core and carries "a
+/// journal-cursor handle whose concrete async I/O is performed by the
+/// engine in `overdrive-control-plane`". This trait IS that handle: a
+/// **declaration only**. Its methods speak in core types
+/// ([`CallResponse`], [`CorrelationKey`]) and its single concrete
+/// implementation — over `Arc<dyn JournalStore>` + a per-instance cursor
+/// — lives in `overdrive-control-plane::workflow_runtime`, where tokio +
+/// the real journal I/O are allowed. The trait declaration pulls no
+/// runtime into core (it uses `async_trait`, already a core dep; the
+/// dst-lint gate finds no `Instant::now` / `rand::*` / `tokio::*` here).
+///
+/// # The check-then-record contract (ADR-0064 §3)
+///
+/// Every `ctx` await-op is a check-then-record point. For `ctx.call` the
+/// cursor is consulted via [`replay_call`](Self::replay_call):
+///
+/// - **Replay (cursor < journal length):** the handle returns
+///   `Some(recorded)` — the recorded [`CallResponse`] for this step. The
+///   ctx returns it WITHOUT firing the transport effect (the exactly-once
+///   guarantee — a resumed run re-derives the response from the journal,
+///   never re-performs the effect). The cursor advances.
+/// - **Live (cursor == journal length):** the handle returns `None`. The
+///   ctx fires the real effect through the injected port, then calls
+///   [`record_call`](Self::record_call) to append the result entry with
+///   fsync BEFORE returning and advance the cursor.
+///
+/// A handle whose `replay_call` always returns `None` and whose
+/// `record_call` is a no-op models a non-durable "always-live" execution
+/// — the shape the core/sim tests inject when no real journal is wired
+/// (see [`AlwaysLiveCursor`]).
+#[async_trait]
+pub trait JournalCursor: Send + Sync {
+    /// Check the cursor for a recorded `ctx.call` at the current step.
+    ///
+    /// # Postconditions
+    ///
+    /// Returns `Some(response)` when replaying (a recorded entry exists at
+    /// the cursor for `correlation`) — the caller MUST NOT fire the
+    /// effect and MUST return the recorded response. Returns `None` when
+    /// live (cursor at the journal end) — the caller fires the effect and
+    /// then calls [`record_call`](Self::record_call). Implementations
+    /// advance the cursor on a replay hit.
+    async fn replay_call(&self, correlation: &CorrelationKey) -> Option<CallResponse>;
+
+    /// Record a freshly-fired `ctx.call` result durably and advance the
+    /// cursor (the live path).
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(())` the response is durably journaled (append + fsync per
+    /// ADR-0063 §4) and the cursor has advanced past this step, so a
+    /// subsequent resume replays it via [`replay_call`](Self::replay_call)
+    /// without re-firing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::JournalRecord`] when the durable
+    /// append/fsync fails — the engine surfaces this rather than continue
+    /// against an unjournaled effect.
+    async fn record_call(
+        &self,
+        correlation: &CorrelationKey,
+        response: &CallResponse,
+    ) -> Result<(), WorkflowCtxError>;
+}
+
+/// A trivial [`JournalCursor`] that never replays and never records — it
+/// models a **non-durable, always-live** execution.
+///
+/// Used by the core author-surface acceptance test (S-WP-01-01) and any
+/// caller that drives a [`Workflow`] without a real journal wired: every
+/// `ctx.call` fires its effect (no replay short-circuit) and nothing is
+/// persisted (no-op record). The durable handle — which DOES replay and
+/// record — lives in `overdrive-control-plane::workflow_runtime`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AlwaysLiveCursor;
+
+#[async_trait]
+impl JournalCursor for AlwaysLiveCursor {
+    async fn replay_call(&self, _correlation: &CorrelationKey) -> Option<CallResponse> {
+        None
+    }
+
+    async fn record_call(
+        &self,
+        _correlation: &CorrelationKey,
+        _response: &CallResponse,
+    ) -> Result<(), WorkflowCtxError> {
+        Ok(())
+    }
 }
 
 /// The injected non-determinism bundle handed to [`Workflow::run`] — the
@@ -127,40 +237,78 @@ pub struct WorkflowCtx {
     clock: Arc<dyn Clock>,
     transport: Arc<dyn Transport>,
     entropy: Arc<dyn Entropy>,
+    /// The engine-owned durable replay cursor (ADR-0064 §1, §3). Every
+    /// `ctx` await-op consults it: replay short-circuits to the recorded
+    /// result, live fires-then-records. The concrete impl over a real
+    /// journal lives in `overdrive-control-plane`; core tests inject
+    /// [`AlwaysLiveCursor`].
+    journal: Arc<dyn JournalCursor>,
 }
 
+/// The `purpose` component of the [`CorrelationKey`] derived for a
+/// `ctx.call` await-point. Stable so replay re-derives the identical key.
+const CALL_PURPOSE: &str = "workflow-ctx-call";
+
 impl WorkflowCtx {
-    /// Construct a ctx over the injected ports. The ports are mandatory
-    /// (no builder, no defaulting) per
+    /// Construct a ctx over the injected ports + the engine's journal
+    /// cursor. All are mandatory (no builder, no defaulting) per
     /// `.claude/rules/development.md` § "Port-trait dependencies" — a
     /// caller that forgets a port fails to compile rather than silently
     /// inheriting production behaviour.
+    ///
+    /// Drivers that run a workflow without a durable journal (the core
+    /// author-surface test, S-WP-01-01) pass
+    /// `Arc::new(AlwaysLiveCursor)`; the durable engine passes its
+    /// real journal-cursor handle.
     #[must_use]
     pub fn new(
         clock: Arc<dyn Clock>,
         transport: Arc<dyn Transport>,
         entropy: Arc<dyn Entropy>,
+        journal: Arc<dyn JournalCursor>,
     ) -> Self {
-        Self { clock, transport, entropy }
+        Self { clock, transport, entropy, journal }
     }
 
     /// Perform one external effect through the injected [`Transport`]
-    /// and return its observable result. The slice-01 await-surface
-    /// (ADR-0064 §4) — the only `ctx` method this slice ships.
+    /// and return its observable result — the slice-01 await-surface
+    /// (ADR-0064 §4), the only `ctx` method this slice ships.
     ///
-    /// In live execution (later slices) the engine appends a
-    /// `CallResult` journal entry with fsync before returning; on replay
-    /// it short-circuits to the recorded response without re-firing the
-    /// effect (the exactly-once guarantee). This slice defines the
-    /// surface; the journaling engine lands in `overdrive-control-plane`.
+    /// **Check-then-record (ADR-0064 §3).** The op first consults the
+    /// engine's journal cursor:
+    /// - **Replay:** if the cursor has a recorded response for this
+    ///   step, it is returned WITHOUT firing the transport effect — the
+    ///   exactly-once guarantee on resume (K1).
+    /// - **Live:** otherwise the effect fires through the injected
+    ///   [`Transport`], the result is durably recorded (append + fsync
+    ///   per ADR-0063 §4) via the cursor BEFORE returning, and the
+    ///   cursor advances.
     ///
     /// # Errors
     ///
     /// Returns [`WorkflowCtxError::Transport`] when the underlying
-    /// transport effect fails.
+    /// transport effect fails, or [`WorkflowCtxError::JournalRecord`]
+    /// when the live-path durable record fails.
     pub async fn call(&self, request: CallRequest) -> Result<CallResponse, WorkflowCtxError> {
+        // Correlation is deterministic across attempts/replays: derived
+        // from (target, payload-digest, purpose) so a resumed run
+        // re-derives the identical key and finds its recorded response
+        // (ADR-0035 § Reconciler I/O rule 2; ADR-0064 §3).
+        let payload_digest = crate::id::ContentHash::of(&request.payload);
+        let correlation =
+            CorrelationKey::derive(&request.target.to_string(), &payload_digest, CALL_PURPOSE);
+
+        // Replay path — return the recorded response, never re-fire.
+        if let Some(recorded) = self.journal.replay_call(&correlation).await {
+            return Ok(recorded);
+        }
+
+        // Live path — fire the real effect, then durably record before
+        // returning (fsync-then-suspend, ADR-0063 §4).
         let bytes_sent = self.transport.send_datagram(request.target, request.payload).await?;
-        Ok(CallResponse { bytes_sent })
+        let response = CallResponse { bytes_sent };
+        self.journal.record_call(&correlation, &response).await?;
+        Ok(response)
     }
 
     /// The injected clock. Workflow bodies read time only through this

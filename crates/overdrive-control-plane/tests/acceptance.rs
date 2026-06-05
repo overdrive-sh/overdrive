@@ -259,5 +259,6 @@ mod acceptance {
     // lives under `tests/integration/workflow_journal/`.
     mod action_shim_dispatches_start_workflow_to_engine; // S-WP-01-11
     mod lifecycle_reconciler_rehydrates_on_restart; // S-WP-01-08
-    mod workflow_emit_action_lands_in_raft_channel; // S-WP-03-03
+    mod workflow_emit_action_lands_in_raft_channel;
+    mod workflow_engine_replay_cursor; // S-WP-01-05 replay-cursor unit tests // S-WP-03-03
 }

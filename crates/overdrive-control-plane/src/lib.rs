@@ -109,6 +109,12 @@ pub mod veth_provisioner;
 pub mod view_store;
 pub mod vip_allocator_config;
 pub mod worker;
+// `workflow_runtime` — the durable-async `WorkflowEngine` (ADR-0064 §1,
+// §3, §5). Drives author `async fn run` futures off the action-shim with
+// crash-safe journal-cursor replay. The `Workflow` trait + `WorkflowCtx`
+// it drives live in `overdrive-core::workflow`; this is the tokio-holding
+// executor that core's trait declaration delegates to.
+pub mod workflow_runtime;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

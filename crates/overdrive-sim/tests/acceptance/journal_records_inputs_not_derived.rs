@@ -49,6 +49,7 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
         step: 0,
         correlation: "provision-record/0".to_string(),
         response_digest,
+        bytes_sent: 0,
     };
 
     store.append(&workflow_id, &started).await.expect("append Started");
@@ -76,7 +77,7 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
         other => panic!("first entry must be Started, got {other:?}"),
     }
     match &loaded[1] {
-        JournalEntry::CallResult { step, correlation, response_digest: got_resp } => {
+        JournalEntry::CallResult { step, correlation, response_digest: got_resp, .. } => {
             assert_eq!(*step, 0, "CallResult records the await-point step index (an input)");
             assert_eq!(correlation, "provision-record/0", "CallResult records the correlation key");
             assert_eq!(
