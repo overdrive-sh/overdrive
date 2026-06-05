@@ -90,13 +90,43 @@ fn svid_spec_subject_uri_equals_requested_spiffe_id() {
 /// The pathLen value is carried as `CertRole::Intermediate { path_len: 0 }`
 /// (sum type makes an unbounded intermediate unrepresentable, per
 /// `development.md` § "Type-driven design").
+///
+/// Universe (port-exposed observable surface, never internal builder fields):
+/// `{role, is_ca, path_len, key_usages, key_usage_critical, subject}`. The
+/// assertion is exact-equality over that whole surface — fail-closed on any
+/// stray key usage (e.g. a `cRLSign` that belongs to the root, or a
+/// `digitalSignature` that would blur the CA profile).
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn intermediate_spec_is_ca_true_with_path_len_zero_and_key_cert_sign() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03 / CertSpec::intermediate profile = \
-         CA:TRUE + pathLenConstraint=0 + keyCertSign + keyUsage critical)"
+    // The intermediate (node) CA subject identifies the per-node authority
+    // under the trust domain. The single-node intermediate is pathLen=0:
+    // exactly one intermediate, leaves only, no further intermediates.
+    let subject = SpiffeId::new("spiffe://overdrive.local/ca/node").expect("valid node subject");
+    let spec = CertSpec::intermediate(subject.clone());
+
+    // role — the sum type carries Intermediate with an explicit pathLen=0
+    // field (an unbounded intermediate is unrepresentable by construction).
+    assert_eq!(spec.role(), CertRole::Intermediate { path_len: 0 });
+
+    // is_ca — CA:TRUE.
+    assert!(spec.is_ca(), "intermediate must be CA:TRUE");
+
+    // path_len — pathLenConstraint=0 (issues leaves only).
+    assert_eq!(spec.path_len(), Some(0), "intermediate carries pathLenConstraint=0");
+
+    // key_usages — exactly keyCertSign, nothing else (fail-closed: no cRLSign,
+    // no digitalSignature).
+    assert_eq!(
+        spec.key_usages(),
+        vec![KeyUsage::KeyCertSign],
+        "intermediate carries exactly keyCertSign"
     );
+
+    // key_usage_critical — keyUsage marked critical.
+    assert!(spec.key_usage_critical(), "keyUsage must be marked critical");
+
+    // subject — preserved through the SpiffeId newtype.
+    assert_eq!(spec.subject(), &subject);
 }
 
 // ---------------------------------------------------------------------------

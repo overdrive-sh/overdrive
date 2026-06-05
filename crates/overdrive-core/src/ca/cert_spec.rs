@@ -111,6 +111,23 @@ impl CertSpec {
         Self { role: CertRole::Root, subject }
     }
 
+    /// Build the **intermediate** (per-node) certificate profile.
+    ///
+    /// The produced profile is `CA:TRUE`, carries `keyCertSign` (signing-only,
+    /// no `cRLSign`), marks `keyUsage` critical, and is bounded by
+    /// `pathLenConstraint = 0` ([`CertRole::Intermediate { path_len: 0 }`](CertRole::Intermediate)) —
+    /// it issues leaves only and cannot mint further intermediates. The
+    /// single-node deployment has exactly one intermediate beneath the root, so
+    /// `path_len` is fixed at `0`; the unbounded intermediate is unrepresentable
+    /// by the sum type.
+    ///
+    /// Infallible: an intermediate profile is always valid for any node-authority
+    /// subject. Per ADR-0063 D5.
+    #[must_use]
+    pub const fn intermediate(subject: SpiffeId) -> Self {
+        Self { role: CertRole::Intermediate { path_len: 0 }, subject }
+    }
+
     /// The role this profile plays in the trust hierarchy.
     #[must_use]
     pub const fn role(&self) -> CertRole {
