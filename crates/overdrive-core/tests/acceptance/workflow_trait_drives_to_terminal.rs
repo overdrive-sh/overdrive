@@ -16,36 +16,20 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use bytes::Bytes;
-
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{CallRequest, Workflow, WorkflowCtx, WorkflowResult};
+use overdrive_core::workflow::{Workflow, WorkflowCtx, WorkflowResult};
+
+// `ProvisionRecord` (struct + `impl Workflow`) was promoted to the
+// shared `overdrive-core::testing::workflow` fixture in step 01-03 so
+// `overdrive-sim`'s journal test can construct the same reference
+// workflow. The canonical clean `async fn run` body the slice-01
+// K6 / D-INH-4 syn-scans read now lives there (see those scans'
+// `PROVISION_RECORD_SOURCE` const).
+use overdrive_core::testing::workflow::ProvisionRecord;
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::transport::SimTransport;
-
-/// A minimal two-step durable sequence: perform one external
-/// `ctx.call` (the non-idempotent-to-repeat "provision write"), then
-/// return a terminal `Success`. Written as one ordinary `async fn` —
-/// no hand-written step enum, no transition match (S-WP-01-02).
-struct ProvisionRecord {
-    /// Where the provision-write effect is addressed.
-    target: SocketAddr,
-}
-
-#[async_trait]
-impl Workflow for ProvisionRecord {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
-        let request =
-            CallRequest { target: self.target, payload: Bytes::from_static(b"provision-record") };
-        match ctx.call(request).await {
-            Ok(_response) => WorkflowResult::Success,
-            Err(_err) => WorkflowResult::Failed { reason: "provision call failed".to_string() },
-        }
-    }
-}
 
 #[tokio::test]
 async fn provision_record_drives_to_terminal_workflow_result() {
@@ -58,7 +42,7 @@ async fn provision_record_drives_to_terminal_workflow_result() {
 
     let ctx = WorkflowCtx::new(clock, transport, entropy);
 
-    let workflow = ProvisionRecord { target };
+    let workflow = ProvisionRecord::new(target);
 
     // Drive the author's `run` through the driving port to its terminal.
     let result = workflow.run(&ctx).await;

@@ -40,7 +40,11 @@ use syn::visit::Visit;
 use syn::{ImplItem, Item};
 
 /// The source file carrying the canonical clean `ProvisionRecord` body.
-const PROVISION_RECORD_SCAFFOLD: &str = "tests/acceptance/workflow_trait_drives_to_terminal.rs";
+// Step 01-03 promoted `ProvisionRecord` (struct + `impl Workflow`) into
+// the shared `overdrive-core::testing::workflow` fixture so the sim
+// journal test can construct it. The canonical clean `async fn run` body
+// this D-INH-4 scan reads now lives there, not in the sibling test.
+const PROVISION_RECORD_SCAFFOLD: &str = "src/testing/workflow.rs";
 
 /// One banned ambient-nondeterminism source found inside a workflow body.
 #[derive(Debug, Clone, PartialEq, Eq)]

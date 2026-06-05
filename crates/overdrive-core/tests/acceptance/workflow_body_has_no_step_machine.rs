@@ -38,7 +38,11 @@ use syn::visit::Visit;
 use syn::{Expr, ImplItem, Item, Stmt};
 
 /// The source file carrying the canonical clean `ProvisionRecord` body.
-const PROVISION_RECORD_SCAFFOLD: &str = "tests/acceptance/workflow_trait_drives_to_terminal.rs";
+// Step 01-03 promoted `ProvisionRecord` (struct + `impl Workflow`) into
+// the shared `overdrive-core::testing::workflow` fixture so the sim
+// journal test can construct it. The canonical clean `async fn run` body
+// this K6 scan reads now lives there, not in the sibling acceptance test.
+const PROVISION_RECORD_SCAFFOLD: &str = "src/testing/workflow.rs";
 
 /// One mechanically-detected unit of step-machine boilerplate.
 #[derive(Debug, Clone, PartialEq, Eq)]

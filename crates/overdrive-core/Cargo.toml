@@ -91,6 +91,15 @@ test-utils = []
 integration-tests = []
 
 [dev-dependencies]
+# Self dev-dep enabling `test-utils` so this crate's OWN integration
+# tests under `tests/` (a separate compilation that does not inherit the
+# lib's `cfg(test)`) can reach the `#[cfg(feature = "test-utils")]`
+# `overdrive_core::testing` module. Step 01-03 promoted the shared
+# `ProvisionRecord` workflow fixture into `testing::workflow`, which
+# `tests/acceptance/workflow_trait_drives_to_terminal.rs` now imports;
+# without this feature the integration test sees `testing` gated out.
+# Production builds NEVER enable `test-utils` (see [features] above).
+overdrive-core = { path = ".", features = ["test-utils"] }
 proptest.workspace = true
 rstest.workspace   = true
 # Static scan of `src/**/*.rs` for the §2.3 API-shape invariant. Used only

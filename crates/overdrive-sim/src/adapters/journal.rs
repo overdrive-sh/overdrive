@@ -1,0 +1,328 @@
+//! `SimJournalStore` — in-memory `JournalStore` implementation for DST.
+//!
+//! Sibling to `RedbJournalStore` (production, step 01-04). Stores
+//! pre-encoded CBOR `Vec<u8>` blobs keyed on `(WorkflowId, u32)` so the
+//! sim has byte-for-byte storage parity with the production redb adapter
+//! (ADR-0063 §3) — append round-trips through the same `ciborium` codec
+//! the production path uses, catching any codec skew at the sim layer.
+//!
+//! Ordering: the storage map is `BTreeMap`, not `HashMap`. `load_journal`
+//! is a range scan over `(id, *)` and DST reproducibility requires a
+//! deterministic iteration order (`.claude/rules/development.md`
+//! § "Ordered-collection choice"). The `(WorkflowId, u32)` tuple key
+//! gives the ascending-step ordering for free, mirroring redb's tuple-key
+//! range-scan shape.
+//!
+//! # Failure injection
+//!
+//! The `WorkflowJournalWriteOrdering` invariant (ADR-0063 §4 / step
+//! 01-06) asserts that a failed `append` leaves the journal unobservable
+//! — the entry is neither persisted nor returned by a later
+//! `load_journal`. The sim exposes
+//! [`SimJournalStore::inject_fsync_failure`] /
+//! [`SimJournalStore::clear_fsync_failure`] for this; the production
+//! [`RedbJournalStore`] (step 01-04) has no such surface.
+//!
+//! When the failure flag is set:
+//! - `append` returns `Err(JournalStoreError::FsyncFailed)` WITHOUT
+//!   inserting into the underlying map.
+//! - `probe` returns `Err(ProbeError::WriteFailed)` with the same
+//!   underlying cause.
+//!
+//! The flag is sticky until [`SimJournalStore::clear_fsync_failure`]
+//! resets it — matching the invariant body which injects, asserts
+//! non-observability, then clears and continues.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use async_trait::async_trait;
+use parking_lot::Mutex;
+
+use overdrive_control_plane::journal::{
+    JournalEntry, JournalStore, JournalStoreError, ProbeError, Result as JsResult, WorkflowId,
+};
+
+/// Reserved workflow id the Earned-Trust probe writes its sentinel entry
+/// under. Validated by `WorkflowId::new` at construction so any future
+/// tightening of that validator regresses this constant at compile time
+/// (caught by the `probe_sentinel_id_is_valid` unit test).
+const PROBE_WORKFLOW_ID: &str = "probe-wf-earned-trust";
+
+/// In-memory `JournalStore` for DST.
+///
+/// Construct via [`SimJournalStore::new`]; the constructor returns an
+/// empty store (no entries, no failure flag). All operations serialise
+/// behind a single `parking_lot::Mutex` — per-test cardinality
+/// (single-digit instances, low-tens of entries) makes contention a
+/// non-concern, matching `SimViewStore`.
+pub struct SimJournalStore {
+    /// Storage map keyed on `(WorkflowId, step)` with pre-encoded CBOR
+    /// bytes as values. `BTreeMap` for the deterministic ascending-step
+    /// range scan `load_journal` relies on
+    /// (`.claude/rules/development.md` § "Ordered-collection choice").
+    storage: Mutex<BTreeMap<(WorkflowId, u32), Vec<u8>>>,
+
+    /// Sticky fsync-failure injection flag. When set, the next (and every
+    /// subsequent) `append` / `probe` call returns
+    /// `Err(JournalStoreError::FsyncFailed)` WITHOUT mutating `storage`,
+    /// until `clear_fsync_failure` resets it. Wrapped in
+    /// `Arc<AtomicBool>` so cloned references stay coherent across tasks.
+    inject_fsync_failure_flag: Arc<AtomicBool>,
+}
+
+impl SimJournalStore {
+    /// Construct an empty `SimJournalStore` with no failure injection
+    /// configured.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            storage: Mutex::new(BTreeMap::new()),
+            inject_fsync_failure_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Arm fsync-failure injection: the next `append` (and `probe`)
+    /// returns `Err(JournalStoreError::FsyncFailed)` WITHOUT persisting,
+    /// until [`clear_fsync_failure`](Self::clear_fsync_failure) resets
+    /// it. Used by the `WorkflowJournalWriteOrdering` invariant (step
+    /// 01-06) to assert a failed append leaves the journal
+    /// unobservable.
+    pub fn inject_fsync_failure(&self) {
+        self.inject_fsync_failure_flag.store(true, Ordering::SeqCst);
+    }
+
+    /// Clear a previously-armed fsync failure, restoring normal
+    /// success behaviour for subsequent `append` / `probe` calls.
+    pub fn clear_fsync_failure(&self) {
+        self.inject_fsync_failure_flag.store(false, Ordering::SeqCst);
+    }
+
+    /// Encode an entry to CBOR bytes via `ciborium` — the same codec the
+    /// production redb adapter uses, so the sim catches codec skew.
+    fn encode(entry: &JournalEntry) -> JsResult<Vec<u8>> {
+        let mut buf: Vec<u8> = Vec::new();
+        ciborium::into_writer(entry, &mut buf)
+            .map_err(|e| JournalStoreError::Encode(e.to_string()))?;
+        Ok(buf)
+    }
+
+    /// Decode CBOR bytes back into a `JournalEntry`.
+    fn decode(bytes: &[u8]) -> JsResult<JournalEntry> {
+        ciborium::from_reader(bytes).map_err(|e| JournalStoreError::Decode(e.to_string()))
+    }
+
+    /// The next step index for `workflow_id` = the count of entries
+    /// already appended for it. Append order maps 1:1 to ascending step
+    /// per the [`JournalStore::append`] contract.
+    fn next_step(storage: &BTreeMap<(WorkflowId, u32), Vec<u8>>, workflow_id: &WorkflowId) -> u32 {
+        // Count entries whose key's first component is this workflow_id.
+        // BTreeMap range gives the contiguous slice for free.
+        let lo = (workflow_id.clone(), 0u32);
+        let hi = (workflow_id.clone(), u32::MAX);
+        u32::try_from(storage.range(lo..=hi).count())
+            .unwrap_or_else(|_| unreachable!("a single instance cannot exceed u32::MAX entries"))
+    }
+}
+
+impl Default for SimJournalStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl JournalStore for SimJournalStore {
+    async fn append(&self, workflow_id: &WorkflowId, entry: &JournalEntry) -> JsResult<()> {
+        // Encode BEFORE taking the lock / checking injection so an encode
+        // failure surfaces cleanly without mutating any state.
+        let bytes = Self::encode(entry)?;
+
+        // Injection: fail the append WITHOUT persisting. Per ADR-0063 §4
+        // the entry must not become observable when fsync fails.
+        if self.inject_fsync_failure_flag.load(Ordering::SeqCst) {
+            return Err(JournalStoreError::FsyncFailed {
+                message: "injected fsync failure (SimJournalStore)".to_string(),
+            });
+        }
+
+        let mut storage = self.storage.lock();
+        let step = Self::next_step(&storage, workflow_id);
+        storage.insert((workflow_id.clone(), step), bytes);
+        drop(storage);
+        Ok(())
+    }
+
+    async fn load_journal(&self, workflow_id: &WorkflowId) -> JsResult<Vec<JournalEntry>> {
+        let lo = (workflow_id.clone(), 0u32);
+        let hi = (workflow_id.clone(), u32::MAX);
+        let storage = self.storage.lock();
+        // BTreeMap range scan yields keys in ascending `(id, step)` order;
+        // filtered to this instance, that IS ascending step order. Decode
+        // into an owned Vec, then drop the guard before returning so the
+        // lock is held only for the scan (significant_drop_tightening).
+        let mut out = Vec::with_capacity(storage.range(lo.clone()..=hi.clone()).count());
+        for (_key, bytes) in storage.range(lo..=hi) {
+            out.push(Self::decode(bytes)?);
+        }
+        drop(storage);
+        Ok(out)
+    }
+
+    async fn probe(&self) -> std::result::Result<(), ProbeError> {
+        // Honour the injection flag — a sim probe under injected failure
+        // refuses startup exactly as the real adapter would on a
+        // read-only / broken substrate.
+        if self.inject_fsync_failure_flag.load(Ordering::SeqCst) {
+            return Err(ProbeError::WriteFailed {
+                source: JournalStoreError::FsyncFailed {
+                    message: "injected fsync failure (SimJournalStore probe)".to_string(),
+                },
+            });
+        }
+
+        let probe_id = WorkflowId::new(PROBE_WORKFLOW_ID)
+            .unwrap_or_else(|_| unreachable!("PROBE_WORKFLOW_ID is a valid instance id"));
+        let sentinel = JournalEntry::Terminal { result: "earned-trust-probe-v1".to_string() };
+        let wrote = Self::encode(&sentinel).map_err(|source| ProbeError::WriteFailed { source })?;
+
+        // Write → read back byte-equal → delete, all under one lock so
+        // no concurrent op can interleave with the sentinel. The guard is
+        // dropped explicitly before each return (significant_drop_tightening).
+        let key = (probe_id, 0u32);
+        let mut storage = self.storage.lock();
+        storage.insert(key.clone(), wrote.clone());
+        let got = storage
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| unreachable!("sentinel was just inserted under the same lock"));
+        storage.remove(&key);
+        drop(storage);
+        if got != wrote {
+            return Err(ProbeError::RoundTripMismatch { wrote, got });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use overdrive_core::id::ContentHash;
+    use proptest::prelude::*;
+
+    /// Strategy for a 32-byte digest wrapped as `ContentHash`.
+    fn content_hash_strategy() -> impl Strategy<Value = ContentHash> {
+        proptest::array::uniform32(any::<u8>()).prop_map(ContentHash::from_bytes)
+    }
+
+    /// Strategy for one arbitrary `JournalEntry` (all slice-01 variants).
+    fn journal_entry_strategy() -> impl Strategy<Value = JournalEntry> {
+        prop_oneof![
+            (content_hash_strategy(), content_hash_strategy()).prop_map(
+                |(spec_digest, input_digest)| JournalEntry::Started { spec_digest, input_digest }
+            ),
+            (any::<u32>(), "[a-z0-9/-]{1,32}", content_hash_strategy()).prop_map(
+                |(step, correlation, response_digest)| JournalEntry::CallResult {
+                    step,
+                    correlation,
+                    response_digest,
+                }
+            ),
+            "[a-zA-Z ]{1,32}".prop_map(|result| JournalEntry::Terminal { result }),
+        ]
+    }
+
+    fn workflow_id() -> WorkflowId {
+        WorkflowId::new("wf-test-0001").expect("valid id")
+    }
+
+    proptest! {
+        /// Round-trip property (ADR-0063 §3): an arbitrary run of entries
+        /// appended to a fresh instance loads back byte-equal and in
+        /// append order. The `Symmetric`/`Roundtrip` Hebert-ch.3 pattern.
+        #[test]
+        fn append_then_load_round_trips_losslessly_and_in_order(
+            entries in proptest::collection::vec(journal_entry_strategy(), 0..16)
+        ) {
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(async {
+                let store = SimJournalStore::new();
+                let id = workflow_id();
+                for entry in &entries {
+                    store.append(&id, entry).await.expect("append");
+                }
+                let loaded = store.load_journal(&id).await.expect("load");
+                prop_assert_eq!(loaded, entries);
+                Ok(())
+            })?;
+        }
+    }
+
+    #[tokio::test]
+    async fn load_journal_for_unknown_instance_is_empty_not_error() {
+        let store = SimJournalStore::new();
+        let id = WorkflowId::new("wf-never-started").expect("valid id");
+        let loaded = store.load_journal(&id).await.expect("load empty");
+        assert!(loaded.is_empty(), "an instance with no entries loads as an empty run");
+    }
+
+    #[tokio::test]
+    async fn injected_fsync_failure_makes_append_fail_without_persisting() {
+        let store = SimJournalStore::new();
+        let id = workflow_id();
+        let entry = JournalEntry::Started {
+            spec_digest: ContentHash::of(b"provision-record"),
+            input_digest: ContentHash::of(b"provision-record"),
+        };
+
+        store.inject_fsync_failure();
+        let err = store.append(&id, &entry).await.expect_err("injected append must fail");
+        assert!(
+            matches!(err, JournalStoreError::FsyncFailed { .. }),
+            "injection surfaces as FsyncFailed, got {err:?}"
+        );
+
+        // Per ADR-0063 §4: the failed append left NO observable entry.
+        let loaded = store.load_journal(&id).await.expect("load after failed append");
+        assert!(loaded.is_empty(), "a failed append must not be observable in the journal");
+
+        // After clearing, append succeeds and is observable.
+        store.clear_fsync_failure();
+        store.append(&id, &entry).await.expect("append after clear");
+        let loaded = store.load_journal(&id).await.expect("load after clear");
+        assert_eq!(loaded, vec![entry], "cleared failure restores normal append");
+    }
+
+    #[tokio::test]
+    async fn probe_succeeds_clean_and_leaves_no_residue() {
+        let store = SimJournalStore::new();
+        store.probe().await.expect("clean probe succeeds");
+
+        // The probe's sentinel must not leak into a real instance's run
+        // nor remain under the probe id.
+        let probe_id = WorkflowId::new(PROBE_WORKFLOW_ID).expect("valid probe id");
+        let residue = store.load_journal(&probe_id).await.expect("load probe id");
+        assert!(residue.is_empty(), "probe must delete its sentinel, leaving no residue");
+    }
+
+    #[tokio::test]
+    async fn probe_under_injected_failure_refuses() {
+        let store = SimJournalStore::new();
+        store.inject_fsync_failure();
+        let err = store.probe().await.expect_err("probe must fail under injection");
+        assert!(
+            matches!(err, ProbeError::WriteFailed { .. }),
+            "injected probe failure surfaces as WriteFailed, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn probe_sentinel_id_is_valid() {
+        // The const must satisfy the WorkflowId validator — guards against
+        // a future validator tightening silently breaking the probe.
+        assert!(WorkflowId::new(PROBE_WORKFLOW_ID).is_ok());
+    }
+}

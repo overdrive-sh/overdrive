@@ -10,3 +10,8 @@
 //! trait level) for the motivation.
 
 pub mod observation_store;
+
+/// Shared workflow test fixtures (`ProvisionRecord`) promoted from the
+/// slice-01 acceptance test so `overdrive-sim`'s journal test (step
+/// 01-03) can construct the same reference workflow. See submodule docs.
+pub mod workflow;

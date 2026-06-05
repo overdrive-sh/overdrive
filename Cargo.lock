@@ -1924,6 +1924,7 @@ dependencies = [
  "ciborium",
  "futures",
  "hex",
+ "overdrive-core",
  "overdrive-sim",
  "proptest",
  "rkyv",
