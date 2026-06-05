@@ -1570,3 +1570,44 @@ attacker-controlled issuance boundary).
 this pass only pins *where the runtime reject lives* (the verifier, not
 `issue_svid`) and retires the aspirational claim. **No new GitHub issue** — this
 is an in-scope contract fix, not a deferral.
+
+### U-CA-2 — `issued_certificates` audit row: concrete-adapter bypass → port-routed `ObservationRow` variant (RESOLVED, 2026-06-06)
+
+**The contradiction DELIVER surfaced.** The `issued_certificates` audit row
+(D6 / US-CA-05 / research Finding 15) first shipped via a **concrete-adapter
+bypass**: a parallel redb table plus inherent methods on the concrete
+`LocalObservationStore`, sidestepping the `ObservationStore` **port** entirely.
+That shape is not DST-testable — it never routes through the trait, so the
+`SimObservationStore` adapter (and the `ca_equivalence` / DST harness that drives
+the port) could not exercise the audit surface. It also contradicts ADR-0063 D6,
+which always specified the row "mirroring `AllocStatusRow` / `NodeHealthRow`" —
+the established sibling pattern is an `ObservationRow` enum variant + a typed
+reader on the trait, reachable on both adapters.
+
+**The user's decision (2026-06-06).** Correct the audit to the faithful
+"mirroring `AllocStatusRow` / `NodeHealthRow`" shape D6 always intended: route
+the audit through the `ObservationStore` port on BOTH the host
+(`LocalObservationStore`) and sim (`SimObservationStore`) adapters, so it is
+DST-testable.
+
+**Resolution (this back-propagation pass).** The landed shape (commit
+`aab5a69b`) makes the `issued_certificates` row a first-class
+`ObservationRow` variant routed through the port on both adapters. The fix is a
+**purely additive trait extension** — two new members, no existing method
+signature changed:
+- `ObservationRow::IssuedCertificate(IssuedCertificateRow)` — a new enum variant,
+  added exactly the way the 5 existing sibling rows were added;
+- `ObservationStore::issued_certificate_rows()` — a typed reader, mirroring the
+  existing `alloc_status_rows()` / `node_health_rows()` / `service_backends_rows()`.
+
+The enum + reader grow additively, the same way every prior observation row was
+added; the rest of the `ObservationStore` surface is untouched. The brief's
+Reuse-Analysis row moves `ObservationStore` from **REUSE AS-IS** to **EXTEND
+(additive)** (tally: 6 REUSE-AS-IS → 5 REUSE-AS-IS + 1 EXTEND), and ADR-0063 D6
+gains an explicit "additive variant + reader through the port on both adapters,
+DST-testable — NOT a concrete-adapter-only surface" clarification.
+
+**No decision reversed.** D6 always specified the observation-row pattern; this
+pass only corrects a non-compliant initial implementation to the shape the ADR
+mandated, and makes the brief's Reuse-Analysis row factually current. **No new
+GitHub issue** — this is an in-scope contract fix, not a deferral.

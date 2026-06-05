@@ -327,6 +327,19 @@ readable via the existing `alloc status` observation path. It is **observation,
 never intent** — the CA *material* is intent (D2); the *record of what was
 issued* is observation. The row is a rkyv versioned envelope
 (`IssuedCertificateRowEnvelope`) mirroring `AllocStatusRow` / `NodeHealthRow`.
+"Mirroring `AllocStatusRow` / `NodeHealthRow`" is concrete: the row is an
+**additive `ObservationRow::IssuedCertificate(IssuedCertificateRow)` variant**
+(a new enum arm, like the existing sibling rows) **plus an additive typed reader
+`ObservationStore::issued_certificate_rows()`** (mirroring
+`alloc_status_rows()` / `node_health_rows()` / `service_backends_rows()`) —
+routed through the `ObservationStore` **port** on BOTH the host
+(`LocalObservationStore`) and sim (`SimObservationStore`) adapters, so the audit
+surface is DST-testable. It is **NOT** a concrete-adapter-only surface (a
+parallel redb table + inherent methods on `LocalObservationStore` that bypass
+the port would not be DST-testable and is explicitly not the intended shape).
+No existing `ObservationStore` method signature changes — the enum + reader grow
+additively, exactly as every prior observation row was added (DELIVER
+back-propagation, commit `aab5a69b`).
 
 **Issuance is never silent:** an issuance whose audit row cannot be written
 surfaces a `CaError` rather than handing out an unaudited certificate (KPI/AC,
@@ -516,6 +529,27 @@ for DISTILL.
 
 ## Changelog
 
+- 2026-06-06 — **D6 clarification — `issued_certificates` is an additive
+  `ObservationRow` variant + typed reader through the port, not a
+  concrete-adapter surface (DELIVER back-propagation). No decision reversed.**
+  The audit row first shipped via a non-compliant bypass (a parallel redb table
+  + inherent methods on `LocalObservationStore`, which never routed through the
+  `ObservationStore` trait and so was not DST-testable). The user directed the
+  correction (2026-06-06) to the faithful "mirroring `AllocStatusRow` /
+  `NodeHealthRow`" shape D6 always intended: the audit now routes through the
+  `ObservationStore` port on BOTH `LocalObservationStore` and
+  `SimObservationStore` (commit `aab5a69b`). The fix is two additive trait
+  members — `ObservationRow::IssuedCertificate(IssuedCertificateRow)` (a new enum
+  variant, like the 5 existing sibling rows) and
+  `ObservationStore::issued_certificate_rows()` (a typed reader mirroring
+  `alloc_status_rows()` / `node_health_rows()` / `service_backends_rows()`); no
+  existing method signature changed. D6 prose gains the explicit "additive
+  variant + reader through the port on both adapters, DST-testable — NOT a
+  concrete-adapter-only surface" note. D6 itself is unchanged — it always
+  specified the observation-row pattern; this only makes the established sibling
+  shape explicit and records the landed correction. The brief's Reuse-Analysis
+  row moves `ObservationStore` from REUSE-AS-IS to EXTEND (additive) in lockstep.
+  — Morgan.
 - 2026-06-06 — **D5 enforcement-location clarification (DELIVER-surfaced;
   Option A ratified). No decision reversed.** DELIVER step 04 surfaced a
   contract contradiction: the original D1 prose and the `Ca::issue_svid` rustdoc
