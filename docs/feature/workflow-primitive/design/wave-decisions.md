@@ -23,15 +23,29 @@ designed OVER it. GH #39, roadmap [3.2]. Job: J-PLAT-005.
   `.await`); the engine is the async executor off the shim, exactly as
   `StartAllocation`→`Driver::start`. The engine is to workflows what `Driver`
   is to allocations. (see: ADR-0064 §5.) **RATIFY — the subtlest boundary.**
-- [D4] **Replay = engine cursor + `ctx.*` check-then-record.** Re-execute `run`
-  from the top; replay returns recorded results without re-firing effects
-  (exactly-once K1); live performs + appends (fsync-before-suspend). All
+- [D4] **Replay = engine cursor + `ctx.*` check-then-record.** The general
+  durable-step primitive is `ctx.run<T>(name, f)` (Restate `ctx.run` model —
+  wrap any side-effecting future, journal its `T`, replay without re-running
+  `f`). Re-execute `run` from the top; replay returns recorded results without
+  re-firing effects (exactly-once on the replay path — K1); live performs +
+  appends (fsync-before-suspend). Step identity positional (the cursor); `name`
+  is a diagnostic label + replay determinism check (fail-closed on mismatch).
+  Honest semantics: at-least-once effect, exactly-once on replay. All
   non-determinism through `ctx` ⇒ bit-identical replay (K4). (see: ADR-0064 §3.)
+- [D4a] **`ctx.run<T>` replaces the slice-01 `ctx.call(CallRequest) ->
+  CallResponse` await-surface.** Rationale: `ctx.call` was hardcoded to a single
+  `Transport`-datagram effect and could not return a value; `ctx.run<T>` wraps
+  any side-effecting future and journals/replays its result. `Transport` stays
+  on `ctx` via a `ctx.transport()` accessor so closures can perform transport
+  effects; `CallRequest`/`CallResponse`/`CALL_PURPOSE`/`WorkflowCtxError::Transport`
+  deleted; journal entry `CallResult` → `RunResult { step, name, result_digest,
+  result_bytes }` (ADR-0063). Greenfield single-cut — no deprecation shim, no
+  journal migration. **User-pinned 2026-06-05.**
 - [D5] **Crate placement: trait+ctx in `overdrive-core` (no tokio), engine +
   journal in `overdrive-control-plane`, sim journal + replay invariant in
   `overdrive-sim`.** Mirrors the reconciler split; honors `core`-has-no-tokio.
   (see: ADR-0064 §1.)
-- [D6] **`WorkflowCtx` surface additive per slice** (call/01 → sleep/02 →
+- [D6] **`WorkflowCtx` surface additive per slice** (run<T>/01 → sleep/02 →
   signal+emit/03); machinery whole in slice 01. (see: ADR-0064 §4.)
 - [D7] **`WorkflowResult` distinct from `TerminalCondition`** — inherits the
   SemVer convention, not the type. (see: ADR-0064 §2.)
@@ -56,7 +70,7 @@ designed OVER it. GH #39, roadmap [3.2]. Job: J-PLAT-005.
 | `RedbViewStore`/`ViewStore` | `view_store/` | redb durable memory + discipline | REUSE substrate; CREATE NEW port | Substrate shared; trait+layout differ (ADR-0063 §1) |
 | action-shim + reconciler runtime | `action_shim/mod.rs:446` | async-effect pipeline | EXTEND | Engine off the same shim |
 | `Clock`/`Transport`/`Entropy` | `traits/` | injected non-determinism | REUSE | `WorkflowCtx` wraps existing ports |
-| `CorrelationKey`/`HttpCall` | `id.rs:538` | call + correlation | REUSE | `ctx.call` reuses them |
+| `CorrelationKey`/`HttpCall` | `id.rs:538` | instance correlation + idempotency-key precedent | REUSE | instance `CorrelationKey` keys the terminal row; `HttpCall`'s idempotency-key shape is the precedent for an exactly-once `ctx.run` closure effect |
 | `TerminalCondition` | core | terminal modelling | DO NOT REUSE (relate) | Different thing; convention inherited |
 | `TickContext` | core | injected bundle | DO NOT REUSE (analogue) | Full ctx surface vs time-only |
 | `JournalStore`/`RedbJournalStore`/`SimJournalStore` | NEW | journal layout | CREATE NEW | No trait hosts append-only-ordered point-access |

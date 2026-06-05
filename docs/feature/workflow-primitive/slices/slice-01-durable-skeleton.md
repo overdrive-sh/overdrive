@@ -20,9 +20,14 @@ before ship), O6 (journal on the existing redb substrate). O3 partial (one
 ## IN scope
 
 - `Workflow` trait: `async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult`.
-- `WorkflowCtx` with ONE durable operation (recommend `ctx.call(...)` against
-  the injected `Transport` — the existing `Action::HttpCall` correlation
-  machinery is the precedent). All non-determinism through `ctx`.
+- `WorkflowCtx` with ONE durable operation: the general
+  `ctx.run<T>(name, f)` durable-step primitive (Restate `ctx.run` model —
+  wrap any side-effecting future `f`, journal its `T`, replay the journaled
+  result on resume without re-running `f`). The slice-01 closure performs a
+  `Transport` datagram send via the `ctx.transport()` accessor and returns a
+  `T` (the existing `Action::HttpCall` idempotency-key machinery is the
+  precedent for making the remote effect exactly-once). All non-determinism
+  through `ctx`.
 - A per-instance append-only journal in redb (distinct layout from the
   reconciler `View` store, same backend). Write checkpoint BEFORE suspend.
 - `WorkflowSpec` made concrete (replacing the `Action::StartWorkflow`
@@ -31,12 +36,12 @@ before ship), O6 (journal on the existing redb substrate). O3 partial (one
   `Action::StartWorkflow { spec, correlation }`; emits a terminal-result row
   to the ObservationStore.
 - First real consumer: **`ProvisionRecord` — a minimal 2-step durable
-  sequence** (`ctx.call` to write one record, then return a terminal result).
-  Justification: it is the thinnest sequence that has a *real, non-idempotent-
-  to-repeat external effect* (the write) — which is the whole point of O1.
-  A cert-rotation slice is the wrong skeleton: it needs ACME + DNS-propagation
-  `ctx.sleep` + multi-await, i.e. it depends on slice 02/03 surface that does
-  not exist yet.
+  sequence** (`ctx.run` whose closure writes one record via the transport,
+  then return a terminal result). Justification: it is the thinnest sequence
+  that has a *real, non-idempotent-to-repeat external effect* (the write) —
+  which is the whole point of O1. A cert-rotation slice is the wrong skeleton:
+  it needs ACME + DNS-propagation `ctx.sleep` + multi-await, i.e. it depends
+  on slice 02/03 surface that does not exist yet.
 - A named `replay_equivalence_provision_record` SimInvariant in
   `overdrive-sim` (no inline literal) + a paired bounded-progress
   `assert_eventually!(is_terminal)`, on the CI critical path.
@@ -65,9 +70,13 @@ before ship), O6 (journal on the existing redb substrate). O3 partial (one
 
 ## Acceptance criteria (production data, not synthetic)
 
-- AC1 (O1): Under DST, killing the instance AFTER the `ctx.call` records but
-  BEFORE terminal, then restarting, results in the `ctx.call` external effect
-  executing EXACTLY ONCE (asserted on the SimTransport call count), not twice.
+- AC1 (O1): Under DST, killing the instance AFTER the `ctx.run` step records
+  but BEFORE terminal, then restarting, results in the `ctx.run` closure's
+  external effect NOT re-firing on the replay path (asserted on the SimTransport
+  call count == 1, not 2). Honest scope: this is exactly-once on the replay
+  path — once the step is journaled, the closure is not re-polled; a crash in
+  the fire→fsync window (before the step journals) re-runs the closure
+  (at-least-once for the effect), mitigated by the remote idempotency key.
 - AC2 (O4): The resumed run reaches a `WorkflowResult` byte-identical to the
   uninterrupted run's result for the same inputs + seed.
 - AC3 (O5): `cargo dst --only replay_equivalence_provision_record` is green,

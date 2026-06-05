@@ -18,10 +18,10 @@
 //! additive schema evolution via `#[serde(default)]`. Each await-surface
 //! slice (02 `ctx.sleep`, 03 `ctx.wait_for_signal` / `ctx.emit_action`)
 //! adds one entry variant additively — no version-bump, no
-//! golden-fixture ceremony. Effect payloads are recorded as DIGESTS
-//! (`response_digest`, …), never full bodies and never a derived
-//! deadline/remaining cache (`.claude/rules/development.md` § "Persist
-//! inputs, not derived state").
+//! golden-fixture ceremony. Step results are recorded as their
+//! CBOR-encoded bytes plus a `result_digest` (the `ctx.run` durable-step
+//! result), never a derived deadline/remaining cache
+//! (`.claude/rules/development.md` § "Persist inputs, not derived state").
 //!
 //! # Adapters
 //!
@@ -202,29 +202,30 @@ pub enum JournalEntry {
         input_digest: overdrive_core::id::ContentHash,
     },
 
-    /// An external `ctx.call` resolved (slice 01). Records the
-    /// await-point step index, the correlation key linking cause to
-    /// response across replays, and the response digest — the inputs
+    /// A `ctx.run` durable step resolved (slice 01). Records the
+    /// await-point step index, the step name (diagnostics + the
+    /// replay-determinism check), the result digest, and the CBOR-encoded
+    /// step result bytes the replay path decodes — the inputs
     /// replay-equivalence (K4) re-derives and compares against.
-    CallResult {
+    ///
+    /// Identity is POSITIONAL (the `step` cursor index); `name` is carried
+    /// for diagnostics and the determinism check, not for identity (the
+    /// per-step `correlation` of the prior `ctx.call` model was dead weight
+    /// once the cursor became positional, and was removed).
+    RunResult {
         /// The monotonic await-point index (journal cursor).
         step: u32,
-        /// Correlation key derived from `(target, spec_hash, purpose)`,
-        /// deterministic across attempts (ADR-0035 § Reconciler I/O
-        /// rule 2). Recorded as the canonical string form.
-        correlation: String,
-        /// SHA-256 digest of the call's response — sufficient for
-        /// replay-equivalence; the full body lives in the
-        /// `external_call_results` observation row.
-        response_digest: overdrive_core::id::ContentHash,
-        /// The slice-01 `CallResponse` value — bytes delivered by the
-        /// transport effect. Carried so a resumed run replays a
-        /// byte-equal `CallResponse` without re-firing the effect
-        /// (ADR-0064 §3, the exactly-once guarantee). Additive
-        /// `#[serde(default)]` per ADR-0063 §2 (no version bump); older
-        /// `CallResult` bytes lacking the field decode `bytes_sent = 0`.
-        #[serde(default)]
-        bytes_sent: usize,
+        /// The `ctx.run` step name — diagnostics + the replay-determinism
+        /// check (a recorded name diverging from the replaying body's name
+        /// at this cursor fails closed; ADR-0064 §3).
+        name: String,
+        /// SHA-256 digest of the step's CBOR-encoded result — sufficient
+        /// for replay-equivalence (K4); the digest of `result_bytes`.
+        result_digest: overdrive_core::id::ContentHash,
+        /// The CBOR-encoded `ctx.run` result. Carried so a resumed run
+        /// replays a byte-equal result without re-polling the step's
+        /// future (ADR-0064 §3, exactly-once on the replay path).
+        result_bytes: Vec<u8>,
     },
 
     /// A `ctx.sleep` was armed (slice 02). Records the await-point step

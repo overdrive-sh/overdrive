@@ -37,7 +37,7 @@ ODI outcomes O1–O6 — `diverge/job-analysis.md`.)
 Inherited (from DIVERGE / RATIFIED DIRECTION — design over these, do NOT
 re-litigate):
 
-- **[D-INH-1] Distinct durable-async `Workflow` primitive.** `async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult` with `ctx.call`/`ctx.sleep`/`ctx.wait_for_signal`/`ctx.activity`. NOT reconciler-as-step-machine (Option C is runner-up). (wave-decisions § RATIFIED, R3.)
+- **[D-INH-1] Distinct durable-async `Workflow` primitive.** `async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult` with `ctx.run<T>`/`ctx.sleep`/`ctx.wait_for_signal`/`ctx.activity`. NOT reconciler-as-step-machine (Option C is runner-up). (wave-decisions § RATIFIED, R3.)
 - **[D-INH-2] Step/await journal in redb**, per-instance append-only, distinct layout from the reconciler `View` store, same backend. NOT libSQL. (R2; whitepaper §17/§18.)
 - **[D-INH-3] Instance lifecycle owned by the workflow-lifecycle reconciler** (spec→running→journaled→terminated); reconcilers emit `Action::StartWorkflow { spec, correlation }`. (R3; whitepaper §18.)
 - **[D-INH-4] All non-determinism through `ctx`** (injected Clock/Transport/Entropy, DST-controllable). Workflow→cluster mutations via typed Actions through Raft, never direct IntentStore writes. Cross-workflow coordination via typed signals in the ObservationStore.
@@ -47,7 +47,7 @@ re-litigate):
 DISCUSS-made:
 
 - **[D1] Feature type: Backend** (platform-internal control-plane primitive). Users = platform engineers (authors) + operators. (Orchestrator-set.)
-- **[D2] Walking skeleton: YES, thinnest end-to-end durable workflow** — `Workflow` trait + `WorkflowCtx` with ONE durable op, redb journal write at the await, lifecycle reconciler brings up one instance via `Action::StartWorkflow`, single-node crash-resume under DST, observable terminal. First consumer: **`ProvisionRecord`** (a minimal 2-step `ctx.call → terminal` sequence with a real non-idempotent-to-repeat effect) — NOT cert-rotation (needs slice-02/03 surface). (slice-01.)
+- **[D2] Walking skeleton: YES, thinnest end-to-end durable workflow** — `Workflow` trait + `WorkflowCtx` with ONE durable op, redb journal write at the await, lifecycle reconciler brings up one instance via `Action::StartWorkflow`, single-node crash-resume under DST, observable terminal. First consumer: **`ProvisionRecord`** (a minimal 2-step `ctx.run → terminal` sequence with a real non-idempotent-to-repeat effect) — NOT cert-rotation (needs slice-02/03 surface). (slice-01.)
 - **[D3] O2 scoped to SINGLE-NODE crash-resume for Phase 1.** "Resume on a DIFFERENT node" (full O2) is a multi-node property the Phase-1 single-node codebase cannot honour; surfaced as a sequencing dependency on HA/multi-node. NO Phase-1 AC promises cross-node resume. The redb-journal design must not PRECLUDE it. (Scope note; back-propagated to jobs.yaml changelog.)
 - **[D4] Observable surface for the operator = ObservationStore terminal-result row + structured lifecycle event + the `replay_equivalence_*` DST invariant as executable evidence.** NO `overdrive workflow` CLI verb is invented (cli.rs has none). (D-INH-3; honesty constraint.)
 - **[D5] Every story `job_id: J-PLAT-005`.** N:1 mapping (no infrastructure-only stories — the engine slice ships WITH its observable skeleton consumer).
@@ -70,7 +70,7 @@ slice and is explicitly flagged 1–1.5 days with a de-risking SPIKE option;
 (b) the new abstraction (engine) ships FIRST as slice 01; (c) slice 01's
 learning hypothesis disproves the locked B′ direction's central premise if it
 fails (real disproof, not decoration); (d) every slice carries a
-production-data AC (real `ctx.call` effect, real SimTransport call-count
+production-data AC (real `ctx.run` effect, real SimTransport call-count
 assertion — not synthetic plumbing); (e) no two slices are scale-duplicates.
 
 ## Wave: DISCUSS / [REF] User Stories
@@ -89,12 +89,12 @@ own durability.
 
 #### Elevator Pitch
 Before: Devon cannot author a crash-resumable sequence without hand-writing a state machine, a step cursor, and a recovery path for each one.
-After: write `impl Workflow for ProvisionRecord { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult { let _ = ctx.call(write_record_req).await?; Ok(WorkflowResult::Success) } }` → `cargo dst --only replay_equivalence_provision_record` shows `ok · step 0 executed once · terminal result == uninterrupted-run terminal`.
+After: write `impl Workflow for ProvisionRecord { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult { let _ = ctx.run("write_record", async { ctx.transport().send(write_record_req).await }).await?; Ok(WorkflowResult::Success) } }` → `cargo dst --only replay_equivalence_provision_record` shows `ok · step 0 executed once · terminal result == uninterrupted-run terminal`.
 Decision enabled: Devon decides she can model the next platform sequence (cert rotation) as ordinary control flow rather than a bespoke state machine.
 
 #### Acceptance Criteria
 - [ ] AC1: A `Workflow` trait exists with `async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult`, and `ProvisionRecord` implements it; the impl **compiles** and a test drives `run` to a terminal `WorkflowResult` (verifies the "After" author surface — one ordinary `async fn`, no bespoke runtime). The O3 *structural* property (zero step-enum / transition-match lines in the body) is the **K6 metric**, asserted by an AST/grep check over the workflow impl — NOT free-hand review. (Per Eclipse review H1: AC made mechanically verifiable.)
-- [ ] AC2: The workflow body performs its side effect through `ctx.call(...).await` only; a `dst-lint`-style check / review confirms no `Instant::now()` / `reqwest` / `tokio::time::sleep` / `rand` in the body (D-INH-4).
+- [ ] AC2: The workflow body performs its side effect through `ctx.run(name, f).await` only (the closure `f` reaching the outside world via `ctx.transport()`); a `dst-lint`-style check / review confirms no `Instant::now()` / `reqwest` / `tokio::time::sleep` / `rand` in the body (D-INH-4).
 - [ ] AC3 (O5): `cargo dst --only replay_equivalence_provision_record` is green and prints a reproducible seed. (Verifies the "sees" output end-to-end.)
 
 → O3, O5.
@@ -130,7 +130,7 @@ After: under DST, kill the instance after step 0 records but before terminal, re
 Decision enabled: Devon decides a control-plane crash during this sequence is survivable — she ships it without a bespoke recovery path.
 
 #### Acceptance Criteria
-- [ ] AC1 (O1): Killing the instance AFTER `ctx.call` records but BEFORE terminal, then restarting, executes the `ctx.call` external effect EXACTLY ONCE (SimTransport call count == 1), not twice.
+- [ ] AC1 (O1): Killing the instance AFTER the `ctx.run` step records but BEFORE terminal, then restarting, does NOT re-fire the `ctx.run` closure's external effect on the replay path (SimTransport call count == 1, not twice). Honest scope: exactly-once on the replay path — once journaled, the closure is not re-polled; a crash in the fire→fsync window (before the step journals) re-runs the effect (at-least-once), mitigated by the remote idempotency key (the Restate `ctx.run` caveat).
 - [ ] AC2 (O4): The resumed run reaches a `WorkflowResult` byte-identical to the uninterrupted run for the same inputs + seed.
 - [ ] AC3 (O2, SINGLE-NODE SCOPE): The crash-resume is demonstrated by killing the PROCESS and restarting on the SAME (single) node, resuming from the redb journal. **No AC claims cross-node resume** — that is a multi-node dependency (D3). The journal design does not preclude cross-node resume.
 - [ ] AC4: The workflow-lifecycle reconciler re-hydrates the instance from `Action::StartWorkflow { spec, correlation }` on restart (D-INH-3).
@@ -198,7 +198,7 @@ a Phase-1 KPI — K2 is scoped single-node per D3.)
 ## Wave: DISCUSS / [REF] Walking Skeleton Strategy
 
 **Strategy B (thinnest end-to-end vertical slice).** Slice 01 IS the walking
-skeleton: `Workflow` trait + `WorkflowCtx` (one durable `ctx.call`) + redb
+skeleton: `Workflow` trait + `WorkflowCtx` (one durable `ctx.run<T>`) + redb
 journal + lifecycle-reconciler bring-up via `Action::StartWorkflow` +
 single-node crash-resume under DST + observable ObservationStore terminal.
 First consumer `ProvisionRecord` (real non-idempotent-to-repeat effect).
@@ -246,7 +246,7 @@ dependency outside the workspace.
 
 1. **Problem clear, domain language** — PASS. JTBD one-liner + per-story Problem in domain terms (cert rotation, region migration, exactly-once side effect). Evidence: job-analysis.md, this delta.
 2. **Persona with specific characteristics** — PASS. `devon-platform-engineer.yaml` (author primary + operator secondary), emotional arc, frustrations, success signals.
-3. **3+ domain examples with real data** — PASS. `ProvisionRecord` (record-write effect), cert rotation (ACME CSR — the non-idempotent example), region migration (quiesce source) named throughout; `ctx.call` with a concrete request shape in US-WP-1's pitch.
+3. **3+ domain examples with real data** — PASS. `ProvisionRecord` (record-write effect), cert rotation (ACME CSR — the non-idempotent example), region migration (quiesce source) named throughout; `ctx.run` with a concrete closure shape in US-WP-1's pitch.
 4. **UAT in Given/When/Then (3–7 scenarios)** — PASS. 5 stories, each with testable ACs in observable-outcome form; scenario titles describe business outcomes (resume exactly-once, prove replay-equivalence), not implementation. Journey YAML carries the GWT-shaped step checkpoints.
 5. **AC derived from UAT** — PASS. Every AC traces to a journey step / ODI outcome and is verifiable (call-count == 1, byte-equality, named-invariant-green).
 6. **Right-sized (1–3 days, 3–7 scenarios)** — PASS with one flag. 3 slices; slice 01 flagged 1–1.5 days with a de-risking SPIKE option (the one heavy slice); slices 02/03 ≤1 day. Each story 3–4 ACs.
@@ -357,12 +357,18 @@ recommended call is recorded here, the 3 warranting user ratification flagged.
   await-surface slice ride `#[serde(default)]`; rkyv would force a per-slice
   version-bump + golden-fixture. ADR-0063 §2. **(RATIFY — codec choice.)**
 - **[DDD-3] Replay = engine-owned journal cursor; `ctx.*` check-then-record.**
-  Engine re-executes `run` from the top each (re)start; replay returns recorded
-  results without re-firing effects (exactly-once K1), live performs + appends
-  (fsync-before-suspend) + advances cursor. All non-determinism through `ctx` ⇒
-  bit-identical replay (K4). ADR-0064 §3.
+  The general durable-step primitive is `ctx.run<T>(name, f)` (Restate `ctx.run`
+  model — wrap any side-effecting future, journal its `T`, replay the journaled
+  result without re-running `f`). Engine re-executes `run` from the top each
+  (re)start; replay returns recorded results without re-firing effects
+  (exactly-once on the replay path — K1), live performs + appends
+  (fsync-before-suspend) + advances cursor. Step identity is positional (the
+  cursor); `name` is a diagnostic label + replay determinism check (fail-closed
+  on mismatch). Honest semantics: at-least-once for the effect (a fire→fsync
+  crash re-runs the closure), exactly-once on replay. All non-determinism
+  through `ctx` ⇒ bit-identical replay (K4). ADR-0064 §3.
 - **[DDD-4] `WorkflowCtx` surface additive per slice.** Machinery (cursor +
-  suspend/resume) whole in slice 01; methods grow `call`(01)→`sleep`(02)→
+  suspend/resume) whole in slice 01; methods grow `run<T>`(01)→`sleep`(02)→
   `wait_for_signal`+`emit_action`(03), each an additive journal variant.
   ADR-0064 §4.
 - **[DDD-5] Engine↔lifecycle-reconciler boundary: reconciler stays pure-sync;
@@ -411,7 +417,7 @@ recommended call is recorded here, the 3 warranting user ratification flagged.
 | Driven port | Adapter (prod) | Adapter (sim) | Effect |
 |---|---|---|---|
 | `JournalStore` (NEW) | `RedbJournalStore` (shared redb file) | `SimJournalStore` | Durable append-only `await` journal |
-| `Transport` (REUSE) | `TcpTransport` | `SimTransport` | `ctx.call` external effect |
+| `Transport` (REUSE) | `TcpTransport` | `SimTransport` | `ctx.run` closure's transport effect (via `ctx.transport()`) |
 | `Clock` (REUSE) | `SystemClock` | `SimClock` | `ctx.sleep` deadline park |
 | `Entropy` (REUSE) | `OsEntropy` | `SeededEntropy` | any `ctx` RNG need |
 | `ObservationStore` (REUSE) | `LocalObservationStore` | `SimObservationStore` | terminal-result row; typed signals (slice 03) |
@@ -450,7 +456,7 @@ recommended call is recorded here, the 3 warranting user ratification flagged.
 | `RedbViewStore`/`ViewStore`/`SimViewStore` | `view_store/{mod,redb}.rs` | redb durable memory; fsync ordering; bulk-load; probe; CBOR | **REUSE substrate+discipline; CREATE NEW port** | THE central call (ADR-0063 §1). Substrate shared; trait+layout differ — distinct `JournalStore` avoids two-contracts-on-one-trait, zero reuse loss |
 | action-shim `dispatch` + reconciler runtime | `action_shim/mod.rs:446`, `reconciler_runtime` | per-tick async-effect pipeline | **EXTEND** | Engine driven off the same shim; `StartWorkflow` no-op arm → `engine.start` |
 | `Clock`/`Transport`/`Entropy` port traits | `traits/` | injected non-determinism | **REUSE** | `WorkflowCtx` is a new wrapper over existing ports; no new port |
-| `CorrelationKey`/`HttpCall` machinery | `id.rs:538`, `reconcilers/mod.rs:357` | `ctx.call`-shaped call + correlation | **REUSE** | `ctx.call` reuses `Transport`+`CorrelationKey`; terminal row keyed by it |
+| `CorrelationKey`/`HttpCall` machinery | `id.rs:538`, `reconcilers/mod.rs:357` | instance correlation + remote idempotency-key precedent | **REUSE** | instance-level `CorrelationKey` keys the terminal row; `HttpCall`'s idempotency-key shape is the precedent for making a `ctx.run` closure's remote effect exactly-once |
 | `TerminalCondition` | `overdrive-core` | terminal modelling | **DO NOT REUSE (relate)** | `WorkflowResult` ≠ allocation claim; inherits SemVer convention not type |
 | `TickContext` | `overdrive-core/reconcilers` | injected bundle | **DO NOT REUSE (analogue)** | `WorkflowCtx` is the analogue; carries full ctx surface, not just time |
 | `JournalStore`/`RedbJournalStore`/`SimJournalStore` | NEW | journal layout | **CREATE NEW** | No existing trait hosts append-only-ordered point-access; mirrors ViewStore line-for-line |
@@ -527,7 +533,7 @@ consolidated review to give the action-shim `StartWorkflow` dispatch arm
 **Strategy B (thinnest end-to-end vertical slice).** Slice 01 IS the walking
 skeleton; the ONE `@walking_skeleton` scenario is **S-WP-01-06** — "Devon kills
 the process mid-run and the completed step is not repeated on restart" — which
-closes the full durable-execution loop (author surface → `ctx.call` → redb
+closes the full durable-execution loop (author surface → `ctx.run` → redb
 journal write → lifecycle-reconciler bring-up via `Action::StartWorkflow` →
 single-node crash-resume under DST → exactly-once effect → byte-identical
 terminal → observable ObservationStore terminal row). Justification: a
@@ -600,7 +606,7 @@ NAME; they LAND (graduate) in DELIVER (ADR-0064 §6, ADR-0063 §6):
 
 1. **`ReplayEquivalenceProvisionRecord`** — graduates the placeholder `ReplayEquivalentEmptyWorkflow` (`mod.rs:136`); replaces the `evaluate_replay_equivalent_empty_workflow` two-SimEntropy-transcript stub with a real journal replay against the engine + `SimJournalStore`. Uninterrupted-vs-crash-resumed trajectory byte-equality + `assert_eventually!(is_terminal)` bounded progress. **K4, on the CI critical path.** (S-WP-01-09; extended for S-WP-02-04 / S-WP-03-05.)
 2. **`WorkflowJournalWriteOrdering`** — under `SimJournalStore` with injected fsync-failure on the next append, the engine does not advance the cursor / suspend (mirrors ADR-0035 `WriteThroughOrdering`). (S-WP-01-10.)
-3. **`WorkflowExactlyOnceEffectOnResume`** — crash after `ctx.call` records but before terminal → resume → `SimTransport` call count == 1 (K1). (S-WP-01-06.)
+3. **`WorkflowExactlyOnceEffectOnResume`** — asserts the replay-path guarantee: crash AFTER a `ctx.run` step records but before terminal → resume → the journaled result is returned and the closure is NOT re-fired → `SimTransport` call count == 1 (K1). (Exactly-once on replay, not unconditional — a fire→fsync-window crash re-runs the closure at-least-once; S-WP-01-06.)
 
 DISTILL scaffolds the acceptance tests that NAME these; DELIVER lands the enum
 variants + evaluators.

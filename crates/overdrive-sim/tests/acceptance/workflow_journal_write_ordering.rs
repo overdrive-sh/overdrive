@@ -16,7 +16,7 @@
 //!    its harness verdict is GREEN + seed-reproducible. The sibling
 //!    `WorkflowExactlyOnceEffectOnResume` (US-WP-4 AC4) is also named and
 //!    on the critical path.
-//! 2. The behavioural surface (port-to-port): `WorkflowCtx::call` against a
+//! 2. The behavioural surface (port-to-port): `WorkflowCtx::run` against a
 //!    `JournalCursorHandle` whose `SimJournalStore` has an injected
 //!    fsync-failure errors on the live-path record, the cursor does NOT
 //!    advance (a subsequent retry is still a LIVE call, not a replay), and
@@ -35,7 +35,7 @@ use overdrive_control_plane::journal::{JournalStore, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::traits::Transport;
-use overdrive_core::workflow::{CallRequest, JournalCursor, WorkflowCtx, WorkflowCtxError};
+use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowCtxError};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -46,9 +46,23 @@ use overdrive_sim::invariants::Invariant;
 
 const TARGET: &str = "127.0.0.1:9000";
 const PAYLOAD: &[u8] = b"provision-record";
+const STEP_NAME: &str = "provision-write";
 
-fn request() -> CallRequest {
-    CallRequest { target: TARGET.parse().expect("addr"), payload: Bytes::from_static(PAYLOAD) }
+/// Run the provision-write durable step through `ctx.run`; returns the raw
+/// ctx result so a record failure surfaces as `WorkflowCtxError`. `T` is
+/// `Result<usize, String>` (the transport error folds into the success
+/// type), so a `JournalRecord` error is distinguishable from an effect
+/// failure.
+async fn run_step(
+    ctx: &WorkflowCtx,
+    target: SocketAddr,
+) -> Result<Result<usize, String>, WorkflowCtxError> {
+    let transport = Arc::clone(ctx.transport());
+    let payload = Bytes::from_static(PAYLOAD);
+    ctx.run(STEP_NAME, async move {
+        transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+    })
+    .await
 }
 
 async fn delivered_count(inbox: &mut SimInbox) -> usize {
@@ -95,7 +109,7 @@ fn write_ordering_and_exactly_once_are_named_critical_path_invariants() {
 }
 
 /// The behavioural surface (port-to-port). Under an injected fsync-failure,
-/// the live-path `ctx.call` record FAILS with `JournalRecord`, the cursor
+/// the live-path `ctx.run` record FAILS with `JournalRecord`, the cursor
 /// does NOT advance (the entry is unobservable + a retry is still LIVE),
 /// and no phantom entry is in the journal. Mirrors ADR-0035
 /// `WriteThroughOrdering` for the workflow journal.
@@ -121,7 +135,7 @@ async fn fsync_failure_on_append_does_not_advance_cursor_or_suspend_with_unrecor
     // Arm the fsync failure: the next live-path record (append) fails.
     store.inject_fsync_failure();
 
-    let err = ctx.call(request()).await.expect_err("live record must fail under injected fsync");
+    let err = run_step(&ctx, target).await.expect_err("live record must fail under injected fsync");
     assert!(
         matches!(err, WorkflowCtxError::JournalRecord { .. }),
         "the failed record surfaces as JournalRecord, got {err:?}"
@@ -151,8 +165,8 @@ async fn fsync_failure_on_append_does_not_advance_cursor_or_suspend_with_unrecor
     // Because the cursor stayed at step 0 and the buffer is empty, the
     // retry is a LIVE call that fires the effect once more and now records.
     store.clear_fsync_failure();
-    let response = ctx.call(request()).await.expect("retry after clear records live");
-    assert_eq!(response.bytes_sent, PAYLOAD.len(), "the retry is a live fire (real byte count)");
+    let retry = run_step(&ctx, target).await.expect("retry after clear records live");
+    assert_eq!(retry, Ok(PAYLOAD.len()), "the retry is a live fire (real byte count)");
     assert_eq!(
         delivered_count(&mut inbox).await,
         1,

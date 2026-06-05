@@ -214,5 +214,6 @@ mod acceptance {
     // (expected = "RED scaffold")]` and import no unbuilt production type.
     mod workflow_body_has_no_step_machine;
     mod workflow_body_routes_nondeterminism_through_ctx;
+    mod workflow_ctx_run_and_sleep;
     mod workflow_trait_drives_to_terminal;
 }

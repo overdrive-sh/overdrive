@@ -4,8 +4,8 @@
 //!
 //! Scenario S-WP-01-03. O5 precondition. A `dst-lint`-style scan over the
 //! workflow impl body finds no `Instant::now()` / `reqwest` /
-//! `tokio::time::sleep` / `rand::*`; the side effect is performed through
-//! `ctx.call(...).await` only. Negative testing: a body that smuggles a
+//! `tokio::time::sleep` / `rand::*`; the side effect is performed inside
+//! `ctx.run(...).await` only. Negative testing: a body that smuggles a
 //! non-`ctx` source is rejected (the failure case is asserted, not just
 //! the happy case).
 //!
@@ -21,7 +21,7 @@
 //! * `Instant::now` / `SystemTime::now` — ambient wall-clock (time MUST
 //!   flow through `ctx.clock()`).
 //! * `reqwest::*` — ambient network (effects MUST flow through
-//!   `ctx.call(...)`).
+//!   `ctx.run(...)`, e.g. `ctx.run(name, async { ctx.transport()... })`).
 //! * `tokio::time::sleep` — ambient timer (waits MUST flow through
 //!   `ctx.sleep(...)`, slice 02).
 //! * `rand::*` / `thread_rng` — ambient RNG (randomness MUST flow through
@@ -165,14 +165,15 @@ fn find_provision_record_run_body(file: &syn::File) -> Option<syn::Block> {
     None
 }
 
-/// Scans a body for a `ctx.call(...)` method-call expression.
-struct CtxCallScan {
+/// Scans a body for a `ctx.run(...)` method-call expression — the
+/// durable-step await-surface every effect routes through.
+struct CtxRunScan {
     found: bool,
 }
 
-impl<'ast> Visit<'ast> for CtxCallScan {
+impl<'ast> Visit<'ast> for CtxRunScan {
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        if node.method == "call" {
+        if node.method == "run" {
             if let syn::Expr::Path(receiver) = &*node.receiver {
                 if receiver.path.segments.last().is_some_and(|s| s.ident == "ctx") {
                     self.found = true;
@@ -183,15 +184,16 @@ impl<'ast> Visit<'ast> for CtxCallScan {
     }
 }
 
-/// Confirm the clean body's side effect routes through `ctx.call`. The
+/// Confirm the clean body's side effect routes through `ctx.run`. The
 /// positive contract is two-sided: (a) no banned ambient source, AND
-/// (b) the effect is actually performed via `ctx.call(...).await`.
-fn body_calls_ctx_call(source: &str) -> bool {
+/// (b) the effect is actually performed inside a `ctx.run(...).await`
+/// durable step.
+fn body_calls_ctx_run(source: &str) -> bool {
     let parsed = syn::parse_file(source).expect("scaffold source parses as Rust");
     let run_body = find_provision_record_run_body(&parsed)
         .expect("scaffold declares `impl Workflow for ProvisionRecord` with an `async fn run`");
 
-    let mut scan = CtxCallScan { found: false };
+    let mut scan = CtxRunScan { found: false };
     scan.visit_block(&run_body);
     scan.found
 }
@@ -214,17 +216,18 @@ fn clean_workflow_body_routes_all_nondeterminism_through_ctx() {
         "D-INH-4 (S-WP-01-03 / O5): the ProvisionRecord workflow body must route ALL \
          non-determinism through `ctx` — found {} ambient source(s) the scan rejects: \
          {violations:#?}\n\
-         Time → `ctx.clock()`, network → `ctx.call(...)`, waits → `ctx.sleep(...)`, \
+         Time → `ctx.clock()`, network → `ctx.run(...)`, waits → `ctx.sleep(...)`, \
          randomness → `ctx.entropy()`.",
         violations.len(),
     );
 
-    // (b) The effect is genuinely performed through `ctx.call(...).await`,
+    // (b) The effect is genuinely performed inside `ctx.run(...).await`,
     // not merely absent of banned sources.
     assert!(
-        body_calls_ctx_call(&source),
+        body_calls_ctx_run(&source),
         "D-INH-4 (S-WP-01-03): the ProvisionRecord body must perform its side effect \
-         through `ctx.call(...).await` — the clean body's only nondeterminism surface.",
+         inside a `ctx.run(...).await` durable step — the clean body's only \
+         nondeterminism surface.",
     );
 }
 

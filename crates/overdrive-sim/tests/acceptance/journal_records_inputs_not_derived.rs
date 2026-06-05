@@ -4,7 +4,7 @@
 //! Scenario S-WP-01-05. O6. Per `development.md` "Persist inputs, not
 //! derived state": the recorded `JournalEntry` carries the step's
 //! inputs/result digest and no derived-deadline / "remaining" field.
-//! ADR-0063 §2 (`CallResult { step, correlation, response_digest }`,
+//! ADR-0063 §2 (`RunResult { step, name, result_digest, result_bytes }`,
 //! `Started { spec_digest, input_digest }`).
 //!
 //! Port-to-port: the test drives the `JournalStore` driving port
@@ -41,19 +41,20 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
     let input_digest = ContentHash::of(ProvisionRecord::PAYLOAD);
     let started = JournalEntry::Started { spec_digest, input_digest };
 
-    // The `ctx.call` result is recorded as a RESPONSE DIGEST (an input
-    // to replay-equivalence), keyed by the await-point step index — not
-    // as a derived "next_attempt_at" / "remaining wait" field.
-    let response_digest = ContentHash::of(b"provision-write-response");
-    let call_result = JournalEntry::CallResult {
+    // The `ctx.run` step result is recorded as its CBOR bytes + a RESULT
+    // DIGEST (inputs to replay-equivalence), keyed by the await-point step
+    // index — not as a derived "next_attempt_at" / "remaining wait" field.
+    let result_bytes = b"provision-write-response".to_vec();
+    let result_digest = ContentHash::of(&result_bytes);
+    let run_result = JournalEntry::RunResult {
         step: 0,
-        correlation: "provision-record/0".to_string(),
-        response_digest,
-        bytes_sent: 0,
+        name: "provision-write".to_string(),
+        result_digest,
+        result_bytes: result_bytes.clone(),
     };
 
     store.append(&workflow_id, &started).await.expect("append Started");
-    store.append(&workflow_id, &call_result).await.expect("append CallResult");
+    store.append(&workflow_id, &run_result).await.expect("append RunResult");
 
     // Drive the read port: the ordered run for this instance.
     let loaded = store.load_journal(&workflow_id).await.expect("load journal");
@@ -61,7 +62,7 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
     // Observable outcome 1 — the run round-trips losslessly and in order.
     assert_eq!(
         loaded,
-        vec![started.clone(), call_result.clone()],
+        vec![started.clone(), run_result.clone()],
         "load_journal must return the appended entries byte-equal and in append order",
     );
 
@@ -77,14 +78,20 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
         other => panic!("first entry must be Started, got {other:?}"),
     }
     match &loaded[1] {
-        JournalEntry::CallResult { step, correlation, response_digest: got_resp, .. } => {
-            assert_eq!(*step, 0, "CallResult records the await-point step index (an input)");
-            assert_eq!(correlation, "provision-record/0", "CallResult records the correlation key");
+        JournalEntry::RunResult {
+            step,
+            name,
+            result_digest: got_digest,
+            result_bytes: got_bytes,
+        } => {
+            assert_eq!(*step, 0, "RunResult records the await-point step index (an input)");
+            assert_eq!(name, "provision-write", "RunResult records the ctx.run step name");
             assert_eq!(
-                *got_resp, response_digest,
-                "CallResult records the response digest, not a derived cache"
+                *got_digest, result_digest,
+                "RunResult records the result digest, not a derived cache"
             );
+            assert_eq!(*got_bytes, result_bytes, "RunResult records the CBOR result bytes");
         }
-        other => panic!("second entry must be CallResult, got {other:?}"),
+        other => panic!("second entry must be RunResult, got {other:?}"),
     }
 }

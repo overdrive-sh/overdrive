@@ -24,16 +24,12 @@
 //! `rand::*` / `tokio::time::sleep` — the type definitions below contain
 //! none; the ctx methods delegate to the injected traits.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use thiserror::Error;
 
-use crate::id::CorrelationKey;
-use crate::traits::transport::TransportError;
 use crate::traits::{Clock, Entropy, Transport};
 
 /// A durable-async workflow. The author writes one ordinary `async fn
@@ -87,35 +83,43 @@ pub enum WorkflowResult {
     Cancelled,
 }
 
-/// The slice-01 request shape for [`WorkflowCtx::call`] — a single
-/// external effect addressed at `target`, carrying `payload`. The
-/// `ctx.call` op is the thinnest await-surface with a real,
-/// non-idempotent-to-repeat effect (the ProvisionRecord write,
-/// US-WP-1), performed through the injected [`Transport`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallRequest {
-    /// Where the effect is addressed.
-    pub target: SocketAddr,
-    /// The request payload bytes.
-    pub payload: Bytes,
-}
-
-/// The response returned by [`WorkflowCtx::call`]. Slice 01 carries the
-/// observable result of the `Transport` effect — the number of bytes
-/// the datagram delivered. Later slices grow this shape additively
-/// alongside the journal `CallResult` entry (ADR-0064 §4).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallResponse {
-    /// Bytes delivered by the underlying transport effect.
-    pub bytes_sent: usize,
-}
-
 /// Errors surfaced from [`WorkflowCtx`] await-ops.
 #[derive(Debug, Error)]
 pub enum WorkflowCtxError {
-    /// The underlying [`Transport`] effect failed.
-    #[error("workflow ctx.call transport error: {0}")]
-    Transport(#[from] TransportError),
+    /// A `ctx.run` step's result could not be CBOR-serialised before
+    /// recording it in the journal. The step's closure produced a value
+    /// whose `Serialize` impl failed — surfaced rather than recording a
+    /// truncated/garbled result.
+    #[error("workflow ctx.run serialize failed: {message}")]
+    Serialize {
+        /// Cause string from the CBOR encoder.
+        message: String,
+    },
+
+    /// A recorded `ctx.run` result could not be CBOR-deserialised back
+    /// into the step's result type on the replay path. Indicates schema
+    /// skew between the recorded bytes and the type the workflow body
+    /// expects — surfaced rather than fabricating a default.
+    #[error("workflow ctx.run deserialize failed: {message}")]
+    Deserialize {
+        /// Cause string from the CBOR decoder.
+        message: String,
+    },
+
+    /// A replay-path `ctx.run` found a recorded step whose name does not
+    /// match the name the workflow body is replaying at this cursor
+    /// position — a non-deterministic divergence between the recorded
+    /// trajectory and the current run. Fail-closed: a workflow body that
+    /// reorders / renames its steps cannot replay a journal recorded
+    /// against the prior shape (journal replay must be bit-identical,
+    /// `development.md` § "Workflow contract").
+    #[error("workflow ctx.run non-deterministic: expected step {expected:?}, got {actual:?}")]
+    NonDeterministic {
+        /// The step name recorded in the journal at this cursor.
+        expected: String,
+        /// The step name the replaying workflow body presented.
+        actual: String,
+    },
 
     /// The engine's journal-cursor handle failed to durably record a
     /// live `ctx` await-point (append + fsync + advance). Per ADR-0063
@@ -138,67 +142,80 @@ pub enum WorkflowCtxError {
 /// Per ADR-0064 §1 the `WorkflowCtx` *type* lives in core and carries "a
 /// journal-cursor handle whose concrete async I/O is performed by the
 /// engine in `overdrive-control-plane`". This trait IS that handle: a
-/// **declaration only**. Its methods speak in core types
-/// ([`CallResponse`], [`CorrelationKey`]) and its single concrete
-/// implementation — over `Arc<dyn JournalStore>` + a per-instance cursor
-/// — lives in `overdrive-control-plane::workflow_runtime`, where tokio +
-/// the real journal I/O are allowed. The trait declaration pulls no
-/// runtime into core (it uses `async_trait`, already a core dep; the
-/// dst-lint gate finds no `Instant::now` / `rand::*` / `tokio::*` here).
+/// **declaration only**. Its methods speak in core types (CBOR result
+/// bytes + step names) and its single concrete implementation — over
+/// `Arc<dyn JournalStore>` + a per-instance cursor — lives in
+/// `overdrive-control-plane::workflow_runtime`, where tokio + the real
+/// journal I/O are allowed. The trait declaration pulls no runtime into
+/// core (it uses `async_trait`, already a core dep; the dst-lint gate
+/// finds no `Instant::now` / `rand::*` / `tokio::*` here).
 ///
 /// # The check-then-record contract (ADR-0064 §3)
 ///
-/// Every `ctx` await-op is a check-then-record point. For `ctx.call` the
-/// cursor is consulted via [`replay_call`](Self::replay_call):
+/// Every `ctx` await-op is a check-then-record point. Identity is
+/// POSITIONAL — the cursor index, exactly as the sleep branch already is.
+/// `name` is carried for diagnostics and a replay-determinism check, not
+/// for identity. For `ctx.run` the cursor is consulted via
+/// [`replay_run`](Self::replay_run):
 ///
 /// - **Replay (cursor < journal length):** the handle returns
-///   `Some(recorded)` — the recorded [`CallResponse`] for this step. The
-///   ctx returns it WITHOUT firing the transport effect (the exactly-once
-///   guarantee — a resumed run re-derives the response from the journal,
-///   never re-performs the effect). The cursor advances.
-/// - **Live (cursor == journal length):** the handle returns `None`. The
-///   ctx fires the real effect through the injected port, then calls
-///   [`record_call`](Self::record_call) to append the result entry with
+///   `Ok(Some(recorded_bytes))` — the recorded CBOR result for this step.
+///   The ctx CBOR-decodes them into the step's result type and returns it
+///   WITHOUT polling the step's future (the exactly-once guarantee on the
+///   replay path — a resumed run re-derives the result from the journal,
+///   never re-performs the effect). The cursor advances. If the recorded
+///   step's name does not match `name`, the handle returns
+///   `Err(WorkflowCtxError::NonDeterministic { .. })` (fail-closed).
+/// - **Live (cursor == journal length):** the handle returns `Ok(None)`.
+///   The ctx polls the step's future, then calls
+///   [`record_run`](Self::record_run) to append the result bytes with
 ///   fsync BEFORE returning and advance the cursor.
 ///
-/// A handle whose `replay_call` always returns `None` and whose
-/// `record_call` is a no-op models a non-durable "always-live" execution
+/// A handle whose `replay_run` always returns `Ok(None)` and whose
+/// `record_run` is a no-op models a non-durable "always-live" execution
 /// — the shape the core/sim tests inject when no real journal is wired
 /// (see [`AlwaysLiveCursor`]).
 #[async_trait]
 pub trait JournalCursor: Send + Sync {
-    /// Check the cursor for a recorded `ctx.call` at the current step.
+    /// Check the cursor for a recorded `ctx.run` step at the current
+    /// position (POSITIONAL identity — the cursor index, like the sleep
+    /// branch).
     ///
     /// # Postconditions
     ///
-    /// Returns `Some(response)` when replaying (a recorded entry exists at
-    /// the cursor for `correlation`) — the caller MUST NOT fire the
-    /// effect and MUST return the recorded response. Returns `None` when
-    /// live (cursor at the journal end) — the caller fires the effect and
-    /// then calls [`record_call`](Self::record_call). Implementations
-    /// advance the cursor on a replay hit.
-    async fn replay_call(&self, correlation: &CorrelationKey) -> Option<CallResponse>;
+    /// Returns `Ok(Some(result_bytes))` when replaying (a recorded run
+    /// entry exists at the cursor) — the caller MUST NOT poll the step's
+    /// future and MUST decode + return the recorded result. Returns
+    /// `Ok(None)` when live (cursor at the journal end) — the caller polls
+    /// the step's future and then calls [`record_run`](Self::record_run).
+    /// Implementations advance the cursor on a replay hit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::NonDeterministic`] when a recorded run
+    /// step exists at the cursor but its recorded `name` does not match
+    /// the passed `name` — the workflow body diverged from the recorded
+    /// trajectory (fail-closed; replay must be bit-identical).
+    async fn replay_run(&self, name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError>;
 
-    /// Record a freshly-fired `ctx.call` result durably and advance the
-    /// cursor (the live path).
+    /// Record a freshly-resolved `ctx.run` result durably and advance the
+    /// cursor (the live path). `name` is recorded for diagnostics + the
+    /// replay-determinism check; `result_bytes` is the CBOR-encoded step
+    /// result.
     ///
     /// # Postconditions
     ///
-    /// On `Ok(())` the response is durably journaled (append + fsync per
-    /// ADR-0063 §4) and the cursor has advanced past this step, so a
-    /// subsequent resume replays it via [`replay_call`](Self::replay_call)
-    /// without re-firing.
+    /// On `Ok(())` the result bytes are durably journaled (append + fsync
+    /// per ADR-0063 §4) and the cursor has advanced past this step, so a
+    /// subsequent resume replays them via [`replay_run`](Self::replay_run)
+    /// without re-polling the step's future.
     ///
     /// # Errors
     ///
     /// Returns [`WorkflowCtxError::JournalRecord`] when the durable
     /// append/fsync fails — the engine surfaces this rather than continue
     /// against an unjournaled effect.
-    async fn record_call(
-        &self,
-        correlation: &CorrelationKey,
-        response: &CallResponse,
-    ) -> Result<(), WorkflowCtxError>;
+    async fn record_run(&self, name: &str, result_bytes: &[u8]) -> Result<(), WorkflowCtxError>;
 
     /// Check the cursor for a recorded `ctx.sleep` arm at the current
     /// step (the slice-02 await-surface, ADR-0064 §3 sleep branch).
@@ -247,7 +264,7 @@ pub trait JournalCursor: Send + Sync {
 ///
 /// Used by the core author-surface acceptance test (S-WP-01-01) and any
 /// caller that drives a [`Workflow`] without a real journal wired: every
-/// `ctx.call` fires its effect (no replay short-circuit) and nothing is
+/// `ctx.run` polls its future (no replay short-circuit) and nothing is
 /// persisted (no-op record). The durable handle — which DOES replay and
 /// record — lives in `overdrive-control-plane::workflow_runtime`.
 #[derive(Debug, Default, Clone, Copy)]
@@ -255,15 +272,11 @@ pub struct AlwaysLiveCursor;
 
 #[async_trait]
 impl JournalCursor for AlwaysLiveCursor {
-    async fn replay_call(&self, _correlation: &CorrelationKey) -> Option<CallResponse> {
-        None
+    async fn replay_run(&self, _name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError> {
+        Ok(None)
     }
 
-    async fn record_call(
-        &self,
-        _correlation: &CorrelationKey,
-        _response: &CallResponse,
-    ) -> Result<(), WorkflowCtxError> {
+    async fn record_run(&self, _name: &str, _result_bytes: &[u8]) -> Result<(), WorkflowCtxError> {
         Ok(())
     }
 
@@ -295,10 +308,6 @@ pub struct WorkflowCtx {
     journal: Arc<dyn JournalCursor>,
 }
 
-/// The `purpose` component of the [`CorrelationKey`] derived for a
-/// `ctx.call` await-point. Stable so replay re-derives the identical key.
-const CALL_PURPOSE: &str = "workflow-ctx-call";
-
 impl WorkflowCtx {
     /// Construct a ctx over the injected ports + the engine's journal
     /// cursor. All are mandatory (no builder, no defaulting) per
@@ -320,45 +329,67 @@ impl WorkflowCtx {
         Self { clock, transport, entropy, journal }
     }
 
-    /// Perform one external effect through the injected [`Transport`]
-    /// and return its observable result — the slice-01 await-surface
-    /// (ADR-0064 §4), the only `ctx` method this slice ships.
+    /// Run one durable step `f`, named `name`, and return its result —
+    /// the general durable-step await-surface (the Restate `ctx.run`
+    /// model). This is the slice-01 await-surface; a workflow body
+    /// performs every effect (transport sends, future external calls)
+    /// INSIDE a `ctx.run` closure so the result is journaled and replayed.
     ///
-    /// **Check-then-record (ADR-0064 §3).** The op first consults the
-    /// engine's journal cursor:
-    /// - **Replay:** if the cursor has a recorded response for this
-    ///   step, it is returned WITHOUT firing the transport effect — the
-    ///   exactly-once guarantee on resume (K1).
-    /// - **Live:** otherwise the effect fires through the injected
-    ///   [`Transport`], the result is durably recorded (append + fsync
-    ///   per ADR-0063 §4) via the cursor BEFORE returning, and the
-    ///   cursor advances.
+    /// **Check-then-record (ADR-0064 §3), POSITIONAL identity.** The op
+    /// consults the engine's journal cursor at the current position:
+    /// - **Replay:** if the cursor has a recorded result at this step, the
+    ///   recorded CBOR bytes are decoded into `T` and returned WITHOUT
+    ///   polling `f` — `f` is dropped unpolled, so the effect never
+    ///   re-fires. This is the exactly-once guarantee on the replay path.
+    /// - **Live:** otherwise `f` is awaited, its result is CBOR-encoded
+    ///   and durably recorded (append + fsync per ADR-0063 §4) via the
+    ///   cursor BEFORE returning, and the cursor advances.
+    ///
+    /// **Honest semantics:** the effect inside `f` is *at-least-once* (a
+    /// crash after `f.await` but before the record is durable re-fires the
+    /// effect on resume); the run await-point is *exactly-once on the
+    /// replay path* (once the result is journaled, resume replays it
+    /// without re-polling `f`). The journal-after-effect ordering is what
+    /// makes the replay path exactly-once — it is NOT an unconditional
+    /// exactly-once guarantee for the effect itself.
+    ///
+    /// `name` is recorded for diagnostics and a replay-determinism check
+    /// (a recorded step whose name diverges from the replaying body's
+    /// `name` fails closed with [`WorkflowCtxError::NonDeterministic`]).
+    /// Identity is the cursor position, not `name`.
     ///
     /// # Errors
     ///
-    /// Returns [`WorkflowCtxError::Transport`] when the underlying
-    /// transport effect fails, or [`WorkflowCtxError::JournalRecord`]
-    /// when the live-path durable record fails.
-    pub async fn call(&self, request: CallRequest) -> Result<CallResponse, WorkflowCtxError> {
-        // Correlation is deterministic across attempts/replays: derived
-        // from (target, payload-digest, purpose) so a resumed run
-        // re-derives the identical key and finds its recorded response
-        // (ADR-0035 § Reconciler I/O rule 2; ADR-0064 §3).
-        let payload_digest = crate::id::ContentHash::of(&request.payload);
-        let correlation =
-            CorrelationKey::derive(&request.target.to_string(), &payload_digest, CALL_PURPOSE);
-
-        // Replay path — return the recorded response, never re-fire.
-        if let Some(recorded) = self.journal.replay_call(&correlation).await {
-            return Ok(recorded);
+    /// - [`WorkflowCtxError::Serialize`] — the live result could not be
+    ///   CBOR-encoded.
+    /// - [`WorkflowCtxError::Deserialize`] — a recorded result could not
+    ///   be CBOR-decoded into `T` on replay.
+    /// - [`WorkflowCtxError::NonDeterministic`] — a recorded step's name
+    ///   diverges from `name` at this cursor position.
+    /// - [`WorkflowCtxError::JournalRecord`] — the live-path durable
+    ///   record failed.
+    pub async fn run<T, F>(&self, name: &str, f: F) -> Result<T, WorkflowCtxError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + Send,
+        F: std::future::Future<Output = T> + Send,
+    {
+        // Replay path — decode the recorded result, never poll `f` (the
+        // effect inside `f` never re-fires on the replay path).
+        if let Some(recorded_bytes) = self.journal.replay_run(name).await? {
+            let value: T = ciborium::from_reader(recorded_bytes.as_slice())
+                .map_err(|e| WorkflowCtxError::Deserialize { message: e.to_string() })?;
+            return Ok(value);
         }
 
-        // Live path — fire the real effect, then durably record before
-        // returning (fsync-then-suspend, ADR-0063 §4).
-        let bytes_sent = self.transport.send_datagram(request.target, request.payload).await?;
-        let response = CallResponse { bytes_sent };
-        self.journal.record_call(&correlation, &response).await?;
-        Ok(response)
+        // Live path — poll `f`, then durably record before returning
+        // (journal-after-effect, ADR-0063 §4). The effect is at-least-once;
+        // the record makes the replay path exactly-once.
+        let result = f.await;
+        let mut bytes: Vec<u8> = Vec::new();
+        ciborium::into_writer(&result, &mut bytes)
+            .map_err(|e| WorkflowCtxError::Serialize { message: e.to_string() })?;
+        self.journal.record_run(name, &bytes).await?;
+        Ok(result)
     }
 
     /// Suspend the workflow for `duration` through the injected
@@ -412,6 +443,16 @@ impl WorkflowCtx {
     #[must_use]
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.clock
+    }
+
+    /// The injected transport. Workflow bodies perform datagram / network
+    /// effects only through this port — and only INSIDE a [`Self::run`]
+    /// closure, so the effect's result is journaled and replayed
+    /// (exactly-once on the replay path). Cloning the `Arc` into the
+    /// closure is the idiomatic shape (the closure is `'static + Send`).
+    #[must_use]
+    pub fn transport(&self) -> &Arc<dyn Transport> {
+        &self.transport
     }
 
     /// The injected entropy source. Workflow bodies read randomness only

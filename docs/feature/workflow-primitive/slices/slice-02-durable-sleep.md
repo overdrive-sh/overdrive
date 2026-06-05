@@ -17,11 +17,11 @@ crash timing), O5 (replay-equivalence holds across the sleep).
   per development.md "Persist inputs, not derived state": resume recomputes
   remaining wait from `recorded_deadline - clock.now()`, it does not persist
   "remaining ms."
-- Extend the skeleton consumer with a `ctx.call → ctx.sleep → ctx.call`
+- Extend the skeleton consumer with a `ctx.run → ctx.sleep → ctx.run`
   3-await shape.
 - Extend the DST invariant: kill DURING the sleep window, restart, assert the
-  pre-sleep `ctx.call` executed once and the post-sleep call fires only after
-  the original deadline.
+  pre-sleep `ctx.run` closure was not re-fired (replayed from the journal) and
+  the post-sleep call fires only after the original deadline.
 
 ## OUT of scope
 
@@ -42,9 +42,11 @@ crash timing), O5 (replay-equivalence holds across the sleep).
 
 ## Acceptance criteria (production data, not synthetic)
 
-- AC1 (O1): Crash during the sleep window → pre-sleep `ctx.call` executes
-  exactly once on resume (SimTransport call count).
-- AC2 (O4): Post-sleep `ctx.call` fires only at/after the ORIGINAL deadline,
+- AC1 (O1): Crash during the sleep window → pre-sleep `ctx.run` closure is not
+  re-fired on resume; its result is replayed from the journal (SimTransport call
+  count == 1). (Exactly-once on the replay path, per the ADR-0064 §3 honest
+  semantics; the kill is after the pre-sleep step journals.)
+- AC2 (O4): Post-sleep `ctx.run` fires only at/after the ORIGINAL deadline,
   regardless of when the crash occurred (asserted via SimClock).
 - AC3 (O5): `replay_equivalence_*` invariant green across the sleep, seeded,
   reproducible.

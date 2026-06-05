@@ -155,24 +155,38 @@ versioned envelope reserved for the first breaking change.
 
 ```text
 JournalEntry =
-  | Started      { spec_digest, input_digest }          // slice 01
-  | CallResult   { step, correlation, response_digest }  // slice 01 (ctx.call)
-  | SleepArmed   { step, deadline_unix }                 // slice 02 (ctx.sleep) — input, not "remaining"
-  | SignalAwaited{ step, signal_key }                    // slice 03 (ctx.wait_for_signal)
-  | SignalSeen   { step, signal_key, value_digest }      // slice 03
-  | ActionEmitted{ step, action_digest }                 // slice 03 (ctx.emit_action)
-  | Terminal     { result }                              // slice 01 (WorkflowResult)
+  | Started      { spec_digest, input_digest }                  // slice 01
+  | RunResult    { step, name, result_digest, result_bytes }    // slice 01 (ctx.run<T>)
+  | SleepArmed   { step, deadline_unix }                        // slice 02 (ctx.sleep) — input, not "remaining"
+  | SignalAwaited{ step, signal_key }                           // slice 03 (ctx.wait_for_signal)
+  | SignalSeen   { step, signal_key, value_digest }             // slice 03
+  | ActionEmitted{ step, action_digest }                        // slice 03 (ctx.emit_action)
+  | Terminal     { result }                                     // slice 01 (WorkflowResult)
 ```
 
 The `step` field is the monotonic `await`-point index (the journal
-cursor — see ADR-0064 §3). `SleepArmed` records the **deadline** (an
-input), not a "remaining duration" — per development.md "Persist inputs,
+cursor — see ADR-0064 §3); **step identity is positional**, the cursor
+itself, NOT a content correlation. `RunResult` is the journal entry for the
+general durable-step primitive `ctx.run<T>(name, f)` (ADR-0064 §3): `name`
+is the diagnostic label the closure was given AND the replay determinism
+check (a mismatch at replay step N is a nondeterministic body → fail-closed);
+`result_bytes` is the **CBOR encoding of the closure's `T`** (so replay
+returns a byte-equal value by deserializing it), and `result_digest` is the
+SHA-256 over those bytes (the replay-equivalence invariant compares it).
+The per-step `correlation` field present in the pre-amendment `CallResult`
+entry is **REMOVED** — it was unused for replay matching, since the cursor is
+positional. (Instance-level `CorrelationKey` — the workflow instance
+identity used by the engine and the `ObservationRow::WorkflowTerminal` row —
+is a separate concern and is UNCHANGED.) `SleepArmed` records the **deadline**
+(an input), not a "remaining duration" — per development.md "Persist inputs,
 not derived state"; resume recomputes remaining wait from
-`recorded_deadline − clock.now()` (slice-02 AC4). Effect payloads are
-recorded as digests (`response_digest`, `value_digest`, `action_digest`),
-not full bodies, to keep journal entries small; the digest is sufficient
-for replay-equivalence (the engine re-derives the effect deterministically
-and compares the digest) and keeps the append append-mostly-small.
+`recorded_deadline − clock.now()` (slice-02 AC4). Signal/action effect
+payloads are recorded as digests (`value_digest`, `action_digest`), not full
+bodies, to keep those entries small; the digest is sufficient for
+replay-equivalence (the engine re-derives the effect deterministically and
+compares the digest). `RunResult` carries the full `result_bytes` (not only a
+digest) because the recorded value IS the replay return — it must be
+reconstructable byte-for-byte, not merely verifiable.
 
 ### 3. Table layout — one append-only table, key `(workflow_id, step)`
 
@@ -403,3 +417,13 @@ where rkyv would force a per-slice version-bump + golden-fixture ceremony.
 - 2026-06-05 — Initial accepted version. Extends ADR-0035 with the
   workflow-journal second table layout; CBOR codec; distinct
   `JournalStore` port on the shared redb substrate.
+- 2026-06-05 — Renamed the slice-01 `JournalEntry::CallResult { step,
+  correlation, response_digest }` variant to `JournalEntry::RunResult { step,
+  name, result_digest, result_bytes }` to back the general `ctx.run<T>`
+  durable-step primitive (ADR-0064 §3). `result_bytes` is the CBOR of the
+  closure's `T` (byte-equal replay); `result_digest` is the SHA-256 over those
+  bytes (replay-equivalence invariant). The per-step `correlation` field is
+  removed (unused for replay — the cursor is positional); instance-level
+  `CorrelationKey` is unchanged. Greenfield single-cut — slice-01 has no
+  breaking journal history, so no version-bump / migration shim; the upgrade
+  path is "delete the redb file." User-pinned 2026-06-05.

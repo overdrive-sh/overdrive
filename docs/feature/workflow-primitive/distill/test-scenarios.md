@@ -55,7 +55,8 @@ preclude it; it is simply not demonstrated across nodes here.
 ## Slice 01 — Walking skeleton: one durable step that survives a crash
 
 Engine + journal + replay core. First consumer `ProvisionRecord` (a real,
-non-idempotent-to-repeat `ctx.call` write effect). Maps US-WP-1, US-WP-2,
+non-idempotent-to-repeat `ctx.run` write effect — the closure performs a
+transport write via `ctx.transport()`). Maps US-WP-1, US-WP-2,
 US-WP-3, US-WP-4.
 
 ### US-WP-1 — Express a durable sequence as ordinary control flow → O3, O5
@@ -80,7 +81,7 @@ US-WP-3, US-WP-4.
 - **AC**: US-WP-1 AC2 · **KPI/ODI**: O5 (replay precondition) · **Scaffold**: `overdrive-core/tests/acceptance/workflow_body_routes_nondeterminism_through_ctx.rs`
 - GIVEN the `ProvisionRecord` workflow body and any future first-party workflow body
 - WHEN a `dst-lint`-style scan walks the workflow impl source
-- THEN it finds no `Instant::now()`, no `reqwest`, no `tokio::time::sleep`, no `rand::*` — the side effect is performed through `ctx.call(...).await` only (D-INH-4)
+- THEN it finds no `Instant::now()`, no `reqwest`, no `tokio::time::sleep`, no `rand::*` — the side effect is performed through `ctx.run(name, f).await` only (the closure `f` reaching the outside world via `ctx.transport()`) (D-INH-4)
 - AND a body that smuggles a non-`ctx` non-determinism source is rejected (the failure case is asserted, not just the happy case — negative testing).
 
 ### US-WP-2 — Journal the await-point in redb so a completed step is durable → O1, O6
@@ -89,14 +90,14 @@ US-WP-3, US-WP-4.
 `@driving_port @real-io @kpi`
 - **AC**: US-WP-2 AC1 (O6), AC2 (ordering) · **KPI/ODI**: K5(O6) · **Scaffold**: `overdrive-control-plane/tests/integration/workflow_journal/journal_writes_to_redb.rs` (real redb, `integration-tests`)
 - GIVEN a `ProvisionRecord` instance running against a **real** `RedbJournalStore` sharing the reconciler redb file
-- WHEN `run` reaches its durable `ctx.call` await-point and records the result
-- THEN the recorded `CallResult` entry is present in the redb journal when read back through the journal handle (the bytes written are the bytes read — `journal_checkpoint` consistency, journey steps 2↔3)
+- WHEN `run` reaches its durable `ctx.run` await-point and records the result
+- THEN the recorded `RunResult` entry is present in the redb journal when read back through the journal handle (the `result_bytes` written are the bytes read — `journal_checkpoint` consistency, journey steps 2↔3)
 - AND no libSQL journal table exists (K5: grep/dep-graph clean).
 
 #### S-WP-01-05 — The journal records step inputs/results, not a derived cache
 `@in-memory @property`
 - **AC**: US-WP-2 AC3 (inputs-not-derived) · **KPI/ODI**: O6 · **Scaffold**: `overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs`
-- GIVEN a `ProvisionRecord` instance recording its `ctx.call` step against `SimJournalStore`
+- GIVEN a `ProvisionRecord` instance recording its `ctx.run` step against `SimJournalStore`
 - WHEN the recorded `JournalEntry` is inspected
 - THEN it carries the step's inputs/result digest (per `development.md` "Persist inputs, not derived state")
 - AND it carries no derived-deadline / "remaining" cache field.
@@ -107,8 +108,8 @@ US-WP-3, US-WP-4.
 `@walking_skeleton @driving_port @dst @in-memory @error @property @kpi`
 - **AC**: US-WP-3 AC1 (O1), AC2 (O4), AC3 (O2 single-node), AC4 (re-hydrate); slice-01 AC1/AC2/AC5 · **KPI/ODI**: K1(O1), K3(O4), K2(O2 single-node) · **Scaffold**: `overdrive-sim/tests/acceptance/workflow_crash_resume_exactly_once.rs` (the `WorkflowExactlyOnceEffectOnResume` invariant)
 - GIVEN a `ProvisionRecord` instance brought up by the workflow-lifecycle reconciler via `Action::StartWorkflow { spec, correlation }`, running under DST on a single node
-- WHEN the instance is killed AFTER its `ctx.call` records in the redb journal but BEFORE it reaches terminal, and the process is restarted on the SAME node
-- THEN the `ctx.call` external effect executes EXACTLY ONCE across the kill (SimTransport call count == 1, not 2)
+- WHEN the instance is killed AFTER its `ctx.run` step records in the redb journal but BEFORE it reaches terminal, and the process is restarted on the SAME node
+- THEN on resume the `ctx.run` closure's external effect is NOT re-fired — the journaled result is replayed (SimTransport call count == 1, not 2). (This is exactly-once on the replay path: the kill is AFTER the journal record, so the journaled-then-resumed leg is the guarantee under test; a kill in the fire→fsync window would re-run the closure at-least-once — out of this scenario's scope.)
 - AND the resumed run reaches a `WorkflowResult` byte-identical to the uninterrupted run for the same inputs + seed
 - AND after terminal the ObservationStore carries a terminal-result row keyed by the instance's `CorrelationKey`
 - AND **no cross-node resume is claimed** — the kill-and-restart is process-local on one node (#205).
@@ -118,7 +119,7 @@ US-WP-3, US-WP-4.
 #### S-WP-01-07 — A committed step survives the crash (not lost) on resume
 `@dst @in-memory @error @kpi`
 - **AC**: US-WP-3 AC2; slice-01 AC2 · **KPI/ODI**: K2(O2 single-node) · **Scaffold**: `overdrive-sim/tests/acceptance/workflow_committed_step_survives_crash.rs`
-- GIVEN a `ProvisionRecord` instance whose `ctx.call` step has recorded in the redb journal
+- GIVEN a `ProvisionRecord` instance whose `ctx.run` step has recorded in the redb journal
 - WHEN the process is killed and restarted on the same node, and the journal is replayed
 - THEN the recorded step's result is read back from the journal (the committed step is NOT lost)
 - AND the resumed run continues from the first UNrecorded await, not from the top.
@@ -163,14 +164,14 @@ US-WP-3, US-WP-4.
 ## Slice 02 — Durable `ctx.sleep` across a crash
 
 Adds `ctx.sleep(Duration)` through the injected `Clock`. Consumer extended to a
-`ctx.call → ctx.sleep → ctx.call` 3-await shape. Maps US-WP-1/3/4 across a sleep.
+`ctx.run → ctx.sleep → ctx.run` 3-await shape. Maps US-WP-1/3/4 across a sleep.
 
 #### S-WP-02-01 — A waiting sequence survives a crash spanning the sleep window without repeating the pre-sleep step
 `@driving_port @dst @in-memory @error @property @kpi`
 - **AC**: slice-02 AC1 (O1) · **KPI/ODI**: K1(O1) · **Scaffold**: `overdrive-sim/tests/acceptance/workflow_sleep_crash_pre_sleep_step_not_repeated.rs`
-- GIVEN a `ctx.call → ctx.sleep → ctx.call` sequence running under DST
+- GIVEN a `ctx.run → ctx.sleep → ctx.run` sequence running under DST
 - WHEN the process is killed DURING the sleep window and restarted on the same node
-- THEN the pre-sleep `ctx.call` executes exactly once on resume (SimTransport call count == 1)
+- THEN the pre-sleep `ctx.run` closure is not re-fired on resume (SimTransport call count == 1) — its result is replayed from the journal
 - AND the sequence resumes the remaining wait, not the whole sleep.
 
 #### S-WP-02-02 — The post-sleep step fires only at/after the original deadline, regardless of crash timing
@@ -178,7 +179,7 @@ Adds `ctx.sleep(Duration)` through the injected `Clock`. Consumer extended to a
 - **AC**: slice-02 AC2 (O4) · **KPI/ODI**: K3(O4) · **Scaffold**: `overdrive-sim/tests/acceptance/workflow_sleep_resumes_to_original_deadline.rs`
 - GIVEN a sequence suspended on `ctx.sleep` with a recorded deadline
 - WHEN the crash occurs at an arbitrary point in the sleep window and the run resumes (SimClock advances logical time)
-- THEN the post-sleep `ctx.call` fires only at/after the ORIGINAL deadline, never earlier
+- THEN the post-sleep `ctx.run` fires only at/after the ORIGINAL deadline, never earlier
 - AND the terminal result is unchanged by the crash timing.
 
 #### S-WP-02-03 — The sleep journal entry records the deadline (an input), never a "remaining" cache
@@ -192,7 +193,7 @@ Adds `ctx.sleep(Duration)` through the injected `Clock`. Consumer extended to a
 #### S-WP-02-04 — Replay-equivalence holds across the sleep, seeded and reproducible
 `@dst @in-memory @property @kpi`
 - **AC**: slice-02 AC3 (O5) · **KPI/ODI**: K4(O5) · **Scaffold**: `overdrive-sim/tests/acceptance/replay_equivalence_holds_across_sleep.rs`
-- GIVEN the `replay_equivalence_*` invariant extended over the 3-await `ctx.call → ctx.sleep → ctx.call` shape
+- GIVEN the `replay_equivalence_*` invariant extended over the 3-await `ctx.run → ctx.sleep → ctx.run` shape
 - WHEN `cargo dst` runs the invariant
 - THEN replaying the journal across the sleep produces a bit-identical trajectory, green on the CI critical path, reproducing bit-for-bit from the printed seed.
 

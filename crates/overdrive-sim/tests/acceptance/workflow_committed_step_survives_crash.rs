@@ -11,10 +11,10 @@
 //!
 //! # Port-to-port
 //!
-//! Driving port: `WorkflowCtx::call` (the slice-01 await-surface). Driven
+//! Driving port: `WorkflowCtx::run` (the slice-01 await-surface). Driven
 //! ports: the bound `SimInbox` (the `SimTransport` effect — fires on the
 //! live step, NOT on the replayed step) and the `SimJournalStore` behind
-//! the cursor handle (the committed `CallResult` read back on resume).
+//! the cursor handle (the committed `RunResult` read back on resume).
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -28,7 +28,7 @@ use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::traits::Transport;
-use overdrive_core::workflow::{CallRequest, CallResponse, JournalCursor, WorkflowCtx};
+use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowCtxError};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -37,6 +37,22 @@ use overdrive_sim::adapters::transport::{SimInbox, SimTransport};
 
 const TARGET: &str = "127.0.0.1:9000";
 const PAYLOAD: &[u8] = b"provision-record";
+const STEP_NAME: &str = "provision-write";
+
+/// Run the provision-write durable step through `ctx.run`; returns the raw
+/// ctx result. `T` is `Result<usize, String>` so the assertions can read
+/// the recorded byte count.
+async fn run_step(
+    ctx: &WorkflowCtx,
+    target: SocketAddr,
+) -> Result<Result<usize, String>, WorkflowCtxError> {
+    let transport = Arc::clone(ctx.transport());
+    let payload = Bytes::from_static(PAYLOAD);
+    ctx.run(STEP_NAME, async move {
+        transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+    })
+    .await
+}
 
 /// Build a `WorkflowCtx` over a SHARED journal, with a freshly-bound
 /// transport inbox so each "boot" observes its own delivered-datagram
@@ -64,10 +80,6 @@ async fn ctx_on(
     (ctx, inbox)
 }
 
-fn request() -> CallRequest {
-    CallRequest { target: TARGET.parse().expect("addr"), payload: Bytes::from_static(PAYLOAD) }
-}
-
 async fn delivered_once(inbox: &mut SimInbox) -> bool {
     tokio::time::timeout(Duration::from_millis(50), inbox.recv()).await.is_ok()
 }
@@ -76,40 +88,42 @@ async fn delivered_once(inbox: &mut SimInbox) -> bool {
 async fn committed_step_is_read_back_from_journal_and_run_resumes_from_first_unrecorded_await() {
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let workflow_id = WorkflowId::new("wf-committed-0001").expect("valid id");
+    let target: SocketAddr = TARGET.parse().expect("addr");
 
-    // ---- Boot 1: live ctx.call commits a CallResult to the journal,
+    // ---- Boot 1: live ctx.run commits a RunResult to the journal,
     //      then "crash" (drop the ctx before any further await). ----
-    let first_call: CallResponse = {
+    let first_result: Result<usize, String> = {
         let (ctx, mut inbox) = ctx_on(Arc::clone(&journal), &workflow_id, Vec::new()).await;
-        let response = ctx.call(request()).await.expect("boot-1 live call");
-        assert!(delivered_once(&mut inbox).await, "boot-1 live call fires the effect");
-        response
+        let result = run_step(&ctx, target).await.expect("boot-1 live run");
+        assert!(delivered_once(&mut inbox).await, "boot-1 live run fires the effect");
+        result
     };
+    assert_eq!(first_result, Ok(PAYLOAD.len()), "boot-1 run records the real byte count");
 
     // The committed step is durable: read back from the journal byte-equal.
     let committed = journal.load_journal(&workflow_id).await.expect("load after crash");
     assert_eq!(committed.len(), 1, "exactly the one committed step survives: {committed:?}");
     match &committed[0] {
-        JournalEntry::CallResult { step, bytes_sent, .. } => {
+        JournalEntry::RunResult { step, name, result_bytes, .. } => {
             assert_eq!(*step, 0, "the committed step is step 0");
-            assert_eq!(
-                *bytes_sent, first_call.bytes_sent,
-                "the journal read-back is byte-equal to the live response"
-            );
+            assert_eq!(name, STEP_NAME, "the committed step records its ctx.run name");
+            let decoded: Result<usize, String> =
+                ciborium::from_reader(result_bytes.as_slice()).expect("decode recorded result");
+            assert_eq!(decoded, first_result, "the journal read-back decodes to the live result");
         }
-        other => panic!("committed step must be a CallResult, got {other:?}"),
+        other => panic!("committed step must be a RunResult, got {other:?}"),
     }
 
     // ---- Boot 2: RESUME. The engine load_journals the committed step into
-    //      the replay buffer; ctx.call short-circuits (replay) and returns
-    //      the read-back response WITHOUT re-firing the effect — the run
+    //      the replay buffer; ctx.run short-circuits (replay) and returns
+    //      the read-back result WITHOUT re-firing the effect — the run
     //      resumes from the FIRST UNRECORDED await, not from the top. ----
     let (ctx, mut inbox) = ctx_on(Arc::clone(&journal), &workflow_id, committed.clone()).await;
-    let replayed = ctx.call(request()).await.expect("boot-2 replayed call");
+    let replayed = run_step(&ctx, target).await.expect("boot-2 replayed run");
 
-    // Committed step NOT lost: the replayed response is the read-back one.
+    // Committed step NOT lost: the replayed result is the read-back one.
     assert_eq!(
-        replayed.bytes_sent, first_call.bytes_sent,
+        replayed, first_result,
         "resume reads the committed step back from the journal — not lost"
     );
     // Resume continues past the recorded await WITHOUT re-performing it:

@@ -295,12 +295,12 @@ mod tests {
         }
     }
 
-    fn call_result(step: u32) -> JournalEntry {
-        JournalEntry::CallResult {
+    fn run_result(step: u32) -> JournalEntry {
+        JournalEntry::RunResult {
             step,
-            correlation: format!("provision-record/{step}"),
-            response_digest: ContentHash::of(b"resp"),
-            bytes_sent: 0,
+            name: "provision-write".to_string(),
+            result_digest: ContentHash::of(b"resp"),
+            result_bytes: Vec::new(),
         }
     }
 
@@ -310,7 +310,7 @@ mod tests {
         let store = RedbJournalStore::new(db);
         let id = workflow_id();
 
-        let entries = vec![started(), call_result(0), call_result(1)];
+        let entries = vec![started(), run_result(0), run_result(1)];
         for e in &entries {
             store.append(&id, e).await.expect("append");
         }
@@ -336,12 +336,12 @@ mod tests {
         let b = WorkflowId::new("wf-bbbb").expect("id b");
 
         store.append(&a, &started()).await.expect("append a");
-        store.append(&b, &call_result(0)).await.expect("append b");
+        store.append(&b, &run_result(0)).await.expect("append b");
 
         let loaded_a = store.load_journal(&a).await.expect("load a");
         let loaded_b = store.load_journal(&b).await.expect("load b");
         assert_eq!(loaded_a, vec![started()], "instance a sees only its own run");
-        assert_eq!(loaded_b, vec![call_result(0)], "instance b sees only its own run");
+        assert_eq!(loaded_b, vec![run_result(0)], "instance b sees only its own run");
     }
 
     #[tokio::test]

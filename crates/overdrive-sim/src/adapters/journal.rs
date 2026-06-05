@@ -224,14 +224,15 @@ mod tests {
             (content_hash_strategy(), content_hash_strategy()).prop_map(
                 |(spec_digest, input_digest)| JournalEntry::Started { spec_digest, input_digest }
             ),
-            (any::<u32>(), "[a-z0-9/-]{1,32}", content_hash_strategy(), any::<usize>()).prop_map(
-                |(step, correlation, response_digest, bytes_sent)| JournalEntry::CallResult {
-                    step,
-                    correlation,
-                    response_digest,
-                    bytes_sent,
-                }
-            ),
+            (
+                any::<u32>(),
+                "[a-z0-9-]{1,32}",
+                content_hash_strategy(),
+                proptest::collection::vec(any::<u8>(), 0..32)
+            )
+                .prop_map(|(step, name, result_digest, result_bytes)| {
+                    JournalEntry::RunResult { step, name, result_digest, result_bytes }
+                }),
             "[a-zA-Z ]{1,32}".prop_map(|result| JournalEntry::Terminal { result }),
         ]
     }

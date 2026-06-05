@@ -24,6 +24,14 @@ serde_json.workspace = true
 rkyv.workspace       = true
 bytecheck.workspace  = true
 
+# CBOR codec for the `WorkflowCtx::run` durable-step await-surface
+# (ADR-0064): a `ctx.run` step's result is CBOR-encoded before the
+# journal records it and CBOR-decoded on the replay path. `ciborium` is
+# a pure-Rust serde codec (no runtime I/O) and is NOT on the dst-lint
+# banned-API list — the same codec the runtime-owned journal/ViewStore
+# use in `overdrive-control-plane`.
+ciborium.workspace = true
+
 # OpenAPI schema derivation — `JobSpecInput` carries `ToSchema` so
 # `overdrive-control-plane::api` can reuse it as the typed spec field in
 # `SubmitJobRequest` / `JobDescription` per ADR-0014 (shared types
@@ -117,12 +125,10 @@ trybuild.workspace = true
 # do not propagate to downstream consumers.
 overdrive-sim.path = "../overdrive-sim"
 tokio              = { workspace = true }
-# `tests/backend_discovery_bridge_types.rs` round-trips
-# `BackendDiscoveryBridgeView` through the same CBOR codec the
-# runtime-owned `ViewStore` uses (per ADR-0035 § 3 — CBOR via
-# `ciborium`). Dev-dep only — production runtime persistence lives
-# in `overdrive-control-plane`, which carries the regular dep.
-ciborium           = { workspace = true }
+# `ciborium` is now a regular dep — see [dependencies] above for the
+# ADR-0064 `WorkflowCtx::run` rationale. Tests
+# (`tests/backend_discovery_bridge_types.rs` and the workflow suite)
+# inherit the regular dep, so a separate dev-dep entry would duplicate.
 # `toml` is now a regular dep — see [dependencies] above for the
 # Slice 01 / ADR-0047 §2 rationale. Tests inherit the regular dep,
 # so a separate dev-dep entry would be a duplicate.

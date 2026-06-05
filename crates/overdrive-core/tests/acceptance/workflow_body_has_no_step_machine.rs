@@ -20,7 +20,7 @@
 //! * **state-transition `match` arm** — a `match` whose scrutinee is a
 //!   locally-declared step-enum value (i.e. a `match` driving the
 //!   hand-rolled cursor). The clean body's only `match` is over the
-//!   `Result` returned by `ctx.call(...).await`, which is NOT a
+//!   `Result` returned by `ctx.run(...).await`, which is NOT a
 //!   step-transition — it is ordinary control flow over a port result.
 //!
 //! Counting *every* `match` would be wrong (the clean body legitimately

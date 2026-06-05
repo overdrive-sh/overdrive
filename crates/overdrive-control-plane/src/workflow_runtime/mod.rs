@@ -17,14 +17,15 @@
 //!
 //! On (re)start the engine loads the instance's journal into a **replay
 //! buffer** and constructs a [`JournalCursorHandle`] at step 0. Each
-//! `ctx.call` is check-then-record:
+//! `ctx.run` durable step is check-then-record (POSITIONAL identity — the
+//! cursor index):
 //!
 //! - **Replay (cursor < buffer length):** the handle returns the recorded
-//!   [`CallResponse`] WITHOUT firing the transport effect — the
-//!   exactly-once guarantee on resume (K1). The cursor advances.
-//! - **Live (cursor == buffer length):** the handle returns `None`; the
-//!   ctx fires the real effect, then the handle appends a
-//!   [`JournalEntry::CallResult`] with fsync BEFORE returning (ADR-0063
+//!   CBOR result bytes WITHOUT polling the step's future — the
+//!   exactly-once guarantee on the replay path (K1). The cursor advances.
+//! - **Live (cursor == buffer length):** the handle returns `Ok(None)`;
+//!   the ctx polls the step's future, then the handle appends a
+//!   [`JournalEntry::RunResult`] with fsync BEFORE returning (ADR-0063
 //!   §4 fsync-then-suspend) and advances the cursor.
 //!
 //! On `run` returning a [`WorkflowResult`], the engine appends a
@@ -43,8 +44,8 @@ use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    CallResponse, JournalCursor, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName,
-    WorkflowResult, WorkflowSpec,
+    JournalCursor, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName, WorkflowResult,
+    WorkflowSpec,
 };
 
 use crate::journal::{JournalEntry, JournalStore, WorkflowId};
@@ -347,42 +348,49 @@ impl JournalCursorHandle {
 
 #[async_trait]
 impl JournalCursor for JournalCursorHandle {
-    async fn replay_call(&self, _correlation: &CorrelationKey) -> Option<CallResponse> {
+    async fn replay_run(&self, name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
         // Replay only while the cursor is within the loaded run AND the
-        // entry at the cursor is a CallResult. (`Started` / `Terminal`
-        // entries are not ctx.call await-points; slice 01 records only
-        // CallResult entries between Started and Terminal, but guarding on
+        // entry at the cursor is a RunResult. (`Started` / `Terminal`
+        // entries are not ctx.run await-points; slice 01 records only
+        // RunResult entries between Started and Terminal, but guarding on
         // the variant keeps the cursor honest if a future slice
         // interleaves other await entries.) A cursor past the buffer (or
-        // at a non-call entry) is the live path → `None`.
-        let response = match self.replay_buffer.get(*cursor) {
-            Some(JournalEntry::CallResult { bytes_sent, .. }) => {
-                *cursor += 1;
-                Some(CallResponse { bytes_sent: *bytes_sent })
-            }
-            _ => None,
+        // at a non-run entry) is the live path → `Ok(None)`.
+        let Some(JournalEntry::RunResult { name: recorded_name, result_bytes, .. }) =
+            self.replay_buffer.get(*cursor)
+        else {
+            drop(cursor);
+            return Ok(None);
         };
+        // Replay-determinism check (POSITIONAL identity; `name` is the
+        // diagnostic + determinism guard). A recorded step whose name
+        // diverges from the replaying body's name at this cursor is a
+        // non-deterministic trajectory — fail closed (ADR-0064 §3). Do NOT
+        // advance the cursor on a mismatch.
+        if recorded_name != name {
+            let expected = recorded_name.clone();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic { expected, actual: name.to_string() });
+        }
+        let bytes = result_bytes.clone();
+        *cursor += 1;
         drop(cursor);
-        response
+        Ok(Some(bytes))
     }
 
-    async fn record_call(
-        &self,
-        correlation: &CorrelationKey,
-        response: &CallResponse,
-    ) -> Result<(), WorkflowCtxError> {
+    async fn record_run(&self, name: &str, result_bytes: &[u8]) -> Result<(), WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
         let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
-        // The response digest is the content hash of the observable
+        // The result digest is the content hash of the CBOR-encoded step
         // result — slice 01 records both the digest (replay-equivalence)
-        // and the value (`bytes_sent`, for byte-equal replay).
-        let response_digest = ContentHash::of(response.bytes_sent.to_le_bytes());
-        let entry = JournalEntry::CallResult {
+        // and the bytes (for byte-equal replay).
+        let result_digest = ContentHash::of(result_bytes);
+        let entry = JournalEntry::RunResult {
             step,
-            correlation: correlation.as_str().to_string(),
-            response_digest,
-            bytes_sent: response.bytes_sent,
+            name: name.to_string(),
+            result_digest,
+            result_bytes: result_bytes.to_vec(),
         };
         // Append + fsync BEFORE returning (ADR-0063 §4). On failure the
         // cursor does NOT advance — the engine must not continue against

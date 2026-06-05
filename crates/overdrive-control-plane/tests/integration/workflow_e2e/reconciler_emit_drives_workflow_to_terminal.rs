@@ -10,7 +10,7 @@
 //! real `hydrate_desired` / `hydrate_actual`) drives `ProvisionRecord`'s
 //! `run` to terminal → the `WorkflowTerminal` `ObservationStore` row
 //! appears keyed by the same `CorrelationKey` → the lifecycle reconciler
-//! converges the instance to terminated; the `ctx.call` effect fired
+//! converges the instance to terminated; the `ctx.run` effect fired
 //! exactly once.
 //!
 //! This is the user-requested proof that the FULL pipeline works
@@ -26,7 +26,7 @@
 //! `AppState::workflow_engine`. The observable outcomes asserted at the
 //! driven boundaries: (1) the `WorkflowTerminal` `ObservationStore` row
 //! keyed by the instance `CorrelationKey`; (2) the engine task completed
-//! (`join_all` returns, `live_instances` is empty); (3) the `ctx.call`
+//! (`join_all` returns, `live_instances` is empty); (3) the `ctx.run`
 //! transport effect fired exactly once (`SimTransport` call count); (4)
 //! the `WorkflowLifecycle` reconciler converges the instance to
 //! terminated (its pure reconcile emits no `StartWorkflow` once the
@@ -94,7 +94,7 @@ impl FixtureTriggerReconciler {
 #[allow(
     clippy::too_many_lines,
     reason = "single end-to-end golden walkthrough: real composition setup + the four \
-              observable-outcome assertions (terminal row, engine task done, ctx.call once, \
+              observable-outcome assertions (terminal row, engine task done, ctx.run once, \
               lifecycle convergence) are one indivisible scenario — splitting would obscure \
               the single committed-StartWorkflow-to-terminal pipeline this test exists to prove."
 )]
@@ -105,16 +105,16 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
 
     // --- Real engine ports (real redb journal via AppState boot; Sim*
     //     for clock/transport/entropy under DST). The transport is held
-    //     by the test so the exactly-once `ctx.call` effect can be
+    //     by the test so the exactly-once `ctx.run` effect can be
     //     asserted at the SimTransport call-count boundary.
     let transport = Arc::new(SimTransport::new());
     let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(0x5eed));
 
     let target: SocketAddr = "127.0.0.1:9000".parse().expect("valid addr");
 
-    // Bind an inbox at the target so the exactly-once `ctx.call` effect is
+    // Bind an inbox at the target so the exactly-once `ctx.run` effect is
     // observable at the transport delivery boundary: ProvisionRecord's
-    // single `ctx.call` sends one datagram to `target`.
+    // single `ctx.run` sends one datagram to `target`.
     let mut inbox = transport.bind_inbox(target).await.expect("bind target inbox");
 
     // The engine's registry maps the workflow kind → the fixture
@@ -192,7 +192,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     // === Commit the action through the production action-shim dispatch,
     //     threaded the REAL engine from AppState (the production commit
     //     point a reconciler's emitted actions flow through). This drives:
-    //     emit → dispatch → real engine start → run → ctx.call effect →
+    //     emit → dispatch → real engine start → run → ctx.run effect →
     //     Terminal journal entry + WorkflowTerminal observation row +
     //     workflow-instance intent persistence.
     let now = Instant::now();
@@ -213,17 +213,17 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     // The engine drives `run` as a tracked task off the shim; wait for it.
     state.workflow_engine.join_all().await;
 
-    // --- (3) the ctx.call transport effect fired EXACTLY ONCE. The single
-    //     ProvisionRecord `ctx.call` delivers exactly one datagram to the
+    // --- (3) the ctx.run transport effect fired EXACTLY ONCE. The single
+    //     ProvisionRecord `ctx.run` delivers exactly one datagram to the
     //     bound target inbox; a second is never delivered.
     let first = tokio::time::timeout(Duration::from_secs(1), inbox.recv())
         .await
-        .expect("ctx.call datagram must be delivered within the budget");
-    assert!(first.is_some(), "ProvisionRecord's single ctx.call must fire exactly once");
+        .expect("ctx.run datagram must be delivered within the budget");
+    assert!(first.is_some(), "ProvisionRecord's single ctx.run must fire exactly once");
     let second = tokio::time::timeout(Duration::from_millis(200), inbox.recv()).await;
     assert!(
         second.is_err() || matches!(second, Ok(None)),
-        "ctx.call must fire EXACTLY once — no second datagram"
+        "ctx.run must fire EXACTLY once — no second datagram"
     );
 
     // --- (1) the WorkflowTerminal observation row appears keyed by the
@@ -302,7 +302,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     .expect("convergence tick ok");
 
     // Converged: a second engine start was NOT triggered — no further
-    // ctx.call datagram is delivered (the terminal-observed reconcile
+    // ctx.run datagram is delivered (the terminal-observed reconcile
     // emits no StartWorkflow, so the engine never re-ran the workflow
     // body).
     state.workflow_engine.join_all().await;

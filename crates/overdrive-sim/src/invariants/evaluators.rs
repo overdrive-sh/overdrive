@@ -46,9 +46,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, ObservationRow, ObservationStore,
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
-use overdrive_core::workflow::{
-    CallRequest, JournalCursor, WorkflowCtx, WorkflowResult, WorkflowSpec,
-};
+use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowResult, WorkflowSpec};
 
 use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{
@@ -597,7 +595,8 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
 // `cargo dst` critical path.
 
 /// The fixed address the `ProvisionRecord` reference workflow's single
-/// `ctx.call` effect is addressed at, in every evaluator below.
+/// `ctx.run` provision-write effect is addressed at, in every evaluator
+/// below.
 const WF_TARGET: &str = "127.0.0.1:9000";
 
 /// Construct the slice-01 instance correlation + id + spec for a
@@ -703,10 +702,11 @@ async fn run_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResu
 
 /// Drive a crash-injected `ProvisionRecord` run.
 ///
-/// Fires `ctx.call` once (records step 0), then drops the future BEFORE
-/// terminal — a process-local kill modelled honestly. Returns the
-/// persisted journal (carrying the recorded `CallResult`, NO `Terminal`)
-/// and the count of effect fires during this pre-crash run.
+/// Runs the `ctx.run("provision-write", ...)` step once (records step 0),
+/// then drops the future BEFORE terminal — a process-local kill modelled
+/// honestly. Returns the persisted journal (carrying the recorded
+/// `RunResult`, NO `Terminal`) and the count of effect fires during this
+/// pre-crash run.
 async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<JournalEntry>, usize) {
     let (_correlation, workflow_id, _spec) = provision_instance();
     let target: SocketAddr =
@@ -728,15 +728,28 @@ async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<Jou
             Arc::new(SimEntropy::new(seed)),
             cursor,
         );
-        let request =
-            CallRequest { target, payload: bytes::Bytes::from_static(ProvisionRecord::PAYLOAD) };
-        // The recorded step. The ctx + future drop at the end of this
-        // block model the crash BEFORE terminal.
-        let _ = ctx.call(request).await;
+        // The recorded step — the same `ctx.run` durable step
+        // `ProvisionRecord` performs. The ctx + future drop at the end of
+        // this block model the crash BEFORE terminal.
+        let _ = provision_write_step(&ctx, target).await;
     }
     let fires = delivered_count(&mut inbox).await;
     let trajectory = journal.load_journal(&workflow_id).await.unwrap_or_default();
     (trajectory, fires)
+}
+
+/// Perform the canonical `provision-write` durable step through `ctx.run`
+/// — the same step the `ProvisionRecord` reference workflow runs. Mirrors
+/// its body so the evaluators driving a raw ctx exercise the identical
+/// recorded-step shape.
+async fn provision_write_step(ctx: &WorkflowCtx, target: SocketAddr) -> Result<usize, String> {
+    let transport = Arc::clone(ctx.transport());
+    let payload = bytes::Bytes::from_static(ProvisionRecord::PAYLOAD);
+    ctx.run("provision-write", async move {
+        transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|err| Err(err.to_string()))
 }
 
 /// Evaluate `ReplayEquivalenceProvisionRecord` (K4).
@@ -761,8 +774,8 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     let (correlation, workflow_id, spec) = provision_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let (pre_resume, _crash_fires) = run_until_crash(seed, &journal).await;
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::CallResult { .. })) {
-        return fail(format!("crash run left no recorded CallResult: {pre_resume:?}"));
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })) {
+        return fail(format!("crash run left no recorded RunResult: {pre_resume:?}"));
     }
     if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
         return fail(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
@@ -789,7 +802,7 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     let resume_fires = delivered_count(&mut resume_inbox).await;
     if resume_fires != 0 {
         return fail(format!(
-            "resume re-fired the recorded ctx.call effect {resume_fires} times (must be 0)"
+            "resume re-fired the recorded ctx.run effect {resume_fires} times (must be 0)"
         ));
     }
 
@@ -801,15 +814,15 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     };
 
     // Replay-equivalence: the resumed trajectory is byte-identical to the
-    // uninterrupted one (the recorded CallResult is the same; both reach
+    // uninterrupted one (the recorded RunResult is the same; both reach
     // a Terminal entry), and the terminal results match.
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
-    let recorded_call = |run: &[JournalEntry]| -> Option<JournalEntry> {
-        run.iter().find(|e| matches!(e, JournalEntry::CallResult { .. })).cloned()
+    let recorded_run = |run: &[JournalEntry]| -> Option<JournalEntry> {
+        run.iter().find(|e| matches!(e, JournalEntry::RunResult { .. })).cloned()
     };
-    if recorded_call(&resumed) != recorded_call(&uninterrupted) {
+    if recorded_run(&resumed) != recorded_run(&uninterrupted) {
         return fail(format!(
-            "resumed recorded CallResult differs from uninterrupted: \
+            "resumed recorded RunResult differs from uninterrupted: \
              {resumed:?} vs {uninterrupted:?}"
         ));
     }
@@ -832,7 +845,7 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
 /// Evaluate `WorkflowJournalWriteOrdering` (ADR-0064 §6).
 ///
 /// Mirrors ADR-0035 `WriteThroughOrdering`. Under an injected
-/// fsync-failure, the live-path `ctx.call` record FAILS, the cursor does
+/// fsync-failure, the live-path `ctx.run` record FAILS, the cursor does
 /// NOT advance (a retry is still a LIVE call), and the journal carries no
 /// phantom entry.
 #[must_use]
@@ -858,12 +871,21 @@ pub async fn evaluate_workflow_journal_write_ordering(seed: u64) -> InvariantRes
         Arc::new(SimEntropy::new(seed)),
         Arc::clone(&cursor),
     );
-    let request =
-        || CallRequest { target, payload: bytes::Bytes::from_static(ProvisionRecord::PAYLOAD) };
+    // The provision-write `ctx.run` durable step; the raw ctx result is
+    // observed so the injected fsync failure surfaces as a JournalRecord
+    // error (the success type `T` is `Result<usize, String>`, so a
+    // record failure is distinguishable from an effect failure).
+    let run_step = || {
+        let transport = Arc::clone(ctx.transport());
+        let payload = bytes::Bytes::from_static(ProvisionRecord::PAYLOAD);
+        ctx.run("provision-write", async move {
+            transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+        })
+    };
 
     // Arm the fsync failure — the next live record (append) fails.
     store.inject_fsync_failure();
-    match ctx.call(request()).await {
+    match run_step().await {
         Ok(_) => return fail("live record succeeded under injected fsync failure".to_owned()),
         Err(_err) => {}
     }
@@ -889,10 +911,13 @@ pub async fn evaluate_workflow_journal_write_ordering(seed: u64) -> InvariantRes
     // the cursor did not advance into a spurious replay.
     let fires_before_retry = delivered_count(&mut inbox).await;
     store.clear_fsync_failure();
-    match ctx.call(request()).await {
-        Ok(response) if response.bytes_sent == ProvisionRecord::PAYLOAD.len() => {}
-        Ok(response) => {
-            return fail(format!("retry response had wrong byte count: {}", response.bytes_sent));
+    match run_step().await {
+        Ok(Ok(bytes_sent)) if bytes_sent == ProvisionRecord::PAYLOAD.len() => {}
+        Ok(Ok(bytes_sent)) => {
+            return fail(format!("retry response had wrong byte count: {bytes_sent}"));
+        }
+        Ok(Err(effect_err)) => {
+            return fail(format!("retry effect failed: {effect_err}"));
         }
         Err(err) => return fail(format!("retry after clear failed: {err}")),
     }
@@ -925,7 +950,7 @@ pub async fn evaluate_workflow_journal_write_ordering(seed: u64) -> InvariantRes
 
 /// Evaluate `WorkflowExactlyOnceEffectOnResume` (ADR-0064 §6; US-WP-3 AC1 / K1).
 ///
-/// Crash after `ctx.call` records → resume → the recorded effect is
+/// Crash after `ctx.run` records → resume → the recorded effect is
 /// replayed WITHOUT re-firing the transport (zero datagrams on the resumed
 /// boot's inbox) and the run reaches terminal.
 #[must_use]
@@ -941,8 +966,8 @@ pub async fn evaluate_workflow_exactly_once_effect_on_resume(seed: u64) -> Invar
     if crash_fires != 1 {
         return fail(format!("pre-crash run fired the effect {crash_fires} times (expected 1)"));
     }
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::CallResult { .. })) {
-        return fail(format!("crash run recorded no CallResult: {pre_resume:?}"));
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })) {
+        return fail(format!("crash run recorded no RunResult: {pre_resume:?}"));
     }
 
     // Resume: zero additional fires, reach terminal.

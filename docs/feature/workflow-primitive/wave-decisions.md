@@ -112,7 +112,7 @@ original taste scoring did not have):
   terminal.**
 
 **Selected option — B′:** a distinct durable-async `Workflow` primitive
-(`async fn run(ctx)` with `ctx.call`/`ctx.sleep`/`ctx.wait_for_signal`/
+(`async fn run(ctx)` with `ctx.run<T>`/`ctx.sleep`/`ctx.wait_for_signal`/
 `ctx.activity`), step **journal in redb**, instance lifecycle owned by the
 **workflow-lifecycle reconciler**, all non-determinism through `ctx`
 (injected `Clock`/`Transport`/`Entropy`, DST-controllable), replay-
@@ -135,3 +135,34 @@ no longer choosing between C and B′.
   subagent context** (Task tool unavailable inside a subagent). Verdict
   surfaced to orchestrator for relay — see return summary. All 5 phase
   gates (G1–G4 + diversity) self-verified PASS.
+
+---
+
+## DESIGN Decisions (post-DISTILL amendment — 2026-06-05)
+
+- **[D-DSN-1] Replaced the slice-01 `ctx.call(CallRequest) -> CallResponse`
+  await-surface with the general `ctx.run<T: Serialize + DeserializeOwned>(name,
+  impl Future<Output = T>) -> T` durable-step primitive (Restate `ctx.run`
+  model).** Rationale: `ctx.call` was a degenerate primitive hardcoded to a
+  single `Transport`-datagram effect and could not return a value; `ctx.run<T>`
+  wraps any side-effecting future and journals/replays its result. Journal
+  identity is positional (the monotonic await-point index = the journal
+  cursor); `name` is a diagnostic label plus a replay determinism check
+  (fail-closed on mismatch, consistent with K6 "non-determinism through `ctx`,
+  fail-closed"). Honest semantics: **at-least-once for the effect, exactly-once
+  on the replay path** (the journal records after the effect fires, so a
+  fire→fsync-window crash re-runs the closure; once journaled the result is
+  replayed and the closure is never re-polled — the same caveat Restate's
+  `ctx.run` carries). Journal entry `JournalEntry::CallResult { step,
+  correlation, response_digest }` → `JournalEntry::RunResult { step, name,
+  result_digest, result_bytes }` (`result_bytes` = CBOR of `T` for byte-equal
+  replay; `result_digest` = SHA-256 over those bytes); the per-step
+  `correlation` field is removed (unused for positional replay). Instance-level
+  `CorrelationKey` is a separate concern, UNCHANGED. `CallRequest`/`CallResponse`/
+  `CALL_PURPOSE`/`WorkflowCtxError::Transport` deleted; `Transport` stays on
+  `WorkflowCtx` via a `ctx.transport()` accessor so closures perform transport
+  effects (transport errors fold into the user's `T`, e.g.
+  `T = Result<usize, String>`). Greenfield single-cut — slice-01 has no
+  breaking journal history, so no deprecation shim and no journal
+  version-bump/migration; the upgrade path is "delete the redb file." ADR-0063
+  (`RunResult` entry) + ADR-0064 §2/§3/§4/§6 amended. **User-pinned 2026-06-05.**

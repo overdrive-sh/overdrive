@@ -25,18 +25,18 @@
 //! impl + the `WorkflowSpec` it derives from.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 
-use crate::workflow::{
-    CallRequest, Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec,
-};
+use crate::workflow::{Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec};
 
 /// The canonical slice-01 reference workflow: perform one external
-/// `ctx.call` (the provision-write effect), then return a terminal
-/// `Success`. Authored as one ordinary `async fn run` per S-WP-01-02.
+/// effect inside a `ctx.run` durable step (the provision-write), then
+/// return a terminal `Success`. Authored as one ordinary `async fn run`
+/// per S-WP-01-02.
 pub struct ProvisionRecord {
     /// Where the provision-write effect is addressed.
     target: SocketAddr,
@@ -79,18 +79,31 @@ impl ProvisionRecord {
 #[async_trait]
 impl Workflow for ProvisionRecord {
     async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
-        let request =
-            CallRequest { target: self.target, payload: Bytes::from_static(Self::PAYLOAD) };
-        match ctx.call(request).await {
-            Ok(_response) => WorkflowResult::Success,
-            Err(_err) => WorkflowResult::Failed { reason: "provision call failed".to_string() },
+        // The provision-write effect runs INSIDE a `ctx.run` durable step:
+        // the transport send fires once on the live path, its result is
+        // journaled, and a resumed run replays the recorded result without
+        // re-firing (exactly-once on the replay path). `T` is the
+        // serializable `Result<usize, String>` — the transport error folds
+        // into the success type so the whole result round-trips through CBOR.
+        let transport = Arc::clone(ctx.transport());
+        let target = self.target;
+        let payload = Bytes::from_static(Self::PAYLOAD);
+        let sent: Result<usize, String> = ctx
+            .run("provision-write", async move {
+                transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap_or_else(|err| Err(err.to_string()));
+        match sent {
+            Ok(_bytes) => WorkflowResult::Success,
+            Err(_reason) => WorkflowResult::Failed { reason: "provision call failed".to_string() },
         }
     }
 }
 
 /// The canonical slice-02 reference workflow: the thinnest durable
 /// sequence that exercises `ctx.sleep` BETWEEN two external effects — a
-/// `ctx.call → ctx.sleep → ctx.call` 3-await shape (slice-02 consumer per
+/// `ctx.run → ctx.sleep → ctx.run` 3-await shape (slice-02 consumer per
 /// step 02-01 AC5). Authored as one ordinary `async fn run`.
 ///
 /// **Distinct from [`ProvisionRecord`], not a mutation of it.** The
@@ -144,23 +157,41 @@ impl ProvisionRecordWithSleep {
 #[async_trait]
 impl Workflow for ProvisionRecordWithSleep {
     async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
-        let first = CallRequest {
-            target: self.first_target,
-            payload: Bytes::from_static(Self::FIRST_PAYLOAD),
-        };
-        if ctx.call(first).await.is_err() {
+        // Pre-sleep provision-write effect, inside a durable `ctx.run` step.
+        let first_transport = Arc::clone(ctx.transport());
+        let first_target = self.first_target;
+        let first_payload = Bytes::from_static(Self::FIRST_PAYLOAD);
+        let first: Result<usize, String> = ctx
+            .run("provision-write-pre-sleep", async move {
+                first_transport
+                    .send_datagram(first_target, first_payload)
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap_or_else(|err| Err(err.to_string()));
+        if first.is_err() {
             return WorkflowResult::Failed { reason: "pre-sleep call failed".to_string() };
         }
         if ctx.sleep(self.sleep).await.is_err() {
             return WorkflowResult::Failed { reason: "sleep failed".to_string() };
         }
-        let second = CallRequest {
-            target: self.second_target,
-            payload: Bytes::from_static(Self::SECOND_PAYLOAD),
-        };
-        match ctx.call(second).await {
-            Ok(_response) => WorkflowResult::Success,
-            Err(_err) => WorkflowResult::Failed { reason: "post-sleep call failed".to_string() },
+        // Post-sleep provision-write effect, inside a durable `ctx.run` step.
+        let second_transport = Arc::clone(ctx.transport());
+        let second_target = self.second_target;
+        let second_payload = Bytes::from_static(Self::SECOND_PAYLOAD);
+        let second: Result<usize, String> = ctx
+            .run("provision-write-post-sleep", async move {
+                second_transport
+                    .send_datagram(second_target, second_payload)
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap_or_else(|err| Err(err.to_string()));
+        match second {
+            Ok(_bytes) => WorkflowResult::Success,
+            Err(_reason) => WorkflowResult::Failed { reason: "post-sleep call failed".to_string() },
         }
     }
 }

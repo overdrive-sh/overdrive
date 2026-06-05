@@ -37,7 +37,7 @@ Three design questions inside the locked direction are this ADR's remit
 1. **Crate placement** — where do the `Workflow` trait + `WorkflowCtx`
    live, given `overdrive-core` is forbidden `tokio` / async-runtime
    deps by the dst-lint `core`-class rule (ADR-0003, CLAUDE.md)?
-2. **`WorkflowCtx` surface granularity** — minimal (`ctx.call` only) for
+2. **`WorkflowCtx` surface granularity** — minimal (`ctx.run<T>` only) for
    slice 01, or the full surface up front?
 3. **The engine ↔ lifecycle-reconciler boundary** — the
    workflow-lifecycle reconciler is a *pure sync* `reconcile`
@@ -138,25 +138,57 @@ The engine drives replay with a **per-instance journal cursor** (the
    loaded journal as a **replay buffer**, (c) a cursor at step 0.
 3. Calls `run(&ctx).await` — a *fresh* execution of the author's `async fn`.
 
-Every `ctx` await-op (`ctx.call`, `ctx.sleep`, `ctx.wait_for_signal`,
-`ctx.emit_action`) is a **check-then-record** point:
+Every `ctx` await-op (`ctx.run<T>`, `ctx.sleep`, `ctx.wait_for_signal`,
+`ctx.emit_action`) is a **check-then-record** point. The generic
+durable-step primitive is `ctx.run<T>(name, f)` (the Restate `ctx.run`
+model — wrap ANY side-effecting future `f`, journal its result, replay the
+journaled result on resume without re-running `f`):
+
+```rust
+pub async fn run<T, F>(&self, name: &str, f: F) -> Result<T, WorkflowCtxError>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + Send,
+    F: std::future::Future<Output = T> + Send;
+```
 
 - **Replay (cursor < journal length):** the op reads the recorded entry
-  at the cursor instead of performing the effect — `ctx.call` returns the
-  recorded response (re-derived from `response_digest`), `ctx.sleep`
-  returns immediately if the recorded deadline has passed,
-  `ctx.wait_for_signal` returns the recorded signal value if `SignalSeen`
-  was recorded. The cursor advances. **No external effect re-fires** —
-  this is the exactly-once guarantee (US-WP-3 AC1, K1: SimTransport call
-  count == 1 on resume).
+  at the cursor instead of performing the effect. For `ctx.run<T>`, it
+  deserializes the recorded CBOR `result_bytes` at the cursor into `T`,
+  returns it, and **drops `f` WITHOUT polling it** — the effect never
+  re-fires. `ctx.sleep` returns immediately if the recorded deadline has
+  passed, `ctx.wait_for_signal` returns the recorded signal value if
+  `SignalSeen` was recorded. The cursor advances. **No external effect
+  re-fires** on the replay path — this is the **exactly-once-on-replay**
+  guarantee (US-WP-3 AC1, K1: SimTransport call count == 1 on resume from
+  a journaled step).
 - **Live (cursor == journal length):** the op performs the real effect
-  through the injected port, **appends the result entry to the journal
-  with fsync BEFORE returning** (ADR-0063 §4 fsync-then-suspend), advances
-  the cursor, and continues. For `ctx.sleep` / `ctx.wait_for_signal`, the
-  "live" step writes the await-armed entry (deadline / signal-key) then
-  **suspends** the future (parks on the injected `Clock` deadline / the
-  ObservationStore signal subscription); the engine yields the instance
-  back to the runtime until the wake condition fires.
+  through the injected port. For `ctx.run<T>`, it `f.await`s, CBOR-serializes
+  the `T`, and **durably appends + fsyncs the journal entry BEFORE returning**
+  (ADR-0063 §4 fsync-then-suspend), advances the cursor, and returns `T`.
+  For `ctx.sleep` / `ctx.wait_for_signal`, the "live" step writes the
+  await-armed entry (deadline / signal-key) then **suspends** the future
+  (parks on the injected `Clock` deadline / the ObservationStore signal
+  subscription); the engine yields the instance back to the runtime until
+  the wake condition fires.
+
+**Identity is positional, not content-correlated.** The step identity is
+the monotonic await-point index (= the journal cursor), NOT a content
+correlation. The `name` argument to `ctx.run<T>` is (a) a diagnostic
+label and (b) a **replay determinism check**: if the `name` recorded at
+step N differs from the `name` passed at replay step N, the workflow body
+is nondeterministic and the engine **fails closed** with an error
+(consistent with the K6 "all non-determinism through `ctx`, fail-closed"
+philosophy; S-WP-01-02 / S-WP-01-03).
+
+**Honest semantics — at-least-once effect, exactly-once on replay.**
+Because the journal record happens AFTER the effect runs (fire → fsync), a
+crash in the window between `f` firing and the fsync completing re-runs `f`
+on resume. The honest guarantee is therefore: **at-least-once for the
+effect; exactly-once on the replay path** — once a step's result is
+journaled, the recorded result is returned and `f` is never re-polled.
+This is the same caveat Restate's `ctx.run` carries; effects that must be
+exactly-once at the remote side carry their own idempotency key (the
+existing `Action::HttpCall` idempotency-key machinery is the precedent).
 
 This is the canonical durable-execution replay shape (Temporal / Restate /
 DBOS all re-execute from the top and short-circuit completed awaits from
@@ -187,18 +219,23 @@ slice 01, and each later method is an additive entry-variant (ADR-0063 §2)
 
 | Method | Slice | Journal entry | Port consumed |
 |---|---|---|---|
-| `ctx.call(req) -> Result<Resp>` | 01 | `CallResult` | `Transport` |
+| `ctx.run<T>(name, f) -> Result<T>` | 01 | `RunResult` | any (via the closure `f`; transport via `ctx.transport()`) |
 | `ctx.sleep(Duration)` | 02 | `SleepArmed` (records deadline) | `Clock` |
 | `ctx.wait_for_signal(SignalKey) -> SignalValue` | 03 | `SignalAwaited` / `SignalSeen` | `ObservationStore` (signal rows) |
 | `ctx.emit_action(Action)` | 03 | `ActionEmitted` | Action channel → Raft |
 | `ctx.activity(...)` | post-skeleton | (forward) | per-activity |
 
-Slice 01 ships `ctx.call` only — the thinnest surface with a real,
-non-idempotent-to-repeat external effect (the ProvisionRecord write,
-US-WP-1). The journal cursor, replay buffer, suspend/resume engine, and
-the `replay_equivalence_provision_record` invariant are all slice-01
-(they are the abstraction every later slice builds on, per the carpaccio
-"ship the abstraction first"). `ctx.emit_action` (slice 03) routes through
+Slice 01 ships `ctx.run<T>` only — the general durable-step primitive,
+the thinnest surface that wraps a real, non-idempotent-to-repeat external
+effect (the ProvisionRecord write, US-WP-1, expressed as a `ctx.run` whose
+closure performs a `Transport` datagram send via the `ctx.transport()`
+accessor and returns a `T`). The `Transport` port stays on `WorkflowCtx`
+(exposed via `ctx.transport()`) so closures can perform transport effects;
+transport errors fold into the user's `T` (e.g. `T = Result<usize, String>`),
+not into `WorkflowCtxError`. The journal cursor, replay buffer,
+suspend/resume engine, and the `replay_equivalence_provision_record`
+invariant are all slice-01 (they are the abstraction every later slice
+builds on, per the carpaccio "ship the abstraction first"). `ctx.emit_action` (slice 03) routes through
 the **same Action channel the reconciler runtime consumes** (whitepaper
 §18 *Primitive Composition* "Workflow → Reconciler"; development.md
 Workflow contract rule 6 — no Raft bypass, no direct IntentStore write);
@@ -242,6 +279,7 @@ reconciler emits Action::StartWorkflow { spec, correlation }
        journal.load_journal(id)  (empty on first start; populated on resume)
        spawn run(&ctx) as a tracked async task
   → the task drives run; each ctx.* await check-then-records (§3)
+       (ctx.run<T> journals the CBOR-encoded T at the await-point)
   → on terminal, engine writes ObservationStore terminal-result row
        (keyed by correlation) via the shim's ObservationStore write path
   → workflow-lifecycle reconciler observes the terminal row next tick,
@@ -287,9 +325,16 @@ them; this ADR pins their meaning):
   injected fsync-failure on the next append: assert the engine does NOT
   advance the cursor / suspend, mirroring ADR-0035's
   `WriteThroughOrdering`.
-- **`WorkflowExactlyOnceEffectOnResume`** — crash after `ctx.call`
-  records but before terminal → resume → `SimTransport` call count == 1
-  (US-WP-3 AC1 / K1).
+- **`WorkflowExactlyOnceEffectOnResume`** — asserts the **replay-path**
+  guarantee: once a `ctx.run<T>` step's result is journaled, the recorded
+  result is returned on resume and the effect closure `f` is NOT re-fired.
+  Crash AFTER `ctx.run` records but before terminal → resume → `SimTransport`
+  call count == 1 (US-WP-3 AC1 / K1). This is *exactly-once on the replay
+  path*, not an unconditional exactly-once: a crash in the fire→fsync window
+  (before the step journals) re-runs `f` on resume (at-least-once for the
+  effect, per §3 "Honest semantics"). The invariant pins the
+  result-is-journaled → effect-not-re-fired property, which is the one the
+  durable replay machinery guarantees.
 
 The existing `ReplayEquivalentEmptyWorkflow` variant + its
 `evaluate_replay_equivalent_empty_workflow` evaluator are the trust-the-sim
@@ -345,7 +390,7 @@ Ship every `ctx` method in the first slice.
 **Rejected** — violates the carpaccio slicing (DISCUSS scope assessment):
 slice 01 is already the one heavy slice (engine + journal + replay). The
 journal-cursor + suspend/resume *machinery* must ship whole in slice 01
-(every later method needs it), but the *methods* beyond `ctx.call` are
+(every later method needs it), but the *methods* beyond `ctx.run<T>` are
 additive entry-variants (ADR-0063 §2) that each carry their own slice's
 learning hypothesis (sleep parks correctly under DST; signals/emit are
 crash-safe). Shipping them all in slice 01 would bundle three learning
@@ -397,8 +442,10 @@ hypotheses into one slice and lose the de-risking the slicing buys.
   journal variants per slice.
 - **Reliability — recoverability**: positive (single-node crash-resume via
   journal replay; pinned by the replay invariant + the ordering invariant).
-- **Reliability — fault tolerance**: positive (exactly-once effect on
-  resume, pinned by `WorkflowExactlyOnceEffectOnResume`).
+- **Reliability — fault tolerance**: positive (exactly-once effect on the
+  replay path — once journaled, the effect is not re-fired — pinned by
+  `WorkflowExactlyOnceEffectOnResume`; at-least-once in the fire→fsync
+  window per §3 honest semantics, mitigated by remote idempotency keys).
 - **Performance — time behaviour**: neutral-to-positive (replay is a
   range-scan + journal-buffer reads, no re-performed effects).
 - **Security**: neutral (workflow→cluster mutations go through Raft via
@@ -429,3 +476,14 @@ hypotheses into one slice and lose the de-risking the slicing buys.
 ## Changelog
 
 - 2026-06-05 — Initial accepted version. Companion to ADR-0063.
+- 2026-06-05 — Replaced the slice-01 `ctx.call(CallRequest) -> CallResponse`
+  await-surface with the general `ctx.run<T: Serialize + DeserializeOwned>(name,
+  impl Future<Output = T>) -> T` durable-step primitive (Restate `ctx.run`
+  model): §2 surface-granularity question, §3 check-then-record narrative (added
+  the `run<T>` signature, positional-identity / `name`-as-determinism-check, and
+  the honest at-least-once-effect / exactly-once-on-replay semantics), the §4
+  await-surface table row 1, the §5 composition path, and the
+  `WorkflowExactlyOnceEffectOnResume` invariant (reframed to the replay-path
+  guarantee). `CallRequest`/`CallResponse`/`CALL_PURPOSE`/`WorkflowCtxError::Transport`
+  removed; `Transport` stays on `ctx` via a `ctx.transport()` accessor. User-pinned
+  contract decision; greenfield single-cut (no deprecation shim).

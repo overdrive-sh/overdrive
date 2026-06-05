@@ -8,7 +8,7 @@
 //! `.claude/rules/testing.md` § "Integration vs unit gating": real
 //! filesystem I/O (opening a real redb file) MUST be gated behind the
 //! `integration-tests` feature and live under `tests/integration/`. The
-//! recorded `CallResult` entry is present in the redb journal when read
+//! recorded `RunResult` entry is present in the redb journal when read
 //! back through the journal handle (the bytes written are the bytes read
 //! — `journal_checkpoint` consistency, journey steps 2↔3), and a
 //! grep/dep-graph check confirms no libSQL journal table. ADR-0063 §1/§3.
@@ -47,7 +47,7 @@ fn spec_digest_of(spec_name: &str) -> ContentHash {
 /// Drive the production `RedbJournalStore` over a REAL redb file (the
 /// SAME `Arc<Database>` shape `RedbViewStore` shares — ADR-0063 §1
 /// one-file-two-layouts): append a `ProvisionRecord`-derived
-/// `CallResult`, read it back byte-equal via `load_journal`, and confirm
+/// `RunResult`, read it back byte-equal via `load_journal`, and confirm
 /// the persisted run is ordered + survives a close/reopen of the real
 /// redb file. The "no libSQL journal table" half of K5/O6 is asserted
 /// structurally: the journal module source references no second storage
@@ -65,13 +65,15 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
         spec_digest: spec_digest_of(PROVISION_RECORD_WORKFLOW_NAME),
         input_digest: ContentHash::of(PROVISION_RECORD_PAYLOAD),
     };
-    // The `ctx.call` result is recorded as a RESPONSE DIGEST keyed by the
-    // await-point step index (US-WP-2 AC1 — the CallResult under audit).
-    let call_result = JournalEntry::CallResult {
+    // The `ctx.run` step result is recorded as its CBOR bytes + a RESULT
+    // DIGEST keyed by the await-point step index (US-WP-2 AC1 — the
+    // RunResult under audit).
+    let result_bytes = b"provision-write-response".to_vec();
+    let run_result = JournalEntry::RunResult {
         step: 0,
-        correlation: "provision-record/0".to_string(),
-        response_digest: ContentHash::of(b"provision-write-response"),
-        bytes_sent: 0,
+        name: "provision-write".to_string(),
+        result_digest: ContentHash::of(&result_bytes),
+        result_bytes,
     };
 
     // --- Append through the production adapter on a REAL redb file. ---
@@ -89,7 +91,7 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
         journal.probe().await.expect("probe ok on healthy redb");
 
         journal.append(&workflow_id, &started).await.expect("append Started durably");
-        journal.append(&workflow_id, &call_result).await.expect("append CallResult durably");
+        journal.append(&workflow_id, &run_result).await.expect("append RunResult durably");
         // Drop `journal` + `db` to release the redb file lock and ensure
         // the `Durability::Immediate` commits hit disk before reopen.
     }
@@ -104,20 +106,20 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
     // (US-WP-2 AC2). bytes-written == bytes-read.
     assert_eq!(
         loaded,
-        vec![started, call_result.clone()],
+        vec![started, run_result.clone()],
         "the real redb journal must return the appended run byte-equal and in order"
     );
 
-    // Observable outcome 2 — the CallResult under audit is present with
+    // Observable outcome 2 — the RunResult under audit is present with
     // its recorded inputs intact (US-WP-2 AC1, the journey 2↔3 consistency
     // check).
-    let found_call_result = loaded
+    let found_run_result = loaded
         .iter()
-        .find(|e| matches!(e, JournalEntry::CallResult { .. }))
-        .expect("the CallResult entry must be present in the real redb journal");
+        .find(|e| matches!(e, JournalEntry::RunResult { .. }))
+        .expect("the RunResult entry must be present in the real redb journal");
     assert_eq!(
-        *found_call_result, call_result,
-        "the read-back CallResult must equal the recorded one (response_digest + correlation + step)"
+        *found_run_result, run_result,
+        "the read-back RunResult must equal the recorded one (result_digest + name + step + bytes)"
     );
 
     // Observable outcome 3 (K5 / O6) — NO second storage engine: the
