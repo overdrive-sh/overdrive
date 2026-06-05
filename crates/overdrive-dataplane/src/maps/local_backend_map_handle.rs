@@ -94,26 +94,19 @@ impl LocalBackendMapHandle {
         // mutex guard drops before the match scrutinee is evaluated
         // (clippy::significant_drop_in_scrutinee).
         let outcome = self.inner.lock().remove(&key);
-        // Three-arm match per Phase 16 review D7: collapsing the
-        // idempotent `KeyNotFound` branch into the `Ok(())` arm via
-        // `|` works mechanically (and clippy::match_same_arms
-        // suggests it) but hides the asymmetry — `Ok(())` is the
-        // load-bearing success path; `Err(KeyNotFound)` is the
-        // trait-contract-mandated swallow per ADR-0053 § 2.
-        // Splitting them documents that intent at the matcher; the
-        // identical bodies are the point, not a bug.
-        #[allow(
-            clippy::match_same_arms,
-            reason = "Phase 16 review D7: each arm carries distinct semantic intent — \
-                      success vs idempotent-swallow per ADR-0053 § 2 — that the \
-                      collapsed form would erase. Comments above the match document the \
-                      load-bearing distinction."
-        )]
-        match outcome {
-            Ok(()) => Ok(()),
-            Err(MapError::KeyNotFound) => Ok(()), // idempotent per ADR-0053 § 2
-            Err(e) => Err(e),
+        // The ADR-0053 § 2 idempotency contract: removing an absent
+        // entry is `Ok(())`. aya 0.13 surfaces absent-key in TWO shapes
+        // on a real BPF HASH map — `MapError::KeyNotFound` AND
+        // `MapError::SyscallError` wrapping the `bpf_map_delete_elem`
+        // `ENOENT` (the kernel returns ENOENT; aya does not normalise it
+        // to `KeyNotFound` in this path). Both MUST be swallowed —
+        // otherwise the deregister retry after a partial failure
+        // (forward already gone) errors on the second forward delete and
+        // never reaches the reverse removal (GH #211).
+        if crate::maps::is_absent_key(&outcome) {
+            return Ok(());
         }
+        outcome
     }
 
     /// Snapshot every `(key, value)` pair, in iteration order.

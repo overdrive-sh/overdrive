@@ -20,6 +20,11 @@ mod integration {
     /// RED scaffold.
     mod atomic_swap;
     mod build_rs_artifact_check;
+    /// unconnected-udp-sendmsg4 follow-up (GH #211; ADR-0053 rev
+    /// Decisions 2 & 3 reversal) — `deregister_local_backend` retry-safety:
+    /// a retry after a partial failure (forward removed, reverse survived)
+    /// purges the stale reverse entry. Caller-supplied backend.
+    mod deregister_retry_safety;
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;

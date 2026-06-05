@@ -101,7 +101,9 @@ pub async fn evaluate_reply_source_rewrite_lockstep() -> InvariantResult {
     // Deregister the first service. Its reply-mirror entry MUST be purged.
     let (&(first_vip, first_port, first_proto), &(first_backend, _)) =
         layout.iter().next().expect("SERVICES > 0");
-    if let Err(e) = dataplane.deregister_local_backend(first_vip, first_port, first_proto).await {
+    if let Err(e) =
+        dataplane.deregister_local_backend(first_vip, first_port, first_backend, first_proto).await
+    {
         return fail(
             NAME,
             format!("deregister_local_backend({first_vip}:{first_port}) failed: {e}"),
@@ -178,7 +180,7 @@ async fn check_coresident_proto_teardown(dataplane: &SimDataplane) -> Option<Str
     }
 
     // Deregister the UDP listener only.
-    if let Err(e) = dataplane.deregister_local_backend(vip, vip_port, Proto::Udp).await {
+    if let Err(e) = dataplane.deregister_local_backend(vip, vip_port, backend, Proto::Udp).await {
         return Some(format!("co-resident udp deregister failed: {e}"));
     }
 

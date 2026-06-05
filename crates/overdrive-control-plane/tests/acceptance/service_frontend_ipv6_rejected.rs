@@ -69,6 +69,7 @@ impl Dataplane for PanicOnUpdateService {
         &self,
         _vip: Ipv4Addr,
         _vip_port: u16,
+        _backend: SocketAddrV4,
         _proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
         Ok(())

@@ -542,6 +542,7 @@ impl Dataplane for SimDataplane {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        backend: SocketAddrV4,
         proto: Proto,
     ) -> Result<(), DataplaneError> {
         // Idempotent per ADR-0053 § 2 — removing an entry that does
@@ -551,15 +552,16 @@ impl Dataplane for SimDataplane {
         //
         // The paired reply-mirror removal (DDD-5a — the deregister inverse
         // of the dual-write) lands under THIS same mutex acquisition. The
-        // reply-mirror key needs the backend identity, so resolve it from
-        // the forward entry BEFORE removing it — mirroring `EbpfDataplane`'s
-        // `deregister_local_backend`, which reads `LOCAL_BACKEND_MAP` first
-        // to derive the `REVERSE_LOCAL_MAP` key. A forward entry that was
-        // already absent removes nothing on either side.
+        // reply-mirror key is built from the CALLER-SUPPLIED `backend`
+        // (GH #211), so BOTH removals are unconditional and keyed without
+        // a forward read-back — observably-equivalent to `EbpfDataplane`'s
+        // retry-safe caller-supplied-backend removal. This MUST NOT shape
+        // production (`.claude/rules/development.md` § "Production code is
+        // not shaped by simulation"); it mirrors the host adapter's
+        // observable post-state.
         let mut state = self.local_state.lock();
-        if let Some(backend) = state.local_backends.remove(&(vip, vip_port, proto)) {
-            state.reply_mirror.remove(&BackendKey::new(*backend.ip(), backend.port(), proto));
-        }
+        state.local_backends.remove(&(vip, vip_port, proto));
+        state.reply_mirror.remove(&BackendKey::new(*backend.ip(), backend.port(), proto));
         drop(state);
         Ok(())
     }

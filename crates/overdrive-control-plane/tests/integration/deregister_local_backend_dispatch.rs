@@ -68,6 +68,7 @@ async fn deregister_local_backend_dispatch_removes_entry_from_dataplane() {
         vip,
         vip_port,
         proto: Proto::Tcp,
+        backend,
         correlation,
     };
 

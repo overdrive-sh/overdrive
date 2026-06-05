@@ -1382,6 +1382,39 @@ impl EbpfDataplane {
     pub fn set_probe_fault(&self, fault: DataplaneError) {
         *self.probe_fault.lock() = Some(fault);
     }
+
+    /// Test-only seam: remove ONLY the forward `LOCAL_BACKEND_MAP` entry
+    /// for `(vip, vip_port, proto)`, leaving any reverse `REVERSE_LOCAL_MAP`
+    /// entry untouched.
+    ///
+    /// Models the post-partial-failure state of a prior
+    /// `deregister_local_backend` where the forward removal succeeded but
+    /// the reverse removal errored — the exact state the GH #211 retry-
+    /// safety regression test drives a retry against. There is no
+    /// production caller; production never removes forward-without-reverse.
+    ///
+    /// Gated behind `#[cfg(any(test, feature = "integration-tests"))]` —
+    /// the symbol does not exist in production builds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LocalBackendDelete`] on a kernel-side map
+    /// delete failure other than `KeyNotFound` (which is idempotent).
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn remove_local_backend_forward_only(
+        &self,
+        vip: Ipv4Addr,
+        vip_port: u16,
+        proto: overdrive_core::dataplane::backend_key::Proto,
+    ) -> Result<(), DataplaneError> {
+        self.local_backend_map.remove(vip, vip_port, proto).map_err(|e| {
+            DataplaneError::LocalBackendDelete {
+                source: std::io::Error::other(format!(
+                    "aya HashMap::remove (LOCAL_BACKEND_MAP, forward-only test seam): {e}"
+                )),
+            }
+        })
+    }
 }
 
 /// Graceful-shutdown RAII per architecture.md § 5.6 of
@@ -2138,32 +2171,34 @@ impl Dataplane for EbpfDataplane {
     }
 
     /// ADR-0053 rev 2026-06-05 (GH #200) — idempotent dual-removal
-    /// (DDD-5a). Removes BOTH the forward `(vip, vip_port, proto)`
-    /// entry and its matching reverse `(backend, proto) → vip` entry.
+    /// (DDD-5a; caller-supplied backend, GH #211). Removes BOTH the
+    /// forward `(vip, vip_port, proto)` entry and its matching reverse
+    /// `(backend, proto) → vip` entry.
     ///
-    /// The signature carries only `(vip, vip_port, proto)`, so the
-    /// backend identity needed for the reverse key is resolved by
-    /// reading the forward entry first. Removal order is forward THEN
-    /// reverse — so no `connect`/`sendmsg` can be rewritten toward a
-    /// backend whose reverse entry is already gone (the
-    /// no-forward-without-reverse invariant, inverted for teardown).
-    /// A forward entry that was already absent removes nothing on
-    /// either side. `KeyNotFound` is swallowed inside the typed
-    /// handles per the trait contract.
+    /// The `backend` tuple is supplied by the caller (mirroring
+    /// `register_local_backend`), so the reverse key is NOT derived by
+    /// reading the forward entry. Both removals are unconditional and
+    /// idempotent. Removal order is forward THEN reverse — so no
+    /// `connect`/`sendmsg` can be rewritten toward a backend whose
+    /// reverse entry is already gone (the no-forward-without-reverse
+    /// invariant, inverted for teardown).
+    ///
+    /// Retry-safety is the reason the backend is caller-supplied: a
+    /// retry after a partial failure (forward removed, reverse removal
+    /// errored) still carries the backend identity and completes the
+    /// reverse removal. The previous forward-read-back derivation was
+    /// unrecoverable once the forward entry was gone — the retry saw
+    /// `None`, skipped the reverse removal, and stranded a stale reverse
+    /// entry that mis-rewrote the reply source of any datagram from that
+    /// backend address (GH #211). `KeyNotFound` is swallowed inside the
+    /// typed handles per the trait contract.
     async fn deregister_local_backend(
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        backend: std::net::SocketAddrV4,
         proto: overdrive_core::dataplane::backend_key::Proto,
     ) -> Result<(), DataplaneError> {
-        // Resolve the backend identity from the forward entry BEFORE
-        // removing it — the reverse key needs the backend addr/port.
-        let backend_entry = self.local_backend_map.get(vip, vip_port, proto).map_err(|e| {
-            DataplaneError::LocalBackendDelete {
-                source: std::io::Error::other(format!("aya HashMap::get (LOCAL_BACKEND_MAP): {e}")),
-            }
-        })?;
-
         // Forward FIRST (DDD-5a teardown order). Idempotent.
         self.local_backend_map.remove(vip, vip_port, proto).map_err(|e| {
             DataplaneError::LocalBackendDelete {
@@ -2173,19 +2208,17 @@ impl Dataplane for EbpfDataplane {
             }
         })?;
 
-        // Reverse SECOND — only when the forward entry existed (otherwise
-        // we have no backend identity to key on, and there is nothing to
-        // remove). Idempotent inside the handle.
-        if let Some(entry) = backend_entry {
-            let backend_ip = Ipv4Addr::from(entry.backend_ip_host);
-            self.reverse_local_map.remove(backend_ip, entry.backend_port_host, proto).map_err(
-                |e| DataplaneError::LocalBackendDelete {
-                    source: std::io::Error::other(format!(
-                        "aya HashMap::remove (REVERSE_LOCAL_MAP): {e}"
-                    )),
-                },
-            )?;
-        }
+        // Reverse SECOND — keyed on the CALLER-SUPPLIED backend, so the
+        // removal is unconditional and retry-safe (no dependence on a
+        // since-removed forward entry, GH #211). Idempotent inside the
+        // handle.
+        self.reverse_local_map.remove(*backend.ip(), backend.port(), proto).map_err(|e| {
+            DataplaneError::LocalBackendDelete {
+                source: std::io::Error::other(format!(
+                    "aya HashMap::remove (REVERSE_LOCAL_MAP): {e}"
+                )),
+            }
+        })?;
         Ok(())
     }
 }

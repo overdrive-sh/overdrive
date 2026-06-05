@@ -195,23 +195,19 @@ impl ReverseLocalMapHandle {
         // ADR-0053 deregister contract — a missing key is `Ok(())`,
         // mirroring `LocalBackendMapHandle::remove`.
         let outcome = self.inner.lock().remove(&key);
-        // Three-arm match (mirrors `LocalBackendMapHandle::remove`,
-        // Phase 16 review D7): `Ok(())` is the load-bearing success
-        // path; `Err(KeyNotFound)` is the idempotent swallow the
-        // ADR-0053 deregister contract mandates. The identical bodies
-        // are the point — collapsing them would erase the distinct
-        // semantic intent.
-        #[allow(
-            clippy::match_same_arms,
-            reason = "each arm carries distinct semantic intent — success vs \
-                      idempotent-swallow per the ADR-0053 deregister contract — \
-                      that the collapsed form would erase"
-        )]
-        match outcome {
-            Ok(()) => Ok(()),
-            Err(MapError::KeyNotFound) => Ok(()), // idempotent per ADR-0053 deregister
-            Err(e) => Err(e),
+        // The ADR-0053 deregister idempotency contract: removing an
+        // absent entry is `Ok(())`. aya 0.13 surfaces absent-key on a
+        // real BPF HASH map as EITHER `MapError::KeyNotFound` OR a
+        // `MapError::SyscallError` wrapping the `bpf_map_delete_elem`
+        // `ENOENT` — both swallowed via the shared `is_absent_key`
+        // classifier (the single source of truth, mirroring
+        // `LocalBackendMapHandle::remove`). The `SyscallError(ENOENT)`
+        // arm is load-bearing for retry-safety (GH #211): a deregister
+        // retry whose reverse entry is already gone must not error.
+        if crate::maps::is_absent_key(&outcome) {
+            return Ok(());
         }
+        outcome
     }
 
     /// Dump every `(ReverseLocalKeyPod, ReverseLocalEntryPod)` entry —

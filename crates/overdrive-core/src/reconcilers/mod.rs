@@ -511,6 +511,11 @@ pub enum Action {
         vip_port: u16,
         /// L4 protocol whose entry to remove (ADR-0053 rev Amendment 3).
         proto: crate::dataplane::backend_key::Proto,
+        /// Resolved local backend `(IPv4, port)` whose reverse entry to
+        /// remove. Caller-supplied so the reverse removal is retry-safe —
+        /// it does not depend on a since-removed forward entry (GH #211).
+        /// Mirrors `RegisterLocalBackend::backend`.
+        backend: std::net::SocketAddrV4,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },

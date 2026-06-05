@@ -350,21 +350,35 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - Removing a `(vip, vip_port)` that was never registered
     ///   succeeds with no side effect.
     /// - **Dual-removal — forward AND reverse (ADR-0053 rev
-    ///   2026-06-05, DDD-5a).** Deregistering removes BOTH the forward
-    ///   `(vip, vip_port, proto)` entry AND its matching reverse
-    ///   `(backend.ip(), backend.port(), proto) → vip` entry. The
-    ///   signature carries only `(vip, vip_port, proto)`, so the
-    ///   adapter resolves the backend identity by reading the forward
-    ///   entry BEFORE removing it, then removes the reverse entry keyed
-    ///   on that backend. The removal order preserves the
-    ///   no-forward-without-reverse invariant: the forward entry is
+    ///   2026-06-05, DDD-5a; caller-supplied backend, GH #211).**
+    ///   Deregistering removes BOTH the forward `(vip, vip_port, proto)`
+    ///   entry AND its matching reverse `(backend.ip(), backend.port(),
+    ///   proto) → vip` entry. The `backend` tuple is supplied by the
+    ///   caller (mirroring `register_local_backend`) — the adapter does
+    ///   NOT derive the reverse key by reading the forward entry. Both
+    ///   removals are **idempotent and unconditional**: the reverse
+    ///   removal is keyed on the caller-supplied `backend` and is no
+    ///   longer gated on the forward entry having existed. The removal
+    ///   order is forward THEN reverse, preserving the
+    ///   no-forward-without-reverse invariant (never expose a forward
+    ///   entry whose reverse is already gone): the forward entry is
     ///   removed first (so no `connect`/`sendmsg` can be rewritten
     ///   toward a backend whose reverse entry is gone), then the
-    ///   reverse. A forward entry that was already absent removes
-    ///   nothing on either side (idempotent).
-    /// - Concurrent `register_local_backend(vip, vip_port, b1)` +
-    ///   `deregister_local_backend(vip, vip_port)` is not defined
-    ///   to interleave at the adapter — callers must serialise.
+    ///   reverse. Removing a `(vip, vip_port, backend, proto)` that was
+    ///   never registered removes nothing on either side.
+    /// - **Retry-safety (the reason the backend is caller-supplied).**
+    ///   Because the reverse key comes from the caller, not from a
+    ///   forward read-back, a retry after a partial failure (forward
+    ///   removed, reverse removal errored) still carries the backend
+    ///   identity and completes the reverse removal. A forward-derived
+    ///   key would be unrecoverable once the forward entry is gone — the
+    ///   retry would see `None`, skip the reverse removal, and strand a
+    ///   stale reverse entry that mis-rewrites the reply source of any
+    ///   datagram from that backend address (GH #211).
+    /// - Concurrent `register_local_backend(vip, vip_port, backend,
+    ///   proto)` + `deregister_local_backend(vip, vip_port, backend,
+    ///   proto)` is not defined to interleave at the adapter — callers
+    ///   must serialise.
     /// # `proto` (ADR-0053 rev 2026-06-03)
     /// Removes only the `(vip, vip_port, proto)` entry. Deregistering
     /// tcp/53 leaves a co-located udp/53 entry intact — a subsequent
@@ -374,6 +388,7 @@ pub trait Dataplane: Send + Sync + 'static {
         &self,
         vip: Ipv4Addr,
         vip_port: u16,
+        backend: SocketAddrV4,
         proto: Proto,
     ) -> Result<(), DataplaneError>;
 }

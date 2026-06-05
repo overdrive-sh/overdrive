@@ -385,6 +385,7 @@ mod tests {
             vip,
             vip_port,
             proto: Proto::Tcp,
+            backend: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 9090),
             correlation: correlation("deregister-local-backend"),
         }
     }
