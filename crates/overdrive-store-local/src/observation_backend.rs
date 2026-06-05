@@ -359,6 +359,19 @@ impl ObservationStore for LocalObservationStore {
                         write.open_table(ISSUED_CERTIFICATES_TABLE).map_err(map_to_io)?;
                     apply_issued_certificate(&mut table, incoming)?
                 }
+                // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out to
+                // subscribers; the durable terminal record for slice-01 is
+                // the engine-side redb+CBOR journal (`JournalEntry::Terminal`,
+                // K5), and the workflow-lifecycle reconciler reads this row
+                // off the live observation stream to converge the instance.
+                // No typed redb table is persisted here: a cold-boot
+                // recovery of the obs terminal row would require a versioned
+                // rkyv envelope per ADR-0048; the journal already provides
+                // durable terminal recovery, so the obs row is the live
+                // convergence signal only. Accepted unconditionally (no LWW
+                // key collision is possible — the correlation key is unique
+                // per instance terminal).
+                ObservationRow::WorkflowTerminal { .. } => true,
             };
             // Commit unconditionally — a rejected write performed only
             // a read inside the transaction; redb handles the no-op

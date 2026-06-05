@@ -73,12 +73,18 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
 
+    // The action-shim's own obs (untouched by StartWorkflow dispatch) is
+    // constructed below; the engine takes its own clone for the terminal
+    // observation-row write (ADR-0064 §2).
+    let engine_obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("engine").expect("node id"), 0));
     let engine = WorkflowEngine::new(
         Arc::clone(&journal),
         Arc::clone(&clock),
         Arc::clone(&transport),
         Arc::clone(&entropy),
         registry,
+        Arc::clone(&engine_obs),
     );
 
     // --- The action the workflow-lifecycle reconciler would emit ------

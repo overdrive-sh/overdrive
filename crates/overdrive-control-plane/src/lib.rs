@@ -1105,6 +1105,12 @@ pub async fn run_server_with_obs_and_driver(
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
     runtime.register(workload_lifecycle()).await?;
+    // ADR-0064 §5 — the pure-sync workflow-lifecycle reconciler. Re-emits
+    // `Action::StartWorkflow` for a running-in-intent instance with no live
+    // engine task on restart; the engine (wired into dispatch below)
+    // drives `run` off the shim. `ReconcilerIsPure` holds with it
+    // registered (the reconcile body holds no `.await`).
+    runtime.register(workflow_lifecycle()).await?;
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -1583,6 +1589,23 @@ pub fn workload_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
     use overdrive_core::reconcilers::{AnyReconciler, WorkloadLifecycle};
 
     AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
+}
+
+/// Construct the `workflow-lifecycle` reconciler per ADR-0064 §5.
+///
+/// The pure-sync reconciler in the two-primitive doctrine: it manages
+/// WHICH workflow instances should exist, re-emitting
+/// `Action::StartWorkflow` for a running-in-intent instance with no live
+/// engine task on restart (US-WP-3 AC4). The engine
+/// ([`workflow_runtime::WorkflowEngine`]) is the async executor driven
+/// off the shim; the reconciler NEVER `.await`s the workflow body
+/// (`ReconcilerIsPure` holds). Registered at boot alongside the other
+/// first-party reconcilers.
+#[must_use]
+pub fn workflow_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, WorkflowLifecycle};
+
+    AnyReconciler::WorkflowLifecycle(WorkflowLifecycle::canonical())
 }
 
 /// Construct the `backend-discovery-bridge` reconciler per

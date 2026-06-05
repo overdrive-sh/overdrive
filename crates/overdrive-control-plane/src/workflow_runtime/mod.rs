@@ -39,6 +39,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
 use overdrive_core::id::{ContentHash, CorrelationKey};
+use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
     CallResponse, JournalCursor, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName,
@@ -119,6 +120,12 @@ pub struct WorkflowEngine {
     clock: Arc<dyn Clock>,
     transport: Arc<dyn Transport>,
     entropy: Arc<dyn Entropy>,
+    /// The observation store the engine writes the terminal-result row to
+    /// on `run` terminal (ADR-0064 §2). The sanctioned shim
+    /// `ObservationStore::write` path — NOT a direct bypass of the
+    /// channels. Mandatory at construction per
+    /// `.claude/rules/development.md` § "Port-trait dependencies".
+    obs: Arc<dyn ObservationStore>,
     registry: Arc<WorkflowRegistry>,
     /// Tracked task set for live instances — the engine owns it the same
     /// way the reconciler runtime owns its tick task (ADR-0023 §4).
@@ -137,12 +144,14 @@ impl WorkflowEngine {
         transport: Arc<dyn Transport>,
         entropy: Arc<dyn Entropy>,
         registry: WorkflowRegistry,
+        obs: Arc<dyn ObservationStore>,
     ) -> Self {
         Self {
             journal,
             clock,
             transport,
             entropy,
+            obs,
             registry: Arc::new(registry),
             tasks: Mutex::new(JoinSet::new()),
         }
@@ -167,7 +176,7 @@ impl WorkflowEngine {
     pub async fn start(
         &self,
         spec: &WorkflowSpec,
-        _correlation: &CorrelationKey,
+        correlation: &CorrelationKey,
         workflow_id: &WorkflowId,
     ) -> Result<(), WorkflowEngineError> {
         let workflow = self.registry.resolve(&spec.name).ok_or_else(|| {
@@ -190,6 +199,8 @@ impl WorkflowEngine {
         );
 
         let journal = Arc::clone(&self.journal);
+        let obs = Arc::clone(&self.obs);
+        let correlation = correlation.clone();
         let workflow_id = workflow_id.clone();
 
         // Spawn the author's async body as a tracked task (ADR-0064 §5 —
@@ -210,6 +221,23 @@ impl WorkflowEngine {
                     workflow_id = %workflow_id,
                     err = %err,
                     "failed to append workflow Terminal journal entry",
+                );
+            }
+            // Terminal-result OBSERVATION row (slice-01 AC5, ADR-0064 §2):
+            // write the terminal through the sanctioned `ObservationStore`
+            // write path — NOT a direct bypass of the channels — keyed by
+            // the instance `CorrelationKey` so the workflow-lifecycle
+            // reconciler finds the result deterministically next tick and
+            // converges the instance. A write failure is surfaced via
+            // tracing; the next resume re-drives `run` and re-writes the
+            // row (the key is stable, so the re-write is idempotent).
+            let row = ObservationRow::WorkflowTerminal { correlation, result };
+            if let Err(err) = obs.write(row).await {
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    err = %err,
+                    "failed to write workflow terminal observation row",
                 );
             }
         });

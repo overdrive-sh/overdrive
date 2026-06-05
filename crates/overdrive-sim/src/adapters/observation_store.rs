@@ -164,6 +164,14 @@ impl PeerState {
             ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
             ObservationRow::ReconcileConflict(incoming) => self.apply_reconcile_conflict(incoming),
             ObservationRow::IssuedCertificate(incoming) => self.apply_issued_certificate(incoming),
+            // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out so the
+            // workflow-lifecycle reconciler (and tests subscribing via
+            // `subscribe_all`) observe the terminal off the live stream.
+            // Accepted unconditionally: the correlation key is unique per
+            // instance terminal, so no LWW collision is possible. The row
+            // is pushed to `rows` + broadcast by the shared accept branch
+            // below, same as every other accepted row.
+            ObservationRow::WorkflowTerminal { .. } => true,
         };
 
         if accepted {

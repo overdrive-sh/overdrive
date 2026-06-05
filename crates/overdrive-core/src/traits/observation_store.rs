@@ -34,7 +34,7 @@ use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
+use crate::id::{AllocationId, CorrelationKey, NodeId, Region, ServiceId, WorkloadId};
 use crate::observation::ProbeResultRow;
 use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
@@ -544,6 +544,26 @@ pub enum ObservationRow {
     /// [`IssuedCertificateRow::from_store_bytes`]) are reused as-is per
     /// ADR-0048.
     IssuedCertificate(IssuedCertificateRow),
+    /// `workflow_terminal` row — the durable terminal surface for a
+    /// workflow instance per ADR-0064 §2. Written by the
+    /// [`WorkflowEngine`](../../../overdrive_control_plane/workflow_runtime/struct.WorkflowEngine.html)
+    /// via the sanctioned [`ObservationStore::write`] path when the
+    /// author's `async fn run` returns a [`WorkflowResult`] terminal —
+    /// NOT a direct engine write bypassing the channels (slice-01 AC5).
+    ///
+    /// Keyed by `correlation` (the instance [`CorrelationKey`]) so the
+    /// emitting workflow-lifecycle reconciler finds the result
+    /// deterministically on the next tick and converges the instance to
+    /// terminated. The `Action::StartWorkflow { spec, correlation }` the
+    /// reconciler emits carries the SAME key the terminal row is filed
+    /// under (`development.md` Reconciler I/O rule 2 — correlation, not
+    /// request ID, links cause to response).
+    WorkflowTerminal {
+        /// Cause-to-response linkage — the instance correlation key.
+        correlation: CorrelationKey,
+        /// The workflow's terminal result.
+        result: crate::workflow::WorkflowResult,
+    },
 }
 
 // ---------------------------------------------------------------------------

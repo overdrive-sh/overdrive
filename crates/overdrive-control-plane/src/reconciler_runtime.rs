@@ -48,7 +48,8 @@ use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridg
 use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName,
     ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
-    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+    WorkflowLifecycleState, WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView,
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -81,6 +82,18 @@ enum AnyViewMap {
     /// `WorkloadLifecycle` carries `View = WorkloadLifecycleView`; the map
     /// holds per-target persisted views.
     WorkloadLifecycle(BTreeMap<TargetResource, WorkloadLifecycleView>),
+    /// `WorkflowLifecycle` carries `View = WorkflowLifecycleView` (Phase 1
+    /// empty); the map holds per-target persisted views per ADR-0035 §5 /
+    /// ADR-0064 §5.
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "WorkflowLifecycleView is intentionally Phase-1-empty (ADR-0064 §5 — the \
+                  re-emit decision is pure over `actual`; there is no input to persist yet). \
+                  The per-target map shape mirrors every other reconciler kind so the runtime \
+                  dispatch stays uniform; the View gains a field (and this expect self-removes) \
+                  when a retry/budget policy lands per `development.md` Persist-inputs rule."
+    )]
+    WorkflowLifecycle(BTreeMap<TargetResource, WorkflowLifecycleView>),
     /// `ServiceMapHydrator` carries `View = ServiceMapHydratorView`;
     /// the map holds per-target persisted views per ADR-0035 §5.
     /// Phase 2 (Slice 08; ASR-2.2-04).
@@ -255,6 +268,21 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::WorkloadLifecycle(loaded)
             }
+            AnyReconciler::WorkflowLifecycle(_) => {
+                #[expect(
+                    clippy::zero_sized_map_values,
+                    reason = "WorkflowLifecycleView is intentionally Phase-1-empty (ADR-0064 §5); \
+                              self-removes when the View gains a field. See AnyViewMap::WorkflowLifecycle."
+                )]
+                let loaded: BTreeMap<TargetResource, WorkflowLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::WorkflowLifecycle(loaded)
+            }
             AnyReconciler::ServiceMapHydrator(_) => {
                 let loaded: BTreeMap<TargetResource, ServiceMapHydratorView> =
                     self.view_store.bulk_load(static_name).await.map_err(|e| {
@@ -373,6 +401,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::WorkloadLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
@@ -418,6 +447,9 @@ impl ReconcilerRuntime {
             AnyViewMap::Unit => AnyReconcilerView::Unit,
             AnyViewMap::WorkloadLifecycle(map) => {
                 AnyReconcilerView::WorkloadLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+            AnyViewMap::WorkflowLifecycle(map) => {
+                AnyReconcilerView::WorkflowLifecycle(map.get(target).cloned().unwrap_or_default())
             }
             AnyViewMap::ServiceMapHydrator(map) => {
                 AnyReconcilerView::ServiceMapHydrator(map.get(target).cloned().unwrap_or_default())
@@ -515,6 +547,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
@@ -551,6 +584,51 @@ impl ReconcilerRuntime {
                 }
                 Ok(())
             }
+            AnyReconcilerView::WorkflowLifecycle(view) => {
+                // Eq-diff skip — same shape as the WorkloadLifecycle arm.
+                // The Phase 1 `WorkflowLifecycleView` is empty, so the
+                // current-vs-next comparison is always equal and this arm
+                // elides the fsync on every tick. The arm is kept full
+                // (not collapsed to `Ok(())`) so a future non-empty view
+                // persists through the same fsync-then-memory ordering.
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::WorkflowLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => WorkflowLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::WorkflowLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
             AnyReconcilerView::ServiceMapHydrator(view) => {
                 // Eq-diff skip — same shape as WorkloadLifecycle arm above.
                 let current = {
@@ -560,6 +638,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_) => ServiceMapHydratorView::default(),
@@ -603,6 +682,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_) => BackendDiscoveryBridgeView::default(),
@@ -644,6 +724,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_) => ServiceLifecycleView::default(),
@@ -723,6 +804,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::WorkloadLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_) => None,
@@ -798,6 +880,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_) => None,
@@ -852,6 +935,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::BackendDiscoveryBridge(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_) => None,
@@ -909,6 +993,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::ServiceLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_) => None,
@@ -1321,7 +1406,12 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // ADR-0035 / Persist inputs); it does not carry a
         // backoff-pending signal, so this arm returns false. A future
         // bridge-side retry policy would extend this match.
-        | AnyReconcilerView::BackendDiscoveryBridge(_) => false,
+        | AnyReconcilerView::BackendDiscoveryBridge(_)
+        // The workflow-lifecycle view is Phase-1 empty (ADR-0064 §5) and
+        // carries no backoff-pending signal; the §18 re-enqueue for a
+        // running-no-task instance is driven by the action-emitted gate
+        // (the reconciler returns a `StartWorkflow`), not this predicate.
+        | AnyReconcilerView::WorkflowLifecycle(_) => false,
         // GAP-9 Shape B — keep the service-lifecycle reconciler alive
         // across cadences while any observed alloc is mid-startup-window.
         //
@@ -1401,6 +1491,22 @@ async fn hydrate_desired(
                 probe_descriptors,
             };
             Ok(AnyState::WorkloadLifecycle(s))
+        }
+        // ADR-0064 §5 — the workflow-lifecycle reconciler's hydrate-desired.
+        // Phase-1 single-node: the per-instance running-in-intent
+        // projection (reading workflow-instance intent rows + joining the
+        // engine's live-task set + observed terminal rows) is the
+        // production hydrate path that lands with the engine-in-AppState
+        // boot composition (see step return — AC3 boot-composition scope
+        // friction). Until then this returns an empty instance map, so the
+        // registered reconciler ticks to `Noop` (converged) and never
+        // panics the dispatch — `ReconcilerIsPure` holds and the registry
+        // carries the reconciler. The pure re-emit logic itself is proven
+        // by the `lifecycle_reconciler_rehydrates_on_restart` acceptance
+        // test driving `AnyReconciler::reconcile` directly with a populated
+        // instance map.
+        AnyReconciler::WorkflowLifecycle(_) => {
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -1958,6 +2064,15 @@ async fn hydrate_actual(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
+        // ADR-0064 §5 — workflow-lifecycle hydrate-actual. Phase-1 empty
+        // map (see hydrate_desired arm + the AC3 boot-composition scope
+        // note). The reconcile body reads `actual.instances`; an empty map
+        // converges to `Noop`. Full per-instance actual (engine live-task
+        // set ∪ observed `WorkflowTerminal` rows) lands with the
+        // engine-in-AppState boot composition.
+        AnyReconciler::WorkflowLifecycle(_) => {
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
+        }
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
             let rows = state
