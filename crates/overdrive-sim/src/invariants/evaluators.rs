@@ -38,7 +38,7 @@ use overdrive_core::reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler, TickContext,
     WorkloadLifecycle,
 };
-use overdrive_core::testing::workflow::ProvisionRecord;
+use overdrive_core::testing::workflow::{ProvisionRecord, ProvisionRecordWithSleep};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -835,7 +835,360 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
         ));
     }
 
+    // Slice 02 (step 02-02): extend the SAME named invariant — not a new
+    // family (the verbatim constraint) — to also exercise the 3-await
+    // `ctx.run → ctx.sleep → ctx.run` shape across a crash that SPANS the
+    // sleep window. Replay-equivalence (K4) must hold across the durable
+    // sleep, seeded and reproducible. SINGLE-NODE only (D3 / #205).
+    if let Some(cause) = check_replay_equivalence_across_sleep(seed).await {
+        return fail(cause);
+    }
+
     result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// ReplayEquivalenceProvisionRecord — slice 02 sleep extension (step 02-02)
+// ---------------------------------------------------------------------------
+//
+// Drives `ProvisionRecordWithSleep` (the slice-02 `ctx.run → ctx.sleep →
+// ctx.run` reference consumer landed in 02-01) through the SAME three-run
+// crash-resume shape the slice-01 body above drives — but the crash now
+// SPANS the sleep window: it lands AFTER the pre-sleep `ctx.run` records
+// and the `ctx.sleep` arms its deadline, but BEFORE the post-sleep
+// `ctx.run`. On resume the recorded pre-sleep `RunResult` is replayed
+// (exactly-once, K1), the sleep recomputes the remaining wait from the
+// recorded `deadline_unix` (an input, never a "remaining" cache; the
+// post-sleep `ctx.run` fires only at/after the ORIGINAL deadline, K3), and
+// the resumed trajectory is byte-identical to the uninterrupted one (K4).
+// ADR-0063 §2, ADR-0064 §3/§6.
+
+/// Two fixed addresses the `ProvisionRecordWithSleep` reference workflow's
+/// pre-sleep / post-sleep `ctx.run` effects are addressed at. Distinct from
+/// [`WF_TARGET`] so the sleep-shape evaluator's inboxes never collide with
+/// the slice-01 single-effect evaluator's inbox.
+const WF_SLEEP_PRE_TARGET: &str = "127.0.0.1:9010";
+const WF_SLEEP_POST_TARGET: &str = "127.0.0.1:9011";
+/// The logical wait the sleep-shape reference workflow arms via `ctx.sleep`.
+const WF_SLEEP: Duration = Duration::from_secs(30);
+
+/// Construct the instance correlation + id + spec for a
+/// `ProvisionRecordWithSleep` instance. Deterministic — fixed instance id,
+/// so twin runs reproduce bit-for-bit.
+fn provision_sleep_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
+    let spec = ProvisionRecordWithSleep::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-provision-sleep-inv-0001",
+        &ContentHash::of(ProvisionRecordWithSleep::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-provision-sleep-inv-0001")
+        .unwrap_or_else(|_| unreachable!("wf-provision-sleep-inv-0001 is a valid instance id"));
+    (correlation, workflow_id, spec)
+}
+
+/// Build a `WorkflowEngine` over the SHARED `journal` + `obs`, a fresh set
+/// of `Sim*` ports, and freshly-bound pre/post transport inboxes. Returns
+/// the engine's `SimClock` so the caller can advance logical time past the
+/// sleep deadline (the harness owns logical time — `SimClock::sleep` parks,
+/// it never auto-advances). The engine resolves `ProvisionRecordWithSleep`.
+async fn provision_sleep_engine(
+    seed: u64,
+    journal: Arc<dyn JournalStore>,
+    obs: Arc<dyn ObservationStore>,
+) -> (WorkflowEngine, Arc<SimClock>, SimInbox, SimInbox) {
+    let pre: SocketAddr = WF_SLEEP_PRE_TARGET
+        .parse()
+        .unwrap_or_else(|_| unreachable!("WF_SLEEP_PRE_TARGET is a valid socket addr"));
+    let post: SocketAddr = WF_SLEEP_POST_TARGET
+        .parse()
+        .unwrap_or_else(|_| unreachable!("WF_SLEEP_POST_TARGET is a valid socket addr"));
+    let sim_transport = SimTransport::new();
+    let pre_inbox =
+        sim_transport.bind_inbox(pre).await.unwrap_or_else(|_| unreachable!("bind_inbox is total"));
+    let post_inbox = sim_transport
+        .bind_inbox(post)
+        .await
+        .unwrap_or_else(|_| unreachable!("bind_inbox is total"));
+
+    let sim_clock = Arc::new(SimClock::new());
+    let transport: Arc<dyn TransportTrait> = Arc::new(sim_transport);
+    let clock: Arc<dyn Clock> = sim_clock.clone();
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(ProvisionRecordWithSleep::spec().name, move || {
+        Box::new(ProvisionRecordWithSleep::new(pre, post, WF_SLEEP))
+    });
+
+    let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
+    (engine, sim_clock, pre_inbox, post_inbox)
+}
+
+/// Drive the engine to terminal, advancing the `SimClock` past the sleep
+/// deadline on a concurrent task so the live/replay sleep park resolves.
+/// `SimClock::sleep` parks on a deadline; only `tick` wakes it — so without
+/// this concurrent advance `join_all` would hang on the parked workflow.
+async fn drive_sleep_to_terminal(engine: &WorkflowEngine, clock: &Arc<SimClock>) {
+    let driver = Arc::clone(clock);
+    let ticker = tokio::spawn(async move {
+        // Advance well past the deadline in a few ticks; each `tick` wakes
+        // any parked `SimClock` timer whose deadline has now passed.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+            driver.tick(WF_SLEEP);
+        }
+    });
+    engine.join_all().await;
+    let _ = ticker.await;
+}
+
+/// Drive a crash-injected `ProvisionRecordWithSleep` run whose crash SPANS
+/// the sleep window: the pre-sleep `ctx.run` records (fires the pre effect
+/// once) and the `ctx.sleep` arms its `SleepArmed` deadline and parks — then
+/// the future is dropped mid-park WITHOUT advancing logical time. A
+/// process-local kill DURING the sleep, modelled honestly. Returns the
+/// persisted journal (pre-sleep `RunResult` + `SleepArmed`, NO post-sleep
+/// run, NO `Terminal`) and the pre/post effect-fire counts of this run.
+async fn run_until_crash_in_sleep(
+    seed: u64,
+    journal: &Arc<dyn JournalStore>,
+) -> (Vec<JournalEntry>, usize, usize) {
+    let (_correlation, workflow_id, _spec) = provision_sleep_instance();
+    let pre: SocketAddr =
+        WF_SLEEP_PRE_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_SLEEP_PRE_TARGET valid"));
+    let post: SocketAddr =
+        WF_SLEEP_POST_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_SLEEP_POST_TARGET valid"));
+    let sim_transport = SimTransport::new();
+    let mut pre_inbox =
+        sim_transport.bind_inbox(pre).await.unwrap_or_else(|_| unreachable!("bind_inbox total"));
+    let mut post_inbox =
+        sim_transport.bind_inbox(post).await.unwrap_or_else(|_| unreachable!("bind_inbox total"));
+    {
+        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new(
+            Arc::clone(journal),
+            workflow_id.clone(),
+            Vec::new(),
+        ));
+        let ctx = WorkflowCtx::new(
+            Arc::new(SimClock::new()),
+            Arc::new(sim_transport) as Arc<dyn TransportTrait>,
+            Arc::new(SimEntropy::new(seed)),
+            cursor,
+        );
+        // Pre-sleep durable step — the same `ctx.run` the author body runs.
+        let pre_transport = Arc::clone(ctx.transport());
+        let pre_payload = bytes::Bytes::from_static(ProvisionRecordWithSleep::FIRST_PAYLOAD);
+        let _ = ctx
+            .run("provision-write-pre-sleep", async move {
+                pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap_or_else(|err| Err(err.to_string()));
+        // Arm the sleep + park, then "crash" mid-park: the sleep appends
+        // `SleepArmed` and parks (logical time NOT advanced), then the
+        // ctx + future are dropped at the end of this block.
+        let sleeper = tokio::spawn(async move { ctx.sleep(WF_SLEEP).await });
+        tokio::task::yield_now().await;
+        sleeper.abort();
+        let _ = sleeper.await;
+    }
+    let pre_fires = delivered_count(&mut pre_inbox).await;
+    let post_fires = delivered_count(&mut post_inbox).await;
+    let trajectory = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    (trajectory, pre_fires, post_fires)
+}
+
+/// Drive an uninterrupted `ProvisionRecordWithSleep` run to terminal through
+/// the engine; return the loaded journal trajectory + terminal result.
+async fn run_sleep_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResult>) {
+    let (correlation, workflow_id, spec) = provision_sleep_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let (engine, clock, _pre, _post) =
+        provision_sleep_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
+    let Ok(mut subscription) = obs.subscribe_all().await else {
+        return (Vec::new(), None);
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    drive_sleep_to_terminal(&engine, &clock).await;
+    let trajectory = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let terminal = drain_terminal(&mut subscription, &correlation).await;
+    (trajectory, terminal)
+}
+
+/// Slice-02 sleep extension of `ReplayEquivalenceProvisionRecord` (K4).
+///
+/// Drives the three-run crash-resume shape over the `ctx.run → ctx.sleep →
+/// ctx.run` workflow, with the crash SPANNING the sleep window. Returns
+/// `None` on success, or `Some(cause)` naming the first violated property.
+async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
+    // (1) Uninterrupted run — the reference trajectory across the sleep.
+    let (uninterrupted, uninterrupted_terminal) = run_sleep_uninterrupted(seed).await;
+    let uninterrupted_terminal = uninterrupted_terminal?;
+    if !uninterrupted.iter().any(|e| matches!(e, JournalEntry::SleepArmed { .. })) {
+        return Some(format!(
+            "uninterrupted sleep run recorded no SleepArmed entry: {uninterrupted:?}"
+        ));
+    }
+
+    // (2) Crash-injected run on a fresh shared journal — pre-sleep RunResult
+    //     + SleepArmed, no post-sleep run, no Terminal. The pre-sleep effect
+    //     fires exactly once; the post-sleep effect never fires (the crash
+    //     is DURING the sleep).
+    let (_correlation, workflow_id, spec) = provision_sleep_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let (pre_resume, crash_pre_fires, crash_post_fires) =
+        run_until_crash_in_sleep(seed, &journal).await;
+    if crash_pre_fires != 1 {
+        return Some(format!(
+            "crash run fired the pre-sleep effect {crash_pre_fires} times (expected 1)"
+        ));
+    }
+    if crash_post_fires != 0 {
+        return Some(format!(
+            "crash run fired the post-sleep effect {crash_post_fires} times (the crash spans the \
+             sleep — it must be 0)"
+        ));
+    }
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })) {
+        return Some(format!("crash run left no recorded pre-sleep RunResult: {pre_resume:?}"));
+    }
+    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::SleepArmed { .. })) {
+        return Some(format!("crash run did not span the sleep (no SleepArmed): {pre_resume:?}"));
+    }
+    if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+        return Some(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
+    }
+
+    // (3) Resume from the persisted journal through the engine. The recorded
+    //     pre-sleep RunResult is replayed (NO re-fire, K1); the sleep
+    //     recomputes the remaining wait from the recorded deadline; the
+    //     post-sleep run fires once (K3); the run reaches terminal.
+    let (correlation, _wid, _spec2) = provision_sleep_instance();
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let (engine, clock, mut resume_pre_inbox, mut resume_post_inbox) =
+        provision_sleep_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
+    let mut resume_sub = match obs.subscribe_all().await {
+        Ok(s) => s,
+        Err(err) => return Some(format!("resume subscribe_all failed: {err}")),
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    drive_sleep_to_terminal(&engine, &clock).await;
+
+    // K1 — the pre-sleep `ctx.run` is replayed on resume: ZERO re-fires.
+    let resume_pre_fires = delivered_count(&mut resume_pre_inbox).await;
+    if resume_pre_fires != 0 {
+        return Some(format!(
+            "resume re-fired the recorded pre-sleep effect {resume_pre_fires} times (must be 0)"
+        ));
+    }
+    // The post-sleep `ctx.run` was never recorded pre-crash → it is live on
+    // resume and fires exactly once at/after the original deadline (K3).
+    let resume_post_fires = delivered_count(&mut resume_post_inbox).await;
+    if resume_post_fires != 1 {
+        return Some(format!(
+            "post-sleep effect fired {resume_post_fires} times on resume (expected exactly 1)"
+        ));
+    }
+
+    let Some(resumed_terminal) = drain_terminal(&mut resume_sub, &correlation).await else {
+        return Some(
+            "resumed sleep run did not reach a terminal WorkflowResult (no bounded progress)"
+                .to_owned(),
+        );
+    };
+
+    // K4 — replay-equivalence across the sleep. The resumed trajectory must
+    // match the uninterrupted one in (a) the ordered sequence of entry
+    // KINDS and (b) the deterministic recorded-step CONTENTS (each
+    // `RunResult`'s name + result bytes). The clock-derived `SleepArmed
+    // { deadline_unix }` is an INPUT computed from the live clock, so its
+    // absolute value differs between two independently-constructed
+    // `SimClock`s (each captures its own wall-clock `unix_epoch`); requiring
+    // it to be byte-identical across the uninterrupted vs resumed clocks
+    // would be asserting clock-epoch identity, not replay-equivalence. The
+    // load-bearing replay property is instead: the resumed run REPLAYS the
+    // crash run's recorded `SleepArmed` (it does NOT re-arm a fresh
+    // deadline) — proven by the resumed trajectory carrying exactly the
+    // crash run's recorded deadline.
+    let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    if !entry_kinds_match(&resumed, &uninterrupted) {
+        return Some(format!(
+            "resumed sleep entry-kind sequence differs from uninterrupted: {resumed:?} vs \
+             {uninterrupted:?}"
+        ));
+    }
+    if recorded_run_steps(&resumed) != recorded_run_steps(&uninterrupted) {
+        return Some(format!(
+            "resumed sleep recorded RunResult steps differ from uninterrupted: {resumed:?} vs \
+             {uninterrupted:?}"
+        ));
+    }
+    // The resumed SleepArmed deadline is the crash run's recorded one
+    // (replay re-armed nothing) — pre_resume is the crash journal.
+    if sleep_armed_deadline(&resumed) != sleep_armed_deadline(&pre_resume) {
+        return Some(format!(
+            "resumed run re-armed the sleep instead of replaying the recorded deadline: \
+             resumed={resumed:?} crash={pre_resume:?}"
+        ));
+    }
+    if !resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+        return Some(format!("resumed sleep run did not append a Terminal entry: {resumed:?}"));
+    }
+    if resumed_terminal != uninterrupted_terminal {
+        return Some(format!(
+            "resumed sleep terminal {resumed_terminal:?} != uninterrupted {uninterrupted_terminal:?}"
+        ));
+    }
+
+    None
+}
+
+/// The ordered sequence of journal-entry KINDS — the replay-equivalence
+/// shape oracle that ignores clock-derived absolute values (a `SleepArmed`
+/// deadline is computed from the live clock's wall-clock epoch).
+fn entry_kinds(run: &[JournalEntry]) -> Vec<&'static str> {
+    run.iter()
+        .map(|e| match e {
+            JournalEntry::Started { .. } => "Started",
+            JournalEntry::RunResult { .. } => "RunResult",
+            JournalEntry::SleepArmed { .. } => "SleepArmed",
+            JournalEntry::Terminal { .. } => "Terminal",
+        })
+        .collect()
+}
+
+/// Whether two runs have the same ordered sequence of entry kinds.
+fn entry_kinds_match(a: &[JournalEntry], b: &[JournalEntry]) -> bool {
+    entry_kinds(a) == entry_kinds(b)
+}
+
+/// The deterministic recorded-step contents — each `RunResult`'s name +
+/// result bytes (clock-independent, so byte-comparable across runs).
+fn recorded_run_steps(run: &[JournalEntry]) -> Vec<(String, Vec<u8>)> {
+    run.iter()
+        .filter_map(|e| match e {
+            JournalEntry::RunResult { name, result_bytes, .. } => {
+                Some((name.clone(), result_bytes.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The recorded `SleepArmed` deadline in a run, if any.
+fn sleep_armed_deadline(run: &[JournalEntry]) -> Option<Duration> {
+    run.iter().find_map(|e| match e {
+        JournalEntry::SleepArmed { deadline_unix, .. } => Some(*deadline_unix),
+        _ => None,
+    })
 }
 
 // ---------------------------------------------------------------------------
