@@ -44,8 +44,8 @@
 
 use std::sync::Arc;
 
-use overdrive_core::SpiffeId;
-use overdrive_core::traits::ca::{Ca, RootCaHandle};
+use overdrive_core::traits::ca::{Ca, IntermediateHandle, RootCaHandle};
+use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
 use overdrive_sim::adapters::SimCa;
@@ -146,16 +146,101 @@ fn ca_equivalence_root_profile_matches_across_host_and_sim() {
     );
 }
 
+/// The contract-observable intermediate profile, parsed from an
+/// [`IntermediateHandle`]'s real cert DER via the trait accessor (`cert_der`).
+/// The equivalence Universe for an intermediate: `is_ca`, `path_len`, the
+/// key-usage set, `key_usage_critical`, and `chains_to_root` (issuer DN equals
+/// the adapter's own root subject DN) — NEVER the serial / key bytes (differ by
+/// construction — research Finding 11) and NEVER the concrete subject/issuer DN
+/// strings (the sim fixture DN differs from the host-derived DN by
+/// construction; only the *chains-to-root* relationship is contract-observable).
+#[derive(Debug, PartialEq, Eq)]
+struct IntermediateProfile {
+    is_ca: bool,
+    path_len: Option<u32>,
+    key_usages: Vec<&'static str>,
+    key_usage_critical: bool,
+    /// The intermediate's issuer DN equals its adapter's root subject DN — the
+    /// chains-to-root linkage, a structural property both adapters share even
+    /// though the concrete DN differs by construction.
+    chains_to_root: bool,
+}
+
+fn intermediate_profile(handle: &IntermediateHandle, root: &RootCaHandle) -> IntermediateProfile {
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(handle.cert_der().as_der())
+        .expect("parse intermediate DER");
+    let (_, root_cert) =
+        x509_parser::certificate::X509Certificate::from_der(root.cert_der().as_der())
+            .expect("parse root DER");
+    let bc = cert
+        .basic_constraints()
+        .expect("basicConstraints parses")
+        .expect("basicConstraints present");
+    let ku = cert.key_usage().expect("keyUsage parses").expect("keyUsage present");
+    let mut key_usages = Vec::new();
+    if ku.value.key_cert_sign() {
+        key_usages.push("keyCertSign");
+    }
+    if ku.value.crl_sign() {
+        key_usages.push("cRLSign");
+    }
+    if ku.value.digital_signature() {
+        key_usages.push("digitalSignature");
+    }
+    IntermediateProfile {
+        is_ca: bc.value.ca,
+        path_len: bc.value.path_len_constraint,
+        key_usages,
+        key_usage_critical: ku.critical,
+        chains_to_root: cert.issuer().to_string() == root_cert.subject().to_string(),
+    }
+}
+
 /// `@real-io` `@adapter-integration` `@S-03` — intermediate profile
 /// equivalence: both adapters' `issue_intermediate(&node)` produce
 /// CA:TRUE + pathLenConstraint=0 intermediates that chain to their
 /// respective roots, with identical key-usage profile.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn ca_equivalence_intermediate_profile_matches_across_host_and_sim() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03 / RcgenCa and SimCa issue_intermediate agree: \
-         CA:TRUE + pathLen=0 + keyUsage critical, each chaining to its own root)"
+    // GIVEN both adapters and a node identity.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let host: RcgenCa = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let sim: SimCa = SimCa::new(Arc::new(SimEntropy::new(0xCA_5E)));
+    let node = NodeId::new("node-a").expect("NodeId parses");
+
+    // WHEN each produces its root + node intermediate (driving port). Each
+    // intermediate chains to its OWN adapter's root (cross-adapter mixing is not
+    // asserted — different roots by construction).
+    let host_root = host.root().expect("RcgenCa::root() self-signs a real root");
+    let sim_root = sim.root().expect("SimCa::root() loads its fixture root");
+    let host_inter =
+        host.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
+    let sim_inter = sim.issue_intermediate(&node).expect("SimCa::issue_intermediate loads fixture");
+
+    // THEN the contract-observable intermediate profile is equivalent across
+    // host and sim — both CA:TRUE, both pathLen=0, both keyCertSign, both
+    // keyUsage critical, each chaining to its own root. This proves both
+    // adapters derive the SAME profile from the one core `CertSpec::intermediate`
+    // policy (ADR-0063 D8), with serial/key/DN excluded from the Universe.
+    let host_profile = intermediate_profile(&host_inter, &host_root);
+    let sim_profile = intermediate_profile(&sim_inter, &sim_root);
+    assert_eq!(
+        host_profile, sim_profile,
+        "host and sim intermediates must agree on the contract-observable profile"
+    );
+
+    // AND the shared profile is the intermediate profile the contract pins.
+    assert_eq!(
+        host_profile,
+        IntermediateProfile {
+            is_ca: true,
+            path_len: Some(0),
+            key_usages: vec!["keyCertSign"],
+            key_usage_critical: true,
+            chains_to_root: true,
+        },
+        "the shared intermediate profile matches the Ca::issue_intermediate contract"
     );
 }
 

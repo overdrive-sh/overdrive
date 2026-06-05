@@ -35,10 +35,14 @@
 use std::process::Command;
 use std::sync::Arc;
 
-use overdrive_core::SpiffeId;
 use overdrive_core::traits::ca::Ca;
+use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
+use rcgen::{
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
+    KeyUsagePurpose,
+};
 use x509_parser::prelude::FromDer;
 
 // ---------------------------------------------------------------------------
@@ -108,11 +112,66 @@ fn rcgen_root_is_a_valid_self_signed_ca_via_openssl_verify() {
 /// -CAfile root.pem intermediate.pem` exits 0. x509-parser confirms
 /// CA:TRUE, pathLenConstraint=0, keyCertSign, keyUsage critical.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn rcgen_intermediate_chains_to_root_via_openssl_verify() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03 / RcgenCa intermediate chains to root: \
-         openssl verify -CAfile root.pem intermediate.pem exits 0; CA:TRUE + pathLen=0)"
+    // GIVEN a host CA over a real OS entropy source and a trust-domain subject.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let node = NodeId::new("node-a").expect("NodeId parses");
+
+    // WHEN the persistent root and a node intermediate are produced (driving
+    // port). Both must share the same root key for the chain to verify — the
+    // root material is cached, so `issue_intermediate` signs against the same
+    // root `root()` returns here.
+    let root = ca.root().expect("RcgenCa::root() self-signs a real P-256 root");
+    let inter = ca.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
+
+    // THEN `openssl verify -CAfile root.pem intermediate.pem` accepts the
+    // intermediate (exit 0) — the chains-to-root proof on the REAL bytes.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root_pem_path = dir.path().join("root.pem");
+    let inter_pem_path = dir.path().join("intermediate.pem");
+    std::fs::write(&root_pem_path, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
+    std::fs::write(&inter_pem_path, inter.cert_pem().as_pem().as_bytes())
+        .expect("write intermediate.pem");
+
+    let status = Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&root_pem_path)
+        .arg(&inter_pem_path)
+        .status()
+        .expect("invoke openssl verify");
+    assert!(
+        status.success(),
+        "openssl verify -CAfile root.pem intermediate.pem must exit 0 (chains to root)"
+    );
+
+    // AND x509-parser confirms the intermediate profile on the REAL cert bytes:
+    // CA:TRUE, pathLenConstraint=0, keyCertSign set, keyUsage marked critical.
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(inter.cert_der().as_der())
+        .expect("parse intermediate DER");
+
+    let bc = cert
+        .basic_constraints()
+        .expect("basicConstraints parses")
+        .expect("basicConstraints present");
+    assert!(bc.value.ca, "intermediate must be CA:TRUE");
+    assert_eq!(bc.value.path_len_constraint, Some(0), "intermediate carries pathLen=0");
+
+    let ku = cert.key_usage().expect("keyUsage parses").expect("keyUsage present");
+    assert!(ku.critical, "keyUsage extension must be marked critical");
+    assert!(ku.value.key_cert_sign(), "intermediate carries keyCertSign");
+
+    // AND the intermediate's issuer is the root's subject — the chains-to-root
+    // linkage observable in the cert bytes.
+    let (_, root_cert) =
+        x509_parser::certificate::X509Certificate::from_der(root.cert_der().as_der())
+            .expect("parse root DER");
+    assert_eq!(
+        cert.issuer().to_string(),
+        root_cert.subject().to_string(),
+        "the intermediate's issuer equals the root's subject"
     );
 }
 
@@ -121,11 +180,71 @@ fn rcgen_intermediate_chains_to_root_via_openssl_verify() {
 /// signs a FURTHER CA cert fails `openssl verify` (the constraint bounds
 /// node-compromise blast radius — research Finding 4). Sad path, example-based.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-03 / a chain where the pathLen=0 intermediate \
-         signs a further CA fails openssl verify; constraint enforced, not merely set)"
+    // GIVEN a host CA with a real root + a pathLen=0 node intermediate.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let node = NodeId::new("node-a").expect("NodeId parses");
+    let root = ca.root().expect("RcgenCa::root() self-signs a real P-256 root");
+    let inter = ca.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
+
+    // WHEN we deliberately construct a FURTHER CA cert signed by the pathLen=0
+    // intermediate. The intermediate's signing key + a CA-shaped params rebuild
+    // an `Issuer`; a second CA cert is signed under it. This is the abuse the
+    // pathLen=0 constraint exists to bound (research Finding 4) — node
+    // compromise must not let the node mint its own sub-CAs.
+    let inter_key =
+        KeyPair::from_pem(inter.signing_key().as_pem()).expect("reload intermediate key");
+    let mut inter_issuer_params =
+        CertificateParams::new(Vec::<String>::new()).expect("intermediate issuer params");
+    inter_issuer_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    inter_issuer_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+    inter_issuer_params.distinguished_name = {
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::OrganizationName, "overdrive.local");
+        dn
+    };
+    let inter_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&inter_issuer_params, &inter_key);
+
+    let further_key = KeyPair::generate().expect("further-CA keypair");
+    let mut further_params =
+        CertificateParams::new(Vec::<String>::new()).expect("further-CA params");
+    further_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    further_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+    further_params.distinguished_name = {
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, "further-ca-abuse");
+        dn
+    };
+    let further_cert =
+        further_params.signed_by(&further_key, &inter_issuer).expect("sign further CA");
+
+    // THEN `openssl verify -CAfile root.pem -untrusted intermediate.pem
+    // furtherca.pem` FAILS (non-zero exit). pathLen=0 forbids a CA child of the
+    // intermediate, so the verifier rejects the chain — proving the constraint
+    // is ENFORCED by the verifier, not merely present in the cert bytes.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root_pem_path = dir.path().join("root.pem");
+    let inter_pem_path = dir.path().join("intermediate.pem");
+    let further_pem_path = dir.path().join("furtherca.pem");
+    std::fs::write(&root_pem_path, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
+    std::fs::write(&inter_pem_path, inter.cert_pem().as_pem().as_bytes())
+        .expect("write intermediate.pem");
+    std::fs::write(&further_pem_path, further_cert.pem().as_bytes()).expect("write furtherca.pem");
+
+    let status = Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&root_pem_path)
+        .arg("-untrusted")
+        .arg(&inter_pem_path)
+        .arg(&further_pem_path)
+        .status()
+        .expect("invoke openssl verify");
+    assert!(
+        !status.success(),
+        "openssl verify of a further-CA under a pathLen=0 intermediate must FAIL (constraint enforced)"
     );
 }
 
