@@ -1,0 +1,102 @@
+schema_version: '0.1'
+outcomes:
+- id: OUT-CA-ROOT
+  kind: operation
+  summary: Generate or load the persistent self-signed P-256 root CA (CA:TRUE, keyCertSign|cRLSign,
+    keyUsage critical, no pathLen)
+  feature: built-in-ca
+  inputs:
+  - shape: '&self -> root()'
+  output:
+    shape: Result<RootCaHandle, CaError>
+  keywords:
+  - ca
+  - root
+  - certificate-authority
+  - x509
+  - self-signed
+  - trust-anchor
+  artifact: crates/overdrive-core/src/traits/ca.rs
+  related: []
+  superseded_by: null
+- id: OUT-CA-INTERMEDIATE
+  kind: operation
+  summary: 'Issue or re-issue the per-node intermediate CA, pathLen=0, signed by the
+    root (single-node: one node yields one intermediate)'
+  feature: built-in-ca
+  inputs:
+  - shape: 'node: &NodeId'
+  output:
+    shape: Result<IntermediateHandle, CaError>
+  keywords:
+  - ca
+  - intermediate
+  - pathlen
+  - node
+  - x509
+  - signed-by-root
+  artifact: crates/overdrive-core/src/traits/ca.rs
+  related: []
+  superseded_by: null
+- id: OUT-CA-SVID
+  kind: operation
+  summary: 'Mint a workload SVID leaf: exactly one spiffe URI SAN, CA:FALSE, keyUsage=digitalSignature
+    critical, CSPRNG serial via Entropy, ~1h TTL; re-issue yields a fresh distinct
+    cert'
+  feature: built-in-ca
+  inputs:
+  - shape: 'req: &SvidRequest'
+  output:
+    shape: Result<SvidMaterial, CaError>
+  keywords:
+  - svid
+  - spiffe
+  - uri-san
+  - workload-identity
+  - leaf
+  - issue
+  - reissue
+  - 1h-ttl
+  artifact: crates/overdrive-core/src/traits/ca.rs
+  related: []
+  superseded_by: null
+- id: OUT-CA-TRUST-BUNDLE
+  kind: operation
+  summary: Compose the trust bundle a relying party verifies an SVID against (root
+    anchor plus intermediate as untrusted chain material)
+  feature: built-in-ca
+  inputs:
+  - shape: '&self -> trust_bundle()'
+  output:
+    shape: Result<TrustBundle, CaError>
+  keywords:
+  - ca
+  - trust-bundle
+  - verification
+  - root-anchor
+  - chain
+  artifact: crates/overdrive-core/src/traits/ca.rs
+  related: []
+  superseded_by: null
+- id: OUT-CA-SINGLE-URI-SAN
+  kind: invariant
+  summary: Every workload SVID carries exactly one spiffe URI SAN; zero or two-or-more
+    URI SANs are rejected before any certificate material is produced (SPIFFE spec
+    hardest rule, KPI K2)
+  feature: built-in-ca
+  inputs:
+  - shape: SvidRequest with a SpiffeId whose SAN projection yields N spiffe URI SANs
+  output:
+    shape: N==1 accepted; N==0 or N>=2 rejected with CaError::InvalidSan before any
+      cert
+  keywords:
+  - svid
+  - spiffe
+  - single-uri-san
+  - invariant
+  - cert-spec
+  - k2
+  - reject-pre-issuance
+  artifact: crates/overdrive-core/src/cert_spec.rs
+  related: []
+  superseded_by: null

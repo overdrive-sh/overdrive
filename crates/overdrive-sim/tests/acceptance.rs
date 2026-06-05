@@ -44,4 +44,10 @@ mod acceptance {
     // CBOR-byte cache for arbitrary `View` values (ADR-0035 §2 /
     // wave-decisions §D6 `ViewStoreRoundtripIsLossless`).
     mod sim_view_store;
+
+    // built-in-ca (GH #28) — DISTILL RED scaffolds for `SimCa` DST
+    // determinism (ADR-0063 D1/D7, KPI K5): fixture P-256 keys +
+    // SeededEntropy serials -> bit-identical issuance from a seed. Layer 2,
+    // example-only per Mandate 9 (DST determinism is same-seed-same-bytes).
+    mod sim_ca_deterministic;
 }

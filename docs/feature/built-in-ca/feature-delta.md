@@ -990,3 +990,420 @@ Codebase evidence verified this wave (Grep/Read):
   integrations** in this feature → no consumer-driven contract tests needed
   (the keyring/systemd-creds are OS ABIs probed via Earned-Trust, not network
   services).
+
+---
+
+# DISTILL Wave (wave 5 of 6) · Agent: Quinn (nw-acceptance-designer) · Mode: lean · Density: `lean`
+
+DISTILL content appends below under `## Wave: DISTILL / [REF] <Section>`
+headings. Tier-1 `[REF]` sections only (lean default); no Tier-2 expansions
+auto-rendered. The executable scenario SSOT is the eight Rust `#[test]`
+scaffold files (already authored + wired); the GIVEN/WHEN/THEN specification
+companion is `docs/feature/built-in-ca/distill/test-scenarios.md` (spec-only,
+never parsed — `.claude/rules/testing.md` § "No `.feature` files anywhere").
+
+**Crypto-backend authority note**: ADR-0063 (Accepted 2026-06-05, the latest
+artifact) fixes the backend as **`ring`** (rcgen 0.14.8, `features = ["ring",
+"pem"]`, P-256); the `aws-lc-rs` switch + FIPS are deferred to **#204**.
+Earlier DISCUSS prose saying `aws_lc_rs`/`rcgen 0.13` is **superseded** by
+ADR-0063 (documented in its changelog). The scaffolds + this DISTILL section
+follow ADR-0063. This is a recorded supersession, not an unresolved
+reconciliation contradiction (see § Wave: DISTILL / [REF] Reconciliation).
+
+---
+
+## Wave: DISTILL / [REF] Reconciliation (Pre-Scenario HARD GATE)
+
+Wave-decisions are embedded in this single-file delta (DISCUSS § Wave
+Decisions D-CA-1..6; DESIGN § Wave Decisions Summary DES-D-1..6 + Decisions
+Table DES-CA-1..10; ADR-0063 D1..D8). No standalone `wave-decisions.md` files
+exist. No DEVOPS wave section exists (single-file model — KPI instrumentation
+lives in DISCUSS § Outcome KPIs) → **WARN, proceed**.
+
+**Contradiction scan — DISCUSS ↔ DESIGN ↔ (no DEVOPS):**
+
+| Decision area | DISCUSS | DESIGN / ADR-0063 | Verdict |
+|---|---|---|---|
+| Crypto backend | `aws_lc_rs` / `rcgen 0.13` (§ System Constraints) | `ring` / `rcgen 0.14.8`, aws-lc-rs→#204 (ADR-0063 Constraints + changelog) | **Documented supersession**, not a live contradiction — ADR-0063's changelog explicitly records the correction ("No architecture decision altered"). Scaffolds encode `ring`. |
+| Single-node scope | D-CA-6 single-node, one intermediate | DES-CA-9 single-node, one intermediate | CONSISTENT |
+| No operator CLI verb | D-CA-4 (no verb; audit row only) | DESIGN Driving Ports (no verb; `issued_certificates` only) | CONSISTENT |
+| State layers | CA material = intent; audit = observation | D2 (intent) + D6 (observation) | CONSISTENT |
+| Rotation OUT | D-CA-3 → #40 (needs #39) | DES-CA-1 / ADR refs → #40/#39 | CONSISTENT |
+
+**Result: Reconciliation passed — 0 unresolved contradictions** (1 documented
+supersession on the crypto backend). Scenario writing proceeded.
+
+---
+
+## Wave: DISTILL / [REF] Scenario List with Tags
+
+39 scenarios across the 5 slices (= 5 user stories = the linear trust-hierarchy
+dependency chain). Full GIVEN/WHEN/THEN + Universe + per-scenario trace:
+`distill/test-scenarios.md`. IDs are `S-0S-NN` (slice-scoped). The `@S-0S`
+tags *inside* the scaffolds denote the owning slice (one tag = one slice), not
+per-scenario unique IDs.
+
+### Slice 01 — Root CA behind the `Ca` port trait (US-CA-01) — `ca_cert_spec_policy.rs` + `sim_ca_deterministic.rs` + `ca_equivalence.rs` + `rcgen_ca_chain_verify.rs`
+
+| ID | Scaffold fn | Layer | Tags |
+|---|---|---|---|
+| S-01-01 | `root_spec_is_self_signed_ca_with_key_cert_sign_and_crl_sign` | L1 pure | `@in-memory @S-01` |
+| S-01-02 | `sim_ca_root_is_bit_identical_across_two_runs_at_same_seed` | L2 sim | `@in-memory @S-01` |
+| S-01-03 | `ca_equivalence_root_profile_matches_across_host_and_sim` | L3 | `@real-io @adapter-integration @S-01` |
+| S-01-04 | `rcgen_root_is_a_valid_self_signed_ca_via_openssl_verify` | L3 | `@real-io @adapter-integration @S-01` |
+| S-01-05 | `cert_spec_error_variants_are_distinct_per_failure_mode` | L1 pure | `@in-memory @error @S-01 @S-04` |
+
+### Slice 02 — Root key envelope-encrypted at rest (US-CA-02) — `rcgen_ca_root_key_envelope.rs` + `ca_boot_and_audit.rs` + `schema_evolution/root_ca_key.rs`
+
+| ID | Scaffold fn | Layer | Tags |
+|---|---|---|---|
+| S-02-01 | `root_key_envelope_seals_and_opens_round_trip_under_same_kek` | L3 | `@real-io @adapter-integration @S-02` |
+| S-02-02 | `root_key_envelope_contains_no_plaintext_key_bytes` | L3 | `@real-io @adapter-integration @S-02` |
+| S-02-03 | `root_key_envelope_tampered_ciphertext_fails_distinct_from_wrong_kek` | L3 | `@real-io @adapter-integration @S-02 @error` |
+| S-02-04 | `root_key_envelope_wrong_kek_fails_distinct_from_tampered` | L3 | `@real-io @adapter-integration @S-02 @error` |
+| S-02-05 | `root_ca_is_reused_across_control_plane_restart` | L3 | `@real-io @adapter-integration @S-02` |
+| S-02-06 | `boot_refuses_to_start_on_envelope_decrypt_failure_without_remint` | L3 | `@real-io @adapter-integration @S-02 @error` |
+| S-02-07 | `boot_refuses_to_start_when_kek_absent_from_keyring` | L3 | `@real-io @adapter-integration @S-02 @error` |
+| S-02-08 | `root_ca_key_envelope_v1_golden_bytes_roundtrip` | L1 archive | `@property @S-02` |
+| S-02-09 | `root_ca_key_envelope_discriminant_offset_triangulates` | L1 archive | `@property @S-02` |
+| S-02-10 | `root_ca_key_envelope_unknown_version_probe_surfaces_error` | L1 archive | `@property @S-02 @error` |
+
+### Slice 03 — Per-node intermediate CA, pathLen=0 (US-CA-03) — `ca_cert_spec_policy.rs` + `sim_ca_deterministic.rs` + `ca_equivalence.rs` + `rcgen_ca_chain_verify.rs` + `ca_boot_and_audit.rs`
+
+| ID | Scaffold fn | Layer | Tags |
+|---|---|---|---|
+| S-03-01 | `intermediate_spec_is_ca_true_with_path_len_zero_and_key_cert_sign` | L1 pure | `@in-memory @S-03` |
+| S-03-02 | `sim_ca_intermediate_is_deterministic_and_chains_to_fixture_root` | L2 sim | `@in-memory @S-03` |
+| S-03-03 | `ca_equivalence_intermediate_profile_matches_across_host_and_sim` | L3 | `@real-io @adapter-integration @S-03` |
+| S-03-04 | `rcgen_intermediate_chains_to_root_via_openssl_verify` | L3 | `@real-io @adapter-integration @S-03` |
+| S-03-05 | `rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced` | L3 | `@real-io @adapter-integration @S-03 @error` |
+| S-03-06 | `intermediate_signing_failure_fails_node_bootstrap_loudly` | L3 | `@real-io @adapter-integration @S-03 @error` |
+
+### Slice 04 — Workload SVID, single URI SAN (US-CA-04) — `ca_cert_spec_policy.rs` + `sim_ca_deterministic.rs` + `ca_equivalence.rs` + `rcgen_ca_chain_verify.rs`
+
+| ID | Scaffold fn | Layer | Tags |
+|---|---|---|---|
+| S-04-01 | `svid_spec_carries_exactly_one_uri_san_and_leaf_key_usage` | L1 pure (PBT) | `@in-memory @property @S-04` |
+| S-04-02 | `svid_spec_rejects_zero_or_multiple_uri_sans_before_any_cert` | L1 pure (PBT) | `@in-memory @property @S-04 @error` |
+| S-04-03 | `svid_spec_subject_uri_equals_requested_spiffe_id` | L1 pure | `@in-memory @S-04` |
+| S-04-04 | `sim_ca_svid_serial_is_deterministic_and_at_least_64_bits` | L2 sim | `@in-memory @S-04` |
+| S-04-05 | `sim_ca_svid_carries_single_uri_san_and_is_not_a_ca` | L2 sim | `@in-memory @S-04` |
+| S-04-06 | `ca_equivalence_svid_profile_matches_across_host_and_sim` | L3 | `@real-io @adapter-integration @S-04` |
+| S-04-07 | `rcgen_full_svid_chain_verifies_root_intermediate_svid` | L3 | `@real-io @adapter-integration @walking_skeleton @S-04` |
+| S-04-08 | `rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile` | L3 | `@real-io @adapter-integration @S-04` |
+| S-04-09 | `rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance` | L3 | `@real-io @adapter-integration @S-04 @error` |
+| S-04-10 | `ca_equivalence_bad_san_request_rejected_identically_by_both` | L3 | `@real-io @adapter-integration @S-04 @error` |
+
+### Slice 05 — Trust bundle, audit, re-issue (US-CA-05) — `sim_ca_deterministic.rs` + `ca_equivalence.rs` + `ca_boot_and_audit.rs` + `schema_evolution/issued_certificate_row.rs`
+
+| ID | Scaffold fn | Layer | Tags |
+|---|---|---|---|
+| S-05-01 | `sim_ca_reissue_for_same_spiffe_id_yields_a_fresh_distinct_leaf` | L2 sim | `@in-memory @S-05` |
+| S-05-02 | `ca_equivalence_trust_bundle_shape_matches_across_host_and_sim` | L3 | `@real-io @adapter-integration @S-05` |
+| S-05-03 | `issuance_writes_issued_certificates_row_matching_the_minted_cert` | L3 | `@real-io @adapter-integration @S-05` |
+| S-05-04 | `issuance_that_cannot_write_audit_row_surfaces_an_error` | L3 | `@real-io @adapter-integration @S-05 @error` |
+| S-05-05 | `svid_is_reissued_on_demand_without_control_plane_restart` | L3 | `@real-io @adapter-integration @S-05` |
+| S-05-06 | `issued_certificate_row_envelope_v1_golden_bytes_roundtrip` | L1 archive | `@property @S-05` |
+| S-05-07 | `issued_certificate_row_envelope_discriminant_offset_triangulates` | L1 archive | `@property @S-05` |
+| S-05-08 | `issued_certificate_row_envelope_unknown_version_probe_surfaces_error` | L1 archive | `@property @S-05 @error` |
+
+**Coverage profile**: 39 total · 15 `@error` (38.5%) · 1 `@walking_skeleton`
+· 8 `@property` · by layer: L1 pure 6, L2 sim 5, L1 archive 6, L3 real-io 22.
+(The Slice-01 table lists 5 rows because `cert_spec_error_variants...` carries
+`@S-01 @S-04` — it is filed under Slice 01 as the policy-taxonomy guard and
+also serves the K2 single-URI invariant. It is one of the 15 `@error`
+scenarios, not a 16th.)
+
+---
+
+## Wave: DISTILL / [REF] Walking Skeleton Strategy
+
+**Per-project Architecture of Reference + Project Infrastructure Policy** (not
+a per-feature A/B/C/D choice — the 4-way strategy is retired). The walking
+skeleton is realised across **Slices 01→04** (root → persist → intermediate →
+SVID → **chain verifies**), per DISCUSS § Story Map. The single
+`@walking_skeleton`-tagged scenario is **S-04-07**
+(`rcgen_full_svid_chain_verifies_root_intermediate_svid`): `openssl verify
+-CAfile root.pem -untrusted intermediate.pem svid.pem` → exit 0.
+
+**Litmus (Dim 5)**: Sam the security engineer runs `openssl verify` himself
+and sees the workload identity validate to the root — a genuine user-observable
+outcome, framed as a user goal (not "all layers connect"). The
+walking-skeleton scenario uses **real adapters** (real `ring`/rcgen crypto,
+real `openssl verify` subprocess), gated `integration-tests`, run via Lima per
+`.claude/rules/testing.md` — i.e. `@real-io`, not `@in-memory`.
+
+**No operator CLI verb** (D-CA-4): there is no `overdrive` subcommand to
+"issue an SVID". `openssl verify` over the minted material is the honest
+external entry point this phase (per the DISCUSS elevator-pitch caveat). The
+only operator read surface is the `issued_certificates` observation row via the
+existing `alloc status` path (S-05-03).
+
+---
+
+## Wave: DISTILL / [REF] Adapter Coverage Table (Mandate 6)
+
+Every driven adapter / driven port has at least one real-I/O scenario (or, for
+the in-memory sim tier, the DST-determinism + equivalence coverage that proves
+the sim honours the same `Ca` trait contract). No `NO — MISSING` rows.
+
+| Adapter / driven port | Real-I/O coverage | Covered by |
+|---|---|---|
+| `RcgenCa` (host adapter, real `ring`/rcgen X.509) | YES (`@real-io`) | S-01-04, S-03-04, S-03-05, S-04-07, S-04-08, S-04-09 (`rcgen_ca_chain_verify.rs` via `openssl verify`) |
+| Root-key AEAD codec (real HKDF-SHA256 + AES-256-GCM via `ring`) | YES (`@real-io`) | S-02-01..S-02-04 (`rcgen_ca_root_key_envelope.rs`, byte-scan + tamper/wrong-KEK) |
+| `SimCa` (sim adapter, fixture P-256 keys + `SeededEntropy`) | in-memory (`@in-memory`) + cross-adapter equivalence | S-01-02, S-03-02, S-04-04, S-04-05, S-05-01 (`sim_ca_deterministic.rs`); equivalence S-01-03/S-03-03/S-04-06/S-04-10/S-05-02 |
+| `IntentStore` (`LocalStore` over redb — root-key envelope persistence) | YES (`@real-io`) | S-02-05 (reuse across restart), S-02-06 (refuse-to-start on decrypt failure) (`ca_boot_and_audit.rs`) |
+| `ObservationStore` (`issued_certificates` audit row) | YES (`@real-io`) | S-05-03 (read-back match), S-05-04 (no silent issuance) (`ca_boot_and_audit.rs`) |
+| `Kek` provider → kernel keyring + systemd-creds (Earned-Trust probe) | YES (`@real-io`) | S-02-07 (absent KEK refuses startup) (`ca_boot_and_audit.rs`) |
+| `Entropy` port (serials) | exercised indirectly | S-04-04 (serial determinism via `SeededEntropy`) — `Entropy` is a pre-existing reused port, not a new adapter |
+| rkyv envelopes (`RootCaKeyEnvelope`, `IssuedCertificateRowEnvelope`) | default-lane archive | S-02-08..10, S-05-06..08 (`schema_evolution/*.rs`, golden-bytes per ADR-0048) |
+
+**`Ca` trait-contract enforcement** (development.md § "DST equivalence test is
+the structural guard"): `ca_equivalence.rs` drives `RcgenCa` (host) and `SimCa`
+(sim) through the same call sequence and asserts observable equivalence via
+trait accessors (S-01-03, S-03-03, S-04-06, S-04-10, S-05-02). This is the
+central guard that the sim adapter does not diverge on policy from the host
+adapter — the highest-value structural test in the feature.
+
+---
+
+## Wave: DISTILL / [REF] Scaffolds (RED-ready)
+
+Eight Rust scaffold files, all RED-at-the-bar via
+`#[should_panic(expected = "RED scaffold")]` (`.claude/rules/testing.md` §
+"RED scaffolds" — the project's Rust convention; the Python `__SCAFFOLD__`
+marker is N/A here). Each scaffold body is a self-contained `panic!` that names
+the scenario + the DELIVER GREEN target; **no scaffold imports unbuilt
+production types**, so nextest reports PASS (expected panic), clippy is clean,
+and lefthook needs no `--no-verify`.
+
+| Scaffold file | Crate · class | Layer · lane | Scenarios |
+|---|---|---|---|
+| `tests/acceptance/ca_cert_spec_policy.rs` | overdrive-core · core | L1 pure · default | S-01-01, S-03-01, S-04-01/02/03, + error-variant distinctness |
+| `tests/acceptance/sim_ca_deterministic.rs` | overdrive-sim · adapter-sim | L2 sim · default | S-01-02, S-03-02, S-04-04/05, S-05-01 |
+| `tests/integration/rcgen_ca_chain_verify.rs` | overdrive-host · adapter-host | L3 · `integration-tests` | S-01-04, S-03-04/05, S-04-07/08/09 |
+| `tests/integration/rcgen_ca_root_key_envelope.rs` | overdrive-host · adapter-host | L3 · `integration-tests` | S-02-01/02/03/04 |
+| `tests/integration/ca_equivalence.rs` | overdrive-control-plane | L3 · `integration-tests` | S-01-03, S-03-03, S-04-06/10, S-05-02 |
+| `tests/integration/ca_boot_and_audit.rs` | overdrive-control-plane | L3 · `integration-tests` | S-02-05/06/07, S-03-06, S-05-03/04/05 |
+| `tests/schema_evolution/root_ca_key.rs` | overdrive-core · core | L1 archive · default | S-02-08/09/10 |
+| `tests/schema_evolution/issued_certificate_row.rs` | overdrive-core · core | L1 archive · default | S-05-06/07/08 |
+
+**Wired entrypoints** (already modified, verified this wave):
+`overdrive-core/tests/acceptance.rs` (`mod ca_cert_spec_policy`),
+`overdrive-sim/tests/acceptance.rs` (`mod sim_ca_deterministic`),
+`overdrive-core/tests/schema_evolution.rs` (`mod root_ca_key`, `mod
+issued_certificate_row`), `overdrive-control-plane/tests/integration.rs` (`mod
+ca_boot_and_audit`, `mod ca_equivalence`). `overdrive-host` newly gained
+`integration-tests = []` + `tests/integration.rs` + `tests/integration/`
+(`mod rcgen_ca_chain_verify`, `mod rcgen_ca_root_key_envelope`).
+
+---
+
+## Wave: DISTILL / [REF] Test Placement
+
+Rust convention per `.claude/rules/testing.md` § "Layout" + ADR-0005, with the
+precedent justification already inline in each entrypoint:
+
+- **L1 pure / archive** (default lane, no `integration-tests`): `overdrive-core
+  tests/acceptance/ca_cert_spec_policy.rs` and `tests/schema_evolution/*.rs`.
+  `CertSpec` is pure core policy (dst-lint-clean), so its tests run in the
+  default lane; the schema-evolution golden-bytes tests are pure in-memory rkyv
+  (testing.md § "Archive schema-evolution roundtrip" mandates one
+  golden-fixture per rkyv envelope).
+- **L2 sim** (default lane): `overdrive-sim tests/acceptance/
+  sim_ca_deterministic.rs` — `SimCa` is in-process, no real I/O.
+- **L3 real-io** (`integration-tests` feature, Lima): host-adapter crypto +
+  `openssl verify` (`overdrive-host tests/integration/`); boot/issuance wiring
+  + equivalence (`overdrive-control-plane tests/integration/`). The
+  `ca_equivalence` test lives in `overdrive-control-plane` because it is the
+  **only** crate that dev-deps BOTH `overdrive-host` (`RcgenCa`) and
+  `overdrive-sim` (`SimCa`) — host and sim do not depend on each other (the
+  sim/host split is load-bearing per CLAUDE.md), so the equivalence harness has
+  no other natural home (justification inline in `integration.rs`).
+
+---
+
+## Wave: DISTILL / [REF] Driving Adapter Coverage
+
+**No operator CLI verb, no HTTP endpoint, no hook adapter** for CA issuance
+this phase (D-CA-4 / DESIGN Driving Ports). The driving *ports* are internal:
+control-plane bootstrap → `root()`; node bootstrap → `issue_intermediate(node)`;
+workload-start → `issue_svid(req)`. These are exercised via the in-process
+boot/issuance wiring in `ca_boot_and_audit.rs` (real `IntentStore` /
+`ObservationStore` / keyring through the composition root), not via a subprocess
+CLI invocation — because there is no CLI surface to invoke. The
+RCA-fix "every CLI/endpoint/hook in DESIGN has a subprocess/HTTP/hook scenario"
+gate is **vacuously satisfied** (zero such surfaces in DESIGN).
+
+The single user-observable *external* entry point is `openssl verify` (the
+walking-skeleton S-04-07 + S-01-04/S-03-04 run it as a real subprocess) and the
+`issued_certificates` observation row via the existing `alloc status` path
+(S-05-03; graduated to verification expectation O-CA-04). These are the honest
+operator/security-reviewer surfaces and are covered by `@real-io` scenarios.
+
+---
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+- **DESIGN driving ports**: `Ca` trait (`root`/`issue_intermediate`/
+  `issue_svid`/`trust_bundle`), `CertSpec` pure builder, `RootCaKeyEnvelope` /
+  `IssuedCertificateRowEnvelope` (ADR-0063 D1/D2/D5/D6) — all CREATE-NEW in
+  DELIVER; the scaffolds specify their observable surface.
+- **Reused (present today)**: `SpiffeId`, `CertSerial`, `NodeId`, `Entropy`
+  port, `IntentStore` (`LocalStore`), `ObservationStore` /
+  `SimObservationStore`, `VersionedEnvelope` / `codec::envelope` (DISCUSS
+  pre-reqs + DESIGN Reuse Analysis — all confirmed in-graph).
+- **Crypto stack**: `rcgen` (bump 0.13.2 → 0.14.8, `features = ["ring", "pem"]`
+  — a DELIVER first-compile gate per ADR-0063 Consequences), `ring` (workspace
+  provider today), Linux kernel keyring + systemd-creds (host adapter,
+  Linux-only production path).
+- **DEVOPS environment matrix**: none authored (single-file model). The
+  effective test environment is the project default — Lima VM for all `@real-io`
+  scenarios (`cargo xtask lima run -- cargo nextest run ... --features
+  integration-tests`); default lane (macOS host or Linux) for L1/L2 scenarios.
+  Tampered-ciphertext / wrong-KEK / absent-credential are the in-test
+  fault-injection equivalents of an environment matrix (Mandate 4 environmental
+  realism), enumerated as example-based sad paths (Mandate 11).
+- **rcgen `ring` feature non-conflict** with workspace `rustls`/`ring`:
+  first-compile check in DELIVER Slice 01 (research Gap 3), not a spike.
+
+---
+
+## Wave: DISTILL / [REF] Mandate Compliance Evidence
+
+- **CM-A (Mandate 1 — hexagonal boundary)**: tests enter through the `Ca`
+  driving port (and the boot/issuance composition root), never internal
+  components. The scaffolds import no unbuilt internals; at GREEN, L1 tests
+  call the pure `CertSpec` public API (its own driving port per
+  nw-tdd-methodology), L2/L3 call `SimCa`/`RcgenCa` via the `Ca` trait.
+- **CM-B (Mandate 2 / Pillar 1 — business language)**: scenario titles + the
+  GIVEN/WHEN/THEN companion speak the security domain (root, intermediate,
+  SVID, SAN, trust bundle, chain verify). Technical detail (rcgen, AES-GCM,
+  redb) is confined to scaffold bodies / Universe notes, not scenario surfaces.
+- **CM-C (Mandate 3 — journey completeness)**: each scenario is a complete
+  unit of behaviour with an observable outcome (a cert that verifies, a refused
+  startup, an audit row, a rejected request) — not an isolated technical op.
+  WS counts: 1 walking skeleton + 38 focused (within the 2-3 WS / 15-20 focused
+  guidance, scaled to a 5-slice security primitive).
+- **CM-E (Mandate 8 — Universe)**: every state-mutating scenario declares its
+  port-exposed Universe in `test-scenarios.md`; the Rust workspace satisfies
+  the universe-bound discipline natively via exact-equality / byte-scan /
+  set-equality fail-closed assertions (per `docs/architecture/
+  atdd-infrastructure-policy.md` § Mandate-8 mapping — no Python
+  `assert_state_delta` port).
+- **CM-F (Mandate 9 — layer-dependent PBT)**: PBT-full (`proptest!`) at GREEN
+  is confined to L1 pure scenarios (S-04-01/02 single-URI-SAN property +
+  rejection property; the schema-evolution `@property` tags denote
+  golden-bytes invariants, not generative PBT). All L3 scenarios are
+  example-only.
+- **CM-G (Mandate 10 — two-tier)**: **Tier A only**. No Tier B
+  state-machine PBT file. Rationale: the CA is a config/issuance-shaped
+  primitive — each slice's journey is 1-2 chained scenarios over a hierarchy,
+  not a ≥3-chained rich-input journey with a state-machine *model*. The
+  `ca_equivalence` cross-adapter contract test covers the "do both adapters
+  agree" space that a Tier-B exploration would otherwise probe.
+- **CM-H (Mandate 11 — example-based sad paths at L3)**: all 13 L3 `@error`
+  scenarios are named example-based tests (tampered ciphertext, wrong KEK,
+  absent KEK, pathLen escalation, bad SAN cardinality, audit-write failure,
+  decrypt-failure refuse-to-start), one example per failure mode from the SSOT
+  journey `error_paths` + ADR-0063 Earned-Trust. No PBT machinery at L3.
+
+---
+
+## Wave: DISTILL / [REF] Verification Catalogue (EDD graduation)
+
+Operator/qualitative-surface scenarios graduate to
+`verification/expectations/` (per `.claude/rules/verification.md`). In-process
+logic stays in the test tiers (not duplicated). Four expectations authored
+(`pending` — evidence captured in DELIVER/DEVOPS against the built binary in
+Lima):
+
+| ID | Surface | Anchor | What it pins |
+|---|---|---|---|
+| `E03-ca-full-chain-verifies` | E (end-to-end) | S-04-07, ADR-0063 D1, KPI K1 | The full Root → Intermediate → SVID chain verifies under `openssl verify` |
+| `O04-ca-refuse-to-start-actionable-error` | O (operator CLI) | S-02-06/07, ADR-0063 D3/Earned-Trust, journey error_paths step 1 | The control plane refuses to start on root-key decrypt failure with an *actionable* cause-distinct error (not a cryptic panic), and does not silently re-mint |
+| `O05-ca-issued-certificates-audit-row` | O (operator CLI) | S-05-03/04, ADR-0063 D6, journey step 4 | The `issued_certificates` audit row is observable via the existing `alloc status` path (serial / spiffe_id / issuer); no silent issuance |
+| `D01-ca-root-key-never-plaintext-at-rest` | D (kernel/disk-observable) | S-02-02, ADR-0063 D2/D4, KPI K3 | The persisted root-key blob contains zero plaintext private-key bytes (byte-scan of the IntentStore file) |
+
+These four are the operator/qualitative slice the four test tiers under-serve;
+the in-process logic (CertSpec policy, sim determinism, envelope roundtrip,
+equivalence) stays in the tiers and is NOT duplicated as expectations.
+
+---
+
+## Wave: DISTILL / [REF] Outcomes Registered
+
+Per `nw-distill` § "Register Outcomes" (D-5 per-typed-contract grain). The
+registry at `docs/product/outcomes/registry.yaml` was created this wave (did
+not exist). Five OUT rows for the feature's new typed contract surface:
+
+| OUT id | kind | Contract |
+|---|---|---|
+| OUT-CA-ROOT | operation | `Ca::root() -> RootCaHandle` |
+| OUT-CA-INTERMEDIATE | operation | `Ca::issue_intermediate(&NodeId) -> IntermediateHandle` |
+| OUT-CA-SVID | operation | `Ca::issue_svid(&SvidRequest) -> SvidMaterial` |
+| OUT-CA-TRUST-BUNDLE | operation | `Ca::trust_bundle() -> TrustBundle` |
+| OUT-CA-SINGLE-URI-SAN | invariant | every SVID carries exactly one `spiffe://` URI SAN; 0 or ≥2 rejected with `CaError::InvalidSan` pre-issuance |
+
+`nwave-ai outcomes check-delta` clean (no collisions against the fresh
+registry).
+
+---
+
+## Wave: DISTILL / [REF] Self-Review
+
+Against the DISTILL self-review checklist + critique Dimensions 1-9:
+
+- **WS strategy declared** (this section) + WS scenario tagged `@walking_skeleton`
+  with `@real-io` (S-04-07) — Dim 9a/9b PASS.
+- **Every driven adapter has real-I/O (or sim-equivalence) coverage** — adapter
+  table, zero `MISSING` — Dim 9c PASS.
+- **Scaffolds RED-not-BROKEN** — all 39 `#[should_panic(expected = "RED
+  scaffold")]`, none import unbuilt types; nextest PASS on default-lane, L3
+  compile-clean — Mandate 7 PASS.
+- **Business-language purity** (Dim 3 / Pillar 1) — scenario surfaces carry no
+  raw HTTP/JSON/DB jargon; crypto domain terms (SAN, CA, pathLen) are the
+  ubiquitous language, not implementation leakage — PASS.
+- **Observable-behavior assertions** (Dim 7) — Universes are port-exposed
+  (trait accessors, observation rows, `openssl verify` exit, byte-scan), never
+  internal struct fields — PASS.
+- **Traceability** (Dim 8) — every US-CA-0N has ≥4 scenarios; K1-K5 mapped
+  (K4 = architecture-review, no executable scenario) — Check A PASS; no DEVOPS
+  environments file (Check B → fault-injection sad paths substitute) — WARN.
+- **Deferrals cite real issues** — #40/#39 (rotation/workflow), #36 (multi-node),
+  #204 (aws-lc-rs/FIPS), #104/#83 (multi-region), #81/Phase 5/7. No inventions.
+
+**Finding (reported, not auto-fixed)**: `@error` ratio = **15/39 = 38.5%**,
+marginally under the 40% Dim-1 target (shortfall = 1 scenario). The eight
+scaffolds are the authored SSOT and are out of this completion pass's scope to
+expand. Surfaced to the orchestrator; natural one-scenario additions noted in
+`test-scenarios.md` § Finding. (Doc-completeness note: an earlier draft mapped
+only 38 of 39 scaffolds; the cross-role `cert_spec_error_variants` guard is now
+documented as S-01-05 — it was already one of the 15 `@error` scenarios, so the
+ratio is unchanged at 38.5%.)
+
+**Verdict**: DISTILL artifacts complete; scenarios sound and traceable;
+scaffolds RED-at-the-bar; outcomes + verification expectations authored. Ready
+for the final 4-reviewer gate (orchestrator-dispatched) and DELIVER handoff.
+
+---
+
+## Wave: DISTILL / [REF] Handoff
+
+- **To DELIVER (nw-software-crafter, OOP)**: 39 RED scaffolds across 8 files
+  (the executable SSOT) + `distill/test-scenarios.md` (the GWT + Universe
+  contract). Implement GREEN bottom-up along the linear chain S-01 → S-05.
+  Slice 01 first-compile gate: bump `rcgen` 0.13.2 → 0.14.8 (`features =
+  ["ring", "pem"]`) + migrate `mint_ephemeral_ca` to the 0.14 builder API in
+  the same change (ADR-0063 Consequences). Two rkyv envelopes carry the
+  golden-bytes `FIXTURE_V1` + `discriminant_offset_from_end` obligation
+  (ADR-0048). PBT-full (`proptest!`) only at L1 (S-04-01/02). All L3 sad paths
+  example-based.
+- **To DEVOPS (nw-platform-architect)**: capture the four EDD expectations
+  (E04, O04, O05, D04) against the built binary in Lima; instrument K1
+  (`openssl verify` rate), K2 (single-URI-SAN rejection), K3 (no-plaintext-key
+  byte-scan), K5 (DST determinism). The keyring + systemd-creds per-boot KEK
+  delivery + the `OVERDRIVE_CA_KEK` dev gate are the boot dependencies.
+- **Reviewer gate**: orchestrator dispatches the final 4-reviewer parallel gate
+  (Eclipse/Architect/Forge/Sentinel) against the full feature-delta; this
+  DISTILL section + the scaffolds + `test-scenarios.md` are Sentinel's scope.

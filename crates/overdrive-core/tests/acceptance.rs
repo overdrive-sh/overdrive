@@ -199,4 +199,10 @@ mod acceptance {
     // action arms, defeating both prior gap closures for Service-kind
     // workloads. Per ADR-0054 §3 + Phase 01 structural audit close-out.
     mod workload_lifecycle_projects_service_probes_into_alloc_spec;
+
+    // built-in-ca (GH #28) — DISTILL RED scaffolds for the pure `CertSpec`
+    // policy (ADR-0063 D5, reconciliation B): the single-URI-SAN invariant
+    // (KPI K2, `@property`) + role->extension mapping live in core so they
+    // are DST-testable and dst-lint-clean. Layer 1, PBT-full per Mandate 9.
+    mod ca_cert_spec_policy;
 }
