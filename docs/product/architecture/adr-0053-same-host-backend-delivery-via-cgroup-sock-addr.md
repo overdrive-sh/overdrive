@@ -1350,7 +1350,7 @@ reverse-map gap.) `deregister_local_backend` removes both symmetrically.
 |---|---|---|
 | Map type | `BPF_MAP_TYPE_HASH` | Single global, point-access only. Mirrors `LOCAL_BACKEND_MAP`'s shape; no HoM (no atomic-swap-of-backend-set requirement on this path). |
 | Key | `BackendKey { ip: Ipv4Addr, port: u16, proto: Proto }` (D2) — host-order, the **existing newtype** at `crates/overdrive-core/src/dataplane/backend_key.rs` | Byte-parity with SERVICE_MAP / REVERSE_NAT / LOCAL_BACKEND_MAP. Endianness lockstep per ADR-0041: userspace writes host order; kernel-side `recvmsg4` converts the skb-populated `user_ip4` wire bytes to host order at the lookup boundary. |
-| Value | `u32` (host-order `Ipv4Addr` of the VIP) | The VIP the reply source is rewritten to on a hit. Single VIP per backend key. |
+| Value | `ReverseLocalEntry { vip_host: u32, vip_port_host: u16, _pad: u16 }` (host order, `#[repr(C)]`, 8 bytes) | The VIP `(address, port)` the reply source is rewritten to on a hit — BOTH the source address AND the source port, symmetric with the forward `(addr, port)` NAT (§D4). Byte-parity is with the **value** shape `LocalBackendEntry { backend_ip, backend_port, _pad }` (the {ip, port, _pad} 8-byte POD), NOT with the `LocalServiceKey` key (parity with which is the *key*'s relationship, via `BackendKey`, above). The trailing `_pad: u16` MUST stay deterministically zeroed. Single VIP `(address, port)` per backend key. The value width grew 4→8 (the VIP port joined the VIP address) when D1 was reconciled with D4 — see the amendment note below. |
 | `max_entries` | 4096 | Same envelope as `LOCAL_BACKEND_MAP`. |
 
 New userspace handle
@@ -1361,12 +1361,45 @@ typed shape mirrors `LocalBackendMapHandle`:
 pub struct ReverseLocalMapHandle { /* Map fd */ }
 
 impl ReverseLocalMapHandle {
-    pub fn upsert(&self, backend: SocketAddrV4, proto: Proto, vip: Ipv4Addr) -> Result<(), MapError>;
+    pub fn upsert(&self, backend: SocketAddrV4, proto: Proto, vip: SocketAddrV4) -> Result<(), MapError>;
     pub fn remove(&self, backend: SocketAddrV4, proto: Proto) -> Result<(), MapError>;
-    pub fn get(&self, backend: SocketAddrV4, proto: Proto) -> Result<Option<Ipv4Addr>, MapError>;
-    pub fn entries(&self) -> Result<Vec<(BackendKey, Ipv4Addr)>, MapError>;
+    pub fn get(&self, backend: SocketAddrV4, proto: Proto) -> Result<Option<SocketAddrV4>, MapError>;
+    pub fn entries(&self) -> Result<Vec<(BackendKey, SocketAddrV4)>, MapError>;
 }
 ```
+
+> **Revision 2026-06-05c — D1 reverse-value widened to carry the VIP
+> port (D1/D4 reconciliation).** Decision-maker: Morgan. Reconciles an
+> intra-ADR contradiction that produced a shipped defect: D1 (this
+> section) originally specified the `REVERSE_LOCAL_MAP` value as IP-only
+> (`u32`, host-order VIP address), while D4 (below) directed the reverse
+> SOURCE rewrite to write the VIP into BOTH `user_ip4` AND `user_port`.
+> A value carrying only the IP cannot satisfy a directive to rewrite the
+> port — the implementation followed D1 (IP-only), so
+> `cgroup_recvmsg4_service` restored only `user_ip4` and dropped the
+> source port, breaking cross-port services (DNS `VIP:53 → backend:5353`)
+> because source-validating resolvers (Unbound, BIND 9) discard a reply
+> whose source port ≠ the queried port.
+>
+> **Resolution:** widen the value 4→8 bytes to
+> `ReverseLocalEntry { vip_host: u32, vip_port_host: u16, _pad: u16 }`
+> carrying BOTH the VIP address and the VIP port, so the reverse path is
+> symmetric with the forward `(addr, port)` NAT and aligned with Cilium's
+> `__sock4_xlate_rev` (which restores BOTH address and port from a
+> reverse entry that stores both). Byte-parity for the value is now with
+> the `LocalBackendEntry { backend_ip, backend_port, _pad }` 8-byte
+> {ip, port, _pad} POD shape — NOT with `LocalServiceKey` (the key's
+> parity relationship, via `BackendKey`, is unchanged). D4's
+> "write the VIP into `user_ip4` / `user_port`" directive is unchanged in
+> intent and is now fully satisfiable; both D1 and D4 describe a full
+> `(addr, port)` reverse translation. The D3/UI-1 miss-path no-op, the
+> `[1,1]` recvmsg4-cannot-deny contract, the reverse-first dual-write
+> ordering, and the endianness lockstep are all unchanged.
+>
+> Shipped on branch `marcus-sa/udp-sendmsg4-hook` (commits `adaa5a5e`,
+> `95ed7d2d`). Full RCA:
+> `docs/feature/fix-recvmsg4-reply-source-port/deliver/rca.md`. Closes
+> #200's recvmsg4 reply-source-port defect.
 
 #### D2 — Reverse key is `(backend_ip, backend_port, proto)`, reusing the `BackendKey` newtype
 
@@ -1378,9 +1411,11 @@ moment two same-host services share a backend IP on different ports
 reply source would be rewritten to whichever VIP last won the slot.
 `(backend_ip, backend_port, proto)` is the minimal unambiguous key, and
 reusing `BackendKey` buys: (a) byte-parity with every other dataplane
-reverse key; (b) the Sim reply mirror (D5d) reuses
-`BTreeMap<BackendKey, Ipv4Addr>` verbatim — the exact shape
-`SimDataplane.reverse_nat` already uses for the XDP path.
+reverse key; (b) the Sim reply mirror (D5d) reuses the same
+`BTreeMap<BackendKey, _>` shape `SimDataplane.reverse_nat` already uses
+for the XDP path, with the value carrying the VIP `SocketAddrV4`
+(address + port) to mirror the D1 reverse-value `(addr, port)` shape
+(revision 2026-06-05c).
 
 One degenerate case the single-VIP-per-backend-key value names
 explicitly: if two distinct VIPs resolve to the identical
@@ -1593,9 +1628,14 @@ own lookup against its own map:
 program body.** One helper MUST NOT serve both rewrite directions:
 
 - connect4 / sendmsg4 do a **forward DEST rewrite** (write the backend
-  into `user_ip4` / `user_port`).
-- recvmsg4 does a **reverse SOURCE rewrite** (write the VIP into
-  `user_ip4` / `user_port`).
+  `(addr, port)` into `user_ip4` / `user_port`).
+- recvmsg4 does a **reverse SOURCE rewrite** (write the VIP `(addr, port)`
+  into `user_ip4` / `user_port` — BOTH the source address and the source
+  port, symmetric with the forward NAT). The VIP port is supplied by the
+  8-byte `REVERSE_LOCAL_MAP` value (`ReverseLocalEntry { vip_host,
+  vip_port_host, _pad }`, D1); restoring the port is load-bearing for
+  cross-port services (DNS `VIP:53 → backend:5353`) — see the D1/D4
+  reconciliation note in § D1 (revision 2026-06-05c).
 
 **This REFACTORS shipped connect4.** `cgroup_connect4_service`'s inline
 key construction + NBO handling (Decision 1 § 1 pipeline) is **replaced
@@ -1717,8 +1757,10 @@ open question (D3).
 
 **D5d — `SimDataplane` reply mirror, under the SAME mutex acquisition;
 test-only accessor; MUST NOT shape production.** `SimDataplane` gains a
-reply mirror `BTreeMap<BackendKey, Ipv4Addr>` written under the **SAME
-mutex acquisition** as `local_backends` inside `register_local_backend`
+reply mirror `BTreeMap<BackendKey, SocketAddrV4>` (the VIP `(address,
+port)`, mirroring the D1 reverse-value `(addr, port)` shape — revision
+2026-06-05c) written under the **SAME mutex acquisition** as
+`local_backends` inside `register_local_backend`
 (the existing `update_service` `services` + `reverse_nat` lockstep idiom
 at `overdrive-sim/src/adapters/dataplane.rs:380` is the template — both
 maps mutated under one lock so the dual-write is observably atomic in
@@ -1730,15 +1772,17 @@ post-state via **two test-only accessors** — the sanctioned Tier-1
 equivalence surface for the reply path, both observing the Sim's
 post-state, neither part of the production `Dataplane` trait:
 
-- **`reply_source_for(key: BackendKey) -> Option<Ipv4Addr>`** — the
-  **forward direction**. Returns the reply source the recvmsg4 path would
-  present for a given backend identity; the invariant asserts it equals
-  the **VIP**, never the backend (the "reply source = VIP" assertion,
-  US-02 AC). `Some(vip)` = reverse hit; `None` = a forward `local_backend`
+- **`reply_source_for(key: BackendKey) -> Option<SocketAddrV4>`** — the
+  **forward direction**. Returns the reply source `(address, port)` the
+  recvmsg4 path would present for a given backend identity; the invariant
+  asserts it equals the **VIP `(addr, port)`**, never the backend (the
+  "reply source = VIP" assertion, US-02 AC — now including the port, so
+  cross-port services are covered, revision 2026-06-05c).
+  `Some(vip)` = reverse hit; `None` = a forward `local_backend`
   entry with no matching reply-mirror entry — the forward-only asymmetry
   the invariant exists to catch. Parity with `reverse_nat_lookup` on the
   XDP path.
-- **`reply_mirror_entries() -> Vec<(BackendKey, Ipv4Addr)>`** — the
+- **`reply_mirror_entries() -> Vec<(BackendKey, SocketAddrV4)>`** — the
   **reverse / enumeration direction**. Snapshots every reply-mirror entry
   in `Ord` order on `BackendKey` (the `bpftool map dump REVERSE_LOCAL_MAP`
   equivalent), so the invariant can assert NO **stale reverse entry**
@@ -1987,6 +2031,7 @@ from intent); no schema-evolution envelope bump.
 
 | Date | Change |
 |---|---|
+| 2026-06-05c | **D1/D4 reconciliation — reverse value widened to carry the VIP port (closes the #200 recvmsg4 reply-source-port defect).** Reconciles an intra-ADR contradiction that shipped a defect: D1's reverse-store value was specified IP-only (`u32`, host-order VIP address) while D4 directed the reverse SOURCE rewrite to write the VIP into BOTH `user_ip4` AND `user_port`. The implementation followed D1 (IP-only), so `cgroup_recvmsg4_service` restored only `user_ip4` and dropped the source port — breaking cross-port services (DNS `VIP:53 → backend:5353`) because source-validating resolvers (Unbound, BIND 9) discard a reply whose source port ≠ the queried port. Resolution: the `REVERSE_LOCAL_MAP` value widens 4→8 bytes to `ReverseLocalEntry { vip_host: u32, vip_port_host: u16, _pad: u16 }` carrying BOTH the VIP address and the VIP port; the reverse path is now symmetric with the forward `(addr, port)` NAT and aligned with Cilium's `__sock4_xlate_rev` (restores both address and port from a reverse entry storing both). Byte-parity for the value is now with the `LocalBackendEntry {ip, port, _pad}` 8-byte POD shape, NOT `LocalServiceKey` (the key's parity, via `BackendKey`, is unchanged). The Sim reply mirror + its two test-only accessors (D5d) widen in lockstep: `BTreeMap<BackendKey, SocketAddrV4>`, `reply_source_for -> Option<SocketAddrV4>`, `reply_mirror_entries -> Vec<(BackendKey, SocketAddrV4)>`. D3/UI-1 miss-path no-op, the `[1,1]` recvmsg4-cannot-deny contract, the reverse-first dual-write ordering, and the endianness lockstep are all unchanged. Shipped on branch `marcus-sa/udp-sendmsg4-hook` (commits `adaa5a5e`, `95ed7d2d`). RCA: `docs/feature/fix-recvmsg4-reply-source-port/deliver/rca.md`. — Morgan. |
 | 2026-06-05b | **D3 miss-handling correction (UI-1; closes the #200 back-prop finding).** Supersedes the 2026-06-05 D3 "rewrite-to-sentinel `192.0.2.1` on a `REVERSE_LOCAL_MAP` miss." Corrected contract: recvmsg4 rewrites source→VIP on a **HIT** and is a **pure no-op on a MISS** (real source left intact; `REVERSE_LOCAL_MISS_COUNTER` bumped for observability only). WHY the sentinel was wrong: recvmsg4 attaches at a cgroup *ancestor* and fires on EVERY unconnected-UDP recv from any descendant, so a reverse-map miss = "not a service reply at all" (a backend's own inbound-query `recvfrom`, any unrelated UDP), NOT "a service reply with a lost reverse entry" — sentinel-ing every miss corrupts the source every non-service datagram's app reads (observed/fixed in DELIVER step 01-03, Tier-3-green, commit `e71ad780`). This is **Cilium-aligned** (`cil_sock4_recvmsg` returns `SYS_PROCEED`; `__sock4_xlate_rev` leaves the source unchanged on a reverse-SK miss), NOT "strictly stronger than Cilium" as the superseded D3 / research Q5 claimed. recvmsg4 still cannot deny (`[1,1]`). K5's no-leak guarantee is **preserved by a different mechanism** — the D1 reverse-first dual-write makes every genuine service reply *always hit* → always VIP-rewritten — NOT by a miss-path sentinel. The `SENTINEL_SOURCE_HOST` constant is now dead code (deleted when S-03-01 lands, per deletion discipline). The miss-counter operational semantics (it counts all non-service UDP; can't isolate the evicted-reply case) is a DEVOPS/acceptance-designer metric-semantics decision; the prior sentinel-resolver-rejection open question is moot. Evidence: research addendum "UI-1 adjudication (2026-06-05)" (High; verdict crafter CORRECT, Q5 WRONG). AC/SPEC for the acceptance-designer (S-03-01 re-scope + K5 reframing) in `feature-delta.md` CA-3. — Morgan. |
 | 2026-06-05 | D5d clarification (final-gate review): the Sim reply-mirror test contract documents BOTH sanctioned Tier-1 accessors — `reply_source_for(key: BackendKey) -> Option<Ipv4Addr>` (forward direction; reply source = VIP) AND `reply_mirror_entries() -> Vec<(BackendKey, Ipv4Addr)>` (reverse/enumeration direction; no stale reverse entry — the deregister-leaves-a-reverse asymmetry, mirror of the forward-only asymmetry). Both are test-only (not on the production `Dataplane` trait), parity with `reverse_nat_lookup`/`reverse_nat_entries`. The `reply-source-rewrite-lockstep` invariant's reverse-direction orphan-detection loop calls `reply_mirror_entries()`; this clarification completes the test-contract surface it relies on. No locked decision changed; no production-trait/map/kernel change. — Morgan. |
 | 2026-06-05 | Unconnected-UDP delivery DELIVERED (closes #200; supersedes Amendment 4's out-of-scope note). Two new cgroup hooks: `cgroup_sendmsg4_service` (forward request rewrite over `LOCAL_BACKEND_MAP`) + `cgroup_recvmsg4_service` (reply source rewrite over the NEW `REVERSE_LOCAL_MAP`). `REVERSE_LOCAL_MAP` = `BPF_MAP_TYPE_HASH`, key = existing `BackendKey {ip,port,proto}` (D2), value = VIP `u32`; written in ordered (reverse-first) sequence by `register_local_backend` (D1/D5a; two map syscalls, not one transaction — an ordering guarantee, not atomicity; NO new trait method; contract amended for the reverse entry + observable invariant). recvmsg4 CANNOT deny (verifier `[1,1]`, research Q1) → reverse-miss handling = rewrite-to-sentinel `192.0.2.1` (RFC 5737) + counted miss reason, strictly stronger than Cilium's pass-through-leak (D3). AC reframed wire→application-sockaddr layer for US-01/US-03/K2/K5 (D3, back-prop). Option 3 shared `#[inline(always)]` `build_local_service_key` helper (key-build + NBO only; per-hook map lookup + per-hook rewrite direction stay in each program body) across all three hooks; REFACTORS shipped connect4 (behavior-preserving, Tier-3-reverified, no Tier-2 backstop) — changes DISCUSS K4/DD6 "0 connect4 changes" (D4, back-prop). Probe extension: attach both new hooks + `REVERSE_LOCAL_MAP` sentinel round-trip; the attach() IS the below-floor preflight (4.18/4.20 floors, both <5.10), no `/proc`/`uname` parse; new `#[from]`-routed error variant(s) (D5b/c). SimDataplane reply mirror `BTreeMap<BackendKey, Ipv4Addr>` under the same mutex acquisition + `reply_source_for` test accessor; models the observable contract only, does not shape production (D5d). `user_port` low-16-NBO idiom copied verbatim into the shared helper; recvmsg4 writable fields = `user_ip4`/`user_port` (msg_src_ip4 is sendmsg-only), research Q2 (D5e). Single-cut hydrator-repopulated migration; no shim. Sentinel-resolver-rejection empirical check surfaced as a Tier-3 DELIVER open question (not a tracking issue). — Morgan (all decisions user-locked). |
