@@ -1628,16 +1628,39 @@ at `overdrive-sim/src/adapters/dataplane.rs:380` is the template — both
 maps mutated under one lock so the dual-write is observably atomic in
 the Sim, which models the same observable invariant production's
 ordered reverse-first dual-write provides: no observer ever sees a
-forward entry without its reverse). A
-test-only accessor `reply_source_for(backend: SocketAddrV4, proto: Proto)
--> Option<Ipv4Addr>` lets the Tier-1 J-PLAT-004 equivalence invariant
-assert "Sim reply source = VIP." The mirror models the **observable
-contract only** (the reply source the app would read) — it adds NO arm,
+forward entry without its reverse). The Tier-1 J-PLAT-004 equivalence
+invariant (`reply-source-rewrite-lockstep`) asserts against the mirror's
+post-state via **two test-only accessors** — the sanctioned Tier-1
+equivalence surface for the reply path, both observing the Sim's
+post-state, neither part of the production `Dataplane` trait:
+
+- **`reply_source_for(key: BackendKey) -> Option<Ipv4Addr>`** — the
+  **forward direction**. Returns the reply source the recvmsg4 path would
+  present for a given backend identity; the invariant asserts it equals
+  the **VIP**, never the backend (the "reply source = VIP" assertion,
+  US-02 AC). `Some(vip)` = reverse hit; `None` = a forward `local_backend`
+  entry with no matching reply-mirror entry — the forward-only asymmetry
+  the invariant exists to catch. Parity with `reverse_nat_lookup` on the
+  XDP path.
+- **`reply_mirror_entries() -> Vec<(BackendKey, Ipv4Addr)>`** — the
+  **reverse / enumeration direction**. Snapshots every reply-mirror entry
+  in `Ord` order on `BackendKey` (the `bpftool map dump REVERSE_LOCAL_MAP`
+  equivalent), so the invariant can assert NO **stale reverse entry**
+  exists — every reply-mirror entry must map back to a live forward
+  `local_backends` entry. This catches the **deregister-leaves-a-reverse**
+  asymmetry (a reply-mirror entry orphaned after its forward entry was
+  purged) — the mirror image of the forward-only asymmetry
+  `reply_source_for` catches. Parity with `reverse_nat_entries` on the XDP
+  path.
+
+The mirror models the **observable contract only** (the reply source the
+app would read; the set of reverse entries that exist) — it adds NO arm,
 NO yield, NO structural concession to production code
 (`.claude/rules/development.md` § "Production code is not shaped by
 simulation"); production's reverse-first dual-write is written to the
 contract, and the Sim mirrors the *post-state*, not production's
-mechanics.
+mechanics. Both accessors observe the Sim's post-state for the equivalence
+invariant; neither belongs on the production `Dataplane` trait.
 
 **D5e — copy the connect4 `user_port` low-16-NBO idiom verbatim into the
 shared `build_local_service_key` helper.** The `user_port` field is
@@ -1844,6 +1867,7 @@ from intent); no schema-evolution envelope bump.
 
 | Date | Change |
 |---|---|
+| 2026-06-05 | D5d clarification (final-gate review): the Sim reply-mirror test contract documents BOTH sanctioned Tier-1 accessors — `reply_source_for(key: BackendKey) -> Option<Ipv4Addr>` (forward direction; reply source = VIP) AND `reply_mirror_entries() -> Vec<(BackendKey, Ipv4Addr)>` (reverse/enumeration direction; no stale reverse entry — the deregister-leaves-a-reverse asymmetry, mirror of the forward-only asymmetry). Both are test-only (not on the production `Dataplane` trait), parity with `reverse_nat_lookup`/`reverse_nat_entries`. The `reply-source-rewrite-lockstep` invariant's reverse-direction orphan-detection loop calls `reply_mirror_entries()`; this clarification completes the test-contract surface it relies on. No locked decision changed; no production-trait/map/kernel change. — Morgan. |
 | 2026-06-05 | Unconnected-UDP delivery DELIVERED (closes #200; supersedes Amendment 4's out-of-scope note). Two new cgroup hooks: `cgroup_sendmsg4_service` (forward request rewrite over `LOCAL_BACKEND_MAP`) + `cgroup_recvmsg4_service` (reply source rewrite over the NEW `REVERSE_LOCAL_MAP`). `REVERSE_LOCAL_MAP` = `BPF_MAP_TYPE_HASH`, key = existing `BackendKey {ip,port,proto}` (D2), value = VIP `u32`; written in ordered (reverse-first) sequence by `register_local_backend` (D1/D5a; two map syscalls, not one transaction — an ordering guarantee, not atomicity; NO new trait method; contract amended for the reverse entry + observable invariant). recvmsg4 CANNOT deny (verifier `[1,1]`, research Q1) → reverse-miss handling = rewrite-to-sentinel `192.0.2.1` (RFC 5737) + counted miss reason, strictly stronger than Cilium's pass-through-leak (D3). AC reframed wire→application-sockaddr layer for US-01/US-03/K2/K5 (D3, back-prop). Option 3 shared `#[inline(always)]` `build_local_service_key` helper (key-build + NBO only; per-hook map lookup + per-hook rewrite direction stay in each program body) across all three hooks; REFACTORS shipped connect4 (behavior-preserving, Tier-3-reverified, no Tier-2 backstop) — changes DISCUSS K4/DD6 "0 connect4 changes" (D4, back-prop). Probe extension: attach both new hooks + `REVERSE_LOCAL_MAP` sentinel round-trip; the attach() IS the below-floor preflight (4.18/4.20 floors, both <5.10), no `/proc`/`uname` parse; new `#[from]`-routed error variant(s) (D5b/c). SimDataplane reply mirror `BTreeMap<BackendKey, Ipv4Addr>` under the same mutex acquisition + `reply_source_for` test accessor; models the observable contract only, does not shape production (D5d). `user_port` low-16-NBO idiom copied verbatim into the shared helper; recvmsg4 writable fields = `user_ip4`/`user_port` (msg_src_ip4 is sendmsg-only), research Q2 (D5e). Single-cut hydrator-repopulated migration; no shim. Sentinel-resolver-rejection empirical check surfaced as a Tier-3 DELIVER open question (not a tracking issue). — Morgan (all decisions user-locked). |
 
 ## Changelog

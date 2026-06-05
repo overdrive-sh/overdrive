@@ -17,10 +17,18 @@ use overdrive_sim::{Harness, Invariant};
 ///
 /// Phase 01-05 (closes #174) GREEN handed off: the three
 /// backend-discovery-bridge evaluators landed and the
-/// downstream-fallout `#[should_panic]` attribute is removed per
+/// downstream-fallout `#[should_panic]` attribute was removed per
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
+///
+/// Re-armed for unconnected-udp-sendmsg4 (GH #200): the full `run(42)`
+/// walk touches the `ReplySourceRewriteLockstep` RED scaffold, whose
+/// evaluator `todo!()`s with the "RED scaffold" message until DELIVER
+/// Slice 01/02 lands the `SimDataplane` reply-mirror write. The first
+/// `run(42)` below panics with that message, satisfying the attribute;
+/// removed again in the same commit the evaluator goes GREEN.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn harness_run_is_deterministic_under_fixed_seed() {
     let a = Harness::new().run(42).expect("harness must compose");
     let b = Harness::new().run(42).expect("harness must compose");

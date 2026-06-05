@@ -105,13 +105,40 @@ pub struct SimDataplane {
     /// helper in `overdrive_core::dataplane` handles the production
     /// userspace sum.
     drop_counter: Mutex<[u64; DropClass::VARIANT_COUNT as usize]>,
-    /// `LOCAL_BACKEND_MAP` mirror per ADR-0053 § 1. Single
-    /// `(vip, vip_port) → backend` map populated by
-    /// `register_local_backend` / `deregister_local_backend`.
+    /// `LOCAL_BACKEND_MAP` mirror + the `REVERSE_LOCAL_MAP` reply
+    /// mirror, under ONE mutex so every `register_local_backend` write
+    /// touches both under a single acquisition (ADR-0053 rev 2026-06-05
+    /// DDD-5d — the `services` + `reverse_nat` lockstep idiom, retargeted
+    /// to the unconnected same-host reply path). Observers cannot witness
+    /// a forward `local_backend` entry without its reply-mirror entry.
     /// `BTreeMap` per `.claude/rules/development.md` §
-    /// "Ordered-collection choice" — DST observers walk the
-    /// map and require deterministic iteration order.
-    local_backends: Mutex<BTreeMap<(Ipv4Addr, u16, Proto), SocketAddrV4>>,
+    /// "Ordered-collection choice" — DST observers walk the maps and
+    /// require deterministic iteration order.
+    local_state: Mutex<LocalState>,
+}
+
+/// `LOCAL_BACKEND_MAP` mirror + `REVERSE_LOCAL_MAP` reply mirror guarded
+/// by a single mutex so the two stay in lockstep (ADR-0053 rev DDD-5d).
+/// Mirrors the production `EbpfDataplane`'s ordered (reverse-first)
+/// dual-write: the Sim models the observable POST-state (both entries
+/// present after one register), NOT the production write sequence — it
+/// MUST NOT shape production (`.claude/rules/development.md` §
+/// "Production code is not shaped by simulation").
+struct LocalState {
+    /// Forward: `(vip, vip_port, proto) → backend` — the unconnected
+    /// sendmsg4 forward lookup mirror (and the connected connect4 mirror).
+    local_backends: BTreeMap<(Ipv4Addr, u16, Proto), SocketAddrV4>,
+    /// Reply: `BackendKey(backend_ip, backend_port, proto) → vip` — the
+    /// unconnected recvmsg4 reverse lookup mirror. `reply_source_for`
+    /// reads this; the Tier-1 `reply-source-rewrite-lockstep` invariant
+    /// asserts "reply source == VIP" against it.
+    reply_mirror: BTreeMap<BackendKey, Ipv4Addr>,
+}
+
+impl LocalState {
+    const fn new() -> Self {
+        Self { local_backends: BTreeMap::new(), reply_mirror: BTreeMap::new() }
+    }
 }
 
 impl SimDataplane {
@@ -123,7 +150,7 @@ impl SimDataplane {
             state: Mutex::new(ServiceState::new()),
             flow_events: Mutex::new(Vec::new()),
             drop_counter: Mutex::new([0_u64; DropClass::VARIANT_COUNT as usize]),
-            local_backends: Mutex::new(BTreeMap::new()),
+            local_state: Mutex::new(LocalState::new()),
         }
     }
 
@@ -151,7 +178,33 @@ impl SimDataplane {
         vip_port: u16,
         proto: Proto,
     ) -> Option<SocketAddrV4> {
-        self.local_backends.lock().get(&(vip, vip_port, proto)).copied()
+        self.local_state.lock().local_backends.get(&(vip, vip_port, proto)).copied()
+    }
+
+    /// Read the original VIP the unconnected-UDP reply path would
+    /// present for a backend identity `(backend_ip, backend_port,
+    /// proto)` — the `REVERSE_LOCAL_MAP` reply-mirror lookup (ADR-0053
+    /// rev 2026-06-05 DDD-5d). `Some(vip)` means recvmsg4 would rewrite
+    /// the reply source to `vip`; `None` means a reverse miss (the
+    /// production kernel substitutes the sentinel `192.0.2.1`).
+    ///
+    /// This is the test-only accessor the Tier-1
+    /// `reply-source-rewrite-lockstep` invariant asserts against:
+    /// "reply source == VIP for the declared frontend" (US-02 / K3,
+    /// the J-PLAT-004 equivalence twin). Not part of the `Dataplane`
+    /// trait — a DST/test convenience, parity with `reverse_nat_lookup`.
+    #[must_use]
+    pub fn reply_source_for(&self, key: BackendKey) -> Option<Ipv4Addr> {
+        self.local_state.lock().reply_mirror.get(&key).copied()
+    }
+
+    /// Snapshot every reply-mirror entry, in `Ord` order on
+    /// `BackendKey`. The `bpftool map dump REVERSE_LOCAL_MAP`-equivalent
+    /// surface for DST invariant evaluators (mirrors
+    /// `reverse_nat_entries`). Not part of the `Dataplane` trait.
+    #[must_use]
+    pub fn reply_mirror_entries(&self) -> Vec<(BackendKey, Ipv4Addr)> {
+        self.local_state.lock().reply_mirror.iter().map(|(k, v)| (*k, *v)).collect()
     }
 
     /// Snapshot every `(vip, port, backend)` triple currently in the
@@ -170,7 +223,12 @@ impl SimDataplane {
     /// violation.
     #[must_use]
     pub fn local_backends(&self) -> Vec<(Ipv4Addr, u16, Proto, SocketAddrV4)> {
-        self.local_backends.lock().iter().map(|(&(v, p, pr), &b)| (v, p, pr, b)).collect()
+        self.local_state
+            .lock()
+            .local_backends
+            .iter()
+            .map(|(&(v, p, pr), &b)| (v, p, pr, b))
+            .collect()
     }
 
     /// Record a kernel-side drop event for `class`. Increments the
@@ -430,13 +488,30 @@ impl Dataplane for SimDataplane {
         backend: SocketAddrV4,
         proto: Proto,
     ) -> Result<(), DataplaneError> {
-        // Single-map point write per ADR-0053 § 2 (rev 2026-06-03) —
-        // keyed on `(vip, vip_port, proto)` so a co-located tcp/53 +
-        // udp/53 install two distinct entries, observably-equivalent
-        // to `EbpfDataplane`'s `LOCAL_BACKEND_MAP` (vip, port, proto)
-        // key. Overwrites any pre-existing entry for the SAME quadruple
-        // atomically (the mutex acquisition IS the atomicity boundary).
-        self.local_backends.lock().insert((vip, vip_port, proto), backend);
+        // Forward point write per ADR-0053 § 2 (rev 2026-06-03) — keyed
+        // on `(vip, vip_port, proto)` so a co-located tcp/53 + udp/53
+        // install two distinct entries, observably-equivalent to
+        // `EbpfDataplane`'s `LOCAL_BACKEND_MAP` (vip, port, proto) key.
+        let mut state = self.local_state.lock();
+        state.local_backends.insert((vip, vip_port, proto), backend);
+
+        // RED GAP (Slice 01 / Slice 02 GREEN target — unconnected-udp-sendmsg4
+        // DDD-5d): the reply-mirror write that pairs the forward entry with
+        // `BackendKey(backend_ip, backend_port, proto) -> vip` is NOT yet
+        // present. Until DELIVER adds it under THIS same mutex acquisition,
+        // `reply_source_for(...)` returns `None` and the Tier-1
+        // `reply-source-rewrite-lockstep` invariant RED-fails — exactly the
+        // forward-only regression the invariant exists to kill (US-02 / K3).
+        //
+        //   if let std::net::IpAddr::V4(bip) = backend.ip().into() {
+        //       state.reply_mirror.insert(
+        //           BackendKey::new(*backend.ip(), backend.port(), proto), vip);
+        //   }
+        //
+        // (Scaffold left as a comment, not a `todo!()`, so the existing
+        // forward-path local_backend tests stay GREEN — the RED signal is
+        // carried by the Tier-1 invariant, not by a panicking write here.)
+        drop(state);
         Ok(())
     }
 
@@ -450,7 +525,12 @@ impl Dataplane for SimDataplane {
         // not exist is `Ok(())`, never `KeyNotFound`. Removes only the
         // `(vip, vip_port, proto)` entry; a co-located other-proto
         // entry on the same `(vip, vip_port)` is left intact.
-        self.local_backends.lock().remove(&(vip, vip_port, proto));
+        //
+        // RED GAP (Slice 01 GREEN target, DDD-5a): the paired
+        // reply-mirror removal lands with the forward removal under this
+        // same mutex acquisition in DELIVER — the deregister inverse of
+        // the dual-write.
+        self.local_state.lock().local_backends.remove(&(vip, vip_port, proto));
         Ok(())
     }
 }

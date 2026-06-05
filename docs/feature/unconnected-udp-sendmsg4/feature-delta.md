@@ -888,3 +888,252 @@ brief, and c4-diagrams, with F-1's implementation guidance carried into
 DELIVER. F-4 stays a DELIVER Tier-3 open question. No revision to the
 locked decisions (D1–D5) was required — these are wording/naming
 corrections to the frozen SSOT, not decision changes.
+
+---
+
+## Wave: DISTILL / [REF] Overview
+
+**Acceptance designer:** Quinn. **Date:** 2026-06-05. **Density:** lean +
+ask-intelligent. **Lang:** Rust (project marker `Cargo.toml`; `[lang-mode]
+rust`). **Reconciliation:** PASSED — the one known DISCUSS↔DESIGN
+divergence (wire-layer US-01/US-03/K2/K5 → app-sockaddr) is **resolved** by
+DESIGN DDD-3a + `design/upstream-changes.md` CA-2 (back-prop), and DD6/K4 "0
+connect4 changes" → connect4 EXTEND is resolved by CA-1/DDD-4. Both are
+documented supersessions, not live contradictions. Scenarios are specced
+against the **reframed app-sockaddr ACs** throughout — zero `tcpdump`/wire
+assertions for the recvmsg4 reply path.
+
+**SSOT scaffold spec:** `distill/test-scenarios.md` (GIVEN/WHEN/THEN, never
+executed — no `.feature` files per `.claude/rules/testing.md`). RED
+classification: `distill/red-classification.md`.
+
+**DEVOPS delta:** ABSENT (no `docs/feature/unconnected-udp-sendmsg4/devops/`).
+WARN, default env applied: Lima VM, kernel ≥ 5.10 (both new hooks' floors
+4.18/4.20 sit below it — no matrix bump). No DEVOPS contradiction possible
+(nothing to contradict).
+
+**KPI contracts:** `docs/product/kpi-contracts.yaml` is the **docs-platform**
+feature's DEVOPS instrumentation contract (KPI-1..6 for the website) — it does
+NOT carry this feature's K1–K5. The UDP K1–K5 live in this file's § DISCUSS
+Outcome KPIs and are linked to scenarios via `@kpi-KN` tags below. Injecting
+UDP KPIs into the docs-platform contract would corrupt an unrelated SSOT;
+**not done** (soft-gate warning honored, not a blocker).
+
+---
+
+## Wave: DISTILL / [REF] Scenario list with tags
+
+9 scenarios across 3 slices. Walking skeleton = **S-01-01** (flagged).
+
+| ID | Slice | Story | Tier | Tags | Class |
+|---|---|---|---|---|---|
+| **S-01-01** | 01 | US-01 | T3 | `@walking_skeleton @US-01 @kpi-K1 @kpi-K2 @tier3 @real-io @driving_adapter @property` | happy (WS) |
+| S-01-02 | 01 | US-01 | T3 | `@US-01 @kpi-K2 @tier3 @real-io` | happy |
+| S-01-03 | 01 | US-01 | T3 | `@US-01 @tier3 @real-io @error` | edge |
+| S-02-01 | 02 | US-02 | T1-DST | `@US-02 @kpi-K3 @tier1-dst @in-memory @property` | happy |
+| S-02-02 | 02 | US-02 | T1-DST | `@US-02 @kpi-K3 @tier1-dst @in-memory @error` | error |
+| S-02-03 | 02 | US-02 | T3 | `@US-02 @kpi-K3 @tier3 @real-io` | happy |
+| S-03-01 | 03 | US-03 | T3 | `@US-03 @kpi-K5 @tier3 @real-io @error` | error |
+| S-03-02 | 03 | US-03 | T3 | `@US-03 @kpi-K5 @tier3 @real-io @error` | error |
+| S-03-03 | 03 | US-03 | T3 | `@US-03 @tier3 @real-io @error` | error |
+
+Error/edge ratio: **5/9 = 56%** (≥ 40% ✓). `@property` (S-01-01, S-02-01) is
+example-pinned per Mandate 9 (S-01-01 at Tier 3 → one canonical round-trip;
+S-02-01 is the DST `evaluate_*` install-walk-assert shape, not Hypothesis
+`@given`). Full GIVEN/WHEN/THEN in `distill/test-scenarios.md`.
+
+---
+
+## Wave: DISTILL / [REF] WS strategy
+
+Per the Architecture of Reference (port-class → treatment, decided once per
+project; the retired A/B/C/D choice): **driving** port = `overdrive deploy`
+(real CLI) + the unconnected `sendto`/`recvfrom` round-trip; **driven-internal**
+= the real BPF maps (`LOCAL_BACKEND_MAP`, `REVERSE_LOCAL_MAP`) via the real
+kernel; **driven non-deterministic** = none (the only "external" is the Linux
+kernel BPF ABI — not a CDC target). The Sim reply mirror is the **in-memory
+double** for the Tier-1 equivalence pin (the `InMemoryComposition`-equivalent
+honoring the same `Dataplane` interface). No project Infrastructure Policy
+file exists or is bootstrapped — this is a kernel-dataplane feature whose
+treatment is fixed by the crate-class split (`overdrive-sim` vs
+`overdrive-host` vs real kernel), already `dst-lint`-enforced; a generic
+`atdd-infrastructure-policy.md` would be redundant noise here (no DB /
+Testcontainers / HTTP fake mechanism to record).
+
+The WS (S-01-01) closes the full backbone thinly: `overdrive deploy` →
+register dual-write → sendmsg4 forward → recvmsg4 reply → VIP-sourced
+`recvfrom`. Demo-able to Ana: `dig @<vip>`-shape answer whose source the app
+reads is the VIP.
+
+---
+
+## Wave: DISTILL / [REF] Adapter coverage table
+
+Every NEW driven adapter maps to a `@real-io @tier3` scenario; the reply-path
+identity additionally carries the `@tier1-dst` equivalence invariant (the
+no-Tier-2-backstop structural defense).
+
+| Driven adapter / surface | @real-io (Tier 3) | @tier1-dst | Covered by |
+|---|---|---|---|
+| `cgroup/sendmsg4` program | YES | (via mirror) | S-01-01, S-01-03 |
+| `cgroup/recvmsg4` program | YES | (via mirror) | S-01-01, S-02-03, S-03-01 |
+| `REVERSE_LOCAL_MAP` (map + handle) | YES | YES (reply mirror) | S-01-02, S-02-01, S-02-03, S-03-01 |
+| `register_local_backend` dual-write (host) | YES | — | S-01-02, S-02-03 |
+| `register_local_backend` reply mirror (sim) | — | YES | S-02-01, S-02-02 |
+| `REVERSE_LOCAL_MISS_COUNTER` | YES | — | S-03-01 |
+| `EbpfDataplane::probe` (attach both; below-floor preflight) | YES | — | S-03-02 |
+| `build_local_service_key` shared helper | YES (exercised via all 3 hooks) | — | S-01-01 (+ connect4 re-run) |
+| `cgroup/connect4` (EXTEND — helper refactor) | YES (shipped acceptance re-run) | — | `local_backend_proto_connect.rs` (D4 risk mitigation) |
+| Driving adapter `overdrive deploy` + unconnected round-trip | YES | — | S-01-01 |
+
+**No-Tier-2-backstop note:** `BPF_PROG_TEST_RUN` → ENOTSUPP for
+`cgroup_sock_addr` ≤ 6.8. The two new programs get **NO Tier-2 triptych**
+(deliberately not scaffolded). Tier-3 is THE gate; Tier-1
+`reply-source-rewrite-lockstep` is the structural defense below it.
+
+---
+
+## Wave: DISTILL / [REF] Scaffolds
+
+Test-side (RED-ready) + production-side (so imports resolve, Mandate 7).
+Markers: `__SCAFFOLD__` / `#[should_panic(expected = "RED scaffold")]` /
+`todo!("RED scaffold: …")`. Discover via
+`grep -rn '__SCAFFOLD__\|RED scaffold' crates/`.
+
+**Tier-1 DST invariant (default lane — load-bearing J-PLAT-004 piece):**
+- `crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs` —
+  `evaluate_reply_source_rewrite_lockstep` (real body; RED-fails via
+  `InvariantResult::Fail` until the Sim mirror write lands). Wired into
+  `Invariant::ReplySourceRewriteLockstep` (`invariants/mod.rs` variant +
+  `as_canonical` + `ALL`) and the harness dispatch arm (`harness.rs`).
+
+**Tier-3 acceptance (integration-tests feature, Lima-only, `#[should_panic]`):**
+- `crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs`
+  — S-01-01 (WS) / S-01-02 / S-01-03 / S-02-03.
+- `crates/overdrive-dataplane/tests/integration/unconnected_udp_reply_hardening.rs`
+  — S-03-01 / S-03-02 / S-03-03.
+- Wired into `tests/integration.rs` inline `mod integration { … }` block.
+
+**Production-side RED scaffolds:**
+- `crates/overdrive-bpf/src/maps/reverse_local_map.rs` (`__SCAFFOLD__`, `#[map]`
+  absent), `…/reverse_local_miss_counter.rs` (same).
+- `crates/overdrive-bpf/src/shared/build_local_service_key.rs` (`todo!` +
+  `#[expect(clippy::todo)]`).
+- `crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs`,
+  `…/cgroup_recvmsg4_service.rs` (`#[cgroup_sock_addr(...)]` attribute absent —
+  the kernel-side RED signal; returns the non-denying verdict 1).
+- `crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs` (`todo!` +
+  `#[expect(clippy::todo)]`).
+- `crates/overdrive-sim/src/adapters/dataplane.rs` — Sim reply mirror field +
+  `reply_source_for()` + `reply_mirror_entries()` (REAL accessors); the mirror
+  WRITE in `register_local_backend` is the GREEN target (commented scaffold,
+  not `todo!` — so existing forward-path tests stay green; RED is carried by
+  the Tier-1 invariant).
+
+mod-wiring touched: `overdrive-bpf` `maps/mod.rs`, `programs/mod.rs`,
+`shared/mod.rs`; `overdrive-dataplane` `maps/mod.rs`,
+`tests/integration.rs`; `overdrive-sim` `invariants/mod.rs`, `harness.rs`.
+
+---
+
+## Wave: DISTILL / [REF] Test placement
+
+Precedent-justified:
+- Tier-1 invariant → `crates/overdrive-sim/src/invariants/` (the
+  `reverse_nat_lockstep.rs` template — same install-walk-assert + `Invariant`
+  enum + harness-dispatch wiring).
+- Tier-3 acceptance → `crates/overdrive-dataplane/tests/integration/<scenario>.rs`
+  behind the `integration-tests` feature, declared inside the inline `mod
+  integration { … }` block in `tests/integration.rs` (the
+  `local_backend_proto_connect.rs` precedent — same cgroup-attach-at-
+  `/sys/fs/cgroup`, `cargo xtask lima run --` root harness, veth + per-test
+  bpffs pin-dir, fixture binding off systemd-resolved ports).
+- Production scaffolds → alongside their shipped siblings
+  (`maps/`, `programs/`, `shared/` in `overdrive-bpf`; `maps/` in
+  `overdrive-dataplane`; `adapters/dataplane.rs` in `overdrive-sim`).
+
+---
+
+## Wave: DISTILL / [REF] Driving-adapter coverage
+
+The operator driving surface is unchanged `overdrive deploy <SPEC>` (DESIGN §
+Ports: no new driving port). S-01-01 exercises it end-to-end via the real CLI
+deploy → the unconnected `sendto`/`recvfrom` round-trip (the user's actual
+invocation path), tagged `@driving_adapter @walking_skeleton`. The two new
+cgroup hooks are **kernel-driven** (the kernel invokes them at
+`sendmsg`/`recvmsg` syscall time) — driven adapters, NOT a driving port; no
+new CLI verb / HTTP route to cover.
+
+---
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+- **DESIGN driving ports / contract:** ADR-0053 rev 2026-06-05 (D1–D5e);
+  `brief.md` § "Unconnected-UDP sendmsg4 extension"; `design/upstream-changes.md`
+  (the app-sockaddr reframe + connect4-EXTEND back-prop).
+- **DEVOPS env (default):** Lima VM, kernel ≥ 5.10 (sendmsg4 ≥ 4.18, recvmsg4
+  ≥ 4.20 both below floor — no matrix bump). Tier-3 runs Lima-only
+  (`cargo xtask lima run -- cargo nextest run --features integration-tests`).
+- **No Tier-2 backstop** for `cgroup_sock_addr` (ENOTSUPP ≤ 6.8) — Tier-3 is
+  THE correctness gate; Tier-1 `reply-source-rewrite-lockstep` is the defense
+  below it.
+- **Shipped deps (REUSE):** `BackendKey`, `Proto`, `LOCAL_BACKEND_MAP` (+
+  handle), `register_local_backend` action (proto-carrying), hydrator
+  classifier, `cgroup_attach_path`.
+- **DELIVER open question (Tier-3, NOT a tracking issue per
+  `feedback_no_unilateral_gh_issues`):** confirm `dig`/glibc/musl cleanly
+  reject a `192.0.2.1`-sourced reply; swap the sentinel (no design change) if
+  not (DESIGN open-Q 1 / F-4).
+
+---
+
+## Wave: DISTILL / [REF] Mandate compliance evidence
+
+- **CM-A (hexagonal boundary):** acceptance tests enter through the driving
+  path (`overdrive deploy` + unconnected round-trip) and the `Dataplane`
+  driving-port methods (`register_local_backend`); the Tier-1 invariant drives
+  the `SimDataplane` adapter through the trait surface. No internal-component
+  instantiation.
+- **CM-B (business language):** scenario titles + GIVEN/WHEN/THEN use Ana's
+  domain (deploy a UDP service, unconnected query, reply source the app reads);
+  technical detail (NBO, `bpf_sock_addr`, map names) lives in Notes, not titles.
+- **CM-C (user journeys):** every scenario is a complete journey with operator
+  value (reachability, VIP-sourced reply, diagnosable failure) — not isolated
+  technical ops.
+- **CM-E (Mandate 8 universe at layers 1-3):** the Tier-1 invariant asserts on
+  port-exposed observables (`reply_source_for`, `reply_mirror_entries`,
+  `local_backends`) — never internal struct fields. Tier-3 (layer 4+) uses
+  traditional `recvfrom`/`bpftool`-equivalent assertions per Mandate 8 (layers
+  4+ may).
+- **CM-F (Mandate 9 layer-dependent PBT):** PBT-shape (`@property`) at Tier 1-2
+  is the DST `evaluate_*` install-walk; layer 3+ scenarios are example-only
+  (`#[should_panic]` single-example), no PBT machinery imported.
+- **CM-G (Mandate 10 Tier B):** NOT added. The journey is ≥3 chained scenarios
+  but the input space is config-shaped (one VIP, one backend, fixed
+  proto=UDP) — the reply-source identity is a single invariant, not a
+  domain-rich generative space. Tier A (the production-composition-root Tier-3
+  round-trip) + the Tier-1 DST invariant cover it; a `RuleBasedStateMachine`
+  would add ceremony with no new coverage (Mandate 10 "when NOT worth it":
+  config-shaped, the observable is identity not a rich mutation space).
+- **CM-H (Mandate 11 layer-3+ sad paths example-based):** S-01-03, S-02-02,
+  S-03-01/02/03 are named example-based tests; no PBT at Tier 3.
+
+---
+
+## Wave: DISTILL / [REF] Handoff to DELIVER
+
+- **Acceptance suite:** 9 scenarios (`distill/test-scenarios.md`) + 1 Tier-1
+  DST invariant + 7 Tier-3 `#[should_panic]` scaffolds + production-side RED
+  scaffolds for every imported NEW module.
+- **Walking skeleton:** S-01-01 (flagged) — the unconnected round-trip,
+  reply VIP-sourced at the app sockaddr layer.
+- **One-at-a-time sequence:** Slice 01 (WS round-trip + dual-write + both maps
+  + helper extraction → flips S-01-01/02/03 + the Tier-1 invariant GREEN) →
+  Slice 02 (the Tier-1 invariant is already wired; Slice 02 confirms the
+  mutation kill + S-02-03 Tier-3 meet) → Slice 03 (sentinel-miss + below-floor
+  + fixture → S-03-01/02/03). Strict 01 → 02 → 03 dependency.
+- **Mandate evidence:** CM-A/B/C/E/F/G/H above.
+- **Peer review:** the mandatory consolidated 4-reviewer Final Wave Review
+  Gate (Eclipse + Atlas + Forge + Sentinel against the full feature-delta) is
+  run by the ORCHESTRATOR after this DISTILL artifact returns — NOT
+  self-invoked here (subagent cannot dispatch parallel reviewers).

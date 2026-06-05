@@ -27,10 +27,16 @@ use overdrive_sim::{Harness, Invariant, InvariantStatus};
 /// Phase 01-05 (closes #174) GREEN handed off: the three
 /// backend-discovery-bridge evaluators landed alongside the prior
 /// Slice 08 hydrator evaluators, so the downstream-fallout
-/// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
+/// `#[should_panic]` attribute was removed per `.claude/rules/testing.md`
 /// § "Downstream fallout on pre-existing tests" handoff procedure.
-/// Test now asserts the green-bar invariant directly.
+///
+/// Re-armed for unconnected-udp-sendmsg4 (GH #200): this full-invariant
+/// walk now touches the `ReplySourceRewriteLockstep` RED scaffold, whose
+/// evaluator `todo!()`s with the "RED scaffold" message until DELIVER
+/// Slice 01/02 lands the `SimDataplane` reply-mirror write. The attribute
+/// is removed again in the same commit the evaluator goes GREEN.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn default_harness_run_passes_all_three_reconciler_invariants() {
     let report = Harness::new().run(42).expect("harness must compose");
 
@@ -175,10 +181,17 @@ fn write_through_ordering_passes_on_default_harness() {
 ///
 /// Phase 01-05 (closes #174) GREEN handed off: the three
 /// backend-discovery-bridge evaluators landed and the
-/// downstream-fallout `#[should_panic]` attribute is removed per
+/// downstream-fallout `#[should_panic]` attribute was removed per
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
+///
+/// Re-armed for unconnected-udp-sendmsg4 (GH #200): the full `run(99)`
+/// walk touches the `ReplySourceRewriteLockstep` RED scaffold, whose
+/// evaluator `todo!()`s with the "RED scaffold" message until DELIVER
+/// Slice 01/02 lands the `SimDataplane` reply-mirror write. Removed again
+/// in the same commit the evaluator goes GREEN.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn full_default_catalogue_includes_three_view_store_invariants_and_passes_them() {
     let report = Harness::new().run(99).expect("harness must compose");
 

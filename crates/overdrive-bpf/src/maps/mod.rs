@@ -17,4 +17,10 @@ pub mod hash_of_maps;
 pub mod local_backend_map;
 pub mod maglev_map;
 pub mod reverse_nat_map;
+// unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — the
+// reply store for the unconnected same-host cgroup path + its miss
+// counter. RED scaffolds: the `#[map]` attribute is absent until
+// DELIVER GREEN (Slice 01 map, Slice 03 counter).
+pub mod reverse_local_map;
+pub mod reverse_local_miss_counter;
 pub mod service_map;

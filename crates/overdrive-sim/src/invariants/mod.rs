@@ -67,6 +67,17 @@ pub mod maglev_deterministic;
 // mutex acquisition. Mirrors the production `EbpfDataplane`'s
 // `REVERSE_NAT_MAP` lockstep contract.
 pub mod reverse_nat_lockstep;
+// unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3). GH #200,
+// ADR-0053 rev 2026-06-05. The `ReplySourceRewriteLockstep` invariant
+// pins the cgroup unconnected-UDP reply-path source identity in the
+// `SimDataplane`: after `register_local_backend`, the reply source for
+// the backend identity is the VIP (`reply_source_for(...) == Some(vip)`),
+// written in lockstep with the forward `local_backend` entry under one
+// mutex acquisition (DDD-5d). The structural defense BELOW Tier-3 (no
+// Tier-2 backstop for `cgroup_sock_addr`). A forward-only mutation turns
+// it RED. Sibling to the Tier-3 round-trip at
+// `crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs`.
+pub mod reply_source_rewrite_lockstep;
 // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling). The
 // `SanityChecksFireBeforeServiceMap` invariant pins the kernel-side
 // contract that every sanity-rule-violating packet produces
@@ -270,6 +281,27 @@ pub enum Invariant {
     /// in `crate::invariants::reverse_nat_lockstep`.
     ReverseNatLockstep,
 
+    /// unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3) —
+    /// always invariant. GH #200, ADR-0053 rev 2026-06-05. After
+    /// `register_local_backend(vip, vip_port, backend, proto)`, the
+    /// `SimDataplane` reply mirror carries
+    /// `BackendKey(backend_ip, backend_port, proto) → vip`: the
+    /// unconnected-UDP recvmsg4 reply source the app would read is the
+    /// VIP, never the backend, written in lockstep with the forward
+    /// `local_backend` entry under one mutex acquisition (DDD-5d). The
+    /// structural defense BELOW Tier-3 — there is NO Tier-2
+    /// `BPF_PROG_TEST_RUN` backstop for `cgroup_sock_addr` (ENOTSUPP
+    /// ≤ 6.8); the kernel recvmsg4 rewrite is a Tier-3-only gate and this
+    /// invariant pins the same observable contract on the Sim adapter,
+    /// meeting Tier-3 at the shared backend identity. A forward-only /
+    /// asymmetric regression (forward entry written, reply mirror not)
+    /// turns it RED — the #163-class mutation this slice kills. Mirror of
+    /// `ReverseNatLockstep` retargeted to the cgroup same-host reply
+    /// path. The evaluator body lives in
+    /// `crate::invariants::reply_source_rewrite_lockstep`. RED until the
+    /// Sim reply-mirror write lands (Slice 01/02 GREEN).
+    ReplySourceRewriteLockstep,
+
     /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling) —
     /// always invariant. Every packet whose classification violates
     /// a sanity-prologue rule (truncated IPv4 header, pathological
@@ -464,6 +496,13 @@ impl Invariant {
         // `ReverseNatLockstep` invariant body lives in
         // `crate::invariants::reverse_nat_lockstep`.
         Self::ReverseNatLockstep,
+        // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3). GH
+        // #200. The `ReplySourceRewriteLockstep` invariant body lives in
+        // `crate::invariants::reply_source_rewrite_lockstep`. RED until
+        // the `SimDataplane::register_local_backend` reply-mirror write
+        // lands (Slice 01/02 GREEN) — the outer-loop RED signal for the
+        // unconnected-UDP reply-path identity (no Tier-2 backstop).
+        Self::ReplySourceRewriteLockstep,
         // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling).
         // The `SanityChecksFireBeforeServiceMap` invariant body lives
         // in `crate::invariants::sanity_checks_fire`. Sibling to the
@@ -537,6 +576,8 @@ impl Invariant {
             Self::MaglevDistributionEven => "maglev-distribution-even",
             Self::MaglevDeterministic => "maglev-deterministic",
             Self::ReverseNatLockstep => "reverse-nat-lockstep",
+            // unconnected-udp-sendmsg4 Slice 02 (US-02 / K3).
+            Self::ReplySourceRewriteLockstep => "reply-source-rewrite-lockstep",
             Self::SanityChecksFireBeforeServiceMap => "sanity-checks-fire-before-service-map",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",

@@ -261,3 +261,9 @@ pub use wire::{
 
 // Typed userspace handle for `LOCAL_BACKEND_MAP` per ADR-0053 § 1.
 pub mod local_backend_map_handle;
+
+// unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — typed
+// userspace handle for `REVERSE_LOCAL_MAP` (the cgroup reply store).
+// RED scaffold: method bodies `todo!()` until DELIVER Slice 01.
+// DISTINCT from `reverse_nat_map_handle` (the XDP wire path).
+pub mod reverse_local_map_handle;

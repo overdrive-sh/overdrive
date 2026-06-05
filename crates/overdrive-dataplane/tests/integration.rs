@@ -57,6 +57,18 @@ mod integration {
     /// keyed on the declared VIP port, not the backend listener port
     /// (VIP:53 → backend:5353).
     mod service_map_vip_port;
+    /// unconnected-udp-sendmsg4 Slice 03 (US-03; S-03-01..03) — GH #200,
+    /// ADR-0053 rev 2026-06-05. Reply-path error hardening: sentinel-on-
+    /// miss (no backend-IP leak to the app), below-floor attach refusal,
+    /// fixture-collision discipline. RED scaffolds (#[should_panic]).
+    mod unconnected_udp_reply_hardening;
+    /// unconnected-udp-sendmsg4 Slice 01 + Slice 02 Tier-3 prong (US-01
+    /// WS, US-02; S-01-01..03, S-02-03) — GH #200, ADR-0053 rev
+    /// 2026-06-05. Unconnected sendto/recvfrom round-trip through the real
+    /// cgroup sendmsg4+recvmsg4 hooks; recvfrom source == VIP at the app
+    /// sockaddr layer; both maps present after one register. THE GATE (no
+    /// Tier-2 backstop). RED scaffolds (#[should_panic]).
+    mod unconnected_udp_roundtrip;
     /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
     /// real-iface XDP attach. RED scaffolds.
     mod veth_attach;

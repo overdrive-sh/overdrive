@@ -12,5 +12,10 @@
 //! **RED scaffold** — module declarations exist; helper bodies
 //! panic via `todo!()` until DELIVER fills them per Slice 05 / 06.
 
+// unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — the
+// single shared key-build + low-16-NBO site for connect4 + sendmsg4 +
+// recvmsg4 (Option 3 / D4). RED scaffold: body is `todo!()` until
+// DELIVER Slice 01. Does key-build ONLY — no lookup, no rewrite.
+pub mod build_local_service_key;
 pub mod csum;
 pub mod sanity;
