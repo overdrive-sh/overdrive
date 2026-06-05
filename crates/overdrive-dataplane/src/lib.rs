@@ -1219,33 +1219,37 @@ impl EbpfDataplane {
                 message: format!("REVERSE_LOCAL_MAP sentinel insert: {e}"),
             })?;
 
-        // Read-back via the dump surface: the sentinel key MUST be present
-        // with the sentinel VIP value. A miss is the structural signal the
-        // reverse path is not programmable on this kernel.
-        let entries =
-            self.reverse_local_map.entries().map_err(|e| DataplaneError::ReverseLocalProbe {
-                message: format!("REVERSE_LOCAL_MAP sentinel read-back: {e}"),
-            })?;
         let sentinel_key = ReverseLocalKeyPod::from_typed(BackendKey::new(
             sentinel_backend_ip,
             sentinel_backend_port,
             sentinel_proto,
         ));
         let sentinel_vip_host = u32::from(sentinel_vip);
-        let round_tripped =
-            entries.iter().any(|(k, v)| *k == sentinel_key && *v == sentinel_vip_host);
-        if !round_tripped {
-            // Best-effort cleanup before bailing; the round-trip miss is
+
+        // Read-back via the dump surface, then verify the round-trip.
+        // The sentinel key MUST be present with the sentinel VIP value;
+        // a miss is the structural signal the reverse path is not
+        // programmable on this kernel. BOTH non-confirmation paths — a
+        // read-back failure AND a sentinel-absent miss — route through
+        // one fallible verdict so they share the single cleanup site
+        // below. The sentinel MUST be removed before the probe returns
+        // on either: a stranded `(0.0.0.0:0, Udp)` sentinel is
+        // inconsistent map state for the process lifetime (the leak this
+        // guards against — the earlier inline `entries()?` propagated a
+        // read-back error without cleanup).
+        if let Err(e) = reverse_local_sentinel_verdict(
+            self.reverse_local_map.entries(),
+            sentinel_key,
+            sentinel_vip_host,
+        ) {
+            // Best-effort cleanup before bailing; the verdict failure is
             // the real story so a delete failure here is swallowed.
             let _ = self.reverse_local_map.remove(
                 sentinel_backend_ip,
                 sentinel_backend_port,
                 sentinel_proto,
             );
-            return Err(DataplaneError::ReverseLocalProbe {
-                message: "REVERSE_LOCAL_MAP sentinel round-trip missed: key absent after insert"
-                    .to_string(),
-            });
+            return Err(e);
         }
 
         self.reverse_local_map
@@ -1475,6 +1479,49 @@ fn empty_backend_purge_keys<'a>(
         })
         .copied()
         .collect()
+}
+
+/// Read-back verdict for the `REVERSE_LOCAL_MAP` sentinel round-trip
+/// (ADR-0053 rev D5b/c, GH #200).
+///
+/// `Ok(())` means the dumped `entries` contain the sentinel key with
+/// the expected VIP — the reverse path is programmable and
+/// [`EbpfDataplane::probe_reverse_local`] proceeds to delete the
+/// sentinel. `Err(_)` means the read-back itself failed OR the sentinel
+/// was absent; in **both** cases the caller MUST remove the sentinel
+/// before returning, so the two non-confirmation paths share one
+/// cleanup site.
+///
+/// Folding the read-back-failure and round-trip-miss branches into a
+/// single fallible verdict is what closes the sentinel-leak gap: the
+/// earlier inline `entries()?` propagated a read error WITHOUT removing
+/// the sentinel, stranding the reserved `(0.0.0.0:0, Udp) → 0.0.0.0`
+/// entry in the map for the process lifetime.
+///
+/// Lives at module scope rather than inline in `probe_reverse_local` so
+/// the unit tests in `mod tests` can exercise the verdict without
+/// constructing a full `EbpfDataplane` (mirrors
+/// [`empty_backend_purge_keys`] / [`should_fallback_to_generic`]) —
+/// the probe itself needs a real kernel map and has no Tier-2 backstop.
+fn reverse_local_sentinel_verdict(
+    entries: Result<
+        Vec<(crate::maps::reverse_local_map_handle::ReverseLocalKeyPod, u32)>,
+        aya::maps::MapError,
+    >,
+    sentinel_key: crate::maps::reverse_local_map_handle::ReverseLocalKeyPod,
+    sentinel_vip_host: u32,
+) -> Result<(), DataplaneError> {
+    let entries = entries.map_err(|e| DataplaneError::ReverseLocalProbe {
+        message: format!("REVERSE_LOCAL_MAP sentinel read-back: {e}"),
+    })?;
+    if entries.iter().any(|(k, v)| *k == sentinel_key && *v == sentinel_vip_host) {
+        Ok(())
+    } else {
+        Err(DataplaneError::ReverseLocalProbe {
+            message: "REVERSE_LOCAL_MAP sentinel round-trip missed: key absent after insert"
+                .to_string(),
+        })
+    }
 }
 
 /// Verdict from classifying an `aya::programs::Xdp::attach` result
@@ -2165,6 +2212,68 @@ mod tests {
             "empty-backend purge must select ONLY the frontend's own \
              (vip, port, proto) slot — co-resident listeners differing by \
              proto or port, and other VIPs, must survive"
+        );
+    }
+
+    /// Regression — a `REVERSE_LOCAL_MAP` sentinel read-back FAILURE
+    /// must be classified as a probe failure (`Err`), the same verdict
+    /// as a round-trip miss, so `probe_reverse_local` removes the
+    /// sentinel before returning. The earlier inline `entries()?`
+    /// propagated a read-back error WITHOUT removing the sentinel,
+    /// stranding the reserved `(0.0.0.0:0, Udp) → 0.0.0.0` entry in
+    /// `REVERSE_LOCAL_MAP` for the process lifetime (ADR-0053 rev
+    /// D5b/c, GH #200). Folding the read-back-failure and round-trip
+    /// -miss branches into one fallible verdict gives both a single
+    /// cleanup site at the call site.
+    ///
+    /// Exercises the pure verdict without constructing a full
+    /// `EbpfDataplane` (mirrors
+    /// `empty_backend_purge_is_scoped_to_frontend_not_vip_wide`) —
+    /// `probe_reverse_local` itself needs a real kernel map and has no
+    /// Tier-2 backstop, so the verdict seam is the default-lane guard.
+    #[test]
+    fn reverse_local_sentinel_verdict_pins_all_three_branches() {
+        use std::net::Ipv4Addr;
+
+        use aya::maps::MapError;
+        use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+
+        use crate::maps::reverse_local_map_handle::ReverseLocalKeyPod;
+
+        let sentinel_key =
+            ReverseLocalKeyPod::from_typed(BackendKey::new(Ipv4Addr::UNSPECIFIED, 0, Proto::Udp));
+        let sentinel_vip_host = u32::from(Ipv4Addr::UNSPECIFIED);
+
+        // 1. Read-back FAILURE — THE regression. The map dump errored;
+        //    the verdict must be `Err` so the caller cleans up the
+        //    sentinel rather than leaking it.
+        let read_back_failed = super::reverse_local_sentinel_verdict(
+            Err(MapError::KeyNotFound),
+            sentinel_key,
+            sentinel_vip_host,
+        );
+        assert!(
+            read_back_failed.is_err(),
+            "a read-back failure must be a probe failure so the sentinel is cleaned up"
+        );
+
+        // 2. Round-trip MISS — sentinel absent from a successful dump.
+        //    Also `Err` (already-correct path; pinned so the two
+        //    non-confirmation branches stay unified).
+        let missed =
+            super::reverse_local_sentinel_verdict(Ok(Vec::new()), sentinel_key, sentinel_vip_host);
+        assert!(missed.is_err(), "an absent sentinel must be a probe failure");
+
+        // 3. CONFIRMED — sentinel present with the expected VIP. The
+        //    only `Ok` path; the caller proceeds to delete the sentinel.
+        let confirmed = super::reverse_local_sentinel_verdict(
+            Ok(vec![(sentinel_key, sentinel_vip_host)]),
+            sentinel_key,
+            sentinel_vip_host,
+        );
+        assert!(
+            confirmed.is_ok(),
+            "a present sentinel with the expected VIP confirms the round-trip"
         );
     }
 
