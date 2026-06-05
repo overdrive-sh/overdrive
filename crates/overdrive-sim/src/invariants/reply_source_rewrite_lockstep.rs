@@ -22,37 +22,22 @@
 //! `submit-a-udp-service.yaml` step-4 template), retargeted from the XDP
 //! `update_service` / `reverse_nat` wire path to the cgroup
 //! `register_local_backend` / `reply_mirror` same-host reply path.
-//!
-//! # RED scaffold (Slice 02 / S-02-01, S-02-02)
-//!
-//! The evaluator body is a `todo!("RED scaffold: …")` panic. Per
-//! `.claude/rules/testing.md` § "RED scaffolds" + § "Downstream fallout
-//! on pre-existing tests", a RED invariant evaluator MUST panic with the
-//! "RED scaffold" message rather than return `InvariantResult::Fail`: an
-//! `InvariantResult::Fail` reds the green bar and forces every
-//! full-invariant-walk test (`run_boots_…`,
-//! `default_harness_run_passes_…`) to fail, which the project convention
-//! forbids (the bar stays green; lefthook passes without `--no-verify`).
-//! The adjacent walk tests carry `#[should_panic(expected = "RED
-//! scaffold")]` until this lands GREEN.
-//!
-//! The real evaluator — driving `register_local_backend` then asserting
-//! `reply_source_for(BackendKey) == Some(vip)`, plus the S-02-02
-//! forward-only-mutation asymmetry assertion — is the DELIVER Slice-01/02
-//! GREEN target. It lands when `SimDataplane::register_local_backend`
-//! gains the reply-mirror write (DDD-5d) under the same `local_state`
-//! mutex acquisition. At that point the evaluator body's `todo!()` is
-//! replaced by the real assertions (the scenario in the fn docstring
-//! below) and the `#[should_panic]` attributes on the walk tests are
-//! removed in the same commit.
-//!
-//! The asymmetry is the point (S-02-02): a forward-only mutation — the
-//! mirror write removed while the forward `local_backend` entry stays —
-//! must keep this invariant RED. That is exactly the #163-class
-//! regression this invariant exists to catch: a forward entry must never
-//! be observable without its paired reply-mirror entry.
 
-use crate::harness::InvariantResult;
+// SPIFFE / SocketAddr literals in this file are structurally total —
+// every input is a hand-picked constant the test author can prove
+// parses. `expect` here is documentation, not error suppression in an
+// unbounded code path.
+#![allow(clippy::expect_used)]
+
+use std::collections::BTreeMap;
+use std::net::{Ipv4Addr, SocketAddrV4};
+
+use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+use overdrive_core::id::NodeId;
+use overdrive_core::traits::dataplane::Dataplane;
+
+use crate::adapters::dataplane::SimDataplane;
+use crate::harness::{InvariantResult, InvariantStatus};
 
 /// Drive the unconnected-UDP reply-path lockstep scenario and return an
 /// `InvariantResult` pinned to the canonical kebab-case name.
@@ -70,23 +55,216 @@ use crate::harness::InvariantResult;
 ///    (no orphan reverse mapping leaks).
 /// 4. Re-register it; assert the reply-mirror entry reappears with the
 ///    matching VIP.
+/// 5. **Per-proto co-resident** — a co-located `(vip, vip_port, Tcp)` +
+///    `(vip, vip_port, Udp)` register the same backend address under two
+///    distinct reply-mirror keys; deregistering the UDP listener leaves
+///    the co-resident TCP reply-mirror entry intact.
 ///
 /// The lockstep guarantee comes from `SimDataplane`: `local_backends`
 /// and `reply_mirror` live inside one `Mutex<LocalState>`, and
 /// `register_local_backend` writes both under one acquisition (DDD-5d).
 /// A forward-only mutation (forward entry written, reply mirror not)
 /// fails step 2 — the regression this invariant exists to catch.
-///
-/// RED scaffold: the body is `todo!("RED scaffold: …")`. DELIVER Slice
-/// 01/02 replaces it with the real driver implementing the scenario
-/// above and removes the `#[should_panic(expected = "RED scaffold")]`
-/// attributes on the harness walk tests in the same commit.
-#[expect(
-    clippy::todo,
-    reason = "RED scaffold; GREEN body awaits register_local_backend (Slice 01/02)"
-)]
 pub async fn evaluate_reply_source_rewrite_lockstep() -> InvariantResult {
-    todo!(
-        "RED scaffold: S-02-01 reply-source-rewrite lockstep — drive register_local_backend then assert reply_source_for(BackendKey) == Some(vip), plus the S-02-02 forward-only-mutation asymmetry (lands GREEN in Slice 01/02 when the SimDataplane reply-mirror write lands)"
-    )
+    const NAME: &str = "reply-source-rewrite-lockstep";
+    const SERVICES: u32 = 4;
+    const VIP_PORT: u16 = 53;
+    const BACKEND_PORT: u16 = 8053;
+
+    let dataplane = SimDataplane::new();
+
+    // Build N same-host UDP services — distinct VIPs and distinct backend
+    // addresses so the (vip, backend) cross-product yields unique
+    // reply-mirror keys. Each entry is `(vip, vip_port, proto) →
+    // backend`, and the expected reply-mirror entry is
+    // `BackendKey(backend_ip, backend_port, proto) → vip`.
+    let mut layout: BTreeMap<(Ipv4Addr, u16, Proto), (SocketAddrV4, Ipv4Addr)> = BTreeMap::new();
+    for s in 0..SERVICES {
+        let vip = Ipv4Addr::new(10, 96, 0, u8::try_from(s + 1).expect("s < 256"));
+        let backend_ip = Ipv4Addr::new(10, 244, 0, u8::try_from(s + 1).expect("s < 256"));
+        let backend = SocketAddrV4::new(backend_ip, BACKEND_PORT);
+        layout.insert((vip, VIP_PORT, Proto::Udp), (backend, vip));
+    }
+
+    // Install every service. After each register, assert lockstep holds
+    // for the cumulative set: every registered backend has a reply-mirror
+    // entry pointing to its VIP.
+    for (&(vip, vip_port, proto), &(backend, _vip)) in &layout {
+        if let Err(e) = dataplane.register_local_backend(vip, vip_port, backend, proto).await {
+            return fail(NAME, format!("register_local_backend({vip}:{vip_port}) failed: {e}"));
+        }
+    }
+    if let Some(violation) = check_lockstep(&dataplane, &layout) {
+        return fail(NAME, format!("after initial install: {violation}"));
+    }
+
+    // Deregister the first service. Its reply-mirror entry MUST be purged.
+    let (&(first_vip, first_port, first_proto), &(first_backend, _)) =
+        layout.iter().next().expect("SERVICES > 0");
+    if let Err(e) = dataplane.deregister_local_backend(first_vip, first_port, first_proto).await {
+        return fail(
+            NAME,
+            format!("deregister_local_backend({first_vip}:{first_port}) failed: {e}"),
+        );
+    }
+
+    let mut after_deregister = layout.clone();
+    after_deregister.remove(&(first_vip, first_port, first_proto));
+    if let Some(violation) = check_lockstep(&dataplane, &after_deregister) {
+        return fail(NAME, format!("after deregister: {violation}"));
+    }
+    // The deregistered backend's reply-mirror entry must be ABSENT.
+    let removed_key = BackendKey::new(*first_backend.ip(), first_backend.port(), first_proto);
+    if let Some(stale_vip) = dataplane.reply_source_for(removed_key) {
+        return fail(
+            NAME,
+            format!(
+                "deregistered backend {removed_key} still has reply-mirror entry → \
+                 {stale_vip}; expected purged"
+            ),
+        );
+    }
+
+    // Re-register it. The reply-mirror entry must reappear with the VIP.
+    if let Err(e) =
+        dataplane.register_local_backend(first_vip, first_port, first_backend, first_proto).await
+    {
+        return fail(NAME, format!("re-register({first_vip}:{first_port}) failed: {e}"));
+    }
+    if let Some(violation) = check_lockstep(&dataplane, &layout) {
+        return fail(NAME, format!("after re-register: {violation}"));
+    }
+
+    // Step 5 — per-proto co-resident teardown guard.
+    if let Some(violation) = check_coresident_proto_teardown(&dataplane).await {
+        return fail(NAME, violation);
+    }
+
+    pass(NAME)
+}
+
+/// Step 5 of `evaluate_reply_source_rewrite_lockstep` — the per-proto
+/// co-resident teardown guard.
+///
+/// Registers a co-located `(vip, vip_port, Tcp)` + `(vip, vip_port,
+/// Udp)` against the SAME backend address — the two reply-mirror keys
+/// differ only in their proto byte. Deregistering the UDP listener MUST
+/// purge only that proto's key; the co-resident TCP reply-mirror entry
+/// survives (per-proto teardown, mirroring `EbpfDataplane`'s
+/// `deregister_local_backend` which keys removal on `(vip, vip_port,
+/// proto)`). Returns `None` on success, `Some(reason)` on the first
+/// violation.
+async fn check_coresident_proto_teardown(dataplane: &SimDataplane) -> Option<String> {
+    let vip = Ipv4Addr::new(10, 96, 0, 200);
+    let vip_port = 53u16;
+    let backend = SocketAddrV4::new(Ipv4Addr::new(10, 244, 0, 200), 8053);
+
+    for proto in [Proto::Tcp, Proto::Udp] {
+        if let Err(e) = dataplane.register_local_backend(vip, vip_port, backend, proto).await {
+            return Some(format!("co-resident register ({proto:?}) failed: {e}"));
+        }
+    }
+
+    // Pre-teardown: both protos' reply-mirror keys present → vip.
+    for proto in [Proto::Tcp, Proto::Udp] {
+        let key = BackendKey::new(*backend.ip(), backend.port(), proto);
+        if dataplane.reply_source_for(key) != Some(vip) {
+            return Some(format!("co-resident pre-teardown: reply_source_for({key}) != {vip}"));
+        }
+    }
+
+    // Deregister the UDP listener only.
+    if let Err(e) = dataplane.deregister_local_backend(vip, vip_port, Proto::Udp).await {
+        return Some(format!("co-resident udp deregister failed: {e}"));
+    }
+
+    // The UDP key is purged; the co-resident TCP key survives.
+    let udp_key = BackendKey::new(*backend.ip(), backend.port(), Proto::Udp);
+    if let Some(stale) = dataplane.reply_source_for(udp_key) {
+        return Some(format!(
+            "co-resident: udp reply_source_for({udp_key}) still → {stale}; expected purged"
+        ));
+    }
+    let tcp_key = BackendKey::new(*backend.ip(), backend.port(), Proto::Tcp);
+    if dataplane.reply_source_for(tcp_key) != Some(vip) {
+        return Some(format!(
+            "co-resident: tcp reply_source_for({tcp_key}) was purged by a udp deregister; \
+             per-proto teardown requires it survive"
+        ));
+    }
+
+    None
+}
+
+/// Walk every `(vip, vip_port, proto) → (backend, vip)` entry in
+/// `layout` and assert the dataplane's reply mirror carries the matching
+/// `BackendKey(backend_ip, backend_port, proto) → vip` entry, AND that no
+/// orphan reply-mirror entries exist (every entry maps back to a backend
+/// in the live layout). Returns `None` on success, `Some(reason)` on the
+/// first violation.
+fn check_lockstep(
+    dataplane: &SimDataplane,
+    layout: &BTreeMap<(Ipv4Addr, u16, Proto), (SocketAddrV4, Ipv4Addr)>,
+) -> Option<String> {
+    // Build the expected reply-mirror map from the layout — exactly one
+    // key per registered backend, under its declared proto.
+    let mut expected: BTreeMap<BackendKey, Ipv4Addr> = BTreeMap::new();
+    for (&(_vip, _vip_port, proto), &(backend, vip)) in layout {
+        expected.insert(BackendKey::new(*backend.ip(), backend.port(), proto), vip);
+    }
+
+    // Forward direction: every expected entry must exist with the VIP.
+    for (key, expected_vip) in &expected {
+        match dataplane.reply_source_for(*key) {
+            Some(actual_vip) if actual_vip == *expected_vip => {}
+            Some(actual_vip) => {
+                return Some(format!(
+                    "reply_source_for({key}) = {actual_vip}; expected {expected_vip}"
+                ));
+            }
+            None => {
+                return Some(format!(
+                    "reply_source_for({key}) missing; expected {expected_vip} \
+                     (forward-only regression — the asymmetry this invariant kills)"
+                ));
+            }
+        }
+    }
+
+    // Reverse direction: no orphan entries — every reply-mirror entry
+    // must correspond to a registered backend in the layout. This catches
+    // stale-entry leaks after deregister.
+    for (key, vip) in dataplane.reply_mirror_entries() {
+        if !expected.contains_key(&key) {
+            return Some(format!(
+                "orphan reply-mirror entry {key} → {vip}; not present in current layout"
+            ));
+        }
+    }
+
+    None
+}
+
+fn pass(name: &str) -> InvariantResult {
+    InvariantResult {
+        name: name.to_owned(),
+        status: InvariantStatus::Pass,
+        tick: 1,
+        host: cluster_host(),
+        cause: None,
+    }
+}
+
+fn fail(name: &str, cause: String) -> InvariantResult {
+    InvariantResult {
+        name: name.to_owned(),
+        status: InvariantStatus::Fail,
+        tick: 1,
+        host: cluster_host(),
+        cause: Some(cause),
+    }
+}
+
+fn cluster_host() -> String {
+    NodeId::new("cluster").map_or_else(|_| "cluster".to_owned(), |id| id.to_string())
 }

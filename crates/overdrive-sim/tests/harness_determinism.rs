@@ -21,14 +21,12 @@ use overdrive_sim::{Harness, Invariant};
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
 ///
-/// Re-armed for unconnected-udp-sendmsg4 (GH #200): the full `run(42)`
-/// walk touches the `ReplySourceRewriteLockstep` RED scaffold, whose
-/// evaluator `todo!()`s with the "RED scaffold" message until DELIVER
-/// Slice 01/02 lands the `SimDataplane` reply-mirror write. The first
-/// `run(42)` below panics with that message, satisfying the attribute;
-/// removed again in the same commit the evaluator goes GREEN.
+/// unconnected-udp-sendmsg4 step 02-01 GREEN: the
+/// `ReplySourceRewriteLockstep` evaluator landed (the `SimDataplane`
+/// reply-mirror write), so the re-armed `#[should_panic(expected = "RED
+/// scaffold")]` guard is removed — the full `run(42)` walk now reaches
+/// the real evaluator and passes green.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn harness_run_is_deterministic_under_fixed_seed() {
     let a = Harness::new().run(42).expect("harness must compose");
     let b = Harness::new().run(42).expect("harness must compose");

@@ -488,29 +488,30 @@ impl Dataplane for SimDataplane {
         backend: SocketAddrV4,
         proto: Proto,
     ) -> Result<(), DataplaneError> {
-        // Forward point write per ADR-0053 § 2 (rev 2026-06-03) — keyed
-        // on `(vip, vip_port, proto)` so a co-located tcp/53 + udp/53
-        // install two distinct entries, observably-equivalent to
-        // `EbpfDataplane`'s `LOCAL_BACKEND_MAP` (vip, port, proto) key.
+        // Single mutex acquisition guards BOTH maps so the forward
+        // `local_backends` entry and its paired `reply_mirror` entry land
+        // under one critical section (ADR-0053 rev 2026-06-05 DDD-5d).
+        // Observers cannot witness a forward entry without its reply
+        // mirror. This models the observable POST-state of the production
+        // `EbpfDataplane`'s ordered reverse-first dual-write — the Sim
+        // mirror MUST NOT shape production (`.claude/rules/development.md`
+        // § "Production code is not shaped by simulation"); the kernel
+        // side already dual-writes via the 01-03 hooks.
         let mut state = self.local_state.lock();
+
+        // Forward write per ADR-0053 § 2 (rev 2026-06-03) — keyed on
+        // `(vip, vip_port, proto)` so a co-located tcp/53 + udp/53 install
+        // two distinct entries, observably-equivalent to `EbpfDataplane`'s
+        // `LOCAL_BACKEND_MAP` (vip, port, proto) key.
         state.local_backends.insert((vip, vip_port, proto), backend);
 
-        // RED GAP (Slice 01 / Slice 02 GREEN target — unconnected-udp-sendmsg4
-        // DDD-5d): the reply-mirror write that pairs the forward entry with
-        // `BackendKey(backend_ip, backend_port, proto) -> vip` is NOT yet
-        // present. Until DELIVER adds it under THIS same mutex acquisition,
-        // `reply_source_for(...)` returns `None` and the Tier-1
-        // `reply-source-rewrite-lockstep` invariant RED-fails — exactly the
-        // forward-only regression the invariant exists to kill (US-02 / K3).
-        //
-        //   if let std::net::IpAddr::V4(bip) = backend.ip().into() {
-        //       state.reply_mirror.insert(
-        //           BackendKey::new(*backend.ip(), backend.port(), proto), vip);
-        //   }
-        //
-        // (Scaffold left as a comment, not a `todo!()`, so the existing
-        // forward-path local_backend tests stay GREEN — the RED signal is
-        // carried by the Tier-1 invariant, not by a panicking write here.)
+        // Reply-mirror write (DDD-5d) — `BackendKey(backend_ip,
+        // backend_port, proto) → vip`. The unconnected-UDP recvmsg4 reply
+        // source the app would read is the VIP, never the backend.
+        // Mirrors `EbpfDataplane`'s `REVERSE_LOCAL_MAP[(backend_ip,
+        // backend_port, proto)] = vip` upsert.
+        state.reply_mirror.insert(BackendKey::new(*backend.ip(), backend.port(), proto), vip);
+
         drop(state);
         Ok(())
     }
@@ -526,11 +527,18 @@ impl Dataplane for SimDataplane {
         // `(vip, vip_port, proto)` entry; a co-located other-proto
         // entry on the same `(vip, vip_port)` is left intact.
         //
-        // RED GAP (Slice 01 GREEN target, DDD-5a): the paired
-        // reply-mirror removal lands with the forward removal under this
-        // same mutex acquisition in DELIVER — the deregister inverse of
-        // the dual-write.
-        self.local_state.lock().local_backends.remove(&(vip, vip_port, proto));
+        // The paired reply-mirror removal (DDD-5a — the deregister inverse
+        // of the dual-write) lands under THIS same mutex acquisition. The
+        // reply-mirror key needs the backend identity, so resolve it from
+        // the forward entry BEFORE removing it — mirroring `EbpfDataplane`'s
+        // `deregister_local_backend`, which reads `LOCAL_BACKEND_MAP` first
+        // to derive the `REVERSE_LOCAL_MAP` key. A forward entry that was
+        // already absent removes nothing on either side.
+        let mut state = self.local_state.lock();
+        if let Some(backend) = state.local_backends.remove(&(vip, vip_port, proto)) {
+            state.reply_mirror.remove(&BackendKey::new(*backend.ip(), backend.port(), proto));
+        }
+        drop(state);
         Ok(())
     }
 }

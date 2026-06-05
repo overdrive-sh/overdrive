@@ -544,10 +544,10 @@ impl Harness {
             // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3).
             // GH #200, ADR-0053 rev 2026-06-05. The evaluator drives
             // `register_local_backend` and asserts the reply mirror's
-            // `reply_source_for(...) == Some(vip)`. RED-fails (returns
-            // `InvariantResult::Fail`) until the Sim reply-mirror write
-            // lands in DELIVER (Slice 01/02 GREEN) — the structural
-            // defense below Tier-3 for the reply-source identity.
+            // `reply_source_for(...) == Some(vip)` (step 02-01 GREEN) —
+            // the structural defense below Tier-3 for the reply-source
+            // identity. A forward-only mutation (forward entry written,
+            // reply mirror not) turns it RED.
             Invariant::ReplySourceRewriteLockstep => {
                 crate::invariants::reply_source_rewrite_lockstep::evaluate_reply_source_rewrite_lockstep().await
             }
@@ -884,16 +884,14 @@ mod tests {
     // section's "removing the underlying todo!() / panic!() will fire
     // a different panic message, trip #[should_panic], and flag the
     // test for review at the moment the scaffold goes GREEN" handoff.
-    // Downstream fallout (`.claude/rules/testing.md` § "Downstream fallout
-    // on pre-existing tests"): this full-invariant walk touches the
-    // `ReplySourceRewriteLockstep` RED scaffold, whose evaluator `todo!()`s
-    // with the "RED scaffold" message until DELIVER Slice 01/02 lands the
-    // SimDataplane reply-mirror write. The attribute keeps the bar green
-    // and is removed in the same commit the evaluator goes GREEN — at
-    // which point the `todo!()` no longer fires and `#[should_panic]`
-    // trips, flagging the test for review.
+    // unconnected-udp-sendmsg4 step 02-01 GREEN: the
+    // `ReplySourceRewriteLockstep` evaluator landed (the SimDataplane
+    // reply-mirror write in `register_local_backend`), so the prior
+    // `#[should_panic(expected = "RED scaffold")]` downstream-fallout
+    // guard (per `.claude/rules/testing.md` § "Downstream fallout on
+    // pre-existing tests") is removed — the full-invariant walk now
+    // reaches the real evaluator and passes green.
     #[test]
-    #[should_panic(expected = "RED scaffold")]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");
         // One result per invariant in the default catalogue.
