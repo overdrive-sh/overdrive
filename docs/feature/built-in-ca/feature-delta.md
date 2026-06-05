@@ -851,14 +851,23 @@ pub trait Ca: Send + Sync {
 Trait-contract rigor (per `development.md` § "Trait definitions specify
 behavior"): every method's rustdoc pins preconditions / postconditions /
 edge cases / observable invariants. Load-bearing edges to specify:
-`issue_svid` with an empty SAN set (→ `CaError::InvalidSan`, before any cert),
-oversized/multiple URI SANs (→ rejected pre-issuance), re-issue idempotency
-(same `SpiffeId` → fresh serial + new validity, distinct cert),
-`issue_intermediate` pathLen guarantee (=0, enforced not merely set),
+`issue_svid` single-URI-SAN invariant enforced **by construction**, NOT a
+runtime cardinality guard (Option A, ratified 2026-06-06) — `SvidRequest
+{ spiffe_id: SpiffeId }` carries exactly one validated identity, so a
+zero-or-≥2-SAN request is *unrepresentable* at the adapter (no
+`CaError::InvalidSan` branch inside `issue_svid` to reach); the single fallible
+parse is the pure-core `CertSpec::svid(Vec<SpiffeId>)` (rejects 0/≥2 with
+`CertSpecError`, tested at L1 by S-04-02), and the SPIFFE-spec-mandated runtime
+reject (X.509-SVID §5.2) lives at the relying-party verifier (#26), not the
+issuer (research:
+`docs/research/security/svid-request-cardinality-enforcement-research.md`);
+re-issue idempotency (same `SpiffeId` → fresh serial + new validity, distinct
+cert); `issue_intermediate` pathLen guarantee (=0, enforced not merely set);
 `trust_bundle` composition (root anchor + intermediate as untrusted chain).
 **Enforcement**: `crates/<crate>/tests/integration/ca_equivalence.rs` — DST
 equivalence test driving `RcgenCa` (host) and `SimCa` (sim) through the same
-call sequence, asserting observable equivalence.
+call sequence, asserting observable equivalence (SVID profile incl. SAN
+cardinality covered by S-04-06).
 
 ---
 
@@ -1055,11 +1064,12 @@ supersession on the crypto backend). Scenario writing proceeded.
 
 ## Wave: DISTILL / [REF] Scenario List with Tags
 
-39 scenarios across the 5 slices (= 5 user stories = the linear trust-hierarchy
-dependency chain). Full GIVEN/WHEN/THEN + Universe + per-scenario trace:
-`distill/test-scenarios.md`. IDs are `S-0S-NN` (slice-scoped). The `@S-0S`
-tags *inside* the scaffolds denote the owning slice (one tag = one slice), not
-per-scenario unique IDs.
+37 scenarios across the 5 slices (was 39; S-04-09 + S-04-10 RETIRED 2026-06-06
+under Option A — see the Slice-04 note) (= 5 user stories = the linear
+trust-hierarchy dependency chain). Full GIVEN/WHEN/THEN + Universe +
+per-scenario trace: `distill/test-scenarios.md`. IDs are `S-0S-NN`
+(slice-scoped). The `@S-0S` tags *inside* the scaffolds denote the owning slice
+(one tag = one slice), not per-scenario unique IDs.
 
 ### Slice 01 — Root CA behind the `Ca` port trait (US-CA-01) — `ca_cert_spec_policy.rs` + `sim_ca_deterministic.rs` + `ca_equivalence.rs` + `rcgen_ca_chain_verify.rs`
 
@@ -1109,8 +1119,25 @@ per-scenario unique IDs.
 | S-04-06 | `ca_equivalence_svid_profile_matches_across_host_and_sim` | L3 | `@real-io @adapter-integration @S-04` |
 | S-04-07 | `rcgen_full_svid_chain_verifies_root_intermediate_svid` | L3 | `@real-io @adapter-integration @walking_skeleton @S-04` |
 | S-04-08 | `rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile` | L3 | `@real-io @adapter-integration @S-04` |
-| S-04-09 | `rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance` | L3 | `@real-io @adapter-integration @S-04 @error` |
-| S-04-10 | `ca_equivalence_bad_san_request_rejected_identically_by_both` | L3 | `@real-io @adapter-integration @S-04 @error` |
+| ~~S-04-09~~ | ~~`rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance`~~ | ~~L3~~ | **RETIRED 2026-06-06** |
+| ~~S-04-10~~ | ~~`ca_equivalence_bad_san_request_rejected_identically_by_both`~~ | ~~L3~~ | **RETIRED 2026-06-06** |
+
+> **S-04-09 / S-04-10 RETIRED (2026-06-06; Option A — type-enforced).** Both
+> tested the adapter rejecting a bad-SAN-cardinality `SvidRequest` — a path the
+> request type (`SvidRequest { spiffe_id: SpiffeId }`, one validated identity by
+> construction) makes **unreachable**. Under the ratified Option A
+> (enforcement-location pinned in ADR-0063 D5: type makes ≠1 unrepresentable →
+> `CertSpec::svid` is the single fallible parse → verifier #26 owns the runtime
+> reject per SPIFFE X.509-SVID §5.2), these are redundant: **S-04-08** already
+> asserts the host leaf carries exactly one URI SAN, **S-04-06** already asserts
+> cross-adapter SVID-profile equivalence including SAN cardinality, and
+> **S-04-02** tests the live `CertSpec::svid` 0/≥2 reject at L1. The
+> spec-mandated runtime reject is at the relying-party verifier (#26), out of
+> this feature's scope. Research:
+> `docs/research/security/svid-request-cardinality-enforcement-research.md`
+> (SPIFFE §2/§5.2; SPIRE single-`spiffeid.ID` reference impl; "parse, don't
+> validate"). The crafter retires the two scaffold fns; the rows are kept struck
+> for traceability, not deleted.
 
 ### Slice 05 — Trust bundle, audit, re-issue (US-CA-05) — `sim_ca_deterministic.rs` + `ca_equivalence.rs` + `ca_boot_and_audit.rs` + `schema_evolution/issued_certificate_row.rs`
 
@@ -1125,12 +1152,17 @@ per-scenario unique IDs.
 | S-05-07 | `issued_certificate_row_envelope_discriminant_offset_triangulates` | L1 archive | `@property @S-05` |
 | S-05-08 | `issued_certificate_row_envelope_unknown_version_probe_surfaces_error` | L1 archive | `@property @S-05 @error` |
 
-**Coverage profile**: 39 total · 15 `@error` (38.5%) · 1 `@walking_skeleton`
-· 8 `@property` · by layer: L1 pure 6, L2 sim 5, L1 archive 6, L3 real-io 22.
-(The Slice-01 table lists 5 rows because `cert_spec_error_variants...` carries
-`@S-01 @S-04` — it is filed under Slice 01 as the policy-taxonomy guard and
-also serves the K2 single-URI invariant. It is one of the 15 `@error`
-scenarios, not a 16th.)
+**Coverage profile**: **37 total** (was 39; S-04-09 + S-04-10 RETIRED 2026-06-06
+under Option A — see the Slice-04 note above) · **13 `@error` (35.1%)** (was
+15/39 = 38.5%; both retired scenarios were `@error`, so the ratio drops to
+13/37 — a **non-gating DISTILL metric**, accepted as a consequence of the
+type-honest design: the bad-cardinality path the two `@error` scenarios tested
+is unrepresentable, so the honest scenario count is lower) · 1
+`@walking_skeleton` · 8 `@property` · by layer: L1 pure 6, L2 sim 5, L1 archive
+6, **L3 real-io 20** (was 22). (The Slice-01 table lists 5 rows because
+`cert_spec_error_variants...` carries `@S-01 @S-04` — it is filed under Slice 01
+as the policy-taxonomy guard and also serves the K2 single-URI invariant. It is
+one of the 13 `@error` scenarios, not a 14th.)
 
 ---
 
@@ -1167,9 +1199,9 @@ the sim honours the same `Ca` trait contract). No `NO — MISSING` rows.
 
 | Adapter / driven port | Real-I/O coverage | Covered by |
 |---|---|---|
-| `RcgenCa` (host adapter, real `ring`/rcgen X.509) | YES (`@real-io`) | S-01-04, S-03-04, S-03-05, S-04-07, S-04-08, S-04-09 (`rcgen_ca_chain_verify.rs` via `openssl verify`) |
+| `RcgenCa` (host adapter, real `ring`/rcgen X.509) | YES (`@real-io`) | S-01-04, S-03-04, S-03-05, S-04-07, S-04-08 (`rcgen_ca_chain_verify.rs` via `openssl verify`; S-04-09 RETIRED 2026-06-06 — the bad-cardinality adapter path is type-unreachable under Option A) |
 | Root-key AEAD codec (real HKDF-SHA256 + AES-256-GCM via `ring`) | YES (`@real-io`) | S-02-01..S-02-04 (`rcgen_ca_root_key_envelope.rs`, byte-scan + tamper/wrong-KEK) |
-| `SimCa` (sim adapter, fixture P-256 keys + `SeededEntropy`) | in-memory (`@in-memory`) + cross-adapter equivalence | S-01-02, S-03-02, S-04-04, S-04-05, S-05-01 (`sim_ca_deterministic.rs`); equivalence S-01-03/S-03-03/S-04-06/S-04-10/S-05-02 |
+| `SimCa` (sim adapter, fixture P-256 keys + `SeededEntropy`) | in-memory (`@in-memory`) + cross-adapter equivalence | S-01-02, S-03-02, S-04-04, S-04-05, S-05-01 (`sim_ca_deterministic.rs`); equivalence S-01-03/S-03-03/S-04-06/S-05-02 (S-04-10 RETIRED 2026-06-06 — SAN-cardinality equivalence covered by S-04-06 under Option A) |
 | `IntentStore` (`LocalStore` over redb — root-key envelope persistence) | YES (`@real-io`) | S-02-05 (reuse across restart), S-02-06 (refuse-to-start on decrypt failure) (`ca_boot_and_audit.rs`) |
 | `ObservationStore` (`issued_certificates` audit row) | YES (`@real-io`) | S-05-03 (read-back match), S-05-04 (no silent issuance) (`ca_boot_and_audit.rs`) |
 | `Kek` provider → kernel keyring + systemd-creds (Earned-Trust probe) | YES (`@real-io`) | S-02-07 (absent KEK refuses startup) (`ca_boot_and_audit.rs`) |
@@ -1179,9 +1211,11 @@ the sim honours the same `Ca` trait contract). No `NO — MISSING` rows.
 **`Ca` trait-contract enforcement** (development.md § "DST equivalence test is
 the structural guard"): `ca_equivalence.rs` drives `RcgenCa` (host) and `SimCa`
 (sim) through the same call sequence and asserts observable equivalence via
-trait accessors (S-01-03, S-03-03, S-04-06, S-04-10, S-05-02). This is the
-central guard that the sim adapter does not diverge on policy from the host
-adapter — the highest-value structural test in the feature.
+trait accessors (S-01-03, S-03-03, S-04-06, S-05-02; S-04-10 RETIRED
+2026-06-06 — SAN-cardinality equivalence is covered by S-04-06's
+SVID-profile equivalence under Option A). This is the central guard that the
+sim adapter does not diverge on policy from the host adapter — the
+highest-value structural test in the feature.
 
 ---
 
@@ -1199,9 +1233,9 @@ and lefthook needs no `--no-verify`.
 |---|---|---|---|
 | `tests/acceptance/ca_cert_spec_policy.rs` | overdrive-core · core | L1 pure · default | S-01-01, S-03-01, S-04-01/02/03, + error-variant distinctness |
 | `tests/acceptance/sim_ca_deterministic.rs` | overdrive-sim · adapter-sim | L2 sim · default | S-01-02, S-03-02, S-04-04/05, S-05-01 |
-| `tests/integration/rcgen_ca_chain_verify.rs` | overdrive-host · adapter-host | L3 · `integration-tests` | S-01-04, S-03-04/05, S-04-07/08/09 |
+| `tests/integration/rcgen_ca_chain_verify.rs` | overdrive-host · adapter-host | L3 · `integration-tests` | S-01-04, S-03-04/05, S-04-07/08 (S-04-09 scaffold fn retired by crafter 2026-06-06) |
 | `tests/integration/rcgen_ca_root_key_envelope.rs` | overdrive-host · adapter-host | L3 · `integration-tests` | S-02-01/02/03/04 |
-| `tests/integration/ca_equivalence.rs` | overdrive-control-plane | L3 · `integration-tests` | S-01-03, S-03-03, S-04-06/10, S-05-02 |
+| `tests/integration/ca_equivalence.rs` | overdrive-control-plane | L3 · `integration-tests` | S-01-03, S-03-03, S-04-06, S-05-02 (S-04-10 scaffold fn retired by crafter 2026-06-06) |
 | `tests/integration/ca_boot_and_audit.rs` | overdrive-control-plane | L3 · `integration-tests` | S-02-05/06/07, S-03-06, S-05-03/04/05 |
 | `tests/schema_evolution/root_ca_key.rs` | overdrive-core · core | L1 archive · default | S-02-08/09/10 |
 | `tests/schema_evolution/issued_certificate_row.rs` | overdrive-core · core | L1 archive · default | S-05-06/07/08 |
@@ -1301,7 +1335,8 @@ operator/security-reviewer surfaces and are covered by `@real-io` scenarios.
 - **CM-C (Mandate 3 — journey completeness)**: each scenario is a complete
   unit of behaviour with an observable outcome (a cert that verifies, a refused
   startup, an audit row, a rejected request) — not an isolated technical op.
-  WS counts: 1 walking skeleton + 38 focused (within the 2-3 WS / 15-20 focused
+  WS counts: 1 walking skeleton + 36 focused (37 total; was 1 + 38 before the
+  2026-06-06 S-04-09/S-04-10 retirement) (within the 2-3 WS / 15-20 focused
   guidance, scaled to a 5-slice security primitive).
 - **CM-E (Mandate 8 — Universe)**: every state-mutating scenario declares its
   port-exposed Universe in `test-scenarios.md`; the Rust workspace satisfies
@@ -1320,11 +1355,15 @@ operator/security-reviewer surfaces and are covered by `@real-io` scenarios.
   not a ≥3-chained rich-input journey with a state-machine *model*. The
   `ca_equivalence` cross-adapter contract test covers the "do both adapters
   agree" space that a Tier-B exploration would otherwise probe.
-- **CM-H (Mandate 11 — example-based sad paths at L3)**: all 13 L3 `@error`
-  scenarios are named example-based tests (tampered ciphertext, wrong KEK,
-  absent KEK, pathLen escalation, bad SAN cardinality, audit-write failure,
-  decrypt-failure refuse-to-start), one example per failure mode from the SSOT
-  journey `error_paths` + ADR-0063 Earned-Trust. No PBT machinery at L3.
+- **CM-H (Mandate 11 — example-based sad paths at L3)**: all 11 L3 `@error`
+  scenarios (was 13 before the 2026-06-06 S-04-09/S-04-10 retirement) are named
+  example-based tests (tampered ciphertext, wrong KEK, absent KEK, pathLen
+  escalation, audit-write failure, decrypt-failure refuse-to-start), one example
+  per failure mode from the SSOT journey `error_paths` + ADR-0063 Earned-Trust.
+  No PBT machinery at L3. The bad-SAN-cardinality sad path is **not** an L3
+  example under Option A — it is type-unreachable at the adapter; the live
+  reject is the L1 `CertSpec::svid` parse (S-04-02, `@property`), and the
+  spec-mandated runtime reject is at the verifier (#26).
 
 ---
 
@@ -1361,7 +1400,7 @@ not exist). Five OUT rows for the feature's new typed contract surface:
 | OUT-CA-INTERMEDIATE | operation | `Ca::issue_intermediate(&NodeId) -> IntermediateHandle` |
 | OUT-CA-SVID | operation | `Ca::issue_svid(&SvidRequest) -> SvidMaterial` |
 | OUT-CA-TRUST-BUNDLE | operation | `Ca::trust_bundle() -> TrustBundle` |
-| OUT-CA-SINGLE-URI-SAN | invariant | every SVID carries exactly one `spiffe://` URI SAN; 0 or ≥2 rejected with `CaError::InvalidSan` pre-issuance |
+| OUT-CA-SINGLE-URI-SAN | invariant | every SVID carries exactly one `spiffe://` URI SAN, by construction (`SvidRequest { spiffe_id: SpiffeId }`); the single fallible parse is `CertSpec::svid(Vec<SpiffeId>)` (rejects 0/≥2 with `CertSpecError`); the runtime reject is at the relying-party verifier (#26, SPIFFE X.509-SVID §5.2). (Option A — clarified 2026-06-06.) |
 
 `nwave-ai outcomes check-delta` clean (no collisions against the fresh
 registry).
@@ -1376,9 +1415,10 @@ Against the DISTILL self-review checklist + critique Dimensions 1-9:
   with `@real-io` (S-04-07) — Dim 9a/9b PASS.
 - **Every driven adapter has real-I/O (or sim-equivalence) coverage** — adapter
   table, zero `MISSING` — Dim 9c PASS.
-- **Scaffolds RED-not-BROKEN** — all 39 `#[should_panic(expected = "RED
-  scaffold")]`, none import unbuilt types; nextest PASS on default-lane, L3
-  compile-clean — Mandate 7 PASS.
+- **Scaffolds RED-not-BROKEN** — all 37 (was 39 before the 2026-06-06
+  S-04-09/S-04-10 retirement) `#[should_panic(expected = "RED scaffold")]`, none
+  import unbuilt types; nextest PASS on default-lane, L3 compile-clean —
+  Mandate 7 PASS.
 - **Business-language purity** (Dim 3 / Pillar 1) — scenario surfaces carry no
   raw HTTP/JSON/DB jargon; crypto domain terms (SAN, CA, pathLen) are the
   ubiquitous language, not implementation leakage — PASS.
@@ -1391,14 +1431,18 @@ Against the DISTILL self-review checklist + critique Dimensions 1-9:
 - **Deferrals cite real issues** — #40/#39 (rotation/workflow), #36 (multi-node),
   #204 (aws-lc-rs/FIPS), #104/#83 (multi-region), #81/Phase 5/7. No inventions.
 
-**Finding (reported, not auto-fixed)**: `@error` ratio = **15/39 = 38.5%**,
-marginally under the 40% Dim-1 target (shortfall = 1 scenario). The eight
-scaffolds are the authored SSOT and are out of this completion pass's scope to
-expand. Surfaced to the orchestrator; natural one-scenario additions noted in
-`test-scenarios.md` § Finding. (Doc-completeness note: an earlier draft mapped
-only 38 of 39 scaffolds; the cross-role `cert_spec_error_variants` guard is now
-documented as S-01-05 — it was already one of the 15 `@error` scenarios, so the
-ratio is unchanged at 38.5%.)
+**Finding (reported, not auto-fixed)**: `@error` ratio = **13/37 = 35.1%**
+(was 15/39 = 38.5% before the 2026-06-06 S-04-09/S-04-10 retirement; both
+retired scenarios were `@error`), under the 40% Dim-1 target. This is a
+**non-gating DISTILL metric**, and the drop is an accepted consequence of the
+type-honest Option-A design: the bad-SAN-cardinality path the two `@error`
+scenarios tested is *unrepresentable* at the adapter, so removing them makes the
+scenario count honest rather than padding it with a dead-code test. The eight
+scaffold files remain the authored SSOT (two fns retired by the crafter).
+Surfaced to the orchestrator. (Doc-completeness note: an earlier draft mapped
+only 38 of the then-39 scaffolds; the cross-role `cert_spec_error_variants`
+guard is documented as S-01-05 — it is one of the 13 surviving `@error`
+scenarios.)
 
 **Verdict**: DISTILL artifacts complete; scenarios sound and traceable;
 scaffolds RED-at-the-bar; outcomes + verification expectations authored. Ready
@@ -1408,12 +1452,19 @@ for the final 4-reviewer gate (orchestrator-dispatched) and DELIVER handoff.
 
 ## Wave: DISTILL / [REF] Handoff
 
-- **To DELIVER (nw-software-crafter, OOP)**: 39 RED scaffolds across 8 files
-  (the executable SSOT) + `distill/test-scenarios.md` (the GWT + Universe
-  contract). Implement GREEN bottom-up along the linear chain S-01 → S-05.
-  Slice 01 first-compile gate: bump `rcgen` 0.13.2 → 0.14.8 (`features =
-  ["ring", "pem"]`) + migrate `mint_ephemeral_ca` to the 0.14 builder API in
-  the same change (ADR-0063 Consequences). Two rkyv envelopes carry the
+- **To DELIVER (nw-software-crafter, OOP)**: 37 RED scaffolds across 8 files
+  (was 39; S-04-09 + S-04-10 RETIRED 2026-06-06 under Option A — the crafter
+  retires those two scaffold fns) (the executable SSOT) +
+  `distill/test-scenarios.md` (the GWT + Universe contract). Implement GREEN
+  bottom-up along the linear chain S-01 → S-05. **`issue_svid` contract (Option
+  A)**: the single-URI-SAN invariant is honored by construction — `SvidRequest`
+  carries one validated `SpiffeId`, so there is NO `CaError::InvalidSan` branch
+  inside `issue_svid`; the fallible parse is `CertSpec::svid` (L1, S-04-02), and
+  the runtime reject is the verifier (#26). Apply the corrected `Ca::issue_svid`
+  rustdoc (Preconditions/Postconditions/Edge-cases/Observable-invariants
+  specified in the architect handoff). The `rcgen` 0.14.8 (`features = ["ring",
+  "pem"]`) pin + `mint_ephemeral_ca` 0.14-builder migration are already
+  committed (`35958ecb`) — no rcgen-bump step. Two rkyv envelopes carry the
   golden-bytes `FIXTURE_V1` + `discriminant_offset_from_end` obligation
   (ADR-0048). PBT-full (`proptest!`) only at L1 (S-04-01/02). All L3 sad paths
   example-based.
@@ -1425,3 +1476,97 @@ for the final 4-reviewer gate (orchestrator-dispatched) and DELIVER handoff.
 - **Reviewer gate**: orchestrator dispatches the final 4-reviewer parallel gate
   (Eclipse/Architect/Forge/Sentinel) against the full feature-delta; this
   DISTILL section + the scaffolds + `test-scenarios.md` are Sentinel's scope.
+
+---
+
+# DELIVER Wave (wave 6 of 6) · Agent: Morgan (nw-solution-architect) · back-propagation pass
+
+DELIVER content that feeds back into the SSOT appears under
+`## Wave: DELIVER / [WHY] <Section>` headings. This is a contract
+back-propagation pass: DELIVER revealed a contradiction in the `issue_svid`
+contract; the user ratified the resolution (Option A); this section records WHY
+and what was retired, so the next reader does not re-open the decision.
+
+---
+
+## Wave: DELIVER / [WHY] Upstream Issues
+
+### U-CA-1 — `issue_svid` single-URI-SAN: type-unreachable runtime guard (RESOLVED, Option A, 2026-06-06)
+
+**The contradiction DELIVER surfaced.** While implementing Slice 04, the crafter
+hit a contract contradiction between the artifacts and the type. The
+`Ca::issue_svid` rustdoc (in `crates/overdrive-core/src/traits/ca.rs`), the
+brief `Ca` trait-contract prose, and the DESIGN `Ca` trait-surface note all
+claimed `issue_svid` "rejects zero or two-or-more URI SANs with
+`CaError::InvalidSan` before any cert is produced." But the request type is
+`SvidRequest { spiffe_id: SpiffeId }` — exactly **one** validated identity by
+construction. There is no way to hand `issue_svid` a zero-or-≥2-SAN request, so
+the documented `CaError::InvalidSan` branch is **unreachable** — an
+aspirational-doc bug (`development.md` § "No aspirational docs. Never document
+behaviour that is not implemented"). Two DISTILL scenarios were written to test
+this unreachable path:
+- **S-04-09** `rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance`
+  (host adapter, L3, `@error`)
+- **S-04-10** `ca_equivalence_bad_san_request_rejected_identically_by_both`
+  (cross-adapter equivalence, L3, `@error`)
+
+Neither can be written without first *widening* the request type to re-admit the
+invalid cardinality — i.e. they presuppose the very design (Option B) the user
+did not choose.
+
+**The user's decision (APPROVED 2026-06-06): Option A — type-enforced.** The
+single-URI-SAN invariant is enforced at three semantically-distinct layers, none
+of which is a runtime cardinality guard inside `issue_svid`:
+1. the request **type** (`SvidRequest { spiffe_id: SpiffeId }`) makes ≠1
+   unrepresentable;
+2. the pure **parse** `CertSpec::svid(Vec<SpiffeId>)` is the single fallible
+   boundary (stays fallible, rejects 0/≥2 with `CertSpecError` — tested green at
+   L1 by **S-04-02**);
+3. the **relying-party verifier** (#26 sockops/kTLS) is the SPIFFE-spec-mandated
+   runtime reject (X.509-SVID §5.2 places the MUST-reject at the validator, not
+   the issuer), out of this feature's scope.
+
+The adapter does not (cannot) runtime-reject cardinality. The `Ca` trait
+**signature is unchanged** — `SvidRequest { spiffe_id: SpiffeId }` is correct
+under Option A; no widening.
+
+**Evidence.**
+`docs/research/security/svid-request-cardinality-enforcement-research.md`
+(committed `b6a5278b`, confidence High, 13 sources). Key facts: SPIFFE
+X.509-SVID **§2** ("An X.509 SVID MUST contain exactly one URI SAN, and by
+extension, exactly one SPIFFE ID") + **§5.2** (the MUST-reject is at the
+relying party); **SPIRE** (the reference impl) already implements Option A —
+`WorkloadX509SVIDParams` carries a single `spiffeid.ID` (no URI-SAN slice), the
+cert template writes exactly one URI by construction, and the runtime reject is
+at the go-spiffe verifier; "Parse, Don't Validate" (Alexis King) + RFC 5280
+§4.2.1.6 (issuer owns SAN *correctness*; relying party owns *rejection*); the
+internal consumer survey (every `issue_svid` consumer — #35/#36/#40/#26/#80/#81/
+#100/#89 + whitepaper §8 — wants exactly one identity; the DNS-SAN/ACME lane is
+a separate `instant-acme` path, not this port; D-CA-4 confirms no
+attacker-controlled issuance boundary).
+
+**Resolution (this back-propagation pass).**
+- **S-04-09 and S-04-10 are RETIRED** (decision: retire, not convert). They are
+  redundant under Option A: **S-04-08** already asserts the host leaf carries
+  exactly one URI SAN; **S-04-06** already asserts cross-adapter SVID-profile
+  equivalence including SAN cardinality; **S-04-02** tests the live
+  `CertSpec::svid` 0/≥2 reject at L1; and the spec-mandated runtime reject is at
+  the verifier (#26), out of scope here. The rows are kept struck-through (not
+  silently deleted) in `test-scenarios.md` § Slice 04 and the DISTILL
+  Slice-04 scenario table for traceability; the crafter retires the two scaffold
+  fns.
+- **The `issue_svid` contract is corrected.** ADR-0063 D5 gains a three-layer
+  enforcement-location note + an Amendments changelog entry; the brief `Ca`
+  trait-surface prose and the DESIGN `Ca` trait-surface note are corrected to
+  the by-construction framing; the crafter applies the corrected
+  `Ca::issue_svid` rustdoc (specified in the architect handoff). See **ADR-0063
+  D5** and its **2026-06-06 Amendments entry**.
+- **Coverage metric moves (non-gating).** built-in-ca scenario count 39 → 37;
+  `@error` ratio 15/39 (38.5%) → 13/37 (35.1%). The drop is the accepted,
+  honest consequence of removing two dead-code tests, not a coverage
+  regression. DISTILL `@error`-ratio is a non-gating metric.
+
+**No decision reversed.** D5 already located the single-URI-SAN policy in core;
+this pass only pins *where the runtime reject lives* (the verifier, not
+`issue_svid`) and retires the aspirational claim. **No new GitHub issue** — this
+is an in-scope contract fix, not a deferral.

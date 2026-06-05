@@ -521,32 +521,36 @@ Scenario: The real SVID leaf is SPIFFE-spec-compliant
   And its validity window is approximately one hour
 ```
 
-### S-04-09 — Real adapter rejects bad SAN cardinality pre-issuance (sad path, K2)
+### ~~S-04-09~~ — **RETIRED 2026-06-06** (Option A — type-enforced)
 
-- **Scaffold**: `rcgen_ca_chain_verify.rs::rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance`
-- **Layer**: L3 (real-io, gated) · **Tags**: `@real-io @adapter-integration @S-04 @error` · **Trace**: US-CA-04 AC2, KPI K2, ADR-0063 D5 (core guard fires in host adapter), journey error_paths step 3
-- **Universe**: `RcgenCa::issue_svid` result — expected `Err(CaError::InvalidSan)` + absence of any produced cert bytes
+- ~~**Scaffold**: `rcgen_ca_chain_verify.rs::rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance`~~
+- **RETIRED 2026-06-06.** This scenario tested the host adapter rejecting a
+  bad-SAN-cardinality `SvidRequest` — a path the request type (`SvidRequest {
+  spiffe_id: SpiffeId }`, exactly one validated identity by construction) makes
+  **unreachable**. Under the user-ratified Option A (ADR-0063 D5
+  enforcement-location amendment, 2026-06-06), there is no `CaError::InvalidSan`
+  branch inside `issue_svid` to test: the type makes ≠1 unrepresentable, the
+  single fallible parse is the pure-core `CertSpec::svid` (tested at L1 by
+  **S-04-02**), and the SPIFFE-spec-mandated runtime reject (X.509-SVID §5.2) is
+  at the relying-party verifier (#26), out of this feature's scope. **Redundant
+  coverage**: **S-04-08** already asserts the host leaf carries exactly one URI
+  SAN. The crafter retires this scaffold fn; the row is kept struck-through for
+  traceability, not deleted. Research:
+  `docs/research/security/svid-request-cardinality-enforcement-research.md`
+  (SPIFFE §2/§5.2; SPIRE single-`spiffeid.ID` reference impl; "parse, don't
+  validate").
 
-```gherkin
-Scenario: A SpiffeId yielding zero or multiple URI SANs is rejected at the real adapter
-  Given a SvidRequest whose SpiffeId would yield zero or two-or-more URI SANs
-  When the host adapter attempts to mint the SVID
-  Then it returns CaError::InvalidSan before producing any certificate bytes
-```
+### ~~S-04-10~~ — **RETIRED 2026-06-06** (Option A — type-enforced)
 
-### S-04-10 — Bad-SAN request rejected identically by both adapters (error parity)
-
-- **Scaffold**: `ca_equivalence.rs::ca_equivalence_bad_san_request_rejected_identically_by_both`
-- **Layer**: L3 (real-io, gated) · **Tags**: `@real-io @adapter-integration @S-04 @error` · **Trace**: US-CA-04 AC2, ADR-0063 D8/A2 (policy lives in core, not adapter)
-- **Universe**: the `CaError` variant from each adapter — expected the SAME `CaError::InvalidSan` from both, before any cert
-
-```gherkin
-Scenario: A bad-SAN request is rejected identically by both host and sim adapters
-  Given a SvidRequest whose SpiffeId would yield zero or two-or-more URI SANs
-  When each adapter attempts to mint the SVID
-  Then both reject with CaError::InvalidSan before any cert
-  And the rejecting behaviour is identical (the policy lives in core, not the adapter)
-```
+- ~~**Scaffold**: `ca_equivalence.rs::ca_equivalence_bad_san_request_rejected_identically_by_both`~~
+- **RETIRED 2026-06-06.** This scenario asserted both adapters reject a
+  bad-SAN-cardinality request identically — again a type-unreachable path under
+  Option A (see S-04-09 above). The cross-adapter SAN-cardinality equivalence it
+  was meant to guard is already covered by **S-04-06**
+  (`ca_equivalence_svid_profile_matches_across_host_and_sim`), whose Universe
+  includes `san_uris (cardinality + value)`. The crafter retires this scaffold
+  fn; the row is kept struck-through for traceability. Research:
+  `docs/research/security/svid-request-cardinality-enforcement-research.md`.
 
 ---
 
@@ -675,7 +679,7 @@ Scenario: An unknown audit-row version fails fast rather than decoding garbage
 | US-CA-01 (root behind port trait) | 01 | S-01-01, S-01-02, S-01-03, S-01-04, S-01-05 | K1, K5 |
 | US-CA-02 (root key envelope-encrypted) | 02 | S-02-01 … S-02-10 | K3, K5 |
 | US-CA-03 (pathLen-0 intermediate) | 03 | S-03-01 … S-03-06 | K1 |
-| US-CA-04 (workload SVID, single URI SAN) | 04 | S-04-01 … S-04-10 | K1, K2, K5 |
+| US-CA-04 (workload SVID, single URI SAN) | 04 | S-04-01 … S-04-08 (S-04-09, S-04-10 RETIRED 2026-06-06 — Option A) | K1, K2, K5 |
 | US-CA-05 (bundle, audit, re-issue) | 05 | S-05-01 … S-05-08 | K1 |
 
 Every user story has ≥4 scenarios (Dim 8 Check A — zero untraceable stories;
@@ -685,47 +689,51 @@ DISCUSS measurement plan).
 
 ## Coverage profile
 
-- **Total scenarios**: 39 (one scaffold per scenario; matches the 39 `#[test]`
-  scaffold fns across the 8 files)
-- **Error / sad-path** (`@error`): **15 = 38.5%** (ground truth: 15 `@error`
-  doc-tags across the 8 scaffolds — see § Finding below). `cert_spec_error_variants`
-  (S-01-05) is one of these 15; documenting its row did not add a new error
-  scenario.
+- **Total scenarios**: **37** (was 39; **S-04-09 + S-04-10 RETIRED 2026-06-06**
+  under Option A — type-enforced; see § Slice 04 retirement notes). One scaffold
+  fn per scenario; the crafter retires the two retired scaffold fns, leaving 37
+  across the 8 files.
+- **Error / sad-path** (`@error`): **13 = 35.1%** (was 15/39 = 38.5%; both
+  retired scenarios were `@error`). `cert_spec_error_variants` (S-01-05) is one
+  of these 13. This is a **non-gating DISTILL metric** — see § Finding.
 - **Walking skeleton** (`@walking_skeleton`): 1 (S-04-07)
 - **Property** (`@property`, PBT-full at GREEN for L1): 8 (S-02-08/09/10,
   S-04-01/02, S-05-06/07/08)
-- **By layer**: L1 pure 6 · L2 sim 5 · L1 archive 6 · L3 real-io 22
+- **By layer**: L1 pure 6 · L2 sim 5 · L1 archive 6 · **L3 real-io 20** (was 22)
 
 ## Finding (reported, not auto-fixed)
 
-The `@error` ratio is **15/39 = 38.5%**, marginally under the Dim-1 / BDD 40%
-target (shortfall = 1 scenario). Per the completion-task constraints, the eight
-scaffold files are the **authored SSOT** and are NOT to be expanded by this
-pass. If DELIVER or a reviewer wants to clear the bar, the natural additions
-(within existing files, no new files) are: a wrong-trust-domain `SpiffeId`
-rejection in `ca_cert_spec_policy.rs`, or a malformed-fixture-key sad path in
-`sim_ca_deterministic.rs`. Surfaced for the orchestrator; not applied (the
-scaffolds are sound and out of this pass's scope).
+The `@error` ratio is **13/37 = 35.1%** (was 15/39 = 38.5% before the
+2026-06-06 retirement of S-04-09 + S-04-10, both `@error`), under the Dim-1 /
+BDD 40% target. This is a **non-gating DISTILL metric**, and the drop is the
+**accepted, honest consequence of the type-honest Option-A design**: the
+bad-SAN-cardinality path that S-04-09/S-04-10 tested is *unrepresentable* at the
+adapter (the request type carries exactly one validated `SpiffeId`), so the two
+`@error` scenarios were dead-code tests of a branch that cannot exist. Removing
+them makes the scenario count honest rather than padding it. The live
+single-URI-SAN guard is the L1 `CertSpec::svid` reject (S-04-02, `@property`);
+the spec-mandated runtime reject is at the relying-party verifier (#26, SPIFFE
+X.509-SVID §5.2). The eight scaffold files remain the **authored SSOT** (two
+fns retired by the crafter). Surfaced for the orchestrator; not auto-expanded.
 
-> **Documentation-completeness correction (this pass)**: an earlier draft of
-> this document mapped only 38 of the 39 scaffolds — the cross-role
+> **Documentation-completeness note**: an earlier draft of this document mapped
+> only 38 of the then-39 scaffolds — the cross-role
 > `cert_spec_error_variants_are_distinct_per_failure_mode` scaffold (tagged
 > `@error @in-memory`, spanning `@S-01 @S-04`) was folded into the S-01
-> narrative without its own row. It is now documented as **S-01-05**. This is a
-> doc-completeness fix (all 39 scaffolds now have a row); it does **not** change
-> the `@error` ratio (that scaffold was already `@error`-tagged and already in
-> the 15-count). The ratio remains 38.5%.
+> narrative without its own row; it is documented as **S-01-05** and is one of
+> the 13 surviving `@error` scenarios.
 
 ## Pre-DELIVER RED classification
 
-All 39 scaffolds are RED-at-the-bar via the project's
-`#[should_panic(expected = "RED scaffold")]` convention (`.claude/rules/
-testing.md` § "RED scaffolds"): nextest reports PASS (the expected panic
-fires), so the RED state is *discoverable and hook-compatible* without
-`--no-verify`. DELIVER replaces each `panic!` body with the real assertions
-(L1/L2 default-lane scaffolds) or real crypto/keyring calls (L3 gated
+All 37 surviving scaffolds (was 39; S-04-09 + S-04-10 retired 2026-06-06 under
+Option A — the crafter removes those two scaffold fns) are RED-at-the-bar via
+the project's `#[should_panic(expected = "RED scaffold")]` convention
+(`.claude/rules/testing.md` § "RED scaffolds"): nextest reports PASS (the
+expected panic fires), so the RED state is *discoverable and hook-compatible*
+without `--no-verify`. DELIVER replaces each `panic!` body with the real
+assertions (L1/L2 default-lane scaffolds) or real crypto/keyring calls (L3 gated
 scaffolds), flipping `#[should_panic]` off as each goes GREEN. Classification:
-**MISSING_FUNCTIONALITY** for all 39 (the production `Ca` trait / `CertSpec` /
+**MISSING_FUNCTIONALITY** for all 37 (the production `Ca` trait / `CertSpec` /
 `RcgenCa` / `SimCa` / envelopes do not exist yet) — none are
 IMPORT_ERROR/FIXTURE_BROKEN (the scaffolds import no unbuilt production types
 by design).

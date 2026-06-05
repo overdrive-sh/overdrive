@@ -112,12 +112,20 @@ raw bytes for issued material (only the root/intermediate adapters hold signing
 keys in memory, mirroring SPIRE's "keys never leave the signer" — research
 Finding 5).
 
-**`issue_svid` enforces the single-URI-SAN invariant before producing any
-certificate.** A `SvidRequest` whose `SpiffeId` would yield zero or ≥2 URI SANs
-is rejected with `CaError::InvalidSan` — this is the SPIFFE spec's hardest
-rule (research Finding 2) and the highest-value invariant in the feature
-(KPI K2). It lives in core (via `CertSpec`, D5), so it is DST-testable and
-dst-lint-clean.
+**`issue_svid` honors the single-URI-SAN invariant *by construction*, not by a
+runtime cardinality guard.** A `SvidRequest { spiffe_id: SpiffeId }` carries
+exactly one validated identity, so a zero-or-≥2-SAN request is *unrepresentable*
+at the adapter boundary — there is no `CaError::InvalidSan` branch inside
+`issue_svid` to reach (the request type already parsed the cardinality). The
+single fallible parse is the pure-core `CertSpec::svid(Vec<SpiffeId>)` policy
+(D5), which stays fallible and rejects 0/≥2 with `CertSpecError`; it is
+DST-testable and dst-lint-clean. The SPIFFE-spec-mandated *runtime* reject
+(X.509-SVID §5.2) lives at the relying-party verifier (#26), not the issuer.
+See the three-layer enforcement-location note under D5 for the full rationale
+([research][svid-cardinality]). This is the SPIFFE spec's hardest rule
+(X.509-SVID §2/§5.2) and the highest-value invariant in the feature (KPI K2).
+
+[svid-cardinality]: ../../research/security/svid-request-cardinality-enforcement-research.md
 
 ### D2 — Root key at rest: rkyv versioned envelope per ADR-0048, in the IntentStore
 
@@ -267,6 +275,47 @@ them DST-testable and dst-lint-clean, and gives the sim adapter the *same*
 policy surface as the host adapter (so the DST equivalence test exercises real
 policy, not a divergent sim shortcut). The host adapter's job shrinks to a pure
 translation + the `rcgen` signing call — `rcgen` never appears in core.
+
+**Enforcement location of the single-URI-SAN invariant (three layers, distinct
+roles).** The "exactly one `spiffe://` URI SAN ⇔ exactly one SPIFFE ID"
+invariant is the SPIFFE domain invariant (X.509-SVID spec §2: *"An X.509 SVID
+MUST contain exactly one URI SAN, and by extension, exactly one SPIFFE ID"*).
+It is enforced at three semantically-distinct layers, each answering a
+different question — NOT by a runtime cardinality guard inside `Ca::issue_svid`:
+
+1. **The request *type* makes ≠1 unrepresentable.** `SvidRequest { spiffe_id:
+   SpiffeId }` carries exactly one validated identity by construction. There is
+   no `URISANs: Vec<…>` field; an adapter physically cannot be handed a
+   zero-or-multiple-SAN request. This is "make illegal states unrepresentable"
+   ([research][1] SQ3; Minsky/King) and is the same shape the SPIFFE reference
+   implementation (SPIRE) chose — its signer parameter
+   `WorkloadX509SVIDParams.SPIFFEID` is a single `spiffeid.ID`, not a slice
+   ([research][1] SQ2).
+2. **The pure parse `CertSpec::svid(Vec<SpiffeId>)` is the single fallible
+   boundary.** The *one* place a raw `Vec` projection of identities is parsed
+   into a validated single-identity leaf profile is the pure-core `CertSpec`
+   policy (D5). It stays fallible and rejects 0 or ≥2 with `CertSpecError`
+   ("parse, don't validate" — parse once at the boundary, trust the refined
+   `SpiffeId` thereafter). This is DST-testable and dst-lint-clean, and is
+   tested green at L1 by **S-04-02**
+   (`svid_spec_rejects_zero_or_multiple_uri_sans_before_any_cert`).
+3. **The relying-party verifier is the SPIFFE-spec-mandated *runtime* reject.**
+   X.509-SVID spec §5.2 places the binding MUST-reject at the *validator*, not
+   the issuer: *"Validators encountering an SVID containing more than one URI
+   SAN MUST reject the SVID."* That runtime reject lives at the peer
+   authenticator — the future #26 sockops/kTLS mTLS verifier — **not** inside
+   `Ca::issue_svid`. It is the genuine defense-in-depth boundary (a distinct
+   trust boundary that must reject any non-compliant cert regardless of which CA
+   issued it), and it is out of this feature's scope (owned by #26).
+
+The adapter does **not** runtime-reject SAN cardinality — it cannot receive a
+bad one (layer 1), the only fallible parse is the pure policy (layer 2), and
+the spec's runtime MUST-reject lives at the verifier (layer 3). A runtime guard
+inside `issue_svid` for a state the request type already forbids would be dead
+code in the same component, not defense-in-depth ([research][1] SQ3/SQ5; this
+is the internal-CA / "no attacker-controlled issuance boundary" case, D-CA-4).
+
+[1]: ../../research/security/svid-request-cardinality-enforcement-research.md
 
 ### D6 — Audit trail: `issued_certificates` ObservationStore row
 
@@ -467,6 +516,35 @@ for DISTILL.
 
 ## Changelog
 
+- 2026-06-06 — **D5 enforcement-location clarification (DELIVER-surfaced;
+  Option A ratified). No decision reversed.** DELIVER step 04 surfaced a
+  contract contradiction: the original D1 prose and the `Ca::issue_svid` rustdoc
+  claimed the adapter "rejects zero or two-or-more URI SANs with
+  `CaError::InvalidSan` before any cert" — a rejection the request type
+  (`SvidRequest { spiffe_id: SpiffeId }`, one validated identity by
+  construction) makes **unreachable**. That was an aspirational-doc bug
+  (`development.md` § "No aspirational docs" / "Never document behaviour that is
+  not implemented"). The user ratified **Option A — type-enforced** (2026-06-06)
+  on the strength of
+  `docs/research/security/svid-request-cardinality-enforcement-research.md`
+  (committed `b6a5278b`; SPIFFE X.509-SVID §2/§5.2 + SPIRE reference impl +
+  "parse, don't validate"). This amendment adds the three-layer
+  enforcement-location note under D5 — (1) the request *type* makes ≠1
+  unrepresentable; (2) the pure `CertSpec::svid(Vec<SpiffeId>)` parse is the
+  single fallible boundary (rejects 0/≥2, tested green by S-04-02 at L1); (3)
+  the relying-party verifier (#26) is the SPIFFE-spec-mandated runtime reject —
+  and corrects the D1 prose to state the invariant is honored *by construction*,
+  not by an adapter cardinality guard. **D5 itself is unchanged** — policy was
+  already in core; this amendment only pins *where the runtime reject lives*
+  (the verifier, not `issue_svid`) and retires the type-unreachable claim. The
+  two DISTILL scenarios that tested the unreachable adapter path — S-04-09
+  (`rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance`) and
+  S-04-10 (`ca_equivalence_bad_san_request_rejected_identically_by_both`) — are
+  retired (redundant under Option A: S-04-08 already asserts the host leaf
+  carries exactly one URI SAN, S-04-06 already asserts cross-adapter SVID-profile
+  equivalence including SAN cardinality, and S-04-02 tests the live `CertSpec`
+  parse reject). The crafter applies the corrected `issue_svid` rustdoc and
+  retires the two scaffolds. — Morgan.
 - 2026-06-05 — Provider-attribution + FIPS-contingency correction. The
   workspace crypto provider is **`ring`** today (`rustls` and `rcgen` both pin
   the `ring` feature); ADR-0039's intended switch to `aws-lc-rs` is
