@@ -4007,6 +4007,36 @@ helper + miss counter are CREATE NEW. `BackendKey`, `Proto`,
 the action variants, `cgroup_attach_path` are all REUSE/EXTEND. Full
 table in `feature-delta.md` § DESIGN.
 
+### Shipped — Component Inventory (FINALIZE 2026-06-05)
+
+All of "What lands" above is **SHIPPED** (DELIVER complete; 7 steps
+01-01…03-02 all COMMIT/PASS; closes ADR-0053 OQ-3 / #200). Nothing in
+this section is deferred-that-shipped. Evolution record:
+`docs/evolution/2026-06-05-unconnected-udp-sendmsg4.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `cgroup_sendmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs` | NEW |
+| `cgroup_recvmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs` | NEW |
+| `build_local_service_key` shared helper (key-build + NBO only) | `crates/overdrive-bpf/src/shared/build_local_service_key.rs` | NEW |
+| `REVERSE_LOCAL_MAP` kernel map | `crates/overdrive-bpf/src/maps/reverse_local_map.rs` | NEW |
+| `REVERSE_LOCAL_MISS_COUNTER` (`PERCPU_ARRAY`) | `crates/overdrive-bpf/src/maps/` | NEW |
+| `ReverseLocalMapHandle` userspace handle | `crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs` | NEW |
+| `cgroup_connect4_service` (key-build/NBO via shared helper) | `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs` | EXTEND (behavior-preserving) |
+| `register_local_backend` reverse-first dual-write + amended contract | `crates/overdrive-core/src/traits/dataplane.rs`, `crates/overdrive-dataplane/src/lib.rs` | EXTEND (no new trait method) |
+| `SimDataplane` reply mirror + `reply_source_for()` | `crates/overdrive-sim/src/adapters/dataplane.rs` | EXTEND |
+| `reply_source_rewrite_lockstep` Tier-1 DST invariant | `crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs` | NEW |
+| `CgroupSendRecvAttach` / `ReverseLocalProbe` typed error variants (`#[from]`-routed → `health.startup.refused`) | `crates/overdrive-core/src/traits/dataplane.rs` | EXTEND |
+
+> **`REVERSE_LOCAL_MISS_COUNTER` operational-semantics design note (for
+> DEVOPS):** recvmsg4 fires on ALL subtree unconnected UDP, so the
+> counter's absolute value is dominated by non-service traffic and is
+> NOT a "service reply failed to translate" alarm. Whether to keep,
+> demote, or replace it (e.g. a control-plane reconciler comparing
+> forward-vs-reverse map cardinality) is a metric-semantics decision,
+> recorded as a DESIGN NOTE (feature-delta § Open questions #1) — NOT a
+> tracking issue. The no-op-on-miss behavior is correct regardless.
+
 ---
 
 ### 88. Listener-fact in-memory view extension (ADR-0062)
