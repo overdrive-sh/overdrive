@@ -91,9 +91,11 @@
             "crates/overdrive-control-plane/src/journal/mod.rs",
             "crates/overdrive-control-plane/src/lib.rs",
             "crates/overdrive-sim/src/adapters/journal.rs",
-            "crates/overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs"
+            "crates/overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs",
+            "crates/overdrive-core/src/testing/mod.rs",
+            "crates/overdrive-core/tests/acceptance/workflow_trait_drives_to_terminal.rs"
           ],
-          "implementation_notes": "Mirrors ViewStore/SimViewStore almost line-for-line (ADR-0063 Negative consequence: shapes copy-adaptable). JournalEntry lives co-located with JournalStore. ciborium is already in the graph from ADR-0035 — no new dep. Both port + sim adapter behind #[allow(dead_code)] until the engine (01-05) wires them. SimJournalStore in src/adapters/mod.rs + lib.rs re-exports.",
+          "implementation_notes": "Mirrors ViewStore/SimViewStore almost line-for-line (ADR-0063 Negative consequence: shapes copy-adaptable). JournalEntry lives co-located with JournalStore. ciborium is already in the graph from ADR-0035 — no new dep. Both port + sim adapter behind #[allow(dead_code)] until the engine (01-05) wires them. SimJournalStore in src/adapters/mod.rs + lib.rs re-exports. UPSTREAM FIX (DELIVER 01-03, orchestrator-authorized): step 01-01 placed ProvisionRecord inline in the workflow_trait_drives_to_terminal.rs test scaffold, which is not reachable from overdrive-sim. Promote ProvisionRecord into overdrive-core::testing (gated #[cfg(any(test, feature=\"test-utils\"))], the existing pattern — overdrive-sim already dev-deps overdrive-core with features=[\"test-utils\"]) so the sim journal test can construct it; update the 01-01 test to import the promoted fixture instead of its inline copy (keep 01-01 GREEN).",
           "deps": [
             "01-01"
           ],

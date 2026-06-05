@@ -35,6 +35,10 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
+pub mod redb;
+
+pub use redb::RedbJournalStore;
+
 /// Result alias for `JournalStore` operations — keeps call sites short
 /// without forcing the long error type on every signature.
 pub type Result<T, E = JournalStoreError> = std::result::Result<T, E>;
