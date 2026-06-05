@@ -2,7 +2,7 @@
 //! reference workflow used across slice-01 acceptance tests.
 //!
 //! `ProvisionRecord` is the thinnest durable sequence with a real,
-//! non-idempotent-to-repeat effect: one external `ctx.call`
+//! non-idempotent-to-repeat effect: one external `ctx.run` durable step
 //! (the "provision write", US-WP-1) followed by a terminal
 //! [`WorkflowResult::Success`]. It is written as one ordinary
 //! `async fn run` — no hand-written step enum, no transition match
@@ -50,7 +50,7 @@ impl ProvisionRecord {
     /// `provision-record`, matching the `WorkflowName` grammar.
     pub const WORKFLOW_NAME: &'static str = "provision-record";
 
-    /// The provision-write payload bytes the slice-01 `ctx.call` sends.
+    /// The provision-write payload bytes the slice-01 `ctx.run` step sends.
     pub const PAYLOAD: &'static [u8] = b"provision-record";
 
     /// Construct a `ProvisionRecord` addressed at `target`.
@@ -112,7 +112,7 @@ impl Workflow for ProvisionRecord {
 /// **Distinct from [`ProvisionRecord`], not a mutation of it.** The
 /// slice-01 e2e (01-08) and the `replay_equivalence_provision_record`
 /// invariant (01-07) depend on `ProvisionRecord` staying a
-/// `ctx.call → terminal` shape — this is a separate fixture added
+/// `ctx.run → terminal` shape — this is a separate fixture added
 /// alongside it so the slice-02 `ctx.sleep` await-surface has a real
 /// 3-await consumer without disturbing slice-01's invariants.
 pub struct ProvisionRecordWithSleep {
@@ -128,10 +128,10 @@ impl ProvisionRecordWithSleep {
     /// The workflow name this fixture provisions under.
     pub const WORKFLOW_NAME: &'static str = "provision-record-with-sleep";
 
-    /// The first (pre-sleep) `ctx.call` payload bytes.
+    /// The first (pre-sleep) `ctx.run` payload bytes.
     pub const FIRST_PAYLOAD: &'static [u8] = b"provision-record-pre-sleep";
 
-    /// The second (post-sleep) `ctx.call` payload bytes.
+    /// The second (post-sleep) `ctx.run` payload bytes.
     pub const SECOND_PAYLOAD: &'static [u8] = b"provision-record-post-sleep";
 
     /// Construct a `ProvisionRecordWithSleep` addressed at

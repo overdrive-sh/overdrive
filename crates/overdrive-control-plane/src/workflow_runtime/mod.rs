@@ -469,6 +469,27 @@ impl JournalCursorHandle {
             obs: Some(obs),
         }
     }
+
+    /// Durably append a live-path await-point `entry` and advance the held
+    /// cursor — the append + fsync + advance tail every `record_*` live
+    /// path shares (ADR-0063 §4 fsync-then-suspend). On a durable-append
+    /// failure the cursor does NOT advance (the engine must not continue
+    /// against an unjournaled effect) and the error surfaces as
+    /// [`WorkflowCtxError::JournalRecord`]. The caller holds `cursor` (the
+    /// step index is `*cursor` at call time, already baked into `entry`),
+    /// so the whole record stays inside the caller's lock window.
+    async fn append_then_advance(
+        &self,
+        cursor: &mut usize,
+        entry: &JournalEntry,
+    ) -> Result<(), WorkflowCtxError> {
+        self.journal
+            .append(&self.workflow_id, entry)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        *cursor += 1;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -520,11 +541,7 @@ impl JournalCursor for JournalCursorHandle {
         // Append + fsync BEFORE returning (ADR-0063 §4). On failure the
         // cursor does NOT advance — the engine must not continue against
         // an unjournaled effect.
-        self.journal
-            .append(&self.workflow_id, &entry)
-            .await
-            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
-        *cursor += 1;
+        self.append_then_advance(&mut cursor, &entry).await?;
         drop(cursor);
         Ok(())
     }
@@ -556,11 +573,7 @@ impl JournalCursor for JournalCursorHandle {
         // Append + fsync BEFORE returning (ADR-0063 §4, fsync-then-park).
         // On failure the cursor does NOT advance — the engine must not
         // park against an unjournaled sleep.
-        self.journal
-            .append(&self.workflow_id, &entry)
-            .await
-            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
-        *cursor += 1;
+        self.append_then_advance(&mut cursor, &entry).await?;
         drop(cursor);
         Ok(())
     }
@@ -623,11 +636,7 @@ impl JournalCursor for JournalCursorHandle {
         // (ADR-0063 §4 fsync-then-suspend).
         let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         let awaited = JournalEntry::SignalAwaited { step, signal_key: signal_key.clone() };
-        self.journal
-            .append(&self.workflow_id, &awaited)
-            .await
-            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
-        *cursor += 1;
+        self.append_then_advance(&mut cursor, &awaited).await?;
         drop(cursor);
         Ok(())
     }
@@ -675,11 +684,7 @@ impl JournalCursor for JournalCursorHandle {
             value_digest,
             value: value.clone(),
         };
-        self.journal
-            .append(&self.workflow_id, &seen)
-            .await
-            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
-        *cursor += 1;
+        self.append_then_advance(&mut cursor, &seen).await?;
         drop(cursor);
         Ok(())
     }
@@ -724,11 +729,7 @@ impl JournalCursor for JournalCursorHandle {
         // Record ActionEmitted durably before returning (ADR-0063 §4): a
         // resumed run sees this entry and does NOT re-send the Action.
         let entry = JournalEntry::ActionEmitted { step, action_digest };
-        self.journal
-            .append(&self.workflow_id, &entry)
-            .await
-            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
-        *cursor += 1;
+        self.append_then_advance(&mut cursor, &entry).await?;
         drop(cursor);
         Ok(())
     }
