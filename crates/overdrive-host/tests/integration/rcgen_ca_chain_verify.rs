@@ -35,7 +35,7 @@
 use std::process::Command;
 use std::sync::Arc;
 
-use overdrive_core::traits::ca::Ca;
+use overdrive_core::traits::ca::{Ca, SvidRequest};
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
@@ -265,11 +265,66 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
 /// exists; `openssl verify` is the honest external entry point per the
 /// DISCUSS elevator-pitch caveat).
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn rcgen_full_svid_chain_verifies_root_intermediate_svid() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / walking skeleton: full Root -> Intermediate \
-         -> SVID chain verifies: openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem exits 0)"
+    // GIVEN a host CA over a real OS entropy source and a trust-domain subject,
+    // a node, and a request to identify allocation a1b2c3 of job payments.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let node = NodeId::new("node-a").expect("NodeId parses");
+    let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+        .expect("workload SpiffeId parses");
+    let req = SvidRequest::new(workload);
+
+    // WHEN the persistent root, the node intermediate, and the workload SVID are
+    // produced through the `Ca` driving port. The intermediate is cached, so the
+    // leaf `issue_svid` signs chains to the SAME intermediate written below.
+    let root = ca.root().expect("RcgenCa::root() self-signs a real P-256 root");
+    let inter = ca.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
+    let svid =
+        ca.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf signed by intermediate");
+
+    // THEN `openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem`
+    // accepts the leaf (exit 0) — THE walking-skeleton proof on the REAL bytes
+    // (KPI K1). Sam runs this himself and confirms the workload identity
+    // validates to the root.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root_pem_path = dir.path().join("root.pem");
+    let inter_pem_path = dir.path().join("intermediate.pem");
+    let svid_pem_path = dir.path().join("svid.pem");
+    std::fs::write(&root_pem_path, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
+    std::fs::write(&inter_pem_path, inter.cert_pem().as_pem().as_bytes())
+        .expect("write intermediate.pem");
+    std::fs::write(&svid_pem_path, svid.cert_pem().as_pem().as_bytes()).expect("write svid.pem");
+
+    let output = Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&root_pem_path)
+        .arg("-untrusted")
+        .arg(&inter_pem_path)
+        .arg(&svid_pem_path)
+        .output()
+        .expect("invoke openssl verify");
+    assert!(
+        output.status.success(),
+        "openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem must exit 0 \
+         (full chain verifies): stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    // AND the leaf's issuer is the intermediate's subject — the
+    // chains-to-intermediate linkage observable in the cert bytes.
+    let (_, leaf) = x509_parser::certificate::X509Certificate::from_der(svid.cert_der().as_der())
+        .expect("parse svid DER");
+    let (_, inter_cert) =
+        x509_parser::certificate::X509Certificate::from_der(inter.cert_der().as_der())
+            .expect("parse intermediate DER");
+    assert_eq!(
+        leaf.issuer().to_string(),
+        inter_cert.subject().to_string(),
+        "the SVID leaf's issuer equals the intermediate's subject"
     );
 }
 
@@ -278,13 +333,59 @@ fn rcgen_full_svid_chain_verifies_root_intermediate_svid() {
 /// keyUsage=digitalSignature marked critical, NO keyCertSign/cRLSign, and a
 /// ~1h validity window. x509-parser inspects the real cert bytes.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-04 / real SVID leaf: exactly one URI SAN = \
-         spiffe://overdrive.local/job/payments/alloc/a1b2c3, CA:FALSE, digitalSignature critical, \
-         no keyCertSign/cRLSign, ~1h TTL)"
+    // GIVEN a host CA and a workload SVID request for a specific identity.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+        .expect("workload SpiffeId parses");
+    let req = SvidRequest::new(workload.clone());
+
+    // WHEN the leaf is minted through the driving port (the root + intermediate
+    // are minted lazily inside `issue_svid`).
+    let svid = ca.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf");
+
+    // THEN x509-parser confirms the leaf profile on the REAL cert bytes (KPI K2):
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(svid.cert_der().as_der())
+        .expect("parse svid DER");
+
+    // (a) basicConstraints CA:FALSE — a leaf signs nothing.
+    let bc = cert.basic_constraints().expect("basicConstraints parses");
+    assert!(
+        bc.is_none_or(|ext| !ext.value.ca),
+        "SVID leaf must be CA:FALSE (absent or CA bit unset)"
     );
+
+    // (b) keyUsage = digitalSignature, marked critical, NO keyCertSign/cRLSign.
+    let ku = cert.key_usage().expect("keyUsage parses").expect("keyUsage present");
+    assert!(ku.critical, "keyUsage extension must be marked critical");
+    assert!(ku.value.digital_signature(), "SVID carries digitalSignature");
+    assert!(!ku.value.key_cert_sign(), "SVID must NOT carry keyCertSign");
+    assert!(!ku.value.crl_sign(), "SVID must NOT carry cRLSign");
+
+    // (c) EXACTLY ONE URI SAN, equal to the requested SpiffeId (the SPIFFE
+    // spec's single-URI-SAN rule on the real bytes).
+    let san = cert
+        .subject_alternative_name()
+        .expect("subjectAltName parses")
+        .expect("subjectAltName present");
+    let uris: Vec<&str> = san
+        .value
+        .general_names
+        .iter()
+        .filter_map(|gn| match gn {
+            x509_parser::extensions::GeneralName::URI(uri) => Some(*uri),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(uris.len(), 1, "SVID leaf carries EXACTLY ONE URI SAN, found {uris:?}");
+    assert_eq!(uris[0], workload.as_str(), "the sole URI SAN equals the requested SpiffeId");
+
+    // (d) validity window is ~1h (research Finding 6) — assert the WIDTH.
+    let validity = cert.validity();
+    let window_secs = validity.not_after.timestamp() - validity.not_before.timestamp();
+    assert_eq!(window_secs, 3600, "SVID validity window is ~1 hour (3600s)");
 }
 
 /// `@real-io` `@adapter-integration` `@S-04` `@error` — KPI K2 rejection
