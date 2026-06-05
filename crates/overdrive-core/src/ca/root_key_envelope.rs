@@ -69,10 +69,13 @@ const KEK_ID_MAX: usize = 253;
     Hash,
     PartialOrd,
     Ord,
+    serde::Serialize,
+    serde::Deserialize,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[serde(try_from = "String", into = "String")]
 pub struct KekId(String);
 
 impl KekId {
@@ -117,6 +120,26 @@ impl std::str::FromStr for KekId {
     type Err = IdParseError;
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         Self::new(raw)
+    }
+}
+
+impl TryFrom<String> for KekId {
+    type Error = IdParseError;
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::new(&raw)
+    }
+}
+
+impl TryFrom<&str> for KekId {
+    type Error = IdParseError;
+    fn try_from(raw: &str) -> Result<Self, Self::Error> {
+        Self::new(raw)
+    }
+}
+
+impl From<KekId> for String {
+    fn from(v: KekId) -> Self {
+        v.0
     }
 }
 
@@ -267,6 +290,79 @@ impl RootCaKeyRecordV1 {
                     source: envelope_error,
                 })
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use proptest::prelude::*;
+
+    use super::{KEK_ID_MAX, KekId};
+    use crate::id::IdParseError;
+
+    #[test]
+    fn case_insensitive_parse_lowercases_canonical() {
+        // An uppercase input parses and `Display` / `as_str` emit the
+        // lowercase canonical form.
+        let parsed = KekId::new("KEK-Root-01").expect("valid mixed-case kek id");
+        assert_eq!(parsed.as_str(), "kek-root-01");
+        assert_eq!(parsed.to_string(), "kek-root-01");
+    }
+
+    #[test]
+    fn rejects_empty_with_empty_variant() {
+        assert!(matches!(KekId::new(""), Err(IdParseError::Empty { kind: "KekId" })));
+    }
+
+    #[test]
+    fn rejects_over_length_with_too_long_variant() {
+        let too_long = "a".repeat(KEK_ID_MAX + 1);
+        assert!(matches!(
+            KekId::new(&too_long),
+            Err(IdParseError::TooLong { kind: "KekId", max: KEK_ID_MAX })
+        ));
+    }
+
+    #[test]
+    fn rejects_out_of_class_char_with_invalid_char_variant() {
+        // Slash and space are both outside the lowercase-alphanumeric +
+        // `-`/`_`/`.` class; each surfaces the specific variant, not a
+        // generic error.
+        assert!(matches!(
+            KekId::new("kek/root"),
+            Err(IdParseError::InvalidChar { kind: "KekId", ch: '/', .. })
+        ));
+        assert!(matches!(
+            KekId::new("kek root"),
+            Err(IdParseError::InvalidChar { kind: "KekId", ch: ' ', .. })
+        ));
+    }
+
+    proptest! {
+        /// Display↔FromStr and serde round-trip parity over the valid
+        /// `KekId` input space. The inputs are already canonical (lowercase
+        /// alphanumeric + `-`/`_`/`.`, non-empty, `≤ KEK_ID_MAX`), so
+        /// `from_str(k.to_string())` and serde JSON round-trip both recover
+        /// the original — the two codecs match `Display` / `FromStr`
+        /// exactly. Generated values vary per case and are never a fixed
+        /// sentinel, so a body returning a constant cannot satisfy this.
+        #[test]
+        fn display_fromstr_and_serde_round_trip(raw in "[a-z0-9][a-z0-9._-]{0,40}") {
+            let k = KekId::new(&raw).expect("generated value is in the valid class");
+
+            // Display ↔ FromStr parity.
+            prop_assert_eq!(KekId::from_str(&k.to_string()), Ok(k.clone()));
+
+            // serde ↔ Display parity: JSON form is the quoted canonical
+            // string and deserialises back to the same value.
+            let json = serde_json::to_string(&k).expect("serialize KekId");
+            prop_assert_eq!(json, format!("\"{}\"", k.as_str()));
+            let back: KekId = serde_json::from_str(&format!("\"{}\"", k.as_str()))
+                .expect("deserialize KekId");
+            prop_assert_eq!(back, k);
         }
     }
 }
