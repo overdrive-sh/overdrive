@@ -39,31 +39,130 @@
 //! NO Tier-2 backstop (ENOTSUPP ≤ 6.8). Tier-3-only correctness +
 //! Tier-1 reply-path equivalence invariant.
 //!
-//! # RED scaffold (Slice 01 / S-01-01)
+//! # Scope split (Slice 01 vs Slice 03)
 //!
-//! Per the kernel-side RED convention, the RED signal is the ABSENCE of
-//! the `#[cgroup_sock_addr(recvmsg4)]` attribute. DELIVER adds it + the
-//! body (Slice 01 GREEN); the sentinel-miss branch lands with Slice 03.
+//! Slice 01 (this step) lands the happy path: a `REVERSE_LOCAL_MAP` HIT
+//! rewrites the source sockaddr to the VIP. The MISS branch is present
+//! (sentinel `192.0.2.1` rewrite + `REVERSE_LOCAL_MISS_COUNTER` bump) so
+//! the program is structurally complete and verifier-legal, but its miss
+//! BEHAVIOR is asserted only in Slice 03 (step 03-01) — the happy-path
+//! round-trip never exercises it under the ordered reverse-first
+//! dual-write.
 
 #![allow(dead_code)]
 
-use aya_ebpf::programs::SockAddrContext;
+use aya_ebpf::{macros::cgroup_sock_addr, programs::SockAddrContext};
 
-/// `BPF_CGROUP_UDP4_RECVMSG` entry point. The verifier requires the
-/// return value to be exactly 1 (`[1,1]` — cannot deny).
+use crate::maps::reverse_local_map::{REVERSE_LOCAL_MAP, ReverseLocalKey};
+use crate::maps::reverse_local_miss_counter::{REVERSE_LOCAL_MISS_COUNTER, SLOT_REVERSE_MISS};
+use crate::shared::build_local_service_key::build_local_service_key_parts;
+
+/// Sentinel source the program writes on a `REVERSE_LOCAL_MAP` miss —
+/// RFC 5737 TEST-NET-1 `192.0.2.1`, host-order. NEVER the backend IP, so
+/// a source-validating resolver still discards the reply rather than
+/// silently trusting an unrewritten backend source (strictly stronger
+/// than Cilium's pass-through-leak; DDD-3).
+const SENTINEL_SOURCE_HOST: u32 = 0xC000_0201; // 192.0.2.1
+
+/// `BPF_CGROUP_UDP4_RECVMSG` entry point. The verifier restricts the
+/// return value to exactly 1 (`[1,1]` — recvmsg4 CANNOT deny; a program
+/// returning 0 is rejected at LOAD time). Every code path returns 1.
 ///
-/// RED scaffold: the `#[cgroup_sock_addr(recvmsg4)]` attribute is NOT
-/// yet present — that absence is the kernel-side RED signal. DELIVER
-/// adds the attribute and fills the body (Slice 01 GREEN): build key via
-/// the shared helper → own `REVERSE_LOCAL_MAP` lookup → reverse source-
-/// rewrite to VIP (hit) or sentinel 192.0.2.1 + miss-counter (miss) →
-/// return 1.
-// __SCAFFOLD__ — add `#[cgroup_sock_addr(recvmsg4)]` in DELIVER (Slice 01 GREEN).
+/// On internal error the inner `try_*` body returns `Err(())` and we
+/// fall back to verdict 1 with no rewrite — the reply reaches the app
+/// with whatever source the kernel populated, the safe non-denying
+/// default the `[1,1]` contract forces.
+#[cgroup_sock_addr(recvmsg4)]
 pub fn cgroup_recvmsg4_service(ctx: SockAddrContext) -> i32 {
-    // Return 1 unconditionally — the only verifier-legal verdict for a
-    // recvmsg4 program (`[1,1]`). The source rewrite (hit → VIP, miss →
-    // sentinel) lands in GREEN; with no attribute the kernel never
-    // invokes this scaffold.
-    let _ = ctx;
-    1
+    try_cgroup_recvmsg4_service(&ctx).unwrap_or(1)
+}
+
+#[inline(always)]
+fn try_cgroup_recvmsg4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
+    let sock_addr = ctx.sock_addr;
+
+    // On the recvmsg4 hook, the kernel has already populated the source
+    // sockaddr (`user_ip4` / `user_port`) with the BACKEND identity the
+    // datagram arrived from. The shared helper extracts that host-order
+    // `(addr, port, proto)` triple (key-build + low-16-NBO ONLY); the
+    // OWN reverse lookup + OWN reverse SOURCE rewrite stay here (F-1).
+    //
+    // SAFETY: aya's `SockAddrContext` exposes `*mut bpf_sock_addr`; the
+    // kernel guarantees validity for the program invocation and the
+    // struct bounds are fixed by the in-tree UAPI.
+    let parts = unsafe { build_local_service_key_parts(sock_addr) }?;
+
+    // The reverse key is the backend identity. Byte-parity with
+    // `LocalServiceKey`, but the SEMANTICS are backend-side (DDD-2).
+    let key = ReverseLocalKey {
+        backend_ip_host: parts.addr_host,
+        backend_port_host: parts.port_host,
+        proto: parts.proto_byte,
+        _pad: 0,
+    };
+
+    // SAFETY: canonical verifier-readable aya-ebpf map access shape.
+    let vip_host = unsafe { REVERSE_LOCAL_MAP.get(&key) };
+
+    // recvmsg4 is attached at a cgroup ANCESTOR and therefore fires on
+    // EVERY unconnected UDP `recvmsg`/`recvfrom` from any descendant —
+    // service replies AND all unrelated UDP (DNS clients, the backends'
+    // own recvs, etc.). The map lookup is the discriminator: only a HIT
+    // (the datagram's source is a registered backend identity) is a
+    // service reply whose source must be rewritten back to the VIP.
+    //
+    // A MISS is the overwhelmingly common case — all non-service UDP —
+    // and MUST be a pure no-op (leave the source untouched, return 1).
+    // Rewriting the source on a miss would corrupt every unrelated UDP
+    // recv in the cgroup (e.g. a backend reading a query would have its
+    // sender address mangled, so its reply would target the wrong peer).
+    // The miss counter is bumped for observability only; its BEHAVIOR
+    // (and any sentinel-rewrite fail-safe scoped to service replies) is
+    // Slice 03's concern (step 03-01) — NOT asserted here. recvmsg4
+    // cannot deny (`[1,1]`); every path returns 1.
+    let Some(vip_host) = vip_host else {
+        record_reverse_miss();
+        return Ok(1);
+    };
+
+    // HIT — this datagram came from a registered backend identity, so it
+    // is a service reply. Rewrite the source the app reads back to the
+    // VIP. Convert host-order VIP to network-order for the syscall
+    // context. Writable fields on the recvmsg4 attach type are
+    // `user_ip4` / `user_port` (`msg_src_ip4` is sendmsg-only; DDD-5e).
+    let source_ip_nbo = (*vip_host).to_be();
+
+    // SAFETY: kernel-guaranteed struct layout; `user_ip4` is writable on
+    // the recvmsg4 attach type. Only the source ADDRESS is rewritten —
+    // the source port is left as the kernel populated it (a source-
+    // validating resolver checks the source address against the VIP it
+    // queried; the ephemeral reply port is not part of that check).
+    unsafe {
+        (*sock_addr).user_ip4 = source_ip_nbo;
+    }
+
+    Ok(1)
+}
+
+/// Bump the per-CPU reverse-miss counter (observability only). Called on
+/// a `REVERSE_LOCAL_MAP` miss — the common non-service-reply case. Does
+/// NOT rewrite the source: recvmsg4 fires on all cgroup UDP recvs, so a
+/// miss must be a no-op to avoid corrupting unrelated traffic. The
+/// sentinel-source fail-safe (DDD-3) is scoped to service replies and
+/// lands in Slice 03 (step 03-01) — see [`SENTINEL_SOURCE_HOST`].
+///
+/// `get_ptr_mut` returns the running CPU's slot pointer; the increment
+/// is per-CPU-local and lock-free (single program context per CPU, no
+/// re-entry on the recvmsg path). Mirrors the `DROP_COUNTER` precedent
+/// in `programs/sanity.rs`.
+#[inline(always)]
+fn record_reverse_miss() {
+    if let Some(counter) = REVERSE_LOCAL_MISS_COUNTER.get_ptr_mut(SLOT_REVERSE_MISS) {
+        // SAFETY: per-CPU array point access validated by the verifier;
+        // the pointer is valid for the program invocation and the write
+        // is to this CPU's slot only.
+        unsafe {
+            *counter = (*counter).wrapping_add(1);
+        }
+    }
 }

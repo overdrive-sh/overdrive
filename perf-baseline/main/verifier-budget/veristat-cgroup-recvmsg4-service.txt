@@ -1,0 +1,21 @@
+# Verifier-budget baseline — cgroup_recvmsg4_service
+#
+# ADR-0053 rev 2026-06-05 (GH #200) — baseline for the new
+# `cgroup_recvmsg4_service` BPF_PROG_TYPE_CGROUP_SOCK_ADDR program
+# (BPF_CGROUP_UDP4_RECVMSG attach) landed alongside the unconnected
+# same-host UDP reply-source rewrite path (step 01-03).
+#
+# Budget gates per the existing `verifier-regress` envelope:
+#   verified_insns <= 500,000    <- 50% of CAP_BPF ceiling
+#   verified_insns <= 1,000,000  <- absolute CAP_BPF ceiling (kernel 5.10+)
+#
+# The reverse analogue: one REVERSE_LOCAL_MAP lookup + (on hit) a single
+# user_ip4 SOURCE rewrite, + (on miss) a per-CPU miss-counter bump. 35
+# verified insns -- 7 more than connect4/sendmsg4 (the extra per-CPU
+# array access + the miss branch). 0.007% of the L1-cache-fits target;
+# recvmsg4 cannot deny ([1,1]) so it returns 1 on every path.
+#
+# Format (one line per program, space-separated key=value pairs;
+# the parser keys off `prog=` and `verified_insns=`).
+
+file=target/bpf/overdrive_bpf.o prog=cgroup_recvmsg4_service verdict=success verified_insns=35

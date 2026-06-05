@@ -2,10 +2,15 @@
 //!
 //! Dispatch invokes [`Dataplane::register_local_backend`] for the
 //! local-side backend the hydrator's classifier (ADR-0053 § 4)
-//! resolved as same-host. The cgroup_sock_addr program reads the
-//! resulting `LOCAL_BACKEND_MAP` entry on every subsequent
-//! `connect(vip:vip_port)` from a process inside the configured
-//! cgroup, rewriting the destination to the backend's real address.
+//! resolved as same-host. The single call performs the ORDERED
+//! reverse-first dual-write (ADR-0053 rev 2026-06-05, DDD-1): the
+//! `cgroup_connect4`/`sendmsg4` programs read the resulting
+//! `LOCAL_BACKEND_MAP` forward entry on every `connect`/`sendto`
+//! `(vip:vip_port)` to rewrite the destination to the backend, AND the
+//! `cgroup_recvmsg4_service` program reads the `REVERSE_LOCAL_MAP`
+//! entry on every unconnected `recvmsg` to rewrite the reply source
+//! backend→VIP. The shim is agnostic to the dual-write — it is the
+//! adapter that orders the two map syscalls reverse-first.
 //!
 //! No correlation-driven follow-up is required at the shim level —
 //! the cgroup hook is not an HTTP call surface and produces no

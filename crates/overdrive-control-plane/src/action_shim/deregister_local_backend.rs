@@ -1,8 +1,12 @@
 //! Action shim for `Action::DeregisterLocalBackend` per ADR-0053 § 3.
 //!
 //! Dispatch invokes [`Dataplane::deregister_local_backend`] for the
-//! `(vip, vip_port)` whose `LOCAL_BACKEND_MAP` entry should be
-//! removed. The trait contract pins idempotence — removing an entry
+//! `(vip, vip_port, proto)` whose registration should be removed. The
+//! single call performs the dual-removal (ADR-0053 rev 2026-06-05,
+//! DDD-5a): both the `LOCAL_BACKEND_MAP` forward entry AND its matching
+//! `REVERSE_LOCAL_MAP` reverse entry are removed (the adapter resolves
+//! the backend identity from the forward entry to key the reverse
+//! removal). The trait contract pins idempotence — removing an entry
 //! that does not exist is `Ok(())`, not an error.
 //!
 //! No correlation-driven follow-up is required at the shim level

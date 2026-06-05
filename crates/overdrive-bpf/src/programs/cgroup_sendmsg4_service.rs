@@ -24,32 +24,80 @@
 //! `cgroup_sock_addr` (ENOTSUPP ≤ 6.8). Correctness is a Tier-3-only
 //! gate (the unconnected round-trip) with the Tier-1 `SimDataplane`
 //! reply-path equivalence invariant as the structural defense below it.
-//!
-//! # RED scaffold (Slice 01 / S-01-01)
-//!
-//! Per the kernel-side RED convention (`programs/mod.rs`), the RED
-//! signal is the ABSENCE of the `#[cgroup_sock_addr(sendmsg4)]`
-//! attribute — `panic!`/`todo!` cannot expand cleanly inside the
-//! handler (the `panic_handler` is `loop {}`). Adding the attribute +
-//! the body is DELIVER's GREEN pass (Slice 01).
 
 #![allow(dead_code)]
 
-use aya_ebpf::programs::SockAddrContext;
+use aya_ebpf::{macros::cgroup_sock_addr, programs::SockAddrContext};
 
-/// `BPF_CGROUP_UDP4_SENDMSG` entry point. Returns 1 on every code path.
+use crate::maps::local_backend_map::{LOCAL_BACKEND_MAP, LocalServiceKey};
+use crate::shared::build_local_service_key::build_local_service_key_parts;
+
+/// `BPF_CGROUP_UDP4_SENDMSG` entry point. Returns 1 on every code path —
+/// the hook only rewrites the datagram destination; it never denies.
 ///
-/// RED scaffold: the `#[cgroup_sock_addr(sendmsg4)]` attribute is NOT
-/// yet present — that absence is the kernel-side RED signal. DELIVER
-/// adds the attribute and fills the body (Slice 01 GREEN): build key via
-/// the shared helper → own `LOCAL_BACKEND_MAP` lookup → own forward
-/// dest-rewrite → return 1.
-// __SCAFFOLD__ — add `#[cgroup_sock_addr(sendmsg4)]` in DELIVER (Slice 01 GREEN).
+/// The per-datagram forward analogue of `cgroup_connect4_service`: on
+/// any internal error the inner `try_*` body returns `Err(())` and we
+/// fall back to verdict 1 (allow the `sendmsg` unchanged). The hook is a
+/// same-host LB primitive, NOT a firewall — denying on internal error
+/// would break non-service traffic for processes that happen to live in
+/// the attach cgroup.
+#[cgroup_sock_addr(sendmsg4)]
 pub fn cgroup_sendmsg4_service(ctx: SockAddrContext) -> i32 {
-    // Allow-unchanged is the safe RED placeholder verdict: with no
-    // attribute the function is never invoked by the kernel; if it were,
-    // verdict 1 ("allow, no rewrite") is the non-denying default the
-    // hook contract requires. The forward rewrite lands in GREEN.
-    let _ = ctx;
-    1
+    try_cgroup_sendmsg4_service(&ctx).unwrap_or(1)
+}
+
+#[inline(always)]
+fn try_cgroup_sendmsg4_service(ctx: &SockAddrContext) -> Result<i32, ()> {
+    let sock_addr = ctx.sock_addr;
+
+    // Build the host-order `(addr, port, proto)` triple via the shared
+    // key-build helper — the single site handling the `user_port`
+    // low-16-NBO hazard (ADR-0053 § D4 / DDD-4, Option 3). The helper
+    // does key-build + NBO ONLY; sendmsg4's OWN `LOCAL_BACKEND_MAP`
+    // forward lookup and OWN forward DEST rewrite stay below (F-1: one
+    // helper must not serve both rewrite directions).
+    //
+    // SAFETY: aya's `SockAddrContext` exposes `*mut bpf_sock_addr`
+    // directly. The kernel guarantees the pointer is valid for the
+    // duration of the program invocation; the struct bounds are fixed by
+    // the in-tree UAPI definition. The helper reads `user_ip4` /
+    // `user_port` / `protocol` within that layout.
+    let parts = unsafe { build_local_service_key_parts(sock_addr) }?;
+
+    let key = LocalServiceKey {
+        vip_host: parts.addr_host,
+        port_host: parts.port_host,
+        proto: parts.proto_byte,
+        _pad: 0,
+    };
+
+    // SAFETY: `LOCAL_BACKEND_MAP.get(...)` is the canonical
+    // verifier-readable aya-ebpf map access shape. The verifier
+    // validates the bounded operation; the returned reference is valid
+    // for the duration of the program invocation.
+    let entry = unsafe { LOCAL_BACKEND_MAP.get(&key) };
+    let Some(entry) = entry else {
+        // Miss — allow the datagram unchanged (non-service traffic).
+        return Ok(1);
+    };
+
+    // Hit — forward DEST rewrite. Convert host-order map values back to
+    // network-order for the syscall context. `user_port`'s low 16 bits
+    // carry the network-byte-order port; widen the nbo u16 into the low
+    // 16 bits of the u32 (high 16 bits stay 0). Same NBO write idiom as
+    // connect4 (DDD-5e).
+    let backend_ip_nbo = entry.backend_ip_host.to_be();
+    let backend_port_nbo = u32::from(entry.backend_port_host.to_be());
+
+    // SAFETY: same as the read above — kernel-guaranteed struct layout.
+    // The verifier permits in-place writes to specific `bpf_sock_addr`
+    // fields documented as writable; `user_ip4` / `user_port` are both in
+    // that set per the kernel UAPI for the sendmsg4 attach type.
+    unsafe {
+        (*sock_addr).user_ip4 = backend_ip_nbo;
+        (*sock_addr).user_port = backend_port_nbo;
+    }
+
+    // Allow the datagram with rewritten destination.
+    Ok(1)
 }

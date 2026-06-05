@@ -207,6 +207,24 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - The application's `getpeername(2)` returns `backend`, not
     ///   `(vip, vip_port)`. Per Cilium ClusterIP semantics; see
     ///   ADR-0053 § "Consequences".
+    /// - **Dual-write — forward AND reverse (ADR-0053 rev 2026-06-05,
+    ///   DDD-1 / DDD-5a).** A single `register_local_backend` installs
+    ///   BOTH directions: the forward entry `(vip, vip_port, proto) →
+    ///   backend` (consumed by the `connect4`/`sendmsg4` forward DEST
+    ///   rewrite) AND the reverse entry `(backend.ip(), backend.port(),
+    ///   proto) → vip` (consumed by the `recvmsg4` reverse SOURCE
+    ///   rewrite that makes an UNCONNECTED same-host UDP reply carry the
+    ///   VIP as its `recvfrom` source, not the backend IP). The reverse
+    ///   entry is what lets a source-validating DNS resolver accept the
+    ///   reply. Both entries are present after the single call returns
+    ///   `Ok(())`.
+    /// - **Ordered reverse-first (DDD-1, F-2).** The reverse entry is
+    ///   upserted BEFORE the forward entry. This is an ORDERING
+    ///   guarantee across two map syscalls, NOT atomicity: the
+    ///   one-directional invariant is "no observer ever sees a forward
+    ///   entry without its matching reverse." A `connect`/`sendmsg`
+    ///   that the forward entry rewrites is therefore guaranteed a
+    ///   reverse entry is already in place for the reply.
     ///
     /// # Edge cases
     /// - Re-registration with the same `backend` is idempotent; the
@@ -217,6 +235,14 @@ pub trait Dataplane: Send + Sync + 'static {
     ///   syscall returning and the next `connect`).
     ///
     /// # Observable invariants
+    /// - **Every forward entry has a matching reverse entry
+    ///   (ADR-0053 rev 2026-06-05, DDD-5a).** For any
+    ///   `(vip, vip_port, proto)` present in the forward map after a
+    ///   `register_local_backend`, the reverse map carries
+    ///   `(backend.ip(), backend.port(), proto) → vip` for that same
+    ///   backend. The ordered reverse-first write makes this hold even
+    ///   mid-registration; no transient state exposes a forward entry
+    ///   whose reply would miss its reverse rewrite.
     /// - After `deregister_local_backend(vip, vip_port)`,
     ///   subsequent `connect(vip:vip_port)` reaches the kernel
     ///   without rewrite — the connect either succeeds against
@@ -270,6 +296,19 @@ pub trait Dataplane: Send + Sync + 'static {
     /// # Edge cases
     /// - Removing a `(vip, vip_port)` that was never registered
     ///   succeeds with no side effect.
+    /// - **Dual-removal — forward AND reverse (ADR-0053 rev
+    ///   2026-06-05, DDD-5a).** Deregistering removes BOTH the forward
+    ///   `(vip, vip_port, proto)` entry AND its matching reverse
+    ///   `(backend.ip(), backend.port(), proto) → vip` entry. The
+    ///   signature carries only `(vip, vip_port, proto)`, so the
+    ///   adapter resolves the backend identity by reading the forward
+    ///   entry BEFORE removing it, then removes the reverse entry keyed
+    ///   on that backend. The removal order preserves the
+    ///   no-forward-without-reverse invariant: the forward entry is
+    ///   removed first (so no `connect`/`sendmsg` can be rewritten
+    ///   toward a backend whose reverse entry is gone), then the
+    ///   reverse. A forward entry that was already absent removes
+    ///   nothing on either side (idempotent).
     /// - Concurrent `register_local_backend(vip, vip_port, b1)` +
     ///   `deregister_local_backend(vip, vip_port)` is not defined
     ///   to interleave at the adapter — callers must serialise.
