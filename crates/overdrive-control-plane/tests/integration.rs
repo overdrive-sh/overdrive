@@ -132,6 +132,11 @@ mod integration {
     /// exactly once. Real redb (journal + obs + intent) + real engine.
     pub mod workflow_e2e {
         mod reconciler_emit_drives_workflow_to_terminal;
+        // step 03-03 — a fixture trigger reconciler emits StartWorkflow for
+        // an EmittingWorkflow whose ctx.emit_action flows through the
+        // PRODUCTION emit-drain task into action_shim::dispatch, driving a
+        // second workflow to a terminal observation row.
+        mod workflow_emit_action_drives_through_production_composition;
     }
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {

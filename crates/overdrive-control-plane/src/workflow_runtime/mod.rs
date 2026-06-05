@@ -52,18 +52,21 @@ use overdrive_core::workflow::{
 
 use crate::journal::{JournalEntry, JournalStore, WorkflowId};
 
-/// The sender half of the engine's **Action channel** — the same channel
-/// the reconciler runtime consumes (→ Raft commit path). A
-/// `ctx.emit_action` hands its typed [`Action`] to this sender; the
-/// receiver (held by the runtime / a test harness) drains it into the
-/// `action_shim` dispatch path (ADR-0064 §4; `development.md` Workflow
-/// contract rule 6 — workflow→cluster mutations go through Raft, never a
-/// direct `IntentStore` write).
+/// The sender half of the engine's **Action channel** — the channel whose
+/// receiver the production `spawn_workflow_emit_drain` task forwards into
+/// the `action_shim` dispatch path (→ Raft commit path), exactly as a
+/// reconciler-emitted Action reaches the shim. A `ctx.emit_action` hands
+/// its typed [`Action`] to this sender (ADR-0064 §4; `development.md`
+/// Workflow contract rule 6 — workflow→cluster mutations go through Raft,
+/// never a direct `IntentStore` write).
 pub type ActionEmitSender = mpsc::UnboundedSender<Action>;
 
-/// The receiver half of the engine's Action channel. Drained by the
-/// reconciler runtime (production) or a test harness; every item is an
-/// [`Action`] a workflow emitted via `ctx.emit_action`.
+/// The receiver half of the engine's Action channel. In production the
+/// `spawn_workflow_emit_drain` task (the dedicated emit-drain task spawned
+/// in `run_server`) takes this receiver and drains every item into
+/// `action_shim::dispatch_with_workflow_intent`; a test harness may take it
+/// instead. Every item is an [`Action`] a workflow emitted via
+/// `ctx.emit_action`.
 pub type ActionEmitReceiver = mpsc::UnboundedReceiver<Action>;
 
 /// A factory producing a fresh [`Workflow`] trait object on demand. The
@@ -147,9 +150,11 @@ pub struct WorkflowEngine {
     /// The sender half of the **Action channel** (→ Raft) a workflow's
     /// `ctx.emit_action` sends on (ADR-0064 §4). Threaded into every
     /// instance's [`JournalCursorHandle`] so the live emit path hands the
-    /// typed Action to the SAME channel the reconciler runtime consumes —
-    /// NOT a direct `IntentStore` write. Mandatory at construction per
-    /// `.claude/rules/development.md` § "Port-trait dependencies".
+    /// typed Action to the channel the production `spawn_workflow_emit_drain`
+    /// task forwards into the SAME `action_shim` dispatch path a
+    /// reconciler-emitted Action takes — NOT a direct `IntentStore` write.
+    /// Mandatory at construction per `.claude/rules/development.md`
+    /// § "Port-trait dependencies".
     action_emit: ActionEmitSender,
     registry: Arc<WorkflowRegistry>,
     /// Tracked task set for live instances — the engine owns it the same
@@ -173,10 +178,11 @@ pub struct WorkflowEngine {
     /// consumer takes it via [`Self::take_action_emit_receiver`]. The
     /// engine owns BOTH halves so [`Self::new`]'s signature stays
     /// unchanged (the emit channel is an engine-internal wiring detail,
-    /// not a constructor dependency); the runtime / a test harness takes
-    /// the receiver once after construction and drains emitted Actions
-    /// into the `action_shim` dispatch path. `Mutex<Option<..>>` so the
-    /// take is `&self` and single-shot.
+    /// not a constructor dependency); in production the dedicated
+    /// `spawn_workflow_emit_drain` task takes the receiver once at boot
+    /// and drains emitted Actions into the `action_shim` dispatch path (a
+    /// test harness may take it instead). `Mutex<Option<..>>` so the take
+    /// is `&self` and single-shot.
     action_emit_rx: Mutex<Option<ActionEmitReceiver>>,
 }
 
@@ -218,11 +224,13 @@ impl WorkflowEngine {
 
     /// Take the receiver half of the engine's Action channel. Single-shot:
     /// the first caller receives `Some(receiver)`, subsequent callers
-    /// receive `None`. The consumer (the reconciler runtime in production,
-    /// or a test harness) drains emitted Actions into the `action_shim`
-    /// dispatch path (→ Raft). Per ADR-0064 §4 this is the SAME channel
-    /// path the runtime already commits reconciler-emitted Actions through;
-    /// `ctx.emit_action` reuses it rather than bypassing Raft.
+    /// receive `None`. The consumer drains emitted Actions into the
+    /// `action_shim` dispatch path (→ Raft). In production the consumer is
+    /// the dedicated `spawn_workflow_emit_drain` task spawned in
+    /// `run_server`; a test harness may take it instead. Per ADR-0064 §4
+    /// the drain forwards each emitted Action into the SAME
+    /// `action_shim::dispatch_with_workflow_intent` path a reconciler-emitted
+    /// Action takes; `ctx.emit_action` reuses it rather than bypassing Raft.
     pub async fn take_action_emit_receiver(&self) -> Option<ActionEmitReceiver> {
         self.action_emit_rx.lock().await.take()
     }
@@ -387,9 +395,11 @@ pub struct JournalCursorHandle {
     /// every live record. Interior-mutable so `&self` ctx ops can move it.
     cursor: Mutex<usize>,
     /// The sender half of the engine's Action channel (→ Raft). The live
-    /// `ctx.emit_action` path sends the typed Action here — the SAME
-    /// channel the reconciler runtime consumes, NOT a direct `IntentStore`
-    /// write (ADR-0064 §4; `development.md` Workflow contract rule 6).
+    /// `ctx.emit_action` path sends the typed Action here — the channel the
+    /// production `spawn_workflow_emit_drain` task forwards into the SAME
+    /// `action_shim` dispatch path a reconciler-emitted Action takes, NOT a
+    /// direct `IntentStore` write (ADR-0064 §4; `development.md` Workflow
+    /// contract rule 6).
     ///
     /// `None` for the 3-arg [`new`](Self::new) handle used by the DST
     /// replay-equivalence harness (which drives `ctx.run` / `ctx.sleep`
@@ -697,8 +707,10 @@ impl JournalCursor for JournalCursorHandle {
         // `development.md` § "Persist inputs, not derived state".
         let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         let action_digest = ContentHash::of(format!("{action:?}").as_bytes());
-        // Send the typed Action on the Action channel (→ Raft) — the SAME
-        // channel the reconciler runtime consumes, NEVER a direct
+        // Send the typed Action on the Action channel (→ Raft) — the
+        // channel the production `spawn_workflow_emit_drain` task forwards
+        // into the SAME `action_shim` dispatch path a reconciler-emitted
+        // Action takes, NEVER a direct
         // IntentStore write. The send is BEFORE the durable record so the
         // ActionEmitted entry implies the Action reached the channel. A
         // handle with no channel wired (the 3-arg DST-harness `new`) drops

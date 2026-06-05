@@ -769,6 +769,14 @@ pub struct ServerHandle {
     /// Without this, `await exit_observer_task` would block
     /// indefinitely on `rx.recv()`. With it, shutdown is bounded.
     exit_observer_task: tokio::task::JoinHandle<()>,
+    /// `JoinHandle` for the workflow emit-drain task — the production
+    /// consumer of the [`workflow_runtime::WorkflowEngine`]'s Action
+    /// channel. It takes the channel receiver once at boot and forwards
+    /// every `ctx.emit_action`'d [`Action`](overdrive_core::reconcilers::Action)
+    /// into [`action_shim::dispatch_with_workflow_intent`] (→ Raft). Per
+    /// ADR-0064 §4 / brief.md §92; spawned in
+    /// [`run_server_with_obs_and_driver`].
+    emit_drain_task: tokio::task::JoinHandle<()>,
     /// Token observed by the convergence-tick spawn loop. Cancelled
     /// in [`Self::shutdown`] BEFORE axum graceful so reconciler tasks
     /// holding `Arc<dyn Driver>` references stop driving the driver
@@ -780,6 +788,12 @@ pub struct ServerHandle {
     /// driven by an in-flight `Driver::stop` lands in obs before the
     /// observer is told to exit.
     exit_observer_shutdown: CancellationToken,
+    /// Token observed by the workflow emit-drain task's `tokio::select!`
+    /// loop. Cancelled in [`Self::shutdown`] alongside the convergence
+    /// loop — the drain task holds an `AppState` clone (and through it
+    /// `Arc<dyn Driver>` references), so it must stop dispatching emitted
+    /// Actions before axum tears down `AppState`.
+    emit_drain_shutdown: CancellationToken,
 }
 
 impl ServerHandle {
@@ -813,6 +827,15 @@ impl ServerHandle {
         //    `action_shim::dispatch`.
         self.convergence_shutdown.cancel();
         let _ = self.convergence_task.await;
+
+        // 1b. Cancel the workflow emit-drain loop and await its
+        //     completion. It holds an `AppState` clone (and through it
+        //     `Arc<dyn Driver>` references), so — like the convergence
+        //     loop — it must stop dispatching emitted Actions before axum
+        //     tears down `AppState`. The join waits for any in-flight
+        //     dispatch of an emitted Action to finish through the shim.
+        self.emit_drain_shutdown.cancel();
+        let _ = self.emit_drain_task.await;
 
         // 2. Trigger axum graceful shutdown. In-flight requests
         //    complete within `drain_deadline`; new connections are
@@ -1568,6 +1591,21 @@ pub async fn run_server_with_obs_and_driver(
         convergence_shutdown.clone(),
     );
 
+    // Spawn the workflow emit-drain task (ADR-0064 §4; brief.md §92).
+    // This is the production CONSUMER of the engine's Action channel —
+    // it takes the receiver once and forwards every `ctx.emit_action`'d
+    // Action into the SAME `action_shim::dispatch_with_workflow_intent`
+    // path a reconciler-emitted Action takes (→ Raft). Without this spawn,
+    // an emitted Action would be undrained in production — sent on the
+    // engine's channel but never reaching the commit path (the gap step
+    // 03-03 closes). Phase 1 has no first-party emit producer (#206 CLI
+    // verb + Phase-3 consumers are the future producers), so the drain is
+    // idle until an emitting workflow runs; the wiring is what makes the
+    // emit path complete end-to-end.
+    let emit_drain_shutdown = CancellationToken::new();
+    let emit_drain_task =
+        spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
+
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -1619,8 +1657,10 @@ pub async fn run_server_with_obs_and_driver(
         server_task,
         convergence_task,
         exit_observer_task,
+        emit_drain_task,
         convergence_shutdown,
         exit_observer_shutdown,
+        emit_drain_shutdown,
     })
 }
 
@@ -1699,6 +1739,100 @@ fn spawn_convergence_loop(
 
             tokio::select! {
                 () = clock.sleep(cadence) => {},
+                () = shutdown.cancelled() => break,
+            }
+        }
+    })
+}
+
+/// Spawn the workflow emit-drain task — the production consumer of the
+/// [`WorkflowEngine`]'s Action channel (ADR-0064 §4; brief.md §92).
+///
+/// Step 03-01 built `ctx.emit_action` so an emitting workflow SENDS its
+/// typed [`Action`] on the engine-owned Action channel, but the channel
+/// receiver was never taken in production — so an emitted Action was
+/// undrained, never reaching the action-shim/Raft commit path. This task
+/// closes that gap: it takes the receiver ONCE (single-shot per
+/// [`WorkflowEngine::take_action_emit_receiver`]) and, for each emitted
+/// [`Action`], forwards it into the SAME production dispatch path a
+/// reconciler-emitted Action takes —
+/// [`action_shim::dispatch_with_workflow_intent`] threaded the real engine
+/// from `state.workflow_engine`. NOT a direct `IntentStore` write, NOT a
+/// parallel undrained channel: the emit reaches Raft through the action
+/// shim exactly as `development.md` § "Workflow contract" rule 6 requires.
+///
+/// The per-Action [`TickContext`] is constructed from the SAME injected
+/// [`Clock`](overdrive_core::traits::clock::Clock) the convergence loop
+/// sources — `state.clock` — never `SystemTime::now()` (dst-lint
+/// enforces). An emitted `StartWorkflow` therefore re-enters the shim's
+/// `StartWorkflow` arm off the engine, an emitted cluster mutation reaches
+/// the same write path, etc. — the emit is a first-class action on the
+/// production commit path.
+///
+/// Cancellation via `shutdown` is observed in `tokio::select!` between
+/// drained items so an in-flight dispatch always completes before exit;
+/// the task also exits when the channel closes (the engine is dropped).
+///
+/// If the receiver was already taken (e.g. a test harness took it first),
+/// the task is a no-op and returns immediately — the single-shot take
+/// yields `None`.
+pub fn spawn_workflow_emit_drain(
+    state: AppState,
+    clock: Arc<dyn overdrive_core::traits::clock::Clock>,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    use overdrive_core::UnixInstant;
+    use overdrive_core::reconcilers::TickContext;
+    tokio::spawn(async move {
+        // Single-shot take of the engine's Action-channel receiver. The
+        // engine owns BOTH halves; this is the production consumer taking
+        // the receiver exactly once at boot.
+        let Some(mut rx) = state.workflow_engine.take_action_emit_receiver().await else {
+            // Already taken (no production producer wired, or a test took
+            // it first). Nothing to drain.
+            return;
+        };
+        let mut tick_n: u64 = 0;
+        loop {
+            tokio::select! {
+                maybe_action = rx.recv() => {
+                    let Some(action) = maybe_action else {
+                        // Channel closed — the engine (and thus every
+                        // sender clone) was dropped. No more emits will
+                        // arrive; exit cleanly.
+                        break;
+                    };
+                    // Build a fresh per-Action TickContext from the injected
+                    // Clock — the same shape `run_convergence_tick` uses, so
+                    // the forwarded Action sees a consistent wall-clock
+                    // snapshot. `now_unix` recomputed each item.
+                    let now = clock.now();
+                    let now_unix = UnixInstant::from_clock(&*clock);
+                    let tick = TickContext {
+                        now,
+                        now_unix,
+                        tick: tick_n,
+                        deadline: now + Duration::from_secs(1),
+                    };
+                    tick_n = tick_n.saturating_add(1);
+                    // Forward the emitted Action into the SAME production
+                    // dispatch path a reconciler-emitted Action takes (→
+                    // Raft). A dispatch error is logged and the drain
+                    // continues — one bad emit must not stall the channel.
+                    if let Err(e) = action_shim::dispatch_with_workflow_intent(
+                        vec![action],
+                        &state,
+                        &tick,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            target: "overdrive::workflow_engine",
+                            ?e,
+                            "workflow emit-drain: dispatch of an emitted Action failed",
+                        );
+                    }
+                }
                 () = shutdown.cancelled() => break,
             }
         }
