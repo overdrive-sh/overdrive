@@ -722,7 +722,7 @@ impl EbpfDataplane {
             .map_err(|e| {
                 DataplaneError::LoadFailed(format!("cgroup_sendmsg4_service program type: {e}"))
             })?;
-        sendmsg4_prog.load().map_err(|e| cgroup_attach_error("cgroup_sendmsg4_service", &e))?;
+        sendmsg4_prog.load().map_err(|e| cgroup_load_error("cgroup_sendmsg4_service", &e))?;
         // ADR-0053 D5b/c — the attach() syscall IS the below-floor
         // preflight: a host below the sendmsg4 floor (< 4.18) rejects this
         // attach (EOPNOTSUPP/ENOSYS). Route through the typed
@@ -744,7 +744,7 @@ impl EbpfDataplane {
             .map_err(|e| {
                 DataplaneError::LoadFailed(format!("cgroup_recvmsg4_service program type: {e}"))
             })?;
-        recvmsg4_prog.load().map_err(|e| cgroup_attach_error("cgroup_recvmsg4_service", &e))?;
+        recvmsg4_prog.load().map_err(|e| cgroup_load_error("cgroup_recvmsg4_service", &e))?;
         // ADR-0053 D5b/c — the attach() syscall IS the below-floor
         // preflight: a host below the recvmsg4 floor (< 4.20) rejects this
         // attach (EOPNOTSUPP/ENOSYS). Route through the typed
@@ -1664,6 +1664,18 @@ fn cgroup_attach_error(hook: &'static str, error: &aya::programs::ProgramError) 
     DataplaneError::CgroupSendRecvAttach { hook, source }
 }
 
+/// Build the typed [`DataplaneError::LoadFailed`] for a failed
+/// `load()` of an unconnected-UDP cgroup hook. A load failure is a
+/// BPF program-correctness problem (verifier rejection, missing
+/// program, capability gap) — NOT the below-floor attach refusal
+/// `cgroup_attach_error` / `CgroupSendRecvAttach` is reserved for
+/// (ADR-0053 D5b/c: the attach() syscall is the kernel-version
+/// oracle, not load()). Mirrors the `cgroup_connect4_service.load`
+/// inline mapping.
+fn cgroup_load_error(hook: &'static str, error: &aya::programs::ProgramError) -> DataplaneError {
+    DataplaneError::LoadFailed(format!("{hook}.load: {error}"))
+}
+
 #[async_trait]
 #[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
@@ -2549,5 +2561,88 @@ mod tests {
             rendered.contains("client_iface != backend_iface"),
             "Display must carry the client_iface != backend_iface remediation hint: {rendered}"
         );
+    }
+
+    // ----- load() vs attach() error routing for the unconnected-UDP
+    //       cgroup hooks (ADR-0053 D5b/c, GH #200) -----
+    //
+    // A `load()` failure on `cgroup_sendmsg4_service` / `cgroup_recvmsg4_service`
+    // is a BPF program-correctness problem (verifier regression, missing
+    // program, capability gap) — NOT the attach-time below-floor kernel
+    // refusal `CgroupSendRecvAttach` is reserved for. Routing a `load()`
+    // failure through `cgroup_attach_error` would tell the operator "the
+    // attach() syscall is the kernel-version oracle" for a problem that has
+    // nothing to do with the kernel floor.
+    //
+    // There is no Tier-2 backstop (`BPF_PROG_TEST_RUN` returns ENOTSUPP for
+    // `cgroup_sock_addr` programs) and a real `load()` failure cannot be
+    // forced on the 5.10+ Lima matrix, so these default-lane unit tests on
+    // the two error-construction helpers ARE the structural defense against
+    // the call-site routing regressing. Each pins the variant its helper
+    // selects; together they lock both helpers' contracts so a future swap
+    // of `load()` back onto `cgroup_attach_error` flips an assertion here.
+
+    /// `cgroup_load_error` builds a [`DataplaneError::LoadFailed`] — the
+    /// program-correctness variant — NOT the kernel-floor-reserved
+    /// `CgroupSendRecvAttach`. The message names the hook and `load` so all
+    /// three cgroup hooks (`connect4`, `sendmsg4`, `recvmsg4`) read
+    /// identically in logs.
+    #[test]
+    fn cgroup_load_error_yields_load_failed_not_attach_refusal() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_prog_load",
+            io_error: io::Error::from_raw_os_error(libc::E2BIG),
+        });
+        let built = super::cgroup_load_error("cgroup_sendmsg4_service", &err);
+
+        assert!(
+            !matches!(built, DataplaneError::CgroupSendRecvAttach { .. }),
+            "a load() failure must NOT route through the attach-time \
+             below-floor variant: {built:?}"
+        );
+        match built {
+            DataplaneError::LoadFailed(message) => {
+                assert!(
+                    message.contains("cgroup_sendmsg4_service"),
+                    "LoadFailed message must name the hook: {message}"
+                );
+                assert!(
+                    message.contains("load"),
+                    "LoadFailed message must name the load() phase: {message}"
+                );
+            }
+            other => panic!("expected DataplaneError::LoadFailed(_), got {other:?}"),
+        }
+    }
+
+    /// `cgroup_attach_error` (the attach path, unchanged) builds the typed
+    /// [`DataplaneError::CgroupSendRecvAttach`] carrying the offending
+    /// hook. Pinned alongside the `load()` test so the two helpers'
+    /// contracts are both locked — `attach()` genuinely IS the below-floor
+    /// oracle per ADR-0053 D5b/c.
+    #[test]
+    fn cgroup_attach_error_yields_send_recv_attach_with_hook() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_prog_attach",
+            io_error: io::Error::from_raw_os_error(libc::EOPNOTSUPP),
+        });
+        let built = super::cgroup_attach_error("cgroup_recvmsg4_service", &err);
+
+        match built {
+            DataplaneError::CgroupSendRecvAttach { hook, .. } => {
+                assert_eq!(hook, "cgroup_recvmsg4_service");
+            }
+            other => {
+                panic!("expected DataplaneError::CgroupSendRecvAttach {{ .. }}, got {other:?}")
+            }
+        }
     }
 }
