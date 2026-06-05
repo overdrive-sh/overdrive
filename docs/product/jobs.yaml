@@ -442,3 +442,21 @@ changelog:
       journal-store tension (libSQL vs redb, given ADR-0035 moved the
       reconciler primitive off libSQL). served_by_phase: 3. Existing
       entries unmodified.
+  - date: 2026-06-05
+    change: >
+      workflow-primitive DISCUSS wave (J-PLAT-005, no re-derivation of the
+      job — JTBD validated in DIVERGE). JTBD-to-Story bridge: the six ODI
+      outcomes O1-O6 are mapped onto the user stories US-WP-1..US-WP-5 (see
+      docs/feature/workflow-primitive/feature-delta.md). Created the
+      platform-engineer persona docs/product/personas/devon-platform-engineer.yaml
+      (NEW persona kind — platform-internal author + operator, distinct from
+      the app-developer/evaluator J-DOCS personas) and the journey
+      docs/product/journeys/author-a-durable-workflow.yaml. SCOPE
+      back-propagation: J-PLAT-005 outcome O2 ("no lost committed step on
+      cross-node resume") is a multi-node property; the codebase is Phase-1
+      single-node, so DISCUSS scopes the IN-SCOPE core to single-node
+      crash-resume (kill the process, restart, resume from the redb
+      journal) and surfaces cross-node resume as a sequencing dependency on
+      HA/multi-node (tracked in GH #205) — NOT promised in any Phase-1
+      acceptance criterion. The job statement itself (served_by_phase: 3) is
+      unchanged. Existing entries unmodified.

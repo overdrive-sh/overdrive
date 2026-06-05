@@ -1,0 +1,104 @@
+schema_version: 1
+
+# Persona for the workflow-primitive feature (GH #39, J-PLAT-005).
+# This is a NEW persona KIND vs maya-agent-developer / priya-evaluator:
+# those two are app-developer / evaluator facing (docs-platform). Devon is
+# a PLATFORM ENGINEER working INSIDE the Overdrive codebase — the author of
+# first-party durable sequences (cert rotation, region migration, staged
+# rollout). The "user" of the workflow primitive is not an end user; it is
+# the platform engineer who writes `async fn run(ctx)` and the operator who
+# observes a running instance. Origin: workflow-primitive DISCUSS (2026-06-05).
+#
+# Two actors live here: the WORKFLOW AUTHOR (Devon, primary — O3 authoring
+# ergonomics) and the OPERATOR (Ana, secondary — observe/inspect a running
+# or terminal instance). Both are platform engineers; the split is by task,
+# not by job title.
+
+persona:
+  id: devon-platform-engineer
+  name: "Devon Reyes"
+  role: "Overdrive platform engineer authoring first-party durable control-plane sequences"
+  one_liner: >
+    Writes the platform's own lifecycle operations — certificate rotation,
+    multi-stage deployment, cross-region migration, staged rollout, microVM
+    snapshot/restore coordination — directly in the Overdrive codebase in
+    Rust. Wants to express a finite, ordered, side-effecting sequence as
+    ordinary `async fn` control flow and trust that the platform persists
+    its progress and resumes it exactly-once after a crash, without
+    hand-rolling a state machine, a step cursor, and a crash-resume proof
+    for every sequence.
+
+  characteristics:
+    - "Distributed-systems / SRE background; same engineer profile as Ana (trust-the-sim, submit-a-job)"
+    - "Already writes reconcilers against the DST harness — fluent in `reconcile() -> (Vec<Action>, View)` and ESR invariants"
+    - "Has hand-rolled at least one crash-resumable state machine before and hated it — knows the bug surface intimately"
+    - "Trusts a property under DST far more than a property under code review"
+    - "Will not adopt a primitive whose correctness she cannot demonstrate from a seed before shipping"
+    - "Allergic to a second persistence/recovery mechanism she has to operate and verify (O6)"
+
+  secondary_actor:
+    name: "Ana — operator observing a running/terminal workflow instance"
+    behavior: >
+      Once a durable sequence is running, Ana needs to answer 'is this cert
+      rotation still in flight, did it complete, or did it fail — and at
+      which step?' She observes it the way she observes everything else in
+      Phase 1: through the ObservationStore rows and structured lifecycle
+      events the workflow-lifecycle reconciler emits. NOTE: the `overdrive`
+      CLI ships NO `workflow` subcommand today (cli.rs has only deploy / job
+      / node / alloc / cluster) — Ana's observable surface in this feature
+      is the ObservationStore row + structured event, NOT a new CLI verb. An
+      operator-facing `overdrive workflow` verb is a surfaced forward
+      concern (see feature-delta § Deferrals), not in scope here.
+
+  context:
+    surface: "The Overdrive Rust workspace — Devon authors a `Workflow` trait impl; Ana reads ObservationStore rows / lifecycle events"
+    entry_points:
+      - "Devon writes `impl Workflow for CertRotation { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult { ... } }`"
+      - "A reconciler emits `Action::StartWorkflow { spec, correlation }`; the workflow-lifecycle reconciler brings the instance up"
+      - "Ana reads the instance's terminal result / current step from the ObservationStore (no CLI verb yet)"
+    triggers:
+      - "Devon needs cert rotation to survive a control-plane crash mid-ACME-handshake without re-issuing the CSR"
+      - "Devon needs to PROVE, before merge, that the resume path reaches the same terminal result the uninterrupted path would have (O5, DST)"
+      - "Ana needs to know whether a running migration is stuck, done, or failed"
+
+  motivations:
+    functional: >
+      Express a side-effecting sequence as ordinary control flow; have the
+      platform journal each await-point in redb, resume from the first
+      incomplete step after a crash, and reach a single terminal result
+      exactly-once — no repeated external effect, no lost committed step.
+    emotional: >
+      Trust that a half-finished cert rotation or region migration will not
+      silently corrupt or double-execute when the node running it dies — the
+      same DST-backed confidence she already has about reconcilers, extended
+      to terminal sequences.
+    social: >
+      Make 'Overdrive's orchestration is mechanically-checked, not
+      hand-rolled' a true and defensible claim that does not stop at the
+      reconciler boundary.
+
+  emotional_arc:
+    start: "Wary — 'durable execution is a famous bug swamp; every step I write is a place a crash can corrupt or double-execute. I have hand-rolled this before and it was awful.'"
+    middle: "Focused then reassured — she writes one ordinary `async fn run(ctx)` with one durable `ctx` operation; the journal row appears in redb at the await point; she kills the process mid-run under DST, restarts, and watches the completed step NOT repeat."
+    end: "Trusting — 'the resume replays the journal to the same terminal result, the DST harness proves replay-equivalence from a seed before I ship, and it reuses the redb substrate I already operate. This is as trustworthy as my reconcilers.'"
+
+  frustrations_to_avoid:
+    - "A durable operation that re-runs a completed side effect after resume (re-issues the CSR, double-quiesces the region) — the core O1 failure"
+    - "A committed step's result lost on resume — the core O2 failure"
+    - "Having to hand-write a step-cursor enum + transition match instead of ordinary control flow (the O3 authoring tax this primitive exists to remove)"
+    - "A resume path she can only validate by code review, not by a seeded DST replay (O5)"
+    - "A second persistence/recovery engine (libSQL journal) bolted on beside the redb ViewStore she already runs (O6)"
+    - "An @infrastructure engine she cannot observe — no terminal result visible anywhere, no DST evidence"
+    - "A Phase-1 slice that silently promises cross-node resume (O2) when the codebase is single-node and cannot honour it"
+
+  success_signals:
+    - "She authors a durable sequence as one `async fn run(ctx)` — no step enum, no transition match (O3)"
+    - "A journal row lands in redb at each await-point; resume reads it and skips the completed step (O1)"
+    - "A `replay_equivalence_*` DST invariant proves resume == uninterrupted from a seed, on the CI critical path, before she ships (O5)"
+    - "The terminal result is observable in the ObservationStore (the instance reached a typed terminal)"
+    - "The journal lives in the same redb substrate as the reconciler ViewStore — one mechanism (O6)"
+
+  related_jobs: [J-PLAT-005]
+  related_personas:
+    - id: priya-evaluator
+      relation: "House-style reference only — Priya is evaluator-facing; Devon is platform-internal. Different job kind."
