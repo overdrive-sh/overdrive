@@ -225,6 +225,21 @@ fn unconnected_sendto_recvfrom_reads_vip_sourced_reply() {
          got {} — without recvmsg4 a source-validating resolver discards this reply",
         src.ip()
     );
+    // Cross-port reply-source assertion (fix-recvmsg4-reply-source-port,
+    // ADR-0053 §D4): the source PORT the app reads MUST be VIP_PORT, not
+    // the backend's listening port. For a cross-port service (VIP:53 →
+    // backend:!53) a source-validating resolver discards a reply whose
+    // source port != the queried port. RED pending step 01-02 — the
+    // kernel recvmsg4 program currently restores only user_ip4 and drops
+    // the source port (cgroup_recvmsg4_service.rs:156-158).
+    assert_eq!(
+        src.port(),
+        VIP_PORT,
+        "recvfrom source PORT MUST be the VIP port {VIP_PORT} (recvmsg4 reverse \
+         source-PORT rewrite, §D4), got {} — the kernel restored user_ip4 but DROPPED \
+         user_port; a source-validating resolver (Unbound/BIND) discards this reply",
+        src.port()
+    );
 
     drop(dataplane);
 }
@@ -307,6 +322,14 @@ fn second_unconnected_query_reuses_same_mapping_statelessly() {
     })
     .expect("first unconnected query round-trip");
     assert_eq!(*first_src.ip(), VIP, "first reply source == VIP");
+    // Cross-port: first reply source PORT == VIP_PORT (RED pending 01-02).
+    assert_eq!(
+        first_src.port(),
+        VIP_PORT,
+        "first reply source PORT MUST be the VIP port {VIP_PORT} (recvmsg4 §D4 \
+         source-PORT rewrite); got {} — kernel dropped user_port",
+        first_src.port()
+    );
 
     // Second query for a DIFFERENT name, immediately after, from a fresh
     // unconnected socket — served by the SAME entries (point-lookup), no
@@ -327,6 +350,14 @@ fn second_unconnected_query_reuses_same_mapping_statelessly() {
         "second reply source MUST again be the VIP {VIP} — same REVERSE_LOCAL_MAP entry, \
          no per-flow state; got {}",
         second_src.ip()
+    );
+    // Cross-port: second reply source PORT == VIP_PORT (RED pending 01-02).
+    assert_eq!(
+        second_src.port(),
+        VIP_PORT,
+        "second reply source PORT MUST again be the VIP port {VIP_PORT} — same widened \
+         REVERSE_LOCAL_MAP entry carries the VIP port (§D4); got {} — kernel dropped user_port",
+        second_src.port()
     );
 
     drop(dataplane);
@@ -411,6 +442,20 @@ fn kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity() {
         "Tier-3 prong: recvfrom source MUST be the VIP {VIP} (kernel recvmsg4 reverse \
          source rewrite), got {} — removing the kernel reply rewrite reads the backend IP here",
         src.ip()
+    );
+    // Tier-3 prong, cross-port source-PORT (fix-recvmsg4-reply-source-port,
+    // §D4): the app-visible recvfrom source PORT MUST be VIP_PORT, not the
+    // backend's listening port. This is the genuine RED prong against the
+    // REAL kernel program (the clause (2) reverse-map dump only carries an
+    // IP-only value until 01-02 widens it). RED pending 01-02 — the kernel
+    // restores user_ip4 only and drops user_port.
+    assert_eq!(
+        src.port(),
+        VIP_PORT,
+        "Tier-3 prong: recvfrom source PORT MUST be the VIP port {VIP_PORT} (kernel \
+         recvmsg4 §D4 source-PORT rewrite), got {} — the kernel restored user_ip4 but \
+         DROPPED user_port; the backend bound off :53 so this is observably the backend port",
+        src.port()
     );
 
     // ---- The shared backend identity. Both prongs key on EXACTLY this

@@ -184,7 +184,7 @@ fn poll_until<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T
 /// reply. recvmsg4 fires on this recv (cgroup-ancestor attach) and MUST be
 /// a pure no-op on the `REVERSE_LOCAL_MAP` miss — the source the app reads
 /// MUST be the real `peer` address, byte-for-byte.
-fn non_service_exchange(payload: &[u8]) -> Option<([u8; 64], usize, SocketAddrV4)> {
+fn non_service_exchange(payload: &[u8]) -> Option<([u8; 64], usize, SocketAddrV4, SocketAddrV4)> {
     // The peer is a plain echo server on a free ephemeral port — its
     // address is NOT in REVERSE_LOCAL_MAP, so its reply is a miss.
     let peer = spawn_udp_echo(1);
@@ -198,8 +198,9 @@ fn non_service_exchange(payload: &[u8]) -> Option<([u8; 64], usize, SocketAddrV4
         std::net::SocketAddr::V6(_) => return None,
     };
     // Real sender source MUST be the peer we sent to — recvmsg4 left it
-    // untouched on the miss.
-    Some((buf, n, src_v4))
+    // untouched on the miss. Return `peer` alongside the observed source
+    // so the caller can pin BOTH IP and PORT as byte-for-byte unchanged.
+    Some((buf, n, src_v4, peer))
 }
 
 /// S-03-01 — recvmsg4 no-op-on-miss: non-service unconnected UDP reads its
@@ -246,9 +247,9 @@ fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
         dataplane.reverse_local_miss_count().expect("dump REVERSE_LOCAL_MISS_COUNTER (before)");
 
     let probe_ns = b"non-service-unconnected-udp";
-    let (buf_ns, n_ns, ns_src) = poll_until(Duration::from_secs(2), || {
-        let (buf, n, src) = non_service_exchange(probe_ns)?;
-        (&buf[..n] == probe_ns).then_some((buf, n, src))
+    let (buf_ns, n_ns, ns_src, ns_peer) = poll_until(Duration::from_secs(2), || {
+        let (buf, n, src, peer) = non_service_exchange(probe_ns)?;
+        (&buf[..n] == probe_ns).then_some((buf, n, src, peer))
     })
     .expect("non-service unconnected UDP exchange did not round-trip within 2s");
     assert_eq!(&buf_ns[..n_ns], probe_ns, "non-service echo payload integrity");
@@ -277,6 +278,28 @@ fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
         Ipv4Addr::new(192, 0, 2, 1),
         "non-service recvfrom source must NOT be the rejected sentinel 192.0.2.1 — \
          no sentinel rewrite exists on the miss path (UI-1)"
+    );
+    // Cross-port no-op-on-miss (fix-recvmsg4-reply-source-port, §D4): the
+    // miss path must never rewrite the source PORT either. The real
+    // sender's port is byte-for-byte unchanged — it equals the peer we
+    // actually sent to, and it is NEVER rewritten to VIP_PORT. A miss-path
+    // source-port rewrite (the inverse of the cross-port HIT rewrite) would
+    // corrupt every non-service datagram's sender port. This stays GREEN —
+    // the recvmsg4 miss path is already a pure no-op (01-03); the
+    // assertion guards 01-02's HIT-only port rewrite from leaking onto it.
+    assert_eq!(
+        ns_src.port(),
+        ns_peer.port(),
+        "non-service recvfrom source PORT MUST be the REAL sender's port {} (left untouched \
+         by the recvmsg4 no-op-on-miss) — got {}; a miss-path source-PORT rewrite would corrupt it",
+        ns_peer.port(),
+        ns_src.port()
+    );
+    assert_ne!(
+        ns_src.port(),
+        VIP_PORT,
+        "non-service recvfrom source PORT must NOT be rewritten to the VIP port {VIP_PORT} on a \
+         miss — the §D4 source-PORT rewrite is HIT-only and must never touch the miss path"
     );
 
     // ---- Assertion (c), part 1 — the miss counter incremented on the
@@ -310,6 +333,19 @@ fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
         "service reply recvfrom source MUST be the VIP {VIP} (recvmsg4 HIT reverse rewrite) — \
          got {}; the registered backend always hits, so no backend IP ever reaches the app",
         svc_src.ip()
+    );
+    // Cross-port service-reply source-PORT (fix-recvmsg4-reply-source-port,
+    // §D4): on a HIT the app-visible source PORT MUST be VIP_PORT, not the
+    // backend's listening port (the backend bound off :53 above). RED
+    // pending 01-02 — the kernel recvmsg4 HIT rewrites user_ip4 only and
+    // drops user_port; a source-validating resolver would reject this reply.
+    assert_eq!(
+        svc_src.port(),
+        VIP_PORT,
+        "service reply recvfrom source PORT MUST be the VIP port {VIP_PORT} (recvmsg4 HIT \
+         §D4 source-PORT rewrite) — got {}; the kernel restored user_ip4 but DROPPED user_port, \
+         leaking the backend port to the app",
+        svc_src.port()
     );
 
     drop(dataplane);

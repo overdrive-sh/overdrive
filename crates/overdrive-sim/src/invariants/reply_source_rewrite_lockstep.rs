@@ -49,8 +49,8 @@ use crate::harness::{InvariantResult, InvariantStatus};
 ///    backend, Udp)` — the unconnected-UDP shape.
 /// 2. After each register, assert
 ///    `reply_source_for(BackendKey(backend_ip, backend_port, udp)) ==
-///    Some(vip)` for every registered backend (the reply source the app
-///    would read is the VIP).
+///    Some((vip, vip_port))` for every registered backend (the reply
+///    source the app would read is `(VIP, VIP_PORT)` — IP AND port).
 /// 3. Deregister one service; assert its reply-mirror entry is purged
 ///    (no orphan reverse mapping leaks).
 /// 4. Re-register it; assert the reply-mirror entry reappears with the
@@ -165,11 +165,15 @@ async fn check_coresident_proto_teardown(dataplane: &SimDataplane) -> Option<Str
         }
     }
 
-    // Pre-teardown: both protos' reply-mirror keys present → vip.
+    // Pre-teardown: both protos' reply-mirror keys present → (vip,
+    // vip_port).
+    let expected_src = SocketAddrV4::new(vip, vip_port);
     for proto in [Proto::Tcp, Proto::Udp] {
         let key = BackendKey::new(*backend.ip(), backend.port(), proto);
-        if dataplane.reply_source_for(key) != Some(vip) {
-            return Some(format!("co-resident pre-teardown: reply_source_for({key}) != {vip}"));
+        if dataplane.reply_source_for(key) != Some(expected_src) {
+            return Some(format!(
+                "co-resident pre-teardown: reply_source_for({key}) != {expected_src}"
+            ));
         }
     }
 
@@ -186,7 +190,7 @@ async fn check_coresident_proto_teardown(dataplane: &SimDataplane) -> Option<Str
         ));
     }
     let tcp_key = BackendKey::new(*backend.ip(), backend.port(), Proto::Tcp);
-    if dataplane.reply_source_for(tcp_key) != Some(vip) {
+    if dataplane.reply_source_for(tcp_key) != Some(expected_src) {
         return Some(format!(
             "co-resident: tcp reply_source_for({tcp_key}) was purged by a udp deregister; \
              per-proto teardown requires it survive"
@@ -207,24 +211,30 @@ fn check_lockstep(
     layout: &BTreeMap<(Ipv4Addr, u16, Proto), (SocketAddrV4, Ipv4Addr)>,
 ) -> Option<String> {
     // Build the expected reply-mirror map from the layout — exactly one
-    // key per registered backend, under its declared proto.
-    let mut expected: BTreeMap<BackendKey, Ipv4Addr> = BTreeMap::new();
-    for (&(_vip, _vip_port, proto), &(backend, vip)) in layout {
-        expected.insert(BackendKey::new(*backend.ip(), backend.port(), proto), vip);
+    // key per registered backend, under its declared proto. The expected
+    // value is the full `(vip, vip_port)` source the recvmsg4 reply path
+    // must restore (both IP and PORT, per §D4), NOT a bare VIP.
+    let mut expected: BTreeMap<BackendKey, SocketAddrV4> = BTreeMap::new();
+    for (&(vip, vip_port, proto), &(backend, _vip)) in layout {
+        expected.insert(
+            BackendKey::new(*backend.ip(), backend.port(), proto),
+            SocketAddrV4::new(vip, vip_port),
+        );
     }
 
-    // Forward direction: every expected entry must exist with the VIP.
-    for (key, expected_vip) in &expected {
+    // Forward direction: every expected entry must exist with the full
+    // `(vip, vip_port)` reply source — IP AND port.
+    for (key, expected_src) in &expected {
         match dataplane.reply_source_for(*key) {
-            Some(actual_vip) if actual_vip == *expected_vip => {}
-            Some(actual_vip) => {
+            Some(actual_src) if actual_src == *expected_src => {}
+            Some(actual_src) => {
                 return Some(format!(
-                    "reply_source_for({key}) = {actual_vip}; expected {expected_vip}"
+                    "reply_source_for({key}) = {actual_src}; expected {expected_src}"
                 ));
             }
             None => {
                 return Some(format!(
-                    "reply_source_for({key}) missing; expected {expected_vip} \
+                    "reply_source_for({key}) missing; expected {expected_src} \
                      (forward-only regression — the asymmetry this invariant kills)"
                 ));
             }
@@ -234,10 +244,10 @@ fn check_lockstep(
     // Reverse direction: no orphan entries — every reply-mirror entry
     // must correspond to a registered backend in the layout. This catches
     // stale-entry leaks after deregister.
-    for (key, vip) in dataplane.reply_mirror_entries() {
+    for (key, src) in dataplane.reply_mirror_entries() {
         if !expected.contains_key(&key) {
             return Some(format!(
-                "orphan reply-mirror entry {key} → {vip}; not present in current layout"
+                "orphan reply-mirror entry {key} → {src}; not present in current layout"
             ));
         }
     }
