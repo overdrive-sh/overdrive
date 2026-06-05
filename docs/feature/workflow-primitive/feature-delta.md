@@ -93,7 +93,7 @@ After: write `impl Workflow for ProvisionRecord { async fn run(&self, ctx: &Work
 Decision enabled: Devon decides she can model the next platform sequence (cert rotation) as ordinary control flow rather than a bespoke state machine.
 
 #### Acceptance Criteria
-- [ ] AC1: A `Workflow` trait exists with `async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult`; an author writes `ProvisionRecord` with NO step enum and NO transition match (O3). (Verifies the "After" author surface.)
+- [ ] AC1: A `Workflow` trait exists with `async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult`, and `ProvisionRecord` implements it; the impl **compiles** and a test drives `run` to a terminal `WorkflowResult` (verifies the "After" author surface — one ordinary `async fn`, no bespoke runtime). The O3 *structural* property (zero step-enum / transition-match lines in the body) is the **K6 metric**, asserted by an AST/grep check over the workflow impl — NOT free-hand review. (Per Eclipse review H1: AC made mechanically verifiable.)
 - [ ] AC2: The workflow body performs its side effect through `ctx.call(...).await` only; a `dst-lint`-style check / review confirms no `Instant::now()` / `reqwest` / `tokio::time::sleep` / `rand` in the body (D-INH-4).
 - [ ] AC3 (O5): `cargo dst --only replay_equivalence_provision_record` is green and prints a reproducible seed. (Verifies the "sees" output end-to-end.)
 
@@ -188,7 +188,7 @@ job-analysis §4).
 | K3 (O4) | the resumed run | diverges from the uninterrupted terminal | 0 byte-divergences for same inputs+seed | byte-equality of `WorkflowResult` (resumed vs uninterrupted) | none |
 | K4 (O5) | the platform engineer | proves resume-equivalence before ship | 1 named `replay_equivalence_*` SimInvariant on the CI critical path, reproducible from seed | presence + green status of the invariant in `cargo dst`; bit-for-bit seed reproduction | DST exists for reconcilers, NOT sequences |
 | K5 (O6) | the platform | operates distinct persistence/recovery mechanisms for terminal sequences | +0 NEW stores (journal on existing redb; no libSQL journal) | grep/dep-graph: no libSQL journal table; journal handle is redb-backed | redb already serves reconcilers |
-| K6 (O3) | the workflow author | hand-writes step-machine boilerplate per sequence | 0 step-enum / transition-match lines in a workflow body | code review of `ProvisionRecord` (one `async fn run`, no step enum) | full state machine per sequence |
+| K6 (O3) | the workflow author | hand-writes step-machine boilerplate per sequence | 0 step-enum / transition-match lines in a workflow body | AST/grep check over the `Workflow` impl body (zero step-enum decls, zero state-transition `match` arms) — automatable, not free-hand review (per Eclipse L1) | full state machine per sequence |
 
 K4 is the load-bearing KPI: a green, seeded, reproducible
 `replay_equivalence_*` invariant on the CI critical path IS the proof of O5
@@ -279,3 +279,55 @@ All five surfaced during DISCUSS and **filed with user approval (2026-06-05)**:
 3. **Typed-signal scope under partition** — [#207](https://github.com/overdrive-sh/overdrive/issues/207). Slice 03 delivers in-process single-node signal delivery; cross-node signal semantics under partition is a multi-node concern.
 4. **Journal retention / compaction policy** — [#208](https://github.com/overdrive-sh/overdrive/issues/208). Whitepaper names "compacted on a declared retention policy" — the policy is undefined.
 5. **WASM workflow SDK + version-skew code-graph hashing** — [#209](https://github.com/overdrive-sh/overdrive/issues/209). Deferred with the app SDK; no story hinges on it.
+
+## Wave: DISCUSS / [REF] Peer Review (Eclipse)
+
+**Reviewer**: Eclipse (nw-product-owner-reviewer) · **Date**: 2026-06-05 ·
+**Model**: inherit (session) · **Verdict**: **APPROVED** (handoff to DESIGN cleared).
+
+Blocking issues: **none**. Hard gates (JTBD traceability, slice composition,
+DoR 9/9) all satisfied. One HIGH-severity finding was actionable and has been
+resolved in this artifact; remaining findings are non-blocking.
+
+### Dimension results
+
+| Dimension | Verdict |
+|---|---|
+| Journey coherence + emotional arc | PASS |
+| Job traceability (hard gate) | PASS — all stories `job_id: J-PLAT-005`, mapped to O1–O6 |
+| Elevator-pitch honesty | PASS — real surfaces (DST, redb journal, ObservationStore, Raft); no invented CLI verb |
+| Slice composition (hard gate) | PASS — no `@infrastructure`-only slice; slice 01 ships with `ProvisionRecord` consumer |
+| AC testability | PASS (US-WP-1 AC1 rephrased per H1) |
+| Outcome KPIs | PASS — K1–K6 numeric + method; K4 load-bearing |
+| Scope honesty / deferral discipline | PASS — #205–#209 cited by real issue numbers; no Phase-1 AC promises cross-node resume |
+| LeanUX antipatterns / sizing | PASS |
+
+### Findings
+
+- `praise:` Honest scope and deferral discipline — every forward concern
+  surfaced and cited by real issue number (#205–#209); Phase-1 single-node O2
+  scope explicit and back-propagated; no invented CLI verb. Model for future specs.
+- `praise:` Strong, earned emotional arc — Devon "wary → reassured → trusting,"
+  each persona frustration mapped to a specific O1–O6 outcome and a preventing AC.
+- `praise:` Clean carpaccio slicing — engine ships with a real value consumer;
+  no orphan infrastructure; slice-01 learning hypothesis has teeth (failure
+  threatens the locked B′ direction).
+- `praise:` DST is first-class — K4 (`replay_equivalence_*` on the CI critical
+  path) is a real gate, not aspirational; all non-determinism routed through `ctx`.
+- `issue (resolved, H1):` US-WP-1 AC1 was code-review-phrased ("author writes …
+  with NO step enum"). **Resolved**: AC1 now asserts compile + drive-to-terminal
+  (mechanical), with the structural "no step machine" property delegated to the
+  K6 metric. K6 measurement upgraded from free-hand review to an AST/grep check
+  (also resolves L1).
+- `suggestion (non-blocking, M1):` Slice-01 effort framing ("OPTIMISTIC ≤1 day")
+  hedges; the honest estimate is ≤1.5 days + optional SPIKE. Narrative polish for
+  the DELIVER dispatcher; no functional impact.
+- `suggestion (non-blocking, M2):` The Phase-1 operator surface (Ana) is weaker
+  than the author surface — no `overdrive workflow` verb; she reads ObservationStore
+  rows. Correctly tracked as #206; flag to DESIGN that the operator journey is
+  Phase-1-incomplete by design.
+
+### Handoff
+**APPROVED.** DESIGN may proceed. The architecture (B′ distinct durable-async
+`Workflow`, redb journal, lifecycle-reconciler-managed) is locked from DIVERGE;
+DISCUSS defines requirements/AC/slices over it and does not re-open the choice.
