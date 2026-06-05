@@ -11,3 +11,4 @@
 //! none of them live here.
 
 pub mod cert_spec;
+pub mod root_key_envelope;
