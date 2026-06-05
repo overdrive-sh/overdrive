@@ -148,6 +148,13 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // walking-skeleton's `bridge_to_hydrator_handoff_dispatches_*` test
     // (currently a RED scaffold).
     "bridge-to-hydrator-handoff",
+    // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3, GH #200) —
+    // the `reply-source-rewrite-lockstep` DST equivalence invariant added to
+    // `Invariant::ALL` by step 02-01 (`crate::invariants::reply_source_rewrite_lockstep`).
+    // The below-Tier-3 defense for unconnected-UDP reply-path identity (no
+    // Tier-2 backstop for cgroup_sock_addr). Blessed here so the catalogue
+    // length + named-set checks track `Invariant::ALL` exactly.
+    "reply-source-rewrite-lockstep",
 ];
 
 // -----------------------------------------------------------------------------
