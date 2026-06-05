@@ -460,7 +460,25 @@ impl FromStr for SchematicId {
 const CERT_SERIAL_MAX_BYTES: usize = 20; // RFC 5280 §4.1.2.2
 
 /// Hex-encoded X.509 certificate serial number (≤ 20 bytes per RFC 5280).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// rkyv-archivable so it can be persisted as a field of rkyv-versioned
+/// observation rows (e.g. `IssuedCertificateRowV1`, built-in-ca / GH #28)
+/// at the durable-storage boundary — mirroring `SpiffeId` / `NodeId`,
+/// which carry the same derives for the same reason.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct CertSerial(String);
 
