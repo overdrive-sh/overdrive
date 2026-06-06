@@ -181,13 +181,13 @@ paths:
           type: string
       responses:
         '200':
-          description: Job description
+          description: Workload description
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkloadDescription'
         '404':
-          description: Job not found
+          description: Workload not found
           content:
             application/json:
               schema:
@@ -248,7 +248,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '404':
-          description: Job not found
+          description: Workload not found
           content:
             application/json:
               schema:
