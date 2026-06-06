@@ -261,6 +261,10 @@ mod acceptance {
     mod lifecycle_reconciler_rehydrates_on_restart; // S-WP-01-08
     mod workflow_emit_action_lands_in_raft_channel;
     mod workflow_engine_replay_cursor; // S-WP-01-05 replay-cursor unit tests // S-WP-03-03
+    // ADR-0064 §5 — start registers a running instance in the live set
+    // (preserved from the deleted terminal-labels test; the live-set surface
+    // it pinned survives the workflow_result_label deletion).
+    mod workflow_engine_live_instance_registration;
     mod workflow_engine_writes_terminal_row; // slice-01 AC5 — engine writes terminal obs row
     // Bug fix (fix-workflow-terminal-redrive) — start must short-circuit on a
     // durable Terminal: a restart over an already-terminal journal must not
