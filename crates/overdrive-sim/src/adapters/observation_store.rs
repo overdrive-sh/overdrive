@@ -236,16 +236,22 @@ impl PeerState {
     }
 
     /// Append-only merge for `issued_certificates` (ADR-0063 D6). Keyed
-    /// on the issued certificate's `CertSerial`. Unlike the LWW
-    /// siblings there is no `updated_at` to compare — serials are
-    /// CSPRNG-drawn, so each issuance is a fresh key; a key collision is
-    /// the issuance bug, not an LWW overwrite case. Always accepts (and
-    /// fans out, so subscribers observe every recorded issuance),
-    /// mirroring the `LocalObservationStore::apply_issued_certificate`
-    /// write path.
+    /// on the issued certificate's `CertSerial`. Unlike the LWW siblings
+    /// there is no `updated_at` to compare — the **first** row written at
+    /// a given serial is immutable and is never overwritten.
+    ///
+    /// A serial already present is therefore a no-op: serials are
+    /// CSPRNG-drawn, so a collision is an issuance replay / retry / bug,
+    /// or (once `issued_certificates` is gossiped, GH #36) idempotent
+    /// re-delivery. Returns `true` only on a fresh insert, `false` on a
+    /// duplicate — so the duplicate is not re-fanned-out, mirroring the
+    /// `LocalObservationStore::apply_issued_certificate` write path.
     fn apply_issued_certificate(&self, incoming: &IssuedCertificateRow) -> bool {
-        let key = incoming.serial.clone();
-        self.by_issued_certificate.lock().insert(key, incoming.clone());
+        let mut by_serial = self.by_issued_certificate.lock();
+        if by_serial.contains_key(&incoming.serial) {
+            return false;
+        }
+        by_serial.insert(incoming.serial.clone(), incoming.clone());
         true
     }
 

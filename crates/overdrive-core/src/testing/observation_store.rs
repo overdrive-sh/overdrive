@@ -32,6 +32,13 @@
 //!    surface that kills mutations on the comparator's branches
 //!    (counter `>` vs `>=`, `Less` / `Greater` swap, tiebreak `>` vs
 //!    `<`).
+//! 8. **Issued-certificate append-only** — the `issued_certificates`
+//!    audit table is keyed by serial with no `updated_at`. A second
+//!    write at an already-present serial MUST be rejected: the prior
+//!    audit row is never overwritten, and the duplicate is never
+//!    re-broadcast (`write` returns no second fan-out). Defends the
+//!    contract on [`ObservationStore::issued_certificate_rows`] against
+//!    a blind upsert.
 //!
 //! # Determinism
 //!
@@ -61,7 +68,8 @@ use futures::StreamExt;
 use tokio::time::timeout;
 
 use crate::UnixInstant;
-use crate::id::{AllocationId, NodeId, Region, WorkloadId};
+use crate::ca::issued_certificate_row::IssuedCertificateRow;
+use crate::id::{AllocationId, CertSerial, NodeId, Region, SpiffeId, WorkloadId};
 use crate::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
@@ -132,6 +140,24 @@ fn ts(counter: u64, writer: &str) -> LogicalTimestamp {
     LogicalTimestamp { counter, writer: node_id(writer) }
 }
 
+/// Build an `issued_certificates` audit row at a given serial. `spiffe`
+/// varies the row *body* so two rows sharing one serial are still
+/// distinguishable — the append-only case relies on a body difference to
+/// prove the prior row was (not) overwritten. Timestamps are fixed for
+/// determinism; they are audit inputs, not an LWW comparison key.
+fn issued_cert_row(serial: &CertSerial, spiffe: &str) -> IssuedCertificateRow {
+    let at = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    IssuedCertificateRow {
+        serial: serial.clone(),
+        spiffe_id: SpiffeId::from_str(spiffe).expect("spiffe id is valid"),
+        issuer_serial: CertSerial::new("00").expect("issuer serial parses"),
+        not_before: at,
+        not_after: at,
+        node_id: node_id("control-plane-0"),
+        issued_at: at,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -178,6 +204,14 @@ pub async fn run_lww_conformance<T: ObservationStore + ?Sized>(store: &T) {
     //       [`LogicalTimestamp::dominates`].
     property_loop_alloc_status(store).await;
     property_loop_node_health(store).await;
+
+    // (viii) Append-only contract for `issued_certificates` — a
+    //        duplicate serial never overwrites the prior audit row and
+    //        is never re-broadcast. Unlike the LWW cases there is no
+    //        `updated_at`; the serial key itself is the immutability
+    //        boundary. See
+    //        `docs/feature/fix-issued-cert-append-only/deliver/rca.md`.
+    case_issued_certificate_append_only(store).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -632,4 +666,62 @@ async fn property_loop_node_health<T: ObservationStore + ?Sized>(store: &T) {
              with the test oracle"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-case — IssuedCertificate append-only
+// ---------------------------------------------------------------------------
+
+/// (viii) The `issued_certificates` audit table is append-only, keyed by
+/// serial with no `updated_at` to compare. A second write at an
+/// already-present serial MUST be a no-op: the prior audit row is never
+/// overwritten, and — mirroring the LWW-reject path — the duplicate is
+/// never re-broadcast.
+///
+/// RED against a blind `table.insert` (redb upsert) / `BTreeMap::insert`:
+/// the overwrite replaces the stored body (fails the "still the first
+/// body" assertion) and the unconditional `true` return drives a second
+/// fan-out (fails the "no re-broadcast" assertion). GREEN once both
+/// adapters guard on prior-key presence and return `false` on collision.
+async fn case_issued_certificate_append_only<T: ObservationStore + ?Sized>(store: &T) {
+    let serial = CertSerial::new("0badc0de").expect("serial parses");
+    let first = issued_cert_row(&serial, "spiffe://overdrive.local/wl/first");
+    let second = issued_cert_row(&serial, "spiffe://overdrive.local/wl/second");
+    assert_ne!(first, second, "(viii) test rows must differ in body to detect overwrite");
+
+    let mut sub = store.subscribe_all().await.expect("subscribe");
+
+    // First issuance at a fresh serial is accepted and fans out unchanged.
+    store
+        .write(ObservationRow::IssuedCertificate(first.clone()))
+        .await
+        .expect("write first issuance");
+    let received = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
+        .await
+        .expect("(viii) subscription delivers first issuance within timeout")
+        .expect("(viii) stream yields first issuance");
+    assert_eq!(
+        received,
+        ObservationRow::IssuedCertificate(first.clone()),
+        "(viii) first issuance must fan out unchanged"
+    );
+
+    // Second write at the SAME serial is a duplicate — append-only rejects it.
+    store
+        .write(ObservationRow::IssuedCertificate(second.clone()))
+        .await
+        .expect("write duplicate serial");
+
+    // (a) No second fan-out: a duplicate serial must NOT be re-broadcast.
+    let poll = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
+    assert!(poll.is_err(), "(viii) a duplicate serial must NOT be re-broadcast — got {poll:?}");
+
+    // (b) The stored audit row is still the FIRST body, never overwritten.
+    let rows = store.issued_certificate_rows().await.expect("(viii) read issued certificate rows");
+    let stored: Vec<_> = rows.into_iter().filter(|r| r.serial == serial).collect();
+    assert_eq!(stored.len(), 1, "(viii) append-only: exactly one row per serial");
+    assert_eq!(
+        stored[0], first,
+        "(viii) append-only: the original audit row must never be overwritten by a duplicate serial"
+    );
 }

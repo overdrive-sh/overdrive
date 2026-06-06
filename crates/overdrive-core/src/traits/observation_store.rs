@@ -1122,17 +1122,35 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// timestamp case (re-delivery of the same row) is treated as a
     /// no-op for the same reason.
     ///
+    /// # Append-only contract (`issued_certificates`)
+    ///
+    /// [`ObservationRow::IssuedCertificate`] is the one variant NOT
+    /// governed by the LWW contract above — it has no `updated_at`. Its
+    /// table is **append-only**, keyed by serial: the first row written
+    /// at a given serial is immutable. A second write at an
+    /// already-present serial MUST NOT overwrite the stored row and MUST
+    /// NOT be emitted on subscriptions (a serial already broadcast is
+    /// never re-broadcast). A duplicate is an issuance replay / retry, or
+    /// — once `issued_certificates` is gossiped (GH #36) — the idempotent
+    /// re-delivery every other row tolerates; in all cases the original
+    /// row is kept. This mirrors the LWW-reject path's no-mutate /
+    /// no-emit shape with the serial key, rather than `updated_at`, as
+    /// the immutability boundary.
+    ///
     /// This contract is exercised by the trait-conformance harness at
-    /// `overdrive_core::testing::observation_store::run_lww_conformance`.
+    /// `overdrive_core::testing::observation_store::run_lww_conformance`
+    /// (LWW cases, plus the append-only case for `issued_certificates`).
     /// The two adapter implementations in this workspace —
     /// `SimObservationStore` and `LocalObservationStore` — honour the
     /// contract. Future adapters (Phase 2 Corrosion replacement, any
     /// future test fakes) MUST honour it identically.
     ///
     /// See `docs/whitepaper.md` §4 (Intent / Observation split,
-    /// "tombstones, full rows over field diffs") and
+    /// "tombstones, full rows over field diffs"),
     /// `docs/feature/fix-observation-lww-merge/deliver/rca.md` for the
-    /// bug RCA that codified this trait-level invariant.
+    /// bug RCA that codified the LWW invariant, and
+    /// `docs/feature/fix-issued-cert-append-only/deliver/rca.md` for the
+    /// append-only one.
     async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>;
 
     /// Subscribe to every observation row written to this peer.

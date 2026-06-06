@@ -944,11 +944,20 @@ fn apply_reconcile_conflict_lww(
 /// Append-only insert for `IssuedCertificateRow` (`issued_certificates`
 /// audit table, ADR-0063 D6). Unlike the LWW siblings there is no
 /// `updated_at` to compare — the audit surface is append-only, keyed on
-/// the issued certificate's serial bytes. Serials are CSPRNG-drawn, so a
-/// key collision is the issuance bug, not an LWW overwrite case; the
-/// `redb` insert at a fresh key is the steady state. Returns `true`
-/// (always accepted) so the caller's post-commit emit mirrors the
-/// sibling write path — every recorded issuance fans out to subscribers.
+/// the issued certificate's serial bytes: the **first** row written at a
+/// given serial is immutable and is never overwritten.
+///
+/// A serial already present in the table is therefore a no-op. Serials
+/// are CSPRNG-drawn, so a collision is not an expected LWW case — it is
+/// an issuance replay, an issuance-path retry/bug, or (once
+/// `issued_certificates` is gossiped, GH #36) the idempotent
+/// re-delivery that every other observation row already tolerates. In
+/// all cases the correct behaviour is identical: keep the original row.
+///
+/// Returns `true` only when a fresh serial is inserted; `false` on a
+/// duplicate. The `false` return suppresses the caller's post-commit
+/// emit (the `write` path above), mirroring the LWW-reject path — a
+/// serial already broadcast is never re-broadcast.
 ///
 /// The row's bytes go through the typed co-located codec
 /// [`IssuedCertificateRow::archive_for_store`] (ADR-0048): wraps in the
@@ -959,6 +968,14 @@ fn apply_issued_certificate(
     incoming: &IssuedCertificateRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = incoming.serial.as_str().as_bytes().to_vec();
+    // Enforce the append-only contract: a serial already in the audit
+    // table is never overwritten. Read-before-write is collision-free
+    // under redb's serializable isolation (the same TOCTOU-safety the
+    // LWW siblings rely on). Return Ok(false) so the post-commit emit is
+    // suppressed — mirrors the LWW-reject path.
+    if table.get(key.as_slice()).map_err(map_to_io)?.is_some() {
+        return Ok(false);
+    }
     let bytes = incoming.archive_for_store().map_err(ObservationStoreError::from)?;
     table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     Ok(true)
