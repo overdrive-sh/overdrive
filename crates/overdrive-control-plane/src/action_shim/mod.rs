@@ -425,9 +425,72 @@ pub async fn dispatch(
     first_error.map_or(Ok(()), Err)
 }
 
+/// Pre-flight: persist workflow-instance desired-intent for every
+/// `Action::StartWorkflow` in `actions`, with **per-action isolation**.
+///
+/// For each action:
+/// - `StartWorkflow`: attempt
+///   `put(IntentKey::for_workflow_instance(correlation), spec.name bytes)`.
+///   - `Ok`  → the action is pushed into the returned `dispatchable` set;
+///     its desired-intent is now durable, so it is safe to drive the
+///     engine for it.
+///   - `Err` → the failure is recorded into `first_error` (only if no
+///     earlier error exists, mirroring [`dispatch`]'s first-error
+///     aggregation), and this `StartWorkflow` is **DROPPED** from the
+///     batch. RATIONALE (load-bearing, ADR-0064 §5): dispatching
+///     `engine.start` for a `StartWorkflow` whose intent did NOT persist
+///     would leave a running instance that is NOT re-emittable on restart
+///     — the exact invariant the intent-persist-before-engine-start
+///     ordering protects. So drop it; the level-triggered
+///     `WorkflowLifecycle` reconciler re-emits it next tick.
+/// - any other action: always pushed into `dispatchable` unchanged.
+///
+/// Returns `(dispatchable, first_error)`. A failed intent write for one
+/// `StartWorkflow` therefore does NOT discard the rest of the tick's
+/// batch — every surviving action (including already-persisted earlier
+/// `StartWorkflow`s and all non-workflow actions) still reaches
+/// [`dispatch`]. The first intent error is surfaced to the caller.
+pub(crate) async fn persist_workflow_intents(
+    store: &dyn overdrive_core::traits::intent_store::IntentStore,
+    actions: Vec<Action>,
+) -> (Vec<Action>, Option<ShimError>) {
+    use overdrive_core::aggregate::IntentKey;
+
+    let mut dispatchable: Vec<Action> = Vec::with_capacity(actions.len());
+    let mut first_error: Option<ShimError> = None;
+
+    for action in actions {
+        match &action {
+            Action::StartWorkflow { spec, correlation } => {
+                let key = IntentKey::for_workflow_instance(correlation);
+                match store.put(key.as_bytes(), spec.name.as_str().as_bytes()).await {
+                    // Intent durable — engine-start may proceed for this
+                    // StartWorkflow.
+                    Ok(()) => dispatchable.push(action),
+                    // Intent write failed — DROP this StartWorkflow (it is
+                    // not re-emittable if started without durable intent),
+                    // record the first such error, and let the rest of the
+                    // batch survive.
+                    Err(err) => {
+                        if first_error.is_none() {
+                            first_error =
+                                Some(ShimError::WorkflowIntent { message: err.to_string() });
+                        }
+                    }
+                }
+            }
+            // Non-workflow actions carry no pre-flight intent; always
+            // dispatch them.
+            _ => dispatchable.push(action),
+        }
+    }
+
+    (dispatchable, first_error)
+}
+
 /// AppState-aware dispatch that persists workflow-instance desired-intent
-/// for every `Action::StartWorkflow` BEFORE handing the actions to
-/// [`dispatch`] threaded the real engine from `state.workflow_engine`
+/// for every `Action::StartWorkflow` BEFORE handing the surviving actions
+/// to [`dispatch`], threaded the real engine from `state.workflow_engine`
 /// (ADR-0064 §5).
 ///
 /// This is the production commit point for a reconciler-emitted
@@ -439,13 +502,24 @@ pub async fn dispatch(
 /// shim. Intent persistence is FIRST so a crash between the two leaves the
 /// instance re-emittable (the level-triggered reconciler re-drives it).
 ///
+/// Per-action isolation holds **at the pre-flight stage too**: the
+/// intent-persist loop ([`persist_workflow_intents`]) does NOT early-return
+/// on the first failed `put`. A failed intent write drops only its own
+/// `StartWorkflow` (which would not be re-emittable if started without
+/// durable intent) and records the first such error; every other action in
+/// the batch — already-persisted earlier `StartWorkflow`s and all
+/// non-workflow actions — still flows into [`dispatch`], which applies its
+/// own first-error aggregation over the survivors. The pre-flight error
+/// (chronologically first) wins over the dispatch result on failure.
+///
 /// Mirrors the `StartAllocation → workload-intent → WorkloadLifecycle`
 /// precedent for `StartWorkflow → workflow-intent → WorkflowLifecycle`.
 ///
 /// # Errors
 ///
-/// - [`ShimError::WorkflowIntent`] — persisting the workflow-instance
-///   intent failed.
+/// - [`ShimError::WorkflowIntent`] — persisting a workflow-instance intent
+///   failed (the first such failure; the offending `StartWorkflow` is
+///   dropped, the rest of the batch still dispatches).
 /// - Any error [`dispatch`] surfaces (driver / observation / dataplane /
 ///   workflow-engine failure), with per-action isolation.
 pub async fn dispatch_with_workflow_intent(
@@ -453,25 +527,11 @@ pub async fn dispatch_with_workflow_intent(
     state: &crate::AppState,
     tick: &TickContext,
 ) -> Result<(), ShimError> {
-    use overdrive_core::aggregate::IntentKey;
-    use overdrive_core::traits::intent_store::IntentStore;
+    let (dispatchable, preflight_err) =
+        persist_workflow_intents(state.store.as_ref(), actions).await;
 
-    // Persist workflow-instance desired-intent for every StartWorkflow
-    // BEFORE dispatch. The value is the workflow spec's kind name (the
-    // input the engine resolves to a factory) — NOT a derived status.
-    for action in &actions {
-        if let Action::StartWorkflow { spec, correlation } = action {
-            let key = IntentKey::for_workflow_instance(correlation);
-            state
-                .store
-                .put(key.as_bytes(), spec.name.as_str().as_bytes())
-                .await
-                .map_err(|err| ShimError::WorkflowIntent { message: err.to_string() })?;
-        }
-    }
-
-    dispatch(
-        actions,
+    let dispatch_result = dispatch(
+        dispatchable,
         state.driver.as_ref(),
         state.obs.as_ref(),
         state.dataplane.as_ref(),
@@ -482,7 +542,12 @@ pub async fn dispatch_with_workflow_intent(
         state.runtime.broker_mutex(),
         Some(state.workflow_engine.as_ref()),
     )
-    .await
+    .await;
+
+    // Pre-flight error wins (it is chronologically first); otherwise the
+    // dispatch result (which itself carries dispatch()'s own first_error
+    // aggregation over the surviving actions).
+    preflight_err.map_or(dispatch_result, Err)
 }
 
 /// Dispatch a single action. Each variant is independent; the caller
@@ -1141,4 +1206,188 @@ pub enum ShimError {
         /// Cause string from the `IntentStore` error.
         message: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pre-flight per-action isolation regression (ADR-0064 §5).
+    //!
+    //! Drives the pure-async helper [`persist_workflow_intents`] directly
+    //! — it IS the driving port for the intent-persist pre-flight stage.
+    //! The observable universe is `(dispatchable, first_error)` plus the
+    //! intent store's persisted bytes (read back via `get`). No real
+    //! redb / FS — a fault-injecting in-memory `IntentStore` keeps this in
+    //! the default lane.
+
+    // Test-double constructors + `.expect()` on infallible test reads are
+    // idiomatic in test code; the const-fn / expect-used lints add ceremony
+    // with no test value (mirrors the file-level allow on the sibling
+    // `tests/acceptance/workflow_emit_action_lands_in_raft_channel.rs`).
+    #![allow(clippy::expect_used, clippy::missing_const_for_fn)]
+
+    use std::collections::BTreeMap;
+
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use futures::Stream;
+    use overdrive_core::aggregate::IntentKey;
+    use overdrive_core::id::{ContentHash, CorrelationKey};
+    use overdrive_core::traits::intent_store::{
+        IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
+    };
+    use overdrive_core::workflow::{WorkflowName, WorkflowSpec};
+
+    use super::{Action, ShimError, persist_workflow_intents};
+
+    /// In-memory `IntentStore` that fails `put` for one configured
+    /// "poison" key and otherwise stores the bytes. `get` reflects what
+    /// actually persisted so the test can assert which intents landed.
+    /// Ordered map per `.claude/rules/development.md` § "Ordered-collection
+    /// choice".
+    struct FaultInjectingIntentStore {
+        stored: parking_lot::Mutex<BTreeMap<Vec<u8>, Vec<u8>>>,
+        poison_key: Vec<u8>,
+    }
+
+    impl FaultInjectingIntentStore {
+        fn with_poison(poison_key: Vec<u8>) -> Self {
+            Self { stored: parking_lot::Mutex::new(BTreeMap::new()), poison_key }
+        }
+    }
+
+    #[async_trait]
+    impl IntentStore for FaultInjectingIntentStore {
+        async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError> {
+            Ok(self.stored.lock().get(key).map(|v| Bytes::copy_from_slice(v)))
+        }
+
+        async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), IntentStoreError> {
+            if key == self.poison_key.as_slice() {
+                return Err(IntentStoreError::Busy);
+            }
+            self.stored.lock().insert(key.to_vec(), value.to_vec());
+            Ok(())
+        }
+
+        async fn put_if_absent(
+            &self,
+            _key: &[u8],
+            _value: &[u8],
+        ) -> Result<PutOutcome, IntentStoreError> {
+            Ok(PutOutcome::Inserted)
+        }
+
+        async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError> {
+            self.stored.lock().remove(key);
+            Ok(())
+        }
+
+        async fn txn(&self, _ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+            Ok(TxnOutcome::Committed)
+        }
+
+        async fn watch(
+            &self,
+            _prefix: &[u8],
+        ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError>
+        {
+            Ok(Box::new(futures::stream::empty()))
+        }
+
+        async fn scan_prefix(
+            &self,
+            prefix: &[u8],
+        ) -> Result<Vec<(Bytes, Bytes)>, IntentStoreError> {
+            Ok(self
+                .stored
+                .lock()
+                .iter()
+                .filter(|(k, _)| k.starts_with(prefix))
+                .map(|(k, v)| (Bytes::copy_from_slice(k), Bytes::copy_from_slice(v)))
+                .collect())
+        }
+
+        async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError> {
+            Ok(StateSnapshot::from_parts(0, Vec::new(), Vec::new()))
+        }
+
+        async fn bootstrap_from(&self, _snapshot: StateSnapshot) -> Result<(), IntentStoreError> {
+            Ok(())
+        }
+    }
+
+    fn start_workflow(slug: &str) -> (Action, CorrelationKey, WorkflowSpec) {
+        let spec =
+            WorkflowSpec { name: WorkflowName::new("provision-record").expect("valid kebab name") };
+        let correlation = CorrelationKey::derive(
+            slug,
+            &ContentHash::of(spec.name.as_str().as_bytes()),
+            "start-workflow",
+        );
+        let action = Action::StartWorkflow { spec: spec.clone(), correlation: correlation.clone() };
+        (action, correlation, spec)
+    }
+
+    /// One failed intent write (for B) must NOT discard the rest of the
+    /// batch: A, C, and the interleaved non-workflow action survive into
+    /// `dispatchable`; B is dropped; the first error surfaces; and exactly
+    /// A's and C's intents persist — never B's. This is the per-action
+    /// isolation the pre-flight `?` early-return previously bypassed.
+    #[tokio::test]
+    async fn preflight_isolation_one_failed_intent_does_not_drop_the_batch() {
+        let (action_a, corr_a, _) = start_workflow("wf-a-0001");
+        let (action_b, corr_b, _) = start_workflow("wf-b-0002");
+        let (action_c, corr_c, _) = start_workflow("wf-c-0003");
+
+        let key_a = IntentKey::for_workflow_instance(&corr_a).as_bytes().to_vec();
+        let key_b = IntentKey::for_workflow_instance(&corr_b).as_bytes().to_vec();
+        let key_c = IntentKey::for_workflow_instance(&corr_c).as_bytes().to_vec();
+
+        // Fail ONLY B's intent write.
+        let store = FaultInjectingIntentStore::with_poison(key_b.clone());
+
+        // Interleave a non-workflow action so the test also pins that
+        // non-StartWorkflow actions always survive.
+        let actions = vec![action_a.clone(), action_b, Action::Noop, action_c.clone()];
+
+        let (dispatchable, first_error) = persist_workflow_intents(&store, actions).await;
+
+        // 1. The first error is a WorkflowIntent failure.
+        assert!(
+            matches!(first_error, Some(ShimError::WorkflowIntent { .. })),
+            "B's failed intent write must surface as ShimError::WorkflowIntent; \
+             got {first_error:?}"
+        );
+
+        // 2. dispatchable contains A, C, and the Noop — and NOT B.
+        assert!(
+            dispatchable.contains(&action_a),
+            "A (intent persisted) must survive into dispatchable; got {dispatchable:?}"
+        );
+        assert!(
+            dispatchable.contains(&action_c),
+            "C (intent persisted) must survive into dispatchable; got {dispatchable:?}"
+        );
+        assert!(
+            dispatchable.contains(&Action::Noop),
+            "the non-workflow action must always survive into dispatchable; \
+             got {dispatchable:?}"
+        );
+        assert!(
+            !dispatchable.iter().any(|a| matches!(
+                a,
+                Action::StartWorkflow { correlation, .. } if *correlation == corr_b
+            )),
+            "B (intent write failed) must be DROPPED from dispatchable — starting it \
+             would leave a non-re-emittable instance; got {dispatchable:?}"
+        );
+
+        // 3. The store persisted A's and C's intents, and NOT B's.
+        assert!(store.get(&key_a).await.expect("get a").is_some(), "A's intent must be persisted");
+        assert!(store.get(&key_c).await.expect("get c").is_some(), "C's intent must be persisted");
+        assert!(
+            store.get(&key_b).await.expect("get b").is_none(),
+            "B's intent must NOT be persisted (its put failed)"
+        );
+    }
 }
