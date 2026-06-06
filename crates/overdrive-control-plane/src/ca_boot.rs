@@ -116,6 +116,12 @@ pub fn root_kek_id() -> KekId {
 
 /// Generate-or-load the persistent root CA, with the Earned-Trust probe.
 ///
+/// `redb_path` is the on-disk path of the `IntentStore`'s redb file (supplied
+/// by the caller that opened the store); it is threaded into the corrupt-/
+/// undecodable-envelope path so the `health.startup.refused` event and the
+/// `IntentStoreError::Envelope` remediation hint name the real file to inspect
+/// or delete, rather than an unactionable placeholder.
+///
 /// # Behaviour
 ///
 /// * **KEK probe** — resolve `kek_id` through `kek`. On failure, emit
@@ -140,6 +146,7 @@ pub async fn boot_ca(
     kek_id: &KekId,
     codec: &RootKeyAeadCodec,
     intent: &Arc<dyn IntentStore>,
+    redb_path: &std::path::Path,
 ) -> Result<RootCaHandle, CaBootError> {
     // Earned-Trust probe (a): the KEK MUST resolve before we generate, load,
     // or persist anything. Refuse-to-start on absence — never mint a throwaway
@@ -156,7 +163,7 @@ pub async fn boot_ca(
 
     match intent.get(ROOT_KEY_ENVELOPE_KEY).await? {
         Some(envelope_bytes) => {
-            load_persistent_root(ca, kek, kek_id, codec, intent, &envelope_bytes).await
+            load_persistent_root(ca, kek, kek_id, codec, intent, redb_path, &envelope_bytes).await
         }
         None => generate_and_persist_root(ca, kek, kek_id, codec, intent).await,
     }
@@ -273,9 +280,9 @@ async fn load_persistent_root(
     kek_id: &KekId,
     codec: &RootKeyAeadCodec,
     intent: &Arc<dyn IntentStore>,
+    redb_path: &std::path::Path,
     envelope_bytes: &[u8],
 ) -> Result<RootCaHandle, CaBootError> {
-    let redb_path = std::path::Path::new("<intent-store>");
     let record: RootCaKeyRecord = RootCaKeyRecord::from_store_bytes(
         envelope_bytes,
         redb_path,

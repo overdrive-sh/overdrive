@@ -39,7 +39,7 @@ use overdrive_core::traits::ca::{
     Ca, CaError, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
 };
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::intent_store::{IntentStore, IntentStoreError};
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
@@ -68,11 +68,18 @@ fn stage_kek_credential(dir: &TempDir, byte: u8) {
         .expect("write systemd-creds KEK credential");
 }
 
+/// The on-disk redb path the `intent_store` helper opens. Kept in ONE place
+/// alongside `intent_store` so the `intent.redb` filename cannot drift between
+/// the store opener and the `boot_ca` `redb_path` argument.
+fn intent_redb_path(dir: &TempDir) -> std::path::PathBuf {
+    dir.path().join("intent.redb")
+}
+
 /// Open a `LocalIntentStore` at `intent.redb` under `dir` as an
 /// `Arc<dyn IntentStore>`.
 fn intent_store(dir: &TempDir) -> Arc<dyn IntentStore> {
     Arc::new(
-        overdrive_store_local::LocalIntentStore::open(dir.path().join("intent.redb"))
+        overdrive_store_local::LocalIntentStore::open(intent_redb_path(dir))
             .expect("LocalIntentStore::open"),
     )
 }
@@ -98,16 +105,17 @@ async fn root_ca_is_reused_across_control_plane_restart() {
     // Each boot opens its OWN handle on the SAME redb file — a genuine restart
     // (the first store is dropped before the second opens), so reuse is proven
     // through on-disk persistence, not in-process caching.
+    let redb_path = intent_redb_path(&store_dir);
     let first = {
         let intent = intent_store(&store_dir);
-        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("first boot generates + persists the root")
     };
 
     let second = {
         let intent = intent_store(&store_dir);
-        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("second boot decrypts + reuses the persisted root")
     };
@@ -166,9 +174,10 @@ async fn issued_chain_anchors_on_persisted_root_after_restart() {
     let kek_id = ca_boot::root_kek_id();
     let node = issuing_node();
 
+    let redb_path = intent_redb_path(&store_dir);
     let first_root_pem = {
         let intent = intent_store(&store_dir);
-        let root = ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+        let root = ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("first boot generates + persists the root");
         root.cert_pem().as_pem().to_owned()
@@ -182,7 +191,7 @@ async fn issued_chain_anchors_on_persisted_root_after_restart() {
     let (restart_inter_pem, restart_svid_pem) = {
         let restart_ca = host_ca();
         let intent = intent_store(&store_dir);
-        ca_boot::boot_ca(&restart_ca, &kek, &kek_id, &codec, &intent)
+        ca_boot::boot_ca(&restart_ca, &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("restart boot loads + adopts the persisted root");
         let inter = ca_boot::bootstrap_node_intermediate(&restart_ca, &node, &intent)
@@ -248,8 +257,9 @@ async fn persisted_root_key_envelope_seals_pem_not_der() {
     let codec = RootKeyAeadCodec::new();
     let kek_id = ca_boot::root_kek_id();
 
+    let redb_path = intent_redb_path(&store_dir);
     let intent = intent_store(&store_dir);
-    ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+    ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
         .await
         .expect("first boot generates + persists the sealed root-key envelope");
 
@@ -296,9 +306,10 @@ async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
     let codec = RootKeyAeadCodec::new();
     let kek_id = ca_boot::root_kek_id();
 
+    let redb_path = intent_redb_path(&store_dir);
     let first = {
         let intent = intent_store(&store_dir);
-        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("first boot persists the root under the correct KEK")
     };
@@ -313,7 +324,7 @@ async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
     // its own handle on the same file (redb is single-writer-exclusive).
     let result = {
         let intent = intent_store(&store_dir);
-        ca_boot::boot_ca(&host_ca(), &wrong_kek, &kek_id, &codec, &intent).await
+        ca_boot::boot_ca(&host_ca(), &wrong_kek, &kek_id, &codec, &intent, &redb_path).await
     };
 
     // THEN the boot REFUSES to start with the typed envelope-decrypt error
@@ -329,7 +340,7 @@ async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
     // it). Re-opening with the CORRECT KEK still recovers the ORIGINAL root.
     let recovered = {
         let intent = intent_store(&store_dir);
-        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("the original root is intact and re-openable under the correct KEK")
     };
@@ -337,6 +348,78 @@ async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
         first.cert_der(),
         recovered.cert_der(),
         "the refused boot must NOT have re-minted or overwritten the persisted root"
+    );
+}
+
+/// `@real-io` `@adapter-integration` `@S-02` `@error` — regression guard for
+/// the hardcoded-placeholder-path bug (operator-actionability of the
+/// corrupt-envelope refusal).
+///
+/// The bug: `load_persistent_root` hardcoded
+/// `std::path::Path::new("<intent-store>")` and threaded that placeholder into
+/// `RootCaKeyRecord::from_store_bytes`, which surfaces it in TWO operator-facing
+/// places on an undecodable envelope — the `health.startup.refused` tracing
+/// event and the `IntentStoreError::Envelope` `Display` remediation hint
+/// ("delete <intent-store> and restart"). The placeholder makes both
+/// unactionable: an operator cannot tell which redb file to inspect or delete.
+///
+/// This pins the contract at the boot seam: when the persisted root-key envelope
+/// is undecodable, the surfaced `IntentStoreError::Envelope` MUST carry the REAL
+/// on-disk redb path (`<store>/intent.redb`), never the placeholder. The KEK
+/// probe PASSES (correct KEK), so execution reaches `from_store_bytes` and the
+/// failure is the envelope DECODE — not a KEK decrypt.
+#[tokio::test]
+async fn boot_envelope_decode_failure_surfaces_real_redb_path() {
+    // GIVEN a first boot that generates + persists the root under the correct
+    // KEK (scoped so the redb write-lock releases before the recovery boot).
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+    let redb_path = intent_redb_path(&store_dir);
+
+    {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path)
+            .await
+            .expect("first boot generates + persists the root");
+    }
+
+    // WHEN the persisted root-key envelope is CORRUPTED to non-decodable bytes
+    // (scoped so the write-lock releases before the recovery boot opens).
+    {
+        let intent = intent_store(&store_dir);
+        intent
+            .put(b"ca/root/key-envelope/v1", b"not-a-valid-rkyv-envelope")
+            .await
+            .expect("overwrite envelope with garbage");
+    }
+
+    // WHEN a second boot runs under the CORRECT KEK — the KEK probe passes, so
+    // execution reaches `from_store_bytes` and fails on the envelope DECODE.
+    let result = {
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path).await
+    };
+
+    // THEN the boot refuses with the typed envelope-decode error carrying the
+    // REAL redb path — the operator-actionable signal the placeholder destroyed.
+    let reported = match result {
+        Err(CaBootError::Intent(IntentStoreError::Envelope { redb_path, .. })) => redb_path,
+        other => panic!(
+            "undecodable envelope must refuse startup with Intent(Envelope {{ .. }}), got {other:?}"
+        ),
+    };
+    assert_eq!(
+        reported, redb_path,
+        "the refusal must report the REAL on-disk redb path so the remediation hint is actionable"
+    );
+    assert_ne!(
+        reported.as_path(),
+        std::path::Path::new("<intent-store>"),
+        "the hardcoded placeholder path must never reappear (regression guard)"
     );
 }
 
@@ -364,8 +447,9 @@ async fn boot_refuses_to_start_when_kek_absent_from_keyring() {
     let kek_id = ca_boot::root_kek_id();
 
     // WHEN the control plane attempts to start.
+    let redb_path = intent_redb_path(&store_dir);
     let intent = intent_store(&store_dir);
-    let result = ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent).await;
+    let result = ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent, &redb_path).await;
 
     // THEN it refuses to start with the typed KEK-unavailable error, BEFORE any
     // issuance (no throwaway KEK minted).
