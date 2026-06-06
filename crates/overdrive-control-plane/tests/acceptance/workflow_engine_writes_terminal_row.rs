@@ -191,12 +191,15 @@ async fn start_writes_started_at_command_index_0_idempotent_on_resume() {
     let workflow_id = WorkflowId::new("wf-provision-0002").expect("valid instance id");
 
     // The input-derived digests the engine must record (ADR-0063 §2): the
-    // spec's canonical identity and the start input. Per
-    // `development.md` § "Persist inputs, not derived state" — INPUTS, not
-    // a pre-computed cache. Mirrors the journal-store characterization
-    // test's derivation so the engine's choice is pinned, not freeform.
+    // spec's canonical identity (`spec_digest`) and the START INPUT bytes
+    // (`input_digest`). Per `development.md` § "Persist inputs, not derived
+    // state" — INPUTS, not a pre-computed cache. Post-#217 the input digest
+    // is `ContentHash::of(&spec.input)` (the opaque CBOR start-input bytes —
+    // CBOR of `()` for `ProvisionRecord`'s unit `Input`), NOT the transport
+    // STEP payload `ProvisionRecord::PAYLOAD` it coincidentally equalled
+    // before the typed-input surface existed (ADR-0065 §5, D5).
     let expected_spec_digest = ContentHash::of(spec.name.as_str().as_bytes());
-    let expected_input_digest = ContentHash::of(ProvisionRecord::PAYLOAD);
+    let expected_input_digest = ContentHash::of(&spec.input);
 
     // --- First start ---
     let engine = make_engine();

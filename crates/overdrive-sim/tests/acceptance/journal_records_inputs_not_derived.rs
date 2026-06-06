@@ -42,9 +42,12 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
     // The journal's first entry records the workflow's INPUTS: the spec
     // digest + the input digest (ADR-0063 §2 `Started`). Derived from
     // the shared `ProvisionRecord` fixture's spec — no pre-computed
-    // deadline/remaining cache is involved.
+    // deadline/remaining cache is involved. Post-#217 the `input_digest`
+    // hashes the start-INPUT bytes (`spec.input` — the opaque CBOR of the
+    // unit `Input`), NOT the transport STEP payload `ProvisionRecord::PAYLOAD`
+    // it coincidentally equalled before the typed-input surface (ADR-0065 §5).
     let spec_digest = spec_digest_of(ProvisionRecord::WORKFLOW_NAME);
-    let input_digest = ContentHash::of(ProvisionRecord::PAYLOAD);
+    let input_digest = ContentHash::of(&ProvisionRecord::spec().input);
     let started = LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest });
 
     // The `ctx.run` step result is recorded as its CBOR bytes + a RESULT
@@ -138,7 +141,7 @@ async fn loaded_entry_run_round_trips_with_interleaved_command_and_notification(
 
     let started = LoadedEntry::Command(JournalCommand::Started {
         spec_digest: ContentHash::of(ProvisionRecord::WORKFLOW_NAME.as_bytes()),
-        input_digest: ContentHash::of(ProvisionRecord::PAYLOAD),
+        input_digest: ContentHash::of(&ProvisionRecord::spec().input),
     });
     let awaited =
         LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: signal_key.clone() });

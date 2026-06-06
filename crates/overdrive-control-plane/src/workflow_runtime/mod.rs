@@ -573,26 +573,25 @@ impl Drop for LiveInstanceGuard {
 /// these are content hashes over the workflow-kind identity and the start
 /// input, NOT a pre-computed cache.
 ///
-/// Slice 01's [`WorkflowStart`] carries only the workflow `name` (its
-/// identity); the start input is the spec's identity bytes until a later
-/// slice grows the spec with start parameters (the spec evolves additively,
-/// `overdrive-core/src/workflow/mod.rs`). Both digests are derived here so
-/// the engine — not the test — owns the derivation, matching the journal
-/// characterization test's `ContentHash::of(spec.name…)` choice.
+/// The two digests address DIFFERENT axes and DIVERGE as intended
+/// (ADR-0065 §5, #217 discharged):
+///
+/// - `spec_digest = ContentHash::of(spec.name…)` — the workflow-KIND
+///   identity. Two instances of the same kind share one `spec_digest`
+///   regardless of their inputs.
+/// - `input_digest = ContentHash::of(&spec.input)` — the opaque CBOR
+///   start-INPUT bytes. Two instances of one kind with DIFFERENT inputs get
+///   DIFFERENT `input_digest`s; the SAME input yields the SAME digest.
+///
+/// Both digests are derived here so the engine — not the test — owns the
+/// derivation, matching the migrated `Started`-digest acceptance tests.
 fn started_digests(spec: &WorkflowStart) -> (ContentHash, ContentHash) {
     let spec_digest = ContentHash::of(spec.name.as_str().as_bytes());
-    // The start input. Slice 01 has no separate start-parameter surface on
-    // `WorkflowStart`, so the input identity is the spec name bytes — the
-    // same input the journal-store characterization test records via
-    // `ProvisionRecord::PAYLOAD` (the workflow-kind constant).
-    //
-    // TODO(#217): when `WorkflowStart` grows a start-parameter surface,
-    // hash the serialised parameter bytes here instead of the name bytes so
-    // `spec_digest` and `input_digest` diverge as intended. The compiler will
-    // NOT flag this site when the spec gains fields (both digests still
-    // type-check against `spec.name`); this marker is the only obligation
-    // record that the input digest must switch off the name bytes.
-    let input_digest = ContentHash::of(spec.name.as_str().as_bytes());
+    // The start input bytes — the opaque CBOR `W::Input` the
+    // `ErasedWorkflowAdapter` decodes (an INPUT, never a derived cache).
+    // Hashing these (NOT the name) is the #217 fix: `spec_digest` and
+    // `input_digest` now diverge per-instance.
+    let input_digest = ContentHash::of(&spec.input);
     (spec_digest, input_digest)
 }
 

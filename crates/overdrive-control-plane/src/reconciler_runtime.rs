@@ -2058,8 +2058,11 @@ async fn stop_intent_present(
 /// joins them.
 ///
 /// Per `.claude/rules/development.md` § "Persist inputs, not derived
-/// state": the persisted value is the spec NAME (an input), and the
-/// `WorkflowStart` is recomputed from it on every read.
+/// state": the persisted value is the FULL `WorkflowStart` spec (name +
+/// opaque CBOR input) archived via the action-shim's `archive_for_store`
+/// codec; this reads it back via `WorkflowStart::from_store_bytes`. A
+/// malformed/undecodable intent REFUSES (intent is SSOT, ADR-0048 §3) — it
+/// is NOT log-and-skipped like an observation row.
 async fn hydrate_workflow_desired_instances(
     state: &AppState,
 ) -> Result<
@@ -2073,7 +2076,7 @@ async fn hydrate_workflow_desired_instances(
 
     use overdrive_core::id::CorrelationKey;
     use overdrive_core::reconcilers::WorkflowInstanceState;
-    use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+    use overdrive_core::workflow::WorkflowStart;
 
     let rows = state
         .store
@@ -2107,36 +2110,34 @@ async fn hydrate_workflow_desired_instances(
             );
             continue;
         };
-        // The value is the workflow kind name (the persisted input).
-        let Ok(name_str) = std::str::from_utf8(value.as_ref()) else {
-            tracing::warn!(
-                target: "overdrive::reconciler",
-                name = "workflow_lifecycle.desired.non_utf8_value",
+        // The value is the FULL `WorkflowStart` spec (name + opaque CBOR
+        // input), persisted via the action-shim's `archive_for_store` codec
+        // (#217 engine discharge — Slice 03). Decode it back through the
+        // co-located `from_store_bytes` codec.
+        //
+        // Intent is the load-bearing SSOT (ADR-0048 §3 asymmetry): an
+        // undecodable intent REFUSES — it does NOT log-and-skip like an
+        // observation row. We emit the `health.startup.refused`-class event
+        // and return a typed `ConvergenceError::IntentDecode` so the runtime
+        // escalates (refuse-to-start), rather than silently dropping the
+        // instance from the desired set (which would make a malformed intent
+        // look like "no such workflow" and converge it away — the silent-skip
+        // bug ADR-0065 §5 closes).
+        let spec = WorkflowStart::from_store_bytes(value.as_ref()).map_err(|err| {
+            tracing::error!(
+                name: "health.startup.refused",
+                reason = "workflow_lifecycle.intent_decode",
                 correlation = %correlation,
-                "skipping workflow-instance intent row with non-UTF8 spec name"
+                error = %err,
+                "workflow-instance intent failed to decode through the WorkflowStart \
+                 envelope codec; refusing (intent is SSOT, ADR-0048 §3)"
             );
-            continue;
-        };
-        let Ok(name) = WorkflowName::new(name_str) else {
-            tracing::warn!(
-                target: "overdrive::reconciler",
-                name = "workflow_lifecycle.desired.bad_workflow_name",
-                correlation = %correlation,
-                value = %name_str,
-                "skipping workflow-instance intent row with invalid workflow name"
-            );
-            continue;
-        };
+            ConvergenceError::IntentDecode(err.to_string())
+        })?;
         instances.insert(
             correlation,
             WorkflowInstanceState {
-                // Additive-field compile-fixup (step 01-02): the desired-intent
-                // value currently persists ONLY the workflow-kind name bytes
-                // (action-shim still writes `start.name`); the full
-                // `archive_for_store` persist + `from_store_bytes` hydrate that
-                // carries `input` lands in Slice 03 (#217 engine discharge).
-                // Until then the reconstructed start intent's input is empty.
-                spec: WorkflowStart { name, input: Vec::new() },
+                spec,
                 running_in_intent: true,
                 has_live_task: false,
                 terminal: None,
@@ -2641,6 +2642,14 @@ pub enum ConvergenceError {
     /// `ObservationStore` read failed.
     #[error("observation read failed: {0}")]
     ObservationRead(String),
+    /// A persisted workflow-instance intent failed to decode through the
+    /// `WorkflowStart` rkyv-envelope codec. Intent is the load-bearing SSOT
+    /// (ADR-0048 §3 asymmetry): an undecodable intent REFUSES — it is NOT
+    /// log-and-skipped like an observation row. The reconcile tick surfaces
+    /// this and the runtime escalates it to `health.startup.refused` +
+    /// non-zero exit (ADR-0065 §5).
+    #[error("workflow-instance intent decode failed: {0}")]
+    IntentDecode(String),
     /// Target resource did not match the expected `job/<id>` shape.
     #[error("invalid target resource: {0}")]
     TargetShape(String),

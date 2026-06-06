@@ -25,15 +25,21 @@ use overdrive_control_plane::journal::redb::RedbJournalStore;
 use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_core::id::ContentHash;
 
-/// The shared `ProvisionRecord` fixture's spec name + payload, inlined
-/// here (byte-identical to `overdrive_core::testing::workflow::ProvisionRecord::{WORKFLOW_NAME, PAYLOAD}`)
-/// to keep this integration test within the step's `files_to_modify`
-/// scope — pulling the `test-utils`-gated `overdrive_core::testing`
-/// module into the integration binary would require a `Cargo.toml`
-/// dev-dependency edit outside this step. The digests are derived from
-/// these INPUTS exactly as the engine will (ADR-0063 §2).
+/// The shared `ProvisionRecord` fixture's spec name + start-input bytes,
+/// inlined here (byte-identical to
+/// `overdrive_core::testing::workflow::ProvisionRecord`'s `WORKFLOW_NAME` and
+/// the CBOR of its unit `Input`) to keep this integration test within the
+/// step's `files_to_modify` scope — pulling the `test-utils`-gated
+/// `overdrive_core::testing` module into the integration binary would require
+/// a `Cargo.toml` dev-dependency edit outside this step. The digests are
+/// derived from these INPUTS exactly as the engine will (ADR-0063 §2).
 const PROVISION_RECORD_WORKFLOW_NAME: &str = "provision-record";
-const PROVISION_RECORD_PAYLOAD: &[u8] = b"provision-record";
+/// The opaque CBOR start-input bytes — `ciborium::into_writer(&())` yields a
+/// single-byte CBOR `null` (`0xf6`). Post-#217 the `Started { input_digest }`
+/// hashes THESE start-input bytes (`spec.input`), NOT the transport STEP
+/// payload `b"provision-record"` it coincidentally equalled before the typed
+/// `WorkflowStart { name, input }` surface existed (ADR-0065 §5, D5).
+const PROVISION_RECORD_START_INPUT: &[u8] = &[0xf6];
 
 /// Build the `Started` entry's `spec_digest` from the fixture's spec —
 /// the INPUT the journal records, mirroring what the engine derives
@@ -63,7 +69,7 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
     // §2 `Started`), derived from the shared `ProvisionRecord` fixture.
     let started = LoadedEntry::Command(JournalCommand::Started {
         spec_digest: spec_digest_of(PROVISION_RECORD_WORKFLOW_NAME),
-        input_digest: ContentHash::of(PROVISION_RECORD_PAYLOAD),
+        input_digest: ContentHash::of(PROVISION_RECORD_START_INPUT),
     });
     // The `ctx.run` step result is recorded as its CBOR bytes + a RESULT
     // DIGEST (US-WP-2 AC1 — the RunResult under audit). No in-entry `step`

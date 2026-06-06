@@ -463,7 +463,31 @@ pub(crate) async fn persist_workflow_intents(
         match &action {
             Action::StartWorkflow { start, correlation } => {
                 let key = IntentKey::for_workflow_instance(correlation);
-                match store.put(key.as_bytes(), start.name.as_str().as_bytes()).await {
+                // Persist the FULL `WorkflowStart` spec (name + opaque CBOR
+                // input) via the co-located rkyv-envelope codec — NOT the bare
+                // name bytes (the #217 bug). Per `development.md` § "Persist
+                // inputs, not derived state" the persisted intent is the inputs;
+                // `from_store_bytes` rehydrates the whole spec on every tick so
+                // a restart re-emits with the original input intact (ADR-0048
+                // §4b, ADR-0065 §5).
+                //
+                // A serialiser failure is unreachable for a valid payload, but
+                // it is handled the SAME way as a failed `put`: record the first
+                // error and DROP this StartWorkflow — starting an instance whose
+                // intent did not persist would leave it non-re-emittable, the
+                // exact invariant the intent-persist-before-engine-start
+                // ordering protects.
+                let archived = match start.archive_for_store() {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        if first_error.is_none() {
+                            first_error =
+                                Some(ShimError::WorkflowIntent { message: err.to_string() });
+                        }
+                        continue;
+                    }
+                };
+                match store.put(key.as_bytes(), archived.as_ref()).await {
                     // Intent durable — engine-start may proceed for this
                     // StartWorkflow.
                     Ok(()) => dispatchable.push(action),
@@ -1321,11 +1345,13 @@ mod tests {
             name: WorkflowName::new("provision-record").expect("valid kebab name"),
             input: Vec::new(),
         };
-        let correlation = CorrelationKey::derive(
-            slug,
-            &ContentHash::of(spec.name.as_str().as_bytes()),
-            "start-workflow",
-        );
+        // Correlation is derived from the workflow-KIND identity (the spec
+        // name) — unrelated to the persisted intent VALUE, which is now the
+        // full `archive_for_store` envelope (the #217 fix above), never the
+        // name bytes.
+        let kind_name = spec.name.as_str();
+        let kind_digest = ContentHash::of(kind_name.as_bytes());
+        let correlation = CorrelationKey::derive(slug, &kind_digest, "start-workflow");
         let action =
             Action::StartWorkflow { start: spec.clone(), correlation: correlation.clone() };
         (action, correlation, spec)
