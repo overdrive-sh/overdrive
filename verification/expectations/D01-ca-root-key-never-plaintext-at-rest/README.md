@@ -47,8 +47,10 @@ fixture/first-boot key the test uses, not a guess.
 
 ## Evidence
 
-Captured under `evidence/` by `harness/run-expectation.sh D01`. Not yet run —
-the CA boot path lands in DELIVER. The gated integration test
+Executed through `harness/run-expectation.sh D01` at SHA `2f4eccd4` and
+self-reports `pending` — the byte-scan needs a persisted IntentStore from the
+built binary, but the CA is not wired into `overdrive serve` this phase (D-CA-4).
+**Unblocked by #215** (wire `boot_ca` into `overdrive serve`). The gated integration test
 `rcgen_ca_root_key_envelope.rs::root_key_envelope_contains_no_plaintext_key_bytes`
 (S-02-02) proves the no-plaintext invariant in-tree against the serialized
 record; this expectation captures the on-disk IntentStore-file byte-scan.

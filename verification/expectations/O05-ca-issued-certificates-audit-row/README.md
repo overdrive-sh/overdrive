@@ -45,7 +45,10 @@ Sub-claims:
 
 ## Evidence
 
-Captured under `evidence/` by `harness/run-expectation.sh O05`. Not yet run —
-the CA issuance + audit-row path lands in DELIVER. The gated integration tests
+Executed through `harness/run-expectation.sh O05` at SHA `2f4eccd4` and
+self-reports `pending` — issuance is not wired into deploy/alloc-start and
+`alloc status` renders no issued-certificates section this phase (D-CA-4).
+**Unblocked by #35** (SVID issuance on alloc-start) + the `alloc status` render.
+The gated integration tests
 in `ca_boot_and_audit.rs` (S-05-03/04) prove the row write + no-silent-issuance
 in-tree; this expectation captures the operator-visible read surface.
