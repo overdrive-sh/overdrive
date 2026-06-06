@@ -161,6 +161,16 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
     "workflow-journal-write-ordering",
     "workflow-exactly-once-effect-on-resume",
+    // workflow-result-error-model step 02-01 (ADR-0065 §3, D3) — the
+    // body-`Result` → `WorkflowStatus` projection invariant added to
+    // `Invariant::ALL` by step 02-01 (`crate::invariants::evaluators::
+    // evaluate_workflow_terminal_status_projection`). Drives an always-failing
+    // workflow and pins `Err(TerminalError::explicit)` → `Failed { terminal }`
+    // plus the byte-equal terminal round-trip through the journal `Terminal`
+    // command and the `WorkflowTerminal` obs row (D3 lossless projection).
+    // Blessed here so the catalogue length + named-set checks track
+    // `Invariant::ALL` exactly.
+    "workflow-terminal-status-projection",
 ];
 
 // -----------------------------------------------------------------------------

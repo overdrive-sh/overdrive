@@ -145,6 +145,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
     "workflow-journal-write-ordering",
     "workflow-exactly-once-effect-on-resume",
+    // workflow-result-error-model step 02-01 (ADR-0065 §3, D3) — the
+    // body-`Result` → `WorkflowStatus` projection invariant added to
+    // `Invariant::ALL` by step 02-01; blessed here so both catalogues track
+    // `Invariant::ALL` exactly. Mirrors `dst_clean_clone_green.rs`.
+    "workflow-terminal-status-projection",
 ];
 
 // -----------------------------------------------------------------------------

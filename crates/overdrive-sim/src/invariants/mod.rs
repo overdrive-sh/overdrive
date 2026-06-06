@@ -598,6 +598,14 @@ impl Invariant {
         // `crate::invariants::evaluators`.
         Self::WorkflowJournalWriteOrdering,
         Self::WorkflowExactlyOnceEffectOnResume,
+        // workflow-result-error-model step 02-01 (ADR-0065 §3, D3) — the
+        // body-`Result` → `WorkflowStatus` projection invariant. Wired into
+        // the default catalogue in GREEN of step 02-01 once the evaluator
+        // body landed in `crate::invariants::evaluators`. Pins the engine's
+        // `Err(TerminalError)` → `WorkflowStatus::Failed { terminal }`
+        // projection AND the lossless terminal round-trip through both the
+        // journal `Terminal` command and the `WorkflowTerminal` obs row.
+        Self::WorkflowTerminalStatusProjection,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static

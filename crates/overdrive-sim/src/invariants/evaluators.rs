@@ -50,7 +50,8 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{
-    JournalCursor, SignalValue, WorkflowCtx, WorkflowStart, WorkflowStatus,
+    JournalCursor, SignalValue, TerminalError, TerminalErrorKind, Workflow, WorkflowCtx,
+    WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
 use overdrive_control_plane::journal::{
@@ -1940,6 +1941,236 @@ pub async fn evaluate_workflow_exactly_once_effect_on_resume(seed: u64) -> Invar
     }
     if drain_terminal(&mut subscription, &correlation).await.is_none() {
         return fail("resumed run did not reach terminal".to_owned());
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowTerminalStatusProjection (workflow-result-error-model step 02-01)
+// ---------------------------------------------------------------------------
+//
+// Pins the engine-owned body-`Result` → `WorkflowStatus` projection (ADR-0065
+// D3) as a structural DST property: a workflow whose body returns
+// `Err(TerminalError::explicit(detail))` MUST project to
+// `WorkflowStatus::Failed { terminal }` (NOT `Completed`, NOT a contentless
+// terminal — the contentless terminal enum was deleted in step 01-03) carrying
+// the SAME `kind` + `detail` the body authored. The terminal is the engine's
+// projection, distinct from the body return type (the crux of the ADR-0065
+// research finding). The invariant also pins the D3 lossless-projection
+// contract: the durable terminal (`JournalCommand::Terminal { status }`) and
+// the observable terminal (`ObservationRow::WorkflowTerminal { status }`) carry
+// byte-identical `WorkflowStatus` bytes.
+
+/// The detail the always-failing reference workflow authors via
+/// `TerminalError::explicit`. A fixed, deterministic string so the projected
+/// terminal replays bit-identically across seeds (the `detail` is an INPUT,
+/// not engine-derived state — `development.md` § "Persist inputs, not derived
+/// state").
+const WF_TERMINAL_DETAIL: &str = "authored terminal failure (step 02-01 D3)";
+
+/// The instance address bound for the always-failing workflow's engine. Never
+/// receives a datagram (the body returns before any `ctx.run`), but a bound
+/// inbox keeps the engine builder shape identical to the slice-01 builder.
+const WF_FAILURE_TARGET: &str = "127.0.0.1:9020";
+
+/// A minimal reference workflow whose body returns
+/// `Err(TerminalError::explicit(WF_TERMINAL_DETAIL))` UNCONDITIONALLY — the
+/// thinnest authored-failure shape. Distinct from the slice-01/02/03 fixtures
+/// (which only fail when a `ctx` effect fails); this one always fails, so the
+/// engine's `Err(TerminalError)` → `WorkflowStatus::Failed` projection is
+/// driven deterministically with no seed-dependent branch.
+struct AlwaysExplicitFailure;
+
+impl AlwaysExplicitFailure {
+    /// The workflow name this fixture registers under. Kebab-case, matching
+    /// the `WorkflowName` grammar.
+    const WORKFLOW_NAME: &'static str = "always-explicit-failure";
+
+    /// The concrete [`WorkflowStart`] this fixture corresponds to. Takes a
+    /// unit `Input`, so the opaque CBOR `input` is the 1-byte encoding of
+    /// `()` the `ErasedWorkflowAdapter` decodes back before calling `run`.
+    fn spec() -> WorkflowStart {
+        let mut input: Vec<u8> = Vec::new();
+        ciborium::into_writer(&(), &mut input)
+            .unwrap_or_else(|_| unreachable!("CBOR-encoding the unit type is total"));
+        WorkflowStart {
+            name: WorkflowName::new(Self::WORKFLOW_NAME)
+                .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            input,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Workflow for AlwaysExplicitFailure {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, _ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
+        // Unconditional authored terminal failure — the body never reaches a
+        // `ctx` await. The engine projects this `Err` to
+        // `WorkflowStatus::Failed { terminal }` (ADR-0065 §3).
+        Err(TerminalError::explicit(WF_TERMINAL_DETAIL))
+    }
+}
+
+/// Construct the instance correlation + id + spec for an
+/// `AlwaysExplicitFailure` instance. Deterministic — fixed instance id, so
+/// twin runs reproduce bit-for-bit.
+fn failure_instance() -> (CorrelationKey, WorkflowId, WorkflowStart) {
+    let spec = AlwaysExplicitFailure::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-terminal-projection-0001",
+        &ContentHash::of(AlwaysExplicitFailure::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-terminal-projection-0001")
+        .unwrap_or_else(|_| unreachable!("wf-terminal-projection-0001 is a valid instance id"));
+    (correlation, workflow_id, spec)
+}
+
+/// Build a `WorkflowEngine` over the SHARED `journal` + `obs`, a fresh set of
+/// `Sim*` ports, and a freshly-bound transport inbox, resolving
+/// `AlwaysExplicitFailure`.
+async fn failure_engine(
+    seed: u64,
+    journal: Arc<dyn JournalStore>,
+    obs: Arc<dyn ObservationStore>,
+) -> WorkflowEngine {
+    let target: SocketAddr = WF_FAILURE_TARGET
+        .parse()
+        .unwrap_or_else(|_| unreachable!("WF_FAILURE_TARGET is a valid socket addr"));
+    let sim_transport = SimTransport::new();
+    // Bind the inbox so the transport has a registered endpoint, matching the
+    // slice-01 builder shape; the always-failing body never sends to it.
+    let _inbox = sim_transport
+        .bind_inbox(target)
+        .await
+        .unwrap_or_else(|_| unreachable!("SimTransport::bind_inbox is total"));
+
+    let transport: Arc<dyn TransportTrait> = Arc::new(sim_transport);
+    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(AlwaysExplicitFailure::spec().name, || AlwaysExplicitFailure);
+
+    WorkflowEngine::new(journal, clock, transport, entropy, registry, obs)
+}
+
+/// Extract the `WorkflowStatus` from the single `JournalCommand::Terminal`
+/// entry in `run`, if present. The engine appends exactly one `Terminal` on
+/// the body's terminal (uninterrupted run, no resume).
+fn journal_terminal_status(run: &[LoadedEntry]) -> Option<&WorkflowStatus> {
+    run.iter().find_map(|e| match e {
+        LoadedEntry::Command(JournalCommand::Terminal { status }) => Some(status),
+        _ => None,
+    })
+}
+
+/// CBOR-encode a `WorkflowStatus` to its canonical bytes — the durable wire
+/// form. Used to assert the journal terminal and the observation terminal
+/// carry byte-identical `WorkflowStatus` payloads (D3 lossless projection).
+fn status_bytes(status: &WorkflowStatus) -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    ciborium::into_writer(status, &mut bytes)
+        .unwrap_or_else(|_| unreachable!("CBOR-encoding WorkflowStatus is total"));
+    bytes
+}
+
+/// Evaluate `WorkflowTerminalStatusProjection` (ADR-0065 §3, D3).
+///
+/// Drives an `AlwaysExplicitFailure` workflow (body returns
+/// `Err(TerminalError::explicit(detail))`) through the real `WorkflowEngine` +
+/// `SimJournalStore`, then asserts:
+///   1. the engine projected the body's `Err` to `WorkflowStatus::Failed {
+///      terminal }` (NOT `Completed`, NOT contentless) with `terminal.kind()
+///      == Explicit` and `terminal.detail() == WF_TERMINAL_DETAIL` (AC2);
+///   2. the SAME `WorkflowStatus` round-trips byte-equal through BOTH the
+///      durable journal `Terminal { status }` AND the observable
+///      `WorkflowTerminal { status }` obs row (AC3 — D3 lossless projection).
+#[must_use]
+pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> InvariantResult {
+    let name = "workflow-terminal-status-projection";
+    // The seed is echoed by the harness's RunReport on failure; embedding it
+    // in the cause string makes a `cargo dst --seed <N>` reproduction
+    // self-describing from the failure line alone.
+    let fail = |cause: String| {
+        result(name, InvariantStatus::Fail, "host-0", Some(format!("[seed={seed}] {cause}")))
+    };
+
+    let (correlation, workflow_id, spec) = failure_instance();
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let engine = failure_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
+    // Subscribe BEFORE driving — the `WorkflowTerminal` row is broadcast live
+    // (never snapshotted), so a post-run subscriber would miss it.
+    let mut subscription = match obs.subscribe_all().await {
+        Ok(s) => s,
+        Err(err) => return fail(format!("subscribe_all failed: {err}")),
+    };
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+
+    // (1) The observable terminal — drained off the live broadcast.
+    let Some(obs_status) = drain_terminal(&mut subscription, &correlation).await else {
+        return fail(
+            "engine wrote no WorkflowTerminal observation row for the authored-failure run"
+                .to_owned(),
+        );
+    };
+
+    // AC2 — the body's `Err(TerminalError::explicit)` projected to
+    // `Failed { terminal }` (NOT Completed, NOT any other variant), carrying
+    // the SAME kind + detail the body authored.
+    let WorkflowStatus::Failed { terminal: obs_terminal } = &obs_status else {
+        return fail(format!(
+            "expected WorkflowStatus::Failed for an authored Err(TerminalError::explicit), got \
+             {obs_status:?}"
+        ));
+    };
+    if obs_terminal.kind() != TerminalErrorKind::Explicit {
+        return fail(format!(
+            "expected TerminalErrorKind::Explicit, got {:?}",
+            obs_terminal.kind()
+        ));
+    }
+    if obs_terminal.detail() != WF_TERMINAL_DETAIL {
+        return fail(format!(
+            "terminal detail mismatch: expected {WF_TERMINAL_DETAIL:?}, got {:?}",
+            obs_terminal.detail()
+        ));
+    }
+
+    // (2) The durable terminal — loaded from the journal.
+    let run = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let Some(journal_status) = journal_terminal_status(&run) else {
+        return fail(format!("journal carries no Terminal command after the run: {run:?}"));
+    };
+
+    // AC3 — D3 lossless projection: the durable terminal and the observable
+    // terminal carry byte-identical `WorkflowStatus` bytes. Structural
+    // equality first (a clearer failure message), then the byte-equal
+    // round-trip the AC names explicitly.
+    if journal_status != &obs_status {
+        return fail(format!(
+            "journal Terminal status {journal_status:?} != observation terminal status \
+             {obs_status:?} (lossy projection)"
+        ));
+    }
+    let journal_bytes = status_bytes(journal_status);
+    let obs_bytes = status_bytes(&obs_status);
+    if journal_bytes != obs_bytes {
+        return fail(format!(
+            "journal Terminal status bytes ({} bytes) differ from observation terminal status \
+             bytes ({} bytes) — D3 lossless projection violated",
+            journal_bytes.len(),
+            obs_bytes.len(),
+        ));
     }
 
     result(name, InvariantStatus::Pass, "host-0", None)
