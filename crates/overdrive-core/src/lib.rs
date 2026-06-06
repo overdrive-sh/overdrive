@@ -143,3 +143,10 @@ pub use wall_clock::UnixInstant;
 // boundary between reconciler-private View state and downstream
 // consumers.
 pub use transition_reason::{TerminalCondition, TransitionReason};
+// `workflow-result-error-model` step 01-01 (ADR-0065 §2/§3) — the two NEW
+// core value types land additively: `TerminalError` (the body's terminal-
+// failure channel) + `TerminalErrorKind` (its structured cause) +
+// `WorkflowStatus` (the engine-owned control-plane projection). They coexist
+// with the still-present `WorkflowResult` and the unchanged `Workflow` trait
+// (the reshape is a later slice).
+pub use workflow::{TerminalError, TerminalErrorKind, WorkflowStatus};

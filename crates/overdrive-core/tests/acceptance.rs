@@ -230,4 +230,15 @@ mod acceptance {
     // TerminalError>`); their migration is DELIVER work (the compiler
     // breaks them at the contract change).
     mod workflow_typed_output_roundtrip; // NEW-1 / D1
+
+    // workflow-result-error-model DELIVER step 01-01 (ADR-0065 §2/§3) —
+    // the two NEW core value types land ADDITIVELY alongside the still-
+    // present `WorkflowResult`: `TerminalError { kind, detail }` (the body's
+    // terminal-failure channel) + `WorkflowStatus` (the engine-owned
+    // control-plane projection). Property: every publicly-constructible
+    // `TerminalError` and every `WorkflowStatus` variant round-trips
+    // byte-equal through CBOR serde (they ride the journal `Terminal`
+    // command + terminal observation row as inputs). The `Workflow` trait
+    // and `WorkflowResult` are UNCHANGED at this step (reshape is 01-03).
+    mod terminal_error_and_workflow_status_roundtrip;
 }

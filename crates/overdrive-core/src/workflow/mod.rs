@@ -96,6 +96,257 @@ pub enum WorkflowResult {
     Cancelled,
 }
 
+/// Maximum byte length of a [`TerminalError`] `detail`, enforced at
+/// construction (ADR-0065 §2).
+///
+/// Over-long detail is truncated to the largest UTF-8 char boundary at or
+/// below this cap (see [`TerminalError::cap_detail`]). The cap closes the
+/// free-text replay-determinism hazard ADR-0064 §3 identified: a
+/// `TerminalError` rides in the durable journal `Terminal` command and the
+/// terminal observation row as an INPUT, and an unbounded author-supplied
+/// (or panic-derived) detail is a standing invitation to embed an
+/// arbitrarily-large — and on the panic path, potentially non-deterministic
+/// — value into the durable terminal. Bounding it at construction makes the
+/// durable terminal's bytes stable and small.
+///
+/// 1 KiB is generous for an operator-facing reason string (the cause is the
+/// structured [`TerminalErrorKind`]; `detail` is human context, not a
+/// payload) while keeping the durable terminal compact.
+pub const TERMINAL_ERROR_DETAIL_MAX: usize = 1024;
+
+/// The terminal-failure channel of a workflow body (ADR-0065 §2).
+///
+/// A workflow body that returns `Err(TerminalError)` ends with a **terminal
+/// failure** — the explicit "do not retry; fail the workflow" signal (the
+/// Restate `TerminalError` / Temporal non-retryable `ApplicationFailure`
+/// shape). RETRYABLE failures never construct this: a transient error is
+/// folded into a `ctx.run` step's own result type and re-driven by the
+/// engine, or propagates as a [`WorkflowCtxError`] the engine classifies as
+/// transient (ADR-0065 §4).
+///
+/// `TerminalError` is the workflow analogue of [`WorkflowCtxError`] but
+/// models a different thing and is **not substitutable** with it:
+/// `WorkflowCtxError` is an *engine-internal* await-op failure (journal
+/// record failed, non-deterministic replay); `TerminalError` is the
+/// *body's authored terminal-failure outcome*. It is `Serialize` /
+/// `Deserialize` because it rides in the durable journal `Terminal` command
+/// and the terminal observation row as an input, and it derives
+/// [`thiserror::Error`] (its `Display` renders the structured kind plus the
+/// bounded detail) so it composes into the typed-error discipline the rest
+/// of core uses (`.claude/rules/development.md` § Errors).
+///
+/// # Construction contract
+///
+/// Built ONLY through the validating constructors ([`Self::explicit`],
+/// [`Self::malformed_input`], [`Self::output_encode`], and the engine-only
+/// [`Self::budget_exhausted`]); the fields are private. Each constructor
+/// length-caps `detail` at [`TERMINAL_ERROR_DETAIL_MAX`] deterministically
+/// (per the newtype-completeness discipline) so an over-long input can never
+/// reach the durable terminal.
+///
+/// # Additive note (step 01-01)
+///
+/// This type lands ALONGSIDE the still-present [`WorkflowResult`] and the
+/// UNCHANGED [`Workflow`] trait; nothing consumes it yet. The trait reshape
+/// to `Result<Output, TerminalError>` is a later slice (ADR-0065 §1).
+#[derive(Debug, Clone, PartialEq, Eq, Error, serde::Serialize, serde::Deserialize)]
+#[error("workflow terminal failure ({kind:?}): {detail}")]
+pub struct TerminalError {
+    /// The bounded, structured cause — NOT free-text. The replay-determinism
+    /// hazard of a free-`String` reason (ADR-0064 §3) is closed by making
+    /// the cause a typed [`TerminalErrorKind`].
+    kind: TerminalErrorKind,
+    /// Author-supplied (or, on the panic-containment path, deterministic
+    /// panic-message-derived) detail. Length-capped at construction
+    /// ([`TERMINAL_ERROR_DETAIL_MAX`]) and recorded as an INPUT in the
+    /// durable terminal — deterministic because it is author-data, not
+    /// engine-derived state. Distinct from the engine-derived `reason` the
+    /// OLD `WorkflowResult::Failed` carried.
+    detail: String,
+}
+
+impl TerminalError {
+    /// Truncate `detail` to the largest UTF-8 char boundary at or below
+    /// [`TERMINAL_ERROR_DETAIL_MAX`] bytes.
+    ///
+    /// Deterministic: identical input always yields identical output (a
+    /// load-bearing property — the durable terminal must replay
+    /// bit-identically). UTF-8-safe: truncation never splits a multi-byte
+    /// scalar (a raw byte-index slice could panic / corrupt), so an over-long
+    /// detail collapses to a valid prefix, not a torn one.
+    fn cap_detail(detail: &str) -> String {
+        if detail.len() <= TERMINAL_ERROR_DETAIL_MAX {
+            return detail.to_string();
+        }
+        // Largest char boundary <= the cap. `floor_char_boundary` is not yet
+        // stable, so walk char indices: the last index that starts at or
+        // before the cap is the boundary to slice at.
+        let boundary = detail
+            .char_indices()
+            .map(|(idx, _)| idx)
+            .take_while(|&idx| idx <= TERMINAL_ERROR_DETAIL_MAX)
+            .last()
+            .unwrap_or(0);
+        detail[..boundary].to_string()
+    }
+
+    /// The author explicitly threw a terminal failure
+    /// ([`TerminalErrorKind::Explicit`]). `detail` is length-capped at
+    /// construction.
+    #[must_use]
+    pub fn explicit(detail: &str) -> Self {
+        Self { kind: TerminalErrorKind::Explicit, detail: Self::cap_detail(detail) }
+    }
+
+    /// The start input could not be CBOR-decoded into the workflow's typed
+    /// `Input` ([`TerminalErrorKind::MalformedInput`]) — the
+    /// `ErasedWorkflowAdapter` decode failure. Not retryable (the bytes will
+    /// not change on re-drive). `detail` is length-capped at construction.
+    #[must_use]
+    pub fn malformed_input(detail: &str) -> Self {
+        Self { kind: TerminalErrorKind::MalformedInput, detail: Self::cap_detail(detail) }
+    }
+
+    /// The typed `Output` could not be CBOR-encoded
+    /// ([`TerminalErrorKind::OutputEncode`]) — the `ErasedWorkflowAdapter`
+    /// encode failure, a programming error in the `Output` type's serde
+    /// impl. `detail` is length-capped at construction.
+    #[must_use]
+    pub fn output_encode(detail: &str) -> Self {
+        Self { kind: TerminalErrorKind::OutputEncode, detail: Self::cap_detail(detail) }
+    }
+
+    /// The engine minted this terminal because the retry budget was
+    /// exhausted ([`TerminalErrorKind::BudgetExhausted`], ADR-0065 §4).
+    ///
+    /// **Engine-only** (`pub(crate)`): author / test code outside this crate
+    /// cannot construct `BudgetExhausted`, because the retry budget is
+    /// engine-owned — the body never authors a budget-exhaustion terminal.
+    /// `detail` is length-capped at construction.
+    ///
+    /// The in-crate roundtrip property exercises this ctor; the production
+    /// engine consumer (budget-exhaustion minting) lands in the retry-loop
+    /// slice (ADR-0065 §4, Slice 04). `expect(dead_code)` is gated to the
+    /// non-test build (the test build DOES use it) and self-removes the
+    /// moment the engine slice wires it in.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "engine-only BudgetExhausted ctor; production consumer lands Slice 04 (ADR-0065 §4)"
+        )
+    )]
+    #[must_use]
+    pub(crate) fn budget_exhausted(detail: &str) -> Self {
+        Self { kind: TerminalErrorKind::BudgetExhausted, detail: Self::cap_detail(detail) }
+    }
+
+    /// The structured cause of this terminal failure.
+    #[must_use]
+    pub const fn kind(&self) -> TerminalErrorKind {
+        self.kind
+    }
+
+    /// The (length-capped) author-supplied detail.
+    #[must_use]
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+}
+
+/// The structured cause of a [`TerminalError`] (ADR-0065 §2).
+///
+/// `#[non_exhaustive]` — the well-known variants are stable; a new cause is
+/// an additive minor change (the K8s-`Condition` / ADR-0037 SemVer
+/// convention). Every match on `TerminalErrorKind` outside this crate must
+/// carry a `_` arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum TerminalErrorKind {
+    /// The author explicitly threw a terminal failure (the Restate
+    /// `TerminalError` / Temporal non-retryable `ApplicationFailure` shape).
+    /// Constructed via [`TerminalError::explicit`].
+    Explicit,
+    /// The engine minted this terminal because the retry budget was
+    /// exhausted (ADR-0065 §4). Author code never constructs this — the
+    /// engine does, on exhaustion, via the `pub(crate)`
+    /// [`TerminalError::budget_exhausted`].
+    BudgetExhausted,
+    /// The start input could not be CBOR-decoded into the workflow's typed
+    /// `Input` (the `ErasedWorkflowAdapter` decode failure). A
+    /// malformed-input terminal — not retryable (the bytes will not change
+    /// on re-drive). Constructed via [`TerminalError::malformed_input`].
+    MalformedInput,
+    /// The typed `Output` could not be CBOR-encoded (the
+    /// `ErasedWorkflowAdapter` encode failure). A programming error in the
+    /// `Output` type's serde impl. Constructed via
+    /// [`TerminalError::output_encode`].
+    OutputEncode,
+}
+
+/// The externally-observable terminal status of a workflow INSTANCE — the
+/// engine's projection of the body's `Result<Output, TerminalError>` PLUS
+/// the engine-observed events the body cannot author (cancel, timeout)
+/// (ADR-0065 §3).
+///
+/// Written to the `workflow_terminal` observation row keyed by the instance
+/// `CorrelationKey`; the workflow-lifecycle reconciler observes it to
+/// converge the instance. **Distinct** from the body's return type (the crux
+/// of the ADR-0065 research finding — the body return and the control-plane
+/// status are two different types) and from `TerminalCondition` (ADR-0037,
+/// the reconciler's *allocation* claim — same SemVer convention, different
+/// type; the `compile_fail/workflow_status_vs_terminal_condition.rs` fixture
+/// structurally enforces the non-substitutability).
+///
+/// `#[non_exhaustive]` — the K8s-`Condition` / ADR-0037 SemVer convention
+/// (well-known variants stable; new variants additive minor; renames major).
+/// Every match outside this crate must carry a `_` arm.
+///
+/// # Variant ownership
+///
+/// `Completed` / `Failed` are the engine's projection of the body's
+/// `Ok(Output)` / `Err(TerminalError)`. `Cancelled` / `TimedOut` are
+/// **engine-authored** — the body can never return them. They are
+/// **forward variants the Phase-1 engine never writes** (no cancel / deadline
+/// surface yet); they are declared now so the projection's shape is honest
+/// about what the control plane will record and the lifecycle reconciler's
+/// match is exhaustive against them from day one.
+///
+/// # Additive note (step 01-01)
+///
+/// This type lands ALONGSIDE the still-present [`WorkflowResult`]; the
+/// migration of `ObservationRow::WorkflowTerminal` / the journal `Terminal`
+/// command from `WorkflowResult` to `WorkflowStatus` is a later slice
+/// (ADR-0065 §3). Nothing consumes it yet.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum WorkflowStatus {
+    /// The body returned `Ok(Output)`. Carries the erased CBOR `Output` bytes
+    /// (the workflow's real output — replaces the contentless
+    /// `WorkflowResult::Success`).
+    Completed {
+        /// The CBOR-encoded `Output` the body produced (opaque to the
+        /// engine; the consumer decodes into the workflow's typed `Output`).
+        output: Vec<u8>,
+    },
+    /// The body returned `Err(TerminalError)`, OR the engine minted a
+    /// terminal on budget exhaustion. Carries the [`TerminalError`]
+    /// (kind + detail).
+    Failed {
+        /// The terminal failure cause + detail.
+        terminal: TerminalError,
+    },
+    /// The control plane cancelled the instance (delivered INTO the body as a
+    /// terminal at the next await point — ADR-0065 §4 forward; the cancel
+    /// surface is a later slice). Engine-authored; the body cannot return
+    /// this.
+    Cancelled,
+    /// The instance exceeded its wall-clock deadline (engine-observed;
+    /// forward — the deadline surface is a later slice). The body cannot
+    /// return this.
+    TimedOut,
+}
+
 /// Errors surfaced from [`WorkflowCtx`] await-ops.
 #[derive(Debug, Error)]
 pub enum WorkflowCtxError {
@@ -1164,7 +1415,137 @@ pub struct WorkflowSpec {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // TerminalError + WorkflowStatus unit-level property coverage
+    // (workflow-result-error-model step 01-01, ADR-0065 §2/§3).
+    //
+    // These live in `src/` (not `tests/acceptance/`) because the engine-only
+    // `TerminalError::budget_exhausted()` ctor is `pub(crate)` — only an
+    // in-crate test can exercise the `BudgetExhausted` variant. The
+    // acceptance suite covers the publicly-constructible variants; this
+    // suite extends to the full variant space plus the construction-time
+    // length-cap truncation determinism (the property that closes the
+    // ADR-0064 §3 free-text replay-determinism hazard).
+    // -----------------------------------------------------------------------
+
+    /// Author-supplied detail strategy bounded UNDER the construction-time
+    /// length cap — generated detail survives verbatim, so the roundtrip
+    /// asserts on the un-truncated shape. Over-cap truncation determinism is
+    /// the separate `terminal_error_detail_length_cap_is_deterministic`
+    /// property below.
+    fn arb_short_detail() -> impl Strategy<Value = String> {
+        "[A-Za-z0-9 ./:_-]{0,80}"
+    }
+
+    /// EVERY `TerminalError` variant, including the engine-only
+    /// `BudgetExhausted` (reachable here via the `pub(crate)` ctor).
+    fn arb_terminal_error() -> impl Strategy<Value = TerminalError> {
+        prop_oneof![
+            arb_short_detail().prop_map(|d| TerminalError::explicit(&d)),
+            arb_short_detail().prop_map(|d| TerminalError::malformed_input(&d)),
+            arb_short_detail().prop_map(|d| TerminalError::output_encode(&d)),
+            arb_short_detail().prop_map(|d| TerminalError::budget_exhausted(&d)),
+        ]
+    }
+
+    /// EVERY `WorkflowStatus` variant — `Completed` (opaque output bytes),
+    /// `Failed` (embedded `TerminalError`, full variant space), `Cancelled`,
+    /// `TimedOut`.
+    fn arb_workflow_status() -> impl Strategy<Value = WorkflowStatus> {
+        prop_oneof![
+            prop::collection::vec(any::<u8>(), 0..=64)
+                .prop_map(|output| WorkflowStatus::Completed { output }),
+            arb_terminal_error().prop_map(|terminal| WorkflowStatus::Failed { terminal }),
+            Just(WorkflowStatus::Cancelled),
+            Just(WorkflowStatus::TimedOut),
+        ]
+    }
+
+    fn cbor_round_trip<T>(value: &T) -> T
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let mut bytes: Vec<u8> = Vec::new();
+        ciborium::into_writer(value, &mut bytes).expect("encode to CBOR");
+        ciborium::from_reader(bytes.as_slice()).expect("decode from CBOR")
+    }
+
+    proptest! {
+        /// `TerminalErrorRoundtrip` (AC#7) — for EVERY `TerminalError` value
+        /// across all four `TerminalErrorKind` variants (including the
+        /// engine-only `BudgetExhausted`), `encode → decode == original` and
+        /// the decoded `kind()` matches. The serde shape is what the durable
+        /// journal `Terminal` command + observation row depend on (ADR-0065
+        /// §2).
+        #[test]
+        fn terminal_error_round_trips_for_every_variant(error in arb_terminal_error()) {
+            let decoded = cbor_round_trip(&error);
+            prop_assert_eq!(&decoded, &error, "TerminalError round-trips byte-equal");
+            prop_assert_eq!(decoded.kind(), error.kind(), "kind() preserved across roundtrip");
+        }
+
+        /// `WorkflowStatusRoundtrip` (AC#7) — for EVERY `WorkflowStatus`
+        /// variant, `encode → decode == original`. `Completed`'s opaque
+        /// output bytes and `Failed`'s embedded `TerminalError` (full variant
+        /// space) both survive byte-equal (ADR-0065 §3).
+        #[test]
+        fn workflow_status_round_trips_for_every_variant(status in arb_workflow_status()) {
+            let decoded = cbor_round_trip(&status);
+            prop_assert_eq!(&decoded, &status, "WorkflowStatus round-trips byte-equal");
+        }
+
+        /// Detail length-cap truncation determinism (AC#2; closes the
+        /// ADR-0064 §3 free-text replay-determinism hazard). For ANY input —
+        /// including arbitrary over-long input — the constructed detail is
+        /// (a) never longer than [`TERMINAL_ERROR_DETAIL_MAX`] and (b) STABLE:
+        /// constructing twice from the same input yields byte-identical
+        /// detail. Determinism is the load-bearing property — a durable
+        /// terminal that embedded a non-deterministic truncation would break
+        /// bit-identical replay.
+        #[test]
+        fn terminal_error_detail_length_cap_is_deterministic(raw in ".{0,2048}") {
+            let once = TerminalError::explicit(&raw);
+            let twice = TerminalError::explicit(&raw);
+            prop_assert_eq!(&once, &twice, "construction is deterministic for identical input");
+            prop_assert!(
+                once.detail().len() <= TERMINAL_ERROR_DETAIL_MAX,
+                "capped detail never exceeds TERMINAL_ERROR_DETAIL_MAX ({} > {})",
+                once.detail().len(),
+                TERMINAL_ERROR_DETAIL_MAX
+            );
+            // Within-cap input is preserved verbatim (no spurious truncation).
+            if raw.len() <= TERMINAL_ERROR_DETAIL_MAX {
+                prop_assert_eq!(once.detail(), raw.as_str(), "within-cap detail preserved verbatim");
+            }
+        }
+    }
+
+    /// Over-long detail is truncated to exactly the cap on a deterministic
+    /// byte boundary, across every public + engine-only constructor (AC#2).
+    /// Pins the canonical readable case the property generalises: a detail
+    /// far longer than the cap collapses to `TERMINAL_ERROR_DETAIL_MAX` bytes
+    /// and the same kind is reported.
+    #[test]
+    fn terminal_error_caps_over_long_detail_on_every_constructor() {
+        let over_long = "x".repeat(TERMINAL_ERROR_DETAIL_MAX * 4);
+        for (error, expected_kind) in [
+            (TerminalError::explicit(&over_long), TerminalErrorKind::Explicit),
+            (TerminalError::malformed_input(&over_long), TerminalErrorKind::MalformedInput),
+            (TerminalError::output_encode(&over_long), TerminalErrorKind::OutputEncode),
+            (TerminalError::budget_exhausted(&over_long), TerminalErrorKind::BudgetExhausted),
+        ] {
+            assert_eq!(
+                error.detail().len(),
+                TERMINAL_ERROR_DETAIL_MAX,
+                "over-long detail capped to exactly TERMINAL_ERROR_DETAIL_MAX"
+            );
+            assert_eq!(error.kind(), expected_kind, "constructor sets the matching kind");
+        }
+    }
 
     #[test]
     fn workflow_name_accepts_canonical_kebab() {
