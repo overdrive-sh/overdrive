@@ -417,6 +417,25 @@ exclude_re = [
     # `evaluate_reconciler_is_pure` entries above — comment-skip does not
     # fire for a mid-body expression mutation).
     "replace \\|\\| with && in ListenerFactStore::rebuild_from_intent",
+
+    # `Ca::adopt_persisted_root` / `Ca::adopt_persisted_intermediate`
+    # trait-level DEFAULT impls — equivalent mutants (ADR-0063 D3; built-in
+    # CA #28). The default bodies are no-ops: `{ let _ = root; Ok(()) }` and
+    # `{ let _ = (node, intermediate); Ok(()) }`. cargo-mutants synthesises
+    # `Ok(())` replacements that drop the `let _` binding — but binding an
+    # argument to `_` and dropping a shared reference has zero observable
+    # effect, so the mutant is byte-identical to the original and no test
+    # can distinguish them. The REAL adoption logic (the ephemeral-divergence
+    # fail-loud guard returning `CaError::AdoptionConflict`) lives in the host
+    # `RcgenCa` OVERRIDE of these methods — that override IS in mutation scope
+    # and IS killed by the adoption-conflict tests. The sim adapter relies on
+    # the no-op default and is excluded from mutation under Rule 7
+    # (`overdrive-sim/src/adapters/**`). Same trait-default-no-op shape as the
+    # `VersionedEnvelope::*` entries above; the source-level `// mutants: skip`
+    # comments on each default in `crates/overdrive-core/src/traits/ca.rs`
+    # carry the same rationale as documentation, this regex is the mechanism.
+    "replace Ca::adopt_persisted_root -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
+    "replace Ca::adopt_persisted_intermediate -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
 ]
 
 # ---------------------------------------------------------------------------

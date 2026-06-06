@@ -741,6 +741,15 @@ pub trait Ca: Send + Sync {
     /// fixture `const` root identical on every boot, so there is no ephemeral
     /// divergence to repair and the default is sound. Adapters that *lazily
     /// generate* a root (the host `RcgenCa`) MUST override this.
+    // mutants: skip — default-impl no-op is an equivalent mutant. The body
+    // `let _ = root; Ok(())` and cargo-mutants' `Ok(())` replacement are
+    // byte-identical behaviour (the `let _` binding only marks the param
+    // intentionally-unused; dropping a shared reference is a no-op), so no
+    // test can distinguish them. The real adoption logic — including the
+    // `CaError::AdoptionConflict` divergence guard — lives in the host
+    // `RcgenCa` override (in mutation scope, tested); the sim adapter relies
+    // on this no-op default and is itself excluded from mutation (Rule 7).
+    // See `.cargo/mutants.toml` exclude_re for the actual suppression.
     fn adopt_persisted_root(&self, root: &RootCaHandle) -> Result<()> {
         let _ = root;
         Ok(())
@@ -793,6 +802,15 @@ pub trait Ca: Send + Sync {
     /// `const` intermediate identical on every boot, so there is no ephemeral
     /// divergence to repair and the default is sound. Adapters that *lazily
     /// generate* an intermediate (the host `RcgenCa`) MUST override this.
+    // mutants: skip — default-impl no-op is an equivalent mutant. The body
+    // `let _ = (node, intermediate); Ok(())` and cargo-mutants' `Ok(())`
+    // replacement are byte-identical behaviour (the `let _` binding only
+    // marks the params intentionally-unused), so no test can distinguish
+    // them. The real adoption logic — including the
+    // `CaError::AdoptionConflict` divergence guard — lives in the host
+    // `RcgenCa` override (in mutation scope, tested); the sim adapter relies
+    // on this no-op default and is itself excluded from mutation (Rule 7).
+    // See `.cargo/mutants.toml` exclude_re for the actual suppression.
     fn adopt_persisted_intermediate(
         &self,
         node: &NodeId,
