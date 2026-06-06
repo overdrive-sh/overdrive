@@ -92,3 +92,65 @@ fn replay_equivalence_provision_record_is_a_named_invariant_green_and_seed_repro
         "the same seed reproduces the invariant verdict bit-for-bit (seed {SEED:#x})"
     );
 }
+
+/// Step 01-06 / D6 (ADR-0064 §6) — the EXTENDED `replay_equivalence_provision
+/// _record` invariant pins (b) `Started` at command-index 0 with a FULL
+/// command-sequence equality between the resumed and uninterrupted runs, AND
+/// (c) the `SignalSeen` notification is resolved by `SignalKey` OFF the
+/// positional command walk (never consumed as a command). This is the
+/// structural regression guard that would have caught the trap: a dropped
+/// `Started` write, or a `SignalSeen` entering the command walk, fails the
+/// invariant.
+///
+/// # Port-to-port
+///
+/// The driving port is the DST harness (`Harness::only(...).run(seed)`) — the
+/// same surface `cargo dst --only replay-equivalence-provision-record`
+/// drives. The observable outcome at the `RunReport` boundary is that the
+/// extended invariant (now carrying the (b)+(c) guard) is GREEN and
+/// seed-reproducible. A regression that dropped `Started` at command-index 0
+/// or walked the `SignalSeen` as a command flips this invariant to `Fail` at
+/// the same boundary.
+#[test]
+fn replay_equivalence_started_at_index_0_and_notification_not_consumed_as_command() {
+    const SEED: u64 = 0x5eed_0d06;
+
+    // Drive the EXTENDED invariant through the harness driving port.
+    let report = Harness::new()
+        .only(Invariant::ReplayEquivalenceProvisionRecord)
+        .run(SEED)
+        .expect("harness composes");
+    let result = report
+        .invariants
+        .iter()
+        .find(|r| r.name == "replay-equivalence-provision-record")
+        .expect("the extended invariant ran (it is on the critical path)");
+
+    // The (b) Started-at-0 full-command-sequence equality AND the (c)
+    // notification-not-as-command cursor-advance guard both hold — the
+    // invariant is GREEN. (A dropped `Started` write fails (b); a `SignalSeen`
+    // walked as a command fails (c) — either flips this to `Fail` with a cause
+    // naming the trap.)
+    assert_eq!(
+        result.status,
+        InvariantStatus::Pass,
+        "D6 — Started-at-0 + notification-not-as-command guard is GREEN: {:?}",
+        result.cause
+    );
+
+    // Seed-reproducible: a second run at the SAME seed reproduces the verdict
+    // bit-for-bit — the `trust-the-sim` discipline (`cargo dst --seed`).
+    let report_again = Harness::new()
+        .only(Invariant::ReplayEquivalenceProvisionRecord)
+        .run(SEED)
+        .expect("harness composes (second run)");
+    let result_again = report_again
+        .invariants
+        .iter()
+        .find(|r| r.name == "replay-equivalence-provision-record")
+        .expect("the extended invariant ran on the second pass");
+    assert_eq!(
+        result, result_again,
+        "the same seed reproduces the extended-guard verdict bit-for-bit (seed {SEED:#x})"
+    );
+}

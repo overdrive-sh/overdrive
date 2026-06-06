@@ -853,17 +853,26 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     };
 
     // Replay-equivalence: the resumed trajectory is byte-identical to the
-    // uninterrupted one (the recorded RunResult is the same; both reach
-    // a Terminal entry), and the terminal results match.
+    // uninterrupted one, and the terminal results match.
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
-    let recorded_run = |run: &[LoadedEntry]| -> Option<LoadedEntry> {
-        run.iter()
-            .find(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
-            .cloned()
-    };
-    if recorded_run(&resumed) != recorded_run(&uninterrupted) {
+
+    // (b) — Started-at-command-index-0 full-command-sequence equality (D6 /
+    // ADR-0064 §6; step 01-06). WIDENS the prior "recorded RunResult matches"
+    // equality to a FULL command-kind-sequence equality that pins `Started`
+    // at command-index 0 in BOTH runs. This is the regression guard that
+    // would have caught the trap: a dropped `Started` write (no `Started` at
+    // command-index 0) or a divergent command sequence fails here.
+    if let Some(cause) =
+        assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
+    {
+        return fail(cause);
+    }
+    // The recorded-step contents (each RunResult's name + bytes) match — the
+    // command-kind sequence equality above pins the SHAPE; this pins the
+    // deterministic CONTENT of the replayed steps.
+    if recorded_run_steps(&resumed) != recorded_run_steps(&uninterrupted) {
         return fail(format!(
-            "resumed recorded RunResult differs from uninterrupted: \
+            "resumed recorded RunResult steps differ from uninterrupted: \
              {resumed:?} vs {uninterrupted:?}"
         ));
     }
@@ -1151,12 +1160,24 @@ async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String
 
     // (4) K4 — replay-equivalence across signal+emit (extracted helper).
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
-    assert_signal_replay_equivalence(
+    if let Some(cause) = assert_signal_replay_equivalence(
         &resumed,
         &uninterrupted,
         &resumed_terminal,
         &uninterrupted_terminal,
-    )
+    ) {
+        return Some(cause);
+    }
+
+    // (c) — notification-not-as-command cursor-advance guard (D6 / ADR-0064
+    // §6; step 01-06). The resumed signal+emit trajectory carries an
+    // interleaved `SignalSeen` notification. Drive its author await-points
+    // through a real cursor and OBSERVE the `SignalSeen` is resolved by
+    // `SignalKey` lookup OFF the positional walk, while the command-cursor
+    // advances over the `SignalAwaited` + `ActionEmitted` COMMANDS only. The
+    // structural guard for the trap's twin — a notification consumed as a
+    // command.
+    assert_notification_not_as_command(&resumed).await
 }
 
 /// K4 replay-equivalence assertion across the signal+emit shape: the
@@ -1561,6 +1582,174 @@ fn entry_kinds(run: &[LoadedEntry]) -> Vec<&'static str> {
 /// Whether two runs have the same ordered sequence of entry kinds.
 fn entry_kinds_match(a: &[LoadedEntry], b: &[LoadedEntry]) -> bool {
     entry_kinds(a) == entry_kinds(b)
+}
+
+/// The ordered command-kind sequence of `run` — the kinds of the
+/// `LoadedEntry::Command`s ONLY, in append order (step 01-06, D6 / ADR-0064
+/// §6). This is the positional command walk the cursor consumes: the
+/// `Vec<JournalCommand>` partition `partition_loaded_run` produces.
+/// Notifications (`SignalSeen`) are OFF the walk and are excluded — they are
+/// `SignalKey`-correlated, never walked as a command (D2). A command-cursor
+/// advances by exactly 1 per command and ZERO per notification, so the
+/// length of this sequence IS the total command-cursor advance count for a
+/// full replay of `run`.
+fn command_kinds(run: &[LoadedEntry]) -> Vec<&'static str> {
+    run.iter()
+        .filter_map(|e| match e {
+            LoadedEntry::Command(JournalCommand::Started { .. }) => Some("Started"),
+            LoadedEntry::Command(JournalCommand::RunResult { .. }) => Some("RunResult"),
+            LoadedEntry::Command(JournalCommand::SleepArmed { .. }) => Some("SleepArmed"),
+            LoadedEntry::Command(JournalCommand::SignalAwaited { .. }) => Some("SignalAwaited"),
+            LoadedEntry::Command(JournalCommand::ActionEmitted { .. }) => Some("ActionEmitted"),
+            LoadedEntry::Command(JournalCommand::Terminal { .. }) => Some("Terminal"),
+            LoadedEntry::Notification(JournalNotification::SignalSeen { .. }) => None,
+        })
+        .collect()
+}
+
+/// The number of `LoadedEntry::Notification`s in `run` — the
+/// `SignalKey`-correlated entries that live OFF the positional command walk
+/// (step 01-06, D6). These NEVER advance the command-cursor; the
+/// [`assert_notification_not_as_command`] guard requires ≥1 so the probe
+/// exercises the notification path rather than a notification-free run.
+fn notification_count(run: &[LoadedEntry]) -> usize {
+    run.iter().filter(|e| matches!(e, LoadedEntry::Notification(_))).count()
+}
+
+/// (b) — Started-at-command-index-0 full-command-sequence equality (D6 /
+/// ADR-0064 §6; step 01-06). The structural regression guard that would
+/// have caught the trap: a dropped `Started` write, or a divergent command
+/// sequence between the resumed and uninterrupted runs, fails this.
+///
+/// Widens the slice-01 "recorded `RunResult` matches" equality to a FULL
+/// command-kind-sequence equality that pins `Started` at command-index 0 in
+/// BOTH runs. Returns `None` on equivalence, `Some(cause)` naming the first
+/// violation:
+///
+/// - either run's command sequence does NOT begin with `Started` at index 0
+///   (the trap: `WorkflowEngine::start` failing to write the `Started`
+///   command), or
+/// - the two command-kind sequences diverge (a non-byte-identical replay).
+fn assert_started_at_index_0_and_command_sequence_identical(
+    resumed: &[LoadedEntry],
+    uninterrupted: &[LoadedEntry],
+) -> Option<String> {
+    let resumed_kinds = command_kinds(resumed);
+    let uninterrupted_kinds = command_kinds(uninterrupted);
+    if resumed_kinds.first() != Some(&"Started") {
+        return Some(format!(
+            "resumed command sequence does not begin with `Started` at command-index 0 \
+             (the trap — a dropped Started write): {resumed:?}"
+        ));
+    }
+    if uninterrupted_kinds.first() != Some(&"Started") {
+        return Some(format!(
+            "uninterrupted command sequence does not begin with `Started` at command-index 0 \
+             (the trap — a dropped Started write): {uninterrupted:?}"
+        ));
+    }
+    if resumed_kinds != uninterrupted_kinds {
+        return Some(format!(
+            "resumed command-kind sequence diverges from uninterrupted (not byte-identical): \
+             {resumed_kinds:?} vs {uninterrupted_kinds:?}"
+        ));
+    }
+    None
+}
+
+/// The `SignalKey` of the first `SignalAwaited` command in `run`, if any —
+/// the key the signal+emit author await replays its `ctx.wait_for_signal`
+/// against (step 01-06).
+fn first_awaited_signal_key(run: &[LoadedEntry]) -> Option<overdrive_core::workflow::SignalKey> {
+    run.iter().find_map(|e| match e {
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key }) => {
+            Some(signal_key.clone())
+        }
+        _ => None,
+    })
+}
+
+/// (c) — notification-not-as-command cursor-advance guard (D6 / ADR-0064 §6;
+/// step 01-06). The structural regression guard for the trap's twin: a
+/// `SignalSeen` notification entering the positional command walk.
+///
+/// Drives the signal+emit `run`'s author await-points through a REAL
+/// [`JournalCursorHandle`] — the SAME `partition_loaded_run` the production
+/// engine uses — and OBSERVES that the `SignalSeen` notification is resolved
+/// by `SignalKey` lookup OFF the positional command walk, while the
+/// command-cursor advances over the `SignalAwaited` and `ActionEmitted`
+/// COMMANDS only:
+///
+/// 1. `replay_signal(key)` — the `ctx.wait_for_signal` await replays: the
+///    cursor points at the `SignalAwaited` command, resolves the recorded
+///    `SignalSeen` value by KEY (never by position), and advances the
+///    command-cursor by EXACTLY 1 (past `SignalAwaited` only — the
+///    notification is off the walk). A replay hit returns `Ok(Some(value))`.
+/// 2. `replay_emit()` — the subsequent `ctx.emit_action` await replays: the
+///    cursor now points at the `ActionEmitted` command and returns
+///    `Ok(true)`. **This is the load-bearing observation:** if the
+///    `SignalSeen` had been walked as a COMMAND, step 1's single advance
+///    would have landed the cursor ON the `SignalSeen`, and step 2 would
+///    trip the Layer-1 type-at-index gate (`NonDeterministic`, expected
+///    `ActionEmitted`, actual `SignalSeen`) — `Err`, NOT `Ok(true)`.
+///
+/// The guard requires the run to carry an interleaved notification AND a
+/// `SignalAwaited` + `ActionEmitted` command pair (the signal+emit shape).
+/// Returns `None` when the notification stays off the walk and both await
+/// replays hit, `Some(cause)` otherwise.
+async fn assert_notification_not_as_command(run: &[LoadedEntry]) -> Option<String> {
+    if notification_count(run) == 0 {
+        return Some(format!(
+            "notification-not-as-command guard requires a run with an interleaved SignalSeen \
+             notification, but `run` carries none: {run:?}"
+        ));
+    }
+    let Some(signal_key) = first_awaited_signal_key(run) else {
+        return Some(format!(
+            "notification-not-as-command guard requires a SignalAwaited command in `run`: {run:?}"
+        ));
+    };
+
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let workflow_id = WorkflowId::new("wf-notif-not-cmd-probe-0001")
+        .unwrap_or_else(|_| unreachable!("wf-notif-not-cmd-probe-0001 is a valid instance id"));
+    let cursor = JournalCursorHandle::new(journal, workflow_id, run.to_vec());
+
+    // (1) The `ctx.wait_for_signal` await replays: SignalSeen resolved by
+    //     KEY (off the walk), command-cursor advances by exactly 1 past the
+    //     SignalAwaited command.
+    match cursor.replay_signal(&signal_key).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Some(format!(
+                "replay_signal did not resolve the recorded SignalSeen by key — the notification \
+                 was not in the off-the-walk lookup map (consumed as a command?): {run:?}"
+            ));
+        }
+        Err(err) => {
+            return Some(format!(
+                "replay_signal tripped the determinism gate at the SignalAwaited cursor \
+                 ({err:?}) — a notification leaked into the command walk: {run:?}"
+            ));
+        }
+    }
+
+    // (2) The subsequent `ctx.emit_action` await replays against the
+    //     ActionEmitted COMMAND — NOT against the SignalSeen. A notification
+    //     walked as a command would have landed the cursor ON the SignalSeen
+    //     here, tripping the Layer-1 gate (Err), not returning Ok(true).
+    match cursor.replay_emit().await {
+        Ok(true) => None,
+        Ok(false) => Some(format!(
+            "replay_emit fell to the live path after replay_signal — the command-cursor \
+             over-advanced (a notification consumed as a command displaced ActionEmitted): {run:?}"
+        )),
+        Err(err) => Some(format!(
+            "replay_emit tripped the determinism gate after replay_signal ({err:?}) — the \
+             command-cursor landed on the SignalSeen notification (consumed as a command, the \
+             trap's twin): {run:?}"
+        )),
+    }
 }
 
 /// The deterministic recorded-step contents — each `RunResult`'s name +
@@ -3670,5 +3859,176 @@ mod tests {
             OrderingVerdict::OrderingHeld,
         );
         assert_eq!(ordering_verdict(Some(&next), &original, &next), OrderingVerdict::Advanced,);
+    }
+
+    // ---------------------------------------------------------------------
+    // Step 01-06 (D6 / ADR-0064 §6) — the EXTENDED replay-equivalence guard
+    // helpers. These prove the guards BITE: a dropped `Started` at command-
+    // index 0 fails (b); a `SignalSeen` consumed as a command fails (c).
+    // ---------------------------------------------------------------------
+
+    use overdrive_core::id::ContentHash;
+    use overdrive_core::workflow::{SignalKey, SignalValue};
+
+    /// A `Started` command-index-0 entry.
+    fn started() -> LoadedEntry {
+        let d = ContentHash::of(b"spec");
+        LoadedEntry::Command(JournalCommand::Started { spec_digest: d, input_digest: d })
+    }
+
+    /// A `RunResult` command with the given name + result bytes.
+    fn run_result(name: &str, bytes: &[u8]) -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: name.to_owned(),
+            result_digest: ContentHash::of(bytes),
+            result_bytes: bytes.to_vec(),
+        })
+    }
+
+    /// A `Terminal` command.
+    fn terminal(result: &str) -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::Terminal { result: result.to_owned() })
+    }
+
+    /// A `SignalAwaited` command for `key`.
+    fn signal_awaited(key: &SignalKey) -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: key.clone() })
+    }
+
+    /// An `ActionEmitted` command.
+    fn action_emitted() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::ActionEmitted { action_digest: ContentHash::of(b"a") })
+    }
+
+    /// A `SignalSeen` NOTIFICATION for `key` (off the positional walk).
+    fn signal_seen(key: &SignalKey) -> LoadedEntry {
+        LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key: key.clone(),
+            value_digest: ContentHash::of(b"v"),
+            value: SignalValue::new("v"),
+        })
+    }
+
+    fn sig_key() -> SignalKey {
+        SignalKey::new("provision-signal").expect("valid signal key")
+    }
+
+    // ---- (b) Started-at-index-0 full-command-sequence equality ----
+
+    #[test]
+    fn b_guard_passes_when_both_runs_begin_with_started_and_sequences_match() {
+        let uninterrupted =
+            vec![started(), run_result("provision-write", b"ok"), terminal("Success")];
+        let resumed = uninterrupted.clone();
+        assert_eq!(
+            assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted),
+            None,
+            "identical runs both opening with Started pass the guard",
+        );
+    }
+
+    #[test]
+    fn b_guard_bites_when_resumed_run_drops_started_at_index_0() {
+        // The TRAP: the resumed run's command sequence does NOT begin with
+        // `Started` (a dropped engine.start Started write). The guard MUST
+        // fail.
+        let uninterrupted =
+            vec![started(), run_result("provision-write", b"ok"), terminal("Success")];
+        let resumed = vec![run_result("provision-write", b"ok"), terminal("Success")];
+        let cause =
+            assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
+                .expect("a resumed run missing Started at index 0 MUST fail the guard");
+        assert!(
+            cause.contains("does not begin with `Started`"),
+            "the cause names the dropped Started write: {cause}",
+        );
+    }
+
+    #[test]
+    fn b_guard_bites_when_command_sequences_diverge() {
+        // Both open with Started, but the resumed sequence diverges (an extra
+        // command). The full-sequence equality MUST fail (the narrow prior
+        // "recorded RunResult matches" equality would have missed this).
+        let uninterrupted =
+            vec![started(), run_result("provision-write", b"ok"), terminal("Success")];
+        let resumed = vec![
+            started(),
+            run_result("provision-write", b"ok"),
+            run_result("extra", b"x"),
+            terminal("Success"),
+        ];
+        let cause =
+            assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
+                .expect("a divergent command sequence MUST fail the guard");
+        assert!(
+            cause.contains("diverges from uninterrupted"),
+            "the cause names the divergence: {cause}",
+        );
+    }
+
+    // ---- (c) notification-not-as-command cursor-advance guard ----
+
+    #[tokio::test]
+    async fn c_guard_passes_when_signal_seen_is_off_the_command_walk() {
+        // The signal+emit shape: SignalSeen is a NOTIFICATION interleaved in
+        // the run, resolved by SignalKey OFF the positional walk. The command
+        // walk is [Started, SignalAwaited, ActionEmitted, Terminal]. The
+        // cursor walks commands only; the guard PASSES.
+        let key = sig_key();
+        let run = vec![
+            started(),
+            signal_awaited(&key),
+            signal_seen(&key), // the notification — off the walk
+            action_emitted(),
+            terminal("Success"),
+        ];
+        assert_eq!(
+            assert_notification_not_as_command(&run).await,
+            None,
+            "a SignalSeen resolved by key (off the walk) passes the guard",
+        );
+    }
+
+    #[tokio::test]
+    async fn c_guard_is_not_vacuous_on_a_notification_free_run() {
+        // The guard requires ≥1 interleaved notification so it genuinely
+        // exercises the off-the-walk lookup — it does NOT vacuously pass a
+        // notification-free run (which would be a meaningless green).
+        let key = sig_key();
+        let run = vec![started(), signal_awaited(&key), action_emitted(), terminal("Success")];
+        let cause = assert_notification_not_as_command(&run)
+            .await
+            .expect("a run with no off-the-walk notification MUST NOT pass the guard");
+        assert!(
+            cause.contains("requires a run with an interleaved SignalSeen"),
+            "a notification-free run trips the precondition arm: {cause}",
+        );
+    }
+
+    #[tokio::test]
+    async fn c_guard_bites_when_notification_present_but_not_resolvable_by_key() {
+        // The TRAP's TWIN, sharper: a SignalSeen notification IS present in
+        // the run (so the precondition is satisfied) but its SignalKey does
+        // NOT match the SignalAwaited command's key — modelling a notification
+        // that the cursor cannot resolve off the walk because the correlation
+        // broke (equivalent to it being mis-routed into the command walk
+        // rather than the key-correlated map). replay_signal(awaited_key)
+        // returns Ok(None) (no matching SignalSeen by key) → the guard fails.
+        let awaited_key = sig_key();
+        let other_key = SignalKey::new("unrelated-signal").expect("valid");
+        let run = vec![
+            started(),
+            signal_awaited(&awaited_key),
+            signal_seen(&other_key), // present, but keyed to a DIFFERENT signal
+            action_emitted(),
+            terminal("Success"),
+        ];
+        let cause = assert_notification_not_as_command(&run)
+            .await
+            .expect("a notification not resolvable by the awaited key MUST fail the guard");
+        assert!(
+            cause.contains("did not resolve the recorded SignalSeen by key"),
+            "the cause names the off-the-walk resolution failure: {cause}",
+        );
     }
 }
