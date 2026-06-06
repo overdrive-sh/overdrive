@@ -20,7 +20,7 @@
 
 use overdrive_core::id::ContentHash;
 use overdrive_core::testing::workflow::ProvisionRecord;
-use overdrive_core::workflow::{SignalKey, SignalValue};
+use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowResult};
 
 use overdrive_control_plane::journal::{
     JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
@@ -148,7 +148,7 @@ async fn loaded_entry_run_round_trips_with_interleaved_command_and_notification(
         value: SignalValue::new("ready"),
     });
     let terminal =
-        LoadedEntry::Command(JournalCommand::Terminal { result: "Completed".to_string() });
+        LoadedEntry::Command(JournalCommand::Terminal { result: WorkflowResult::Success });
 
     // The run as appended — a Command, a Command, a NOTIFICATION, a Command.
     let appended = vec![started, awaited, seen, terminal];

@@ -79,7 +79,7 @@ pub trait Workflow: Send + Sync {
 /// (well-known variants stable; new variants additive minor; renames
 /// major) is inherited from ADR-0037 §5 — the *convention*, not the
 /// type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum WorkflowResult {
     /// The workflow ran to a successful terminal.

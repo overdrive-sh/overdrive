@@ -315,12 +315,17 @@ pub enum JournalCommand {
     },
 
     /// The workflow ran to a terminal value (slice 01) — the last command.
-    /// Records the terminal result string form — the engine maps this back
-    /// to a `WorkflowResult` on read.
+    /// Records the FULL [`WorkflowResult`](overdrive_core::workflow::WorkflowResult)
+    /// the engine returned (not a lossy string label), so a resumed run
+    /// reads back the exact terminal value — including a `Failed`'s
+    /// `reason` — and can re-publish the terminal observation row
+    /// losslessly without re-running the author body
+    /// (`docs/feature/fix-workflow-terminal-redrive/deliver/rca.md`,
+    /// Option 1; `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state").
     Terminal {
-        /// Operator-facing terminal result (canonical string form of
-        /// the `WorkflowResult` the engine returned).
-        result: String,
+        /// The workflow's full terminal result.
+        result: overdrive_core::workflow::WorkflowResult,
     },
 }
 
@@ -638,8 +643,37 @@ pub trait JournalStore: Send + Sync {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::WorkflowId;
+    use super::{JournalCommand, LoadedEntry, WorkflowId};
     use overdrive_core::id::{ContentHash, CorrelationKey};
+    use overdrive_core::workflow::WorkflowResult;
+
+    /// The journal `Terminal` command now carries the FULL `WorkflowResult`
+    /// (fix-workflow-terminal-redrive, RCA Option 1) — not a lossy string
+    /// label. A CBOR (`ciborium`) round-trip of `Terminal { result:
+    /// Failed { reason } }` must preserve the `reason` exactly: this is the
+    /// lossless-terminal guarantee the start-time short-circuit relies on to
+    /// re-publish the terminal observation row without re-running the body.
+    ///
+    /// The OLD `result: String` label folded `Failed { reason }` to the
+    /// constant `"Failed"`, discarding the reason with no inverse; this test
+    /// pins that the durable terminal no longer loses it.
+    #[test]
+    fn terminal_command_cbor_roundtrip_preserves_failed_reason() {
+        let entry = LoadedEntry::Command(JournalCommand::Terminal {
+            result: WorkflowResult::Failed { reason: "disk full at step 3".to_string() },
+        });
+
+        let mut buf = Vec::new();
+        ciborium::into_writer(&entry, &mut buf).expect("CBOR encode succeeds");
+        let decoded: LoadedEntry =
+            ciborium::from_reader(buf.as_slice()).expect("CBOR decode succeeds");
+
+        assert_eq!(
+            decoded, entry,
+            "the journal Terminal command must round-trip the full WorkflowResult \
+             (including a Failed's reason) byte-equal through CBOR"
+        );
+    }
 
     /// `WorkflowId::for_correlation` is total and deterministic over
     /// every valid correlation key: the derived id is grammar-valid and

@@ -44,6 +44,7 @@ use overdrive_control_plane::journal::{
     JournalCommand, JournalStore, JournalStoreError, LoadedEntry, ProbeError, Result as JsResult,
     WorkflowId,
 };
+use overdrive_core::workflow::WorkflowResult;
 
 /// Reserved workflow id the Earned-Trust probe writes its sentinel entry
 /// under. Validated by `WorkflowId::new` at construction so any future
@@ -185,9 +186,8 @@ impl JournalStore for SimJournalStore {
 
         let probe_id = WorkflowId::new(PROBE_WORKFLOW_ID)
             .unwrap_or_else(|_| unreachable!("PROBE_WORKFLOW_ID is a valid instance id"));
-        let sentinel = LoadedEntry::Command(JournalCommand::Terminal {
-            result: "earned-trust-probe-v1".to_string(),
-        });
+        let sentinel =
+            LoadedEntry::Command(JournalCommand::Terminal { result: WorkflowResult::Success });
         let wrote = Self::encode(&sentinel).map_err(|source| ProbeError::WriteFailed { source })?;
 
         // Write → read back byte-equal → delete, all under one lock so
@@ -230,6 +230,19 @@ mod tests {
             .prop_map(|raw| SignalKey::new(&raw).expect("kebab body is a valid SignalKey"))
     }
 
+    /// Strategy for an arbitrary [`WorkflowResult`] — the real terminal
+    /// payload the journal `Terminal` command now carries (not a lossy
+    /// label). Exercises all three variants, with `Failed` carrying an
+    /// arbitrary `reason`, so the CBOR roundtrip proptest proves the full
+    /// payload (including the reason) survives serialize→deserialize.
+    fn workflow_result_strategy() -> impl Strategy<Value = WorkflowResult> {
+        prop_oneof![
+            Just(WorkflowResult::Success),
+            "[a-zA-Z0-9 ]{0,32}".prop_map(|reason| WorkflowResult::Failed { reason }),
+            Just(WorkflowResult::Cancelled),
+        ]
+    }
+
     /// Strategy for one arbitrary [`LoadedEntry`] — emits BOTH
     /// `Command(...)` (every replayable, cursor-advancing variant) and
     /// `Notification(...)` (the sole `SignalSeen` notification) so the
@@ -256,7 +269,7 @@ mod tests {
                 .prop_map(|signal_key| JournalCommand::SignalAwaited { signal_key }),
             content_hash_strategy()
                 .prop_map(|action_digest| JournalCommand::ActionEmitted { action_digest }),
-            "[a-zA-Z ]{1,32}".prop_map(|result| JournalCommand::Terminal { result }),
+            workflow_result_strategy().prop_map(|result| JournalCommand::Terminal { result }),
         ]
         .prop_map(LoadedEntry::Command);
 

@@ -42,7 +42,7 @@ use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::WorkflowSpec;
+use overdrive_core::workflow::{WorkflowResult, WorkflowSpec};
 
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 
@@ -151,7 +151,8 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     assert!(
         entries.iter().any(|e| matches!(
             e,
-            LoadedEntry::Command(JournalCommand::Terminal { result }) if result == "Success"
+            LoadedEntry::Command(JournalCommand::Terminal { result })
+                if *result == WorkflowResult::Success
         )),
         "the engine must drive run to a Terminal(Success) journal entry off the shim; got {entries:?}"
     );

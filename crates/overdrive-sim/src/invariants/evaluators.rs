@@ -3893,9 +3893,9 @@ mod tests {
         })
     }
 
-    /// A `Terminal` command.
-    fn terminal(result: &str) -> LoadedEntry {
-        LoadedEntry::Command(JournalCommand::Terminal { result: result.to_owned() })
+    /// A `Terminal` command carrying the full `WorkflowResult`.
+    fn terminal(result: WorkflowResult) -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::Terminal { result })
     }
 
     /// A `SignalAwaited` command for `key`.
@@ -3925,8 +3925,11 @@ mod tests {
 
     #[test]
     fn b_guard_passes_when_both_runs_begin_with_started_and_sequences_match() {
-        let uninterrupted =
-            vec![started(), run_result("provision-write", b"ok"), terminal("Success")];
+        let uninterrupted = vec![
+            started(),
+            run_result("provision-write", b"ok"),
+            terminal(WorkflowResult::Success),
+        ];
         let resumed = uninterrupted.clone();
         assert_eq!(
             assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted),
@@ -3940,9 +3943,12 @@ mod tests {
         // The TRAP: the resumed run's command sequence does NOT begin with
         // `Started` (a dropped engine.start Started write). The guard MUST
         // fail.
-        let uninterrupted =
-            vec![started(), run_result("provision-write", b"ok"), terminal("Success")];
-        let resumed = vec![run_result("provision-write", b"ok"), terminal("Success")];
+        let uninterrupted = vec![
+            started(),
+            run_result("provision-write", b"ok"),
+            terminal(WorkflowResult::Success),
+        ];
+        let resumed = vec![run_result("provision-write", b"ok"), terminal(WorkflowResult::Success)];
         let cause =
             assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
                 .expect("a resumed run missing Started at index 0 MUST fail the guard");
@@ -3957,13 +3963,16 @@ mod tests {
         // Both open with Started, but the resumed sequence diverges (an extra
         // command). The full-sequence equality MUST fail (the narrow prior
         // "recorded RunResult matches" equality would have missed this).
-        let uninterrupted =
-            vec![started(), run_result("provision-write", b"ok"), terminal("Success")];
+        let uninterrupted = vec![
+            started(),
+            run_result("provision-write", b"ok"),
+            terminal(WorkflowResult::Success),
+        ];
         let resumed = vec![
             started(),
             run_result("provision-write", b"ok"),
             run_result("extra", b"x"),
-            terminal("Success"),
+            terminal(WorkflowResult::Success),
         ];
         let cause =
             assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
@@ -3988,7 +3997,7 @@ mod tests {
             signal_awaited(&key),
             signal_seen(&key), // the notification — off the walk
             action_emitted(),
-            terminal("Success"),
+            terminal(WorkflowResult::Success),
         ];
         assert_eq!(
             assert_notification_not_as_command(&run).await,
@@ -4003,7 +4012,12 @@ mod tests {
         // exercises the off-the-walk lookup — it does NOT vacuously pass a
         // notification-free run (which would be a meaningless green).
         let key = sig_key();
-        let run = vec![started(), signal_awaited(&key), action_emitted(), terminal("Success")];
+        let run = vec![
+            started(),
+            signal_awaited(&key),
+            action_emitted(),
+            terminal(WorkflowResult::Success),
+        ];
         let cause = assert_notification_not_as_command(&run)
             .await
             .expect("a run with no off-the-walk notification MUST NOT pass the guard");
@@ -4029,7 +4043,7 @@ mod tests {
             signal_awaited(&awaited_key),
             signal_seen(&other_key), // present, but keyed to a DIFFERENT signal
             action_emitted(),
-            terminal("Success"),
+            terminal(WorkflowResult::Success),
         ];
         let cause = assert_notification_not_as_command(&run)
             .await

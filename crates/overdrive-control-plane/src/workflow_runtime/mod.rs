@@ -301,6 +301,44 @@ impl WorkflowEngine {
 
         let mut replay_buffer = self.journal.load_journal(workflow_id).await?;
 
+        // TERMINAL SHORT-CIRCUIT (fix-workflow-terminal-redrive, RCA Option
+        // 1). If the loaded run ALREADY holds a `JournalCommand::Terminal`,
+        // the instance is COMPLETE. Without this guard, resume would:
+        //   1. re-run the author body (it has no terminal awareness), AND
+        //   2. append a SECOND `Terminal` — `JournalStore::append` is
+        //      append-only with no dedup — so the GC-less journal grows
+        //      unboundedly on every re-drive.
+        // The re-drive is itself driven by a persistent terminal obs-write
+        // failure: the in-memory `WorkflowTerminal` row is lost, the
+        // workflow-lifecycle reconciler sees no terminal + no live task, and
+        // re-emits `StartWorkflow` each tick.
+        //
+        // On the short-circuit we ONLY re-publish the terminal observation
+        // row (idempotent under the instance `CorrelationKey`) from the
+        // journal's FULL `WorkflowResult` — losslessly, including a
+        // `Failed`'s `reason`. We do NOT write `Started`, build the cursor,
+        // spawn the body, or insert into `live_instances`: the instance is
+        // TERMINAL, not live, and the reconciler converges on
+        // `terminal.is_some()` (never on `has_live_task` once a terminal
+        // exists), so no live entry is needed and inserting one would leak.
+        // The obs write carries the SAME non-fatal `tracing::error!`
+        // discipline as the spawn-path terminal write — a failure is
+        // surfaced and the cheap idempotent re-publish is retried next tick;
+        // the journal is NOT touched (no append), so it halts at exactly one
+        // `Terminal`.
+        if let Some(result) = terminal_result(&replay_buffer) {
+            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), result };
+            if let Err(err) = self.obs.write(row).await {
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    err = %err,
+                    "failed to re-publish workflow terminal observation row on terminal short-circuit",
+                );
+            }
+            return Ok(());
+        }
+
         // CA-4 — write `Started` at command-index 0 on FIRST start; idempotent
         // on resume (ADR-0063 §2 / ADR-0064 §5). The instance has already
         // started iff its loaded run holds any command (on a genuine first
@@ -401,12 +439,14 @@ impl WorkflowEngine {
                 }
             };
             // Durable terminal record (slice-01 terminal surface,
-            // ADR-0064 §2 / §3): append the canonical result string via
-            // the sanctioned journal path. A real failure to append is
-            // surfaced via tracing; the next resume re-drives `run`.
-            let terminal = LoadedEntry::Command(JournalCommand::Terminal {
-                result: workflow_result_label(&result).to_string(),
-            });
+            // ADR-0064 §2 / §3): append the FULL `WorkflowResult` via the
+            // sanctioned journal path — not a lossy label — so a resumed
+            // run reads back the exact terminal (including a `Failed`'s
+            // `reason`) and the start-time short-circuit can re-publish the
+            // terminal observation row losslessly without re-running the
+            // body. A real failure to append is surfaced via tracing.
+            let terminal =
+                LoadedEntry::Command(JournalCommand::Terminal { result: result.clone() });
             if let Err(err) = journal.append(&workflow_id, &terminal).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -531,20 +571,23 @@ fn run_has_started(loaded: &[LoadedEntry]) -> bool {
     loaded.iter().any(|entry| matches!(entry, LoadedEntry::Command(_)))
 }
 
-/// The canonical terminal-result string a [`WorkflowResult`] maps to in
-/// the journal `Terminal` entry. Stable labels so a resumed run reads back
-/// the same terminal (the engine maps these back to a `WorkflowResult` in
-/// later slices).
-const fn workflow_result_label(result: &WorkflowResult) -> &'static str {
-    match result {
-        WorkflowResult::Success => "Success",
-        WorkflowResult::Failed { .. } => "Failed",
-        WorkflowResult::Cancelled => "Cancelled",
-        // `WorkflowResult` is `#[non_exhaustive]`; future variants get a
-        // label when they land. Until then an unknown variant maps to a
-        // conservative "Unknown" so the match stays total.
-        _ => "Unknown",
-    }
+/// The full [`WorkflowResult`] from a `JournalCommand::Terminal` in the
+/// loaded run, if the instance has already reached a durable terminal.
+///
+/// This is the terminal-short-circuit guard for resume
+/// (`docs/feature/fix-workflow-terminal-redrive/deliver/rca.md`, Option 1):
+/// a run that already carries a `Terminal` command is COMPLETE — re-driving
+/// it would re-run the author body AND (since `JournalStore::append` is
+/// append-only, no dedup) append a SECOND `Terminal`, growing the
+/// GC-less journal unboundedly. `start` short-circuits when this returns
+/// `Some`. Returns the cloned full result so the obs terminal row can be
+/// re-published losslessly (including a `Failed`'s `reason`) without
+/// reconstructing it from a lossy label.
+fn terminal_result(loaded: &[LoadedEntry]) -> Option<WorkflowResult> {
+    loaded.iter().find_map(|entry| match entry {
+        LoadedEntry::Command(JournalCommand::Terminal { result }) => Some(result.clone()),
+        _ => None,
+    })
 }
 
 /// The deterministic, address-free kind-label of a [`JournalCommand`] —
