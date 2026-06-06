@@ -128,15 +128,47 @@ keyed by the instance's `CorrelationKey` (US-WP-2 / slice-01 AC5), via the
 same action-shim ObservationStore write path the reconciler runtime uses
 — NOT a direct engine write that bypasses the sanctioned channels.
 
-### 3. Replay mechanism — engine-owned journal cursor; `ctx.*` ops check-then-record
+### 3. Replay mechanism — engine-owned journal cursor; partition-at-construction; `ctx.*` ops check-then-record
 
-The engine drives replay with a **per-instance journal cursor** (the
-`step` index, ADR-0063 §2). On (re)start of an instance the engine:
+The engine drives replay with a **per-instance journal cursor**. On
+(re)start of an instance the engine:
 
-1. `journal.load_journal(workflow_id)` → the ordered `Vec<JournalEntry>`.
-2. Constructs a `WorkflowCtx` carrying (a) the injected ports, (b) the
-   loaded journal as a **replay buffer**, (c) a cursor at step 0.
+1. `journal.load_journal(workflow_id)` → the flat ordered
+   `Vec<LoadedEntry>` (commands + notifications interleaved in append
+   order — ADR-0063 §3; the store is a dumb ordered log).
+2. Constructs a `WorkflowCtx` carrying (a) the injected ports, (b) a
+   `JournalCursorHandle` built via `JournalCursorHandle::new` /
+   `new_with_channels`, which **partitions the loaded run ONCE at
+   construction** (Q2, amended 2026-06-06 — see § "Changed Assumptions"):
+   - `Vec<JournalCommand>` — the **positional replay walk**, in command
+     append order. The cursor advances over this, one command at a time.
+     `Started` is command-index 0; the first re-executed `await`-point
+     reads command-index 1.
+   - `BTreeMap<SignalKey, JournalNotification>` — the **correlated
+     notification lookup** (`BTreeMap`, not `HashMap`, per
+     `.claude/rules/development.md` § "Ordered-collection choice"; the
+     map is iterated by DST invariants and must be deterministic across
+     seeds). `SignalSeen` notifications land here, keyed by `SignalKey`,
+     **off** the positional walk.
 3. Calls `run(&ctx).await` — a *fresh* execution of the author's `async fn`.
+
+**The partition lives at the cursor, not the store** (Q2). The store
+returns the flat `Vec<LoadedEntry>`; the cursor classifies into the two
+collections at construction. This RETIRES the pre-amendment
+two-positional-entry signal walk (the `*cursor += 2` advance that treated
+`SignalAwaited` + `SignalSeen` as two consecutive positional entries —
+see § "Changed Assumptions" CA-5). Under the typed model:
+
+- `SignalAwaited` is a **command** — it advances the command-cursor by 1
+  (exactly like every other command).
+- `SignalSeen` is a **notification** — it is matched by `SignalKey`
+  lookup in the `BTreeMap`, never by cursor position.
+- **"Crashed while still blocked"** is now a *structural* condition,
+  type-checkable: a `SignalAwaited` command is present at the cursor with
+  **no matching `SignalSeen` notification** in the lookup map → the wait
+  did not complete → re-block on the same `SignalKey`. (Before: a lone
+  `SignalAwaited` with no following positional `SignalSeen`; the
+  positional check is replaced by the keyed-absence check.)
 
 Every `ctx` await-op (`ctx.run<T>`, `ctx.sleep`, `ctx.wait_for_signal`,
 `ctx.emit_action`) is a **check-then-record** point. The generic
@@ -171,14 +203,45 @@ where
   subscription); the engine yields the instance back to the runtime until
   the wake condition fires.
 
-**Identity is positional, not content-correlated.** The step identity is
-the monotonic await-point index (= the journal cursor), NOT a content
-correlation. The `name` argument to `ctx.run<T>` is (a) a diagnostic
-label and (b) a **replay determinism check**: if the `name` recorded at
-step N differs from the `name` passed at replay step N, the workflow body
-is nondeterministic and the engine **fails closed** with an error
-(consistent with the K6 "all non-determinism through `ctx`, fail-closed"
-philosophy; S-WP-01-02 / S-WP-01-03).
+**Identity is positional, not content-correlated.** The command identity
+is the monotonic command-index (= the cursor's position in
+`Vec<JournalCommand>`), NOT a content correlation and NOT the storage
+append-position (ADR-0063 §3). The in-entry `step` field is gone (Q5,
+ADR-0063 § "Changed Assumptions" CA-2); position in the partitioned
+command vector IS the identity.
+
+**Determinism gate — Layers 1+2, fail-closed (Q4, amended 2026-06-06).**
+On replay, each `await`-op the resumed body performs is checked against
+the `JournalCommand` recorded at the current command-index, in two
+layers (the Restate RT0016 shape — `docs/research/workflow/restate-journal-replay-model.md`
+Finding 4a; "the match is on the *sequence of command types at each
+position*"):
+
+- **Layer 1 — type-at-index.** The recorded `JournalCommand` variant at
+  command-index N must match the await-op kind the resumed body performs
+  at N (a `RunResult` for a `ctx.run`, a `SleepArmed` for a `ctx.sleep`,
+  a `SignalAwaited` for a `ctx.wait_for_signal`, an `ActionEmitted` for a
+  `ctx.emit_action`). A mismatch is a nondeterministic body → the engine
+  **fails closed** with `WorkflowCtxError::NonDeterministic { expected,
+  actual }`. This is the **structural twin of the trap**: before this
+  amendment a variant mismatch at the cursor silently fell through to the
+  live path (re-performing the effect against a divergent journal); the
+  fail-closed gate makes a divergent journal an error, not a silent
+  re-execution.
+- **Layer 2 — name (within `RunResult`).** When Layer 1 confirms a
+  `RunResult` at command-index N, the recorded `name` must equal the
+  `name` the resumed body passed to `ctx.run` at N. A mismatch → the same
+  `WorkflowCtxError::NonDeterministic` fail-closed. `name` is a diagnostic
+  label AND this determinism check; it is not identity (position is).
+
+**Layer 3 — content/digest comparison — is DEFERRED**
+([#214](https://github.com/overdrive-sh/overdrive/issues/214)). The gate
+does **not** compare the recorded `result_digest` / `value_digest` /
+`action_digest` against a re-derived digest of the replaying body's
+effect. Layers 1+2 (type-at-index + name) are the Phase-1 gate; the
+optional Layer-3 content comparison (catching "same operation shape, same
+name, but the closure now produces different bytes") is tracked in #214
+and is not built here.
 
 **Honest semantics — at-least-once effect, exactly-once on replay.**
 Because the journal record happens AFTER the effect runs (fire → fsync), a
@@ -217,13 +280,20 @@ The `WorkflowCtx` surface grows one method per await-surface slice; the
 slice 01, and each later method is an additive entry-variant (ADR-0063 §2)
 + an additive `ctx` method:
 
-| Method | Slice | Journal entry | Port consumed |
+| Method | Slice | Journal entry (class) | Port consumed |
 |---|---|---|---|
-| `ctx.run<T>(name, f) -> Result<T>` | 01 | `RunResult` | any (via the closure `f`; transport via `ctx.transport()`) |
-| `ctx.sleep(Duration)` | 02 | `SleepArmed` (records deadline) | `Clock` |
-| `ctx.wait_for_signal(SignalKey) -> SignalValue` | 03 | `SignalAwaited` / `SignalSeen` | `ObservationStore` (signal rows) |
-| `ctx.emit_action(Action)` | 03 | `ActionEmitted` | Action channel → Raft |
+| `ctx.run<T>(name, f) -> Result<T>` | 01 | `RunResult` (command) | any (via the closure `f`; transport via `ctx.transport()`) |
+| `ctx.sleep(Duration)` | 02 | `SleepArmed` (command — records deadline) | `Clock` |
+| `ctx.wait_for_signal(SignalKey) -> SignalValue` | 03 | `SignalAwaited` (command, advances cursor) + `SignalSeen` (notification, `SignalKey`-keyed) | `ObservationStore` (signal rows) |
+| `ctx.emit_action(Action)` | 03 | `ActionEmitted` (command) | Action channel → Raft |
 | `ctx.activity(...)` | post-skeleton | (forward) | per-activity |
+
+The `ctx.wait_for_signal` row is the one await-surface that produces both
+classes: a `SignalAwaited` **command** (advances the command-cursor by 1
+when the wait is armed — Q2/§3) and, when satisfied, a `SignalSeen`
+**notification** (matched by `SignalKey` in the cursor's
+`BTreeMap<SignalKey, JournalNotification>`, never by position). Every
+other await-surface produces a single command.
 
 Slice 01 ships `ctx.run<T>` only — the general durable-step primitive,
 the thinnest surface that wraps a real, non-idempotent-to-repeat external
@@ -277,9 +347,18 @@ reconciler emits Action::StartWorkflow { spec, correlation }
   → WorkflowEngine::start(spec, correlation):
        journal.probe-already-done-at-boot
        journal.load_journal(id)  (empty on first start; populated on resume)
+       IF the loaded run is empty (first start, not a resume):
+         journal.append(Started { spec_digest, input_digest })  [fsync]
+         — the command-index-0 entry (ADR-0063 §2 CA-4); the cursor's
+           positional walk begins at this command. On resume the loaded
+           run already contains Started at command-index 0, so it is
+           NOT re-appended (idempotent first-entry write).
+       partition the loaded run at the cursor (§3): commands → the
+         positional Vec<JournalCommand>; SignalSeen → the SignalKey map
        spawn run(&ctx) as a tracked async task
   → the task drives run; each ctx.* await check-then-records (§3)
-       (ctx.run<T> journals the CBOR-encoded T at the await-point)
+       (ctx.run<T> journals the CBOR-encoded T at the await-point;
+        the determinism gate Layers 1+2 fail-closed on a divergent journal)
   → on terminal, engine writes ObservationStore terminal-result row
        (keyed by correlation) via the shim's ObservationStore write path
   → workflow-lifecycle reconciler observes the terminal row next tick,
@@ -321,6 +400,22 @@ them; this ADR pins their meaning):
   vs crash-resumed trajectory byte-equality + `assert_eventually!
   (is_terminal)` bounded progress. **K4, the load-bearing KPI, on the CI
   critical path.**
+  - **Cursor-advance guard (NEW IN SCOPE, Q6, amended 2026-06-06).** The
+    SAME invariant (the verbatim `replay_equivalence_provision_record`
+    name — NOT a new invariant family) is **extended** to drive a run
+    whose journal has `Started` at command-index 0, crash after step-N,
+    resume, and assert: **(a)** the resumed `ctx.run` effect fires **0
+    times** (K1 — the recorded command is replayed, the closure is not
+    re-polled); AND **(b)** the resumed command sequence is
+    byte-identical *including* `Started` at command-index 0, with **zero
+    re-executions caused by a non-command (the `SignalSeen` notification)
+    being consumed as a command** (K4). This is the guard that would have
+    caught the trap: a `Started` command-index-0 entry that the cursor
+    correctly walks, and a notification that never enters the positional
+    command sequence. The DST replay-equivalence invariant is the
+    structural enforcement of the typed split — a regression that let a
+    notification leak into the command walk, or that dropped the
+    `Started` write, fails this invariant.
 - **`WorkflowJournalWriteOrdering`** — under `SimJournalStore` with
   injected fsync-failure on the next append: assert the engine does NOT
   advance the cursor / suspend, mirroring ADR-0035's
@@ -451,10 +546,120 @@ hypotheses into one slice and lose the de-risking the slicing buys.
 - **Security**: neutral (workflow→cluster mutations go through Raft via
   `ctx.emit_action`; no IntentStore bypass — slice-03 AC2).
 
+## Changed Assumptions
+
+Amendment **2026-06-06 — workflow-journal command/notification split**
+(feature `workflow-journal-command-notification-split`; GUIDE-mode
+decisions Q1–Q6, all user-ratified). Companion to ADR-0063's amendment
+of the same date. This block quotes the superseded original ADR-0064
+text verbatim (with its location in this file) and pins the replacement
++ rationale (the back-propagation contract). The §3 / §4 / §5 / §6 text
+above has been edited in place to match.
+
+### CA-5 — the `*cursor += 2` two-positional-entry signal walk → command-advance-1 + `SignalKey` notification lookup (Q2)
+
+**Original (ADR-0064 §3 "Replay mechanism", as accepted 2026-06-05):**
+
+> the loaded journal as a **replay buffer** … On (re)start of an instance
+> the engine: 1. `journal.load_journal(workflow_id)` → the ordered
+> `Vec<JournalEntry>`. 2. Constructs a `WorkflowCtx` carrying … (b) the
+> loaded journal as a **replay buffer**, (c) a cursor at step 0.
+
+The pre-amendment `JournalCursorHandle` held a flat `replay_buffer:
+Vec<JournalEntry>` and walked it positionally; `replay_signal` advanced
+`*cursor += 2` to skip a `SignalAwaited` + `SignalSeen` *pair* treated as
+two consecutive positional entries.
+
+**Replacement:** the cursor is built by `JournalCursorHandle::new` /
+`new_with_channels`, which **partition the loaded `Vec<LoadedEntry>` once
+at construction** into `Vec<JournalCommand>` (the positional walk) +
+`BTreeMap<SignalKey, JournalNotification>` (correlated lookup) — §3.
+`SignalAwaited` is a command (advances the cursor by 1, like every other
+command); `SignalSeen` is a notification matched by `SignalKey`, never by
+position. The `*cursor += 2` advance is RETIRED.
+"Crashed while blocked" becomes the structural condition "`SignalAwaited`
+command present at the cursor with no matching `SignalSeen` notification
+in the lookup map → re-block."
+
+**Rationale:** the two-positional-entry walk conflated two semantic
+classes (an armed-command and a satisfied-notification) into one
+positional sequence — exactly the conflation the trap exploits. The
+typed split removes the notification from the positional walk entirely
+(`SignalKey`-keyed), so the cursor advances over commands only and a
+notification can never be consumed as a command. The partition lives at
+the cursor (not the store) to keep `JournalStore` a dumb ordered log
+(ADR-0063 §3) — a future HA adapter (#205) re-implements the log without
+re-deriving replay semantics.
+
+### CA-6 — determinism gate: silent fall-to-live on variant mismatch → Layers 1+2 fail-closed (Q4)
+
+**Original (ADR-0064 §3, as accepted 2026-06-05):** the only determinism
+check pinned was the `name`-mismatch fail-closed within `ctx.run`. A
+*variant* mismatch at the cursor (the recorded entry's type not matching
+the await-op the resumed body performs) was NOT a pinned fail-closed case
+— the positional cursor implementation fell through to the live path
+(re-performing the effect against a divergent journal). This is the
+trap's twin.
+
+**Replacement:** an explicit two-layer determinism gate (§3): **Layer 1**
+(type-at-index — the recorded `JournalCommand` variant at command-index N
+must match the resumed body's await-op kind) and **Layer 2** (name within
+`RunResult`), both fail-closed with `WorkflowCtxError::NonDeterministic {
+expected, actual }`. **Layer 3** (content/digest comparison) is DEFERRED
+→ [#214](https://github.com/overdrive-sh/overdrive/issues/214).
+
+**Rationale:** a divergent journal must be an error, not a silent
+re-execution against the wrong recorded state. Layer 1 closes the
+silent-fall-to-live path; the Restate RT0016 "command-type-at-position"
+check is the precedent (research Finding 4a). Layer 3 (catching "same
+shape, same name, different bytes") is real but optional for Phase 1 and
+is tracked, not built.
+
+### CA-7 — `Started` write obligation + the cursor-advance DST guard (Q6)
+
+**Original (ADR-0064 §5 "composition path", as accepted 2026-06-05):**
+`WorkflowEngine::start` was specified as `load_journal(id)` → `spawn
+run(&ctx)`; **no clause obligated writing `Started`**, and the engine
+code never did (ADR-0063 § "Changed Assumptions" CA-4 — the trap).
+
+**Replacement:** §5's composition path now obligates
+`WorkflowEngine::start` to `journal.append(Started { spec_digest,
+input_digest })` [fsync] on first start (empty loaded run) — the
+command-index-0 entry — and to skip the re-append on resume (the loaded
+run already contains it; idempotent first-entry write). §6's
+`replay_equivalence_provision_record` invariant is **extended** (verbatim
+name, NOT a new invariant family) to drive a run whose journal has
+`Started` at command-index 0, crash after step-N, resume, and assert (a)
+the resumed `ctx.run` effect fires 0 times (K1) AND (b) the resumed
+command sequence is byte-identical incl. `Started` at index 0, with zero
+re-executions caused by a notification consumed as a command (K4).
+
+**Rationale:** the DST replay-equivalence invariant is the structural
+enforcement of the typed split (per the methodology: "DST replay-
+equivalence is the structural guard"). The extended invariant is the
+guard that would have caught the trap — a regression that drops the
+`Started` write or lets a notification leak into the command walk fails
+it. Minimal notification model (Q6): only `BTreeMap<SignalKey,
+JournalNotification>` is built; no general `NotificationId` correlation
+model and no forward pointer for one (single-node Phase-1 has exactly one
+notification shape).
+
 ## References
 
 - ADR-0063 — workflow journal (the engine's durable backing; codec;
-  fsync ordering; `JournalStore` port).
+  fsync ordering; `JournalStore` port). **Companion amendment
+  2026-06-06** (the entry taxonomy CA-1..CA-4 this ADR's cursor +
+  determinism + DST amendments CA-5..CA-7 pair with).
+- `docs/research/workflow/restate-journal-replay-model.md` — the Restate
+  journal-v2 `Command`/`Notification` split + RT0016 determinism check
+  (Findings 3b, 4a) the cursor partition (CA-5) and the determinism gate
+  (CA-6) are modelled on.
+- [#205](https://github.com/overdrive-sh/overdrive/issues/205) — HA
+  cross-node crash-resume (the cursor partition + the dumb-log store
+  leave it un-precluded; §5).
+- [#214](https://github.com/overdrive-sh/overdrive/issues/214) —
+  determinism Layer-3 (content/digest) comparison, deferred (the gate is
+  Layers 1+2; §3 / CA-6).
 - ADR-0035 — `Reconciler` trait shape (the peer primitive's trait-in-core
   / runtime-in-control-plane placement this ADR mirrors; purity invariant
   preserved).
@@ -487,3 +692,21 @@ hypotheses into one slice and lose the de-risking the slicing buys.
   guarantee). `CallRequest`/`CallResponse`/`CALL_PURPOSE`/`WorkflowCtxError::Transport`
   removed; `Transport` stays on `ctx` via a `ctx.transport()` accessor. User-pinned
   contract decision; greenfield single-cut (no deprecation shim).
+- 2026-06-06 — **Command/Notification split — cursor + determinism + DST**
+  (see § "Changed Assumptions" CA-5..CA-7; feature
+  `workflow-journal-command-notification-split`; GUIDE-mode Q1–Q6,
+  user-ratified; companion to ADR-0063's same-date amendment). §3:
+  cursor partitions the loaded `Vec<LoadedEntry>` once at construction
+  into `Vec<JournalCommand>` (positional walk) + `BTreeMap<SignalKey,
+  JournalNotification>` (correlated lookup); retired the `*cursor += 2`
+  two-positional-entry signal walk (CA-5, Q2). §3: explicit determinism
+  gate Layers 1+2 (type-at-index + name) fail-closed with
+  `WorkflowCtxError::NonDeterministic`; Layer 3 (content/digest) deferred
+  → [#214](https://github.com/overdrive-sh/overdrive/issues/214) (CA-6,
+  Q4). §5: `WorkflowEngine::start` obligated to write `Started` at
+  command-index 0 on first start (idempotent on resume) — closes the
+  trap (CA-7, Q6). §6: `replay_equivalence_provision_record` extended
+  (verbatim name) with the `Started`-at-index-0 + notification-not-as-
+  command cursor-advance guard (CA-7, Q6). §4 await-surface table:
+  `SignalAwaited` (command) / `SignalSeen` (notification) classes pinned.
+  Minimal notification model — no general `NotificationId`. User-pinned 2026-06-06.

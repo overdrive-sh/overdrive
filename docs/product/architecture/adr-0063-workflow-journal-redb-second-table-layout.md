@@ -151,52 +151,136 @@ versioned envelope reserved for the first breaking change.
   slice. The journal is *designed to grow one entry-variant per slice*;
   CBOR's additive tolerance is the right tool for that growth shape.
 
-**Entry shape** (`JournalEntry` enum, CBOR-tagged):
+**Entry taxonomy — TWO typed enums + a boundary sum (amended 2026-06-06,
+journal-command-notification-split; supersedes the single `JournalEntry`
+enum — see § "Changed Assumptions").** A journal entry is one of two
+*semantically distinct* classes, modelled as two enums so the type
+system makes "a notification cannot enter the positional command walk"
+unrepresentable (the repo's foundational "make invalid states
+unrepresentable" — `.claude/rules/development.md` § "Type-driven
+design"). The Restate journal-v2 `RawEntry::Command | RawEntry::Notification`
+split is the direct precedent (`docs/research/workflow/restate-journal-replay-model.md`
+Findings 3b, 4a):
 
 ```text
-JournalEntry =
-  | Started      { spec_digest, input_digest }                  // slice 01
-  | RunResult    { step, name, result_digest, result_bytes }    // slice 01 (ctx.run<T>)
-  | SleepArmed   { step, deadline_unix }                        // slice 02 (ctx.sleep) — input, not "remaining"
-  | SignalAwaited{ step, signal_key }                           // slice 03 (ctx.wait_for_signal)
-  | SignalSeen   { step, signal_key, value_digest }             // slice 03
-  | ActionEmitted{ step, action_digest }                        // slice 03 (ctx.emit_action)
-  | Terminal     { result }                                     // slice 01 (WorkflowResult)
+// Replayable commands — ADVANCE the positional replay cursor (one per command).
+JournalCommand =
+  | Started      { spec_digest, input_digest }       // slice 01 — command-index 0
+  | RunResult    { name, result_digest, result_bytes }  // slice 01 (ctx.run<T>)
+  | SleepArmed   { deadline_unix }                   // slice 02 (ctx.sleep) — input, not "remaining"
+  | SignalAwaited{ signal_key }                      // slice 03 (ctx.wait_for_signal)
+  | ActionEmitted{ action_digest }                   // slice 03 (ctx.emit_action)
+  | Terminal     { result }                          // slice 01 (WorkflowResult)
+
+// Correlated notifications — OFF the positional walk; keyed by SignalKey.
+JournalNotification =
+  | SignalSeen   { signal_key, value_digest, value } // slice 03
+
+// On-disk / append / load representation — commands and notifications
+// interleave in ONE ordered table (§3); this sum is what `append` /
+// `load_journal` deal in.
+LoadedEntry =
+  | Command(JournalCommand)
+  | Notification(JournalNotification)
 ```
 
-The `step` field is the monotonic `await`-point index (the journal
-cursor — see ADR-0064 §3); **step identity is positional**, the cursor
-itself, NOT a content correlation. `RunResult` is the journal entry for the
-general durable-step primitive `ctx.run<T>(name, f)` (ADR-0064 §3): `name`
-is the diagnostic label the closure was given AND the replay determinism
-check (a mismatch at replay step N is a nondeterministic body → fail-closed);
-`result_bytes` is the **CBOR encoding of the closure's `T`** (so replay
-returns a byte-equal value by deserializing it), and `result_digest` is the
-SHA-256 over those bytes (the replay-equivalence invariant compares it).
-The per-step `correlation` field present in the pre-amendment `CallResult`
-entry is **REMOVED** — it was unused for replay matching, since the cursor is
-positional. (Instance-level `CorrelationKey` — the workflow instance
-identity used by the engine and the `ObservationRow::WorkflowTerminal` row —
-is a separate concern and is UNCHANGED.) `SleepArmed` records the **deadline**
-(an input), not a "remaining duration" — per development.md "Persist inputs,
-not derived state"; resume recomputes remaining wait from
-`recorded_deadline − clock.now()` (slice-02 AC4). Signal/action effect
-payloads are recorded as digests (`value_digest`, `action_digest`), not full
-bodies, to keep those entries small; the digest is sufficient for
-replay-equivalence (the engine re-derives the effect deterministically and
-compares the digest). `RunResult` carries the full `result_bytes` (not only a
-digest) because the recorded value IS the replay return — it must be
-reconstructable byte-for-byte, not merely verifiable.
+**Storage append-position vs replay command-index — the load-bearing
+distinction this amendment pins.** Two indices exist and they are NOT the
+same number:
 
-### 3. Table layout — one append-only table, key `(workflow_id, step)`
+- **Storage append-position** (the redb key's `u32`, §3): a monotonic
+  append-order over **all** `LoadedEntry`s (commands AND notifications)
+  in the single ordered table. It is an ordering / observability index —
+  it is the store's concern, never the replay cursor's. `next_step`
+  (the store's count-all over the table) computes it; the store stays a
+  dumb ordered log.
+- **Replay command-index** (the cursor's advance unit, ADR-0064 §3):
+  positional **over `JournalCommand`s only** — derived at the cursor
+  when it partitions the loaded run (Q2 / ADR-0064 §3). `Started` is
+  command-index 0 (the first command appended); the first re-executed
+  `await`-point reads command-index 1. A `SignalSeen` notification
+  occupies a storage append-position but is **not** a command-index —
+  it is correlated by `SignalKey`, off the positional walk.
+
+The `step: u32` field that lived in-entry on every variant of the old
+single enum is **DROPPED** (Q5): identity is structural (position in the
+partitioned `Vec<JournalCommand>` for commands; `SignalKey` lookup for
+notifications), and a persisted `step` is derived state — a cache of "my
+position," which `.claude/rules/development.md` § "Persist inputs, not
+derived state" forbids. The redb key still carries a `u32` (the storage
+append-position, §3); the in-entry field is gone.
+
+`RunResult` is the journal command for the general durable-step
+primitive `ctx.run<T>(name, f)` (ADR-0064 §3): `name` is the diagnostic
+label the closure was given AND the replay determinism check (a mismatch
+at replay command-index N is a nondeterministic body → fail-closed —
+ADR-0064 §3 Layer 2); `result_bytes` is the **CBOR encoding of the
+closure's `T`** (so replay returns a byte-equal value by deserializing
+it), and `result_digest` is the SHA-256 over those bytes (the
+replay-equivalence invariant compares it). (Instance-level
+`CorrelationKey` — the workflow instance identity used by the engine and
+the `ObservationRow::WorkflowTerminal` row — is a separate concern and is
+UNCHANGED.) `SleepArmed` records the **deadline** (an input), not a
+"remaining duration" — per development.md "Persist inputs, not derived
+state"; resume recomputes remaining wait from `recorded_deadline −
+clock.now()` (slice-02 AC4). `SignalSeen` (the one notification today)
+and `ActionEmitted` record digests (`value_digest`, `action_digest`),
+not full bodies, to keep those entries small; the digest is sufficient
+for replay-equivalence (the engine re-derives the effect deterministically
+and compares the digest). `RunResult` carries the full `result_bytes`
+(not only a digest) because the recorded value IS the replay return — it
+must be reconstructable byte-for-byte, not merely verifiable.
+
+**`Started` is a real engine-written command-index-0 entry (this
+amendment closes the trap).** Before this amendment `Started` was
+documented as "the journal's first entry" but **the engine never wrote
+it** (`WorkflowEngine::start` loaded the journal and constructed the
+cursor without appending `Started`) — and the positional cursor could
+not consume a non-`await` entry sitting at a walked position. The
+typed split makes `Started` a legitimate `JournalCommand` at
+command-index 0, written by `WorkflowEngine::start` on first start
+(ADR-0064 §5); the first `await`-point reads command-index 1; the
+replay-cursor walk is honest. `Terminal` is likewise a legitimate
+command (the last one), exactly as Restate's `Command::Output`
+(research Finding, Implication 2).
+
+**Codec — no envelope bump (greenfield single-cut).** The split changes
+the on-disk shape (two enums + a `LoadedEntry` sum, and the dropped
+in-entry `step`), but it does NOT introduce a `#[serde(tag = "v")]`
+versioned envelope. The CBOR additive-evolution discipline (§2) still
+holds for *future* await-surface variants; the re-tag cost for *this*
+change is bounded to zero because no surviving on-disk journals exist
+(slices 01/02/03 are unlanded greenfield — the upgrade path is "delete
+the redb file," per `.claude/rules/development.md` and
+`feedback_single_cut_greenfield_migrations.md`). The first breaking
+change *after* a journal ships in production still mints the envelope.
+
+### 3. Table layout — one append-only table, key `(workflow_id, append_position)`
 
 A single redb table `__wf_journal__` with key `(WorkflowId, u32)`
-(workflow instance + step index) and value = CBOR-encoded `JournalEntry`.
-redb's `(K1, K2)` tuple keys give an ordered range scan per `workflow_id`
-for free (load-on-resume is a range query `(id, 0)..=(id, u32::MAX)`),
-and a point write per append. This is the canonical redb append-mostly
-point-access shape ADR-0035 §4 / whitepaper §17 name as "redb's
-wheelhouse."
+(workflow instance + **storage append-position**) and value =
+CBOR-encoded `LoadedEntry` (`Command(JournalCommand) |
+Notification(JournalNotification)` — §2). redb's `(K1, K2)` tuple keys
+give an ordered range scan per `workflow_id` for free (load-on-resume is
+a range query `(id, 0)..=(id, u32::MAX)`), and a point write per append.
+This is the canonical redb append-mostly point-access shape ADR-0035 §4
+/ whitepaper §17 name as "redb's wheelhouse."
+
+**The `u32` key is the storage append-position, NOT the replay
+command-index** (§2, amended 2026-06-06). Commands and notifications
+interleave in this one ordered table in append order; the store assigns
+each appended `LoadedEntry` the next contiguous `u32` over **all**
+entries (`next_step` = the store's count-all range scan, UNCHANGED in
+behaviour — it still counts every entry in the instance's run). The
+store is a **dumb ordered log**: it does not know or care which entries
+are commands and which are notifications. The partition into the
+positional command walk (`Vec<JournalCommand>`) and the correlated
+notification lookup (`BTreeMap<SignalKey, JournalNotification>`) happens
+**once at the cursor**, at instance (re)start, NOT in the store (Q2 /
+ADR-0064 §3). Pushing the classification into the store would couple the
+store to the replay model; keeping it at the cursor keeps the store a
+generic append-only `(WorkflowId, u32) → LoadedEntry` log that a future
+HA adapter (#205) can re-implement without re-deriving replay semantics.
 
 One table (not one table per workflow kind, the `ViewStore` shape):
 workflow *instances* are unbounded in cardinality (unlike reconciler
@@ -410,7 +494,130 @@ where rkyv would force a per-slice version-bump + golden-fixture ceremony.
 - `.claude/rules/development.md` § "rkyv schema evolution" vs
   § "Reconciler I/O → Schema evolution" (the two codec disciplines this
   ADR chooses between) + § "Persist inputs, not derived state" (the
-  `SleepArmed { deadline }` rule).
+  `SleepArmed { deadline }` rule AND the dropped-`step` rule, CA-2) +
+  § "Type-driven design" (the `JournalCommand`/`JournalNotification`
+  split, CA-1).
+- `docs/research/workflow/restate-journal-replay-model.md` — the Restate
+  journal-v2 `Command`/`Notification` evidence (Findings 3b, 4a;
+  Implications 2–4) the command/notification split (CA-1, 2026-06-06
+  amendment) is modelled on.
+- [#205](https://github.com/overdrive-sh/overdrive/issues/205) — HA
+  cross-node crash-resume (the typed split is node-independent and does
+  not preclude it; §5).
+- [#214](https://github.com/overdrive-sh/overdrive/issues/214) —
+  determinism Layer-3 (content/digest) comparison, deferred (ADR-0064
+  §3 gate is Layers 1+2).
+
+## Changed Assumptions
+
+Amendment **2026-06-06 — workflow-journal command/notification split**
+(feature `workflow-journal-command-notification-split`; GUIDE-mode
+decisions Q1–Q6, all user-ratified). This block is the back-propagation
+contract: it quotes the superseded original ADR text verbatim (with its
+location in this file) and pins the replacement + rationale. The original
+text above the §2 entry-taxonomy block and the §3 key description have
+been edited in place to match; this block is the audit trail of *what
+changed and why*.
+
+### CA-1 — single `JournalEntry` enum → two typed enums + `LoadedEntry` boundary sum (Q1)
+
+**Original (ADR-0063 §2 "Entry shape", as accepted 2026-06-05):**
+
+> `JournalEntry = | Started { spec_digest, input_digest } | RunResult {
+> step, name, result_digest, result_bytes } | SleepArmed { step,
+> deadline_unix } | SignalAwaited { step, signal_key } | SignalSeen {
+> step, signal_key, value_digest } | ActionEmitted { step, action_digest
+> } | Terminal { result }`
+
+**Replacement:** the single 7-variant `JournalEntry` is split by
+*semantic class* into `JournalCommand` (6 variants: `Started`,
+`RunResult`, `SleepArmed`, `SignalAwaited`, `ActionEmitted`, `Terminal`
+— replayable, advance the cursor) and `JournalNotification` (1 variant:
+`SignalSeen` — correlated by `SignalKey`, off the positional walk), with
+a boundary sum `LoadedEntry = Command(JournalCommand) |
+Notification(JournalNotification)` as the on-disk/append/load
+representation.
+
+**Rationale:** the repo's foundational "make invalid states
+unrepresentable" — a notification cannot enter the positional command
+walk *by type*, eliminating the class of bug where a non-`await` entry
+corrupts the positional cursor. The Restate journal-v2
+`RawEntry::Command | RawEntry::Notification` split is the direct
+precedent (`docs/research/workflow/restate-journal-replay-model.md`
+Finding 3b: "type the entries so the cursor advances only over
+replayable commands — not by removing entries"). `SignalSeen` is one
+notification variant today; `JournalNotification` is the distinct type
+future notification kinds land in (Q6 keeps the model minimal — no
+general `NotificationId` correlation model is built).
+
+### CA-2 — in-entry `step: u32` field DROPPED from every variant (Q5)
+
+**Original (ADR-0063 §2, as accepted 2026-06-05):**
+
+> The `step` field is the monotonic `await`-point index (the journal
+> cursor — see ADR-0064 §3); **step identity is positional**, the cursor
+> itself, NOT a content correlation.
+
+**Replacement:** the in-entry `step: u32` field is removed from
+`RunResult`, `SleepArmed`, `SignalAwaited`, `ActionEmitted` (and was
+never present on `Started` / `Terminal`). Identity is structural —
+position in the partitioned `Vec<JournalCommand>` for commands, `SignalKey`
+lookup for notifications. The redb key still carries a `u32` (the storage
+append-position, §3); only the duplicated in-entry copy is gone.
+
+**Rationale:** a persisted `step` is derived state — a cache of "my own
+position in the run," recomputable for free from the partition. Per
+`.claude/rules/development.md` § "Persist inputs, not derived state",
+persisting it is a stale cache of the cursor's own logic; the canonical
+symptom ("a persisted field whose value would change if the
+positional-derivation logic were edited") applies exactly. DELIVER must
+verify no consumer reads the field (the store counts entries for
+`next_step`; the cursor derives the command-index at partition time) and
+move any position reader to position-derived.
+
+### CA-3 — storage append-position distinguished from replay command-index (Q3)
+
+**Original (ADR-0063 §3 "Table layout", as accepted 2026-06-05):**
+
+> A single redb table `__wf_journal__` with key `(WorkflowId, u32)`
+> (workflow instance + step index) and value = CBOR-encoded
+> `JournalEntry`.
+
+**Replacement:** the `u32` key is the **storage append-position** — a
+monotonic append-order over **all** `LoadedEntry`s (commands AND
+notifications), the store's ordering/observability index. The value is a
+`LoadedEntry`. `next_step` (count-all over the table) is UNCHANGED in
+behaviour and computes this append-position. The **replay command-index**
+(the cursor's advance unit) is a *separate*, derived-at-the-cursor index
+positional over `JournalCommand`s only; `Started` is command-index 0.
+Storage-step ≠ command-index, and that divergence is intended (storage =
+ordering/observability; command-index = replay identity).
+
+**Rationale:** conflating "append position" with "cursor consumption
+position" is the exact trap (a notification at a walked storage position
+would be consumed as a command). Keeping the store a dumb ordered log
+(it does not classify entries) and deriving the command-index at the
+cursor decouples the persistence layout from the replay model — a future
+HA `JournalStore` (#205) re-implements the log without re-deriving replay
+semantics.
+
+### CA-4 — `Started` is now actually engine-written (the trap closed)
+
+**Original (ADR-0063 §2, as accepted 2026-06-05):** `Started` was listed
+as the first `JournalEntry` variant and the entry shape implied it was
+"the journal's first entry," but no ADR clause obligated
+`WorkflowEngine::start` to write it, and the engine code never did — the
+positional cursor therefore could never consume it at command-index 0.
+
+**Replacement:** `Started` is a real `JournalCommand` written by
+`WorkflowEngine::start` on first start (ADR-0064 §5), occupying
+command-index 0; the first `await`-point reads command-index 1.
+
+**Rationale:** this is the latent replay-corruption trap the feature
+exists to close. The documented-but-unwritten `Started` left the journal
+self-inconsistent (documentation claimed an entry the engine never
+produced). The typed split makes `Started` a legitimate command the
+cursor walks, and ADR-0064 §5 obligates the write.
 
 ## Changelog
 
@@ -427,3 +634,21 @@ where rkyv would force a per-slice version-bump + golden-fixture ceremony.
   `CorrelationKey` is unchanged. Greenfield single-cut — slice-01 has no
   breaking journal history, so no version-bump / migration shim; the upgrade
   path is "delete the redb file." User-pinned 2026-06-05.
+- 2026-06-06 — **Command/Notification split** (see § "Changed
+  Assumptions" CA-1..CA-4; feature
+  `workflow-journal-command-notification-split`; GUIDE-mode Q1–Q6,
+  user-ratified). Split the single `JournalEntry` into `JournalCommand`
+  (6 replayable variants, advance the cursor) + `JournalNotification`
+  (`SignalSeen`, correlated by `SignalKey`) + a `LoadedEntry` boundary
+  sum (§2, Q1). Dropped the in-entry `step: u32` from every variant
+  (identity is structural — Q5/CA-2). Distinguished the storage
+  append-position (redb `u32` key, count-all `next_step` unchanged) from
+  the replay command-index (derived at the cursor; `Started` =
+  command-index 0 — §3, Q3/CA-3). `Started` becomes a real
+  engine-written command-index-0 entry, closing the
+  documented-but-unwritten trap (CA-4). No `#[serde(tag = "v")]`
+  envelope bump — greenfield single-cut, no surviving on-disk journals;
+  CBOR additive evolution unchanged for future variants. Companion
+  amendment: ADR-0064 (cursor partition + determinism gate + DST
+  invariant). Determinism Layer 3 (content/digest) deferred —
+  [#214](https://github.com/overdrive-sh/overdrive/issues/214). User-pinned 2026-06-06.
