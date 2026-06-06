@@ -934,7 +934,7 @@ impl JournalCursor for JournalCursorHandle {
         // crashed-while-blocked case below (a `SignalAwaited` with no
         // matching notification) is NOT divergence — it is the
         // re-block-on-resume shape, which stays `Ok(None)`.
-        let JournalCommand::SignalAwaited { .. } = command else {
+        let JournalCommand::SignalAwaited { signal_key: recorded_key } = command else {
             let expected = command_kind(command).to_string();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic {
@@ -942,6 +942,25 @@ impl JournalCursor for JournalCursorHandle {
                 actual: "SignalAwaited".to_string(),
             });
         };
+        // LAYER 2 — key-within-`SignalAwaited` fail-closed gate (D4). The
+        // variant matches, but a recorded `SignalAwaited` whose `signal_key`
+        // diverges from the replaying body's `ctx.wait_for_signal` key at this
+        // cursor is a non-deterministic trajectory — fail closed. Do NOT
+        // advance the cursor on a mismatch. Mirrors the `RunResult` Layer-2
+        // name check above. Without this, a key change at the same cursor
+        // passes Layer 1, the notification lookup on the NEW key misses,
+        // `replay_signal` returns `Ok(None)` as "crashed while blocked", and
+        // `record_signal_awaited` silently consumes the recorded
+        // `SignalAwaited{old}` with no `NonDeterministic`. (Identity is
+        // POSITIONAL; the key is the determinism guard, not the cursor identity.)
+        if recorded_key != signal_key {
+            let expected = recorded_key.to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                expected,
+                actual: signal_key.to_string(),
+            });
+        }
         // Correlated lookup — find the SignalSeen by its key, wherever it
         // landed in the interleaved on-disk stream (NOT at SignalAwaited+1).
         let Some(JournalNotification::SignalSeen { value, .. }) =
@@ -971,7 +990,24 @@ impl JournalCursor for JournalCursorHandle {
         // advance the command-cursor PAST the recorded SignalAwaited command
         // (by exactly 1) and re-enter the live block on the SAME key. This is
         // the load-bearing crash-safety case (S-WP-03-01).
-        if matches!(self.replay_commands.get(*cursor), Some(JournalCommand::SignalAwaited { .. })) {
+        if let Some(JournalCommand::SignalAwaited { signal_key: recorded_key }) =
+            self.replay_commands.get(*cursor)
+        {
+            // Crash-while-blocked: the recorded key MUST match the key the
+            // body is re-blocking on. A divergent key is non-determinism —
+            // already caught upstream by `replay_signal`'s Layer-2 gate, which
+            // fails closed before this method is reached. This guard is
+            // defense-in-depth: only advance past the recorded `SignalAwaited`
+            // when the keys match; a mismatch fails closed rather than
+            // silently consuming the recorded command.
+            if recorded_key != signal_key {
+                let expected = recorded_key.to_string();
+                drop(cursor);
+                return Err(WorkflowCtxError::NonDeterministic {
+                    expected,
+                    actual: signal_key.to_string(),
+                });
+            }
             *cursor += 1;
             drop(cursor);
             return Ok(());

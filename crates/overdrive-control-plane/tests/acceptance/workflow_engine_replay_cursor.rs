@@ -508,6 +508,80 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
     );
 }
 
+/// ADR-0064 §3 fail-closed determinism gate (D4), Layer 2 for the
+/// `SignalAwaited` branch — the key-within-variant gate, the sibling of the
+/// `RunResult` name gate above.
+///
+/// The `SignalAwaited` replay branch had Layer 1 (type-at-index) but was
+/// MISSING Layer 2 (signal-key-within-`SignalAwaited`), unlike `RunResult`.
+/// Consequence on a crashed-while-blocked resume after the body's
+/// `ctx.wait_for_signal` key changed at the same cursor:
+///
+/// 1. `replay_signal("key-b")` passes Layer 1 (variant is still
+///    `SignalAwaited`), discards the recorded key, looks up the notification
+///    map under the NEW key, misses, and returns `Ok(None)` — the legitimate
+///    "crashed while blocked" shape.
+/// 2. `record_signal_awaited("key-b")` matched the recorded
+///    `SignalAwaited{"key-a"}` via an UNGUARDED `matches!(.., SignalAwaited)`,
+///    advanced the cursor past it WITHOUT comparing keys, and returned
+///    `Ok(())`.
+/// 3. The recorded `SignalAwaited{"key-a"}` was silently consumed — no
+///    `NonDeterministic`, then the live block resolved and a `SignalSeen` was
+///    appended. Determinism-gate hole.
+///
+/// With Layer 2 in place a key divergence at the same cursor fails closed:
+/// `replay_signal` returns `NonDeterministic { expected: "key-a", actual:
+/// "key-b" }`, the cursor does NOT advance, and nothing is appended.
+///
+/// The buffer records `SignalAwaited{"key-a"}` with NO matching `SignalSeen`
+/// (the crash-while-blocked shape); the replaying body issues
+/// `ctx.wait_for_signal("key-b")`. Identity is POSITIONAL; the key is the
+/// determinism guard, not the cursor identity.
+///
+/// Port-to-port: the driving port is `WorkflowCtx::wait_for_signal`; the
+/// driven port is the `SimJournalStore` behind the cursor (observed via
+/// `load_journal` — a fail-closed replay appends nothing). The buggy path
+/// would have appended a `SignalSeen` notification.
+#[tokio::test]
+async fn signal_key_mismatch_in_crash_while_blocked_fails_closed_nondeterministic() {
+    let recorded = SignalKey::new("key-a").expect("valid signal key");
+    // Crash-while-blocked shape: a lone SignalAwaited command, NO matching
+    // SignalSeen notification.
+    let buffer =
+        vec![LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: recorded.clone() })];
+    let (ctx, journal, workflow_id) = ctx_only(buffer);
+
+    // The replaying body re-blocks on a DIFFERENT key at the same cursor.
+    let body_key = SignalKey::new("key-b").expect("valid signal key");
+    let result = ctx.wait_for_signal(body_key).await;
+
+    match result {
+        Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
+            assert_eq!(
+                expected, "key-a",
+                "expected names the recorded SignalAwaited key (deterministic, Display form)"
+            );
+            assert_eq!(
+                actual, "key-b",
+                "actual names the key the replaying body re-blocked on (deterministic)"
+            );
+        }
+        other => panic!(
+            "signal-key mismatch on crash-while-blocked resume must fail closed with \
+             NonDeterministic, got {other:?}"
+        ),
+    }
+
+    // Fail-closed: the cursor did NOT advance and did NOT fall through to the
+    // live block — nothing was appended. The buggy path silently consumed the
+    // recorded SignalAwaited and then appended a SignalSeen notification.
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert!(
+        entries.is_empty(),
+        "fail-closed must not advance / append (no SignalSeen); got {entries:?}"
+    );
+}
+
 /// ADR-0064 §3 sleep branch, replay path. A recorded `SleepArmed` at the
 /// cursor replays its recorded ABSOLUTE deadline WITHOUT re-arming (no
 /// append), and advances the command-cursor by exactly 1 — so the trailing
