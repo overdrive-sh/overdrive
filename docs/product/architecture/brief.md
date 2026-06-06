@@ -2539,6 +2539,81 @@ no follow-up issues created:
 
 ---
 
+_This section extends §§ 1–68 with the application-architecture
+decision landed by feature `describe-workload-oneof-discriminator`
+(ADR-0064, Accepted 2026-06-06). Nothing in §§ 1–68 is rewritten._
+**Tracks:** GH #183. **Date:** 2026-06-06.
+
+### 69. Describe-side wire layer — `DescribeSpecOutput` (the fourth type-family corner)
+
+ADR-0051 § 1 established three type families for "a workload" (TOML
+parser `WorkloadSpec`, HTTP submit wire `SubmitSpecInput`, persisted
+`WorkloadIntent`). ADR-0064 adds a **fourth, narrow corner** — the
+HTTP **describe** wire — because the describe response must surface a
+field the submit wire structurally cannot carry: the platform-issued
+Service VIP.
+
+| Layer | Type | Direction | Module |
+|---|---|---|---|
+| TOML parser | `WorkloadSpec` | operator → parser | `aggregate::workload_spec` (ADR-0047) |
+| HTTP submit wire | `SubmitSpecInput` | request (client → server) | `api::submit` (ADR-0051) |
+| Persisted | `WorkloadIntent` | server-internal | `aggregate` (ADR-0050) |
+| **HTTP describe wire** | **`DescribeSpecOutput`** | **response (server → client)** | **`api::describe` (ADR-0064)** |
+
+`DescribeSpecOutput` is a kind-discriminated `oneOf`
+(`#[serde(tag = "kind", rename_all = "snake_case")]`, `utoipa::ToSchema`
+→ `discriminator: propertyName: kind`) with three arms:
+
+- **`Job(JobSpecInput)`** — reuses the existing Job wire type verbatim
+  (no platform-derived field to surface); the existing `From<&Job>`
+  impl is the render path, wrapped in the enum.
+- **`Service(ServiceSpecOutput)`** — the submit Service field set PLUS
+  a **required** `vip: ServiceVip` (dotted-quad string on the wire).
+  The VIP is the platform-issued address surfaced read-only; absence is
+  unrepresentable (OQ-4). A persisted Service always has an allocated
+  VIP (submit-time admission per ADR-0049 § 4); a missing allocator
+  entry is an internal-invariant violation → HTTP 500
+  (`ControlPlaneError::ServiceVipMissing`).
+- **`Schedule(ScheduleSpecOutput)`** — exhaustive-enum completeness;
+  the `ScheduleV1::to_describe()` render path is a RED scaffold (Phase 1
+  cannot persist a Schedule; describe rejects `WorkloadIntent::Schedule`
+  structurally).
+
+`WorkloadDescription.spec` changes type from `JobSpecInput` to
+`DescribeSpecOutput` (single-cut); `spec_digest` stays top-level.
+
+**VIP retrieval is read-only and reuses an existing method.** The
+describe handler resolves the VIP via
+`PersistentServiceVipAllocator::get(&spec_digest)` — the read-only
+(`&self`, sync) accessor that already exists for the
+`BackendDiscoveryBridge` (§ 63). Describe never calls the mutating
+`allocate` / `release` (OQ-7). The VIP is read at describe time, never
+persisted on the response shape (per `.claude/rules/development.md` §
+"Persist inputs, not derived state" — the allocator memo is the source
+of truth per ADR-0049 § 5a).
+
+**No new container; no new arrow.** The describe path is a read against
+the same `IntentStore` + `ServiceVipAllocator` the control-plane
+container already holds. The C4 L2 container topology is unchanged from
+§ 67. The only new component-level edge is the read-only
+`describe_workload → ServiceVipAllocator::get` lookup, captured in the
+feature's `design/c4-component-describe.md`.
+
+**Render constructors** mirror the `from_submit` family as the inverse
+direction: `JobV1::to_describe()`, `ServiceV1::to_describe(vip)`,
+`ScheduleV1::to_describe()` (RED scaffold). The VIP is passed in by the
+handler (core must not depend on the control-plane crate that holds the
+allocator).
+
+**Upstream change:** ADR-0051 § 1's describe-echo boundary note
+("`WorkloadIntent → SubmitSpecInput` — describe echoes back") is
+amended — describe now uses `DescribeSpecOutput`, not `SubmitSpecInput`.
+See ADR-0051 § "Amendment (2026-06-06)".
+
+External integrations: **none**. No contract tests recommended.
+
+---
+
 ---
 
 ## Handoff annotations
