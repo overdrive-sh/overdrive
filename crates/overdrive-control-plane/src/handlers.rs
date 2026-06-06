@@ -708,7 +708,7 @@ pub async fn describe_workload(
         ("id" = String, Path, description = "Canonical WorkloadId"),
     ),
     responses(
-        (status = 200, description = "Job stop recorded", body = StopWorkloadResponse),
+        (status = 200, description = "Workload stop recorded", body = StopWorkloadResponse),
         (status = 400, description = "Validation error", body = api::ErrorBody),
         (status = 404, description = "Workload not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
