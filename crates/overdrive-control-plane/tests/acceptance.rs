@@ -274,4 +274,27 @@ mod acceptance {
     // terminal + unconditional live-instance teardown (catch_unwind + RAII
     // drop guard), not strand the instance.
     mod workflow_panic_converges_to_failed_terminal;
+
+    // workflow-result-error-model DISTILL (ADR-0065; resolves #217) — NEW
+    // control-plane RED scaffolds for the genuinely-new engine-side
+    // behaviour the reshape introduces. All `#[should_panic(expected =
+    // "RED scaffold")]`; import no unbuilt type. The existing engine /
+    // action-shim / lifecycle workflow tests above MIGRATE (Terminal/obs
+    // `result: WorkflowResult` → `status: WorkflowStatus`; body
+    // `WorkflowResult::Success/Failed` → `Ok(())` / `Err(TerminalError)`;
+    // `input_digest` assertion target → `ContentHash::of(&spec.input)`);
+    // that migration is DELIVER work (the contract change breaks them at
+    // compile time, each slice migrates what it breaks).
+    //
+    //   - NEW-2  (Slice 03)  input_digest divergence — the executable #217
+    //     acceptance: two distinct inputs of one kind ⇒ distinct digests.
+    //   - NEW-4  (Slice 03)  MalformedInput terminal — undecodable start
+    //     input ⇒ engine-minted WorkflowStatus::Failed{MalformedInput},
+    //     body never entered.
+    //   - NEW-5  (Slice 04)  budget-exhaustion mints BudgetExhausted — STAYS
+    //     RED until Slice 04 (the retry-re-drive loop). DELIVER Slices 01-03
+    //     do NOT activate it.
+    mod workflow_budget_exhaustion_mints_terminal; // NEW-5 / D4 (Slice 04)
+    mod workflow_input_digest_divergence; // NEW-2 / D5 / #217
+    mod workflow_malformed_input_terminal; // NEW-4 / D2 / D3
 }

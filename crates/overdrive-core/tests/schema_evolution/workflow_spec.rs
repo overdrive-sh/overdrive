@@ -1,0 +1,168 @@
+//! Schema-evolution golden-bytes test — `WorkflowSpecEnvelope`
+//! (DISTILL DELIVER-ready scaffold, `workflow-result-error-model` /
+//! ADR-0065 § 5 / D5).
+//!
+//! Mandatory per ADR-0048 § 1 + `.claude/rules/testing.md` § "Archive
+//! schema-evolution roundtrip": `WorkflowSpec` grows from identity-only
+//! (`{ name }`) to an input-bearing durable INTENT aggregate
+//! (`{ name: WorkflowName, input: Vec<u8> }`) read back on every restart,
+//! so it crosses the rkyv versioned-envelope + co-located-typed-codec
+//! boundary (the `Job` aggregate precedent, ADR-0048 § 4b). This fixture
+//! pins the V1 archived layout so any future commit that appends a field
+//! to the V1 payload — rather than minting a `V2` — breaks this test.
+//!
+//! The V1 payload (`WorkflowSpecV1`) persists the start INPUTS, never
+//! derived state (`development.md` § "Persist inputs, not derived state"):
+//! the `name` (kind identity) and the opaque CBOR `input` bytes (the erased
+//! `W::Input`). The rkyv envelope wraps the OUTER `WorkflowSpec` only — the
+//! inner `input: Vec<u8>` stays opaque CBOR (the "aggregate envelopes wrap
+//! the outer type only" rule; the two codecs — rkyv outer, CBOR inner —
+//! stay separate per `development.md` § "rkyv schema evolution").
+//!
+//! **`FIXTURE_V1` is never touched** once minted. Bumping to `V2` adds a
+//! new `FIXTURE_V2` constant + a new assertion in the same commit; existing
+//! constants stay verbatim (`development.md` § "Version-bump procedure").
+//!
+//! Default lane (no `integration-tests` feature) — pure in-memory rkyv, no
+//! I/O.
+//!
+//! # DELIVER ACTIVATION (Slice 01)
+//!
+//! This file references `WorkflowSpecEnvelope` / `WorkflowSpecV1` /
+//! `WorkflowSpecRecordLatest`, which DO NOT EXIST until DELIVER Slice 01
+//! creates them in `overdrive-core::workflow`. It is therefore NOT a
+//! green-at-the-bar `#[should_panic]` scaffold — it cannot compile
+//! standalone — and is deliberately LEFT UN-WIRED from
+//! `tests/schema_evolution.rs` (its `mod workflow_spec;` line is commented
+//! there with this marker). Wiring it in now would break the WHOLE
+//! `overdrive-core` schema-evolution test binary (every other fixture's
+//! ability to run) against a type that does not exist yet — the Rust
+//! analogue of a fixture that cannot be skipped.
+//!
+//! Slice 01 DELIVER steps, in one commit:
+//!   1. Create `WorkflowSpecV1` + `WorkflowSpecEnvelope` (V1) + the
+//!      `VersionedEnvelope` impl + the co-located typed codec
+//!      (`WorkflowSpec::archive_for_store` / `from_store_bytes`).
+//!   2. Run `print_fixture_v1_bytes` (below) and paste the hex into
+//!      `FIXTURE_V1`; pin `GOLDEN_DISCRIMINANT_OFFSET_V1` from the same run.
+//!   3. UNCOMMENT `mod workflow_spec;` in `tests/schema_evolution.rs`.
+//! Until step 3 the three `#[test]`s here do not run; the file ships the
+//! spec, the harness shape, and the regeneration aid DELIVER needs.
+
+use overdrive_core::codec::VersionedEnvelope;
+use overdrive_core::workflow::{
+    WorkflowName, WorkflowSpecEnvelope, WorkflowSpecRecordLatest, WorkflowSpecV1,
+};
+
+use super::harness::{
+    assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
+    assert_unknown_version_probe_surfaces,
+};
+
+/// Independent pin of the V1 discriminant offset for triangulation against
+/// `WorkflowSpecEnvelope::discriminant_offset_from_end()` (two-source guard
+/// against unilateral drift of either pin, per ADR-0048). On a `V<N+1>`
+/// bump BOTH this constant and the trait method update in the same commit.
+///
+/// PLACEHOLDER — DELIVER Slice 01 pins the real value by regenerating
+/// `FIXTURE_V1` and locating the trailing-root discriminant byte (mirror
+/// `alloc_status_row.rs::GOLDEN_DISCRIMINANT_OFFSET_V1`).
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 0;
+
+/// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
+/// projection is built from these values verbatim — change any one of them
+/// and the test fails until `FIXTURE_V1` is regenerated.
+///
+/// The `input` bytes are a fixed, arbitrary-but-stable CBOR-shaped byte
+/// vector standing in for an erased `W::Input` — the fixture pins the
+/// rkyv layout of `WorkflowSpec` carrying a NON-EMPTY input (the #217
+/// shape: identity-only had no envelope; input-bearing does).
+fn canonical_v1_payload() -> WorkflowSpecRecordLatest {
+    WorkflowSpecV1 {
+        name: WorkflowName::new("provision-record").expect("valid kebab workflow name"),
+        // A stable, non-empty opaque CBOR input (the erased W::Input). The
+        // value is arbitrary; the test asserts byte-stable round-trip of the
+        // OUTER WorkflowSpec rkyv layout, not the inner CBOR semantics.
+        input: vec![0xa1, 0x63, 0x66, 0x6f, 0x6f, 0x18, 0x2a],
+    }
+}
+
+/// Hex-encoded rkyv-archived bytes of
+/// `WorkflowSpecEnvelope::V1(canonical_v1_payload())`.
+///
+/// PLACEHOLDER — minted by `print_fixture_v1_bytes` (below) in DELIVER
+/// Slice 01 once `WorkflowSpecV1` compiles, then pasted verbatim.
+/// Pre-shipment regeneration is allowed under
+/// `feedback_single_cut_greenfield_migrations.md`; once V1 ships to a
+/// deployed consumer this constant becomes immutable per
+/// `.claude/rules/development.md` § "rkyv schema evolution" — future
+/// variants need a `V2` envelope.
+const FIXTURE_V1: &str = "__RED_SCAFFOLD__regenerate_in_deliver_slice_01__";
+
+/// `@property` `@D5` `@issue-217` (NEW-3) — golden-bytes roundtrip:
+/// hex-decode `FIXTURE_V1`, rkyv-deserialise into `WorkflowSpecEnvelope`,
+/// `into_latest()`, assert equality against the canonical `Latest`
+/// projection; the archived layout is byte-stable. A future additive field
+/// on `WorkflowSpecV1` (instead of a `V2`) shifts the layout and fails this
+/// test — the structural defense ADR-0048 mandates.
+#[test]
+fn workflow_spec_envelope_v1_golden_bytes_roundtrip() {
+    let expected = canonical_v1_payload();
+    assert_envelope_v_roundtrip::<WorkflowSpecEnvelope>(FIXTURE_V1, &expected);
+}
+
+/// `@property` `@D5` (NEW-3b) — discriminant-offset triangulation: the
+/// independent pin (`GOLDEN_DISCRIMINANT_OFFSET_V1`) must agree with
+/// `WorkflowSpecEnvelope::discriminant_offset_from_end()` (two-source guard
+/// against unilateral drift, per ADR-0048).
+#[test]
+fn workflow_spec_envelope_discriminant_offset_triangulates() {
+    assert_discriminant_offset_triangulation::<WorkflowSpecEnvelope>(
+        canonical_v1_payload(),
+        GOLDEN_DISCRIMINANT_OFFSET_V1,
+        0,
+    );
+}
+
+/// `@property` `@D5` `@error` (NEW-3c) — an unknown/forward envelope version
+/// surfaces `EnvelopeError` via the probe rather than decoding into garbage.
+/// This is the intent fail-fast precursor: per ADR-0065 § 5 the `IntentStore`
+/// decode path for the persisted `WorkflowSpec` intent refuses with a
+/// `health.startup.refused`-class surface on this error (intent is SSOT —
+/// the ADR-0048 intent asymmetry).
+///
+/// `supported_max == 0` because today's envelope is V1-only; bumping to V2
+/// means re-pinning this assertion in the same commit per
+/// `development.md` § "Version-bump procedure".
+#[test]
+fn workflow_spec_envelope_unknown_version_probe_surfaces_error() {
+    assert_unknown_version_probe_surfaces::<WorkflowSpecEnvelope>(
+        canonical_v1_payload(),
+        "WorkflowSpecEnvelope",
+        0,
+    );
+}
+
+// ---------------------------------------------------------------------
+// Bootstrap helper — generates the canonical V1 bytes on demand for the
+// crafter to paste into `FIXTURE_V1` above. Run via:
+//
+//   cargo nextest run -p overdrive-core --test schema_evolution \
+//       -E 'test(/workflow_spec.*print_fixture_v1_bytes/)' --no-capture
+//
+// Marked `#[ignore]` so it never runs in normal test execution; the pinned
+// `FIXTURE_V1` constant is the load-bearing artifact, this is a one-shot
+// regeneration aid (mirror alloc_status_row.rs / root_ca_key.rs).
+// ---------------------------------------------------------------------
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand in DELIVER Slice 01 to mint FIXTURE_V1; the pinned FIXTURE_V<N> constants are the load-bearing artifact"]
+#[allow(
+    clippy::print_stdout,
+    reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V1"
+)]
+fn print_fixture_v1_bytes() {
+    let envelope = WorkflowSpecEnvelope::latest(canonical_v1_payload());
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+    println!("FIXTURE_V1 = \"{}\"", hex::encode(bytes.as_ref()));
+}

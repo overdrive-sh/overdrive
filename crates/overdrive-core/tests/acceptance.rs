@@ -216,4 +216,18 @@ mod acceptance {
     mod workflow_body_routes_nondeterminism_through_ctx;
     mod workflow_ctx_run_and_sleep;
     mod workflow_trait_drives_to_terminal;
+
+    // workflow-result-error-model DISTILL (ADR-0065; resolves #217) — NEW
+    // RED scaffold for the genuinely-new author-edge behaviour the reshape
+    // introduces: a NON-UNIT typed `Output` (and typed `Input`) crossing
+    // the `ErasedWorkflowAdapter<W>` CBOR-erasure boundary and decoding
+    // back equal (D1, object safety via typed-edge / CBOR-erased-interior).
+    // `#[should_panic(expected = "RED scaffold")]` — imports no unbuilt
+    // type; DELIVER Slice 01 replaces the panic with the real adapter
+    // roundtrip (and promotes the output property to `proptest!`). The
+    // 4 existing `workflow_*` core tests above MIGRATE (fixture signature
+    // `run(ctx) -> WorkflowResult` → `run(ctx, ()) -> Result<(),
+    // TerminalError>`); their migration is DELIVER work (the compiler
+    // breaks them at the contract change).
+    mod workflow_typed_output_roundtrip; // NEW-1 / D1
 }
