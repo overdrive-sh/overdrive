@@ -1,4 +1,4 @@
-# ADR-0065 — Workflow body returns `Result<T, TerminalError>`; status enum becomes an engine-owned control-plane projection; typed `WorkflowSpec` input crosses Raft with rkyv-envelope discipline
+# ADR-0065 — Workflow body returns `Result<T, TerminalError>`; status enum becomes an engine-owned control-plane projection; typed `WorkflowStart` input crosses Raft with rkyv-envelope discipline
 
 ## Status
 
@@ -19,12 +19,12 @@ digests are touched here). **Composes with**: ADR-0035 (`Reconciler`
 retry-budget-in-`View` precedent the engine's retry-location contrasts
 with), ADR-0037 (`TerminalCondition` — the control-plane terminal-status
 enum's SemVer-convention sibling), ADR-0048 (rkyv versioned-envelope
-discipline `WorkflowSpec` input now requires), ADR-0003 (core-has-no-
+discipline `WorkflowStart` input now requires), ADR-0003 (core-has-no-
 tokio).
 
 **Resolves** [#217](https://github.com/overdrive-sh/overdrive/issues/217)
 (`input_digest` must hash the start-input bytes, not the workflow
-name) by giving `WorkflowSpec` a typed input surface and routing it
+name) by giving `WorkflowStart` a typed input surface and routing it
 durably through Raft. **Unblocks** [#40](https://github.com/overdrive-sh/overdrive/issues/40)
 (cert-rotation as the first internal workflow — the validating consumer
 of typed input + typed output).
@@ -78,12 +78,12 @@ Two project-specific facts sharpen this:
   is a standing invitation to embed a non-deterministic value into the
   durable terminal — the structural fix is to take terminal-failure
   authoring away from the body and give it a typed, bounded shape.
-- **#217 is open and gated on the spec input.** `WorkflowSpec` today
+- **#217 is open and gated on the spec input.** `WorkflowStart` today
   carries only `name: WorkflowName` (identity). The engine's
   `started_digests` currently hashes `spec.name` bytes for BOTH
   `spec_digest` AND `input_digest` (a `TODO(#217)` marks the gap); the
   action-shim persists `spec.name.as_str().as_bytes()` as the durable
-  desired-intent; the lifecycle reconciler rehydrates a `WorkflowSpec`
+  desired-intent; the lifecycle reconciler rehydrates a `WorkflowStart`
   by parsing those bytes back into a `WorkflowName`. A workflow with
   *parameters* (cert-rotation's `CertSpec`, #40) has nowhere to put them,
   and `input_digest` cannot distinguish two instances of the same kind
@@ -96,7 +96,7 @@ Four design questions follow (the four priorities in scope):
 
 1. **Object safety** — the engine drives `Box<dyn Workflow>`. A typed
    `Result<T, TerminalError>` return collides with `dyn` dispatch.
-2. **Typed input on `WorkflowSpec`** crossing `Action::StartWorkflow` →
+2. **Typed input on `WorkflowStart`** crossing `Action::StartWorkflow` →
    Raft (durable intent → rkyv-envelope discipline; resolves #217).
 3. **Control-plane terminal-status projection** — the engine-owned status
    enum, where it lives, distinct from the body's return type.
@@ -369,16 +369,16 @@ immediately, with the retry loop layered on top in Slice 04 without changing
 the body contract. This is the honest carpaccio: the body contract is stable
 from Slice 01; the engine's retry sophistication grows additively.
 
-### 5. Typed `WorkflowSpec` input crossing Raft — rkyv-envelope discipline; resolves #217 (D5)
+### 5. Typed `WorkflowStart` input crossing Raft — rkyv-envelope discipline; resolves #217 (D5)
 
-`WorkflowSpec` grows from identity-only to identity + typed input:
+`WorkflowStart` grows from identity-only to identity + typed input:
 
 ```rust
 /// The concrete workflow spec carried by `Action::StartWorkflow`. Now
 /// carries the start INPUT in addition to the kind identity — the
 /// `input_digest` hashes it (#217) and the `ErasedWorkflowAdapter`
 /// CBOR-decodes into `W::Input`.
-pub struct WorkflowSpec {
+pub struct WorkflowStart {
     /// Identity of the workflow kind to start (resolves the factory).
     pub name: WorkflowName,
     /// The CBOR-encoded start input (the erased `W::Input`). Opaque to
@@ -390,8 +390,8 @@ pub struct WorkflowSpec {
 
 **The durability path (the #217 resolution):**
 
-1. `Action::StartWorkflow { spec, correlation }` carries the typed
-   `WorkflowSpec { name, input }`. `Action` is core, `input` is opaque CBOR.
+1. `Action::StartWorkflow { start, correlation }` carries the typed
+   `WorkflowStart { name, input }`. `Action` is core, `input` is opaque CBOR.
 2. The action-shim's `persist_workflow_intents` persists the **full spec**
    (name + input) as the durable desired-intent under
    `IntentKey::for_workflow_instance(correlation)` — NOT just the name bytes
@@ -399,16 +399,16 @@ pub struct WorkflowSpec {
    persisted desired-intent is a **durable, replayable-across-restart
    value**, it crosses the rkyv-persistence boundary discipline.
 
-   **Decision (D5a): the persisted `WorkflowSpec` intent uses the rkyv
-   versioned-envelope + typed-codec discipline (ADR-0048).** A `WorkflowSpec`
+   **Decision (D5a): the persisted `WorkflowStart` intent uses the rkyv
+   versioned-envelope + typed-codec discipline (ADR-0048).** A `WorkflowStart`
    that now carries arbitrary input bytes is a durable intent aggregate
    read back on every restart; per `development.md` § "rkyv schema evolution"
    and ADR-0048 § 4b (the `Job` typed-codec precedent), it gets a
-   `WorkflowSpecEnvelope` enum (`V1(WorkflowSpecV1)`) and a co-located typed
-   codec (`WorkflowSpec::archive_for_store` / `WorkflowSpec::from_store_bytes`)
+   `WorkflowStartEnvelope` enum (`V1(WorkflowStartV1)`) and a co-located typed
+   codec (`WorkflowStart::archive_for_store` / `WorkflowStart::from_store_bytes`)
    on the typed value, with the byte-level `IntentStore` surface unchanged.
    The action-shim writes `spec.archive_for_store()?` bytes; the lifecycle
-   reconciler's `hydrate_desired` reads `WorkflowSpec::from_store_bytes(bytes)?`
+   reconciler's `hydrate_desired` reads `WorkflowStart::from_store_bytes(bytes)?`
    — replacing the current `WorkflowName::new(from_utf8(value))` parse. A
    decode failure on intent is load-bearing (intent is SSOT): refuse with a
    structured `health.startup.refused`-class surface, per ADR-0048's intent
@@ -420,8 +420,8 @@ pub struct WorkflowSpec {
    the journal `input`/`Output`/`Terminal` bytes are runtime-memory CBOR per
    ADR-0063 §2 — they are NOT re-aliased through rkyv. The two codecs stay
    separate per the `development.md` rule; do not conflate.) The
-   `input: Vec<u8>` inside `WorkflowSpec` is itself opaque CBOR (the erased
-   `W::Input`); the rkyv envelope wraps the OUTER `WorkflowSpec`, not the
+   `input: Vec<u8>` inside `WorkflowStart` is itself opaque CBOR (the erased
+   `W::Input`); the rkyv envelope wraps the OUTER `WorkflowStart`, not the
    inner input — exactly the "aggregate envelopes wrap the outer type only"
    rule.
 3. `started_digests` (engine) now derives `input_digest = ContentHash::of(&spec.input)`
@@ -432,7 +432,7 @@ pub struct WorkflowSpec {
    records both as inputs.
 
 This is the one decision that pulls in a durable-schema discipline:
-`WorkflowSpec` was identity-only (no envelope needed); with input it
+`WorkflowStart` was identity-only (no envelope needed); with input it
 becomes a versioned durable intent aggregate.
 
 ## Considered alternatives
@@ -515,7 +515,7 @@ role.
   observable projection), `TerminalCondition` (reconciler's allocation
   claim, ADR-0037). They model genuinely different things; the ADR pins the
   distinctions, but a reader must not conflate them.
-- **`WorkflowSpec` crosses an rkyv-envelope boundary now.** Identity-only
+- **`WorkflowStart` crosses an rkyv-envelope boundary now.** Identity-only
   needed no envelope; input-bearing durable intent does (ADR-0048
   discipline + a golden-bytes schema-evolution fixture). One more durable
   schema to evolve carefully — but it rides the established `Job` codec
@@ -568,7 +568,7 @@ role.
   carried forward.
 - ADR-0063 — the journal (`Terminal` command's `status` field; `Started`
   digests; the additive `RetryAttempted` command for D4).
-- ADR-0048 — rkyv versioned-envelope + typed-codec discipline `WorkflowSpec`
+- ADR-0048 — rkyv versioned-envelope + typed-codec discipline `WorkflowStart`
   input adopts (the `Job` aggregate precedent).
 - ADR-0037 — `TerminalCondition` (the control-plane terminal-status sibling
   `WorkflowStatus` mirrors in convention, not type).
@@ -589,6 +589,6 @@ role.
 
 - 2026-06-06 — Initial proposed version. Amends ADR-0064 §2/§3/§5/§6.
   Body return → `Result<Output, TerminalError>`; status enum → engine-owned
-  `WorkflowStatus` control-plane projection; typed `WorkflowSpec.input`
+  `WorkflowStatus` control-plane projection; typed `WorkflowStart.input`
   crossing Raft with rkyv-envelope discipline (resolves #217); retry budget
   in engine/journal (D4). Greenfield single-cut — `WorkflowResult` deleted.

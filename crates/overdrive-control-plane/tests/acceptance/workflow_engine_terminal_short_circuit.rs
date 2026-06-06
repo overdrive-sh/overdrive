@@ -45,7 +45,9 @@ use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{
+    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
+};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -65,8 +67,8 @@ struct CountingSuccess {
 impl CountingSuccess {
     const WORKFLOW_NAME: &'static str = "counting-success-wf";
 
-    fn spec() -> WorkflowSpec {
-        WorkflowSpec {
+    fn spec() -> WorkflowStart {
+        WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
             input: Vec::new(),
         }
@@ -139,7 +141,7 @@ async fn restart_over_terminal_journal_does_not_append_second_terminal() {
         )
     };
 
-    let spec: WorkflowSpec = CountingSuccess::spec();
+    let spec: WorkflowStart = CountingSuccess::spec();
     let correlation = CorrelationKey::derive(
         "wf-short-circuit-0001",
         &ContentHash::of(spec.name.as_str().as_bytes()),

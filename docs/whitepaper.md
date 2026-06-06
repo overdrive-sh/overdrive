@@ -2074,7 +2074,7 @@ Workflow journals live in the runtime-owned redb substrate (§4, §17), a per-in
 
 The two primitives compose through the Action channel and the ObservationStore:
 
-- **Reconciler → Workflow** — reconciler emits `Action::StartWorkflow { spec, correlation }`; the workflow lifecycle reconciler brings the workflow up. Subsequent `reconcile` iterations read the workflow's state from the ObservationStore and branch on its result.
+- **Reconciler → Workflow** — reconciler emits `Action::StartWorkflow { start, correlation }`; the workflow lifecycle reconciler brings the workflow up. Subsequent `reconcile` iterations read the workflow's state from the ObservationStore and branch on its result.
 - **Workflow → Reconciler** — a workflow that needs to mutate cluster intent emits a typed Action descriptor through the same Action channel the reconciler runtime consumes. The action lands in Raft; the target reconciler picks it up on commit. Workflows do not bypass Raft.
 - **Workflow → external service** — direct `ctx.call(...).await` through injected `Transport`. Crash-safe via journal; replayable under DST.
 - **Workflow → workflow** — typed signals via ObservationStore. Parent workflows may `await` child results; sibling workflows may `await` signals from any other workflow.
@@ -2401,7 +2401,7 @@ assert_eventually!("desired == actual",
 // Run the workflow once; capture its journal. Replay from the journal;
 // assert bit-identical trajectory. Catches smuggled non-determinism.
 assert_replay_equivalent!("cert_rotation workflow replays deterministically",
-    WorkflowSpec::cert_rotation(domain));
+    WorkflowStart::cert_rotation(domain));
 
 // Bounded progress — workflows must terminate within declared step budget.
 assert_eventually!("workflow terminates",

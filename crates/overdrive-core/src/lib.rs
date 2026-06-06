@@ -89,7 +89,7 @@ pub mod reconcilers;
 // 01 / 04 / 05 / 08.
 pub mod service_lifecycle;
 pub mod traits;
-// `Workflow` trait + `WorkflowCtx` + `WorkflowResult` + `WorkflowSpec` —
+// `Workflow` trait + `WorkflowCtx` + `WorkflowResult` + `WorkflowStart` —
 // the durable-async §18 peer primitive to `Reconciler`. Trait-only in
 // core (no tokio); the async signature uses `async_trait`, all
 // non-determinism flows through `WorkflowCtx`'s injected ports. The

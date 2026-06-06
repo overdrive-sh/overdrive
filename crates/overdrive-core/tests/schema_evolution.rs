@@ -35,20 +35,11 @@ mod schema_evolution {
     mod issued_certificate_row;
     mod root_ca_key;
 
-    // workflow-result-error-model DISTILL (ADR-0065 § 5 / D5; resolves
-    // #217) — the mandatory golden-bytes fixture for the NEW
-    // `WorkflowSpecEnvelope` (V1). The fixture FILE
-    // (`tests/schema_evolution/workflow_spec.rs`) ships now, DELIVER-ready,
-    // but its `mod` line is DELIBERATELY COMMENTED OUT: the fixture
-    // references `WorkflowSpecEnvelope` / `WorkflowSpecV1`, which do NOT
-    // exist until DELIVER Slice 01 creates them in
-    // `overdrive-core::workflow`. Unlike a self-contained
-    // `#[should_panic]` acceptance scaffold, a schema-evolution fixture
-    // CANNOT compile standalone (the harness needs the real envelope type),
-    // so wiring it in now would break the WHOLE schema-evolution test
-    // binary against a not-yet-existing type. DELIVER Slice 01, in the same
-    // commit that creates `WorkflowSpecEnvelope`: (1) run the file's
-    // `print_fixture_v1_bytes` to mint `FIXTURE_V1`, (2) pin
-    // `GOLDEN_DISCRIMINANT_OFFSET_V1`, (3) UNCOMMENT the line below.
-    mod workflow_spec; // NEW-3 / D5 / #217 — wired in DELIVER Slice 01 (step 01-02)
+    // workflow-result-error-model (ADR-0065 § 5 / D5; resolves #217) — the
+    // mandatory golden-bytes fixture for the `WorkflowStartEnvelope` (V1).
+    // The fixture FILE (`tests/schema_evolution/workflow_start.rs`) pins the
+    // V1 archived layout of the durable `Action::StartWorkflow` start intent
+    // (`WorkflowStartEnvelope` / `WorkflowStartV1`), created in
+    // `overdrive-core::workflow` in DELIVER Slice 01 (step 01-02).
+    mod workflow_start; // NEW-3 / D5 / #217 — wired in DELIVER Slice 01 (step 01-02)
 }

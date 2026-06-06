@@ -36,7 +36,7 @@ use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ObservationSubscription,
 };
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{WorkflowResult, WorkflowStart};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -67,7 +67,7 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
         Arc::clone(&obs),
     );
 
-    let spec: WorkflowSpec = ProvisionRecord::spec();
+    let spec: WorkflowStart = ProvisionRecord::spec();
     let correlation = CorrelationKey::derive(
         "wf-provision-0001",
         &ContentHash::of(spec.name.as_str().as_bytes()),
@@ -179,7 +179,7 @@ async fn start_writes_started_at_command_index_0_idempotent_on_resume() {
         )
     };
 
-    let spec: WorkflowSpec = ProvisionRecord::spec();
+    let spec: WorkflowStart = ProvisionRecord::spec();
     let correlation = CorrelationKey::derive(
         "wf-provision-0002",
         &ContentHash::of(spec.name.as_str().as_bytes()),

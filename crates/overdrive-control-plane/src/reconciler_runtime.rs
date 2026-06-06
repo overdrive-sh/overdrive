@@ -2052,14 +2052,14 @@ async fn stop_intent_present(
 /// by [`CorrelationKey`] (ADR-0064 §5). Each row's value is the workflow
 /// spec's kind name (the input the engine resolves to a factory); the
 /// returned `WorkflowInstanceState` carries the reconstructed
-/// `WorkflowSpec` and `running_in_intent = true`. The engine/obs-derived
+/// `WorkflowStart` and `running_in_intent = true`. The engine/obs-derived
 /// fields (`has_live_task`, `terminal`) are left at their defaults — the
 /// desired side does not know them; `hydrate_workflow_actual_instances`
 /// joins them.
 ///
 /// Per `.claude/rules/development.md` § "Persist inputs, not derived
 /// state": the persisted value is the spec NAME (an input), and the
-/// `WorkflowSpec` is recomputed from it on every read.
+/// `WorkflowStart` is recomputed from it on every read.
 async fn hydrate_workflow_desired_instances(
     state: &AppState,
 ) -> Result<
@@ -2073,7 +2073,7 @@ async fn hydrate_workflow_desired_instances(
 
     use overdrive_core::id::CorrelationKey;
     use overdrive_core::reconcilers::WorkflowInstanceState;
-    use overdrive_core::workflow::{WorkflowName, WorkflowSpec};
+    use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
     let rows = state
         .store
@@ -2132,11 +2132,11 @@ async fn hydrate_workflow_desired_instances(
             WorkflowInstanceState {
                 // Additive-field compile-fixup (step 01-02): the desired-intent
                 // value currently persists ONLY the workflow-kind name bytes
-                // (action-shim still writes `spec.name`); the full
+                // (action-shim still writes `start.name`); the full
                 // `archive_for_store` persist + `from_store_bytes` hydrate that
                 // carries `input` lands in Slice 03 (#217 engine discharge).
-                // Until then the reconstructed spec's input is empty.
-                spec: WorkflowSpec { name, input: Vec::new() },
+                // Until then the reconstructed start intent's input is empty.
+                spec: WorkflowStart { name, input: Vec::new() },
                 running_in_intent: true,
                 has_live_task: false,
                 terminal: None,

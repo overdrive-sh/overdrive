@@ -5,7 +5,7 @@
 //! leaving it only implicitly exercised by the walking skeleton.
 //!
 //! Scenario S-WP-01-11 — when the action-shim dispatches
-//! `Action::StartWorkflow { spec, correlation }`, it hands the instance
+//! `Action::StartWorkflow { start, correlation }`, it hands the instance
 //! to `WorkflowEngine::start` (the async executor driven off the shim,
 //! exactly as `Action::StartAllocation` → `Driver::start`) — the engine
 //! is NOT run as a reconciler. This is the upheld two-primitive doctrine
@@ -42,7 +42,7 @@ use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{WorkflowResult, WorkflowStart};
 
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 
@@ -68,8 +68,8 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     let target: SocketAddr = "127.0.0.1:9000".parse().expect("valid addr");
 
     // The engine's registry maps a WorkflowName → the author's Workflow.
-    // The reconciler emits `StartWorkflow { spec }`; the engine resolves
-    // `spec.name` to the registered `ProvisionRecord` and drives `run`.
+    // The reconciler emits `StartWorkflow { start }`; the engine resolves
+    // `start.name` to the registered `ProvisionRecord` and drives `run`.
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
 
@@ -88,7 +88,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     );
 
     // --- The action the workflow-lifecycle reconciler would emit ------
-    let spec: WorkflowSpec = ProvisionRecord::spec();
+    let spec: WorkflowStart = ProvisionRecord::spec();
     let correlation = CorrelationKey::derive(
         target.to_string().as_str(),
         &ContentHash::of(spec.name.as_str().as_bytes()),
@@ -126,7 +126,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
 
     // --- Driving port: the action shim, off which the engine runs -----
     dispatch(
-        vec![Action::StartWorkflow { spec, correlation }],
+        vec![Action::StartWorkflow { start: spec, correlation }],
         &driver,
         obs.as_ref(),
         &dataplane,

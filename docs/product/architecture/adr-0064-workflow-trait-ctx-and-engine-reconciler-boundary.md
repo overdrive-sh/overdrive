@@ -54,7 +54,7 @@ between them is the subtlest part of this design.
 ### 1. `Workflow` trait + `WorkflowCtx` live in `overdrive-core` (trait-only, no async-runtime dep)
 
 The `Workflow` trait, the `WorkflowCtx` *type*, `WorkflowResult`, and
-`WorkflowSpec` (replacing the placeholder at `reconcilers/mod.rs:562`)
+`WorkflowStart` (replacing the placeholder at `reconcilers/mod.rs:562`)
 live in a new module `overdrive-core::workflow`, mirroring how the
 `Reconciler` trait lives in `overdrive-core::reconcilers` while its
 *runtime* lives in `overdrive-control-plane` (ADR-0035 §1).
@@ -90,7 +90,7 @@ executes it is not, and lives in control-plane).
 
 | Surface | Crate | Class | Rationale |
 |---|---|---|---|
-| `Workflow` trait, `WorkflowCtx` type, `WorkflowResult`, `WorkflowSpec` | `overdrive-core::workflow` | core | Author-facing trait surface; no runtime; injected ports only |
+| `Workflow` trait, `WorkflowCtx` type, `WorkflowResult`, `WorkflowStart` | `overdrive-core::workflow` | core | Author-facing trait surface; no runtime; injected ports only |
 | `WorkflowEngine` (drives `run`, journal cursor, suspend/resume) | `overdrive-control-plane::workflow_runtime` | adapter-host | Genuinely async; holds tokio; does journal I/O |
 | `JournalStore` port + `RedbJournalStore` | `overdrive-control-plane::journal` | adapter-host | ADR-0063 |
 | `workflow-lifecycle` reconciler | `overdrive-core::reconcilers` (state) + runtime registration | core (reconcile) / control-plane (registration) | Pure-sync `reconcile`, ADR-0035 shape |
@@ -320,7 +320,7 @@ the `ActionEmitted` journal entry makes the emit idempotent on resume
   reconciler.** It owns *instance lifecycle* (spec → running → journaled →
   terminated) as desired-vs-actual convergence, NOT the durable-async
   execution. Its `reconcile(desired, actual, view, tick) -> (Vec<Action>,
-  View)` is pure: `desired` carries the `WorkflowSpec`(s) that should be
+  View)` is pure: `desired` carries the `WorkflowStart`(s) that should be
   running (hydrated from the IntentStore via `Action::StartWorkflow`
   having been committed); `actual` carries the instances' observed states
   (running / terminal) from the ObservationStore; the `View` carries
@@ -341,7 +341,7 @@ the `ActionEmitted` journal entry makes the emit idempotent on resume
 **Concretely, the composition path:**
 
 ```
-reconciler emits Action::StartWorkflow { spec, correlation }
+reconciler emits Action::StartWorkflow { start, correlation }
   → reconciler runtime commits it (Raft / Phase-1 IntentStore)
   → action-shim dispatch picks it up
   → WorkflowEngine::start(spec, correlation):
@@ -457,7 +457,7 @@ avoiding any core change.
    adapter-host-class — every first-party workflow would depend on
    `overdrive-control-plane`, the heavy axum/rustls/tokio crate, just to
    `impl Workflow`. The trait belongs next to its peer in core.
-2. **`WorkflowSpec` already lives in core** (`reconcilers/mod.rs:562`, the
+2. **`WorkflowStart` already lives in core** (`reconcilers/mod.rs:562`, the
    placeholder this feature replaces) because `Action::StartWorkflow`
    carries it and `Action` is core. The trait that consumes the spec
    belongs in the same crate.

@@ -3,7 +3,7 @@
 //! (DISTILL RED scaffold, `workflow-result-error-model` / ADR-0065;
 //! resolves #217).
 //!
-//! Slice 03 / D5. `WorkflowSpec` grows `{ name, input: Vec<u8> }`; the
+//! Slice 03 / D5. `WorkflowStart` grows `{ name, input: Vec<u8> }`; the
 //! engine's `started_digests` derives `input_digest =
 //! ContentHash::of(&spec.input)` (the start-input bytes) and `spec_digest`
 //! from the kind identity. The two digests DIVERGE as intended — the
@@ -51,7 +51,7 @@
 //!
 //! RED-scaffold convention (`.claude/rules/testing.md` § "RED scaffolds"):
 //! the bodies below are self-contained `panic!`s importing NO unbuilt
-//! production type (the reshaped `WorkflowSpec { name, input }` +
+//! production type (the reshaped `WorkflowStart { name, input }` +
 //! `started_digests` off `spec.input` land in DELIVER Slice 03). nextest
 //! reports PASS; clippy is clean; lefthook needs no `--no-verify`.
 
@@ -61,10 +61,10 @@
 /// `ContentHash::of(&spec.input)`, NOT the kind name (the #217 bug). This
 /// is the executable #217 acceptance.
 ///
-/// DELIVER (Slice 03) body, once `WorkflowSpec { name, input }` +
+/// DELIVER (Slice 03) body, once `WorkflowStart { name, input }` +
 /// `started_digests` off `spec.input` exist:
 ///
-/// 1. One kind name; two `WorkflowSpec`s `spec_a = { name, input: cbor(A) }`
+/// 1. One kind name; two `WorkflowStart`s `spec_a = { name, input: cbor(A) }`
 ///    and `spec_b = { name, input: cbor(B) }` with `A != B`.
 /// 2. Drive `engine.start(&spec_a, ..)` and `engine.start(&spec_b, ..)` on
 ///    two distinct correlations / workflow ids (shared or separate journal).
@@ -95,7 +95,7 @@ async fn two_distinct_inputs_of_one_kind_get_distinct_input_digests() {
 /// restart).
 ///
 /// DELIVER body: persist `spec.archive_for_store()?` under the instance
-/// intent key, rehydrate via `WorkflowSpec::from_store_bytes(value)?`, and
+/// intent key, rehydrate via `WorkflowStart::from_store_bytes(value)?`, and
 /// assert the rehydrated `input` is byte-equal to the original AND that the
 /// engine derives the identical `input_digest` from it.
 #[tokio::test]

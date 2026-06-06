@@ -22,7 +22,7 @@
 //! Constructing the `WorkflowCtx` (which needs the `Sim*` port adapters
 //! living in `overdrive-sim`) stays in each test; this module exposes
 //! only the runtime-agnostic `struct ProvisionRecord` + its `Workflow`
-//! impl + the `WorkflowSpec` it derives from.
+//! impl + the `WorkflowStart` it derives from.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ use bytes::Bytes;
 
 use crate::reconcilers::Action;
 use crate::workflow::{
-    SignalKey, Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec,
+    SignalKey, Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
 };
 
 /// The canonical slice-01 reference workflow: perform one external
@@ -59,7 +59,7 @@ impl ProvisionRecord {
         Self { target }
     }
 
-    /// The concrete [`WorkflowSpec`] this fixture corresponds to. The
+    /// The concrete [`WorkflowStart`] this fixture corresponds to. The
     /// journal's `Started { spec_digest }` entry (ADR-0063 §2) is
     /// derived from this spec's CBOR/canonical encoding by the engine
     /// (or, in the slice-01 journal test, by the test itself) — the
@@ -71,8 +71,8 @@ impl ProvisionRecord {
     /// Never in practice: [`Self::WORKFLOW_NAME`] is a compile-time
     /// kebab constant that satisfies the `WorkflowName` grammar.
     #[must_use]
-    pub fn spec() -> WorkflowSpec {
-        WorkflowSpec {
+    pub fn spec() -> WorkflowStart {
+        WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
             // These reference workflows take no typed input — the opaque
@@ -145,15 +145,15 @@ impl ProvisionRecordWithSleep {
         Self { first_target, second_target, sleep }
     }
 
-    /// The concrete [`WorkflowSpec`] this fixture corresponds to.
+    /// The concrete [`WorkflowStart`] this fixture corresponds to.
     ///
     /// # Panics
     ///
     /// Never in practice: [`Self::WORKFLOW_NAME`] is a compile-time
     /// kebab constant that satisfies the `WorkflowName` grammar.
     #[must_use]
-    pub fn spec() -> WorkflowSpec {
-        WorkflowSpec {
+    pub fn spec() -> WorkflowStart {
+        WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
             // These reference workflows take no typed input — the opaque
@@ -217,15 +217,15 @@ impl ProvisionRecordWithSignalEmit {
             .unwrap_or_else(|_| unreachable!("SIGNAL_KEY is a valid kebab constant"))
     }
 
-    /// The concrete [`WorkflowSpec`] this fixture corresponds to.
+    /// The concrete [`WorkflowStart`] this fixture corresponds to.
     ///
     /// # Panics
     ///
     /// Never in practice: [`Self::WORKFLOW_NAME`] is a compile-time
     /// kebab constant that satisfies the `WorkflowName` grammar.
     #[must_use]
-    pub fn spec() -> WorkflowSpec {
-        WorkflowSpec {
+    pub fn spec() -> WorkflowStart {
+        WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
             // These reference workflows take no typed input — the opaque

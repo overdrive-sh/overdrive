@@ -50,11 +50,11 @@ verdict. Trade-off content is under [WHY] below.
   (additive command, ADR-0063 §2) recomputed against the live policy. The
   full re-drive loop is Slice 04 (types + success/explicit-terminal paths
   land Slices 01–03; body contract stable from Slice 01).
-- **[D5] Typed `WorkflowSpec.input` crossing Raft with rkyv-envelope
+- **[D5] Typed `WorkflowStart.input` crossing Raft with rkyv-envelope
   discipline; resolves #217.** VERDICT: ACCEPTED.
-  `WorkflowSpec { name: WorkflowName, input: Vec<u8> }` (opaque CBOR
+  `WorkflowStart { name: WorkflowName, input: Vec<u8> }` (opaque CBOR
   `W::Input`); the durable desired-intent persists the FULL spec via a
-  `WorkflowSpecEnvelope` (V1) + co-located typed codec
+  `WorkflowStartEnvelope` (V1) + co-located typed codec
   (`archive_for_store`/`from_store_bytes`, ADR-0048 `Job` precedent), NOT the
   name bytes; `started_digests` derives `input_digest = ContentHash::of(&spec.input)`
   (discharges the `TODO(#217)`).
@@ -68,8 +68,8 @@ verdict. Trade-off content is under [WHY] below.
 | `TerminalError` + `TerminalErrorKind` | `crates/overdrive-core/src/workflow/mod.rs` | CREATE |
 | `WorkflowStatus` (control-plane projection) | `crates/overdrive-core/src/workflow/mod.rs` | CREATE |
 | `WorkflowResult` enum | `crates/overdrive-core/src/workflow/mod.rs` | DELETE |
-| `WorkflowSpec` (+ `input`, envelope, typed codec) | `crates/overdrive-core/src/workflow/mod.rs` | MODIFY |
-| `WorkflowSpecEnvelope` (V1) + schema-evolution fixture | `crates/overdrive-core/src/workflow/mod.rs` + `crates/overdrive-core/tests/schema_evolution/workflow_spec.rs` | CREATE |
+| `WorkflowStart` (+ `input`, envelope, typed codec) | `crates/overdrive-core/src/workflow/mod.rs` | MODIFY |
+| `WorkflowStartEnvelope` (V1) + schema-evolution fixture | `crates/overdrive-core/src/workflow/mod.rs` + `crates/overdrive-core/tests/schema_evolution/workflow_start.rs` | CREATE |
 | `WorkflowFactory` / `WorkflowRegistry` (→ `ErasedWorkflow`) | `crates/overdrive-control-plane/src/workflow_runtime/mod.rs` | MODIFY |
 | `WorkflowEngine::start` (run_erased, status write, short-circuit, started_digests) | `crates/overdrive-control-plane/src/workflow_runtime/mod.rs` | MODIFY |
 | `JournalCommand::Terminal` (`result` → `status`); `JournalCommand::RetryAttempted` (D4, additive) | `crates/overdrive-control-plane/src/journal/mod.rs` | MODIFY |
@@ -82,7 +82,7 @@ verdict. Trade-off content is under [WHY] below.
 
 ## [REF] Driving / driven ports
 
-- **Driving (into the hexagon):** `Action::StartWorkflow { spec: WorkflowSpec, correlation }`
+- **Driving (into the hexagon):** `Action::StartWorkflow { start: WorkflowStart, correlation }`
   — the reconciler→engine trigger (unchanged variant; `spec` now typed-param-
   bearing). The action-shim is the driving adapter that persists intent +
   drives the engine off the shim.
@@ -101,7 +101,7 @@ verdict. Trade-off content is under [WHY] below.
 | Choice | Tech | Rationale | License |
 |---|---|---|---|
 | Body output/input erasure codec | `ciborium` (CBOR) | Already the journal step-result + `ctx.run<T>` codec (ADR-0063 §2); homogeneous durable surface; runtime-memory class | Apache-2.0/MIT (workspace dep) |
-| Durable `WorkflowSpec` intent codec | `rkyv` versioned envelope (ADR-0048) | Intent-class durable aggregate read across restarts — the `Job` precedent, NOT CBOR (the two codecs stay separate per `development.md`) | MIT (workspace dep) |
+| Durable `WorkflowStart` intent codec | `rkyv` versioned envelope (ADR-0048) | Intent-class durable aggregate read across restarts — the `Job` precedent, NOT CBOR (the two codecs stay separate per `development.md`) | MIT (workspace dep) |
 | `TerminalError`/`WorkflowStatus` derive | `serde` + `thiserror` (errors) | typed-error discipline (core libraries never eyre); serde for journal/obs carriage | workspace deps |
 | Async author trait | `async_trait` | already a core dep; no tokio in core (ADR-0064 §1 carried forward) | MIT/Apache-2.0 |
 
@@ -115,7 +115,7 @@ No new dependencies. No proprietary tech.
 | D2 | `TerminalError` concrete core type | Accepted | 0065 §2 |
 | D3 | `WorkflowStatus` engine-owned projection | Accepted | 0065 §3 |
 | D4 | Retry budget in engine/journal (not body, not View) | Accepted | 0065 §4 |
-| D5 | Typed `WorkflowSpec.input` + rkyv envelope; #217 | Accepted | 0065 §5 |
+| D5 | Typed `WorkflowStart.input` + rkyv envelope; #217 | Accepted | 0065 §5 |
 | D6 | New ADR (0065) amending 0064, not in-place edit | Accepted | 0065 § Alt A |
 
 ## [REF] Reuse Analysis (mandatory hard gate)
@@ -123,21 +123,21 @@ No new dependencies. No proprietary tech.
 | Existing component | File | Overlap | Decision | Justification |
 |---|---|---|---|---|
 | `ctx.run<T>` CBOR typed-edge/erased-interior | `overdrive-core/src/workflow/mod.rs:714` | The exact "type at the author edge, CBOR at the journal boundary" pattern D1 needs | **REUSE (pattern)** | D1's `ErasedWorkflowAdapter` is the same erasure `ctx.run<T>` already performs for step results — not a new mechanism. |
-| `WorkflowSpec` placeholder (`name` only) | `overdrive-core/src/workflow/mod.rs:1160` | The spec the trigger carries | **EXTEND** | Add `input: Vec<u8>` + envelope/codec; already core because `Action` is core. |
-| `Action::StartWorkflow { spec, correlation }` | `overdrive-core/src/reconcilers/mod.rs:380` | The reconciler→engine trigger | **REUSE (unchanged variant)** | `spec` reshapes; the variant shape is exactly D-INH-3. No new Action. |
+| `WorkflowStart` placeholder (`name` only) | `overdrive-core/src/workflow/mod.rs:1160` | The spec the trigger carries | **EXTEND** | Add `input: Vec<u8>` + envelope/codec; already core because `Action` is core. |
+| `Action::StartWorkflow { start, correlation }` | `overdrive-core/src/reconcilers/mod.rs:380` | The reconciler→engine trigger | **REUSE (unchanged variant)** | `spec` reshapes; the variant shape is exactly D-INH-3. No new Action. |
 | `JournalCommand::Terminal { result }` | `overdrive-control-plane/src/journal/mod.rs:326` | The durable terminal | **EXTEND** (`result: WorkflowResult` → `status: WorkflowStatus`) | The lossless-terminal short-circuit already depends on this carrying the full terminal; swap the carried type. |
 | `JournalCommand` (additive variants) | `overdrive-control-plane/src/journal/mod.rs:236` | Retry bookkeeping (D4) | **EXTEND** | `RetryAttempted` is an additive `#[serde(default)]` command per ADR-0063 §2 — the established additive-variant pattern. |
 | `ObservationRow::WorkflowTerminal { result }` | `overdrive-core/src/traits/observation_store.rs:561` | The observable terminal | **EXTEND** (`result` → `status`) | Same plumbing; swap the carried type to the projection. |
 | `WorkflowInstanceState.terminal: Option<WorkflowResult>` | `overdrive-core/src/reconcilers/workflow_lifecycle.rs:66` | Reconciler convergence signal | **EXTEND** (`Option<WorkflowStatus>`) | The `terminal.is_some()` convergence check is unchanged; only the carried type. |
 | `WorkflowEngine::started_digests` `TODO(#217)` | `overdrive-control-plane/src/workflow_runtime/mod.rs:542` | `input_digest` derivation | **MODIFY** (discharge #217) | `input_digest = ContentHash::of(&spec.input)`; the marker exists precisely for this. |
 | `persist_workflow_intents` (persists `spec.name` bytes) | `overdrive-control-plane/src/action_shim/mod.rs:466` | Durable desired-intent write | **MODIFY** | Persist `spec.archive_for_store()?` (full spec) — the #217 value-side fix. |
-| `hydrate_workflow_desired_instances` (parses name bytes) | `overdrive-control-plane/src/reconciler_runtime.rs:2110` | Rehydrate spec from intent | **MODIFY** | Read `WorkflowSpec::from_store_bytes(value)?` — the #217 read-side fix. |
-| `Job::archive_for_store`/`from_store_bytes` + envelope | `overdrive-core` (ADR-0048 §4b) | The rkyv typed-codec precedent | **REUSE (pattern)** | `WorkflowSpec`'s codec is the same shape — co-located typed codec on the value, byte-level store unchanged. |
+| `hydrate_workflow_desired_instances` (parses name bytes) | `overdrive-control-plane/src/reconciler_runtime.rs:2110` | Rehydrate spec from intent | **MODIFY** | Read `WorkflowStart::from_store_bytes(value)?` — the #217 read-side fix. |
+| `Job::archive_for_store`/`from_store_bytes` + envelope | `overdrive-core` (ADR-0048 §4b) | The rkyv typed-codec precedent | **REUSE (pattern)** | `WorkflowStart`'s codec is the same shape — co-located typed codec on the value, byte-level store unchanged. |
 | `RETRY_BACKOFFS` / `RetryMemory` reconciler precedent | `overdrive-control-plane/src/worker/exit_observer.rs`; `development.md` Reconciler I/O | Retry-budget shape | **CONTRAST, do NOT reuse** | Reconciler has no engine → View-memory; workflow HAS an engine → journal-derived budget (D4). Deliberately the opposite home. |
 | `WorkflowResult` enum | `overdrive-core/src/workflow/mod.rs:84` | The old body return | **DELETE** | Greenfield single-cut; replaced by `Result<Output, TerminalError>` (body) + `WorkflowStatus` (projection). |
 
 No component is created where an existing one can be extended; every CREATE
-(`ErasedWorkflow`, `TerminalError`, `WorkflowStatus`, `WorkflowSpecEnvelope`)
+(`ErasedWorkflow`, `TerminalError`, `WorkflowStatus`, `WorkflowStartEnvelope`)
 is a genuinely new concept with no existing alternative (verified by the
 search above).
 
@@ -185,7 +185,7 @@ search above).
 
 ### P2 — Typed input crossing Raft
 
-- **Option A (RECOMMENDED): `WorkflowSpec { name, input: Vec<u8> }`, durable
+- **Option A (RECOMMENDED): `WorkflowStart { name, input: Vec<u8> }`, durable
   intent via rkyv envelope (ADR-0048 `Job` precedent).** Trade-off: one new
   durable schema to evolve (envelope + golden fixture), but it rides the
   established precedent and correctly treats the persisted desired-intent as
@@ -246,11 +246,11 @@ workflow-result-error-model extension".
   `TerminalError`/`TerminalErrorKind`, `WorkflowStatus`, `ErasedWorkflow` +
   `ErasedWorkflowAdapter<W>`; reshape the `Workflow` trait to
   `{ type Output; type Input; run(ctx, input) -> Result<Output, TerminalError> }`;
-  DELETE `WorkflowResult`. Grow `WorkflowSpec { name, input }` + the
-  `WorkflowSpecEnvelope` (V1) + typed codec + the golden-bytes
+  DELETE `WorkflowResult`. Grow `WorkflowStart { name, input }` + the
+  `WorkflowStartEnvelope` (V1) + typed codec + the golden-bytes
   schema-evolution fixture (ADR-0048). **Acceptance intent:** the trait + ctx
   module compiles in `overdrive-core` with no tokio; `ErasedWorkflowAdapter`
-  round-trips a typed `Output`/`Input` through CBOR; the `WorkflowSpecEnvelope`
+  round-trips a typed `Output`/`Input` through CBOR; the `WorkflowStartEnvelope`
   V1 golden fixture decodes via `into_latest`; `TerminalError`/`WorkflowStatus`
   newtype-completeness (serde round-trip, bounded `detail`). Pure-core slice,
   default test lane.
@@ -272,10 +272,10 @@ workflow-result-error-model extension".
   type). NEW DST invariant `WorkflowTerminalStatusProjection`.
   `replay_equivalence_provision_record` updated to assert `Completed{output}`
   (output round-trips to `()`). Lima integration lane for the engine.
-- **Slice 03 — typed `WorkflowSpec` crosses Raft; #217 discharged.**
+- **Slice 03 — typed `WorkflowStart` crosses Raft; #217 discharged.**
   action-shim `persist_workflow_intents` persists the full spec via
   `spec.archive_for_store()?`; lifecycle reconciler `hydrate_desired` reads
-  `WorkflowSpec::from_store_bytes(value)?`; `started_digests` derives
+  `WorkflowStart::from_store_bytes(value)?`; `started_digests` derives
   `input_digest = ContentHash::of(&spec.input)`. **Acceptance intent:** two
   instances of the same kind with different `input` persist + rehydrate with
   distinct `input_digest`s; a round-trip `StartWorkflow → intent → hydrate →
@@ -324,7 +324,7 @@ port-to-port discipline is satisfied at the trait/engine boundary.
 
 **DISTILL deliverable is the PLAN + the NEW scaffolds, NOT the migration.**
 The contract change (`WorkflowResult` DELETE; `run` reshape; `Terminal`/obs
-`result → status`; `WorkflowSpec { name → name, input }`) breaks every
+`result → status`; `WorkflowStart { name → name, input }`) breaks every
 existing consumer at compile time. Migrating each broken test is DELIVER
 work (each slice migrates what its production change breaks). The triage
 below tells DELIVER exactly what breaks and how each broken assertion maps.
@@ -337,7 +337,7 @@ below tells DELIVER exactly what breaks and how each broken assertion maps.
 | DESIGN#D2 | `TerminalError { kind, detail }` concrete core type; `BudgetExhausted` engine-minted; `detail` length-capped (closes the `reason: String` replay hazard) | D2 | NEW-4 (MalformedInput) + the panic-test MIGRATE both assert the typed terminal; `reason: String` assertion sites are deleted |
 | DESIGN#D3 | Engine-owned `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from body return | D3 | 7 terminal-asserting tests MIGRATE `result: WorkflowResult` → `status: WorkflowStatus`; the body-return → status mapping is pinned by NEW-1/NEW-4 + the migrated panic test |
 | DESIGN#D4 | Retryable absorbed/re-driven by engine; budget in engine/journal (`RetryAttempted`-derived + engine-constant policy), NOT body, NOT `View`; `BudgetExhausted` engine-minted | D4 | NEW-5 scaffolds (Slice 04, stay RED) pin re-drive-to-budget + engine-minted exhaustion + "retryable never reaches the return type" |
-| DESIGN#D5 | Typed `WorkflowSpec { name, input: Vec<u8> }` crosses Raft via rkyv `WorkflowSpecEnvelope` (V1) + co-located typed codec; `input_digest = ContentHash::of(&spec.input)` — resolves #217 | D5 | NEW-2 scaffold pins the executable #217 acceptance (distinct inputs ⇒ distinct digests); NEW-3 schema-evolution fixture pins the V1 rkyv layout; 3 existing `input_digest` tests MIGRATE their assertion target |
+| DESIGN#D5 | Typed `WorkflowStart { name, input: Vec<u8> }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec; `input_digest = ContentHash::of(&spec.input)` — resolves #217 | D5 | NEW-2 scaffold pins the executable #217 acceptance (distinct inputs ⇒ distinct digests); NEW-3 schema-evolution fixture pins the V1 rkyv layout; 3 existing `input_digest` tests MIGRATE their assertion target |
 | DESIGN (single-cut) | `WorkflowResult` DELETED greenfield; only the `provision-record` test fixture is a registered consumer | n/a | The keystone fixture (`testing/workflow.rs`) signature migration cascades to all 24 tests; no production workflow instances exist to migrate |
 
 ### [REF] Reuse / Migrate / New triage
@@ -389,7 +389,7 @@ Slice 02 work (component table row `testing/workflow.rs` MODIFY).
 
 | # | Test | Crate / path | Why REUSE |
 |---|---|---|---|
-| R1 | `workflow_ctx_run_and_sleep` | overdrive-core/tests/acceptance | Pure `ctx.run` / `ctx.sleep` cursor mechanics + `WorkflowCtxError::NonDeterministic`; never constructs a `Workflow::run`, never names `WorkflowResult`/`WorkflowSpec`. `WorkflowCtx` + `WorkflowCtxError` are untouched by ADR-0065. |
+| R1 | `workflow_ctx_run_and_sleep` | overdrive-core/tests/acceptance | Pure `ctx.run` / `ctx.sleep` cursor mechanics + `WorkflowCtxError::NonDeterministic`; never constructs a `Workflow::run`, never names `WorkflowResult`/`WorkflowStart`. `WorkflowCtx` + `WorkflowCtxError` are untouched by ADR-0065. |
 | R2 | `workflow_committed_step_survives_crash` | overdrive-sim/tests/acceptance | Journal commit/crash mechanics; zero migration touch-points in the scan. Drives `ctx` directly, asserts journal entries — the result-model reshape does not reach it. |
 | R3 | `workflow_journal_write_ordering` | overdrive-sim/tests/acceptance | Journal append/fsync ordering invariant; zero touch-points. |
 
@@ -418,20 +418,20 @@ unchanged.
 | # | Test | Path | Migration (delta only) |
 |---|---|---|---|
 | M1 | `workflow_engine_writes_terminal_row` | cp/tests/acceptance | obs-row `{ result }` → `{ status }`; `WorkflowResult::Success` → `WorkflowStatus::Completed`; **`expected_input_digest`: `ContentHash::of(ProvisionRecord::PAYLOAD)` → `ContentHash::of(&spec.input)`** (the #217 fix lands HERE — substantive, not shallow); `Started { spec_digest, input_digest }` matcher unchanged shape |
-| M2 | `workflow_engine_terminal_short_circuit` | cp/tests/acceptance | `CountingSuccess::run` sig + `WorkflowResult::Success` → `Ok(())`; `WorkflowSpec { name }` → `{ name, input: cbor(()) }`. `terminal_count` helper (type-agnostic `Terminal { .. }`) UNCHANGED — already authored to survive both contracts |
-| M3 | `workflow_panic_converges_to_failed_terminal` | cp/tests/acceptance | **The `reason: String` replay-hazard closure lands here.** `matches!(result, WorkflowResult::Failed { .. })` → `matches!(status, WorkflowStatus::Failed { terminal } if terminal.kind() == TerminalErrorKind::Explicit)` with the deterministic downcast `detail`; obs-row `result → status`; `PanickingWorkflow::run` sig + `WorkflowSpec` |
+| M2 | `workflow_engine_terminal_short_circuit` | cp/tests/acceptance | `CountingSuccess::run` sig + `WorkflowResult::Success` → `Ok(())`; `WorkflowStart { name }` → `{ name, input: cbor(()) }`. `terminal_count` helper (type-agnostic `Terminal { .. }`) UNCHANGED — already authored to survive both contracts |
+| M3 | `workflow_panic_converges_to_failed_terminal` | cp/tests/acceptance | **The `reason: String` replay-hazard closure lands here.** `matches!(result, WorkflowResult::Failed { .. })` → `matches!(status, WorkflowStatus::Failed { terminal } if terminal.kind() == TerminalErrorKind::Explicit)` with the deterministic downcast `detail`; obs-row `result → status`; `PanickingWorkflow::run` sig + `WorkflowStart` |
 | M4 | `workflow_engine_replay_cursor` | cp/tests/acceptance | `ctx.run` replay-cursor unit mechanics; `result_digest`/`value_digest`/`action_digest` are `ContentHash::of(bytes)` (UNCHANGED). Migrates ONLY if it constructs a `Terminal` command or a `Workflow::run` — scan shows it does not name `WorkflowResult`; MIGRATE-shallow (compile-fixup if it touches the reshaped `JournalCommand::Terminal` field name via a shared helper) |
-| M5 | `workflow_engine_live_instance_registration` | cp/tests/acceptance | `BlockingWorkflow::run` sig + `WorkflowResult::Success` → `Ok(())`; `WorkflowSpec` |
-| M6 | `action_shim_dispatches_start_workflow_to_engine` | cp/tests/acceptance | `JournalCommand::Terminal { result } if *result == WorkflowResult::Success` → `{ status } if matches!(status, WorkflowStatus::Completed { .. })`; `WorkflowSpec` |
-| M7 | `lifecycle_reconciler_rehydrates_on_restart` | cp/tests/acceptance | `WorkflowInstanceState.terminal: Some(WorkflowResult::Success)` → `Some(WorkflowStatus::Completed { .. })`; `provision_spec()` `WorkflowSpec { name }` → `{ name, input }` |
-| M8 | `workflow_emit_action_lands_in_raft_channel` | cp/tests/acceptance | `EmittingWorkflow::run` sig + `Ok(()) => WorkflowResult::Success` / `Err(_) => WorkflowResult::Failed { reason }` → `Ok(())` / `Err(TerminalError::explicit(..))`; `WorkflowSpec` |
+| M5 | `workflow_engine_live_instance_registration` | cp/tests/acceptance | `BlockingWorkflow::run` sig + `WorkflowResult::Success` → `Ok(())`; `WorkflowStart` |
+| M6 | `action_shim_dispatches_start_workflow_to_engine` | cp/tests/acceptance | `JournalCommand::Terminal { result } if *result == WorkflowResult::Success` → `{ status } if matches!(status, WorkflowStatus::Completed { .. })`; `WorkflowStart` |
+| M7 | `lifecycle_reconciler_rehydrates_on_restart` | cp/tests/acceptance | `WorkflowInstanceState.terminal: Some(WorkflowResult::Success)` → `Some(WorkflowStatus::Completed { .. })`; `provision_spec()` `WorkflowStart { name }` → `{ name, input }` |
+| M8 | `workflow_emit_action_lands_in_raft_channel` | cp/tests/acceptance | `EmittingWorkflow::run` sig + `Ok(()) => WorkflowResult::Success` / `Err(_) => WorkflowResult::Failed { reason }` → `Ok(())` / `Err(TerminalError::explicit(..))`; `WorkflowStart` |
 
 #### MIGRATE — e2e / integration cluster (control-plane, Lima lane)
 
 | # | Test | Path | Migration (delta only) |
 |---|---|---|---|
-| M9 | `reconciler_emit_drives_workflow_to_terminal` | cp/tests/integration/workflow_e2e | obs-row `{ result }` → `{ status }`; `obs.workflow_terminal_rows()` return-type shift; `WorkflowResult::Success` → `WorkflowStatus::Completed` (2 sites: terminal row + `actual_instance.terminal`); `FixtureTriggerReconciler { spec }` carries reshaped `WorkflowSpec`; correlation derivation off `spec.name` UNCHANGED |
-| M10 | `workflow_emit_action_drives_through_production_composition` | cp/tests/integration/workflow_e2e | `EmittingWorkflow::run` sig + 3 `WorkflowResult::{Success,Failed}` sites; `obs.workflow_terminal_rows()` + helper return type → `WorkflowStatus`; `WorkflowSpec` (both provision + emitting specs) |
+| M9 | `reconciler_emit_drives_workflow_to_terminal` | cp/tests/integration/workflow_e2e | obs-row `{ result }` → `{ status }`; `obs.workflow_terminal_rows()` return-type shift; `WorkflowResult::Success` → `WorkflowStatus::Completed` (2 sites: terminal row + `actual_instance.terminal`); `FixtureTriggerReconciler { spec }` carries reshaped `WorkflowStart`; correlation derivation off `spec.name` UNCHANGED |
+| M10 | `workflow_emit_action_drives_through_production_composition` | cp/tests/integration/workflow_e2e | `EmittingWorkflow::run` sig + 3 `WorkflowResult::{Success,Failed}` sites; `obs.workflow_terminal_rows()` + helper return type → `WorkflowStatus`; `WorkflowStart` (both provision + emitting specs) |
 | M11 | `journal_writes_to_redb` | cp/tests/integration/workflow_journal | **`input_digest: ContentHash::of(PROVISION_RECORD_PAYLOAD)` → `ContentHash::of(&spec.input)`** (#217); `result_digest` unchanged; `Terminal` field rename if constructed |
 
 #### MIGRATE — sim crash / resume / sleep / signal / journal cluster (overdrive-sim, MIGRATE-shallow)
@@ -446,9 +446,9 @@ assertion/fixture lines change. Confirms the user's hypothesis.
 
 | # | Test | Migration (delta only) |
 |---|---|---|
-| M12 | `workflow_crash_resume_exactly_once` (WALKING SKELETON) | terminal-result helper return `WorkflowResult` → `WorkflowStatus`; obs-row `{ result }` → `{ status }`; final `assert_eq!(resumed_result, WorkflowResult::Success)` → `matches!(.., WorkflowStatus::Completed { .. })`; `WorkflowSpec`. Exactly-once / replay-byte-equality core UNCHANGED |
+| M12 | `workflow_crash_resume_exactly_once` (WALKING SKELETON) | terminal-result helper return `WorkflowResult` → `WorkflowStatus`; obs-row `{ result }` → `{ status }`; final `assert_eq!(resumed_result, WorkflowResult::Success)` → `matches!(.., WorkflowStatus::Completed { .. })`; `WorkflowStart`. Exactly-once / replay-byte-equality core UNCHANGED |
 | M13 | `workflow_sleep_resumes_to_original_deadline` | `run_body() -> WorkflowResult` → `Result<(), TerminalError>` (returns `Ok(())`); `assert_eq!(terminal, WorkflowResult::Success)` → `Completed`; obs-row rename. Deadline-recompute core UNCHANGED |
-| M14 | `workflow_sleep_crash_pre_sleep_step_not_repeated` | obs-row `{ result }` → `{ status }`; final `assert_eq!(result, WorkflowResult::Success)` → `Completed`; `WorkflowSpec`. Pre-sleep-step-not-repeated core UNCHANGED |
+| M14 | `workflow_sleep_crash_pre_sleep_step_not_repeated` | obs-row `{ result }` → `{ status }`; final `assert_eq!(result, WorkflowResult::Success)` → `Completed`; `WorkflowStart`. Pre-sleep-step-not-repeated core UNCHANGED |
 | M15 | `workflow_signal_wait_reblocks_after_crash` | terminal helper return `WorkflowResult` → `WorkflowStatus`; obs-row rename; `Some(WorkflowResult::Success)` → `Some(WorkflowStatus::Completed { .. })`; `obs.workflow_terminal_rows()` shift. Re-block-on-absent-signal core UNCHANGED |
 | M16 | `workflow_signal_already_seen_not_rewaited` | same shape as M15 (terminal helper + obs-row + `Some(Completed)`); already-seen-not-rewaited core UNCHANGED |
 | M17 | `workflow_emit_action_not_re_emitted_after_crash` | keystone-fixture cascade; `Terminal { .. }` type-agnostic matcher UNCHANGED; obs-row rename if it reads the terminal row. Not-re-emitted core UNCHANGED |
@@ -492,7 +492,7 @@ green-at-the-bar (nextest PASS / clippy clean / no `--no-verify`).
 |---|---|---|---|---|---|
 | NEW-1 | Non-unit typed `Output` round-trips through `ErasedWorkflowAdapter` CBOR erasure (+ NEW-1b: typed `Input` decode side) | `crates/overdrive-core/tests/acceptance/workflow_typed_output_roundtrip.rs` | 01 | `@in-memory @property @D1` | Layer 1; PBT-full in DELIVER (output roundtrip is a universal property) |
 | NEW-2 | `input_digest` divergence — two distinct inputs of one kind ⇒ distinct digests (+ NEW-2b: same input ⇒ stable digest + persist→rehydrate fidelity) | `crates/overdrive-control-plane/tests/acceptance/workflow_input_digest_divergence.rs` | 03 | `@in-memory @property @D5 @issue-217` | Layer 1-2; the executable #217 acceptance |
-| NEW-3 | `WorkflowSpecEnvelope` V1 golden-bytes + discriminant triangulation + unknown-version probe | `crates/overdrive-core/tests/schema_evolution/workflow_spec.rs` | 01 | `@property @D5 @issue-217 @error` | Layer 1 rkyv; mandatory golden-bytes obligation (ADR-0048) |
+| NEW-3 | `WorkflowStartEnvelope` V1 golden-bytes + discriminant triangulation + unknown-version probe | `crates/overdrive-core/tests/schema_evolution/workflow_start.rs` | 01 | `@property @D5 @issue-217 @error` | Layer 1 rkyv; mandatory golden-bytes obligation (ADR-0048) |
 | NEW-4 | Undecodable start input ⇒ engine-minted `WorkflowStatus::Failed { MalformedInput }`, body never entered | `crates/overdrive-control-plane/tests/acceptance/workflow_malformed_input_terminal.rs` | 03 | `@in-memory @error @D2 @D3` | Layer 1-2; example-based sad path (Mandate 11) |
 | NEW-5 | Transient re-driven to budget ⇒ engine-minted `BudgetExhausted` (+ NEW-5b: transient clearing within budget ⇒ `Completed`, "retryable never reaches the return type") | `crates/overdrive-control-plane/tests/acceptance/workflow_budget_exhaustion_mints_terminal.rs` | **04** | `@in-memory @error @D4 @slice-04` | Layer 1-2; **STAYS RED until Slice 04** (DELIVER 01-03 do NOT activate) |
 
@@ -515,12 +515,12 @@ sibling.
 ### [REF] Schema-evolution fixture decision (NEW-3)
 
 **Decision: author the fixture FILE now (DELIVER-ready), wire it in DELIVER
-Slice 01.** The `WorkflowSpecEnvelope` golden-bytes fixture is MANDATORY
+Slice 01.** The `WorkflowStartEnvelope` golden-bytes fixture is MANDATORY
 (ADR-0048 § 1 — every rkyv envelope ships a per-version golden fixture). But
 unlike the four self-contained `#[should_panic]` acceptance scaffolds, a
 schema-evolution fixture CANNOT be green-at-the-bar: the harness
-(`assert_envelope_v_roundtrip::<WorkflowSpecEnvelope>`) needs the REAL
-envelope type, which lands in DELIVER Slice 01. Wiring `mod workflow_spec;`
+(`assert_envelope_v_roundtrip::<WorkflowStartEnvelope>`) needs the REAL
+envelope type, which lands in DELIVER Slice 01. Wiring `mod workflow_start;`
 into `tests/schema_evolution.rs` now would fail the WHOLE `overdrive-core`
 schema-evolution test binary compile (breaking every OTHER fixture's ability
 to run) against a not-yet-existing type.
@@ -530,14 +530,14 @@ cannot compile standalone): the fixture file ships complete — canonical V1
 payload, the three harness assertions (golden-bytes roundtrip, discriminant
 triangulation, unknown-version probe), and the `print_fixture_v1_bytes`
 regeneration aid — with `FIXTURE_V1 = "__RED_SCAFFOLD__..."` and
-`GOLDEN_DISCRIMINANT_OFFSET_V1 = 0` placeholders. Its `mod workflow_spec;`
+`GOLDEN_DISCRIMINANT_OFFSET_V1 = 0` placeholders. Its `mod workflow_start;`
 line in `tests/schema_evolution.rs` is COMMENTED OUT with an explicit
 DELIVER-Slice-01 activation marker (3 steps: mint `FIXTURE_V1` via the aid,
 pin the offset, uncomment). This matches how `root_ca_key.rs` /
 `issued_certificate_row.rs` were wired only AFTER their `src/ca/` envelope
 types existed — here the type does not exist yet, so the wiring waits one
 slice. The contract (the V1 payload shape, the `input`-bearing aggregate, the
-"rkyv wraps the outer `WorkflowSpec` only, inner `input` stays opaque CBOR"
+"rkyv wraps the outer `WorkflowStart` only, inner `input` stays opaque CBOR"
 rule) is fully specified by the shipped file.
 
 ### [REF] trybuild non-substitutability — RECOMMEND, do not author
@@ -564,7 +564,7 @@ REAL compiler output once both types exist (DELIVER) — a RED-scaffold
 ### [REF] Test placement + pre-requisites
 
 - **NEW-1, NEW-3** → `crates/overdrive-core/tests/` (the author/core surface:
-  the erasure adapter + the `WorkflowSpecEnvelope` are core types).
+  the erasure adapter + the `WorkflowStartEnvelope` are core types).
   Precedent: `ca_cert_spec_policy.rs` (most recent core DISTILL RED-scaffold)
   and `root_ca_key.rs` / `alloc_status_row.rs` (schema-evolution harness).
 - **NEW-2, NEW-4, NEW-5** → `crates/overdrive-control-plane/tests/acceptance/`
@@ -579,7 +579,7 @@ REAL compiler output once both types exist (DELIVER) — a RED-scaffold
 - **Pre-requisites (DESIGN driving ports the scaffolds depend on):** the
   `Workflow` typed trait + `ErasedWorkflow`/`ErasedWorkflowAdapter<W>` +
   `TerminalError`/`TerminalErrorKind` + `WorkflowStatus` +
-  `WorkflowSpec { name, input }` + `WorkflowSpecEnvelope` (Slice 01); the
+  `WorkflowStart { name, input }` + `WorkflowStartEnvelope` (Slice 01); the
   engine `run_erased` drive + status mapping + `started_digests` off
   `spec.input` (Slices 02-03); the retry-re-drive loop +
   `JournalCommand::RetryAttempted` + `TerminalError::budget_exhausted()`
@@ -614,7 +614,7 @@ REAL compiler output once both types exist (DELIVER) — a RED-scaffold
    matcher ("compiles against BOTH the current String-based Terminal (RED)
    and the post-fix WorkflowResult-based one") — so the helper survives the
    `result → status` rename verbatim. Only its `CountingSuccess::run` body +
-   `WorkflowSpec` migrate. A small, pleasant confirmation that the codebase
+   `WorkflowStart` migrate. A small, pleasant confirmation that the codebase
    already anticipated terminal-payload churn.
 4. **The `replay_equivalence` invariant test is MIGRATE-shallow at the test
    surface (refinement).** The hypothesis implied the invariant migrates. The

@@ -376,10 +376,10 @@ pub enum Action {
         idempotency_key: Option<String>,
     },
 
-    /// Start a workflow. `WorkflowSpec` is a placeholder in Phase 1.
+    /// Start a workflow. Carries the durable [`WorkflowStart`] intent.
     StartWorkflow {
-        /// The workflow to start.
-        spec: WorkflowSpec,
+        /// The durable workflow START intent (identity + opaque input).
+        start: WorkflowStart,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },
@@ -569,12 +569,12 @@ pub enum RestartReason {
     },
 }
 
-// `WorkflowSpec` is the concrete shape defined in `crate::workflow`
+// `WorkflowStart` is the concrete shape defined in `crate::workflow`
 // (ADR-0064 §1, replacing the former unit placeholder). It is
 // re-exported here so `Action::StartWorkflow` (above) and existing
-// `reconcilers::WorkflowSpec` references keep resolving against this
+// `reconcilers::WorkflowStart` references keep resolving against this
 // path.
-pub use crate::workflow::WorkflowSpec;
+pub use crate::workflow::WorkflowStart;
 
 // ---------------------------------------------------------------------------
 // ReconcilerName newtype

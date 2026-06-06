@@ -44,7 +44,9 @@ use overdrive_core::traits::intent_store::{
 };
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{
+    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
+};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -62,8 +64,8 @@ struct EmittingWorkflow;
 impl EmittingWorkflow {
     const WORKFLOW_NAME: &'static str = "emitting-workflow";
 
-    fn spec() -> WorkflowSpec {
-        WorkflowSpec {
+    fn spec() -> WorkflowStart {
+        WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
             input: Vec::new(),
         }
@@ -196,7 +198,7 @@ async fn emit_action_lands_in_the_action_channel_and_the_workflow_makes_no_direc
 
     let _target: SocketAddr = "127.0.0.1:9000".parse().expect("valid addr");
 
-    let spec: WorkflowSpec = EmittingWorkflow::spec();
+    let spec: WorkflowStart = EmittingWorkflow::spec();
     let correlation = CorrelationKey::derive(
         "wf-emit-0001",
         &ContentHash::of(spec.name.as_str().as_bytes()),

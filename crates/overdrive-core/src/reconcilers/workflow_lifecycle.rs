@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::id::CorrelationKey;
-use crate::workflow::{WorkflowResult, WorkflowSpec};
+use crate::workflow::{WorkflowResult, WorkflowStart};
 
 use super::{Action, Reconciler, ReconcilerName, TickContext};
 
@@ -46,10 +46,10 @@ use super::{Action, Reconciler, ReconcilerName, TickContext};
 /// [`CorrelationKey`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkflowInstanceState {
-    /// The spec the engine resolves to a registered `Workflow` factory.
-    /// Re-emitted verbatim on `StartWorkflow` so the engine drives the
-    /// same workflow kind on resume.
-    pub spec: WorkflowSpec,
+    /// The durable start intent the engine resolves to a registered
+    /// `Workflow` factory. Re-emitted verbatim on `StartWorkflow` so the
+    /// engine drives the same workflow kind on resume.
+    pub spec: WorkflowStart,
     /// Whether intent says this instance should be running. Derived by
     /// the runtime's hydrate-desired from the intent SSOT; a `false`
     /// value means the instance is not desired and the reconciler does
@@ -161,7 +161,7 @@ impl Reconciler for WorkflowLifecycle {
             // re-emit StartWorkflow. The engine's `load_journal` decides
             // cold-start vs crash-resume; the reconciler stays pure.
             actions.push(Action::StartWorkflow {
-                spec: instance.spec.clone(),
+                start: instance.spec.clone(),
                 correlation: correlation.clone(),
             });
         }

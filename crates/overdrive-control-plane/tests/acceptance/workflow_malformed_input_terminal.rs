@@ -49,7 +49,7 @@
 //! RED-scaffold convention (`.claude/rules/testing.md` § "RED scaffolds"):
 //! the body below is a self-contained `panic!` importing NO unbuilt
 //! production type (`WorkflowStatus` / `TerminalError` / `TerminalErrorKind`
-//! plus the reshaped `WorkflowSpec { name, input }` and the decode-in-adapter
+//! plus the reshaped `WorkflowStart { name, input }` and the decode-in-adapter
 //! path land in DELIVER Slices 01-03). nextest reports PASS; clippy is
 //! clean; lefthook needs no `--no-verify`.
 
@@ -65,7 +65,7 @@
 /// 1. A fixture `impl Workflow { type Input = <non-unit type>; type Output
 ///    = (); run(&self, _ctx, _input) -> Result<(), TerminalError> { Ok(()) }
 ///    }` whose body would succeed IF the input decoded.
-/// 2. `let spec = WorkflowSpec { name, input: b"not-cbor-for-this-input"
+/// 2. `let spec = WorkflowStart { name, input: b"not-cbor-for-this-input"
 ///    .to_vec() };` — bytes that fail `ciborium::from_reader::<Input>`.
 /// 3. `engine.start(&spec, &correlation, &workflow_id).await` then
 ///    `join_all`.

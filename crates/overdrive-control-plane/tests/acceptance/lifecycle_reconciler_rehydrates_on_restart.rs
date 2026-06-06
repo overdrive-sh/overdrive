@@ -3,7 +3,7 @@
 //!
 //! Scenario S-WP-01-08. O2 (single-node). An instance that is `running`
 //! in intent but has no live engine task after a process restart: the
-//! pure-sync `reconcile` re-emits `Action::StartWorkflow { spec,
+//! pure-sync `reconcile` re-emits `Action::StartWorkflow { start,
 //! correlation }` for it (the engine's `load_journal` then RESUMES rather
 //! than cold-starts), and the `reconcile` body performs no `.await` — the
 //! `ReconcilerIsPure` DST invariant continues to hold with the
@@ -34,7 +34,7 @@ use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkflowInstanceState,
     WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
 };
-use overdrive_core::workflow::{WorkflowName, WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{WorkflowName, WorkflowResult, WorkflowStart};
 
 fn fresh_tick(now: Instant) -> TickContext {
     TickContext {
@@ -45,14 +45,14 @@ fn fresh_tick(now: Instant) -> TickContext {
     }
 }
 
-fn provision_spec() -> WorkflowSpec {
-    WorkflowSpec {
+fn provision_spec() -> WorkflowStart {
+    WorkflowStart {
         name: WorkflowName::new("provision-record").expect("valid workflow name"),
         input: Vec::new(),
     }
 }
 
-fn correlation_for(spec: &WorkflowSpec) -> CorrelationKey {
+fn correlation_for(spec: &WorkflowStart) -> CorrelationKey {
     CorrelationKey::derive(
         "wf-provision-0001",
         &ContentHash::of(spec.name.as_str().as_bytes()),
@@ -113,10 +113,10 @@ fn lifecycle_reconciler_re_emits_start_workflow_for_a_running_instance_with_no_l
          StartWorkflow on restart; got {actions_a:?}"
     );
     match start_workflows[0] {
-        Action::StartWorkflow { spec: emitted_spec, correlation: emitted_corr } => {
+        Action::StartWorkflow { start: emitted_spec, correlation: emitted_corr } => {
             assert_eq!(
                 *emitted_spec, spec,
-                "re-emitted spec must match the running instance's spec"
+                "re-emitted start intent must match the running instance's spec"
             );
             assert_eq!(
                 *emitted_corr, correlation,

@@ -77,7 +77,7 @@ async fn drive_with_signal(
     engine: &WorkflowEngine,
     obs: &Arc<dyn ObservationStore>,
     clock: &Arc<SimClock>,
-    spec: &overdrive_core::workflow::WorkflowSpec,
+    spec: &overdrive_core::workflow::WorkflowStart,
     correlation: &CorrelationKey,
     workflow_id: &WorkflowId,
 ) {

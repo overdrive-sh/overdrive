@@ -554,7 +554,7 @@ pub enum ObservationRow {
     /// Keyed by `correlation` (the instance [`CorrelationKey`]) so the
     /// emitting workflow-lifecycle reconciler finds the result
     /// deterministically on the next tick and converges the instance to
-    /// terminated. The `Action::StartWorkflow { spec, correlation }` the
+    /// terminated. The `Action::StartWorkflow { start, correlation }` the
     /// reconciler emits carries the SAME key the terminal row is filed
     /// under (`development.md` Reconciler I/O rule 2 — correlation, not
     /// request ID, links cause to response).

@@ -59,7 +59,7 @@ use overdrive_core::testing::workflow::ProvisionRecord;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{WorkflowResult, WorkflowStart};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -76,7 +76,7 @@ use tempfile::TempDir;
 /// hand the production composition the action that exercises the now-real
 /// engine wiring end-to-end.
 struct FixtureTriggerReconciler {
-    spec: WorkflowSpec,
+    spec: WorkflowStart,
     correlation: CorrelationKey,
 }
 
@@ -84,7 +84,7 @@ impl FixtureTriggerReconciler {
     /// Emit the `StartWorkflow` action — the made-up trigger's output.
     fn emit(&self) -> Vec<Action> {
         vec![Action::StartWorkflow {
-            spec: self.spec.clone(),
+            start: self.spec.clone(),
             correlation: self.correlation.clone(),
         }]
     }
@@ -181,7 +181,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
 
     // --- The fixture trigger reconciler emits StartWorkflow. The
     //     correlation is derived the same shape a real producer would use.
-    let spec: WorkflowSpec = ProvisionRecord::spec();
+    let spec: WorkflowStart = ProvisionRecord::spec();
     let correlation = CorrelationKey::derive(
         target.to_string().as_str(),
         &ContentHash::of(spec.name.as_str().as_bytes()),

@@ -70,7 +70,9 @@ use overdrive_core::testing::workflow::ProvisionRecord;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowSpec};
+use overdrive_core::workflow::{
+    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
+};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -87,14 +89,14 @@ use tokio_util::sync::CancellationToken;
 /// production producer (#206) would emit. Its single job is to hand the
 /// production composition the action that starts the `EmittingWorkflow`.
 struct FixtureTriggerReconciler {
-    spec: WorkflowSpec,
+    spec: WorkflowStart,
     correlation: CorrelationKey,
 }
 
 impl FixtureTriggerReconciler {
     fn emit(&self) -> Vec<Action> {
         vec![Action::StartWorkflow {
-            spec: self.spec.clone(),
+            start: self.spec.clone(),
             correlation: self.correlation.clone(),
         }]
     }
@@ -120,8 +122,8 @@ struct EmittingWorkflow {
 impl EmittingWorkflow {
     const WORKFLOW_NAME: &'static str = "emitting-trigger-workflow";
 
-    fn spec() -> WorkflowSpec {
-        WorkflowSpec {
+    fn spec() -> WorkflowStart {
+        WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
             input: Vec::new(),
         }
@@ -187,14 +189,14 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
     // workflow AND the ProvisionRecord the emit starts. Production
     // registers real first-party workflows here at boot; Phase 1 has none,
     // so the e2e registers the fixtures to exercise the real composition.
-    let provision_spec: WorkflowSpec = ProvisionRecord::spec();
+    let provision_spec: WorkflowStart = ProvisionRecord::spec();
     let second_correlation = CorrelationKey::derive(
         provision_target.to_string().as_str(),
         &ContentHash::of(provision_spec.name.as_str().as_bytes()),
         "emitted-start-workflow",
     );
     let emitted_action = Action::StartWorkflow {
-        spec: provision_spec.clone(),
+        start: provision_spec.clone(),
         correlation: second_correlation.clone(),
     };
 
@@ -272,7 +274,7 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
     // --- The fixture trigger reconciler emits StartWorkflow for the
     //     EmittingWorkflow. The correlation is derived the same shape a
     //     real producer would use.
-    let emitting_spec: WorkflowSpec = EmittingWorkflow::spec();
+    let emitting_spec: WorkflowStart = EmittingWorkflow::spec();
     let first_correlation = CorrelationKey::derive(
         emit_run_target.to_string().as_str(),
         &ContentHash::of(emitting_spec.name.as_str().as_bytes()),

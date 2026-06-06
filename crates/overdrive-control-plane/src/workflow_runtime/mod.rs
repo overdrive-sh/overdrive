@@ -63,7 +63,7 @@ use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
     JournalCursor, SignalKey, SignalValue, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName,
-    WorkflowResult, WorkflowSpec,
+    WorkflowResult, WorkflowStart,
 };
 
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
@@ -86,7 +86,7 @@ pub type ActionEmitSender = mpsc::UnboundedSender<Action>;
 pub type ActionEmitReceiver = mpsc::UnboundedReceiver<Action>;
 
 /// A factory producing a fresh [`Workflow`] trait object on demand. The
-/// engine resolves a [`WorkflowSpec`]'s [`WorkflowName`] to one of these
+/// engine resolves a [`WorkflowStart`]'s [`WorkflowName`] to one of these
 /// and calls it to obtain a fresh instance to drive.
 pub type WorkflowFactory = Box<dyn Fn() -> Box<dyn Workflow> + Send + Sync>;
 
@@ -291,7 +291,7 @@ impl WorkflowEngine {
     ///   not be loaded.
     pub async fn start(
         &self,
-        spec: &WorkflowSpec,
+        spec: &WorkflowStart,
         correlation: &CorrelationKey,
         workflow_id: &WorkflowId,
     ) -> Result<(), WorkflowEngineError> {
@@ -533,20 +533,20 @@ impl Drop for LiveInstanceGuard {
 /// these are content hashes over the workflow-kind identity and the start
 /// input, NOT a pre-computed cache.
 ///
-/// Slice 01's [`WorkflowSpec`] carries only the workflow `name` (its
+/// Slice 01's [`WorkflowStart`] carries only the workflow `name` (its
 /// identity); the start input is the spec's identity bytes until a later
 /// slice grows the spec with start parameters (the spec evolves additively,
 /// `overdrive-core/src/workflow/mod.rs`). Both digests are derived here so
 /// the engine — not the test — owns the derivation, matching the journal
 /// characterization test's `ContentHash::of(spec.name…)` choice.
-fn started_digests(spec: &WorkflowSpec) -> (ContentHash, ContentHash) {
+fn started_digests(spec: &WorkflowStart) -> (ContentHash, ContentHash) {
     let spec_digest = ContentHash::of(spec.name.as_str().as_bytes());
     // The start input. Slice 01 has no separate start-parameter surface on
-    // `WorkflowSpec`, so the input identity is the spec name bytes — the
+    // `WorkflowStart`, so the input identity is the spec name bytes — the
     // same input the journal-store characterization test records via
     // `ProvisionRecord::PAYLOAD` (the workflow-kind constant).
     //
-    // TODO(#217): when `WorkflowSpec` grows a start-parameter surface,
+    // TODO(#217): when `WorkflowStart` grows a start-parameter surface,
     // hash the serialised parameter bytes here instead of the name bytes so
     // `spec_digest` and `input_digest` diverge as intended. The compiler will
     // NOT flag this site when the spec gains fields (both digests still

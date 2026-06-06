@@ -52,9 +52,9 @@ steps:
       injected Transport. All non-determinism flows through `ctx`
       (injected Clock/Transport/Entropy, DST-controllable).
     shared_artifacts:
-      - name: workflow_spec
-        source: "WorkflowSpec — the typed descriptor carried in Action::StartWorkflow { spec, correlation } (mod.rs:373, placeholder today)"
-        displayed_as: "${workflow_spec}"
+      - name: workflow_start
+        source: "WorkflowStart — the typed descriptor carried in Action::StartWorkflow { start, correlation } (mod.rs:373, placeholder today)"
+        displayed_as: "${workflow_start}"
         consumers: ["the reconciler emitting StartWorkflow", "the workflow-lifecycle reconciler that brings the instance up", "the journal key namespace"]
       - name: correlation_key
         source: "CorrelationKey — derived (reconciliation_target, spec_hash, purpose) per development.md Reconciler I/O rule 2"
@@ -69,7 +69,7 @@ steps:
       cursor directly. All non-determinism MUST flow through `ctx`
       (per whitepaper §18 + development.md Workflow contract rule 1).
       No `Instant::now()` / `reqwest::get()` / `tokio::time::sleep` /
-      `rand::random()` in the workflow body. WorkflowSpec must be the
+      `rand::random()` in the workflow body. WorkflowStart must be the
       typed descriptor the existing Action::StartWorkflow placeholder
       already names — not a new ad-hoc shape.
     failure_modes:

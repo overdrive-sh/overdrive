@@ -461,9 +461,9 @@ pub(crate) async fn persist_workflow_intents(
 
     for action in actions {
         match &action {
-            Action::StartWorkflow { spec, correlation } => {
+            Action::StartWorkflow { start, correlation } => {
                 let key = IntentKey::for_workflow_instance(correlation);
-                match store.put(key.as_bytes(), spec.name.as_str().as_bytes()).await {
+                match store.put(key.as_bytes(), start.name.as_str().as_bytes()).await {
                     // Intent durable — engine-start may proceed for this
                     // StartWorkflow.
                     Ok(()) => dispatchable.push(action),
@@ -589,7 +589,7 @@ async fn dispatch_single(
         // no-op for this tick — the level-triggered reconciler re-emits
         // it once the engine is composed. This mirrors the
         // StartAllocation arm's tolerance of a level-triggered re-enqueue.
-        Action::StartWorkflow { spec, correlation } => {
+        Action::StartWorkflow { start, correlation } => {
             let Some(engine) = workflow_engine else {
                 return Ok(());
             };
@@ -600,7 +600,7 @@ async fn dispatch_single(
             // `load_journal` then RESUMES rather than cold-starts).
             let workflow_id = WorkflowId::for_correlation(&correlation);
             engine
-                .start(&spec, &correlation, &workflow_id)
+                .start(&start, &correlation, &workflow_id)
                 .await
                 .map_err(|err| ShimError::WorkflowEngine { message: err.to_string() })
         }
@@ -1235,7 +1235,7 @@ mod tests {
     use overdrive_core::traits::intent_store::{
         IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
     };
-    use overdrive_core::workflow::{WorkflowName, WorkflowSpec};
+    use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
     use super::{Action, ShimError, persist_workflow_intents};
 
@@ -1316,8 +1316,8 @@ mod tests {
         }
     }
 
-    fn start_workflow(slug: &str) -> (Action, CorrelationKey, WorkflowSpec) {
-        let spec = WorkflowSpec {
+    fn start_workflow(slug: &str) -> (Action, CorrelationKey, WorkflowStart) {
+        let spec = WorkflowStart {
             name: WorkflowName::new("provision-record").expect("valid kebab name"),
             input: Vec::new(),
         };
@@ -1326,7 +1326,8 @@ mod tests {
             &ContentHash::of(spec.name.as_str().as_bytes()),
             "start-workflow",
         );
-        let action = Action::StartWorkflow { spec: spec.clone(), correlation: correlation.clone() };
+        let action =
+            Action::StartWorkflow { start: spec.clone(), correlation: correlation.clone() };
         (action, correlation, spec)
     }
 

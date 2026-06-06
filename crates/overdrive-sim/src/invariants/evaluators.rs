@@ -50,7 +50,7 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{
-    JournalCursor, SignalValue, WorkflowCtx, WorkflowResult, WorkflowSpec,
+    JournalCursor, SignalValue, WorkflowCtx, WorkflowResult, WorkflowStart,
 };
 
 use overdrive_control_plane::journal::{
@@ -609,7 +609,7 @@ const WF_TARGET: &str = "127.0.0.1:9000";
 /// Construct the slice-01 instance correlation + id + spec for a
 /// `ProvisionRecord` instance. Deterministic — no seed dependence beyond
 /// the fixed instance id, so twin runs reproduce bit-for-bit.
-fn provision_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
+fn provision_instance() -> (CorrelationKey, WorkflowId, WorkflowStart) {
     let spec = ProvisionRecord::spec();
     let correlation = CorrelationKey::derive(
         "wf-provision-0001",
@@ -637,7 +637,7 @@ fn provision_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
 /// to the one `engine.start` would have written. Production is the source
 /// of truth (`development.md` § "Production code is not shaped by
 /// simulation"); this harness fixture mirrors it.
-fn started_entry(spec: &WorkflowSpec) -> LoadedEntry {
+fn started_entry(spec: &WorkflowStart) -> LoadedEntry {
     let digest = ContentHash::of(spec.name.as_str().as_bytes());
     LoadedEntry::Command(JournalCommand::Started { spec_digest: digest, input_digest: digest })
 }
@@ -928,7 +928,7 @@ const WF_SIGNAL_VALUE: &str = "provision-signal-ready";
 /// Construct the instance correlation + id + spec for a
 /// `ProvisionRecordWithSignalEmit` instance. Deterministic — fixed instance
 /// id, so twin runs reproduce bit-for-bit.
-fn provision_signal_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
+fn provision_signal_instance() -> (CorrelationKey, WorkflowId, WorkflowStart) {
     let spec = ProvisionRecordWithSignalEmit::spec();
     let correlation = CorrelationKey::derive(
         "wf-provision-signal-inv-0001",
@@ -1033,7 +1033,7 @@ async fn run_signal_until_crash_while_blocked(
     seed: u64,
     journal: &Arc<dyn JournalStore>,
     obs: &Arc<dyn ObservationStore>,
-    spec: &WorkflowSpec,
+    spec: &WorkflowStart,
     correlation: &CorrelationKey,
     workflow_id: &WorkflowId,
 ) -> Result<(usize, Vec<LoadedEntry>), String> {
@@ -1254,7 +1254,7 @@ const WF_SLEEP: Duration = Duration::from_secs(30);
 /// Construct the instance correlation + id + spec for a
 /// `ProvisionRecordWithSleep` instance. Deterministic — fixed instance id,
 /// so twin runs reproduce bit-for-bit.
-fn provision_sleep_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
+fn provision_sleep_instance() -> (CorrelationKey, WorkflowId, WorkflowStart) {
     let spec = ProvisionRecordWithSleep::spec();
     let correlation = CorrelationKey::derive(
         "wf-provision-sleep-inv-0001",

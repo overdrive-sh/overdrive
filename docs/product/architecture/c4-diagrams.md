@@ -622,7 +622,7 @@ C4Container
   Person(devon, "Platform Engineer (Devon)")
 
   Container_Boundary(workspace, "Overdrive workspace") {
-    Container(core, "overdrive-core", "Rust crate (class: core)", "NEW `workflow` module: Workflow trait, WorkflowCtx type, WorkflowResult, concrete WorkflowSpec. NO tokio (injected ports + async_trait). EXTENDED: Action::StartWorkflow made live.")
+    Container(core, "overdrive-core", "Rust crate (class: core)", "NEW `workflow` module: Workflow trait, WorkflowCtx type, WorkflowResult, concrete WorkflowStart. NO tokio (injected ports + async_trait). EXTENDED: Action::StartWorkflow made live.")
     Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "NEW WorkflowEngine (workflow_runtime) + JournalStore port + RedbJournalStore (journal). EXTENDED: action-shim StartWorkflow arm → engine.start; workflow-lifecycle reconciler (pure-sync).")
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "NEW SimJournalStore. GRADUATED: replay_equivalence_provision_record (was ReplayEquivalentEmptyWorkflow placeholder) + WorkflowJournalWriteOrdering + WorkflowExactlyOnceEffectOnResume invariants.")
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "Unchanged — NO `overdrive workflow` verb (#206); engine composed in `serve` boot.")
@@ -632,7 +632,7 @@ C4Container
   ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "Terminal-result rows (keyed by CorrelationKey) + typed signal rows (slice 03)")
 
   Rel(devon, core, "impl Workflow for ProvisionRecord")
-  Rel(ctrl, core, "Drives Workflow::run; reads WorkflowSpec from Action::StartWorkflow")
+  Rel(ctrl, core, "Drives Workflow::run; reads WorkflowStart from Action::StartWorkflow")
   Rel(ctrl, redb_file, "JournalStore::append (fsync) / load_journal; ViewStore on the same file")
   Rel(ctrl, obs, "Engine writes terminal-result row; reconciler observes it; signals (slice 03)")
   Rel(sim, ctrl, "DST drives the engine with SimJournalStore + Sim* ports")
@@ -646,7 +646,7 @@ C4Component
 
   Container_Boundary(core, "overdrive-core (class: core)") {
     Component(wf_trait, "Workflow trait + WorkflowCtx (NEW)", "workflow/ — async_trait", "async fn run(&self, ctx) -> WorkflowResult. WorkflowCtx bundles Arc<dyn Clock/Transport/Entropy> + journal cursor. The workflow analogue of TickContext. No tokio.")
-    Component(wf_result, "WorkflowResult + WorkflowSpec (NEW)", "workflow/", "WorkflowResult = Success | Failed{reason} | Cancelled (#[non_exhaustive], distinct from TerminalCondition). WorkflowSpec replaces the reconcilers/mod.rs:562 placeholder.")
+    Component(wf_result, "WorkflowResult + WorkflowStart (NEW)", "workflow/", "WorkflowResult = Success | Failed{reason} | Cancelled (#[non_exhaustive], distinct from TerminalCondition). WorkflowStart replaces the reconcilers/mod.rs:562 placeholder.")
     Component(action_sw, "Action::StartWorkflow (EXTENDED)", "reconcilers/mod.rs:373", "spec + correlation — already the locked shape; the reconciler→workflow lifecycle trigger.")
     Component(corr, "CorrelationKey (REUSE)", "id.rs:538", "derive(target, spec_hash, purpose); keys the terminal-result observation row.")
   }
@@ -666,7 +666,7 @@ C4Component
 
   ContainerDb(redb_file, "redb file (shared substrate)", "ACID KV", "ViewStore tables + __wf_journal__ table, one Database handle")
 
-  Rel(wf_lifecycle, action_sw, "Emits StartWorkflow{spec, correlation}")
+  Rel(wf_lifecycle, action_sw, "Emits StartWorkflow{start, correlation}")
   Rel(action_sw, shim, "Committed Action dispatched")
   Rel(shim, engine, "WorkflowEngine::start(spec, correlation)")
   Rel(engine, wf_trait, "Calls run(&ctx).await; ctx.* are check-then-record points")
