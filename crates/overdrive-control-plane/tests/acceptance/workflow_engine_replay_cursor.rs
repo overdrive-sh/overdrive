@@ -32,6 +32,7 @@ use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 use std::sync::Arc as StdArc;
 
 use overdrive_core::id::ContentHash;
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
     JournalCursor, SignalKey, SignalValue, WorkflowCtx, WorkflowCtxError,
@@ -505,4 +506,240 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
         layer2_entries.is_empty(),
         "Layer 2 fail-closed must not advance / append; got {layer2_entries:?}"
     );
+}
+
+/// ADR-0064 §3 sleep branch, replay path. A recorded `SleepArmed` at the
+/// cursor replays its recorded ABSOLUTE deadline WITHOUT re-arming (no
+/// append), and advances the command-cursor by exactly 1 — so the trailing
+/// `RunResult` replays at the next command position.
+///
+/// Falsifies three mutations at once:
+/// - `replay_sleep -> Ok(None)` — would fall to the live path and append a
+///   fresh `SleepArmed` (the journal would NOT be empty).
+/// - `*cursor += 1` -> `*= 1` in `replay_sleep` — the cursor would not
+///   advance, landing the trailing `ctx.run` on the `SleepArmed` at index 0
+///   → Layer-1 `NonDeterministic` (the `expect` below panics).
+/// - `*cursor += 1` -> `-= 1` in `replay_sleep` — usize underflow panic.
+///
+/// The recorded deadline is `Duration::ZERO` (already in the past relative
+/// to `clock.unix_now()`), so the replay path returns immediately without a
+/// `SimClock` park.
+#[tokio::test]
+async fn replay_sleep_returns_recorded_deadline_and_advances_so_next_command_replays() {
+    let recorded_bytes = encode_run_result(&Ok(7usize));
+    let buffer = vec![
+        // [0] the armed sleep — an already-passed absolute deadline.
+        LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix: Duration::ZERO }),
+        // [1] the post-sleep durable step — replays only if the sleep
+        //     advanced the cursor by exactly 1.
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: "after-sleep".to_string(),
+            result_digest: ContentHash::of(&recorded_bytes),
+            result_bytes: recorded_bytes,
+        }),
+    ];
+    let (ctx, journal, workflow_id) = ctx_only(buffer);
+
+    // Command-index 0 — the sleep replays the recorded (already-passed)
+    // deadline and returns immediately (the duration arg is irrelevant on
+    // replay; `ZERO` keeps the live-path mutant from parking the SimClock).
+    ctx.sleep(Duration::ZERO).await.expect("sleep replays the recorded deadline");
+
+    // Command-index 1 — the post-sleep step replays, proving the cursor
+    // advanced by exactly 1.
+    let after: Result<usize, String> = ctx
+        .run("after-sleep", async move { Ok::<usize, String>(0) })
+        .await
+        .expect("post-sleep step replays at command-index 1");
+    assert_eq!(after, Ok(7), "the post-sleep step replays its recorded result");
+
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert!(entries.is_empty(), "a pure replay appends nothing; got {entries:?}");
+}
+
+/// ADR-0064 §3 sleep branch, live path. With an empty replay buffer
+/// `ctx.sleep` arms a fresh sleep: it records a `SleepArmed { deadline_unix }`
+/// (append + fsync, ADR-0063 §4) carrying the ABSOLUTE wall-clock deadline
+/// (an input), then parks on the Clock. Pins `record_sleep_armed` against the
+/// `-> Ok(())` no-op mutation (which would append nothing).
+///
+/// `Duration::ZERO` so the `SimClock` park returns immediately without a
+/// harness tick.
+#[tokio::test]
+async fn live_sleep_records_sleep_armed_deadline() {
+    let (ctx, journal, workflow_id) = ctx_only(Vec::new());
+
+    ctx.sleep(Duration::ZERO).await.expect("live sleep records the deadline and returns");
+
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert_eq!(entries.len(), 1, "live sleep appends exactly one entry; got {entries:?}");
+    match &entries[0] {
+        LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix }) => {
+            // The recorded deadline is an ABSOLUTE wall-clock input (>= the
+            // UNIX epoch), never a zero/remaining cache.
+            assert!(
+                *deadline_unix > Duration::ZERO,
+                "live sleep records an absolute wall-clock deadline, not a remaining cache"
+            );
+        }
+        other => panic!("live sleep must append a SleepArmed command, got {other:?}"),
+    }
+}
+
+/// ADR-0064 §4 signal branch, live path. With an empty replay buffer and no
+/// `ObservationStore` wired (the 3-arg DST-harness handle, whose
+/// `poll_signal` resolves to the empty value immediately), `ctx.wait_for_signal`
+/// records a `SignalAwaited` COMMAND, then — once the signal resolves — a
+/// `SignalSeen` NOTIFICATION. Pins two no-op mutations at once:
+/// - `record_signal_awaited -> Ok(())` — would drop the `SignalAwaited`
+///   command (the run would hold only the notification).
+/// - `record_signal_seen -> Ok(())` — would drop the `SignalSeen`
+///   notification (the run would hold only the command).
+#[tokio::test]
+async fn live_wait_for_signal_records_awaited_command_then_seen_notification() {
+    let (ctx, journal, workflow_id) = ctx_only(Vec::new());
+    let key = SignalKey::new("cert-ready").expect("valid signal key");
+
+    let value = ctx.wait_for_signal(key.clone()).await.expect("live wait resolves");
+    assert_eq!(
+        value,
+        SignalValue::empty(),
+        "a no-obs handle resolves the signal to the present-empty value"
+    );
+
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert_eq!(
+        entries.len(),
+        2,
+        "live wait appends a SignalAwaited command THEN a SignalSeen notification; got {entries:?}"
+    );
+    assert_eq!(
+        entries[0],
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: key.clone() }),
+        "the first append is the SignalAwaited command (an input — the key the body blocked on)"
+    );
+    match &entries[1] {
+        LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key, value, ..
+        }) => {
+            assert_eq!(*signal_key, key, "the SignalSeen notification carries the awaited key");
+            assert_eq!(*value, SignalValue::empty(), "the SignalSeen records the observed value");
+        }
+        other => panic!("the second append must be a SignalSeen notification, got {other:?}"),
+    }
+}
+
+/// ADR-0064 §4 signal branch, crash-while-blocked resume (S-WP-03-01). A
+/// recorded `SignalAwaited` with NO matching `SignalSeen` notification is the
+/// "crashed while still blocked" shape: `replay_signal` returns `Ok(None)`
+/// (re-block), and the live `record_signal_awaited` sees the recorded
+/// `SignalAwaited` at the cursor and advances PAST it by exactly 1 WITHOUT a
+/// duplicate append. The trailing `RunResult` then replays at the next
+/// command position.
+///
+/// Pins the crash-block advance against both arithmetic mutations:
+/// - `*cursor += 1` -> `*= 1` — the cursor would not advance, landing the
+///   trailing `ctx.run` on the `SignalAwaited` at index 0 → Layer-1
+///   `NonDeterministic` (the `expect` below panics).
+/// - `*cursor += 1` -> `-= 1` — usize underflow panic.
+#[tokio::test]
+async fn crash_while_blocked_resume_advances_past_recorded_signal_awaited() {
+    let key = SignalKey::new("cert-ready").expect("valid signal key");
+    let recorded_bytes = encode_run_result(&Ok(42usize));
+    let buffer = vec![
+        // [0] the armed wait — recorded, but its SignalSeen never landed
+        //     (the prior run crashed while blocked).
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: key.clone() }),
+        // [1] the post-signal durable step — replays only if the crash-block
+        //     branch advanced the cursor by exactly 1.
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: "after-signal".to_string(),
+            result_digest: ContentHash::of(&recorded_bytes),
+            result_bytes: recorded_bytes,
+        }),
+    ];
+    let (ctx, _journal, _workflow_id) = ctx_only(buffer);
+
+    // The resumed wait re-blocks on the SAME key (no matching SignalSeen),
+    // then resolves on the live poll (no obs wired → present-empty).
+    let value =
+        ctx.wait_for_signal(key.clone()).await.expect("resumed wait re-blocks then resolves");
+    assert_eq!(value, SignalValue::empty(), "the resumed wait resolves on the live poll");
+
+    // Command-index 1 — the post-signal step replays, proving the crash-block
+    // branch advanced the cursor by exactly 1.
+    let after: Result<usize, String> = ctx
+        .run("after-signal", async move { Ok::<usize, String>(0) })
+        .await
+        .expect("post-signal step replays at command-index 1");
+    assert_eq!(after, Ok(42), "the post-signal step replays its recorded result");
+}
+
+/// ADR-0064 §4 signal branch, engine-internal block poll. A handle with no
+/// `ObservationStore` wired (the 3-arg DST-harness `new`) resolves
+/// `poll_signal` to the present-empty value — NEVER `Ok(None)` (absent) — so
+/// a signalless live wait does not block forever. Pins `poll_signal` against
+/// the `-> Ok(None)` mutation, which would make every live wait spin on the
+/// Clock park indefinitely. Driven directly on the handle (the ctx-level
+/// effect of the mutation is an infinite park, not a clean assertion).
+#[tokio::test]
+async fn poll_signal_with_no_obs_resolves_to_present_empty_value() {
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let workflow_id = WorkflowId::new("wf-poll-signal").expect("valid id");
+    let handle = JournalCursorHandle::new(Arc::clone(&journal), workflow_id, Vec::new());
+    let key = SignalKey::new("cert-ready").expect("valid signal key");
+
+    let polled = handle.poll_signal(&key).await.expect("poll");
+    assert_eq!(
+        polled,
+        Some(SignalValue::empty()),
+        "a no-obs handle resolves a signal poll to present-empty, never absent (Ok(None))"
+    );
+}
+
+/// ADR-0064 §4 emit branch, replay path. A recorded `ActionEmitted` at the
+/// cursor short-circuits `ctx.emit_action` — the Action is NOT re-sent and
+/// nothing is appended (exactly-once on the replay path) — and advances the
+/// command-cursor by exactly 1, so the trailing `RunResult` replays at the
+/// next command position.
+///
+/// Falsifies three mutations at once:
+/// - `replay_emit -> Ok(false)` — would fall to the live path and append a
+///   fresh `ActionEmitted` (the journal would NOT be empty).
+/// - `*cursor += 1` -> `*= 1` in `replay_emit` — the cursor would not
+///   advance, landing the trailing `ctx.run` on the `ActionEmitted` at index
+///   0 → Layer-1 `NonDeterministic` (the `expect` below panics).
+/// - `*cursor += 1` -> `-= 1` in `replay_emit` — usize underflow panic.
+#[tokio::test]
+async fn replay_emit_short_circuits_and_advances_so_next_command_replays() {
+    let recorded_bytes = encode_run_result(&Ok(5usize));
+    let buffer = vec![
+        // [0] the recorded emit — replayed, NOT re-sent.
+        LoadedEntry::Command(JournalCommand::ActionEmitted {
+            action_digest: ContentHash::of(b"recorded-action"),
+        }),
+        // [1] the post-emit durable step — replays only if the emit advanced
+        //     the cursor by exactly 1.
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: "after-emit".to_string(),
+            result_digest: ContentHash::of(&recorded_bytes),
+            result_bytes: recorded_bytes,
+        }),
+    ];
+    let (ctx, journal, workflow_id) = ctx_only(buffer);
+
+    // Command-index 0 — the emit replays (Action NOT re-sent; nothing
+    // appended) and advances the cursor by exactly 1.
+    ctx.emit_action(Action::Noop).await.expect("emit replays (Action not re-sent)");
+
+    // Command-index 1 — the post-emit step replays, proving the cursor
+    // advanced by exactly 1.
+    let after: Result<usize, String> = ctx
+        .run("after-emit", async move { Ok::<usize, String>(0) })
+        .await
+        .expect("post-emit step replays at command-index 1");
+    assert_eq!(after, Ok(5), "the post-emit step replays its recorded result");
+
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert!(entries.is_empty(), "a pure replay appends nothing; got {entries:?}");
 }

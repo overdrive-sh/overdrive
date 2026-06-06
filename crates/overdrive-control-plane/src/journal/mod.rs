@@ -684,4 +684,20 @@ mod tests {
             WorkflowId::for_correlation(&CorrelationKey::new("plainkey").expect("valid key"));
         assert_eq!(plain.as_str(), "wf-plainkey");
     }
+
+    /// `WorkflowId::for_correlation` preserves ASCII digits verbatim. The
+    /// char-map keeps `[a-z0-9-]` as-is and folds everything else to `-`;
+    /// a digit is in the keep-set, NOT the fold-set. Pins the
+    /// `is_ascii_digit() || c == '-'` disjunction against an `&&` collapse
+    /// (`is_ascii_digit() && c == '-'` is unsatisfiable, so every digit
+    /// would silently fold to `-`).
+    #[test]
+    fn for_correlation_preserves_digits_verbatim() {
+        let id = WorkflowId::for_correlation(&CorrelationKey::new("abc123").expect("valid key"));
+        assert_eq!(
+            id.as_str(),
+            "wf-abc123",
+            "digits survive the char map verbatim — they are not folded to '-'"
+        );
+    }
 }

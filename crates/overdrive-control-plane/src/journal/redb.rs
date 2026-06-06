@@ -374,6 +374,38 @@ mod tests {
         assert!(residue.is_empty(), "probe must leave no sentinel residue, found {residue:?}");
     }
 
+    /// The probe is NOT a no-op — it actually writes, reads back, and
+    /// DELETES the reserved sentinel key. Pre-seeding that key with a
+    /// foreign entry distinguishes a real probe (which overwrites then
+    /// deletes the key, leaving it empty) from a `probe -> Ok(())`
+    /// no-op (which never touches the store, so the foreign entry
+    /// survives). The sibling `probe_succeeds_and_leaves_no_residue`
+    /// cannot catch the no-op because a clean store is empty both before
+    /// and after — the pre-seed is what makes the side effect observable.
+    #[tokio::test]
+    async fn probe_writes_reads_and_deletes_the_sentinel_not_a_noop() {
+        let (_tmp, db) = db();
+        let store = RedbJournalStore::new(db);
+        let probe_id = WorkflowId::new(PROBE_WORKFLOW_ID).expect("valid probe id");
+
+        // Pre-seed the reserved probe-sentinel key (first append lands at
+        // step 0 — the exact key the probe uses) with a foreign entry.
+        store.append(&probe_id, &run_result("pre-seed")).await.expect("seed probe key");
+        assert!(
+            !store.load_journal(&probe_id).await.expect("load seeded").is_empty(),
+            "precondition: the probe sentinel key is seeded with a foreign entry"
+        );
+
+        store.probe().await.expect("probe ok on healthy fs");
+
+        let after = store.load_journal(&probe_id).await.expect("load after probe");
+        assert!(
+            after.is_empty(),
+            "a real probe writes-then-deletes the sentinel key, leaving it empty; \
+             a no-op probe leaves the pre-seeded entry behind, found {after:?}"
+        );
+    }
+
     #[tokio::test]
     async fn probe_succeeds_repeatedly() {
         let (_tmp, db) = db();

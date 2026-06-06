@@ -767,6 +767,15 @@ impl JournalCursorHandle {
             .append(&self.workflow_id, entry)
             .await
             .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        // mutants: skip — `+= 1` -> `*= 1` is an equivalent mutant here.
+        // `append_then_advance` is ONLY ever called from a live `record_*`
+        // path, which the ctx reaches solely after a `replay_*` returned the
+        // live sentinel — i.e. with `*cursor == replay_commands.len()` (the
+        // command-walk end). Past the walk every subsequent `replay_*` resolves
+        // to the live sentinel regardless of whether the cursor sits at `len`
+        // or `len + k`, so the post-advance value is unobservable and `*= 1`
+        // (identity at the boundary) cannot diverge from `+= 1`. The `-= 1`
+        // mutant IS caught (usize underflow panic on the first live record).
         *cursor += 1;
         Ok(())
     }
