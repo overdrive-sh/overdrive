@@ -169,6 +169,76 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-06T20:20:34Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:23:03Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:28:51Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: transient-signal seam underspecified \u2014 engine sees only run_erased()->Result<Vec<u8>,TerminalError>; 'engine classifies a transient WorkflowCtxError' (ADR-0065 D4) requires a core surface (new ErasedWorkflow outcome OR TerminalErrorKind::Retryable OR ctx transient channel) NOT in files_to_modify (overdrive-core edit sanctioned ONLY for budget_exhausted ctor visibility). Surfaced to user for seam ratification.",
+      "t": "2026-06-06T20:30:23Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:33:46Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:34:47Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:47:04Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:49:13Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:52:47Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T20:55:47Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: DST invariant is the property, no separate unit test",
+      "t": "2026-06-06T20:55:47Z"
     }
   ]
 }

@@ -666,6 +666,19 @@ impl Harness {
             Invariant::WorkflowTerminalStatusProjection => {
                 evaluators::evaluate_workflow_terminal_status_projection(seed).await
             }
+            // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+            // counterpart to NEW-5 (`workflow_budget_exhaustion_mints_terminal`).
+            // Drives an always-transient workflow (body returns
+            // `Err(TerminalError::retryable(..))`) through the real
+            // `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
+            // each backoff window via a concurrent ticker so the parked
+            // re-drives fire, and asserts the engine re-drove up to
+            // `WORKFLOW_RETRY_BUDGET` then MINTED `WorkflowStatus::Failed {
+            // terminal: BudgetExhausted }` — the body authored no failure
+            // (D4). Authored GREEN directly (the retry loop landed in 04-01).
+            Invariant::WorkflowBudgetExhaustionMintsTerminal => {
+                evaluators::evaluate_workflow_budget_exhaustion_mints_terminal(seed).await
+            }
         }
     }
 }

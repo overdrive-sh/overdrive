@@ -150,6 +150,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `Invariant::ALL` by step 02-01; blessed here so both catalogues track
     // `Invariant::ALL` exactly. Mirrors `dst_clean_clone_green.rs`.
     "workflow-terminal-status-projection",
+    // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+    // counterpart to NEW-5, added to `Invariant::ALL` by step 04-02; blessed
+    // here so both catalogues track `Invariant::ALL` exactly. Mirrors
+    // `dst_clean_clone_green.rs`.
+    "workflow-budget-exhaustion-mints-terminal",
 ];
 
 // -----------------------------------------------------------------------------

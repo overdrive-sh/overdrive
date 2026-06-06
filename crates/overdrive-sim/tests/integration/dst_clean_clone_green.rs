@@ -171,6 +171,15 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // Blessed here so the catalogue length + named-set checks track
     // `Invariant::ALL` exactly.
     "workflow-terminal-status-projection",
+    // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+    // counterpart to NEW-5 (`crate::invariants::evaluators::
+    // evaluate_workflow_budget_exhaustion_mints_terminal`). Drives an
+    // always-transient workflow and pins the engine re-driving up to
+    // `WORKFLOW_RETRY_BUDGET` then minting `Failed { terminal:
+    // BudgetExhausted }` (the body authored no failure — D4). Added to
+    // `Invariant::ALL` by step 04-02; blessed here so the catalogue length +
+    // named-set checks track `Invariant::ALL` exactly.
+    "workflow-budget-exhaustion-mints-terminal",
 ];
 
 // -----------------------------------------------------------------------------

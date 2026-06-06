@@ -58,7 +58,7 @@ use overdrive_control_plane::journal::{
     JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
 };
 use overdrive_control_plane::workflow_runtime::{
-    JournalCursorHandle, WorkflowEngine, WorkflowRegistry,
+    JournalCursorHandle, WORKFLOW_RETRY_BUDGET, WorkflowEngine, WorkflowRegistry,
 };
 
 use crate::adapters::clock::SimClock;
@@ -2171,6 +2171,277 @@ pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> Invarian
              bytes ({} bytes) — D3 lossless projection violated",
             journal_bytes.len(),
             obs_bytes.len(),
+        ));
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowBudgetExhaustionMintsTerminal (workflow-result-error-model step 04-02)
+// ---------------------------------------------------------------------------
+//
+// The DST sibling of NEW-5 (the example-based acceptance at
+// `crates/overdrive-control-plane/tests/acceptance/workflow_budget_exhaustion_mints_terminal.rs`)
+// and the DST counterpart to `WorkflowTerminalStatusProjection`. Pins the
+// ADR-0065 §D4 engine-owns-retry / body-owns-only-terminal split as a forever
+// property over the harness trajectory: a workflow whose body ALWAYS fails
+// transiently is re-driven by the engine up to the engine-constant
+// `WORKFLOW_RETRY_BUDGET`, then the engine MINTS `WorkflowStatus::Failed {
+// terminal: BudgetExhausted }`. The body authors NO failure of its own — every
+// drive returns a transient the engine absorbs and re-drives; the
+// `BudgetExhausted` terminal is engine-minted (D4).
+//
+// Per the step guidance: the invariant asserts the OUTCOME (budget →
+// engine-minted `Failed{BudgetExhausted}`; body authored no terminal), which
+// holds regardless of HOW the body signals the transient — so a future review
+// that changes the transient channel away from `TerminalError::retryable`
+// leaves this invariant green as long as the engine-minted-terminal contract
+// holds.
+
+/// The instance address bound for the always-transient workflow's engine.
+/// Never receives a datagram (the body returns the transient before any
+/// `ctx` send), but a bound inbox keeps the engine builder shape identical to
+/// the slice-01/02 builders.
+const WF_BUDGET_TARGET: &str = "127.0.0.1:9021";
+
+/// The detail the always-transient reference workflow authors via
+/// `TerminalError::retryable`. A fixed, deterministic string so the run
+/// replays bit-identically across seeds. NOTE: this is the BODY's transient
+/// signal — the engine absorbs it and never surfaces it on the terminal; the
+/// minted `BudgetExhausted` terminal carries the engine's own detail.
+const WF_BUDGET_TRANSIENT_DETAIL: &str = "transient: provision call failed (step 04-02 D4)";
+
+/// A reference workflow whose body ALWAYS fails transiently: each drive bumps
+/// a shared `AtomicUsize` (so the evaluator can count how many times the
+/// engine re-drove the body) and returns `Err(TerminalError::retryable(..))` —
+/// the RETRYABLE channel the engine absorbs and re-drives, NEVER an explicit
+/// terminal the body authors. The engine re-drives up to
+/// `WORKFLOW_RETRY_BUDGET`, then mints `BudgetExhausted`.
+///
+/// Mirrors NEW-5's `AlwaysTransientWorkflow` — the DST invariant drives the
+/// identical fixture shape the example-based acceptance does, so both tiers
+/// pin the same engine-owned-retry behaviour.
+struct AlwaysTransientFailure {
+    /// Bumped once per drive (per body entry). The engine re-drives the whole
+    /// body from the journal on each retry; only replayed commands skip the
+    /// body, so the body's transient step re-fires every drive. The total
+    /// count across all re-drives is the observable proof the engine — not the
+    /// body — owned the retry loop.
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl AlwaysTransientFailure {
+    /// The workflow name this fixture registers under. Kebab-case, matching
+    /// the `WorkflowName` grammar.
+    const WORKFLOW_NAME: &'static str = "always-transient-failure";
+
+    /// The concrete [`WorkflowStart`] this fixture corresponds to — a unit
+    /// `Input` (the 1-byte CBOR encoding of `()`).
+    fn spec() -> WorkflowStart {
+        let mut input: Vec<u8> = Vec::new();
+        ciborium::into_writer(&(), &mut input)
+            .unwrap_or_else(|_| unreachable!("CBOR-encoding the unit type is total"));
+        WorkflowStart {
+            name: WorkflowName::new(Self::WORKFLOW_NAME)
+                .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            input,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Workflow for AlwaysTransientFailure {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, _ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
+        // Bump once per body entry — the engine re-drives the body on each
+        // retry, so this counts the total number of drives.
+        self.attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // The transient failure: a RETRYABLE terminal the engine ABSORBS and
+        // re-drives. The body authors NO explicit/budget terminal — the engine
+        // mints `BudgetExhausted` once the budget is consumed (D4).
+        Err(TerminalError::retryable(WF_BUDGET_TRANSIENT_DETAIL))
+    }
+}
+
+/// Count `RetryAttempted` commands in a loaded run — the engine's durable
+/// retry bookkeeping (one per re-drive, the recomputed attempt INPUTS per
+/// `development.md` § "Persist inputs, not derived state").
+fn retry_attempted_count(run: &[LoadedEntry]) -> usize {
+    run.iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::RetryAttempted { .. })))
+        .count()
+}
+
+/// Spawn a concurrent ticker that advances `clock` past each backoff window
+/// until `stop` is set, so the engine's `clock.sleep(backoff)` re-drive parks
+/// release under `SimClock`. The harness — never the SUT — drives logical
+/// time (`.claude/rules/testing.md` § "Tier 1 — Deterministic Simulation
+/// Testing"); the production engine parks on the injected `Clock` with no
+/// DST-only branch (`development.md` § "Production code is not shaped by
+/// simulation"). Mirrors NEW-5's `spawn_clock_ticker`.
+fn spawn_budget_clock_ticker(
+    clock: Arc<SimClock>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+            // Advance well past the largest backoff so every parked re-drive
+            // wakes promptly; `yield_now` hands control to the engine task
+            // between ticks on the single-threaded runtime.
+            clock.tick(Duration::from_secs(1));
+            tokio::task::yield_now().await;
+        }
+    })
+}
+
+/// Evaluate `WorkflowBudgetExhaustionMintsTerminal` (ADR-0065 §D4).
+///
+/// Drives an `AlwaysTransientFailure` workflow (body returns
+/// `Err(TerminalError::retryable(..))` on every drive) through the real
+/// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past each
+/// backoff window via a concurrent ticker so the parked re-drives fire, then
+/// asserts:
+///   1. the engine re-drove the body up to `WORKFLOW_RETRY_BUDGET` — observed
+///      as `attempts == budget + 1` (the initial drive + `budget` re-drives,
+///      the `exit_observer` "1 initial + N retries" precedent) AND
+///      `RetryAttempted` count == `budget` in the durable journal (AC2);
+///   2. the engine MINTED `WorkflowStatus::Failed { terminal }` with
+///      `terminal.kind() == BudgetExhausted` (AC2);
+///   3. the body NEVER authored a failure of its own — the engine-minted
+///      `BudgetExhausted` kind (a kind only the engine produces; the body's
+///      `retryable` is absorbed and never surfaces on the terminal) IS the
+///      observable proof of the engine-owns-retry / body-owns-only-terminal
+///      split (AC3 — D4).
+///
+/// Asserts the OUTCOME (engine-minted `BudgetExhausted`), not the body's
+/// `Retryable` channel, so the invariant stays green if a future review
+/// changes how the transient is signalled.
+#[must_use]
+pub async fn evaluate_workflow_budget_exhaustion_mints_terminal(seed: u64) -> InvariantResult {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let name = "workflow-budget-exhaustion-mints-terminal";
+    // The seed is echoed by the harness's RunReport on failure; embedding it
+    // in the cause string makes a `cargo dst --seed <N>` reproduction
+    // self-describing from the failure line alone.
+    let fail = |cause: String| {
+        result(name, InvariantStatus::Fail, "host-0", Some(format!("[seed={seed}] {cause}")))
+    };
+
+    let spec = AlwaysTransientFailure::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-budget-exhaustion-0001",
+        &ContentHash::of(AlwaysTransientFailure::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-budget-exhaustion-0001")
+        .unwrap_or_else(|_| unreachable!("wf-budget-exhaustion-0001 is a valid instance id"));
+
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+
+    // Build the engine over the SHARED journal + obs, with the attempts
+    // counter wired into the registered fixture so the evaluator can count
+    // how many times the engine re-drove the body.
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_factory = Arc::clone(&attempts);
+
+    let target: SocketAddr = WF_BUDGET_TARGET
+        .parse()
+        .unwrap_or_else(|_| unreachable!("WF_BUDGET_TARGET is a valid socket addr"));
+    let sim_transport = SimTransport::new();
+    let _inbox = sim_transport
+        .bind_inbox(target)
+        .await
+        .unwrap_or_else(|_| unreachable!("SimTransport::bind_inbox is total"));
+
+    let sim_clock = Arc::new(SimClock::new());
+    let transport: Arc<dyn TransportTrait> = Arc::new(sim_transport);
+    let clock: Arc<dyn Clock> = Arc::clone(&sim_clock) as Arc<dyn Clock>;
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(AlwaysTransientFailure::spec().name, move || AlwaysTransientFailure {
+        attempts: Arc::clone(&attempts_for_factory),
+    });
+
+    let engine =
+        WorkflowEngine::new(journal.clone(), clock, transport, entropy, registry, obs.clone());
+
+    // Drive the SimClock concurrently so the engine's backoff parks release —
+    // the harness driving logical time, the canonical DST shape.
+    let stop = Arc::new(AtomicBool::new(false));
+    let ticker = spawn_budget_clock_ticker(Arc::clone(&sim_clock), Arc::clone(&stop));
+
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+    stop.store(true, Ordering::SeqCst);
+    let _ = ticker.await;
+
+    // AC2 (re-drove to budget — drive count): the body ran `budget + 1` times,
+    // the INITIAL drive plus `WORKFLOW_RETRY_BUDGET` re-drives. The budget
+    // bounds the number of RE-DRIVES (the durable `RetryAttempted` count
+    // below), not the total drive count; the (budget+1)-th drive is the one
+    // that observes the exhausted budget and the engine mints `BudgetExhausted`.
+    let drives = attempts.load(Ordering::SeqCst);
+    let expected_drives = WORKFLOW_RETRY_BUDGET as usize + 1;
+    if drives != expected_drives {
+        return fail(format!(
+            "body ran {drives} times; expected the initial drive + WORKFLOW_RETRY_BUDGET \
+             ({WORKFLOW_RETRY_BUDGET}) re-drives = {expected_drives}"
+        ));
+    }
+
+    // AC2 (re-drove to budget — durable SSOT): the journal carries
+    // `budget`-many `RetryAttempted` commands — the recomputed attempt INPUTS
+    // (D4). This is the durable record of exactly how many re-drives the
+    // engine performed before minting `BudgetExhausted`.
+    let run = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let retries = retry_attempted_count(&run);
+    if retries != WORKFLOW_RETRY_BUDGET as usize {
+        return fail(format!(
+            "journal carries {retries} RetryAttempted commands; expected WORKFLOW_RETRY_BUDGET \
+             ({WORKFLOW_RETRY_BUDGET}) — one per re-drive: {run:?}"
+        ));
+    }
+
+    // AC2 + AC3 (engine-minted terminal): the observable `WorkflowTerminal`
+    // row carries `Failed { terminal }` with `kind() == BudgetExhausted`.
+    let terminals = match obs.workflow_terminal_rows().await {
+        Ok(rows) => rows,
+        Err(err) => return fail(format!("workflow_terminal_rows read failed: {err}")),
+    };
+    let Some((_, status)) = terminals.iter().find(|(corr, _)| *corr == correlation) else {
+        return fail(
+            "engine wrote no WorkflowTerminal observation row for the budget-exhaustion run"
+                .to_owned(),
+        );
+    };
+
+    let WorkflowStatus::Failed { terminal } = status else {
+        return fail(format!(
+            "expected WorkflowStatus::Failed on budget exhaustion, got {status:?}"
+        ));
+    };
+
+    // AC3 — the body authored NO failure: it returned `retryable` on every
+    // drive, which the engine absorbed and re-drove. `BudgetExhausted` is a
+    // kind ONLY the engine mints (the body cannot author it — it has no access
+    // to the budget); observing it on the terminal IS the proof the terminal
+    // is engine-minted, not body-authored (D4). Asserting the OUTCOME (the
+    // minted kind) rather than the body's `Retryable` channel keeps the
+    // invariant robust if review changes how the transient is signalled.
+    if terminal.kind() != TerminalErrorKind::BudgetExhausted {
+        return fail(format!(
+            "expected engine-minted TerminalErrorKind::BudgetExhausted (the body authored no \
+             terminal — it returned retryable, which the engine absorbed), got {:?}",
+            terminal.kind()
         ));
     }
 

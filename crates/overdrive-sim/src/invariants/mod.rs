@@ -491,6 +491,29 @@ pub enum Invariant {
     /// lands GREEN in step 02-01, so `cargo dst` (which iterates `ALL`)
     /// stays green until then.
     WorkflowTerminalStatusProjection,
+
+    /// workflow-result-error-model step 04-02 (ADR-0065 §D4) — always
+    /// invariant. The DST counterpart to NEW-5 (the example-based
+    /// acceptance at `crates/overdrive-control-plane/tests/acceptance/
+    /// workflow_budget_exhaustion_mints_terminal.rs`) and the Slice-04
+    /// sibling of `WorkflowTerminalStatusProjection`. Drives a workflow
+    /// whose body ALWAYS fails transiently
+    /// (`Err(TerminalError::retryable(..))`) through the real
+    /// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
+    /// each backoff window so the parked re-drives fire, and asserts the
+    /// engine re-drives up to `WORKFLOW_RETRY_BUDGET` (observed as
+    /// `attempts == budget + 1` AND `RetryAttempted` count == `budget`)
+    /// then MINTS `WorkflowStatus::Failed { terminal }` with
+    /// `terminal.kind() == BudgetExhausted`. The body authored NO failure
+    /// of its own — the engine-minted `BudgetExhausted` kind (a kind only
+    /// the engine produces) IS the observable proof of the
+    /// engine-owns-retry / body-owns-only-terminal split (D4). Asserts the
+    /// OUTCOME, not the body's `Retryable` channel, so it stays green if a
+    /// future review changes how the transient is signalled. Authored
+    /// GREEN directly (the retry re-drive loop landed in step 04-01; no
+    /// `todo!` scaffold phase needed). The evaluator body lives in
+    /// `crate::invariants::evaluators`.
+    WorkflowBudgetExhaustionMintsTerminal,
 }
 
 impl Invariant {
@@ -606,6 +629,14 @@ impl Invariant {
         // projection AND the lossless terminal round-trip through both the
         // journal `Terminal` command and the `WorkflowTerminal` obs row.
         Self::WorkflowTerminalStatusProjection,
+        // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+        // counterpart to NEW-5. Authored GREEN directly (the retry re-drive
+        // loop + `WORKFLOW_RETRY_BUDGET` + engine-minted `BudgetExhausted`
+        // landed in step 04-01); the evaluator body lives in
+        // `crate::invariants::evaluators`. Pins the engine-owns-retry /
+        // body-owns-only-terminal split (D4) as a forever property,
+        // complementing NEW-5's example-based acceptance.
+        Self::WorkflowBudgetExhaustionMintsTerminal,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -658,8 +689,12 @@ impl Invariant {
             // workflow-primitive step 01-07.
             Self::WorkflowJournalWriteOrdering => "workflow-journal-write-ordering",
             Self::WorkflowExactlyOnceEffectOnResume => "workflow-exactly-once-effect-on-resume",
-            // workflow-result-error-model step 02-01 (RED scaffold; not in ALL).
+            // workflow-result-error-model step 02-01.
             Self::WorkflowTerminalStatusProjection => "workflow-terminal-status-projection",
+            // workflow-result-error-model step 04-02 (ADR-0065 §D4).
+            Self::WorkflowBudgetExhaustionMintsTerminal => {
+                "workflow-budget-exhaustion-mints-terminal"
+            }
         }
     }
 }
