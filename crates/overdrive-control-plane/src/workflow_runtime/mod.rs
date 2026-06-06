@@ -693,7 +693,10 @@ impl JournalCursor for JournalCursorHandle {
         let mut cursor = self.cursor.lock().await;
         // A replay hit requires a recorded ActionEmitted at the cursor: the
         // Action was already sent on a prior run, so it is NOT re-sent
-        // (exactly one cluster mutation across a crash — ADR-0064 §4).
+        // (exactly-once ON THE REPLAY PATH — ADR-0064 §4). The live path in
+        // `emit_action` is at-least-once: a recorded ActionEmitted is what
+        // makes resume idempotent, so a run that sent but failed to record
+        // it (no entry here) re-sends. See `emit_action` below.
         let is_replay =
             matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::ActionEmitted { .. }));
         if is_replay {
@@ -717,8 +720,21 @@ impl JournalCursor for JournalCursorHandle {
         // into the SAME `action_shim` dispatch path a reconciler-emitted
         // Action takes, NEVER a direct
         // IntentStore write. The send is BEFORE the durable record so the
-        // ActionEmitted entry implies the Action reached the channel. A
-        // handle with no channel wired (the 3-arg DST-harness `new`) drops
+        // ActionEmitted entry implies the Action reached the channel.
+        //
+        // SEND-BEFORE-RECORD ⇒ AT-LEAST-ONCE (deliberate). If the
+        // `append_then_advance` below fails (or the process crashes) AFTER
+        // this send but BEFORE ActionEmitted is durable, no ActionEmitted is
+        // journaled at this cursor: a resume re-runs the live path and
+        // re-sends. Exactly-once holds only on the replay path (`replay_emit`
+        // returns true once ActionEmitted is recorded). This is the SAME
+        // at-least-once window `WorkflowCtx::run` documents; safety against
+        // the duplicate rests on the downstream `action_shim` dispatch being
+        // idempotent. Do NOT "fix" this by recording before sending —
+        // record-before-send loses the mutation SILENTLY on a crash between
+        // the record and the send (strictly worse for a cluster mutation).
+        //
+        // A handle with no channel wired (the 3-arg DST-harness `new`) drops
         // the emit — degenerate always-live behaviour, never reached by an
         // emitting workflow under the engine.
         if let Some(sender) = &self.action_emit {

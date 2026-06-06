@@ -382,11 +382,11 @@ pub trait JournalCursor: Send + Sync {
     ///
     /// # Postconditions
     ///
-    /// - **Replay (cursor < journal length):** returns `true` — an
-    ///   `ActionEmitted` entry is recorded at the cursor; the caller does
-    ///   NOT re-send the Action on the Action channel (the idempotent-emit
-    ///   contract: exactly one cluster mutation across a crash, proven by
-    ///   step 03-02). Implementations advance the cursor on a replay hit.
+    /// - **Replay (an `ActionEmitted` is recorded at the cursor):** returns
+    ///   `true` — the caller does NOT re-send the Action on the Action
+    ///   channel (exactly-once *on the replay path*: once `ActionEmitted` is
+    ///   journaled, resume replays it without re-sending). Implementations
+    ///   advance the cursor on a replay hit.
     /// - **Live (cursor at journal end):** returns `false` — the caller
     ///   sends the Action on the engine's Action channel, then records
     ///   `ActionEmitted` durably before returning.
@@ -405,6 +405,17 @@ pub trait JournalCursor: Send + Sync {
     /// AND the `ActionEmitted` entry is durably journaled (append + fsync
     /// per ADR-0063 §4), so a subsequent resume replays it via
     /// [`replay_emit`](Self::replay_emit) without re-sending the Action.
+    ///
+    /// **At-least-once on the live path.** The send is BEFORE the durable
+    /// record, so a crash (or an `Err(JournalRecord)`-then-crash) AFTER the
+    /// send but BEFORE `ActionEmitted` is journaled leaves no `ActionEmitted`
+    /// at the cursor — resume re-runs the live path and re-sends. Exactly-once
+    /// holds only on the replay path (above). The ordering is deliberate:
+    /// record-before-send would instead lose the mutation silently on a crash
+    /// between record and send. Safety against the duplicate rests on the
+    /// downstream action-shim dispatch being idempotent — the same
+    /// at-least-once + downstream-idempotency contract reconciler-emitted
+    /// Actions carry.
     ///
     /// # Errors
     ///
@@ -715,11 +726,23 @@ impl WorkflowCtx {
     /// **Check-then-record (ADR-0064 §4), POSITIONAL identity.**
     ///
     /// - **Replay:** if an `ActionEmitted` was recorded at this cursor, the
-    ///   Action is NOT re-sent (the idempotent-emit contract: exactly one
-    ///   cluster mutation across a crash — proven by step 03-02).
+    ///   Action is NOT re-sent — exactly-once *on the replay path* (once
+    ///   `ActionEmitted` is journaled, resume replays it without re-sending).
     /// - **Live:** the engine sends the Action on the Action channel, then
     ///   records `ActionEmitted` durably (fsync per ADR-0063 §4) before
     ///   returning, and advances the cursor.
+    ///
+    /// **Honest semantics:** the emit is *at-least-once* — a crash after the
+    /// channel send but before `ActionEmitted` is durably recorded re-fires
+    /// the emit on resume (no `ActionEmitted` is journaled at the cursor, so
+    /// the live path runs again and re-sends). This is the SAME shape
+    /// [`run`](Self::run) documents; the send-before-record ordering is
+    /// deliberate. Safety against the duplicate rests on the downstream
+    /// action-shim dispatch being idempotent (the at-least-once +
+    /// downstream-idempotency contract reconciler-emitted Actions also carry).
+    /// Reversing to record-before-send would trade the dedup-able duplicate
+    /// for a SILENT lost mutation on a crash between record and send —
+    /// strictly worse for a cluster mutation.
     ///
     /// # Errors
     ///
@@ -728,7 +751,8 @@ impl WorkflowCtx {
     /// - [`WorkflowCtxError::JournalRecord`] — the durable record failed.
     pub async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError> {
         // Replay path — the Action was already emitted on a prior run; do
-        // NOT re-send it (exactly-one cluster mutation across a crash).
+        // NOT re-send it (exactly-once on the replay path; the live path
+        // below is at-least-once — see the rustdoc "Honest semantics").
         if self.journal.replay_emit().await {
             return Ok(());
         }

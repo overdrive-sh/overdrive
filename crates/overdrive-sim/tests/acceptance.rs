@@ -70,6 +70,7 @@ mod acceptance {
     mod workflow_sleep_resumes_to_original_deadline; // S-WP-02-02
     // Slice 03 (signals + emit):
     mod replay_equivalence_holds_across_signal_and_emit; // S-WP-03-05
+    mod workflow_emit_action_at_least_once_on_failed_record; // emit_action at-least-once (live-path)
     mod workflow_emit_action_not_re_emitted_after_crash; // S-WP-03-04
     mod workflow_signal_already_seen_not_rewaited; // S-WP-03-02
     mod workflow_signal_wait_reblocks_after_crash; // S-WP-03-01

@@ -296,9 +296,13 @@ pub enum JournalEntry {
     /// inputs (per `.claude/rules/development.md` § "Persist inputs, not
     /// derived state"). The presence of this entry at the cursor makes
     /// the emit idempotent on resume: a resumed run sees `ActionEmitted`
-    /// and does NOT re-send the Action (exactly one cluster mutation
-    /// across a crash — the idempotent-emit contract proven by step
-    /// 03-02). ADR-0064 §4.
+    /// and does NOT re-send the Action (exactly-once *on the replay path*).
+    /// This is NOT an unconditional exactly-once guarantee — the live emit
+    /// is send-before-record, so a crash AFTER the send but BEFORE this
+    /// entry is journaled leaves no `ActionEmitted` at the cursor and the
+    /// resume re-sends (at-least-once; safety rests on downstream
+    /// idempotency). See `WorkflowCtx::emit_action` "Honest semantics".
+    /// ADR-0064 §4.
     ///
     /// Additive `#[serde(default)]` per ADR-0063 §2.
     ActionEmitted {
