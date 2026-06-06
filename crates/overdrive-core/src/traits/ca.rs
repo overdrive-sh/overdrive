@@ -73,16 +73,45 @@ impl CaCertDer {
     }
 }
 
-/// PEM-encoded private-key text held only inside a signer adapter.
+/// PEM-encoded private-key text — a sign-capability / node-held leaf credential.
 ///
-/// This is the **sign-capability material** a [`RootCaHandle`] /
-/// [`IntermediateHandle`] holds internally. Per ADR-0063 D1 (research
-/// Finding 5 — "keys never leave the signer") the private key never crosses
-/// the trait boundary as raw bytes for *issued* material; this newtype exists
-/// so the root/intermediate adapter can carry its own signing key as opaque
-/// bytes without leaking it through `issue_svid` output.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Two roles (ADR-0063):
+/// * the **sign-capability material** a [`RootCaHandle`] / [`IntermediateHandle`]
+///   holds internally (D1, research Finding 5 — "keys never leave the signer":
+///   root/intermediate signing keys do not cross the trait boundary as issued
+///   material), and
+/// * the **node-held leaf private key** returned on [`SvidMaterial`] (D9 — the
+///   deliberate exception: the node agent holds the leaf key to run the TLS 1.3
+///   handshake on the workload's behalf).
+///
+/// # Security note
+///
+/// This newtype wraps a **private key**, so it is deliberately incomplete to
+/// keep the secret off every accidental sink (mirroring [`KekMaterial`] in
+/// `crate::ca::kek`): it has **no** `Display`, **no** `Serialize`, **no**
+/// `FromStr`, and a **redacted `Debug`** (see the manual impl below) — a `{:?}`,
+/// `dbg!`, `tracing::debug!(?key)`, or a failed `assert_eq!` prints
+/// `CaKeyPem(<redacted>)`, never the PKCS#8 body. The one observable accessor is
+/// [`as_pem`](CaKeyPem::as_pem); that is the single place the key bytes leave the
+/// newtype, and they must never reach a log/sink. `PartialEq`/`Eq`/`Hash` compare
+/// the raw bytes (the adopt-idempotency check needs equality-by-bytes) without
+/// rendering them.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CaKeyPem(String);
+
+/// A redacting `Debug` — never prints the private-key body.
+///
+/// `CaKeyPem` derives no `Debug`; this hand-written impl emits a fixed
+/// placeholder so an accidental `{:?}` on a [`CaKeyPem`] (or on any struct that
+/// derives `Debug` and embeds one — [`RootCaHandle`], [`IntermediateHandle`],
+/// [`SvidMaterial`]) cannot leak the PKCS#8 private key into a log line. The
+/// derived `Debug` on those handles delegates to this impl for the key field, so
+/// they stay `#[derive(Debug)]` and still redact.
+impl std::fmt::Debug for CaKeyPem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CaKeyPem(<redacted>)")
+    }
+}
 
 impl CaKeyPem {
     /// Wrap raw private-key PEM text.
@@ -441,6 +470,23 @@ pub enum CaError {
         reason: String,
     },
 
+    /// A persisted root / intermediate was adopted AFTER the adapter had
+    /// already minted a **different** one — an adoption/ordering conflict, NOT a
+    /// signing failure (`.claude/rules/development.md` § "Distinct failure modes
+    /// get distinct error variants"). It means issuance ran *before* adoption, so
+    /// the ephemeral-anchor chain-break ([`adopt_persisted_root`](Ca::adopt_persisted_root)
+    /// / [`adopt_persisted_intermediate`](Ca::adopt_persisted_intermediate))
+    /// already occurred. The boot path adopts BEFORE any issuance, so reaching
+    /// this is a boot-ordering logic error; the adapter fails loud here rather
+    /// than silently retain the ephemeral anchor.
+    #[error(
+        "adoption conflict: a divergent {which} was already minted before adoption — issuance ran before adoption"
+    )]
+    AdoptionConflict {
+        /// Which anchor diverged — `"root"` or `"intermediate"`.
+        which: &'static str,
+    },
+
     /// The persisted root-key envelope failed AES-GCM authentication when
     /// opened under the **correct** KEK — the ciphertext or tag was tampered
     /// with / corrupted at rest. Distinct from [`WrongKek`](CaError::WrongKek):
@@ -480,6 +526,14 @@ impl CaError {
     #[must_use]
     pub fn signing_failed(reason: impl Into<String>) -> Self {
         Self::SigningFailed { reason: reason.into() }
+    }
+
+    /// Construct an [`AdoptionConflict`](CaError::AdoptionConflict) for a
+    /// divergent anchor (`which` = `"root"` | `"intermediate"`) adopted after a
+    /// different one was already minted.
+    #[must_use]
+    pub const fn adoption_conflict(which: &'static str) -> Self {
+        Self::AdoptionConflict { which }
     }
 
     /// Construct a [`TamperedEnvelope`](CaError::TamperedEnvelope) for a record
@@ -631,9 +685,15 @@ pub trait Ca: Send + Sync {
     /// trust only on the root). Composition order is root-anchor-first.
     ///
     /// # Edge cases
-    /// A bundle requested before any root exists surfaces
-    /// [`CaError::SigningFailed`] (the adapter cannot compose a bundle with no
-    /// anchor). The bundle never contains a leaf SVID.
+    /// Composing a bundle is not itself a signing operation — both adapters
+    /// derive the root anchor from the persistent root they already hold (the
+    /// host adapter lazily mints it on first access; the sim adapter loads a
+    /// fixture `const`), so there is no "no root anchor exists yet" precondition
+    /// to surface as an error here. A failure surfaces [`CaError::SigningFailed`]
+    /// ONLY if the underlying root material cannot be produced (a signing-backend
+    /// failure while minting the anchor on the host adapter) — never as a
+    /// "bundle-before-root" precondition violation. The bundle never contains a
+    /// leaf SVID.
     ///
     /// # Observable invariants
     /// The bundle is deterministic for a given root/intermediate pair — same
@@ -672,8 +732,8 @@ pub trait Ca: Send + Sync {
     /// root a second time is a no-op `Ok(())`. Adopting AFTER the adapter has
     /// already minted a *different* root is a logic error (issuance ran before
     /// adoption — the ephemeral-root chain-break has already occurred) and MUST
-    /// fail loud with a typed [`CaError`], never silently retain the ephemeral
-    /// root.
+    /// fail loud with [`CaError::AdoptionConflict`] (`which = "root"`), never
+    /// silently retain the ephemeral root.
     ///
     /// # Default
     /// A no-op `Ok(())` — correct for adapters whose root is **stable by
@@ -723,8 +783,9 @@ pub trait Ca: Send + Sync {
     /// byte-identical intermediate a second time is a no-op `Ok(())`. Adopting
     /// AFTER the adapter has already minted a *different* intermediate is a logic
     /// error (issuance ran before adoption — the ephemeral-intermediate
-    /// chain-break has already occurred) and MUST fail loud with a typed
-    /// [`CaError`], never silently retain the ephemeral intermediate.
+    /// chain-break has already occurred) and MUST fail loud with
+    /// [`CaError::AdoptionConflict`] (`which = "intermediate"`), never silently
+    /// retain the ephemeral intermediate.
     ///
     /// # Default
     /// A no-op `Ok(())` — correct for adapters whose intermediate is **stable by
@@ -744,7 +805,65 @@ pub trait Ca: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{CaCertDer, CaCertPem, CaKeyPem, TrustBundle, TrustBundlePem};
+    use super::{
+        CaCertDer, CaCertPem, CaKeyPem, CertSerial, IntermediateHandle, RootCaHandle, SpiffeId,
+        SvidMaterial, TrustBundle, TrustBundlePem,
+    };
+
+    /// `CaKeyPem`'s `Debug` is REDACTED — it never renders the private-key body.
+    ///
+    /// Security regression guard (P1, ADR-0063 review): the key-bearing newtype
+    /// wraps a PKCS#8 private key, so `{:?}` / `dbg!` / `tracing::debug!(?key)` /
+    /// a failed `assert_eq!` must print a fixed `CaKeyPem(<redacted>)` placeholder
+    /// — NOT the key. The unredacted (derived-`Debug`) version of this type would
+    /// print the full PEM body here, so this test fails against the pre-fix code
+    /// and passes only with the manual redacting impl. The same redaction covers
+    /// the key field of every `#[derive(Debug)]` handle that embeds a `CaKeyPem`
+    /// (`RootCaHandle` / `IntermediateHandle` / `SvidMaterial`), so those are
+    /// asserted here too.
+    #[test]
+    fn ca_key_pem_debug_is_redacted_and_never_leaks_the_key_body() {
+        let key_body = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgSECRETKEYBYTES";
+        let pem = format!("-----BEGIN PRIVATE KEY-----\n{key_body}\n-----END PRIVATE KEY-----\n");
+        let key = CaKeyPem::new(pem.clone());
+
+        let rendered = format!("{key:?}");
+        assert_eq!(
+            rendered, "CaKeyPem(<redacted>)",
+            "CaKeyPem Debug must be the fixed placeholder"
+        );
+        assert!(!rendered.contains(key_body), "CaKeyPem Debug must NOT contain the key body");
+        // The accessor still yields the real bytes — redaction is Debug-only.
+        assert_eq!(key.as_pem(), pem);
+
+        // Every handle that embeds a CaKeyPem and derives Debug delegates to the
+        // redacting impl for the key field, so the key body never appears in the
+        // handle's own Debug output either.
+        let cert_pem =
+            CaCertPem::new("-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n".into());
+        let cert_der = CaCertDer::new(vec![0xDE, 0xAD]);
+        let serial = CertSerial::new("0badc0de").expect("serial parses");
+        let spiffe =
+            SpiffeId::new("spiffe://overdrive.local/job/x/alloc/y").expect("spiffe parses");
+
+        let root =
+            RootCaHandle::new(cert_pem.clone(), cert_der.clone(), serial.clone(), key.clone());
+        let inter = IntermediateHandle::new(
+            cert_pem.clone(),
+            cert_der.clone(),
+            serial.clone(),
+            key.clone(),
+        );
+        let svid = SvidMaterial::new(cert_pem, cert_der, serial, spiffe, key);
+
+        for rendered in [format!("{root:?}"), format!("{inter:?}"), format!("{svid:?}")] {
+            assert!(rendered.contains("CaKeyPem(<redacted>)"), "handle Debug must redact the key");
+            assert!(
+                !rendered.contains(key_body),
+                "handle Debug must NOT leak the key body: {rendered}"
+            );
+        }
+    }
 
     /// The PEM/key/bundle string byte-newtypes round-trip raw text through
     /// their `as_pem` accessor. Newtype-completeness mandate

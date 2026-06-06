@@ -145,8 +145,12 @@ pub async fn issue_and_audit(
     request: &SvidRequest,
 ) -> Result<SvidMaterial, CaIssuanceError> {
     // The node intermediate is the issuer of the leaf; its serial is the audit
-    // row's `issuer_serial` (the chain link an auditor walks). Single-node:
-    // idempotently cached by the adapter, so re-issue does not re-mint it.
+    // row's `issuer_serial` (the chain link an auditor walks). Single-node: the
+    // HOST adapter (`RcgenCa`) idempotently caches the intermediate, so re-issue
+    // does not re-mint it. This is an adapter implementation detail, NOT a trait
+    // guarantee — `Ca::issue_intermediate` does not promise caching, and `SimCa`
+    // returns a fixture intermediate on every call (its serial is re-drawn from
+    // the seeded `Entropy` port per the determinism contract).
     let intermediate = ca.issue_intermediate(node).map_err(CaIssuanceError::ca)?;
 
     // Mint the leaf — a FRESH certificate each call (distinct serial, new

@@ -529,10 +529,7 @@ impl Ca for RcgenCa {
             if existing.cert_der == material.cert_der {
                 return Ok(());
             }
-            return Err(CaError::signing_failed(
-                "adopt_persisted_root after a divergent root was already minted — issuance ran \
-                 before adoption",
-            ));
+            return Err(CaError::adoption_conflict("root"));
         }
 
         // `set` only fails on a lost race; the winning value is the same
@@ -570,10 +567,7 @@ impl Ca for RcgenCa {
             if existing.cert_der == material.cert_der {
                 return Ok(());
             }
-            return Err(CaError::signing_failed(
-                "adopt_persisted_intermediate after a divergent intermediate was already minted — \
-                 issuance ran before adoption",
-            ));
+            return Err(CaError::adoption_conflict("intermediate"));
         }
 
         // `set` only fails on a lost race; the winning value is the same

@@ -56,4 +56,11 @@ mod integration {
     /// `crates/overdrive-sim/src/invariants/workload_gc_absent_intent.rs`,
     /// and GitHub issue #148 AC §1.3.
     mod workload_gc_absent_intent;
+
+    /// built-in-ca (GH #28, ADR-0063 D9 review P2) — guards the `SimCa`
+    /// fixture leaf cert↔key matched-pair invariant against silent
+    /// desync (parses the fixture key/cert via `rcgen` / `x509-parser`,
+    /// real-crypto byte parsing). Ports the host adapter's cert↔key
+    /// correspondence proof to the sim fixture consts.
+    mod sim_ca_fixture_cert_key_match;
 }

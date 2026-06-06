@@ -2015,6 +2015,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rand 0.8.6",
+ "rcgen",
  "rkyv",
  "serde",
  "serde_json",
@@ -2022,6 +2023,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "x509-parser",
 ]
 
 [[package]]

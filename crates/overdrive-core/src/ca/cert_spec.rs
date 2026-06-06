@@ -172,15 +172,24 @@ impl CertSpec {
         &self.subject
     }
 
-    /// The `spiffe://` URI SANs this profile carries, in canonical order.
+    /// The `spiffe://` URI SAN projection for the workload-leaf profile.
     ///
-    /// A leaf ([`Svid`](CertRole::Svid)) carries **exactly one** URI SAN — the
-    /// requested workload identity, with its canonical-lowercase form preserved
-    /// (the single-URI-SAN invariant, KPI K2, enforced at [`svid`](Self::svid)
-    /// construction time). The CA roles carry their authority subject as the
-    /// sole URI SAN as well; the observable contract is the URI-SAN set, not
-    /// how the subject is stored internally. Returns an owned `Vec` so the set
-    /// is stable regardless of internal storage.
+    /// Meaningful for the leaf ([`Svid`](CertRole::Svid)) role: a leaf carries
+    /// **exactly one** URI SAN — the requested workload identity, with its
+    /// canonical-lowercase form preserved (the single-URI-SAN invariant, KPI K2,
+    /// enforced at [`svid`](Self::svid) construction time). This projection is
+    /// what the host adapter stamps as the leaf's `subjectAltName` in
+    /// `issue_svid`.
+    ///
+    /// The CA roles ([`Root`](CertRole::Root) / [`Intermediate`](CertRole::Intermediate))
+    /// do **NOT** carry a `spiffe://` URI SAN: per SPIFFE X.509-SVID (research
+    /// Finding 2) only the leaf bears the SPIFFE URI, and the host adapter sets
+    /// `subject_alt_names` solely in `issue_svid` (never for the root /
+    /// intermediate). This method returns `[subject]` structurally for every
+    /// role, but for the CA roles the value is the authority *subject* used to
+    /// build the issuer DN, not a URI SAN that ends up on the cert — call it only
+    /// for the leaf-SAN projection. Returns an owned `Vec` so the set is stable
+    /// regardless of internal storage.
     #[must_use]
     pub fn san_uris(&self) -> Vec<SpiffeId> {
         vec![self.subject.clone()]

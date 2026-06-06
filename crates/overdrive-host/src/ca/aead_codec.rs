@@ -216,10 +216,13 @@ impl RootKeyAeadCodec {
     ///   (KEK-confusion; detected structurally, before decrypt — the AAD
     ///   binding would also fail authentication, this only refines the variant).
     /// * [`CaError::TamperedEnvelope`] when the ids match but AES-GCM
-    ///   authentication fails (corrupt/tampered ciphertext or tag — integrity
-    ///   failure under the correct KEK).
-    /// * [`CaError::SigningFailed`] when the KEK cannot be resolved or the
-    ///   record's nonce is malformed.
+    ///   authentication fails (corrupt/tampered ciphertext or a right-length tag
+    ///   that fails to authenticate — integrity failure under the correct KEK).
+    /// * [`CaError::SigningFailed`] when the KEK cannot be resolved or the record
+    ///   is structurally malformed — a nonce that is not 12 bytes or an
+    ///   `aead_tag` that is not 16 bytes. A wrong-length tag is a malformed record
+    ///   (a truncated/over-long write), NOT an authentication failure, so it does
+    ///   NOT surface as `TamperedEnvelope`.
     ///
     /// Takes `&self` for API symmetry with [`seal`](Self::seal) even though
     /// open draws no randomness — the codec is the single seal/open surface.
@@ -250,11 +253,19 @@ impl RootKeyAeadCodec {
             .map_err(|_| CaError::signing_failed("record nonce is not 12 bytes"))?;
         let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
+        // A wrong-LENGTH tag is a structurally-malformed record (the stored tag
+        // is not 16 bytes), NOT an AES-GCM authentication failure — so it maps to
+        // SigningFailed("malformed …"), the same class as the 12-byte nonce check
+        // above, rather than TamperedEnvelope. TamperedEnvelope means "the tag is
+        // the right shape but AES-GCM auth failed under the correct KEK" (the
+        // open_in_place call below); telling an operator "tampered" for a
+        // truncated/over-long write would misdiagnose a corrupt-at-rest record as
+        // an active-tampering integrity failure.
         let tag: Tag = record
             .aead_tag
             .as_slice()
             .try_into()
-            .map_err(|_| CaError::tampered_envelope(record.kek_id.clone()))?;
+            .map_err(|_| CaError::signing_failed("record aead_tag is not 16 bytes"))?;
 
         // Open in place: AES-GCM authenticates ciphertext + tag against the
         // AAD (kek_id). The ids already match here, so an auth failure is

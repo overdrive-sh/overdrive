@@ -35,7 +35,7 @@
 use std::process::Command;
 use std::sync::Arc;
 
-use overdrive_core::traits::ca::{Ca, SvidRequest};
+use overdrive_core::traits::ca::{Ca, CaError, SvidRequest};
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
@@ -455,4 +455,97 @@ fn rcgen_svid_returns_matching_leaf_private_key_for_node_custody() {
         "the cert's embedded public key (SPKI) must equal the public half of the returned leaf \
          private key — the cert↔key correspondence the orphaned-key bug violated"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Adoption ordering — divergent-anchor adoption is a typed AdoptionConflict
+// (ADR-0063 review P3), idempotent same-anchor re-adoption is Ok(())
+// ---------------------------------------------------------------------------
+
+/// `@real-io` `@adapter-integration` `@error` — `adopt_persisted_root` after the
+/// adapter has already minted a DIFFERENT (ephemeral) root surfaces the dedicated
+/// [`CaError::AdoptionConflict`] (`which = "root"`) — NOT the generic
+/// `SigningFailed`. This is an adoption/ordering conflict (issuance ran before
+/// adoption, the ephemeral-root chain-break already happened), a distinct failure
+/// mode from a signing-backend error.
+///
+/// Falsifiability: against the pre-fix code this returns
+/// `CaError::SigningFailed { .. }`, so the `matches!(.., AdoptionConflict)`
+/// assertion fails; it passes only once the divergence path returns the dedicated
+/// variant. Idempotent same-root re-adoption still returns `Ok(())`.
+#[test]
+fn rcgen_adopt_divergent_root_is_an_adoption_conflict_not_signing_failed() {
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+
+    // GIVEN an adapter that has already MINTED its own (ephemeral) root.
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject.clone());
+    let minted_root = ca.root().expect("RcgenCa::root() mints an ephemeral root");
+
+    // AND a DIFFERENT persisted root (a second adapter's independently-minted
+    // root — different key, different cert bytes).
+    let other_ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let divergent_root = other_ca.root().expect("a second, divergent root");
+    assert_ne!(
+        minted_root.cert_der().as_der(),
+        divergent_root.cert_der().as_der(),
+        "the two independently-minted roots must differ for this test to mean anything"
+    );
+
+    // WHEN we adopt the divergent root AFTER issuance already minted a different
+    // one. THEN it fails with the dedicated AdoptionConflict variant.
+    let err = ca
+        .adopt_persisted_root(&divergent_root)
+        .expect_err("adopting a divergent root after a mint must fail");
+    assert!(
+        matches!(err, CaError::AdoptionConflict { which: "root" }),
+        "divergent root adoption must be CaError::AdoptionConflict {{ which: \"root\" }}, got {err:?}"
+    );
+
+    // AND adopting the byte-identical SAME root the adapter already holds is an
+    // idempotent no-op `Ok(())`.
+    ca.adopt_persisted_root(&minted_root)
+        .expect("re-adopting the same root is an idempotent Ok(())");
+}
+
+/// `@real-io` `@adapter-integration` `@error` — sibling of the root case for the
+/// node intermediate: `adopt_persisted_intermediate` after a DIFFERENT
+/// intermediate was minted surfaces [`CaError::AdoptionConflict`]
+/// (`which = "intermediate"`), and idempotent same-intermediate re-adoption is
+/// `Ok(())`.
+#[test]
+fn rcgen_adopt_divergent_intermediate_is_an_adoption_conflict_not_signing_failed() {
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let node = NodeId::new("node-a").expect("NodeId parses");
+
+    // GIVEN an adapter that has already minted its own (ephemeral) intermediate.
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject.clone());
+    let minted_inter =
+        ca.issue_intermediate(&node).expect("RcgenCa::issue_intermediate mints an intermediate");
+
+    // AND a DIFFERENT persisted intermediate (a second adapter's).
+    let other_ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let divergent_inter =
+        other_ca.issue_intermediate(&node).expect("a second, divergent intermediate");
+    assert_ne!(
+        minted_inter.cert_der().as_der(),
+        divergent_inter.cert_der().as_der(),
+        "the two independently-minted intermediates must differ"
+    );
+
+    // WHEN we adopt the divergent intermediate after issuance already minted a
+    // different one. THEN it fails with the dedicated AdoptionConflict variant.
+    let err = ca
+        .adopt_persisted_intermediate(&node, &divergent_inter)
+        .expect_err("adopting a divergent intermediate after a mint must fail");
+    assert!(
+        matches!(err, CaError::AdoptionConflict { which: "intermediate" }),
+        "divergent intermediate adoption must be CaError::AdoptionConflict {{ which: \
+         \"intermediate\" }}, got {err:?}"
+    );
+
+    // AND re-adopting the SAME intermediate is an idempotent no-op `Ok(())`.
+    ca.adopt_persisted_intermediate(&node, &minted_inter)
+        .expect("re-adopting the same intermediate is an idempotent Ok(())");
 }
