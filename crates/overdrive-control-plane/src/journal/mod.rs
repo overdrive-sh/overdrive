@@ -315,17 +315,19 @@ pub enum JournalCommand {
     },
 
     /// The workflow ran to a terminal value (slice 01) — the last command.
-    /// Records the FULL [`WorkflowResult`](overdrive_core::workflow::WorkflowResult)
-    /// the engine returned (not a lossy string label), so a resumed run
-    /// reads back the exact terminal value — including a `Failed`'s
-    /// `reason` — and can re-publish the terminal observation row
+    /// Records the FULL [`WorkflowStatus`](overdrive_core::workflow::WorkflowStatus)
+    /// the engine projected (not a lossy string label), so a resumed run
+    /// reads back the exact terminal status — including a `Failed`'s
+    /// structured [`TerminalError`](overdrive_core::workflow::TerminalError)
+    /// (kind + detail) — and can re-publish the terminal observation row
     /// losslessly without re-running the author body
     /// (`docs/feature/fix-workflow-terminal-redrive/deliver/rca.md`,
     /// Option 1; `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state").
+    /// derived state"). The structured `TerminalError` (vs the old free-text
+    /// reason) closes the ADR-0064 §3 replay-determinism hazard.
     Terminal {
-        /// The workflow's full terminal result.
-        result: overdrive_core::workflow::WorkflowResult,
+        /// The workflow instance's full terminal status.
+        status: overdrive_core::workflow::WorkflowStatus,
     },
 }
 
@@ -645,22 +647,25 @@ pub trait JournalStore: Send + Sync {
 mod tests {
     use super::{JournalCommand, LoadedEntry, WorkflowId};
     use overdrive_core::id::{ContentHash, CorrelationKey};
-    use overdrive_core::workflow::WorkflowResult;
+    use overdrive_core::workflow::{TerminalError, TerminalErrorKind, WorkflowStatus};
 
-    /// The journal `Terminal` command now carries the FULL `WorkflowResult`
-    /// (fix-workflow-terminal-redrive, RCA Option 1) — not a lossy string
-    /// label. A CBOR (`ciborium`) round-trip of `Terminal { result:
-    /// Failed { reason } }` must preserve the `reason` exactly: this is the
-    /// lossless-terminal guarantee the start-time short-circuit relies on to
-    /// re-publish the terminal observation row without re-running the body.
+    /// The journal `Terminal` command now carries the FULL `WorkflowStatus`
+    /// (fix-workflow-terminal-redrive, RCA Option 1; ADR-0065 §3) — not a
+    /// lossy string label. A CBOR (`ciborium`) round-trip of `Terminal {
+    /// status: Failed { terminal } }` must preserve the structured
+    /// `TerminalError` (kind + detail) exactly: this is the lossless-terminal
+    /// guarantee the start-time short-circuit relies on to re-publish the
+    /// terminal observation row without re-running the body.
     ///
-    /// The OLD `result: String` label folded `Failed { reason }` to the
-    /// constant `"Failed"`, discarding the reason with no inverse; this test
-    /// pins that the durable terminal no longer loses it.
+    /// The OLD `result: String` label folded the failure to the constant
+    /// `"Failed"`, discarding the cause with no inverse; this test pins that
+    /// the durable terminal preserves the structured `TerminalError` instead.
     #[test]
-    fn terminal_command_cbor_roundtrip_preserves_failed_reason() {
+    fn terminal_command_cbor_roundtrip_preserves_failed_terminal() {
         let entry = LoadedEntry::Command(JournalCommand::Terminal {
-            result: WorkflowResult::Failed { reason: "disk full at step 3".to_string() },
+            status: WorkflowStatus::Failed {
+                terminal: TerminalError::explicit("disk full at step 3"),
+            },
         });
 
         let mut buf = Vec::new();
@@ -670,9 +675,19 @@ mod tests {
 
         assert_eq!(
             decoded, entry,
-            "the journal Terminal command must round-trip the full WorkflowResult \
-             (including a Failed's reason) byte-equal through CBOR"
+            "the journal Terminal command must round-trip the full WorkflowStatus \
+             (including a Failed's structured TerminalError) byte-equal through CBOR"
         );
+        // The structured cause survives — the property the old free-text
+        // reason label could not provide.
+        let LoadedEntry::Command(JournalCommand::Terminal {
+            status: WorkflowStatus::Failed { terminal },
+        }) = decoded
+        else {
+            panic!("decoded entry must be a Terminal carrying a Failed status");
+        };
+        assert_eq!(terminal.kind(), TerminalErrorKind::Explicit);
+        assert_eq!(terminal.detail(), "disk full at step 3");
     }
 
     /// `WorkflowId::for_correlation` is total and deterministic over

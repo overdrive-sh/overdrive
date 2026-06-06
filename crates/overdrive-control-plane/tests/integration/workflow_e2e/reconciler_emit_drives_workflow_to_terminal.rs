@@ -59,7 +59,7 @@ use overdrive_core::testing::workflow::ProvisionRecord;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{WorkflowResult, WorkflowStart};
+use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -122,7 +122,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     // workflows here at boot; Phase 1 has none, so the e2e registers the
     // fixture workflow to exercise the real composition.
     let mut registry = WorkflowRegistry::new();
-    registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+    registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(target));
 
     // --- Real observation store (real redb) shared by the engine (writes
     //     the terminal row) and the runtime (reads it in hydrate_actual).
@@ -227,14 +227,14 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     );
 
     // --- (1) the WorkflowTerminal observation row appears keyed by the
-    //     same CorrelationKey, carrying Success.
+    //     same CorrelationKey, carrying a Completed status (ProvisionRecord's
+    //     `Output = ()` projects to `Completed { output: cbor(()) }`).
     let terminals = obs.workflow_terminal_rows().await.expect("read terminal rows");
     let found = terminals.iter().find(|(corr, _)| *corr == correlation);
-    let (_, result) = found.expect("WorkflowTerminal row keyed by the instance correlation");
-    assert_eq!(
-        *result,
-        WorkflowResult::Success,
-        "the terminal row must carry the workflow's terminal result"
+    let (_, status) = found.expect("WorkflowTerminal row keyed by the instance correlation");
+    assert!(
+        matches!(status, WorkflowStatus::Completed { .. }),
+        "the terminal row must carry a Completed status, got {status:?}"
     );
 
     // --- (2) the engine task completed: no live instance remains.
@@ -280,10 +280,10 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     );
     let actual_instance =
         actual_state.instances.get(&correlation).expect("hydrate_actual must surface the instance");
-    assert_eq!(
-        actual_instance.terminal,
-        Some(WorkflowResult::Success),
-        "hydrate_actual must surface the observed terminal result"
+    assert!(
+        matches!(actual_instance.terminal, Some(WorkflowStatus::Completed { .. })),
+        "hydrate_actual must surface the observed terminal status, got {:?}",
+        actual_instance.terminal
     );
 
     // Drive a convergence tick for the workflow-lifecycle reconciler:

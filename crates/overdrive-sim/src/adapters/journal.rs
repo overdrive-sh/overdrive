@@ -44,7 +44,7 @@ use overdrive_control_plane::journal::{
     JournalCommand, JournalStore, JournalStoreError, LoadedEntry, ProbeError, Result as JsResult,
     WorkflowId,
 };
-use overdrive_core::workflow::WorkflowResult;
+use overdrive_core::workflow::WorkflowStatus;
 
 /// Reserved workflow id the Earned-Trust probe writes its sentinel entry
 /// under. Validated by `WorkflowId::new` at construction so any future
@@ -194,8 +194,9 @@ impl JournalStore for SimJournalStore {
 
         let probe_id = WorkflowId::new(PROBE_WORKFLOW_ID)
             .unwrap_or_else(|_| unreachable!("PROBE_WORKFLOW_ID is a valid instance id"));
-        let sentinel =
-            LoadedEntry::Command(JournalCommand::Terminal { result: WorkflowResult::Success });
+        let sentinel = LoadedEntry::Command(JournalCommand::Terminal {
+            status: WorkflowStatus::Completed { output: Vec::new() },
+        });
         let wrote = Self::encode(&sentinel).map_err(|source| ProbeError::WriteFailed { source })?;
 
         // Write → read back byte-equal → delete, all under one lock so
@@ -223,7 +224,7 @@ mod tests {
     use super::*;
     use overdrive_control_plane::journal::JournalNotification;
     use overdrive_core::id::ContentHash;
-    use overdrive_core::workflow::{SignalKey, SignalValue};
+    use overdrive_core::workflow::{SignalKey, SignalValue, TerminalError};
     use proptest::prelude::*;
 
     /// Strategy for a 32-byte digest wrapped as `ContentHash`.
@@ -238,16 +239,23 @@ mod tests {
             .prop_map(|raw| SignalKey::new(&raw).expect("kebab body is a valid SignalKey"))
     }
 
-    /// Strategy for an arbitrary [`WorkflowResult`] — the real terminal
-    /// payload the journal `Terminal` command now carries (not a lossy
-    /// label). Exercises all three variants, with `Failed` carrying an
-    /// arbitrary `reason`, so the CBOR roundtrip proptest proves the full
-    /// payload (including the reason) survives serialize→deserialize.
-    fn workflow_result_strategy() -> impl Strategy<Value = WorkflowResult> {
+    /// Strategy for an arbitrary [`WorkflowStatus`] — the real terminal
+    /// payload the journal `Terminal` command now carries (ADR-0065 §3; not
+    /// a lossy label). Exercises every variant: `Completed` with an
+    /// arbitrary opaque `output` byte vector (the erased `Output`),
+    /// `Failed` with a structured [`TerminalError`] carrying an arbitrary
+    /// detail, plus the engine-authored `Cancelled` / `TimedOut`. The CBOR
+    /// roundtrip proptest proves the full payload (including the structured
+    /// terminal cause) survives serialize→deserialize.
+    fn workflow_status_strategy() -> impl Strategy<Value = WorkflowStatus> {
         prop_oneof![
-            Just(WorkflowResult::Success),
-            "[a-zA-Z0-9 ]{0,32}".prop_map(|reason| WorkflowResult::Failed { reason }),
-            Just(WorkflowResult::Cancelled),
+            proptest::collection::vec(any::<u8>(), 0..32)
+                .prop_map(|output| WorkflowStatus::Completed { output }),
+            "[a-zA-Z0-9 ]{0,32}".prop_map(|detail| WorkflowStatus::Failed {
+                terminal: TerminalError::explicit(&detail)
+            }),
+            Just(WorkflowStatus::Cancelled),
+            Just(WorkflowStatus::TimedOut),
         ]
     }
 
@@ -277,7 +285,7 @@ mod tests {
                 .prop_map(|signal_key| JournalCommand::SignalAwaited { signal_key }),
             content_hash_strategy()
                 .prop_map(|action_digest| JournalCommand::ActionEmitted { action_digest }),
-            workflow_result_strategy().prop_map(|result| JournalCommand::Terminal { result }),
+            workflow_status_strategy().prop_map(|status| JournalCommand::Terminal { status }),
         ]
         .prop_map(LoadedEntry::Command);
 

@@ -44,9 +44,7 @@ use overdrive_core::traits::intent_store::{
 };
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{
-    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
-};
+use overdrive_core::workflow::{TerminalError, Workflow, WorkflowCtx, WorkflowName, WorkflowStart};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -67,21 +65,33 @@ impl EmittingWorkflow {
     fn spec() -> WorkflowStart {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
-            input: Vec::new(),
+            // `Input = ()`: CBOR of `()` so the adapter decodes it (an empty
+            // `Vec` would mint a MalformedInput terminal; ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
 
+/// CBOR-encode the unit `Input`.
+fn cbor_unit() -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    ciborium::into_writer(&(), &mut bytes).expect("CBOR-encode unit");
+    bytes
+}
+
 #[async_trait]
 impl Workflow for EmittingWorkflow {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The workflow→cluster mutation goes through ctx.emit_action — the
         // SAME Action channel the reconciler runtime consumes (→ Raft). The
         // body has no IntentStore handle; the emit is the only mutation it
         // can express, and it routes through the channel by construction.
         match ctx.emit_action(Action::Noop).await {
-            Ok(()) => WorkflowResult::Success,
-            Err(_) => WorkflowResult::Failed { reason: "emit failed".to_string() },
+            Ok(()) => Ok(()),
+            Err(_) => Err(TerminalError::explicit("emit failed")),
         }
     }
 }
@@ -176,7 +186,7 @@ async fn emit_action_lands_in_the_action_channel_and_the_workflow_makes_no_direc
     let intent = Arc::new(CountingIntentStore::new());
 
     let mut registry = WorkflowRegistry::new();
-    registry.register(EmittingWorkflow::spec().name, || Box::new(EmittingWorkflow));
+    registry.register(EmittingWorkflow::spec().name, || EmittingWorkflow);
 
     let engine = WorkflowEngine::new(
         Arc::clone(&journal),

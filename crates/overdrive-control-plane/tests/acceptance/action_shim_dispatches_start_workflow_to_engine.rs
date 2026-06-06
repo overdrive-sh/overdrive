@@ -42,7 +42,7 @@ use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{WorkflowResult, WorkflowStart};
+use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
 
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 
@@ -71,7 +71,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     // The reconciler emits `StartWorkflow { start }`; the engine resolves
     // `start.name` to the registered `ProvisionRecord` and drives `run`.
     let mut registry = WorkflowRegistry::new();
-    registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+    registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(target));
 
     // The action-shim's own obs (untouched by StartWorkflow dispatch) is
     // constructed below; the engine takes its own clone for the terminal
@@ -151,9 +151,10 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     assert!(
         entries.iter().any(|e| matches!(
             e,
-            LoadedEntry::Command(JournalCommand::Terminal { result })
-                if *result == WorkflowResult::Success
+            LoadedEntry::Command(JournalCommand::Terminal {
+                status: WorkflowStatus::Completed { .. }
+            })
         )),
-        "the engine must drive run to a Terminal(Success) journal entry off the shim; got {entries:?}"
+        "the engine must drive run to a Terminal(Completed) journal entry off the shim; got {entries:?}"
     );
 }

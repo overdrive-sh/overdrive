@@ -59,7 +59,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::transport::Transport as TransportTrait;
-use overdrive_core::workflow::{SignalValue, WorkflowResult};
+use overdrive_core::workflow::{SignalValue, WorkflowStatus};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -88,10 +88,10 @@ fn build_engine(
     let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(SEED));
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecordWithSignalEmit::spec().name, || {
-        Box::new(ProvisionRecordWithSignalEmit::new(
+        ProvisionRecordWithSignalEmit::new(
             ProvisionRecordWithSignalEmit::signal_key(),
             Action::Noop,
-        ))
+        )
     });
     WorkflowEngine::new(journal, clock, transport, entropy, registry, obs)
 }
@@ -207,14 +207,13 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     engine_b.join_all().await;
     let _ = ticker.await;
 
-    // OBSERVABLE 4 — the resumed run reached terminal Success, and exactly
-    // ONE Action was emitted across the WHOLE history (pre-crash 0 + resume
-    // 1). No duplicate downstream effect (K1 / US-WP-5 AC1).
+    // OBSERVABLE 4 — the resumed run reached a Completed terminal, and
+    // exactly ONE Action was emitted across the WHOLE history (pre-crash 0 +
+    // resume 1). No duplicate downstream effect (K1 / US-WP-5 AC1).
     let terminal = drain_terminal(&mut sub, &correlation).await;
-    assert_eq!(
-        terminal,
-        Some(WorkflowResult::Success),
-        "once the signal arrives the resumed run completes Success"
+    assert!(
+        matches!(terminal, Some(WorkflowStatus::Completed { .. })),
+        "once the signal arrives the resumed run completes (Completed), got {terminal:?}"
     );
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
     assert!(
@@ -241,14 +240,14 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
 async fn drain_terminal(
     sub: &mut overdrive_core::traits::observation_store::ObservationSubscription,
     correlation: &CorrelationKey,
-) -> Option<WorkflowResult> {
+) -> Option<WorkflowStatus> {
     use futures::StreamExt;
     for _ in 0..64 {
         match tokio::time::timeout(Duration::from_millis(50), sub.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, result }))
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
                 if &got == correlation =>
             {
-                return Some(result);
+                return Some(status);
             }
             Ok(Some(_) | None) | Err(_) => {}
         }

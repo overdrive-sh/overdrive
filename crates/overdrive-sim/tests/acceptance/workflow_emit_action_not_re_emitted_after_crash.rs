@@ -57,10 +57,10 @@ fn build_engine(
     let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(SEED));
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecordWithSignalEmit::spec().name, || {
-        Box::new(ProvisionRecordWithSignalEmit::new(
+        ProvisionRecordWithSignalEmit::new(
             ProvisionRecordWithSignalEmit::signal_key(),
             Action::Noop,
-        ))
+        )
     });
     WorkflowEngine::new(journal, clock, transport, entropy, registry, obs)
 }

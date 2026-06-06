@@ -4,7 +4,7 @@
 //! Scenario S-WP-01-06 — the headline durable-execution journey: kill the
 //! process AFTER `ctx.run` records but BEFORE terminal, restart on the
 //! SAME node, and the external effect is NOT repeated (`SimTransport` call
-//! count == 1), the resumed `WorkflowResult` is byte-identical to the
+//! count == 1), the resumed `WorkflowStatus` is byte-identical to the
 //! uninterrupted run, and the `ObservationStore` carries a terminal-result
 //! row keyed by `CorrelationKey`. This is the `WorkflowExactlyOnceEffect
 //! OnResume` DST invariant (ADR-0064 §6). K1(O1), K3(O4), K2(O2
@@ -58,7 +58,7 @@ use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ObservationSubscription,
 };
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowResult};
+use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowStatus};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -85,24 +85,24 @@ async fn engine_on(
     let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(0x5eed));
 
     let mut registry = WorkflowRegistry::new();
-    registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+    registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(target));
 
     let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
     (engine, inbox)
 }
 
 /// Drain the `WorkflowTerminal` row for `correlation` off a subscription
-/// taken BEFORE the run drove to terminal. Returns the terminal result.
-async fn terminal_result(
+/// taken BEFORE the run drove to terminal. Returns the terminal status.
+async fn terminal_status(
     subscription: &mut ObservationSubscription,
     correlation: &CorrelationKey,
-) -> WorkflowResult {
+) -> WorkflowStatus {
     for _ in 0..8 {
         match tokio::time::timeout(Duration::from_secs(1), subscription.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, result }))
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
                 if &got == correlation =>
             {
-                return result;
+                return status;
             }
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => break,
@@ -141,7 +141,7 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
     engine_a.start(&spec, &correlation, &workflow_id).await.expect("start A");
     engine_a.join_all().await;
 
-    let uninterrupted_result = terminal_result(&mut sub_a, &correlation).await;
+    let uninterrupted_status = terminal_status(&mut sub_a, &correlation).await;
     let uninterrupted_journal = journal_a.load_journal(&workflow_id).await.expect("load A");
     let uninterrupted_fires = delivered_count(&mut inbox_a).await;
     assert_eq!(uninterrupted_fires, 1, "uninterrupted run fires the effect exactly once");
@@ -212,14 +212,18 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
         "resume must NOT re-fire the recorded ctx.run effect (exactly-once on resume)"
     );
 
-    // K3 / O4 — the resumed WorkflowResult is byte-identical to the
+    // K3 / O4 — the resumed WorkflowStatus is byte-identical to the
     // uninterrupted run.
-    let resumed_result = terminal_result(&mut sub_c, &correlation).await;
+    let resumed_status = terminal_status(&mut sub_c, &correlation).await;
     assert_eq!(
-        resumed_result, uninterrupted_result,
-        "resumed terminal result must be byte-identical to the uninterrupted run"
+        resumed_status, uninterrupted_status,
+        "resumed terminal status must be byte-identical to the uninterrupted run"
     );
-    assert_eq!(resumed_result, WorkflowResult::Success, "ProvisionRecord runs to Success");
+    // ProvisionRecord's `Output = ()` projects to `Completed { output: cbor(()) }`.
+    assert!(
+        matches!(resumed_status, WorkflowStatus::Completed { .. }),
+        "ProvisionRecord runs to a Completed terminal, got {resumed_status:?}"
+    );
 
     // AC5 / O2 — the resumed run reached terminal and the journal now
     // carries a Terminal entry alongside the (single, replayed) RunResult.

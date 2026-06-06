@@ -279,12 +279,11 @@ mod acceptance {
     // control-plane RED scaffolds for the genuinely-new engine-side
     // behaviour the reshape introduces. All `#[should_panic(expected =
     // "RED scaffold")]`; import no unbuilt type. The existing engine /
-    // action-shim / lifecycle workflow tests above MIGRATE (Terminal/obs
-    // `result: WorkflowResult` → `status: WorkflowStatus`; body
-    // `WorkflowResult::Success/Failed` → `Ok(())` / `Err(TerminalError)`;
-    // `input_digest` assertion target → `ContentHash::of(&spec.input)`);
-    // that migration is DELIVER work (the contract change breaks them at
-    // compile time, each slice migrates what it breaks).
+    // action-shim / lifecycle workflow tests above were MIGRATED in step
+    // 01-03 (Terminal/obs `result` → `status: WorkflowStatus`; body
+    // contentless success/failure → `Ok(())` / `Err(TerminalError)`;
+    // `input_digest` assertion target → `ContentHash::of(&spec.input)` is
+    // DEFERRED to step 03-01 per the roadmap).
     //
     //   - NEW-2  (Slice 03)  input_digest divergence — the executable #217
     //     acceptance: two distinct inputs of one kind ⇒ distinct digests.

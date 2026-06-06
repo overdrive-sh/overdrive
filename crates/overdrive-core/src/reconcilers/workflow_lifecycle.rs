@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::id::CorrelationKey;
-use crate::workflow::{WorkflowResult, WorkflowStart};
+use crate::workflow::{WorkflowStart, WorkflowStatus};
 
 use super::{Action, Reconciler, ReconcilerName, TickContext};
 
@@ -60,10 +60,10 @@ pub struct WorkflowInstanceState {
     /// task set. After a process restart this is `false` for every
     /// previously-running instance — the trigger for the re-emit.
     pub has_live_task: bool,
-    /// The observed terminal result, if the engine has written a
+    /// The observed terminal status, if the engine has written a
     /// `WorkflowTerminal` observation row for this instance. `Some(_)`
     /// means the instance has converged — no re-emit.
-    pub terminal: Option<WorkflowResult>,
+    pub terminal: Option<WorkflowStatus>,
 }
 
 /// `desired`/`actual` projection for the workflow-lifecycle reconciler.

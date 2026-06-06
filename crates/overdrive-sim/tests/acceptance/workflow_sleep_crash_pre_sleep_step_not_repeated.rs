@@ -39,7 +39,7 @@ use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::testing::workflow::ProvisionRecordWithSleep;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowResult};
+use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowStatus};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -75,7 +75,7 @@ async fn engine_on(
 
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecordWithSleep::spec().name, move || {
-        Box::new(ProvisionRecordWithSleep::new(pre, post, SLEEP))
+        ProvisionRecordWithSleep::new(pre, post, SLEEP)
     });
 
     let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
@@ -257,15 +257,19 @@ async fn crash_during_sleep_window_does_not_repeat_the_pre_sleep_step() {
         "resume replayed the recorded pre-sleep RunResult — no second one appended: {resumed:?}"
     );
 
-    // The terminal observation row records Success (driven-port outcome).
+    // The terminal observation row records a Completed status (driven-port
+    // outcome — `ProvisionRecordWithSleep`'s `Output = ()`).
     let mut terminal_seen = false;
     for _ in 0..8 {
         match tokio::time::timeout(Duration::from_secs(1), futures::StreamExt::next(&mut sub)).await
         {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, result }))
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
                 if got == correlation =>
             {
-                assert_eq!(result, WorkflowResult::Success, "the resumed run terminates Success");
+                assert!(
+                    matches!(status, WorkflowStatus::Completed { .. }),
+                    "the resumed run terminates Completed, got {status:?}"
+                );
                 terminal_seen = true;
                 break;
             }

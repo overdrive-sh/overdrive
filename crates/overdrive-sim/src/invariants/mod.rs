@@ -152,7 +152,7 @@ pub enum Invariant {
     /// after step-0 records, before terminal); (3) a resumed run from the
     /// persisted journal. Asserts the resumed trajectory is byte-identical
     /// to the uninterrupted one (replay-equivalence) AND the resumed run
-    /// reaches a terminal `WorkflowResult` within the step budget
+    /// reaches a terminal `WorkflowStatus` within the step budget
     /// (`assert_eventually!(is_terminal)`, bounded progress). The evaluator
     /// body lives in `crate::invariants::evaluators`.
     ReplayEquivalenceProvisionRecord,
@@ -473,10 +473,24 @@ pub enum Invariant {
     /// terminal → resume from the persisted `SimJournalStore` journal →
     /// the recorded effect is replayed WITHOUT re-firing the transport
     /// (the resumed boot's bound `SimInbox` receives zero datagrams) and
-    /// the run reaches the same terminal `WorkflowResult`. The
+    /// the run reaches the same terminal `WorkflowStatus`. The
     /// exactly-once-on-resume guarantee. The evaluator body lives in
     /// `crate::invariants::evaluators`.
     WorkflowExactlyOnceEffectOnResume,
+
+    /// workflow-result-error-model step 02-01 (ADR-0065 §3) — RED scaffold.
+    /// Always invariant: under the migrated terminal model, an
+    /// uninterrupted `ProvisionRecord` run writes a
+    /// `WorkflowStatus::Completed { output }` terminal whose erased CBOR
+    /// `output` round-trips back to the workflow's typed `Output` (`()` for
+    /// the reference fixtures), and an authored-failure / panic run writes
+    /// `WorkflowStatus::Failed { terminal }` carrying the structured
+    /// `TerminalError`. Pins the engine's body-`Result` → `WorkflowStatus`
+    /// projection at the DST tier. NOT wired into the default catalogue
+    /// (`ALL`) yet — the evaluator body is a `todo!` RED scaffold that
+    /// lands GREEN in step 02-01, so `cargo dst` (which iterates `ALL`)
+    /// stays green until then.
+    WorkflowTerminalStatusProjection,
 }
 
 impl Invariant {
@@ -636,6 +650,8 @@ impl Invariant {
             // workflow-primitive step 01-07.
             Self::WorkflowJournalWriteOrdering => "workflow-journal-write-ordering",
             Self::WorkflowExactlyOnceEffectOnResume => "workflow-exactly-once-effect-on-resume",
+            // workflow-result-error-model step 02-01 (RED scaffold; not in ALL).
+            Self::WorkflowTerminalStatusProjection => "workflow-terminal-status-projection",
         }
     }
 }

@@ -3,10 +3,10 @@
 //!
 //! `ProvisionRecord` is the thinnest durable sequence with a real,
 //! non-idempotent-to-repeat effect: one external `ctx.run` durable step
-//! (the "provision write", US-WP-1) followed by a terminal
-//! [`WorkflowResult::Success`]. It is written as one ordinary
-//! `async fn run` — no hand-written step enum, no transition match
-//! (S-WP-01-02 / K6).
+//! (the "provision write", US-WP-1) followed by a terminal `Ok(())`
+//! (`Output = ()` — the contentless terminal the pre-ADR-0065 contentless
+//! success modelled). It is written as one ordinary `async fn run` — no
+//! hand-written step enum, no transition match (S-WP-01-02 / K6).
 //!
 //! # Why this lives in `overdrive-core::testing`
 //!
@@ -33,12 +33,30 @@ use bytes::Bytes;
 
 use crate::reconcilers::Action;
 use crate::workflow::{
-    SignalKey, Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
+    SignalKey, TerminalError, Workflow, WorkflowCtx, WorkflowName, WorkflowStart,
 };
+
+/// CBOR-encode the unit `Input` these reference workflows take — a 1-byte
+/// CBOR `null` (`0xf6`). The `ErasedWorkflowAdapter` decodes this back to
+/// `()` before calling `run` (ADR-0065 §1). Factored out so every fixture's
+/// `spec()` derives the same opaque `input` bytes through the real CBOR
+/// codec rather than a hand-pinned constant.
+///
+/// # Panics
+///
+/// Never — `ciborium::into_writer(&(), _)` over an in-memory `Vec` is total
+/// for the unit type.
+#[must_use]
+fn cbor_unit() -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    ciborium::into_writer(&(), &mut bytes)
+        .unwrap_or_else(|_| unreachable!("CBOR-encoding the unit type is total"));
+    bytes
+}
 
 /// The canonical slice-01 reference workflow: perform one external
 /// effect inside a `ctx.run` durable step (the provision-write), then
-/// return a terminal `Success`. Authored as one ordinary `async fn run`
+/// return a terminal `Ok(())`. Authored as one ordinary `async fn run`
 /// per S-WP-01-02.
 pub struct ProvisionRecord {
     /// Where the provision-write effect is addressed.
@@ -75,16 +93,20 @@ impl ProvisionRecord {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
-            // These reference workflows take no typed input — the opaque
-            // CBOR `input` is empty (additive-field compile-fixup, step 01-02).
-            input: Vec::new(),
+            // These reference workflows take a unit `Input` — the opaque CBOR
+            // `input` is the encoding of `()` (a 1-byte CBOR `null`), so the
+            // `ErasedWorkflowAdapter` decodes it back to `()` (ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
 
 #[async_trait]
 impl Workflow for ProvisionRecord {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The provision-write effect runs INSIDE a `ctx.run` durable step:
         // the transport send fires once on the live path, its result is
         // journaled, and a resumed run replays the recorded result without
@@ -101,8 +123,8 @@ impl Workflow for ProvisionRecord {
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
         match sent {
-            Ok(_bytes) => WorkflowResult::Success,
-            Err(_reason) => WorkflowResult::Failed { reason: "provision call failed".to_string() },
+            Ok(_bytes) => Ok(()),
+            Err(_reason) => Err(TerminalError::explicit("provision call failed")),
         }
     }
 }
@@ -156,9 +178,10 @@ impl ProvisionRecordWithSleep {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
-            // These reference workflows take no typed input — the opaque
-            // CBOR `input` is empty (additive-field compile-fixup, step 01-02).
-            input: Vec::new(),
+            // These reference workflows take a unit `Input` — the opaque CBOR
+            // `input` is the encoding of `()` (a 1-byte CBOR `null`), so the
+            // `ErasedWorkflowAdapter` decodes it back to `()` (ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
@@ -178,10 +201,10 @@ impl ProvisionRecordWithSleep {
 ///
 /// The workflow BLOCKS on `ctx.wait_for_signal(signal)` until the
 /// signal row is present in the `ObservationStore` (in-process
-/// single-node delivery), then emits one `Action` and returns
-/// [`WorkflowResult::Success`]. This is the honest blocking shape
-/// step 03-02 proves crash-safe (S-WP-03-01): a crash WHILE blocked on
-/// the absent signal re-blocks on the SAME signal on resume.
+/// single-node delivery), then emits one `Action` and returns a terminal
+/// `Ok(())`. This is the honest blocking shape step 03-02 proves
+/// crash-safe (S-WP-03-01): a crash WHILE blocked on the absent signal
+/// re-blocks on the SAME signal on resume.
 pub struct ProvisionRecordWithSignalEmit {
     /// The signal key the workflow blocks on via `ctx.wait_for_signal`.
     signal: SignalKey,
@@ -228,35 +251,42 @@ impl ProvisionRecordWithSignalEmit {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
-            // These reference workflows take no typed input — the opaque
-            // CBOR `input` is empty (additive-field compile-fixup, step 01-02).
-            input: Vec::new(),
+            // These reference workflows take a unit `Input` — the opaque CBOR
+            // `input` is the encoding of `()` (a 1-byte CBOR `null`), so the
+            // `ErasedWorkflowAdapter` decodes it back to `()` (ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
 
 #[async_trait]
 impl Workflow for ProvisionRecordWithSignalEmit {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // Block on the typed signal until it is present in the
         // ObservationStore (genuine blocking on an absent signal — the
         // honest shape step 03-02 proves crash-safe). On resume after a
         // crash WHILE blocked, this re-blocks on the SAME signal.
         if ctx.wait_for_signal(self.signal.clone()).await.is_err() {
-            return WorkflowResult::Failed { reason: "signal wait failed".to_string() };
+            return Err(TerminalError::explicit("signal wait failed"));
         }
         // Emit one typed Action (idempotent across a crash — a recorded
         // `ActionEmitted` makes a resumed run NOT re-emit).
         if ctx.emit_action(self.action.clone()).await.is_err() {
-            return WorkflowResult::Failed { reason: "emit_action failed".to_string() };
+            return Err(TerminalError::explicit("emit_action failed"));
         }
-        WorkflowResult::Success
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Workflow for ProvisionRecordWithSleep {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // Pre-sleep provision-write effect, inside a durable `ctx.run` step.
         let first_transport = Arc::clone(ctx.transport());
         let first_target = self.first_target;
@@ -271,10 +301,10 @@ impl Workflow for ProvisionRecordWithSleep {
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
         if first.is_err() {
-            return WorkflowResult::Failed { reason: "pre-sleep call failed".to_string() };
+            return Err(TerminalError::explicit("pre-sleep call failed"));
         }
         if ctx.sleep(self.sleep).await.is_err() {
-            return WorkflowResult::Failed { reason: "sleep failed".to_string() };
+            return Err(TerminalError::explicit("sleep failed"));
         }
         // Post-sleep provision-write effect, inside a durable `ctx.run` step.
         let second_transport = Arc::clone(ctx.transport());
@@ -290,8 +320,8 @@ impl Workflow for ProvisionRecordWithSleep {
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
         match second {
-            Ok(_bytes) => WorkflowResult::Success,
-            Err(_reason) => WorkflowResult::Failed { reason: "post-sleep call failed".to_string() },
+            Ok(_bytes) => Ok(()),
+            Err(_reason) => Err(TerminalError::explicit("post-sleep call failed")),
         }
     }
 }

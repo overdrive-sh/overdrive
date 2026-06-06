@@ -3,10 +3,11 @@
 //! write path on `run` terminal. ADR-0064 §2.
 //!
 //! Scenario companion to S-WP-01-11. When the engine drives the author's
-//! `async fn run` to a `WorkflowResult`, it writes
-//! `ObservationRow::WorkflowTerminal { correlation, result }` — keyed by
+//! `async fn run` to a terminal, it projects the body's `Result<Output,
+//! TerminalError>` to a `WorkflowStatus` and writes
+//! `ObservationRow::WorkflowTerminal { correlation, status }` — keyed by
 //! the instance `CorrelationKey` so the emitting workflow-lifecycle
-//! reconciler finds the result deterministically next tick (ADR-0064 §2 /
+//! reconciler finds the status deterministically next tick (ADR-0064 §2 /
 //! `development.md` Reconciler I/O rule 2). The write goes through the
 //! injected `ObservationStore` (the shim's write path), NOT a direct
 //! engine bypass of the channels.
@@ -36,7 +37,7 @@ use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ObservationSubscription,
 };
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{WorkflowResult, WorkflowStart};
+use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -56,7 +57,7 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
     let target: SocketAddr = "127.0.0.1:9000".parse().expect("valid addr");
 
     let mut registry = WorkflowRegistry::new();
-    registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+    registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(target));
 
     let engine = WorkflowEngine::new(
         Arc::clone(&journal),
@@ -84,13 +85,13 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
 
     // Observable outcome at the ObservationStore boundary: a
     // WorkflowTerminal row keyed by the instance correlation, carrying the
-    // workflow's terminal result.
-    let mut found: Option<(CorrelationKey, WorkflowResult)> = None;
+    // workflow's terminal status.
+    let mut found: Option<(CorrelationKey, WorkflowStatus)> = None;
     for _ in 0..8 {
         let next = tokio::time::timeout(Duration::from_secs(1), subscription.next()).await;
         match next {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation, result })) => {
-                found = Some((correlation, result));
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation, status })) => {
+                found = Some((correlation, status));
                 break;
             }
             Ok(Some(_)) => {}
@@ -98,17 +99,20 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
         }
     }
 
-    let (got_corr, got_result) =
+    let (got_corr, got_status) =
         found.expect("engine must write a WorkflowTerminal observation row on run terminal");
     assert_eq!(
         got_corr, correlation,
         "the terminal row must be keyed by the instance CorrelationKey (ADR-0064 §2)"
     );
-    assert_eq!(
-        got_result,
-        WorkflowResult::Success,
-        "the terminal row must carry the workflow's terminal result"
-    );
+    // `ProvisionRecord` returns `Ok(())`, so the engine projects it to
+    // `WorkflowStatus::Completed { output }` carrying the CBOR of `()`.
+    let WorkflowStatus::Completed { output } = got_status else {
+        panic!("the terminal row must carry a Completed status, got {got_status:?}");
+    };
+    let decoded: () = ciborium::from_reader(output.as_slice())
+        .expect("the erased Completed output decodes back to the unit Output");
+    assert_eq!(decoded, (), "ProvisionRecord's `Output = ()` round-trips through the terminal row");
 }
 
 /// Count the `Started` commands in a loaded run and return the index of
@@ -167,8 +171,7 @@ async fn start_writes_started_at_command_index_0_idempotent_on_resume() {
     // persisted run, exactly the crash-resume shape).
     let make_engine = || {
         let mut registry = WorkflowRegistry::new();
-        registry
-            .register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+        registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(target));
         WorkflowEngine::new(
             Arc::clone(&journal),
             Arc::clone(&clock),

@@ -652,6 +652,24 @@ impl Harness {
             Invariant::BridgeToHydratorHandoff => {
                 crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff().await
             }
+            // workflow-result-error-model step 02-01 (ADR-0065 §3) — RED
+            // scaffold. The body-`Result` → `WorkflowStatus` projection
+            // invariant lands GREEN in step 02-01. NOT a neutral stub (which
+            // would mask the unfinished state) and NOT in `Invariant::ALL`
+            // (so `cargo dst` never dispatches it and stays green). The
+            // exhaustive `match` arm is kept intact per
+            // `.claude/rules/testing.md` § "RED scaffolds" — removing the
+            // `todo!()` is the explicit GREEN transition in 02-01.
+            #[expect(
+                clippy::todo,
+                reason = "RED scaffold; WorkflowTerminalStatusProjection lands GREEN in step 02-01"
+            )]
+            Invariant::WorkflowTerminalStatusProjection => {
+                todo!(
+                    "RED scaffold: WorkflowTerminalStatusProjection lands GREEN in step 02-01 \
+                     (ADR-0065 §3 body-Result -> WorkflowStatus projection)"
+                )
+            }
         }
     }
 }

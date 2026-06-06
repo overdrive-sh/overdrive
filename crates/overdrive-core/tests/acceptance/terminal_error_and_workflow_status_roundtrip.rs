@@ -3,8 +3,8 @@
 //!
 //! # What this pins
 //!
-//! ADR-0065 introduces two NEW core value types ALONGSIDE the still-present
-//! `WorkflowResult` (the trait reshape is a later slice):
+//! ADR-0065 introduces the typed workflow terminal model (the trait reshape
+//! to `Result<Output, TerminalError>` landed in step 01-03):
 //!
 //! * `TerminalError { kind: TerminalErrorKind, detail: String }` — the
 //!   workflow body's terminal-failure channel. Rides in the journal

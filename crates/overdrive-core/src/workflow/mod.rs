@@ -47,54 +47,150 @@ use crate::traits::{Clock, Entropy, Transport};
 const SIGNAL_POLL: Duration = Duration::from_millis(50);
 
 /// A durable-async workflow. The author writes one ordinary `async fn
-/// run`; the engine (later slices) drives it to a terminal
-/// [`WorkflowResult`], journaling each `ctx` await-point for
-/// crash-resume.
+/// run` over a typed `Input` and `Output`; the engine (later slices)
+/// drives it — via the object-safe [`ErasedWorkflow`] erasure — to a
+/// terminal [`WorkflowStatus`], journaling each `ctx` await-point for
+/// crash-resume (ADR-0065 §1).
+///
+/// # Object safety via the typed-edge / CBOR-erased-interior split
+///
+/// The associated `Input` / `Output` types make `Workflow` **not**
+/// object-safe (a method's signature mentions `Self::Input` /
+/// `Self::Output`). This is deliberate: the AUTHOR edge is typed (the
+/// body returns a real `Self::Output`, not bytes), while the ENGINE
+/// drives the object-safe [`ErasedWorkflow`] whose interior is `&[u8]` /
+/// `Vec<u8>` CBOR. The generic [`ErasedWorkflowAdapter`] bridges them —
+/// the SAME typed-edge / erased-interior split [`WorkflowCtx::run`]
+/// already performs for step results. The composition root registers a
+/// TYPED workflow; the adapter is applied internally, so the author
+/// never writes the erasure.
+///
+/// # Behavior contract
+///
+/// - **Preconditions:** `input` is the typed `Self::Input` the start
+///   intent's opaque CBOR bytes decoded to (the [`ErasedWorkflowAdapter`]
+///   performs the decode; a decode failure never reaches the body — it
+///   becomes a [`TerminalError::malformed_input`] before `run` is
+///   called). Every non-deterministic input is read through `ctx`.
+/// - **Postconditions:** `Ok(output)` is the workflow's typed terminal
+///   value (the engine erases it to CBOR and projects to
+///   [`WorkflowStatus::Completed`]); `Err(terminal)` is the body's
+///   authored terminal FAILURE (projected to [`WorkflowStatus::Failed`]).
+/// - **Edge cases:** an `Output` of `()` is the contentless terminal the
+///   old contentless success modelled — it CBOR-encodes to a small fixed
+///   value the consumer decodes back to `()`. A body that panics is
+///   contained by the engine (`catch_unwind`) and converged to
+///   `Failed { TerminalError::explicit(<deterministic panic detail>) }`
+///   — the panic never escapes the engine task.
+/// - **Invariants:** the body contains no step cursor and no bespoke
+///   state machine; a body that reads `Instant::now()` / `rand::*` /
+///   `tokio::time::sleep` directly breaks journal replay and is rejected
+///   by the dst-lint-style scan (S-WP-01-03).
 ///
 /// The trait uses `async fn` via `async_trait` — declaring a
 /// `Future`-returning signature does **not** require a runtime, so the
-/// trait declaration is core-safe (ADR-0064 §1). All non-determinism in
-/// the body MUST flow through [`WorkflowCtx`]; a body that reads
-/// `Instant::now()` / `rand::*` / `tokio::time::sleep` directly breaks
-/// journal replay and is rejected by the slice-01 dst-lint-style scan
-/// (S-WP-01-03, later step).
+/// trait declaration is core-safe (ADR-0064 §1).
 #[async_trait]
 pub trait Workflow: Send + Sync {
-    /// Drive the workflow to a terminal [`WorkflowResult`]. Every
+    /// The workflow's typed terminal-success value. CBOR-serialisable so
+    /// the engine erases it to bytes for [`WorkflowStatus::Completed`].
+    type Output: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
+
+    /// The workflow's typed start input. CBOR-serialisable so the
+    /// [`ErasedWorkflowAdapter`] decodes the start intent's opaque
+    /// `input` bytes into it before calling [`Self::run`].
+    type Input: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
+
+    /// Drive the workflow over `input` to its typed terminal. Every
     /// non-deterministic input is read through `ctx`; the body contains
-    /// no step cursor and no bespoke state machine.
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult;
+    /// no step cursor and no bespoke state machine. `Ok(Output)` is the
+    /// terminal success value; `Err(TerminalError)` is the authored
+    /// terminal failure (the explicit "do not retry; fail the workflow"
+    /// signal — ADR-0065 §2).
+    async fn run(
+        &self,
+        ctx: &WorkflowCtx,
+        input: Self::Input,
+    ) -> Result<Self::Output, TerminalError>;
 }
 
-/// A workflow's terminal value, returned from [`Workflow::run`].
+/// The object-safe engine-facing surface of a [`Workflow`] (ADR-0065 §1).
 ///
-/// **Distinct from `TerminalCondition`** (ADR-0037): that enum is the
-/// *reconciler's* claim about an *allocation's* lifecycle, written onto
-/// `AllocStatusRow`. `WorkflowResult` is the *workflow's own* return
-/// value. They are related by composition (the workflow-lifecycle
-/// reconciler may observe a `WorkflowResult` and emit a terminal claim
-/// for the workflow instance's observation row) but model different
-/// things and are **not substitutable** (ADR-0064 §2).
+/// `Workflow` is not object-safe (its associated `Input` / `Output`
+/// appear in its method signature), so the engine cannot hold a
+/// `Box<dyn Workflow>`. `ErasedWorkflow` is the erasure: a single
+/// `run_erased` whose interior is concrete `&[u8]` / `Vec<u8>` CBOR —
+/// object-safe, so `Box<dyn ErasedWorkflow>` compiles. The engine drives
+/// THIS; the generic [`ErasedWorkflowAdapter`] is the sole bridge from a
+/// typed `Workflow` to it.
 ///
-/// `#[non_exhaustive]` + the K8s-`Condition`-style SemVer convention
-/// (well-known variants stable; new variants additive minor; renames
-/// major) is inherited from ADR-0037 §5 — the *convention*, not the
-/// type.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub enum WorkflowResult {
-    /// The workflow ran to a successful terminal.
-    Success,
+/// # Behavior contract
+///
+/// - **Preconditions:** `input_bytes` are the start intent's opaque CBOR
+///   `W::Input` bytes (recorded by the reconciler, replayed verbatim by
+///   the engine). The engine never interprets them — only the adapter
+///   decodes.
+/// - **Postconditions:** `Ok(output_bytes)` is the CBOR encoding of the
+///   body's `W::Output` (the engine projects it to
+///   [`WorkflowStatus::Completed`] verbatim). `Err(terminal)` is the
+///   body's authored failure, a decode failure
+///   ([`TerminalError::malformed_input`]), or an encode failure
+///   ([`TerminalError::output_encode`]) (projected to
+///   [`WorkflowStatus::Failed`]).
+/// - **Edge cases:** undecodable `input_bytes` ⇒ `malformed_input` and
+///   the typed body is NEVER entered; an `Output` whose serde impl fails
+///   to encode ⇒ `output_encode`.
+/// - **Invariants:** `run_erased` is the only engine entry point; the
+///   typed edge (decode in / encode out) is owned by the adapter, so the
+///   engine stays type-agnostic.
+#[async_trait]
+pub trait ErasedWorkflow: Send + Sync {
+    /// Decode `input_bytes` into the workflow's typed `Input`, drive the
+    /// body, and CBOR-encode its typed `Output`. See the trait contract
+    /// for the precise pre/postconditions and error mapping.
+    async fn run_erased(
+        &self,
+        ctx: &WorkflowCtx,
+        input_bytes: &[u8],
+    ) -> Result<Vec<u8>, TerminalError>;
+}
 
-    /// The workflow ran to a failure terminal, carrying the cause.
-    Failed {
-        /// Operator-facing reason the workflow failed.
-        reason: String,
-    },
+/// The generic blanket bridge from a typed [`Workflow`] `W` to the
+/// object-safe [`ErasedWorkflow`] (ADR-0065 §1).
+///
+/// Wraps a concrete `W: Workflow` and implements [`ErasedWorkflow`] by:
+/// CBOR-decoding `input_bytes` into `W::Input` (a decode error becomes
+/// [`TerminalError::malformed_input`], so the typed body is never
+/// entered on undecodable input), calling `W::run`, and CBOR-encoding
+/// `W::Output` (an encode error becomes [`TerminalError::output_encode`]).
+/// This is the single site that crosses the typed author edge ↔ erased
+/// engine interior — the author never writes it; the composition root
+/// applies it when registering a typed workflow.
+pub struct ErasedWorkflowAdapter<W: Workflow>(pub W);
 
-    /// The workflow was cancelled by an operator or its parent
-    /// (forward-looking; the cancellation surface lands slice 03+).
-    Cancelled,
+#[async_trait]
+impl<W: Workflow> ErasedWorkflow for ErasedWorkflowAdapter<W> {
+    async fn run_erased(
+        &self,
+        ctx: &WorkflowCtx,
+        input_bytes: &[u8],
+    ) -> Result<Vec<u8>, TerminalError> {
+        // Typed-edge IN: decode the opaque start input into W::Input. An
+        // undecodable input is a malformed-input terminal — the body is
+        // NEVER entered (the bytes will not change on re-drive, so it is
+        // not retryable; ADR-0065 §2/§4).
+        let input: W::Input = ciborium::from_reader(input_bytes)
+            .map_err(|e| TerminalError::malformed_input(&e.to_string()))?;
+        // Drive the typed body. Its Err(TerminalError) propagates verbatim.
+        let output = self.0.run(ctx, input).await?;
+        // Typed-edge OUT: encode W::Output to CBOR for the engine. An
+        // encode failure is a programming error in the Output type's serde
+        // impl (output_encode), surfaced rather than recording garbage.
+        let mut output_bytes: Vec<u8> = Vec::new();
+        ciborium::into_writer(&output, &mut output_bytes)
+            .map_err(|e| TerminalError::output_encode(&e.to_string()))?;
+        Ok(output_bytes)
+    }
 }
 
 /// Maximum byte length of a [`TerminalError`] `detail`, enforced at
@@ -145,11 +241,12 @@ pub const TERMINAL_ERROR_DETAIL_MAX: usize = 1024;
 /// (per the newtype-completeness discipline) so an over-long input can never
 /// reach the durable terminal.
 ///
-/// # Additive note (step 01-01)
+/// # Consumed by the trait reshape (step 01-03)
 ///
-/// This type lands ALONGSIDE the still-present [`WorkflowResult`] and the
-/// UNCHANGED [`Workflow`] trait; nothing consumes it yet. The trait reshape
-/// to `Result<Output, TerminalError>` is a later slice (ADR-0065 §1).
+/// The [`Workflow`] trait's `run` returns `Result<Self::Output,
+/// TerminalError>`; the [`ErasedWorkflowAdapter`] mints `MalformedInput` /
+/// `OutputEncode` at the CBOR erasure boundary, and the engine projects an
+/// `Err(TerminalError)` to [`WorkflowStatus::Failed`] (ADR-0065 §1/§3).
 #[derive(Debug, Clone, PartialEq, Eq, Error, serde::Serialize, serde::Deserialize)]
 #[error("workflow terminal failure ({kind:?}): {detail}")]
 pub struct TerminalError {
@@ -161,8 +258,8 @@ pub struct TerminalError {
     /// panic-message-derived) detail. Length-capped at construction
     /// ([`TERMINAL_ERROR_DETAIL_MAX`]) and recorded as an INPUT in the
     /// durable terminal — deterministic because it is author-data, not
-    /// engine-derived state. Distinct from the engine-derived `reason` the
-    /// OLD `WorkflowResult::Failed` carried.
+    /// engine-derived state. The structured cause is [`TerminalErrorKind`];
+    /// this is human context, never a payload.
     detail: String,
 }
 
@@ -313,18 +410,19 @@ pub enum TerminalErrorKind {
 /// about what the control plane will record and the lifecycle reconciler's
 /// match is exhaustive against them from day one.
 ///
-/// # Additive note (step 01-01)
+/// # The durable terminal surface (step 01-03)
 ///
-/// This type lands ALONGSIDE the still-present [`WorkflowResult`]; the
-/// migration of `ObservationRow::WorkflowTerminal` / the journal `Terminal`
-/// command from `WorkflowResult` to `WorkflowStatus` is a later slice
-/// (ADR-0065 §3). Nothing consumes it yet.
+/// `ObservationRow::WorkflowTerminal` and the journal `Terminal` command
+/// both carry a `WorkflowStatus` (the prior contentless terminal enum was
+/// deleted in the same step). The engine projects the body's
+/// `Result<Output, TerminalError>` here; the workflow-lifecycle reconciler
+/// observes `Some(status)` to converge the instance (ADR-0065 §3).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum WorkflowStatus {
     /// The body returned `Ok(Output)`. Carries the erased CBOR `Output` bytes
-    /// (the workflow's real output — replaces the contentless
-    /// `WorkflowResult::Success`).
+    /// (the workflow's real output — the contentful replacement for the
+    /// pre-ADR-0065 contentless success terminal).
     Completed {
         /// The CBOR-encoded `Output` the body produced (opaque to the
         /// engine; the consumer decodes into the workflow's typed `Output`).

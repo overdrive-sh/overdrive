@@ -282,7 +282,7 @@ struct Inner {
     workflow_terminals: std::sync::Mutex<
         std::collections::BTreeMap<
             overdrive_core::id::CorrelationKey,
-            overdrive_core::workflow::WorkflowResult,
+            overdrive_core::workflow::WorkflowStatus,
         >,
     >,
     /// In-memory `workflow_signal` index, keyed by the
@@ -444,11 +444,11 @@ impl ObservationStore for LocalObservationStore {
         // re-write under the same key is a no-op-equivalent overwrite.
         // Done on the async side (not in the blocking redb task) because
         // it touches process-local state, not the database.
-        if let ObservationRow::WorkflowTerminal { correlation, result } = &row {
+        if let ObservationRow::WorkflowTerminal { correlation, status } = &row {
             #[allow(clippy::expect_used)]
             let mut index =
                 self.inner.workflow_terminals.lock().expect("workflow_terminals mutex poisoned");
-            index.insert(correlation.clone(), result.clone());
+            index.insert(correlation.clone(), status.clone());
         }
 
         // `Signal` (ADR-0064 §4): record the typed signal value in the
@@ -801,7 +801,7 @@ impl ObservationStore for LocalObservationStore {
     async fn workflow_terminal_rows(
         &self,
     ) -> Result<
-        Vec<(overdrive_core::id::CorrelationKey, overdrive_core::workflow::WorkflowResult)>,
+        Vec<(overdrive_core::id::CorrelationKey, overdrive_core::workflow::WorkflowStatus)>,
         ObservationStoreError,
     > {
         // Read the process-local in-memory terminal index (populated on

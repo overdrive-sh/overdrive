@@ -71,7 +71,7 @@ use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
+    TerminalError, Workflow, WorkflowCtx, WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
 use overdrive_sim::adapters::clock::SimClock;
@@ -125,14 +125,26 @@ impl EmittingWorkflow {
     fn spec() -> WorkflowStart {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
-            input: Vec::new(),
+            // `Input = ()`: CBOR of `()` so the adapter decodes it (an empty
+            // `Vec` would mint a MalformedInput terminal; ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
 
+/// CBOR-encode the unit `Input`.
+fn cbor_unit() -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    ciborium::into_writer(&(), &mut bytes).expect("CBOR-encode unit");
+    bytes
+}
+
 #[async_trait]
 impl Workflow for EmittingWorkflow {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // One durable step (the `ctx.run` await-point that precedes the
         // emit per the step's `ctx.run → ctx.emit_action → terminal`
         // shape), then the emit. The `ctx.run` effect is a transport send
@@ -149,15 +161,15 @@ impl Workflow for EmittingWorkflow {
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
         if sent.is_err() {
-            return WorkflowResult::Failed { reason: "run step failed".to_string() };
+            return Err(TerminalError::explicit("run step failed"));
         }
         // The workflow→cluster mutation: emit the second StartWorkflow on
         // the Action channel (→ the production drain → Raft). Exactly-once
         // across a crash (a recorded `ActionEmitted` makes a resumed run
         // NOT re-emit).
         match ctx.emit_action(self.emitted.clone()).await {
-            Ok(()) => WorkflowResult::Success,
-            Err(_) => WorkflowResult::Failed { reason: "emit failed".to_string() },
+            Ok(()) => Ok(()),
+            Err(_) => Err(TerminalError::explicit("emit failed")),
         }
     }
 }
@@ -201,15 +213,11 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
     };
 
     let mut registry = WorkflowRegistry::new();
-    registry.register(ProvisionRecord::spec().name, move || {
-        Box::new(ProvisionRecord::new(provision_target))
-    });
+    registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(provision_target));
     let emitted_for_factory = emitted_action.clone();
-    registry.register(EmittingWorkflow::spec().name, move || {
-        Box::new(EmittingWorkflow {
-            run_target: emit_run_target,
-            emitted: emitted_for_factory.clone(),
-        })
+    registry.register(EmittingWorkflow::spec().name, move || EmittingWorkflow {
+        run_target: emit_run_target,
+        emitted: emitted_for_factory.clone(),
     });
 
     // --- Real observation store (real redb) shared by the engine (writes
@@ -311,15 +319,15 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
     //     as tracked tasks; the drain → dispatch → start chain is
     //     async). A bounded poll: if the emitted Action were undrained
     //     (the gap this step closes), the second row would NEVER appear.
-    let second_result =
+    let second_status =
         await_terminal_row(obs.as_ref(), &second_correlation, Duration::from_secs(5))
             .await
             .expect("the emitted StartWorkflow must drive ProvisionRecord to a terminal row");
-    assert_eq!(
-        second_result,
-        WorkflowResult::Success,
-        "the second (emitted) workflow's terminal row must carry its terminal result — \
-         it ran ONLY because the emitted Action flowed through the production drain → dispatch"
+    assert!(
+        matches!(second_status, WorkflowStatus::Completed { .. }),
+        "the second (emitted) workflow's terminal row must carry a Completed status — \
+         it ran ONLY because the emitted Action flowed through the production drain → dispatch; \
+         got {second_status:?}"
     );
 
     // Exactly-once across replay: the emitted Action is dispatched once,
@@ -340,7 +348,7 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
 
 /// Poll the `WorkflowTerminal` observation surface until a row keyed by
 /// `correlation` appears, or `budget` elapses. Returns the terminal
-/// result on success, `None` on timeout. The poll is the honest shape for
+/// status on success, `None` on timeout. The poll is the honest shape for
 /// observing the async drain → dispatch → engine-start → terminal chain:
 /// the second workflow runs on a tracked engine task spawned by the drain
 /// task, so the row materialises after a bounded async delay, not
@@ -349,12 +357,12 @@ async fn await_terminal_row(
     obs: &dyn ObservationStore,
     correlation: &CorrelationKey,
     budget: Duration,
-) -> Option<WorkflowResult> {
+) -> Option<WorkflowStatus> {
     let deadline = Instant::now() + budget;
     loop {
         let terminals = obs.workflow_terminal_rows().await.expect("read terminal rows");
-        if let Some((_, result)) = terminals.iter().find(|(corr, _)| *corr == *correlation) {
-            return Some(result.clone());
+        if let Some((_, status)) = terminals.iter().find(|(corr, _)| *corr == *correlation) {
+            return Some(status.clone());
         }
         if Instant::now() >= deadline {
             return None;

@@ -89,7 +89,7 @@ pub mod reconcilers;
 // 01 / 04 / 05 / 08.
 pub mod service_lifecycle;
 pub mod traits;
-// `Workflow` trait + `WorkflowCtx` + `WorkflowResult` + `WorkflowStart` —
+// `Workflow` trait + `WorkflowCtx` + `WorkflowStatus` + `WorkflowStart` —
 // the durable-async §18 peer primitive to `Reconciler`. Trait-only in
 // core (no tokio); the async signature uses `async_trait`, all
 // non-determinism flows through `WorkflowCtx`'s injected ports. The
@@ -143,10 +143,15 @@ pub use wall_clock::UnixInstant;
 // boundary between reconciler-private View state and downstream
 // consumers.
 pub use transition_reason::{TerminalCondition, TransitionReason};
-// `workflow-result-error-model` step 01-01 (ADR-0065 §2/§3) — the two NEW
-// core value types land additively: `TerminalError` (the body's terminal-
-// failure channel) + `TerminalErrorKind` (its structured cause) +
-// `WorkflowStatus` (the engine-owned control-plane projection). They coexist
-// with the still-present `WorkflowResult` and the unchanged `Workflow` trait
-// (the reshape is a later slice).
-pub use workflow::{TerminalError, TerminalErrorKind, WorkflowStatus};
+// `workflow-result-error-model` (ADR-0065 §1/§2/§3) — the typed workflow
+// terminal model. `TerminalError` (the body's terminal-failure channel) +
+// `TerminalErrorKind` (its structured cause) + `WorkflowStatus` (the
+// engine-owned control-plane projection of the body's `Result<Output,
+// TerminalError>` plus the engine-authored cancel/timeout terminals). Step
+// 01-03 reshaped `Workflow::run` to `-> Result<Output, TerminalError>`,
+// added the object-safe `ErasedWorkflow` + `ErasedWorkflowAdapter` erasure,
+// and DELETED the old contentless terminal enum (the contentless success
+// is now `WorkflowStatus::Completed { output }` carrying the erased CBOR).
+pub use workflow::{
+    ErasedWorkflow, ErasedWorkflowAdapter, TerminalError, TerminalErrorKind, WorkflowStatus,
+};

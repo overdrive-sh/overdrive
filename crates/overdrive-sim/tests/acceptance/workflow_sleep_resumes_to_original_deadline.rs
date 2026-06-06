@@ -31,7 +31,7 @@ use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::testing::workflow::ProvisionRecordWithSleep;
 use overdrive_core::traits::Clock;
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowResult};
+use overdrive_core::workflow::{JournalCursor, TerminalError, WorkflowCtx};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -66,13 +66,14 @@ async fn ctx_on(
 }
 
 /// Drive `ProvisionRecordWithSleep`'s author body against `ctx`. Returns
-/// the terminal `WorkflowResult` once the sleep park resolves.
-async fn run_body(ctx: WorkflowCtx) -> WorkflowResult {
+/// the terminal `Result<(), TerminalError>` once the sleep park resolves.
+async fn run_body(ctx: WorkflowCtx) -> Result<(), TerminalError> {
     use overdrive_core::workflow::Workflow;
     let pre: SocketAddr = PRE_TARGET.parse().expect("pre addr");
     let post: SocketAddr = POST_TARGET.parse().expect("post addr");
     let workflow = ProvisionRecordWithSleep::new(pre, post, SLEEP);
-    workflow.run(&ctx).await
+    // `Input = ()` — the reference fixture takes no typed input.
+    workflow.run(&ctx, ()).await
 }
 
 /// Count datagrams currently sitting in `inbox` without blocking past the
@@ -179,7 +180,7 @@ async fn post_sleep_step_fires_only_at_or_after_the_original_deadline_regardless
         .await
         .expect("resume body resolves once logical time reaches the original deadline")
         .expect("body task");
-    assert_eq!(terminal, WorkflowResult::Success, "the resumed run terminates Success");
+    assert_eq!(terminal, Ok(()), "the resumed run terminates Ok(())");
     assert_eq!(
         delivered_count(&mut resume_post).await,
         1,

@@ -34,7 +34,7 @@ use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkflowInstanceState,
     WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
 };
-use overdrive_core::workflow::{WorkflowName, WorkflowResult, WorkflowStart};
+use overdrive_core::workflow::{WorkflowName, WorkflowStart, WorkflowStatus};
 
 fn fresh_tick(now: Instant) -> TickContext {
     TickContext {
@@ -167,7 +167,9 @@ fn lifecycle_reconciler_converges_on_observed_terminal() {
             spec,
             running_in_intent: true,
             has_live_task: false,
-            terminal: Some(WorkflowResult::Success),
+            // A converged instance — `terminal.is_some()` is what suppresses
+            // re-emit; the specific Completed output is immaterial here.
+            terminal: Some(WorkflowStatus::Completed { output: Vec::new() }),
         },
     );
     let desired = AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances });

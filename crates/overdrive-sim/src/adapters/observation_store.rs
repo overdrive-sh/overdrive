@@ -63,7 +63,7 @@ use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationSubscription, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
 };
-use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowResult};
+use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
@@ -583,21 +583,21 @@ impl ObservationStore for SimObservationStore {
 
     async fn workflow_terminal_rows(
         &self,
-    ) -> Result<Vec<(CorrelationKey, WorkflowResult)>, ObservationStoreError> {
+    ) -> Result<Vec<(CorrelationKey, WorkflowStatus)>, ObservationStoreError> {
         // `WorkflowTerminal` rows are accepted unconditionally and pushed
         // to the `rows` log (see `PeerState::apply`). A crash-resume can
         // re-write the same instance's terminal under the same stable
         // correlation key, so collapse to one entry per correlation
-        // (last-write-wins on log order; the result is identical on
+        // (last-write-wins on log order; the status is identical on
         // idempotent re-write). Collected into a `BTreeMap` for
         // deterministic iteration per `.claude/rules/development.md`
         // § "Ordered-collection choice".
-        let mut by_correlation: BTreeMap<CorrelationKey, WorkflowResult> = BTreeMap::new();
+        let mut by_correlation: BTreeMap<CorrelationKey, WorkflowStatus> = BTreeMap::new();
         {
             let rows = self.inner.rows.lock();
             for row in rows.iter() {
-                if let ObservationRow::WorkflowTerminal { correlation, result } = row {
-                    by_correlation.insert(correlation.clone(), result.clone());
+                if let ObservationRow::WorkflowTerminal { correlation, status } = row {
+                    by_correlation.insert(correlation.clone(), status.clone());
                 }
             }
         }

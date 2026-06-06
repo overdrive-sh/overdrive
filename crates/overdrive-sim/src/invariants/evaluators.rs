@@ -50,7 +50,7 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{
-    JournalCursor, SignalValue, WorkflowCtx, WorkflowResult, WorkflowStart,
+    JournalCursor, SignalValue, WorkflowCtx, WorkflowStart, WorkflowStatus,
 };
 
 use overdrive_control_plane::journal::{
@@ -664,7 +664,7 @@ async fn provision_engine(
     let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
 
     let mut registry = WorkflowRegistry::new();
-    registry.register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+    registry.register(ProvisionRecord::spec().name, move || ProvisionRecord::new(target));
 
     let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
     (engine, inbox)
@@ -680,7 +680,7 @@ async fn delivered_count(inbox: &mut SimInbox) -> usize {
     count
 }
 
-/// Drain the terminal `WorkflowResult` for `correlation` off a
+/// Drain the terminal `WorkflowStatus` for `correlation` off a
 /// subscription that was taken BEFORE the engine drove the workflow to
 /// terminal. `SimObservationStore::subscribe_all` returns a LIVE
 /// broadcast stream (it does NOT replay a snapshot — `WorkflowTerminal`
@@ -690,14 +690,14 @@ async fn delivered_count(inbox: &mut SimInbox) -> usize {
 async fn drain_terminal(
     subscription: &mut overdrive_core::traits::observation_store::ObservationSubscription,
     correlation: &CorrelationKey,
-) -> Option<WorkflowResult> {
+) -> Option<WorkflowStatus> {
     use futures::StreamExt;
     for _ in 0..32 {
         match tokio::time::timeout(Duration::from_millis(100), subscription.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, result }))
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
                 if &got == correlation =>
             {
-                return Some(result);
+                return Some(status);
             }
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => break,
@@ -708,7 +708,7 @@ async fn drain_terminal(
 
 /// Drive an uninterrupted `ProvisionRecord` run to terminal through the
 /// engine; return the loaded journal trajectory + terminal result.
-async fn run_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResult>) {
+async fn run_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowStatus>) {
     let (correlation, workflow_id, spec) = provision_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
@@ -792,7 +792,7 @@ async fn provision_write_step(ctx: &WorkflowCtx, target: SocketAddr) -> Result<u
 /// Drives the three-run crash-resume shape (ADR-0064 §3): uninterrupted,
 /// crash-injected, resumed-from-journal. Asserts the resumed trajectory is
 /// byte-identical to the uninterrupted one AND the resumed run reaches a
-/// terminal `WorkflowResult` (bounded progress).
+/// terminal `WorkflowStatus` (bounded progress).
 #[must_use]
 pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> InvariantResult {
     let name = "replay-equivalence-provision-record";
@@ -801,7 +801,7 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     // (1) Uninterrupted run — the reference trajectory.
     let (uninterrupted, uninterrupted_terminal) = run_uninterrupted(seed).await;
     let Some(uninterrupted_terminal) = uninterrupted_terminal else {
-        return fail("uninterrupted run did not reach a terminal WorkflowResult".to_owned());
+        return fail("uninterrupted run did not reach a terminal WorkflowStatus".to_owned());
     };
 
     // (2) Crash-injected run on a fresh shared journal — records step 0,
@@ -848,7 +848,7 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     // assert_eventually!(is_terminal): the resumed run reached terminal.
     let Some(resumed_terminal) = drain_terminal(&mut resume_sub, &correlation).await else {
         return fail(
-            "resumed run did not reach a terminal WorkflowResult (no bounded progress)".to_owned(),
+            "resumed run did not reach a terminal WorkflowStatus (no bounded progress)".to_owned(),
         );
     };
 
@@ -956,10 +956,10 @@ fn provision_signal_engine(
 
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecordWithSignalEmit::spec().name, || {
-        Box::new(ProvisionRecordWithSignalEmit::new(
+        ProvisionRecordWithSignalEmit::new(
             ProvisionRecordWithSignalEmit::signal_key(),
             Action::Noop,
-        ))
+        )
     });
 
     let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
@@ -1004,7 +1004,7 @@ async fn drive_signal_to_terminal(
 
 /// Drive an uninterrupted `ProvisionRecordWithSignalEmit` run to terminal;
 /// return the loaded journal trajectory + terminal result.
-async fn run_signal_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResult>) {
+async fn run_signal_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowStatus>) {
     let (correlation, workflow_id, spec) = provision_signal_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
@@ -1153,7 +1153,7 @@ async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String
 
     let Some(resumed_terminal) = drain_terminal(&mut resume_sub, &correlation).await else {
         return Some(
-            "resumed signal+emit run did not reach a terminal WorkflowResult (no bounded progress)"
+            "resumed signal+emit run did not reach a terminal WorkflowStatus (no bounded progress)"
                 .to_owned(),
         );
     };
@@ -1189,8 +1189,8 @@ async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String
 fn assert_signal_replay_equivalence(
     resumed: &[LoadedEntry],
     uninterrupted: &[LoadedEntry],
-    resumed_terminal: &WorkflowResult,
-    uninterrupted_terminal: &WorkflowResult,
+    resumed_terminal: &WorkflowStatus,
+    uninterrupted_terminal: &WorkflowStatus,
 ) -> Option<String> {
     if !entry_kinds_match(resumed, uninterrupted) {
         return Some(format!(
@@ -1297,7 +1297,7 @@ async fn provision_sleep_engine(
 
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecordWithSleep::spec().name, move || {
-        Box::new(ProvisionRecordWithSleep::new(pre, post, WF_SLEEP))
+        ProvisionRecordWithSleep::new(pre, post, WF_SLEEP)
     });
 
     let engine = WorkflowEngine::new(journal, clock, transport, entropy, registry, obs);
@@ -1385,7 +1385,7 @@ async fn run_until_crash_in_sleep(
 
 /// Drive an uninterrupted `ProvisionRecordWithSleep` run to terminal through
 /// the engine; return the loaded journal trajectory + terminal result.
-async fn run_sleep_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResult>) {
+async fn run_sleep_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowStatus>) {
     let (correlation, workflow_id, spec) = provision_sleep_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
@@ -1481,7 +1481,7 @@ async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
 
     let Some(resumed_terminal) = drain_terminal(&mut resume_sub, &correlation).await else {
         return Some(
-            "resumed sleep run did not reach a terminal WorkflowResult (no bounded progress)"
+            "resumed sleep run did not reach a terminal WorkflowStatus (no bounded progress)"
                 .to_owned(),
         );
     };
@@ -3893,9 +3893,16 @@ mod tests {
         })
     }
 
-    /// A `Terminal` command carrying the full `WorkflowResult`.
-    fn terminal(result: WorkflowResult) -> LoadedEntry {
-        LoadedEntry::Command(JournalCommand::Terminal { result })
+    /// A `Terminal` command carrying a `WorkflowStatus::Completed` with an
+    /// empty erased `Output` — the contentless-success terminal the
+    /// reference `ProvisionRecord` fixture (`Output = ()`) projects to under
+    /// the migrated terminal model (ADR-0065 §3). These guard tests compare
+    /// entry-KIND sequences, so the opaque `output` bytes are immaterial; an
+    /// empty `Vec` keeps the fixture minimal.
+    fn terminal() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::Terminal {
+            status: WorkflowStatus::Completed { output: Vec::new() },
+        })
     }
 
     /// A `SignalAwaited` command for `key`.
@@ -3925,11 +3932,7 @@ mod tests {
 
     #[test]
     fn b_guard_passes_when_both_runs_begin_with_started_and_sequences_match() {
-        let uninterrupted = vec![
-            started(),
-            run_result("provision-write", b"ok"),
-            terminal(WorkflowResult::Success),
-        ];
+        let uninterrupted = vec![started(), run_result("provision-write", b"ok"), terminal()];
         let resumed = uninterrupted.clone();
         assert_eq!(
             assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted),
@@ -3943,12 +3946,8 @@ mod tests {
         // The TRAP: the resumed run's command sequence does NOT begin with
         // `Started` (a dropped engine.start Started write). The guard MUST
         // fail.
-        let uninterrupted = vec![
-            started(),
-            run_result("provision-write", b"ok"),
-            terminal(WorkflowResult::Success),
-        ];
-        let resumed = vec![run_result("provision-write", b"ok"), terminal(WorkflowResult::Success)];
+        let uninterrupted = vec![started(), run_result("provision-write", b"ok"), terminal()];
+        let resumed = vec![run_result("provision-write", b"ok"), terminal()];
         let cause =
             assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
                 .expect("a resumed run missing Started at index 0 MUST fail the guard");
@@ -3963,16 +3962,12 @@ mod tests {
         // Both open with Started, but the resumed sequence diverges (an extra
         // command). The full-sequence equality MUST fail (the narrow prior
         // "recorded RunResult matches" equality would have missed this).
-        let uninterrupted = vec![
-            started(),
-            run_result("provision-write", b"ok"),
-            terminal(WorkflowResult::Success),
-        ];
+        let uninterrupted = vec![started(), run_result("provision-write", b"ok"), terminal()];
         let resumed = vec![
             started(),
             run_result("provision-write", b"ok"),
             run_result("extra", b"x"),
-            terminal(WorkflowResult::Success),
+            terminal(),
         ];
         let cause =
             assert_started_at_index_0_and_command_sequence_identical(&resumed, &uninterrupted)
@@ -3997,7 +3992,7 @@ mod tests {
             signal_awaited(&key),
             signal_seen(&key), // the notification — off the walk
             action_emitted(),
-            terminal(WorkflowResult::Success),
+            terminal(),
         ];
         assert_eq!(
             assert_notification_not_as_command(&run).await,
@@ -4012,12 +4007,7 @@ mod tests {
         // exercises the off-the-walk lookup — it does NOT vacuously pass a
         // notification-free run (which would be a meaningless green).
         let key = sig_key();
-        let run = vec![
-            started(),
-            signal_awaited(&key),
-            action_emitted(),
-            terminal(WorkflowResult::Success),
-        ];
+        let run = vec![started(), signal_awaited(&key), action_emitted(), terminal()];
         let cause = assert_notification_not_as_command(&run)
             .await
             .expect("a run with no off-the-walk notification MUST NOT pass the guard");
@@ -4043,7 +4033,7 @@ mod tests {
             signal_awaited(&awaited_key),
             signal_seen(&other_key), // present, but keyed to a DIFFERENT signal
             action_emitted(),
-            terminal(WorkflowResult::Success),
+            terminal(),
         ];
         let cause = assert_notification_not_as_command(&run)
             .await

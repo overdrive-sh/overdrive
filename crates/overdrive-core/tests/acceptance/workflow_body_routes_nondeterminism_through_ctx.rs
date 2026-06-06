@@ -240,14 +240,16 @@ fn workflow_body_smuggling_non_ctx_nondeterminism_is_rejected() {
         use async_trait::async_trait;
         #[async_trait]
         impl Workflow for ProvisionRecord {
-            async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+            type Output = ();
+            type Input = ();
+            async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
                 let _now = std::time::Instant::now();
                 let _sys = std::time::SystemTime::now();
                 let _roll = rand::random::<u64>();
                 let _rng = rand::thread_rng();
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 let _ = reqwest::get("http://example.com").await;
-                WorkflowResult::Success
+                Ok(())
             }
         }
     "#;

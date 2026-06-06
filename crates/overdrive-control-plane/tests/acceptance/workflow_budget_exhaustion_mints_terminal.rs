@@ -17,8 +17,8 @@
 //!
 //! # Why NEW
 //!
-//! The retryable-vs-terminal taxonomy is structurally new: `WorkflowResult::
-//! Failed { reason }` collapsed retryable and terminal into one
+//! The retryable-vs-terminal taxonomy is structurally new: the prior
+//! contentless terminal model collapsed retryable and terminal into one
 //! body-authored variant (the anti-pattern the four-platform research
 //! refutes). The engine-OWNED retry budget (journal-`RetryAttempted`-derived
 //! attempts + engine-constant policy, NOT the body, NOT a reconciler `View`

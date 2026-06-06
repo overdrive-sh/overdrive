@@ -206,39 +206,35 @@ mod acceptance {
     // are DST-testable and dst-lint-clean. Layer 1, PBT-full per Mandate 9.
     mod ca_cert_spec_policy;
     // workflow-primitive DISTILL (GH #39, J-PLAT-005) — slice-01 author-
-    // surface RED scaffolds per
+    // surface scenarios per
     // `docs/feature/workflow-primitive/distill/test-scenarios.md`
-    // (S-WP-01-01/02/03). The `Workflow` trait + `WorkflowCtx` +
-    // `WorkflowResult` land in `overdrive-core::workflow` during DELIVER
-    // slice 01 (ADR-0064 §1); these scaffolds are `#[should_panic
-    // (expected = "RED scaffold")]` and import no unbuilt production type.
+    // (S-WP-01-01/02/03). The `Workflow` trait + `WorkflowCtx` landed in
+    // `overdrive-core::workflow` (ADR-0064 §1). These tests were MIGRATED in
+    // `workflow-result-error-model` step 01-03 to the reshaped trait
+    // (`run(ctx, input) -> Result<Output, TerminalError>`); the two
+    // syn-scan tests carry an embedded example body in the new shape.
     mod workflow_body_has_no_step_machine;
     mod workflow_body_routes_nondeterminism_through_ctx;
     mod workflow_ctx_run_and_sleep;
     mod workflow_trait_drives_to_terminal;
 
-    // workflow-result-error-model DISTILL (ADR-0065; resolves #217) — NEW
-    // RED scaffold for the genuinely-new author-edge behaviour the reshape
-    // introduces: a NON-UNIT typed `Output` (and typed `Input`) crossing
-    // the `ErasedWorkflowAdapter<W>` CBOR-erasure boundary and decoding
-    // back equal (D1, object safety via typed-edge / CBOR-erased-interior).
-    // `#[should_panic(expected = "RED scaffold")]` — imports no unbuilt
-    // type; DELIVER Slice 01 replaces the panic with the real adapter
-    // roundtrip (and promotes the output property to `proptest!`). The
-    // 4 existing `workflow_*` core tests above MIGRATE (fixture signature
-    // `run(ctx) -> WorkflowResult` → `run(ctx, ()) -> Result<(),
-    // TerminalError>`); their migration is DELIVER work (the compiler
-    // breaks them at the contract change).
+    // workflow-result-error-model step 01-03 (ADR-0065 § 1; resolves #217) —
+    // the genuinely-new author-edge behaviour the reshape introduces: a
+    // NON-UNIT typed `Output` (and typed `Input`) crossing the
+    // `ErasedWorkflowAdapter<W>` CBOR-erasure boundary and decoding back
+    // equal (D1, object safety via typed-edge / CBOR-erased-interior). The
+    // output side is a `proptest!` over a domain `Output` strategy; the
+    // input side pins the decode half. ACTIVATED in step 01-03 (the DISTILL
+    // `#[should_panic]` scaffolds replaced with the real adapter roundtrip).
     mod workflow_typed_output_roundtrip; // NEW-1 / D1
 
-    // workflow-result-error-model DELIVER step 01-01 (ADR-0065 §2/§3) —
-    // the two NEW core value types land ADDITIVELY alongside the still-
-    // present `WorkflowResult`: `TerminalError { kind, detail }` (the body's
-    // terminal-failure channel) + `WorkflowStatus` (the engine-owned
+    // workflow-result-error-model DELIVER step 01-01 (ADR-0065 §2/§3) — the
+    // typed terminal value types: `TerminalError { kind, detail }` (the
+    // body's terminal-failure channel) + `WorkflowStatus` (the engine-owned
     // control-plane projection). Property: every publicly-constructible
     // `TerminalError` and every `WorkflowStatus` variant round-trips
     // byte-equal through CBOR serde (they ride the journal `Terminal`
-    // command + terminal observation row as inputs). The `Workflow` trait
-    // and `WorkflowResult` are UNCHANGED at this step (reshape is 01-03).
+    // command + terminal observation row as inputs). Step 01-03 reshaped the
+    // `Workflow` trait and deleted the prior contentless terminal enum.
     mod terminal_error_and_workflow_status_roundtrip;
 }

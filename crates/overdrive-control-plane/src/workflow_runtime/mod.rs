@@ -41,9 +41,14 @@
 //! `SignalAwaited` command with no matching `SignalSeen` notification
 //! re-blocks (the "crashed while blocked" shape, now structural).
 //!
-//! On `run` returning a [`WorkflowResult`], the engine appends a
-//! [`JournalCommand::Terminal`] recording the canonical result string —
-//! the durable terminal surface for slice 01.
+//! The engine drives the object-safe [`ErasedWorkflow::run_erased`] over
+//! the start intent's opaque `input` bytes (the typed `Workflow` is
+//! erased to it by the [`ErasedWorkflowAdapter`] in the registry). On a
+//! terminal it projects the body's `Result<Vec<u8>, TerminalError>` to a
+//! [`WorkflowStatus`] — `Ok(bytes)` → `Completed { output: bytes }`,
+//! `Err(terminal)` → `Failed { terminal }` — and appends a
+//! [`JournalCommand::Terminal`] recording that status (ADR-0065 §3), the
+//! durable terminal surface for slice 01.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
@@ -62,8 +67,8 @@ use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    JournalCursor, SignalKey, SignalValue, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName,
-    WorkflowResult, WorkflowStart,
+    ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, SignalKey, SignalValue, TerminalError,
+    Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
@@ -85,15 +90,22 @@ pub type ActionEmitSender = mpsc::UnboundedSender<Action>;
 /// `ctx.emit_action`.
 pub type ActionEmitReceiver = mpsc::UnboundedReceiver<Action>;
 
-/// A factory producing a fresh [`Workflow`] trait object on demand. The
-/// engine resolves a [`WorkflowStart`]'s [`WorkflowName`] to one of these
-/// and calls it to obtain a fresh instance to drive.
-pub type WorkflowFactory = Box<dyn Fn() -> Box<dyn Workflow> + Send + Sync>;
+/// A factory producing a fresh object-safe [`ErasedWorkflow`] on demand.
+/// The engine resolves a [`WorkflowStart`]'s [`WorkflowName`] to one of
+/// these and calls it to obtain a fresh erased instance to drive
+/// (ADR-0065 §1).
+///
+/// The trait object is `ErasedWorkflow` (not [`Workflow`]) because
+/// `Workflow`'s associated `Input` / `Output` make it not object-safe;
+/// [`WorkflowRegistry::register`] wraps the author's TYPED workflow in an
+/// [`ErasedWorkflowAdapter`] internally, so the author never writes the
+/// erasure.
+pub type WorkflowFactory = Box<dyn Fn() -> Box<dyn ErasedWorkflow> + Send + Sync>;
 
 /// Maps a [`WorkflowName`] (the workflow *kind*) to its author-supplied
-/// [`Workflow`] factory. The composition root registers every first-party
+/// workflow factory. The composition root registers every first-party
 /// workflow here at boot; the engine looks up `spec.name` on each
-/// `StartWorkflow`.
+/// `StartWorkflow` and drives the resolved [`ErasedWorkflow`].
 ///
 /// `BTreeMap` per `.claude/rules/development.md` § "Ordered-collection
 /// choice" — the registry is small and point-accessed, but keeping it
@@ -110,19 +122,28 @@ impl WorkflowRegistry {
         Self { factories: BTreeMap::new() }
     }
 
-    /// Register `factory` under `name`. A later `StartWorkflow` carrying a
-    /// spec with this name drives a fresh instance from `factory`.
-    /// Re-registering the same name replaces the prior factory.
-    pub fn register<F>(&mut self, name: WorkflowName, factory: F)
+    /// Register a TYPED [`Workflow`] factory under `name`. A later
+    /// `StartWorkflow` carrying a spec with this name drives a fresh
+    /// instance from `factory`. Re-registering the same name replaces the
+    /// prior factory.
+    ///
+    /// The caller hands a `Fn() -> W` for a concrete `W: Workflow`; this
+    /// wraps each produced instance in an [`ErasedWorkflowAdapter`] so the
+    /// engine drives the object-safe [`ErasedWorkflow`] surface (ADR-0065
+    /// §1). The author NEVER writes the erasure — registering a typed
+    /// workflow is the whole contract.
+    pub fn register<W, F>(&mut self, name: WorkflowName, factory: F)
     where
-        F: Fn() -> Box<dyn Workflow> + Send + Sync + 'static,
+        W: Workflow + 'static,
+        F: Fn() -> W + Send + Sync + 'static,
     {
-        self.factories.insert(name, Box::new(factory));
+        self.factories.insert(name, Box::new(move || Box::new(ErasedWorkflowAdapter(factory()))));
     }
 
-    /// Resolve a fresh [`Workflow`] for `name`, or `None` if unregistered.
+    /// Resolve a fresh [`ErasedWorkflow`] for `name`, or `None` if
+    /// unregistered.
     #[must_use]
-    pub fn resolve(&self, name: &WorkflowName) -> Option<Box<dyn Workflow>> {
+    pub fn resolve(&self, name: &WorkflowName) -> Option<Box<dyn ErasedWorkflow>> {
         self.factories.get(name).map(|factory| factory())
     }
 }
@@ -315,10 +336,10 @@ impl WorkflowEngine {
         //
         // On the short-circuit we ONLY re-publish the terminal observation
         // row (idempotent under the instance `CorrelationKey`) from the
-        // journal's FULL `WorkflowResult` — losslessly, including a
-        // `Failed`'s `reason`. We do NOT write `Started`, build the cursor,
-        // spawn the body, or insert into `live_instances`: the instance is
-        // TERMINAL, not live, and the reconciler converges on
+        // journal's FULL `WorkflowStatus` — losslessly, including a
+        // `Failed`'s structured `TerminalError`. We do NOT write `Started`,
+        // build the cursor, spawn the body, or insert into `live_instances`:
+        // the instance is TERMINAL, not live, and the reconciler converges on
         // `terminal.is_some()` (never on `has_live_task` once a terminal
         // exists), so no live entry is needed and inserting one would leak.
         // The obs write carries the SAME non-fatal `tracing::error!`
@@ -326,8 +347,8 @@ impl WorkflowEngine {
         // surfaced and the cheap idempotent re-publish is retried next tick;
         // the journal is NOT touched (no append), so it halts at exactly one
         // `Terminal`.
-        if let Some(result) = terminal_result(&replay_buffer) {
-            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), result };
+        if let Some(status) = terminal_status(&replay_buffer) {
+            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), status };
             if let Err(err) = self.obs.write(row).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -383,6 +404,13 @@ impl WorkflowEngine {
         let obs = Arc::clone(&self.obs);
         let correlation = correlation.clone();
         let workflow_id = workflow_id.clone();
+        // The opaque CBOR `input` bytes the erased body decodes into its
+        // typed `Input` (ADR-0065 §1). Cloned into the spawned task; the
+        // engine never interprets them — the `ErasedWorkflowAdapter` is the
+        // sole decode site. On a malformed input the adapter returns
+        // `Err(TerminalError::malformed_input)` and the typed body is never
+        // entered (mapped to `Failed` like any other terminal failure).
+        let input_bytes = spec.input.clone();
 
         // Mark this instance live BEFORE spawning so a hydrate_actual that
         // races the spawn sees the instance as running (has_live_task =
@@ -411,6 +439,14 @@ impl WorkflowEngine {
             // (leading underscore) keeps it alive until end-of-scope without
             // an "unused" warning; its `Drop` does the live-instance removal.
             let _teardown = teardown;
+            // Drive the object-safe erased body over the opaque input bytes
+            // and PROJECT the outcome to a `WorkflowStatus` (ADR-0065 §3):
+            //   - `Ok(bytes)`            → `Completed { output: bytes }`
+            //   - `Err(terminal)`        → `Failed { terminal }`  (the body's
+            //                              authored failure OR the adapter's
+            //                              MalformedInput / OutputEncode)
+            //   - panic (catch_unwind)   → `Failed { TerminalError::explicit }`
+            //
             // Contain a panic in the UNTRUSTED author `run` future. Without
             // this, a panic unwinds past the terminal-write below and the
             // JoinSet absorbs it (production never `join_next`s) — the
@@ -418,13 +454,16 @@ impl WorkflowEngine {
             // live entry: the workflow-lifecycle reconciler then sees
             // "running-in-intent, no terminal" and cannot converge. Mapping
             // the panic to `Failed` runs the EXISTING terminal-write path, so
-            // the reconciler converges. The `reason` is derived ONLY from the
-            // deterministic downcast payload (never the address-bearing raw
-            // box) so the terminal string stays stable across runs.
-            let result = match AssertUnwindSafe(workflow.run(&ctx)).catch_unwind().await {
-                Ok(terminal) => terminal,
+            // the reconciler converges. The detail is derived ONLY from the
+            // deterministic downcast payload (the &str / String panic message,
+            // NEVER the address-bearing raw box) so the durable terminal stays
+            // byte-stable across runs — closing the ADR-0064 §3 hazard.
+            let run = AssertUnwindSafe(workflow.run_erased(&ctx, &input_bytes)).catch_unwind();
+            let status = match run.await {
+                Ok(Ok(output)) => WorkflowStatus::Completed { output },
+                Ok(Err(terminal)) => WorkflowStatus::Failed { terminal },
                 Err(panic) => {
-                    let reason = panic
+                    let detail = panic
                         .downcast_ref::<&str>()
                         .map(|s| (*s).to_string())
                         .or_else(|| panic.downcast_ref::<String>().cloned())
@@ -432,21 +471,22 @@ impl WorkflowEngine {
                     tracing::error!(
                         target: "overdrive::workflow_engine",
                         workflow_id = %workflow_id,
-                        reason = %reason,
+                        detail = %detail,
                         "workflow run panicked; converging instance to Failed terminal",
                     );
-                    WorkflowResult::Failed { reason }
+                    WorkflowStatus::Failed { terminal: TerminalError::explicit(&detail) }
                 }
             };
             // Durable terminal record (slice-01 terminal surface,
-            // ADR-0064 §2 / §3): append the FULL `WorkflowResult` via the
+            // ADR-0064 §2 / §3): append the FULL `WorkflowStatus` via the
             // sanctioned journal path — not a lossy label — so a resumed
             // run reads back the exact terminal (including a `Failed`'s
-            // `reason`) and the start-time short-circuit can re-publish the
-            // terminal observation row losslessly without re-running the
-            // body. A real failure to append is surfaced via tracing.
+            // structured `TerminalError`) and the start-time short-circuit can
+            // re-publish the terminal observation row losslessly without
+            // re-running the body. A real failure to append is surfaced via
+            // tracing.
             let terminal =
-                LoadedEntry::Command(JournalCommand::Terminal { result: result.clone() });
+                LoadedEntry::Command(JournalCommand::Terminal { status: status.clone() });
             if let Err(err) = journal.append(&workflow_id, &terminal).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -455,15 +495,15 @@ impl WorkflowEngine {
                     "failed to append workflow Terminal journal entry",
                 );
             }
-            // Terminal-result OBSERVATION row (slice-01 AC5, ADR-0064 §2):
+            // Terminal-status OBSERVATION row (slice-01 AC5, ADR-0064 §2):
             // write the terminal through the sanctioned `ObservationStore`
             // write path — NOT a direct bypass of the channels — keyed by
             // the instance `CorrelationKey` so the workflow-lifecycle
-            // reconciler finds the result deterministically next tick and
+            // reconciler finds the status deterministically next tick and
             // converges the instance. A write failure is surfaced via
             // tracing; the next resume re-drives `run` and re-writes the
             // row (the key is stable, so the re-write is idempotent).
-            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), result };
+            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), status };
             if let Err(err) = obs.write(row).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -577,7 +617,7 @@ fn run_has_started(loaded: &[LoadedEntry]) -> bool {
     loaded.iter().any(|entry| matches!(entry, LoadedEntry::Command(_)))
 }
 
-/// The full [`WorkflowResult`] from a `JournalCommand::Terminal` in the
+/// The full [`WorkflowStatus`] from a `JournalCommand::Terminal` in the
 /// loaded run, if the instance has already reached a durable terminal.
 ///
 /// This is the terminal-short-circuit guard for resume
@@ -586,12 +626,12 @@ fn run_has_started(loaded: &[LoadedEntry]) -> bool {
 /// it would re-run the author body AND (since `JournalStore::append` is
 /// append-only, no dedup) append a SECOND `Terminal`, growing the
 /// GC-less journal unboundedly. `start` short-circuits when this returns
-/// `Some`. Returns the cloned full result so the obs terminal row can be
-/// re-published losslessly (including a `Failed`'s `reason`) without
-/// reconstructing it from a lossy label.
-fn terminal_result(loaded: &[LoadedEntry]) -> Option<WorkflowResult> {
+/// `Some`. Returns the cloned full status so the obs terminal row can be
+/// re-published losslessly (including a `Failed`'s structured
+/// `TerminalError`) without reconstructing it from a lossy label.
+fn terminal_status(loaded: &[LoadedEntry]) -> Option<WorkflowStatus> {
     loaded.iter().find_map(|entry| match entry {
-        LoadedEntry::Command(JournalCommand::Terminal { result }) => Some(result.clone()),
+        LoadedEntry::Command(JournalCommand::Terminal { status }) => Some(status.clone()),
         _ => None,
     })
 }

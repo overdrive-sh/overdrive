@@ -214,7 +214,9 @@ fn step_machine_check_rejects_a_hand_rolled_step_cursor_body() {
         use async_trait::async_trait;
         #[async_trait]
         impl Workflow for ProvisionRecord {
-            async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult {
+            type Output = ();
+            type Input = ();
+            async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
                 enum Step {
                     Provision,
                     Done,
@@ -226,7 +228,7 @@ fn step_machine_check_rejects_a_hand_rolled_step_cursor_body() {
                             cursor = Step::Done;
                         }
                         Step::Done => {
-                            return WorkflowResult::Success;
+                            return Ok(());
                         }
                     }
                 }

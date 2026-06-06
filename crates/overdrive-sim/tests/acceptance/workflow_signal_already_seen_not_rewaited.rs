@@ -37,7 +37,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::transport::Transport as TransportTrait;
-use overdrive_core::workflow::{SignalValue, WorkflowResult};
+use overdrive_core::workflow::{SignalValue, WorkflowStatus};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -56,10 +56,10 @@ fn build_engine(
     let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(SEED));
     let mut registry = WorkflowRegistry::new();
     registry.register(ProvisionRecordWithSignalEmit::spec().name, || {
-        Box::new(ProvisionRecordWithSignalEmit::new(
+        ProvisionRecordWithSignalEmit::new(
             ProvisionRecordWithSignalEmit::signal_key(),
             Action::Noop,
-        ))
+        )
     });
     WorkflowEngine::new(journal, clock, transport, entropy, registry, obs)
 }
@@ -163,13 +163,14 @@ async fn a_signal_seen_before_the_crash_is_not_rewaited_on_resume() {
     engine_b.join_all().await;
     let _ = ticker_b.await;
 
-    // OBSERVABLE — the resumed run reached terminal Success WITHOUT a live
-    // signal row: the recorded SignalSeen value was replayed, not re-read.
+    // OBSERVABLE — the resumed run reached a Completed terminal WITHOUT a
+    // live signal row: the recorded SignalSeen value was replayed, not
+    // re-read.
     let terminal = drain_terminal(&mut sub, &correlation).await;
-    assert_eq!(
-        terminal,
-        Some(WorkflowResult::Success),
-        "resume replays the recorded SignalSeen and proceeds — no re-block on absent signal"
+    assert!(
+        matches!(terminal, Some(WorkflowStatus::Completed { .. })),
+        "resume replays the recorded SignalSeen and proceeds (Completed) — no re-block on absent \
+         signal; got {terminal:?}"
     );
     // The resume did NOT append a second SignalAwaited/SignalSeen pair —
     // the recorded ones were replayed.
@@ -187,14 +188,14 @@ async fn a_signal_seen_before_the_crash_is_not_rewaited_on_resume() {
 async fn drain_terminal(
     sub: &mut overdrive_core::traits::observation_store::ObservationSubscription,
     correlation: &CorrelationKey,
-) -> Option<WorkflowResult> {
+) -> Option<WorkflowStatus> {
     use futures::StreamExt;
     for _ in 0..64 {
         match tokio::time::timeout(Duration::from_millis(50), sub.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, result }))
+            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
                 if &got == correlation =>
             {
-                return Some(result);
+                return Some(status);
             }
             Ok(Some(_) | None) | Err(_) => {}
         }

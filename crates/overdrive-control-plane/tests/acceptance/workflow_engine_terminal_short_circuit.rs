@@ -45,9 +45,7 @@ use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{
-    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
-};
+use overdrive_core::workflow::{TerminalError, Workflow, WorkflowCtx, WorkflowName, WorkflowStart};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -55,11 +53,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
-/// A workflow that returns `WorkflowResult::Success` immediately and bumps a
-/// shared counter each time its `run` body executes. The counter is the
-/// "body-ran-once" oracle: a genuine short-circuit on resume must NOT re-run
-/// the body, so the counter is 1 across both starts (the bug re-drives it to
-/// 2).
+/// A workflow that returns `Ok(())` immediately and bumps a shared counter
+/// each time its `run` body executes. The counter is the "body-ran-once"
+/// oracle: a genuine short-circuit on resume must NOT re-run the body, so
+/// the counter is 1 across both starts (the bug re-drives it to 2).
 struct CountingSuccess {
     runs: Arc<AtomicUsize>,
 }
@@ -70,22 +67,37 @@ impl CountingSuccess {
     fn spec() -> WorkflowStart {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
-            input: Vec::new(),
+            // `Input = ()` — the opaque `input` is the CBOR encoding of `()`
+            // so the `ErasedWorkflowAdapter` decodes it back to `()` (an
+            // empty `Vec` would fail to decode and mint a MalformedInput
+            // terminal; ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
 
 #[async_trait]
 impl Workflow for CountingSuccess {
-    async fn run(&self, _ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, _ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
-        WorkflowResult::Success
+        Ok(())
     }
 }
 
+/// CBOR-encode the unit `Input` — the bytes the start intent records so the
+/// `ErasedWorkflowAdapter` decodes `()` back from them.
+fn cbor_unit() -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    ciborium::into_writer(&(), &mut bytes).expect("CBOR-encode unit");
+    bytes
+}
+
 /// Count the `Terminal` commands in a loaded run — payload-type-agnostic
-/// (`{ .. }`) so it compiles against BOTH the current `String`-based
-/// `Terminal` (RED) and the post-fix `WorkflowResult`-based one (GREEN).
+/// (`{ .. }`) — counts the `Terminal` command regardless of the
+/// `WorkflowStatus` payload it carries (ADR-0065 §3).
 fn terminal_count(loaded: &[LoadedEntry]) -> usize {
     loaded
         .iter()
@@ -128,8 +140,8 @@ async fn restart_over_terminal_journal_does_not_append_second_terminal() {
     let make_engine = || {
         let mut registry = WorkflowRegistry::new();
         let runs = Arc::clone(&runs);
-        registry.register(CountingSuccess::spec().name, move || {
-            Box::new(CountingSuccess { runs: Arc::clone(&runs) })
+        registry.register(CountingSuccess::spec().name, move || CountingSuccess {
+            runs: Arc::clone(&runs),
         });
         WorkflowEngine::new(
             Arc::clone(&journal),

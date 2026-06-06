@@ -548,11 +548,13 @@ pub enum ObservationRow {
     /// workflow instance per ADR-0064 §2. Written by the
     /// [`WorkflowEngine`](../../../overdrive_control_plane/workflow_runtime/struct.WorkflowEngine.html)
     /// via the sanctioned [`ObservationStore::write`] path when the
-    /// author's `async fn run` returns a [`WorkflowResult`] terminal —
+    /// author's `async fn run` returns its terminal — the engine projects
+    /// the body's `Result<Output, TerminalError>` to a
+    /// [`WorkflowStatus`](crate::workflow::WorkflowStatus) (ADR-0065 §3) —
     /// NOT a direct engine write bypassing the channels (slice-01 AC5).
     ///
     /// Keyed by `correlation` (the instance [`CorrelationKey`]) so the
-    /// emitting workflow-lifecycle reconciler finds the result
+    /// emitting workflow-lifecycle reconciler finds the status
     /// deterministically on the next tick and converges the instance to
     /// terminated. The `Action::StartWorkflow { start, correlation }` the
     /// reconciler emits carries the SAME key the terminal row is filed
@@ -561,8 +563,9 @@ pub enum ObservationRow {
     WorkflowTerminal {
         /// Cause-to-response linkage — the instance correlation key.
         correlation: CorrelationKey,
-        /// The workflow's terminal result.
-        result: crate::workflow::WorkflowResult,
+        /// The workflow instance's terminal status (the engine-owned
+        /// projection of the body's `Result<Output, TerminalError>`).
+        status: crate::workflow::WorkflowStatus,
     },
     /// `workflow_signal` row — the typed cross-workflow signal surface a
     /// `ctx.wait_for_signal(key)` blocks on per ADR-0064 §4. A producer
@@ -1430,7 +1433,7 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   strict).
     async fn workflow_terminal_rows(
         &self,
-    ) -> Result<Vec<(CorrelationKey, crate::workflow::WorkflowResult)>, ObservationStoreError>;
+    ) -> Result<Vec<(CorrelationKey, crate::workflow::WorkflowStatus)>, ObservationStoreError>;
 
     /// Read the current typed signal value for `key`, if present — the
     /// surface a `ctx.wait_for_signal(key)` blocks on per ADR-0064 §4.

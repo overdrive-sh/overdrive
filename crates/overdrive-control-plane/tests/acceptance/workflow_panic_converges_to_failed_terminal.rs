@@ -22,8 +22,9 @@
 //! # The fix (shape C — `catch_unwind` + RAII drop guard)
 //!
 //! `start` wraps `run` in `catch_unwind`, mapping a panic to
-//! `WorkflowResult::Failed { reason }` so the EXISTING terminal-write path
-//! runs and the reconciler converges; and a `LiveInstanceGuard` whose
+//! `WorkflowStatus::Failed { terminal: TerminalError::explicit(<deterministic
+//! downcast detail>) }` so the EXISTING terminal-write path runs and the
+//! reconciler converges; and a `LiveInstanceGuard` whose
 //! `Drop` removes the correlation from `live_instances` unconditionally
 //! (defense-in-depth against a panic in the terminal-write itself).
 //!
@@ -52,7 +53,8 @@ use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    Workflow, WorkflowCtx, WorkflowName, WorkflowResult, WorkflowStart,
+    TerminalError, TerminalErrorKind, Workflow, WorkflowCtx, WorkflowName, WorkflowStart,
+    WorkflowStatus,
 };
 
 use overdrive_sim::adapters::clock::SimClock;
@@ -73,14 +75,29 @@ impl PanickingWorkflow {
     fn spec() -> WorkflowStart {
         WorkflowStart {
             name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
-            input: Vec::new(),
+            // `Input = ()`: the opaque `input` MUST be the CBOR of `()` so the
+            // adapter decodes it and ENTERS the body (which then panics). An
+            // empty `Vec` would fail to decode and short-circuit to a
+            // MalformedInput terminal BEFORE the body runs — the panic path
+            // would never be exercised (ADR-0065 §1).
+            input: cbor_unit(),
         }
     }
 }
 
+/// CBOR-encode the unit `Input`.
+fn cbor_unit() -> Vec<u8> {
+    let mut bytes: Vec<u8> = Vec::new();
+    ciborium::into_writer(&(), &mut bytes).expect("CBOR-encode unit");
+    bytes
+}
+
 #[async_trait]
 impl Workflow for PanickingWorkflow {
-    async fn run(&self, _ctx: &WorkflowCtx) -> WorkflowResult {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, _ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         panic!("boom");
     }
 }
@@ -95,7 +112,7 @@ async fn panicking_workflow_converges_to_failed_terminal_and_tears_down_live_ins
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
 
     let mut registry = WorkflowRegistry::new();
-    registry.register(PanickingWorkflow::spec().name, || Box::new(PanickingWorkflow));
+    registry.register(PanickingWorkflow::spec().name, || PanickingWorkflow);
 
     let engine = WorkflowEngine::new(
         Arc::clone(&journal),
@@ -136,11 +153,20 @@ async fn panicking_workflow_converges_to_failed_terminal_and_tears_down_live_ins
     // terminal stayed None → no convergence.
     let terminals = obs.workflow_terminal_rows().await.expect("read terminal rows");
     let terminal = terminals.iter().find(|(corr, _)| *corr == correlation);
-    let (_, result) = terminal.expect(
+    let (_, status) = terminal.expect(
         "a panicked workflow must write a WorkflowTerminal row so the reconciler converges",
     );
+    // The engine maps the contained panic to a `WorkflowStatus::Failed`
+    // carrying a `TerminalError::explicit` whose detail is the deterministic
+    // downcast of the panic message (ADR-0065 §1/§3) — never the
+    // address-bearing raw box, so the durable terminal stays byte-stable.
     assert!(
-        matches!(result, WorkflowResult::Failed { .. }),
-        "a panicked workflow must converge to a Failed terminal, got {result:?}"
+        matches!(status, WorkflowStatus::Failed { terminal } if terminal.kind() == TerminalErrorKind::Explicit),
+        "a panicked workflow must converge to a Failed{{Explicit}} terminal, got {status:?}"
     );
+    // The panic message ("boom") survives as the deterministic detail.
+    let WorkflowStatus::Failed { terminal } = status else {
+        panic!("status must be Failed, got {status:?}");
+    };
+    assert_eq!(terminal.detail(), "boom", "the panic message is the deterministic terminal detail");
 }
