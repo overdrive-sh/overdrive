@@ -952,6 +952,13 @@ impl ServiceV1 {
     /// back to the wire shape (`u16` / lowercase protocol string), in
     /// declaration order — the inverse of the projection
     /// [`ServiceV1::from_submit`] applies.
+    ///
+    /// The three probe vectors (`startup_probes`, `readiness_probes`,
+    /// `liveness_probes`) project read-only from the persisted intent so
+    /// an operator who declared a `[[health_check.startup]]` probe sees
+    /// it reflected on describe (the round-trip gap this closes per the
+    /// ADR-0064 amendment). Readiness / liveness surface as `[]` until
+    /// slices 02-01 / 02-02 populate them.
     #[must_use]
     pub fn to_describe(
         &self,
@@ -978,6 +985,9 @@ impl ServiceV1 {
                 args: exec.args.clone(),
             }),
             listeners,
+            startup_probes: self.startup_probes.clone(),
+            readiness_probes: self.readiness_probes.clone(),
+            liveness_probes: self.liveness_probes.clone(),
             vip,
         }
     }

@@ -1471,17 +1471,22 @@ components:
             items:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
-              Operator-declared liveness probes. Same defaulting policy as
-              [`Self::startup_probes`]. Reserved field; populated by future
-              slices (02-02).
+              Operator-declared liveness probes, projected from the parser-
+              side `[[health_check.liveness]]` blocks. Same defaulting policy
+              as [`Self::startup_probes`]. Evaluated by the reconciler — a
+              liveness failure past `failure_threshold` emits a restart
+              (ADR-0055).
           readiness_probes:
             type: array
             items:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
-              Operator-declared readiness probes. Same defaulting policy as
-              [`Self::startup_probes`]. Reserved field; populated by future
-              slices (02-01).
+              Operator-declared readiness probes, projected from the parser-
+              side `[[health_check.readiness]]` blocks. Same defaulting policy
+              as [`Self::startup_probes`]: defaults to an empty `Vec` on the
+              wire when omitted; the CLI's deploy path populates it from TOML.
+              Evaluated by the reconciler — a satisfied readiness probe flips
+              the backend healthy (ADR-0055).
           replicas:
             type: integer
             format: int32
@@ -1525,6 +1530,9 @@ components:
         - replicas
         - resources
         - listeners
+        - startup_probes
+        - readiness_probes
+        - liveness_probes
         - vip
         properties:
           id:
@@ -1537,12 +1545,43 @@ components:
               Operator-declared listeners, `(port, protocol)` only — no VIP
               per listener (ADR-0049 § 5a: one VIP per Service, surfaced once
               at the Service level, not per-listener).
+          liveness_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared liveness probes, projected read-only from the
+              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
+              surfaced on describe so a Service's liveness probes round-trip.
+          readiness_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared readiness probes, projected read-only from the
+              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
+              surfaced on describe so a Service's readiness probes round-trip.
           replicas:
             type: integer
             format: int32
             minimum: 0
           resources:
             $ref: '#/components/schemas/ResourcesInput'
+          startup_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared startup probes, projected read-only from the
+              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              side [`crate::api::submit::ServiceSpecInput::startup_probes`].
+              Surfaced today so an operator who declared a
+              `[[health_check.startup]]` probe sees it reflected on describe
+              (the round-trip gap this field closes per the ADR-0064
+              amendment). The server always populates this on output, so no
+              `#[serde(default)]` is needed on this response wire.
           vip:
             $ref: '#/components/schemas/ServiceVip'
             description: |-

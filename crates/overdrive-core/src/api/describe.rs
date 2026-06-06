@@ -20,6 +20,7 @@
 //! a client deserialising a newer server's response ignores additive
 //! fields rather than rejecting them.
 
+use crate::aggregate::probe_descriptor::ProbeDescriptor;
 use crate::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use crate::api::submit::ListenerInput;
 use crate::id::ServiceVip;
@@ -77,6 +78,25 @@ pub struct ServiceSpecOutput {
     /// per listener (ADR-0049 § 5a: one VIP per Service, surfaced once
     /// at the Service level, not per-listener).
     pub listeners: Vec<ListenerInput>,
+    /// Operator-declared startup probes, projected read-only from the
+    /// persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+    /// side [`crate::api::submit::ServiceSpecInput::startup_probes`].
+    /// Surfaced today so an operator who declared a
+    /// `[[health_check.startup]]` probe sees it reflected on describe
+    /// (the round-trip gap this field closes per the ADR-0064
+    /// amendment). The server always populates this on output, so no
+    /// `#[serde(default)]` is needed on this response wire.
+    pub startup_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared readiness probes, projected read-only from the
+    /// persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+    /// side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
+    /// surfaced on describe so a Service's readiness probes round-trip.
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared liveness probes, projected read-only from the
+    /// persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+    /// side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
+    /// surfaced on describe so a Service's liveness probes round-trip.
+    pub liveness_probes: Vec<ProbeDescriptor>,
     /// The platform-issued Service VIP. REQUIRED — serialised as a
     /// dotted-quad string (the [`ServiceVip`] newtype's `Display`).
     /// Read-only: the operator never sets this on submit; the platform
@@ -143,8 +163,62 @@ mod tests {
         )
     }
 
+    use crate::aggregate::probe_descriptor::ProbeMechanic;
+    use crate::observation::ProbeRole;
+
+    /// Strategy producing a valid `ProbeDescriptor` with a TCP mechanic
+    /// (the only mechanic the round-trip needs to exercise; the wire
+    /// shape is mechanic-agnostic). `port` is `1..=65535` so the
+    /// descriptor passes `ProbeMechanic::validate`.
+    fn probe_descriptor_strategy() -> impl Strategy<Value = ProbeDescriptor> {
+        (
+            prop_oneof![
+                Just(ProbeRole::Startup),
+                Just(ProbeRole::Readiness),
+                Just(ProbeRole::Liveness),
+            ],
+            ".*",
+            1u16..=u16::MAX,
+            any::<u32>(),
+            any::<u32>(),
+            any::<u32>(),
+            proptest::option::of(any::<u32>()),
+            proptest::option::of(any::<u32>()),
+            any::<bool>(),
+        )
+            .prop_map(
+                |(
+                    role,
+                    host,
+                    port,
+                    timeout_seconds,
+                    interval_seconds,
+                    max_attempts,
+                    failure_threshold,
+                    success_threshold,
+                    inferred,
+                )| ProbeDescriptor {
+                    role,
+                    mechanic: ProbeMechanic::Tcp { host, port },
+                    timeout_seconds,
+                    interval_seconds,
+                    max_attempts,
+                    failure_threshold,
+                    success_threshold,
+                    inferred,
+                },
+            )
+    }
+
+    /// Strategy producing an arbitrary `Vec<ProbeDescriptor>` (possibly
+    /// non-empty, so the round-trip actually exercises the probe fields
+    /// through serialise → deserialise).
+    fn probes_strategy() -> impl Strategy<Value = Vec<ProbeDescriptor>> {
+        proptest::collection::vec(probe_descriptor_strategy(), 0..3)
+    }
+
     /// Strategy producing an arbitrary `ServiceSpecOutput`, including a
-    /// generated `ServiceVip`.
+    /// generated `ServiceVip` and the three probe vectors.
     fn service_spec_output_strategy() -> impl Strategy<Value = ServiceSpecOutput> {
         (
             ".*",
@@ -152,11 +226,36 @@ mod tests {
             resources_strategy(),
             driver_strategy(),
             listeners_strategy(),
+            probes_strategy(),
+            probes_strategy(),
+            probes_strategy(),
             service_vip_strategy(),
         )
-            .prop_map(|(id, replicas, resources, driver, listeners, vip)| {
-                ServiceSpecOutput { id, replicas, resources, driver, listeners, vip }
-            })
+            .prop_map(
+                |(
+                    id,
+                    replicas,
+                    resources,
+                    driver,
+                    listeners,
+                    startup_probes,
+                    readiness_probes,
+                    liveness_probes,
+                    vip,
+                )| {
+                    ServiceSpecOutput {
+                        id,
+                        replicas,
+                        resources,
+                        driver,
+                        listeners,
+                        startup_probes,
+                        readiness_probes,
+                        liveness_probes,
+                        vip,
+                    }
+                },
+            )
     }
 
     use crate::aggregate::{JobV1, ServiceV1};
@@ -190,6 +289,23 @@ mod tests {
 
     #[test]
     fn service_to_describe_carries_passed_vip_and_maps_listeners() {
+        use crate::aggregate::probe_descriptor::ProbeMechanic;
+        use crate::observation::ProbeRole;
+
+        // An operator-declared startup probe — `ServiceV1::from_submit`
+        // passes probe vecs through unchanged (validation only; default-
+        // TCP synthesis happens at the TOML parser, NOT in `from_submit`),
+        // so the describe round-trip is exact equality with this input.
+        let startup_probe = ProbeDescriptor {
+            role: ProbeRole::Startup,
+            mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
+            timeout_seconds: 5,
+            interval_seconds: 2,
+            max_attempts: 30,
+            failure_threshold: None,
+            success_threshold: None,
+            inferred: false,
+        };
         let input = ServiceSpecInput {
             id: "describe-svc".to_owned(),
             replicas: 3,
@@ -202,7 +318,7 @@ mod tests {
                 ListenerInput { port: 8080, protocol: "tcp".to_owned() },
                 ListenerInput { port: 53, protocol: "udp".to_owned() },
             ],
-            startup_probes: vec![],
+            startup_probes: vec![startup_probe],
             readiness_probes: vec![],
             liveness_probes: vec![],
         };
@@ -226,6 +342,13 @@ mod tests {
                 ListenerInput { port: 53, protocol: "udp".to_owned() },
             ]
         );
+        // The three probe vectors project from the persisted intent
+        // unchanged — this is the round-trip the bugfix closes. The
+        // operator-declared startup probe must survive describe; the
+        // (currently-empty) readiness / liveness vecs must surface too.
+        assert_eq!(rendered.startup_probes, svc.startup_probes);
+        assert_eq!(rendered.readiness_probes, svc.readiness_probes);
+        assert_eq!(rendered.liveness_probes, svc.liveness_probes);
     }
 
     proptest! {

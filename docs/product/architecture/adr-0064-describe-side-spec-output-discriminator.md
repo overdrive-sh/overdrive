@@ -65,6 +65,40 @@ mirror** of ADR-0051 (the SUBMIT-side `SubmitSpecInput` discriminator).
   so the `to_describe()` body is unreachable from any existing test.
   Mirrors ADR-0051 OQ-5.
 
+### Amendment (2026-06-07) — Service describe wire mirrors probe vecs
+
+The original § 2 Service-arm spec listed the "classic five" operator
+fields (`id`, `replicas`, `resources`, `driver`, `listeners`) plus the
+`vip`, and omitted the three probe vectors (`startup_probes`,
+`readiness_probes`, `liveness_probes: Vec<ProbeDescriptor>`) that
+ADR-0057/0058 added to the **submit** shape (`ServiceSpecInput`) and
+that `ServiceV1` persists. That left a round-trip gap: an operator who
+declares `[[health_check.startup]]` in TOML has it accepted, persisted,
+and acted on by the reconciler, but `GET` describe did not reflect it.
+
+**Decision:** the describe wire MUST mirror the probe vectors for an
+honest round-trip. `ServiceSpecOutput` now carries all three
+`Vec<ProbeDescriptor>` fields (projected read-only from the persisted
+`ServiceV1`) in addition to the prior field set and the `vip`. All
+three probe vectors (`startup`, `readiness`, `liveness`) are
+operator-declared in TOML, parsed, persisted on `ServiceV1`, and
+evaluated by the reconciler runtime — readiness flips
+`Backend.healthy`, liveness emits a restart (ADR-0055). They are fully
+implemented and shipped (the `service-health-check-probes` feature,
+finalized 2026-05-30). The describe wire was the only surface dropping
+them; surfacing all three closes the round-trip gap. There is no
+deferral and no future slice — every probe vector reflects state the
+operator can observe today.
+
+Cross-references: issue
+[#183](https://github.com/overdrive-sh/overdrive/issues/183) (the
+describe-side work this ADR governs) and ADR-0057/0058 (the
+service-health-check-probes additions to the submit shape). `ProbeDescriptor`
+lives at `overdrive_core::aggregate::probe_descriptor::ProbeDescriptor`
+and already derives `utoipa::ToSchema` (it is in the OpenAPI components
+graph via `ServiceSpecInput`), so the describe-side surfacing adds no
+new schema-registration burden beyond `ServiceSpecOutput` itself.
+
 Tags: phase-1, application-arch, wire-shape, describe-side, oneOf
 discriminator, parser-vs-wire-vs-intent separation,
 single-cut-migration.
@@ -135,7 +169,10 @@ shape (`WorkloadIntent`) remains owned by ADR-0050.
   `WorkloadIntent::Job(JobV1)` / `Service(ServiceV1)` /
   `Schedule(ScheduleV1)`. `pub type Job = JobV1`. `JobV1` carries
   `{ id, replicas: NonZeroU32, resources, driver: WorkloadDriver }`;
-  `ServiceV1` adds `listeners: Vec<Listener>` plus probe vectors;
+  `ServiceV1` adds `listeners: Vec<Listener>` plus the three probe
+  vectors `startup_probes` / `readiness_probes` / `liveness_probes:
+  Vec<ProbeDescriptor>` (ADR-0057/0058) — all three persisted on the
+  intent and projected onto the describe wire (§ 2);
   `ScheduleV1` carries `{ id, job: JobV1, cron_expr: CronExpr }`.
 - **VIP retrieval** (ADR-0049):
   `PersistentServiceVipAllocator::get(&ServiceSpecDigest) ->
@@ -260,15 +297,20 @@ produced by the existing `From<&Job>` impl.
 
 #### Service arm — `ServiceSpecOutput` (new)
 
-Carries the same operator-input field set as `ServiceSpecInput`
-(ADR-0051 § 3) PLUS a **required** `vip: ServiceVip` field. The VIP is
-the platform-issued address surfaced read-only:
+Mirrors the **full** `ServiceSpecInput` operator-input field set —
+`id`, `replicas`, `resources`, `driver`, `listeners`, and the three
+probe vectors `startup_probes` / `readiness_probes` / `liveness_probes`
+added to the submit shape by ADR-0057/0058 — PLUS a **required** `vip:
+ServiceVip` field. The VIP is the platform-issued address surfaced
+read-only:
 
 ```rust
 /// HTTP/JSON wire-shape for a Service describe RESPONSE arm.
 ///
-/// Mirrors the Service submit shape (`id`, `replicas`, `resources`,
-/// `driver`, `listeners`) PLUS the platform-issued `vip` — the field
+/// Mirrors the full Service submit shape (`id`, `replicas`,
+/// `resources`, `driver`, `listeners`, and the `startup_probes` /
+/// `readiness_probes` / `liveness_probes` vectors added by
+/// ADR-0057/0058) PLUS the platform-issued `vip` — the field
 /// `ServiceSpecInput` structurally cannot carry (ADR-0049 § 5). The
 /// `vip` is REQUIRED per OQ-4: a persisted-and-describable Service
 /// always has an allocated VIP (submit-time admission allocates before
@@ -287,6 +329,21 @@ pub struct ServiceSpecOutput {
     /// per listener (ADR-0049 § 5a: one VIP per Service, surfaced once
     /// at the Service level, not per-listener).
     pub listeners: Vec<ListenerInput>,
+    /// Operator-declared startup probes, projected from the persisted
+    /// `ServiceV1` (ADR-0057/0058). Operator-observable today. Read-only
+    /// on the describe wire: the operator declares these on submit via
+    /// `[[health_check.startup]]`; describe reflects them back verbatim.
+    pub startup_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared readiness probes, projected read-only from the
+    /// persisted `ServiceV1` (ADR-0057/0058). The operator declares
+    /// these on submit via `[[health_check.readiness]]`; describe
+    /// reflects them back verbatim so the Service's probes round-trip.
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    /// Operator-declared liveness probes, projected read-only from the
+    /// persisted `ServiceV1` (ADR-0057/0058). The operator declares
+    /// these on submit via `[[health_check.liveness]]`; describe
+    /// reflects them back verbatim so the Service's probes round-trip.
+    pub liveness_probes: Vec<ProbeDescriptor>,
     /// The platform-issued Service VIP. REQUIRED — serialised as a
     /// dotted-quad string (the `ServiceVip` newtype's `Display`).
     /// Read-only: the operator never sets this on submit; the platform
