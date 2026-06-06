@@ -644,6 +644,61 @@ pub trait Ca: Send + Sync {
         let _ = root;
         Ok(())
     }
+
+    /// Re-seed the adapter with the persisted node intermediate after a restart.
+    ///
+    /// # Why this exists
+    /// The sibling of [`adopt_persisted_root`](Ca::adopt_persisted_root) for the
+    /// node intermediate. An adapter that *lazily generates* its intermediate
+    /// (the host `RcgenCa`) holds the intermediate signing key only in memory.
+    /// After a control-plane restart a fresh adapter's cache is empty; unless the
+    /// boot path decrypts the persisted intermediate and feeds it back, the
+    /// adapter's first signing call mints a BRAND-NEW (ephemeral) intermediate —
+    /// and every SVID signed under the PREVIOUS boot's intermediate (still inside
+    /// its short validity window) fails to chain to the intermediate the
+    /// refreshed [`trust_bundle`](Ca::trust_bundle) now carries. This method is
+    /// the seam that closes that chain-break: the boot path
+    /// (`ca_boot::bootstrap_node_intermediate`) decrypts the sealed intermediate
+    /// key and calls this to install the persisted intermediate into the adapter
+    /// before any issuance.
+    ///
+    /// # Preconditions
+    /// `intermediate` is the **byte-identical persisted intermediate**:
+    /// `signing_key()` is the decrypted intermediate private key (PEM), and the
+    /// cert PEM / DER / serial are the persisted public material. `node` is the
+    /// node identity the intermediate was minted for (single-node Phase 2.6: one
+    /// node → one intermediate), threaded so the adopted material is faithful to
+    /// the per-node subject the cert was signed under. The boot path adopts
+    /// exactly once, on a fresh adapter, BEFORE any issuance.
+    ///
+    /// # Postconditions
+    /// On `Ok`, every subsequent [`issue_intermediate`](Ca::issue_intermediate)
+    /// returns the adopted handle, [`issue_svid`](Ca::issue_svid) signs leaves
+    /// under the adopted intermediate key, and [`trust_bundle`](Ca::trust_bundle)
+    /// carries the adopted intermediate as chain material.
+    ///
+    /// # Edge cases / idempotency / ordering
+    /// Adoption is idempotent for the SAME intermediate: adopting the
+    /// byte-identical intermediate a second time is a no-op `Ok(())`. Adopting
+    /// AFTER the adapter has already minted a *different* intermediate is a logic
+    /// error (issuance ran before adoption — the ephemeral-intermediate
+    /// chain-break has already occurred) and MUST fail loud with a typed
+    /// [`CaError`], never silently retain the ephemeral intermediate.
+    ///
+    /// # Default
+    /// A no-op `Ok(())` — correct for adapters whose intermediate is **stable by
+    /// construction** across instances. The sim adapter (`SimCa`) loads a fixture
+    /// `const` intermediate identical on every boot, so there is no ephemeral
+    /// divergence to repair and the default is sound. Adapters that *lazily
+    /// generate* an intermediate (the host `RcgenCa`) MUST override this.
+    fn adopt_persisted_intermediate(
+        &self,
+        node: &NodeId,
+        intermediate: &IntermediateHandle,
+    ) -> Result<()> {
+        let _ = (node, intermediate);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

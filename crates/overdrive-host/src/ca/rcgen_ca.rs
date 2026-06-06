@@ -531,6 +531,47 @@ impl Ca for RcgenCa {
         Ok(())
     }
 
+    fn adopt_persisted_intermediate(
+        &self,
+        node: &NodeId,
+        intermediate: &IntermediateHandle,
+    ) -> Result<(), CaError> {
+        // Re-seed the lazily-generated intermediate cache with the persisted
+        // intermediate the boot path decrypted, BEFORE any signing call. Without
+        // this, a fresh `RcgenCa` (empty `OnceLock`) mints a new ephemeral
+        // intermediate on first issuance and every SVID signed under the prior
+        // boot's intermediate fails to chain to the refreshed trust bundle (the
+        // chain-break this closes). The `node` is retained so the rebuilt issuer
+        // params in `issue_svid` carry the SAME per-node `CommonName` the cert
+        // was signed under — mirrors how `intermediate_material` caches it.
+        let material = IntermediateMaterial {
+            node: node.clone(),
+            key_pem: intermediate.signing_key().as_pem().to_string(),
+            cert_pem: intermediate.cert_pem().as_pem().to_string(),
+            cert_der: intermediate.cert_der().as_der().to_vec(),
+            serial: intermediate.serial().clone(),
+        };
+
+        // Fail-loud guard (contract: adoption after a DIVERGENT intermediate was
+        // minted means issuance ran before adoption — the ephemeral-intermediate
+        // chain-break already happened). First adoption wins; re-adopting the
+        // SAME intermediate is an idempotent no-op.
+        if let Some(existing) = self.intermediate_material.get() {
+            if existing.cert_der == material.cert_der {
+                return Ok(());
+            }
+            return Err(CaError::signing_failed(
+                "adopt_persisted_intermediate after a divergent intermediate was already minted — \
+                 issuance ran before adoption",
+            ));
+        }
+
+        // `set` only fails on a lost race; the winning value is the same
+        // persisted intermediate, so reading it back is correct.
+        let _ = self.intermediate_material.set(material);
+        Ok(())
+    }
+
     fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
         // The trust anchor is the persistent root certificate (minted once,
         // cached) — the relying party pins it. The chain material is the cached

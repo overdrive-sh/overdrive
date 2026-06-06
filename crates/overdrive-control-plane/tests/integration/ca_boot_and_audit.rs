@@ -194,9 +194,17 @@ async fn issued_chain_anchors_on_persisted_root_after_restart() {
         ca_boot::boot_ca(&restart_ca, &kek, &kek_id, &codec, &intent, &redb_path)
             .await
             .expect("restart boot loads + adopts the persisted root");
-        let inter = ca_boot::bootstrap_node_intermediate(&restart_ca, &node, &intent)
-            .await
-            .expect("restart node bootstrap signs the intermediate under the adopted root");
+        let inter = ca_boot::bootstrap_node_intermediate(
+            &restart_ca,
+            &node,
+            &intent,
+            &kek,
+            &kek_id,
+            &codec,
+            &redb_path,
+        )
+        .await
+        .expect("restart node bootstrap signs the intermediate under the adopted root");
         let svid =
             restart_ca.issue_svid(&workload_request()).expect("restart issues a workload SVID");
         (inter.cert_pem().as_pem().to_owned(), svid.cert_pem().as_pem().to_owned())
@@ -227,6 +235,122 @@ async fn issued_chain_anchors_on_persisted_root_after_restart() {
         output.status.success(),
         "the restart-issued chain must verify against the FIRST boot's persisted root \
          (chain-to-persisted-root after restart): stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Regression — pre-restart SVID stays verifiable against the POST-restart
+// trust bundle (node intermediate survives restart; built-in-ca / GH #28)
+// ---------------------------------------------------------------------------
+
+/// `@real-io` `@adapter-integration` `@S-02` `@error` — node-intermediate
+/// continuity-across-restart regression guard (built-in-ca / GH #28).
+///
+/// The bug: the node intermediate was EPHEMERAL per process. Only its public
+/// cert material was persisted (`ca/node/intermediate-material/v1`); its
+/// PRIVATE key was never sealed, and `bootstrap_node_intermediate`
+/// unconditionally called `issue_intermediate`, which on a fresh `RcgenCa`
+/// (empty `intermediate_material` `OnceLock`) minted a BRAND-NEW intermediate
+/// (new key + new cert) on every restart. The post-restart `trust_bundle()`
+/// then carried that fresh intermediate, so every SVID signed under the
+/// PREVIOUS boot's intermediate — still inside its 1-hour validity window —
+/// failed to chain-verify against the refreshed bundle. This is the exact
+/// chain-break class `adopt_persisted_root` (ADR-0063 D3) closed for the
+/// root, left open for the intermediate.
+///
+/// This pins the contract: an SVID minted on boot 1 MUST still verify against
+/// the trust bundle the control plane presents AFTER a genuine restart (the
+/// first store handle is dropped before the second opens). The discriminating
+/// proof is `openssl verify` against the POST-restart bundle: under the bug
+/// the boot-1 SVID was signed by the lost ephemeral intermediate, so it does
+/// NOT chain to the restart bundle's freshly-minted intermediate and
+/// verification FAILS (non-zero). With the fix — the intermediate key is
+/// sealed + persisted on boot 1, and the restart bootstraps by decrypting +
+/// adopting it before any issuance — the restart bundle carries the SAME
+/// intermediate the boot-1 SVID was signed under and verification PASSES.
+#[tokio::test]
+async fn pre_restart_svid_verifies_against_post_restart_trust_bundle() {
+    // GIVEN a first boot that generates + persists the root, bootstraps the
+    // node intermediate under it (sealing + persisting the intermediate key),
+    // and mints a workload SVID. Capture the boot-1 SVID PEM — the leaf a
+    // relying party holds for its full ~1h validity window across a restart.
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+    let node = issuing_node();
+    let redb_path = intent_redb_path(&store_dir);
+
+    let boot1_svid_pem = {
+        let ca = host_ca();
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&ca, &kek, &kek_id, &codec, &intent, &redb_path)
+            .await
+            .expect("first boot generates + persists the root");
+        ca_boot::bootstrap_node_intermediate(
+            &ca, &node, &intent, &kek, &kek_id, &codec, &redb_path,
+        )
+        .await
+        .expect("first boot bootstraps + persists the node intermediate");
+        let svid = ca.issue_svid(&workload_request()).expect("boot-1 mints a workload SVID");
+        svid.cert_pem().as_pem().to_owned()
+    };
+
+    // WHEN a fresh process restarts: a NEW `RcgenCa` (empty OnceLocks),
+    // boot_ca (adopts the persisted root), bootstrap_node_intermediate (must
+    // decrypt + adopt the persisted intermediate, NOT mint a fresh one), then
+    // read the trust bundle the restarted control plane now presents.
+    let restart_bundle_pem = {
+        let restart_ca = host_ca();
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&restart_ca, &kek, &kek_id, &codec, &intent, &redb_path)
+            .await
+            .expect("restart boot loads + adopts the persisted root");
+        ca_boot::bootstrap_node_intermediate(
+            &restart_ca,
+            &node,
+            &intent,
+            &kek,
+            &kek_id,
+            &codec,
+            &redb_path,
+        )
+        .await
+        .expect("restart boot loads + adopts the persisted node intermediate");
+        restart_ca
+            .trust_bundle()
+            .expect("restart composes its trust bundle")
+            .bundle_pem()
+            .as_pem()
+            .to_owned()
+    };
+
+    // THEN `openssl verify -CAfile <POST-restart bundle.pem> <boot-1 svid.pem>`
+    // exits 0 — the bundle carries the SAME node intermediate the boot-1 SVID
+    // was signed under (root anchor + adopted intermediate), so the still-valid
+    // pre-restart leaf chains to the post-restart bundle. Under the bug the
+    // restart minted a fresh ephemeral intermediate and this verification FAILS.
+    let dir = TempDir::new().expect("pem tempdir");
+    let bundle_pem_path = dir.path().join("bundle.pem");
+    let svid_pem_path = dir.path().join("svid.pem");
+    std::fs::write(&bundle_pem_path, restart_bundle_pem.as_bytes()).expect("write bundle.pem");
+    std::fs::write(&svid_pem_path, boot1_svid_pem.as_bytes()).expect("write svid.pem");
+
+    let output = std::process::Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&bundle_pem_path)
+        .arg(&svid_pem_path)
+        .output()
+        .expect("invoke openssl verify");
+    assert!(
+        output.status.success(),
+        "a boot-1 SVID must verify against the POST-restart trust bundle (the node intermediate \
+         must survive restart, not be re-minted ephemerally): stdout={}, stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
@@ -506,15 +630,26 @@ impl Ca for RootKeyUnavailableCa {
 #[tokio::test]
 async fn intermediate_signing_failure_fails_node_bootstrap_loudly() {
     // GIVEN a persisted intent store and a `Ca` whose root key is unavailable
-    // for intermediate signing (decrypt failed upstream).
+    // for intermediate signing (decrypt failed upstream). The KEK is staged so
+    // the Earned-Trust KEK probe passes and execution reaches the issuance step
+    // — the failure under test is the intermediate SIGNING, not KEK resolution.
     let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+    let redb_path = intent_redb_path(&store_dir);
     let intent = intent_store(&store_dir);
     let ca = RootKeyUnavailableCa;
     let node = NodeId::new("overdrive-node-0").expect("valid NodeId");
 
     // WHEN node bootstrap issues the single node intermediate through the
     // node-bootstrap driving port.
-    let result = ca_boot::bootstrap_node_intermediate(&ca, &node, &intent).await;
+    let result = ca_boot::bootstrap_node_intermediate(
+        &ca, &node, &intent, &kek, &kek_id, &codec, &redb_path,
+    )
+    .await;
 
     // THEN node bootstrap fails loudly with the typed CA error surfaced from
     // `issue_intermediate` (no panic, no silent skip). `health.startup.refused`

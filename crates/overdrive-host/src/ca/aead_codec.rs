@@ -64,9 +64,19 @@ const SUBKEY_LEN: usize = 32;
 /// AES-GCM authentication tag length (bytes) — 128-bit.
 const TAG_LEN: usize = 16;
 
-/// HKDF domain-separation `info` label (ADR-0063 D4). Varying this label lets
-/// the same KEK protect distinct future secrets with no key reuse.
+/// HKDF domain-separation `info` label for the ROOT CA key (ADR-0063 D4).
+/// Varying this label lets the same KEK protect distinct secrets with no key
+/// reuse — the node-intermediate key uses [`HKDF_INFO_INTERMEDIATE`] instead.
 const HKDF_INFO: &[u8] = b"overdrive/ca/root-key/v1";
+
+/// HKDF domain-separation `info` label for the NODE-INTERMEDIATE CA key
+/// (built-in-ca / GH #28). Distinct from [`HKDF_INFO`] so the intermediate
+/// subkey is domain-separated from the root subkey under the SAME KEK — no key
+/// reuse across the two sealed secrets (ADR-0063 D4 domain-separation
+/// discipline). The record's own `info` field carries this label, so
+/// [`open`](RootKeyAeadCodec::open) recovers either secret from the stored
+/// bytes without the caller naming which label sealed it.
+const HKDF_INFO_INTERMEDIATE: &[u8] = b"overdrive/ca/node-intermediate-key/v1";
 
 /// A fixed-length [`KeyType`] for HKDF expand — yields a [`SUBKEY_LEN`]-byte
 /// OKM (ring's `hkdf::expand` is generic over output length via `KeyType`).
@@ -125,6 +135,47 @@ impl RootKeyAeadCodec {
         kek_id: &KekId,
         root_key_bytes: &[u8],
     ) -> Result<RootCaKeyRecord, CaError> {
+        self.seal_with_info(kek, kek_id, root_key_bytes, HKDF_INFO)
+    }
+
+    /// Seal the node-intermediate signing key under the KEK named `kek_id`,
+    /// producing a persistable [`RootCaKeyRecord`] domain-separated from the
+    /// root key by the [`HKDF_INFO_INTERMEDIATE`] label (built-in-ca / GH #28).
+    ///
+    /// Identical AEAD scheme as [`seal`](Self::seal) — fresh salt + nonce, AAD =
+    /// `kek_id` — but the HKDF subkey derives under a DISTINCT `info` label, so
+    /// the intermediate subkey is independent of the root subkey under the same
+    /// KEK (no key reuse across the two sealed secrets). The boot path seals the
+    /// intermediate signing key in **PEM** form (the load path parses the
+    /// decrypted bytes as UTF-8 PEM), mirroring the root contract.
+    ///
+    /// # Errors
+    /// As [`seal`](Self::seal): [`CaError::SigningFailed`] on KEK-resolution,
+    /// CSPRNG, or AES-GCM-seal failure.
+    pub fn seal_intermediate(
+        &self,
+        kek: &dyn Kek,
+        kek_id: &KekId,
+        intermediate_key_bytes: &[u8],
+    ) -> Result<RootCaKeyRecord, CaError> {
+        self.seal_with_info(kek, kek_id, intermediate_key_bytes, HKDF_INFO_INTERMEDIATE)
+    }
+
+    /// HKDF-SHA256-derive a per-use subkey under `info` and AES-256-GCM-seal
+    /// `plaintext` under it. The single seal implementation — [`seal`](Self::seal)
+    /// (root, [`HKDF_INFO`]) and [`seal_intermediate`](Self::seal_intermediate)
+    /// (intermediate, [`HKDF_INFO_INTERMEDIATE`]) differ ONLY in the `info` label
+    /// they pass, so the AEAD machinery and the persisted-shape contract are
+    /// shared and cannot drift between the two secrets. The record's `info`
+    /// field records the label used, so [`open`](Self::open) recovers either
+    /// secret from the stored bytes alone.
+    fn seal_with_info(
+        &self,
+        kek: &dyn Kek,
+        kek_id: &KekId,
+        plaintext: &[u8],
+        info: &[u8],
+    ) -> Result<RootCaKeyRecord, CaError> {
         let material = kek.resolve(kek_id).map_err(|err| map_resolve_err(&err))?;
 
         let mut salt = [0u8; SALT_LEN];
@@ -135,12 +186,12 @@ impl RootKeyAeadCodec {
             .fill(&mut nonce_bytes)
             .map_err(|_| CaError::signing_failed("CSPRNG nonce draw failed"))?;
 
-        let key = derive_subkey(&material, &salt)?;
+        let key = derive_subkey_with_info(&material, &salt, info)?;
 
         // Seal in place: copy the plaintext into a working buffer, encrypt it,
         // and take the tag out separately so it lands in the record's distinct
         // `aead_tag` field (matching the persisted-shape contract).
-        let mut in_out = root_key_bytes.to_vec();
+        let mut in_out = plaintext.to_vec();
         let nonce = Nonce::assume_unique_for_key(nonce_bytes);
         let tag = key
             .seal_in_place_separate_tag(nonce, Aad::from(aad_bytes(kek_id)), &mut in_out)
@@ -149,7 +200,7 @@ impl RootKeyAeadCodec {
         Ok(RootCaKeyRecord {
             kek_id: kek_id.clone(),
             salt: salt.to_vec(),
-            info: HKDF_INFO.to_vec(),
+            info: info.to_vec(),
             nonce: nonce_bytes.to_vec(),
             ciphertext: in_out,
             aead_tag: tag.as_ref().to_vec(),
@@ -236,12 +287,6 @@ impl RootKeyAeadCodec {
 /// [`open`]: RootKeyAeadCodec::open
 fn aad_bytes(kek_id: &KekId) -> &[u8] {
     kek_id.as_str().as_bytes()
-}
-
-/// HKDF-SHA256-derive the AES-256-GCM subkey from the KEK + salt, using the
-/// canonical [`HKDF_INFO`] label (the seal path).
-fn derive_subkey(material: &KekMaterial, salt: &[u8]) -> Result<LessSafeKey, CaError> {
-    derive_subkey_with_info(material, salt, HKDF_INFO)
 }
 
 /// HKDF-SHA256-derive the AES-256-GCM subkey from the KEK + salt + the

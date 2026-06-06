@@ -51,6 +51,16 @@ const ROOT_CERT_MATERIAL_KEY: &[u8] = b"ca/root/cert-material/v1";
 /// attestation are tracked in #36, not built here).
 const NODE_INTERMEDIATE_MATERIAL_KEY: &[u8] = b"ca/node/intermediate-material/v1";
 
+/// IntentStore key under which the sealed node-intermediate key envelope bytes
+/// live (built-in-ca / GH #28). The intermediate signing key is sealed under
+/// the SAME operator KEK as the root, but with a DISTINCT HKDF `info` label
+/// (`RootKeyAeadCodec::seal_intermediate`) so the two subkeys are
+/// domain-separated. Persisting the sealed key is what makes the node
+/// intermediate STABLE across restart — without it the intermediate is
+/// ephemeral per process and every SVID signed under a prior boot's
+/// intermediate fails to chain to the refreshed trust bundle.
+const NODE_INTERMEDIATE_KEY_ENVELOPE_KEY: &[u8] = b"ca/node/intermediate-key-envelope/v1";
+
 /// A CA boot failure — fail-closed startup refusal (ADR-0063 D3 Earned Trust).
 #[derive(Debug, thiserror::Error)]
 pub enum CaBootError {
@@ -170,33 +180,86 @@ pub async fn boot_ca(
 }
 
 /// Bootstrap the single node intermediate CA (single-node: one node → one
-/// intermediate), signed by the root that `boot_ca` composed.
+/// intermediate), signed by the root that `boot_ca` composed — **stable across
+/// restart** (built-in-ca / GH #28).
 ///
-/// # Behaviour
+/// # Behaviour — generate-or-load (mirrors [`boot_ca`])
 ///
-/// Issues the node intermediate through [`Ca::issue_intermediate`] and, on
-/// success, persists its public cert material to the [`IntentStore`]. The
-/// intermediate is what the node presents to issue workload SVIDs under — the
-/// node does not run workloads it cannot identify.
+/// * **First boot** (no persisted intermediate-key envelope) — issue the node
+///   intermediate through [`Ca::issue_intermediate`], seal its private signing
+///   key under the KEK (distinct HKDF `info` label from the root —
+///   [`RootKeyAeadCodec::seal_intermediate`]), and persist BOTH the sealed key
+///   envelope AND the public cert material to the [`IntentStore`]. Returns the
+///   freshly minted [`IntermediateHandle`].
+/// * **Subsequent boot** (persisted intermediate-key envelope present) —
+///   decrypt the envelope under the KEK (Earned-Trust probe), reconstruct the
+///   [`IntermediateHandle`] from the persisted public cert material + the
+///   decrypted key, and re-seed the CA adapter via
+///   [`Ca::adopt_persisted_intermediate`] BEFORE any issuance — so issuance
+///   signs under the SAME intermediate relying parties already anchor chains
+///   on, rather than a freshly-minted ephemeral one (the chain-break this
+///   closes). Returns the adopted handle.
 ///
-/// # Fail-loud (ADR-0063, reconciler-discipline)
+/// The intermediate is what the node presents to issue workload SVIDs under —
+/// the node does not run workloads it cannot identify.
 ///
-/// When the root key is unavailable (decrypt failed upstream), the signing
-/// failure surfaces from `issue_intermediate` as a typed [`CaError`]; this fn
-/// emits `health.startup.refused` and returns [`CaBootError::Ca`] WITHOUT
-/// persisting anything. No half-provisioned state is left behind — there is no
-/// adopt-and-skip of a partial intermediate.
+/// # Fail-loud (ADR-0063, reconciler-discipline + Earned Trust)
+///
+/// * First boot, root key unavailable (decrypt failed upstream): the signing
+///   failure surfaces from `issue_intermediate` as a typed [`CaError`]; this fn
+///   emits `health.startup.refused` and returns [`CaBootError::Ca`] WITHOUT
+///   persisting anything. No half-provisioned state is left behind — there is
+///   no adopt-and-skip of a partial intermediate.
+/// * Subsequent boot, envelope decrypt failure (tampered / wrong KEK / corrupt):
+///   emit `health.startup.refused` and return [`CaBootError::EnvelopeDecrypt`]
+///   with NO silent re-issue — a silent re-mint would orphan every SVID signed
+///   under the persisted intermediate.
 ///
 /// # Errors
 ///
 /// [`CaBootError::Ca`] when the intermediate cannot be signed (root key
-/// unavailable); [`CaBootError::Intent`] when persistence fails.
+/// unavailable) or adoption diverges; [`CaBootError::EnvelopeDecrypt`] when the
+/// persisted intermediate-key envelope cannot be opened under the KEK;
+/// [`CaBootError::Intent`] when persistence/load fails.
 ///
 /// Single-node only: multi-node per-node intermediates + node attestation are
 /// tracked in #36 and are NOT built here.
 pub async fn bootstrap_node_intermediate(
     ca: &dyn Ca,
     node: &NodeId,
+    intent: &Arc<dyn IntentStore>,
+    kek: &dyn Kek,
+    kek_id: &KekId,
+    codec: &RootKeyAeadCodec,
+    redb_path: &std::path::Path,
+) -> Result<IntermediateHandle, CaBootError> {
+    match intent.get(NODE_INTERMEDIATE_KEY_ENVELOPE_KEY).await? {
+        Some(envelope_bytes) => {
+            load_persistent_intermediate(
+                ca,
+                node,
+                kek,
+                kek_id,
+                codec,
+                intent,
+                redb_path,
+                &envelope_bytes,
+            )
+            .await
+        }
+        None => generate_and_persist_intermediate(ca, node, kek, kek_id, codec, intent).await,
+    }
+}
+
+/// First boot: sign the node intermediate, seal its key under the KEK
+/// (intermediate `info` label), and persist both the sealed key envelope and
+/// the public cert material.
+async fn generate_and_persist_intermediate(
+    ca: &dyn Ca,
+    node: &NodeId,
+    kek: &dyn Kek,
+    kek_id: &KekId,
+    codec: &RootKeyAeadCodec,
     intent: &Arc<dyn IntentStore>,
 ) -> Result<IntermediateHandle, CaBootError> {
     // Sign the node intermediate by the root. A root-key-unavailable (decrypt
@@ -216,14 +279,90 @@ pub async fn bootstrap_node_intermediate(
         CaBootError::Ca { source }
     })?;
 
-    // Only on a successful signature do we persist the intermediate's public
-    // cert material — the persistence happens strictly after issuance, so the
-    // failure path above leaves the IntentStore untouched.
+    // Seal the intermediate private signing key (PEM bytes) under the KEK, with
+    // the distinct intermediate HKDF `info` label so the subkey is
+    // domain-separated from the root subkey. This is what makes the intermediate
+    // STABLE across restart.
+    let key_pem = intermediate.signing_key().as_pem().as_bytes();
+    let record = codec
+        .seal_intermediate(kek, kek_id, key_pem)
+        .map_err(|source| CaBootError::Ca { source })?;
+    let envelope_bytes = record.archive_for_store()?;
+
+    // Persist strictly AFTER a successful signature + seal, so the failure paths
+    // above leave the IntentStore untouched (no half-provisioned state). The key
+    // envelope and the public cert material are both written.
+    intent.put(NODE_INTERMEDIATE_KEY_ENVELOPE_KEY, envelope_bytes.as_ref()).await?;
     intent
         .put(NODE_INTERMEDIATE_MATERIAL_KEY, &encode_intermediate_material(&intermediate))
         .await?;
 
     Ok(intermediate)
+}
+
+/// Subsequent boot: decrypt the persisted intermediate-key envelope
+/// (Earned-Trust probe), reconstruct the SAME intermediate identity from the
+/// persisted public cert material, and re-seed the CA adapter with it so
+/// issuance signs under the persisted intermediate rather than a freshly-minted
+/// ephemeral one (the chain-break fix).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "boot seam threads KEK + codec + redb path like boot_ca"
+)]
+async fn load_persistent_intermediate(
+    ca: &dyn Ca,
+    node: &NodeId,
+    kek: &dyn Kek,
+    kek_id: &KekId,
+    codec: &RootKeyAeadCodec,
+    intent: &Arc<dyn IntentStore>,
+    redb_path: &std::path::Path,
+    envelope_bytes: &[u8],
+) -> Result<IntermediateHandle, CaBootError> {
+    let record: RootCaKeyRecord = RootCaKeyRecord::from_store_bytes(
+        envelope_bytes,
+        redb_path,
+        Some("ca/node/intermediate-key-envelope/v1"),
+    )?;
+
+    // Earned-Trust probe: the persisted envelope MUST decrypt under the resolved
+    // KEK. A tampered / wrong-KEK / corrupt record refuses startup with NO silent
+    // re-issue (a re-issue would orphan every SVID signed under the persisted
+    // intermediate).
+    let key_pem_bytes = codec.open(kek, kek_id, &record).map_err(|source| {
+        tracing::error!(
+            name: "health.startup.refused",
+            kek_id = %kek_id,
+            cause = %source,
+            "persisted node-intermediate key envelope failed to decrypt; node bootstrap refusing \
+             to start (no silent re-issue)",
+        );
+        CaBootError::EnvelopeDecrypt { source }
+    })?;
+
+    // The decrypted key is the proof of trust; the persisted public cert
+    // material carries the byte-identical intermediate identity to present on
+    // reuse.
+    let cert_material =
+        intent.get(NODE_INTERMEDIATE_MATERIAL_KEY).await?.ok_or_else(|| CaBootError::Ca {
+            source: CaError::signing_failed(
+                "node-intermediate key envelope present but public cert material missing from \
+                 IntentStore",
+            ),
+        })?;
+
+    let handle = decode_intermediate_material(&cert_material, key_pem_bytes)?;
+
+    // Re-seed the CA adapter with the persisted intermediate BEFORE any issuance.
+    // A fresh adapter (e.g. `RcgenCa` with an empty cache) would otherwise mint a
+    // new ephemeral intermediate on its first signing call, and every SVID signed
+    // under the prior boot's intermediate would fail to chain to the refreshed
+    // trust bundle (the chain-break fix). Idempotent for the same intermediate;
+    // fails loud if a divergent intermediate was already minted
+    // (issuance-before-adoption — see `Ca::adopt_persisted_intermediate`).
+    ca.adopt_persisted_intermediate(node, &handle).map_err(|source| CaBootError::Ca { source })?;
+
+    Ok(handle)
 }
 
 /// Newline-framed encoding of the public node-intermediate cert material: PEM,
@@ -353,6 +492,51 @@ fn encode_cert_material(root: &RootCaHandle) -> Vec<u8> {
 /// Decode the newline-framed public cert material + decrypted key into a
 /// [`RootCaHandle`] presenting the byte-identical root identity.
 fn decode_cert_material(bytes: &[u8], key_pem_bytes: Vec<u8>) -> Result<RootCaHandle, CaBootError> {
+    let (pem, der, serial) = decode_framed_material(bytes)?;
+
+    // The decrypted key is PEM-shaped sign-capability material (the root
+    // signing key was sealed in PEM form, not DER); the identity assertion is
+    // on the public cert (cert_pem / cert_der / serial), which is
+    // byte-identical to first boot.
+    let key_pem = String::from_utf8(key_pem_bytes).map_err(|_| CaBootError::Ca {
+        source: CaError::signing_failed("decrypted root key is not valid UTF-8 PEM"),
+    })?;
+
+    Ok(RootCaHandle::new(CaCertPem::new(pem), CaCertDer::new(der), serial, CaKeyPem::new(key_pem)))
+}
+
+/// Decode the newline-framed public node-intermediate cert material + decrypted
+/// key into an [`IntermediateHandle`] presenting the byte-identical intermediate
+/// identity. Mirrors [`decode_cert_material`] — the encoding is the same
+/// newline-framed PEM/DER-hex/serial shape — but yields the intermediate handle.
+fn decode_intermediate_material(
+    bytes: &[u8],
+    key_pem_bytes: Vec<u8>,
+) -> Result<IntermediateHandle, CaBootError> {
+    let (pem, der, serial) = decode_framed_material(bytes)?;
+
+    // The decrypted key is PEM-shaped sign-capability material (the intermediate
+    // signing key was sealed in PEM form, not DER); the identity assertion is on
+    // the public cert (cert_pem / cert_der / serial), byte-identical to first
+    // boot.
+    let key_pem = String::from_utf8(key_pem_bytes).map_err(|_| CaBootError::Ca {
+        source: CaError::signing_failed("decrypted node-intermediate key is not valid UTF-8 PEM"),
+    })?;
+
+    Ok(IntermediateHandle::new(
+        CaCertPem::new(pem),
+        CaCertDer::new(der),
+        serial,
+        CaKeyPem::new(key_pem),
+    ))
+}
+
+/// Parse the shared newline-framed public cert material (PEM length-prefixed,
+/// then DER-hex + serial on trailing lines) into its `(pem, der, serial)` parts.
+/// The single parse site for both [`decode_cert_material`] (root) and
+/// [`decode_intermediate_material`] (intermediate) — the two encoders emit the
+/// identical frame shape, so the two decoders cannot drift on the framing.
+fn decode_framed_material(bytes: &[u8]) -> Result<(String, Vec<u8>, CertSerial), CaBootError> {
     let text = std::str::from_utf8(bytes).map_err(|_| CaBootError::Ca {
         source: CaError::signing_failed("persisted cert material is not valid UTF-8"),
     })?;
@@ -372,21 +556,7 @@ fn decode_cert_material(bytes: &[u8], key_pem_bytes: Vec<u8>) -> Result<RootCaHa
 
     let der = decode_hex(der_hex).ok_or_else(malformed)?;
     let serial = CertSerial::new(serial_str).map_err(|_| malformed())?;
-
-    // The decrypted key is PEM-shaped sign-capability material (the root
-    // signing key was sealed in PEM form, not DER); the identity assertion is
-    // on the public cert (cert_pem / cert_der / serial), which is
-    // byte-identical to first boot.
-    let key_pem = String::from_utf8(key_pem_bytes).map_err(|_| CaBootError::Ca {
-        source: CaError::signing_failed("decrypted root key is not valid UTF-8 PEM"),
-    })?;
-
-    Ok(RootCaHandle::new(
-        CaCertPem::new(pem.to_string()),
-        CaCertDer::new(der),
-        serial,
-        CaKeyPem::new(key_pem),
-    ))
+    Ok((pem.to_string(), der, serial))
 }
 
 /// Decode a lowercase-hex string to bytes; `None` on any non-hex / odd length.
