@@ -1557,6 +1557,24 @@ fn crash_journal_spans_sleep_shape(pre_resume: &[LoadedEntry]) -> Option<String>
     None
 }
 
+/// The stable kind label of a single [`JournalCommand`] — the per-variant
+/// projection both [`entry_kinds`] and [`command_kinds`] share so the six
+/// command arms live in exactly ONE place (they drifted as two verbatim
+/// copies before). Mirrors the production `command_kind` determinism-gate
+/// label (`workflow_runtime`), but is defined here independently: that one
+/// is crate-private to the control-plane and serves the fail-closed gate;
+/// this serves the sim replay-equivalence oracle.
+const fn journal_command_kind(command: &JournalCommand) -> &'static str {
+    match command {
+        JournalCommand::Started { .. } => "Started",
+        JournalCommand::RunResult { .. } => "RunResult",
+        JournalCommand::SleepArmed { .. } => "SleepArmed",
+        JournalCommand::SignalAwaited { .. } => "SignalAwaited",
+        JournalCommand::ActionEmitted { .. } => "ActionEmitted",
+        JournalCommand::Terminal { .. } => "Terminal",
+    }
+}
+
 /// The ordered sequence of journal-entry KINDS — the replay-equivalence
 /// shape oracle that ignores clock-derived absolute values (a `SleepArmed`
 /// deadline is computed from the live clock's wall-clock epoch).
@@ -1564,16 +1582,11 @@ fn crash_journal_spans_sleep_shape(pre_resume: &[LoadedEntry]) -> Option<String>
 /// Classifies the typed [`LoadedEntry`] boundary sum (D1): commands and
 /// notifications interleave in one ordered run; the kind string names the
 /// inner variant regardless of class — `SignalSeen` is a notification,
-/// every other kind is a command.
+/// every other kind is a command (delegated to [`journal_command_kind`]).
 fn entry_kinds(run: &[LoadedEntry]) -> Vec<&'static str> {
     run.iter()
         .map(|e| match e {
-            LoadedEntry::Command(JournalCommand::Started { .. }) => "Started",
-            LoadedEntry::Command(JournalCommand::RunResult { .. }) => "RunResult",
-            LoadedEntry::Command(JournalCommand::SleepArmed { .. }) => "SleepArmed",
-            LoadedEntry::Command(JournalCommand::SignalAwaited { .. }) => "SignalAwaited",
-            LoadedEntry::Command(JournalCommand::ActionEmitted { .. }) => "ActionEmitted",
-            LoadedEntry::Command(JournalCommand::Terminal { .. }) => "Terminal",
+            LoadedEntry::Command(command) => journal_command_kind(command),
             LoadedEntry::Notification(JournalNotification::SignalSeen { .. }) => "SignalSeen",
         })
         .collect()
@@ -1596,12 +1609,7 @@ fn entry_kinds_match(a: &[LoadedEntry], b: &[LoadedEntry]) -> bool {
 fn command_kinds(run: &[LoadedEntry]) -> Vec<&'static str> {
     run.iter()
         .filter_map(|e| match e {
-            LoadedEntry::Command(JournalCommand::Started { .. }) => Some("Started"),
-            LoadedEntry::Command(JournalCommand::RunResult { .. }) => Some("RunResult"),
-            LoadedEntry::Command(JournalCommand::SleepArmed { .. }) => Some("SleepArmed"),
-            LoadedEntry::Command(JournalCommand::SignalAwaited { .. }) => Some("SignalAwaited"),
-            LoadedEntry::Command(JournalCommand::ActionEmitted { .. }) => Some("ActionEmitted"),
-            LoadedEntry::Command(JournalCommand::Terminal { .. }) => Some("Terminal"),
+            LoadedEntry::Command(command) => Some(journal_command_kind(command)),
             LoadedEntry::Notification(JournalNotification::SignalSeen { .. }) => None,
         })
         .collect()
