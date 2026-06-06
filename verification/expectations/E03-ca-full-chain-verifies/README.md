@@ -55,6 +55,8 @@ audit reads only the captured `evidence/`).
 
 ## Evidence
 
-Captured under `evidence/` by `harness/run-expectation.sh E03`. Not yet run —
-the `Ca`/`RcgenCa` production surface lands in DELIVER. Until then the runner
+Executed through `harness/run-expectation.sh E03` at SHA `2f4eccd4` and
+self-reports `pending` — no operator verb mints/exports a chain this phase
+(D-CA-4). **Unblocked by #215** (boot-side) + **#35** (issuance on alloc-start).
+Until then the runner
 records `pending` and prints the manual capture steps.

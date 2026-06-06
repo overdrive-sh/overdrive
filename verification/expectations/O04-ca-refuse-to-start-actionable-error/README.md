@@ -54,7 +54,9 @@ Sub-claims:
 
 ## Evidence
 
-Captured under `evidence/` by `harness/run-expectation.sh O04`. Not yet run —
-the CA boot path lands in DELIVER. The gated integration tests in
+Executed through `harness/run-expectation.sh O04` at SHA `2f4eccd4` and
+self-reports `pending` — `overdrive serve --help` builds and runs in Lima but
+exposes no CA boot surface (D-CA-4). **Unblocked by #215** (wire `boot_ca` into
+`overdrive serve`). The gated integration tests in
 `ca_boot_and_audit.rs` (S-02-06/07) prove the refuse-to-start in-tree; this
 expectation captures the operator-visible stderr quality.

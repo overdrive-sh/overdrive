@@ -38,8 +38,12 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   `sim_ca_deterministic.rs`, `rcgen_ca_*.rs`, `ca_equivalence.rs`,
   `ca_boot_and_audit.rs`, `schema_evolution/{root_ca_key,issued_certificate_row}.rs`);
   these four expectations capture the operator/reviewer-observable slice those
-  tiers under-serve. All `pending` until the CA production surface lands in
-  DELIVER.
+  tiers under-serve. All `pending` **by design**: the CA is library-complete and
+  proven by the gated tiers, but is intentionally not wired into the operator
+  binary this phase (D-CA-4). Unblocked by **#215** (boot-side: wire `boot_ca`
+  into `overdrive serve` → D01/O04) + **#35** (consumer-side: SVID issuance on
+  alloc-start → E03/O05). Executed at SHA `2f4eccd4`; see
+  `docs/evolution/2026-06-06-built-in-ca.md`.
 
 ## Adding an expectation
 
