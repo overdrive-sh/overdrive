@@ -1,0 +1,162 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
+EVID="/Users/marcus/conductor/workspaces/helios/adelaide/verification/expectations/O06-describe-service-discriminated-vip/evidence"
+REPO="/Users/marcus/conductor/workspaces/helios/adelaide"
+SPEC="/Users/marcus/conductor/workspaces/helios/adelaide/examples/dns-resolver.toml"
+WID="dns-resolver"
+SEED="1"
+cd "$REPO"
+
+BIND="127.0.0.1:7443"
+LOOPBACK_PROBE_PORT="1"
+CFG_DIR="$(mktemp -d /tmp/od-o06-cfg.XXXXXX)"
+DATA_DIR="$(mktemp -d /tmp/od-o06-data.XXXXXX)"
+SERVE_PID=""
+
+probe_xdp() {
+  for i in $(ip -br link show | awk '\''{print $1}'\''); do
+    info="$(ip link show "$i")"
+    case "$info" in
+      *xdpgeneric*|*xdpdrv*|*xdp\ *)
+        echo "=== $i ==="; echo "$info" | grep -E '\''xdp(generic|drv)?'\'' ;;
+    esac
+  done
+  echo "--- bpftool prog show (xdp/sched_cls only) ---"
+  bpftool prog show 2>/dev/null | grep -E '\''(xdp|sched_cls)'\'' || echo "(none)"
+}
+probe_loopback() {
+  if timeout 3 bash -c "echo > /dev/tcp/127.0.0.1/$LOOPBACK_PROBE_PORT" 2>/dev/null; then
+    echo "UNEXPECTED: 127.0.0.1:$LOOPBACK_PROBE_PORT accepted (something is listening?)"
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then echo "HANG: loopback connect timed out after 3s -> probable leaked XDP on lo"
+    else echo "HEALTHY: loopback refused fast (no leaked XDP swallowing lo traffic)"; fi
+  fi
+}
+probe_cgroups() {
+  ls /sys/fs/cgroup/overdrive.slice/workloads.slice/ 2>/dev/null | grep '\''^alloc-'\'' || echo "(no alloc-*.scope)"
+}
+sweep() {
+  [ -n "$SERVE_PID" ] && kill "$SERVE_PID" 2>/dev/null
+  if cd /sys/fs/cgroup/overdrive.slice/workloads.slice 2>/dev/null; then
+    for d in alloc-*.scope; do
+      [ -d "$d" ] && { echo 1 > "$d/cgroup.kill" 2>/dev/null; rmdir "$d" 2>/dev/null; }
+    done
+    cd "$REPO" 2>/dev/null || true
+  fi
+  for i in $(ip -br link show | awk '\''{print $1}'\''); do
+    ip link set dev "$i" xdpgeneric off 2>/dev/null
+    ip link set dev "$i" xdpdrv off 2>/dev/null
+    ip link set dev "$i" xdp off 2>/dev/null
+  done
+  return 0
+}
+on_exit() {
+  sweep
+  { echo "# probe: XDP attachments POST-TEARDOWN (after sweep)"; probe_xdp; }      > "$EVID/probe_post_teardown_xdp.txt"      2>&1
+  { echo "# probe: loopback POST-TEARDOWN (after sweep)";        probe_loopback; } > "$EVID/probe_post_teardown_loopback.txt" 2>&1
+  { echo "# probe: workload cgroups POST-TEARDOWN (after sweep)"; probe_cgroups; } > "$EVID/probe_post_teardown_cgroups.txt"  2>&1
+  return 0
+}
+trap on_exit EXIT
+
+{ echo "# probe: XDP attachments BEFORE run"; probe_xdp; }       > "$EVID/probe_before_xdp.txt"      2>&1
+{ echo "# probe: loopback BEFORE run";        probe_loopback; }  > "$EVID/probe_before_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups BEFORE run"; probe_cgroups; }  > "$EVID/probe_before_cgroups.txt"  2>&1
+
+if grep -q '\''HANG'\'' "$EVID/probe_before_loopback.txt"    || grep -qE '\''(xdp_|overdrive)'\'' "$EVID/probe_before_xdp.txt"    || '\!' grep -q '\''(no alloc'\'' "$EVID/probe_before_cgroups.txt"; then
+  echo "PRE-EXISTING LEAK detected at runner start; cleaning before serve." >> "$EVID/probe_before_cgroups.txt"
+  sweep
+fi
+
+echo "# building overdrive binary"
+if '\!' cargo build -p overdrive-cli --bin overdrive 2> "$EVID/build.log"; then
+  echo "BUILD_FAILED"; tail -40 "$EVID/build.log"
+  echo "INNER_DONE serve_status=build-failed"; exit 0
+fi
+BIN="$CARGO_TARGET_DIR/debug/overdrive"
+[ -x "$BIN" ] || { echo "BIN_MISSING: $BIN"; echo "INNER_DONE serve_status=bin-missing"; exit 0; }
+
+echo "# starting ephemeral serve: bind=$BIND cfg=$CFG_DIR data=$DATA_DIR"
+OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" serve --bind "$BIND" --data-dir "$DATA_DIR"   > "$EVID/serve.log" 2>&1 &
+SERVE_PID=$'\!'
+
+CFG_FILE="$CFG_DIR/.overdrive/config"
+ready=0
+for _ in $(seq 1 50); do
+  if [ -f "$CFG_FILE" ]; then ready=1; break; fi
+  if '\!' kill -0 "$SERVE_PID" 2>/dev/null; then break; fi
+  sleep 0.5
+done
+if [ "$ready" -ne 1 ]; then
+  echo "SERVE_NOT_READY: trust-triple config never appeared at $CFG_FILE"
+  echo "--- serve.log tail ---"; tail -20 "$EVID/serve.log"
+  echo "INNER_DONE serve_status=not-ready"; exit 0
+fi
+echo "# serve ready: trust triple at $CFG_FILE (pid $SERVE_PID)"
+
+# --- SC1: deploy the Service (persists intent + allocates VIP at submit) ---
+{
+  echo "# command: overdrive deploy $SPEC"
+  echo "# seed:    $SEED"
+  echo "# started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$EVID/deploy_service.meta"
+DEPLOY_RC=0
+OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" deploy "$SPEC" > "$EVID/deploy_service.out" 2>&1 || DEPLOY_RC=$?
+echo "# exit:    $DEPLOY_RC" >> "$EVID/deploy_service.meta"
+echo "# deploy exit: $DEPLOY_RC"
+
+# --- wait for convergence so the capture shows a Running allocation, not the
+#     0-allocations empty-state. The default Service startup probe interval is
+#     ~2s, so a single 1s sleep cannot reach Running — poll alloc status up to
+#     ~25s and stop the moment allocations > 0. The describe VIP is allocated at
+#     SUBMIT (ADR-0049) and is unaffected by convergence; this only strengthens
+#     the alloc-status capture (SC2) to a converged operator view.
+CONVERGE_SECS=0
+for _ in $(seq 1 25); do
+  OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" alloc status --job "$WID" > "$EVID/alloc_status_service.out" 2>&1 || true
+  if grep -qE '\''^Allocations:[[:space:]]+[1-9]'\'' "$EVID/alloc_status_service.out"; then break; fi
+  sleep 1; CONVERGE_SECS=$((CONVERGE_SECS+1))
+done
+
+# --- SC2: final authoritative O-surface capture (exit code + converged output) ---
+ALLOC_RC=0
+OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" alloc status --job "$WID" > "$EVID/alloc_status_service.out" 2>&1 || ALLOC_RC=$?
+{ echo "alloc_status_exit=$ALLOC_RC"; echo "converged_after_secs=$CONVERGE_SECS"; } > "$EVID/alloc_status_service.meta"
+echo "# alloc status exit: $ALLOC_RC (converged_after=${CONVERGE_SECS}s)"
+
+# --- SC3: raw mTLS GET /v1/jobs/<id> — the describe wire response (#183) ---
+# Extract the trust triple'\''s base64-PEM ca/crt/key (single-line TOML inline
+# strings) without a toml parser, decode, and curl the describe endpoint.
+EP="$(grep -E '\''^[[:space:]]*endpoint[[:space:]]*='\'' "$CFG_FILE" | head -1 | sed '\''s/.*=[[:space:]]*"\(.*\)"/\1/'\'')"
+[ -n "$EP" ] || EP="https://$BIND"
+for f in ca crt key; do
+  grep -E "^[[:space:]]*$f[[:space:]]*=" "$CFG_FILE" | head -1     | sed "s/.*=[[:space:]]*\"\(.*\)\"/\1/" | base64 -d > "/tmp/od-o06-$f.pem" 2>/dev/null
+done
+DESCRIBE_HTTP=000
+if [ -s /tmp/od-o06-ca.pem ] && [ -s /tmp/od-o06-crt.pem ] && [ -s /tmp/od-o06-key.pem ]; then
+  DESCRIBE_HTTP="$(curl -sS --cacert /tmp/od-o06-ca.pem --cert /tmp/od-o06-crt.pem --key /tmp/od-o06-key.pem       -o "$EVID/describe_api.json" -w '\''%{http_code}'\'' "$EP/v1/jobs/$WID" 2>"$EVID/describe_api.curlerr" || true)"
+else
+  echo "CERT_EXTRACT_FAILED: one of ca/crt/key did not decode from $CFG_FILE" > "$EVID/describe_api.curlerr"
+fi
+echo "describe_http_code=$DESCRIBE_HTTP" > "$EVID/describe_api.meta"
+echo "describe_endpoint=$EP/v1/jobs/$WID" >> "$EVID/describe_api.meta"
+echo "# describe GET /v1/jobs/$WID -> HTTP $DESCRIBE_HTTP"
+rm -f /tmp/od-o06-ca.pem /tmp/od-o06-crt.pem /tmp/od-o06-key.pem
+
+{ echo "# probe: XDP attachments AFTER (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
+{ echo "# probe: loopback AFTER";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups AFTER"; probe_cgroups; }                 > "$EVID/probe_after_cgroups.txt"  2>&1
+
+kill "$SERVE_PID" 2>/dev/null; wait "$SERVE_PID" 2>/dev/null
+echo "INNER_DONE serve_status=ready deploy_rc=$DEPLOY_RC alloc_rc=$ALLOC_RC describe_http=$DESCRIBE_HTTP"
+exit 0'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+# building overdrive binary
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o06-cfg.zmP6wr data=/tmp/od-o06-data.9vMOcB
+# serve ready: trust triple at /tmp/od-o06-cfg.zmP6wr/.overdrive/config (pid 1526425)
+# deploy exit: 0
+# alloc status exit: 0 (converged_after=1s)
+# describe GET /v1/jobs/dns-resolver -> HTTP 200
+INNER_DONE serve_status=ready deploy_rc=0 alloc_rc=0 describe_http=200

@@ -1,0 +1,32 @@
+  --- serve_describe.out (tail) ---
+echo "describe_endpoint=$EP/v1/jobs/$WID" >> "$EVID/describe_api.meta"
+echo "# describe GET /v1/jobs/$WID -> HTTP $DESCRIBE_HTTP"
+rm -f /tmp/od-o06-ca.pem /tmp/od-o06-crt.pem /tmp/od-o06-key.pem
+
+{ echo "# probe: XDP attachments AFTER (pre-teardown)"; probe_xdp; }       > "$EVID/probe_after_xdp.txt"      2>&1
+{ echo "# probe: loopback AFTER";  probe_loopback; }                       > "$EVID/probe_after_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups AFTER"; probe_cgroups; }                 > "$EVID/probe_after_cgroups.txt"  2>&1
+
+kill "$SERVE_PID" 2>/dev/null; wait "$SERVE_PID" 2>/dev/null
+echo "INNER_DONE serve_status=ready deploy_rc=$DEPLOY_RC alloc_rc=$ALLOC_RC describe_http=$DESCRIBE_HTTP"
+exit 0'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+# building overdrive binary
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o06-cfg.zmP6wr data=/tmp/od-o06-data.9vMOcB
+# serve ready: trust triple at /tmp/od-o06-cfg.zmP6wr/.overdrive/config (pid 1526425)
+# deploy exit: 0
+# alloc status exit: 0 (converged_after=1s)
+# describe GET /v1/jobs/dns-resolver -> HTTP 200
+INNER_DONE serve_status=ready deploy_rc=0 alloc_rc=0 describe_http=200
+  [PASS] no-leak: probe_before_loopback shows HEALTHY loopback
+  [PASS] no-leak: probe_post_teardown_loopback shows HEALTHY loopback
+  [PASS] no-leak: post-teardown shows no XDP programs attached
+  [PASS] SC1: deploy exited 0
+  [PASS] 'deploy_service.out' contains: Accepted.
+  [PASS] SC2: alloc status exited 0 — CLI deserialised DescribeSpecOutput
+  [PASS] SC2b: alloc status renders the Service VIP line (operator-visible)
+  [info] workload converged to >=1 allocation after ~1s (captured running, not the 0-alloc empty-state)
+  [PASS] SC3a: describe response carries "kind":"service" (discriminated)
+  [PASS] SC3b: describe response carries platform-issued "vip" IPv4
+O06 sub-claim aggregate exit: 0

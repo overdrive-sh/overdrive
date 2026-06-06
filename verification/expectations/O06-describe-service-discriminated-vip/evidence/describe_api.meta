@@ -1,0 +1,2 @@
+describe_http_code=200
+describe_endpoint=https://127.0.0.1:7443/v1/jobs/dns-resolver

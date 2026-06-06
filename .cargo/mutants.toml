@@ -256,6 +256,27 @@ exclude_re = [
     "in consume_stream_job$",
     "replace run -> Result<\\(\\)> with Ok",
 
+    # `describe_workload` (GH #183 — describe-workload-oneof-discriminator).
+    # The whole-async-handler body-replacement is the ONLY mutant
+    # cargo-mutants synthesises for this fn, and it is UNVIABLE:
+    # `Json<api::WorkloadDescription>` has no `Default` / `::new()`, so the
+    # synthesised `Ok(Json::new())` body fails to compile. The handler body
+    # is a 3-arm exhaustive match projecting `WorkloadIntent (+ VIP) ->
+    # DescribeSpecOutput` (ADR-0064) — pure data construction with no
+    # individual mutable operators (no arithmetic / comparison / boolean
+    # sites; exhaustive-match arm-deletion is itself unviable). Its logic IS
+    # covered port-to-port by the `describe_service_returns_discriminated_
+    # shape_with_vip` + `describe_round_trip` integration tests (behind the
+    # `integration-tests` feature), which fail loudly if the Service or Job
+    # arm is reverted. Same structural class as the `consume_stream` / `run`
+    # entries above: a feature-gated async handler whose sole mutant carries
+    # no quality signal. Without this entry the per-PR `--diff` run reports
+    # total=1 / unviable=1 -> "no quality signal" fail on a pure wire-shape
+    # plumbing diff (the rest of the diff is type definitions + `to_describe`
+    # struct-construction whose only mutants are `Default::default()` bodies
+    # already excluded by Rule 7 above — domain types impl no `Default`).
+    "replace describe_workload -> .* with Ok\\(Json::new\\(\\)\\)",
+
     # Running-gate release in `dispatch_single` — the `if state ==
     # AllocState::Running` conditional is exercised by the
     # `exit_observer_running_gate` integration test (behind

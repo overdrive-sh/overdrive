@@ -45,6 +45,7 @@ use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
+use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -353,11 +354,16 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     );
     let desc_body: WorkloadDescription =
         described.json().await.expect("decode WorkloadDescription");
+    // Post-ADR-0064 the describe response is a `DescribeSpecOutput` oneOf;
+    // a Job submit describes as the `Job` arm carrying `JobSpecInput`.
+    let described_job = match &desc_body.spec {
+        DescribeSpecOutput::Job(job) => job,
+        other => panic!("a Job describe must return DescribeSpecOutput::Job; got {other:?}"),
+    };
     assert_eq!(
-        desc_body.spec.replicas, 3,
+        described_job.replicas, 3,
         "after a 409, the stored spec must remain the ORIGINAL (replicas = 3), \
-         not the rejected replacement (replicas = 7); got {:?}",
-        desc_body.spec,
+         not the rejected replacement (replicas = 7); got {described_job:?}",
     );
     assert_eq!(
         desc_body.spec_digest, prime_response.spec_digest,

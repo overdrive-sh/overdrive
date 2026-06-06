@@ -181,13 +181,13 @@ paths:
           type: string
       responses:
         '200':
-          description: Job description
+          description: Workload description
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkloadDescription'
         '404':
-          description: Job not found
+          description: Workload not found
           content:
             application/json:
               schema:
@@ -236,7 +236,7 @@ paths:
           type: string
       responses:
         '200':
-          description: Job stop recorded
+          description: Workload stop recorded
           content:
             application/json:
               schema:
@@ -248,7 +248,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '404':
-          description: Job not found
+          description: Workload not found
           content:
             application/json:
               schema:
@@ -547,6 +547,71 @@ components:
             type: string
         region:
           type: string
+    DescribeSpecOutput:
+      oneOf:
+      - allOf:
+        - $ref: '#/components/schemas/JobSpecInput'
+          description: |-
+            Run-to-completion workload — reuses [`JobSpecInput`] verbatim
+            (the Job describe arm carries no platform-derived field, so the
+            existing `From<&Job>` render path IS the projection per
+            ADR-0064 § 2).
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - job
+        description: |-
+          Run-to-completion workload — reuses [`JobSpecInput`] verbatim
+          (the Job describe arm carries no platform-derived field, so the
+          existing `From<&Job>` render path IS the projection per
+          ADR-0064 § 2).
+      - allOf:
+        - $ref: '#/components/schemas/ServiceSpecOutput'
+          description: |-
+            Long-running supervised workload — surfaces the platform-issued
+            VIP via [`ServiceSpecOutput`].
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - service
+        description: |-
+          Long-running supervised workload — surfaces the platform-issued
+          VIP via [`ServiceSpecOutput`].
+      - allOf:
+        - $ref: '#/components/schemas/ScheduleSpecOutput'
+          description: Cron-scheduled `Job` — see [`ScheduleSpecOutput`].
+        - type: object
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              enum:
+              - schedule
+        description: Cron-scheduled `Job` — see [`ScheduleSpecOutput`].
+      description: |-
+        HTTP/JSON wire-shape for the `GET /v1/jobs/{id}` describe RESPONSE.
+
+        Per ADR-0064 this is the describe-side member of the type-family
+        universe — the read-only output projection distinct from the
+        submit-side [`crate::api::submit::SubmitSpecInput`] (ADR-0051)
+        because it surfaces the platform-issued Service VIP, which the
+        submit shape structurally forbids (ADR-0049 § 5).
+
+        Tagged JSON via `#[serde(tag = "kind", rename_all = "snake_case")]`
+        — the `kind` field discriminates `job` / `service` / `schedule`.
+
+        `utoipa::ToSchema` renders this as a `oneOf`-discriminated schema in
+        the generated OpenAPI document per OQ-1. NO `deny_unknown_fields`:
+        a response wire is forward-tolerant (ADR-0064 § 1).
     DriverInput:
       oneOf:
       - type: object
@@ -1101,6 +1166,27 @@ components:
             Inner job specification fired on each cron tick. Same wire
             shape standalone Jobs use.
       additionalProperties: false
+    ScheduleSpecOutput:
+      type: object
+      description: |-
+        HTTP/JSON wire-shape for a Schedule describe RESPONSE arm per
+        ADR-0064 § 2. The per-fire instance is a Job; the schedule adds the
+        cron expression. No VIP (a Schedule is not a Service).
+      required:
+      - id
+      - job
+      - cron_expr
+      properties:
+        cron_expr:
+          type: string
+          description: Cron expression. String-shaped on the wire.
+        id:
+          type: string
+        job:
+          $ref: '#/components/schemas/JobSpecInput'
+          description: |-
+            Inner job specification fired on each cron tick. Same wire shape
+            standalone Jobs use.
     ServiceFailureReason:
       oneOf:
       - type: object
@@ -1385,17 +1471,22 @@ components:
             items:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
-              Operator-declared liveness probes. Same defaulting policy as
-              [`Self::startup_probes`]. Reserved field; populated by future
-              slices (02-02).
+              Operator-declared liveness probes, projected from the parser-
+              side `[[health_check.liveness]]` blocks. Same defaulting policy
+              as [`Self::startup_probes`]. Evaluated by the reconciler — a
+              liveness failure past `failure_threshold` emits a restart
+              (ADR-0055).
           readiness_probes:
             type: array
             items:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
-              Operator-declared readiness probes. Same defaulting policy as
-              [`Self::startup_probes`]. Reserved field; populated by future
-              slices (02-01).
+              Operator-declared readiness probes, projected from the parser-
+              side `[[health_check.readiness]]` blocks. Same defaulting policy
+              as [`Self::startup_probes`]: defaults to an empty `Vec` on the
+              wire when omitted; the CLI's deploy path populates it from TOML.
+              Evaluated by the reconciler — a satisfied readiness probe flips
+              the backend healthy (ADR-0055).
           replicas:
             type: integer
             format: int32
@@ -1430,6 +1521,87 @@ components:
         `ServiceVipAllocator` keyed by
         `WorkloadIntent::Service(_).spec_digest()` after admission; the
         operator never names a VIP on the wire or in TOML.
+    ServiceSpecOutput:
+      allOf:
+      - $ref: '#/components/schemas/DriverInput'
+      - type: object
+        required:
+        - id
+        - replicas
+        - resources
+        - listeners
+        - startup_probes
+        - readiness_probes
+        - liveness_probes
+        - vip
+        properties:
+          id:
+            type: string
+          listeners:
+            type: array
+            items:
+              $ref: '#/components/schemas/ListenerInput'
+            description: |-
+              Operator-declared listeners, `(port, protocol)` only — no VIP
+              per listener (ADR-0049 § 5a: one VIP per Service, surfaced once
+              at the Service level, not per-listener).
+          liveness_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared liveness probes, projected read-only from the
+              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
+              surfaced on describe so a Service's liveness probes round-trip.
+          readiness_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared readiness probes, projected read-only from the
+              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
+              surfaced on describe so a Service's readiness probes round-trip.
+          replicas:
+            type: integer
+            format: int32
+            minimum: 0
+          resources:
+            $ref: '#/components/schemas/ResourcesInput'
+          startup_probes:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProbeDescriptor'
+            description: |-
+              Operator-declared startup probes, projected read-only from the
+              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              side [`crate::api::submit::ServiceSpecInput::startup_probes`].
+              Surfaced today so an operator who declared a
+              `[[health_check.startup]]` probe sees it reflected on describe
+              (the round-trip gap this field closes per the ADR-0064
+              amendment). The server always populates this on output, so no
+              `#[serde(default)]` is needed on this response wire.
+          vip:
+            $ref: '#/components/schemas/ServiceVip'
+            description: |-
+              The platform-issued Service VIP. REQUIRED — serialised as a
+              dotted-quad string (the [`ServiceVip`] newtype's `Display`).
+              Read-only: the operator never sets this on submit; the platform
+              assigns it via `ServiceVipAllocator` (ADR-0049).
+      description: |-
+        HTTP/JSON wire-shape for a Service describe RESPONSE arm per
+        ADR-0064 § 2.
+
+        Mirrors the Service submit shape (`id`, `replicas`, `resources`,
+        `driver`, `listeners`) PLUS the platform-issued `vip` — the field
+        [`crate::api::submit::ServiceSpecInput`] structurally cannot carry
+        (ADR-0049 § 5). The `vip` is REQUIRED per OQ-4: a persisted-and-
+        describable Service always has an allocated VIP (submit-time
+        admission allocates before the intent is written — ADR-0049 § 4).
+        Absence is unrepresentable; a missing allocator entry is an
+        internal-invariant violation surfaced as HTTP 500, never an
+        `Option`.
     ServiceSubmitEvent:
       oneOf:
       - type: object
@@ -2315,17 +2487,22 @@ components:
         the canonical spec digest per ADR-0014 and US-03 AC (amended by
         ADR-0020).
 
-        `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
-        CLI parses this response into a concrete type rather than a value
-        bag. `spec_digest` equals the lowercase-hex SHA-256 of the
-        rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
-        same value the original `POST /v1/jobs` returned for this `workload_id`.
+        `spec` is typed (`DescribeSpecOutput`), never `serde_json::Value` —
+        the CLI parses this response into a concrete type rather than a value
+        bag. Per ADR-0064 it is a kind-discriminated `oneOf` (the describe-side
+        inverse of the submit-side `SubmitSpecInput` per ADR-0051): `Job` carries
+        the verbatim `JobSpecInput` projection, `Service` carries
+        `ServiceSpecOutput` (with the platform-issued VIP the submit shape
+        structurally forbids), and `Schedule` carries `ScheduleSpecOutput`.
+        `spec_digest` equals the lowercase-hex SHA-256 of the rkyv-archived
+        bytes pulled out of the `IntentStore` — i.e. the same value the original
+        `POST /v1/jobs` returned for this `workload_id`.
       required:
       - spec
       - spec_digest
       properties:
         spec:
-          $ref: '#/components/schemas/JobSpecInput'
+          $ref: '#/components/schemas/DescribeSpecOutput'
         spec_digest:
           type: string
     WorkloadKind:

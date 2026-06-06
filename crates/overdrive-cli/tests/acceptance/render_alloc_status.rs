@@ -252,6 +252,75 @@ fn render_alloc_status_renders_no_listeners_section_when_empty() {
 }
 
 // -------------------------------------------------------------------
+// (g2) Service VIP rendering on the LIVE path (#220).
+//
+// `AllocStatusResponse.vip` already carries the platform-issued Service
+// VIP on the wire (ADR-0049 / #183) — populated for `WorkloadKind::Service`
+// reads from the allocator memo, `None` for Job/Schedule. The live
+// `render::alloc_status` path (the function `main.rs:158` actually calls)
+// dropped it. An operator deploying a Service must see the VIP so the
+// frontend address is visible; this is the operator-visibility half of
+// #220 (NOT the alloc-status→describe-workload rename). VIP is a
+// Service-only frontend property, grouped with `Listeners:` (VIP first),
+// and omitted entirely (not rendered as `VIP: None`) for non-Service.
+// -------------------------------------------------------------------
+
+/// A Service whose `AllocStatusResponse` carries a VIP renders a `VIP:`
+/// line with the platform-issued address on the live `render::alloc_status`
+/// path so the operator sees the frontend address.
+#[test]
+fn render_alloc_status_renders_service_vip_when_present() {
+    let snapshot = AllocStatusResponse {
+        vip: Some("10.96.0.2".to_string()),
+        listeners: vec![listener(5353, Proto::Udp)],
+        ..Default::default()
+    };
+
+    let out = AllocStatusOutput {
+        workload_id: "dns-resolver".to_string(),
+        spec_digest: "d7b885".to_string() + &"0".repeat(58),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot,
+    };
+
+    let rendered = overdrive_cli::render::alloc_status(&out);
+
+    assert!(
+        rendered.contains("VIP:"),
+        "live alloc_status render must include a 'VIP:' label for a Service with a \
+         platform-issued VIP; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("10.96.0.2"),
+        "live alloc_status render must surface the Service VIP address so the operator \
+         sees the frontend; got:\n{rendered}",
+    );
+}
+
+/// A workload with no VIP (`vip: None` — Job/Schedule) renders NO `VIP:`
+/// line — the line is presence-guarded, never rendered as `VIP: None`.
+#[test]
+fn render_alloc_status_renders_no_vip_line_when_absent() {
+    let out = AllocStatusOutput {
+        workload_id: "coinflip".to_string(),
+        spec_digest: "f".repeat(64),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        // default snapshot carries `vip: None`.
+        snapshot: AllocStatusResponse::default(),
+    };
+
+    let rendered = overdrive_cli::render::alloc_status(&out);
+
+    assert!(
+        !rendered.contains("VIP:"),
+        "a workload with no VIP (Job/Schedule) must NOT render a 'VIP:' line — \
+         it is omitted, never rendered as 'VIP: None'; got:\n{rendered}",
+    );
+}
+
+// -------------------------------------------------------------------
 // (h) Failed/terminal allocation surfaces state + error on the LIVE path.
 //
 // RCA finding S-A4 (root-cause-analysis-convergence-dataplane-gap.md):

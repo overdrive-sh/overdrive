@@ -30,6 +30,7 @@ use overdrive_control_plane::api::{
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_host::RealCgroupFs;
 use tempfile::TempDir;
@@ -184,7 +185,11 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
 
     let description: WorkloadDescription =
         client.describe_workload(&submit_resp.workload_id).await.expect("describe_workload");
-    assert_eq!(description.spec, spec, "round-tripped spec must match submitted spec");
+    assert_eq!(
+        description.spec,
+        DescribeSpecOutput::Job(spec),
+        "round-tripped spec must be the Job arm carrying the submitted spec",
+    );
     assert_eq!(
         description.spec_digest, submit_resp.spec_digest,
         "describe must echo the same spec_digest submit returned — \

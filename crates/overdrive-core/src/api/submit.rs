@@ -85,14 +85,19 @@ pub struct ServiceSpecInput {
     /// `submit_streaming_service` populates this field.
     #[serde(default)]
     pub startup_probes: Vec<ProbeDescriptor>,
-    /// Operator-declared readiness probes. Same defaulting policy as
-    /// [`Self::startup_probes`]. Reserved field; populated by future
-    /// slices (02-01).
+    /// Operator-declared readiness probes, projected from the parser-
+    /// side `[[health_check.readiness]]` blocks. Same defaulting policy
+    /// as [`Self::startup_probes`]: defaults to an empty `Vec` on the
+    /// wire when omitted; the CLI's deploy path populates it from TOML.
+    /// Evaluated by the reconciler — a satisfied readiness probe flips
+    /// the backend healthy (ADR-0055).
     #[serde(default)]
     pub readiness_probes: Vec<ProbeDescriptor>,
-    /// Operator-declared liveness probes. Same defaulting policy as
-    /// [`Self::startup_probes`]. Reserved field; populated by future
-    /// slices (02-02).
+    /// Operator-declared liveness probes, projected from the parser-
+    /// side `[[health_check.liveness]]` blocks. Same defaulting policy
+    /// as [`Self::startup_probes`]. Evaluated by the reconciler — a
+    /// liveness failure past `failure_threshold` emits a restart
+    /// (ADR-0055).
     #[serde(default)]
     pub liveness_probes: Vec<ProbeDescriptor>,
 }

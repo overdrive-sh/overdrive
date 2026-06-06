@@ -1,0 +1,3 @@
+ M verification/expectations/O06-describe-service-discriminated-vip/README.md
+ M verification/expectations/O06-describe-service-discriminated-vip/evidence/dirty-status.txt
+ M verification/expectations/O06-describe-service-discriminated-vip/runner.sh

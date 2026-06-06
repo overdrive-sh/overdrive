@@ -814,3 +814,46 @@ issue creation request is theirs.
   off 2026-05-15** (user accepted all eight recommendations
   verbatim). ADR Status flipped from Proposed to Accepted in the
   same edit.
+
+## Amendment (2026-06-06) — describe direction superseded by ADR-0064
+
+§ 1 ("Three distinct type families for the same logical concept") lists
+the boundary mapping functions. One of them is, verbatim:
+
+> - `WorkloadIntent` → `SubmitSpecInput` — `describe_workload`
+>   endpoint echoes the persisted intent back to the operator on
+>   GET; `JobV1 → JobSpecInput` reuses the existing `From<&Job>`
+>   impl at `aggregate/mod.rs:641`.
+
+**This describe-direction boundary is SUPERSEDED by ADR-0064**
+(Accepted 2026-06-06). The `describe_workload` endpoint does NOT echo
+the persisted intent back through `SubmitSpecInput`. It uses a
+**distinct `DescribeSpecOutput`** type (a kind-discriminated `oneOf`
+in `overdrive-core::api::describe`), for two reasons established at
+ADR-0064 OQ-1:
+
+1. **VIP surfacing.** The describe response must surface the
+   platform-issued Service VIP (per #183). `SubmitSpecInput`
+   structurally cannot carry it — its Service arm has no `vip` field
+   and is `deny_unknown_fields` (per this ADR § 3 and ADR-0049 § 5,
+   the operator never names a VIP). A distinct describe type is the
+   only shape that surfaces the VIP without re-admitting an
+   operator-supplied VIP on the submit wire.
+2. **Cadence decoupling.** Echoing through `SubmitSpecInput` would
+   re-couple describe ↔ submit evolution — a describe-only field would
+   force a change on the submit wire and vice versa. That is the
+   exact Pattern-C coupling this ADR fought to avoid (§ "Context" →
+   "Constraints"). `DescribeSpecOutput` keeps the describe boundary
+   independent.
+
+**What remains valid:** the Job describe arm still reuses
+`JobSpecInput` via the existing `From<&Job>` impl — but wrapped in
+`DescribeSpecOutput::Job(JobSpecInput::from(&job))`, not handed back
+as a bare `SubmitSpecInput`. The other three mapping functions in § 1
+(TOML → `WorkloadSpec`, `WorkloadSpec` → `SubmitSpecInput`,
+`SubmitSpecInput` → `WorkloadIntent`) are unchanged.
+
+See **ADR-0064** for the full describe-side decision (OQ-1 / OQ-4 /
+OQ-5 / OQ-7), the `DescribeSpecOutput` type sketch, the required-VIP
+shape, the read-only allocator `get`, and the single-cut migration
+plan.

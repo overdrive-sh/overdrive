@@ -1,0 +1,4 @@
+[1m[92m   Compiling[0m overdrive-dataplane v0.0.0 (/Users/marcus/conductor/workspaces/helios/adelaide/crates/overdrive-dataplane)
+[1m[92m   Compiling[0m overdrive-control-plane v0.0.0 (/Users/marcus/conductor/workspaces/helios/adelaide/crates/overdrive-control-plane)
+[1m[92m   Compiling[0m overdrive-cli v0.0.0 (/Users/marcus/conductor/workspaces/helios/adelaide/crates/overdrive-cli)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.85s

@@ -1,0 +1,82 @@
+{
+  "roadmap": {
+    "project_id": "describe-workload-oneof-discriminator",
+    "created_at": "2026-06-06",
+    "total_steps": 3,
+    "goal": "Widen the GET /v1/jobs/{id} describe response from a Job-only JobSpecInput to a kind-discriminated DescribeSpecOutput oneOf, surfacing the platform-issued Service VIP, per ADR-0064 (describe-side mirror of ADR-0051)."
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Describe-side DescribeSpecOutput oneOf widening",
+      "description": "Land the fourth wire type family (describe response), a typed VIP-missing error, then single-cut flip the describe response shape with exhaustive handler dispatch and OpenAPI regen per ADR-0064.",
+      "default_agent": "nw-software-crafter",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Add describe-wire types and render constructors",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "DescribeSpecOutput enum plus ServiceSpecOutput (required vip: ServiceVip) plus ScheduleSpecOutput exist in new api/describe.rs with serde tag=kind plus utoipa oneOf",
+            "JobV1::to_describe() delegates to existing From<&Job>; ServiceV1::to_describe(vip) renders with the passed VIP",
+            "ScheduleV1::to_describe() is a todo!() RED scaffold per OQ-5; carries #[expect(clippy::todo, reason=...)]",
+            "Inline proptest serde roundtrip plus oneOf-discriminator shape tests pass; additive only, no existing consumer changes",
+            "No deny_unknown_fields on the response enum (forward-tolerant per ADR-0064 §1)"
+          ],
+          "test_file": "crates/overdrive-core/src/api/describe.rs",
+          "scenario_name": "describe_spec_output_roundtrip_and_oneof_shape",
+          "files_to_modify": [
+            "crates/overdrive-core/src/api/describe.rs",
+            "crates/overdrive-core/src/api/mod.rs",
+            "crates/overdrive-core/src/aggregate/mod.rs"
+          ],
+          "implementation_notes": "Mirror ADR-0064 §§1-3 type sketches verbatim. Job arm reuses JobSpecInput (no new type) wrapped in DescribeSpecOutput::Job. ServiceSpecOutput reuses ServiceVip / ListenerInput / ResourcesInput / DriverInput (no duplication). NO deny_unknown_fields on the response enum (server-authored response is forward-tolerant, ADR-0064 §1). Schedule to_describe carries #[expect(clippy::todo, reason=\"RED scaffold — lands with Schedule submit per OQ-5\")] and #[should_panic(expected = \"RED scaffold\")] on any test exercising it. Additive only — no existing consumer changes in this step; the type must compile standalone. TEST PARADIGM: proptest @given Arbitrary roundtrip (serialize→deserialize bit-equal) plus oneOf-discriminator shape assertion (the kind tag is present and matches the variant). Single-example tests are FALLBACK only — document with a # bypass: comment if used.",
+          "deps": []
+        },
+        {
+          "id": "01-02",
+          "name": "Add ServiceVipMissing typed error and HTTP 500 mapping",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "New ControlPlaneError::ServiceVipMissing { spec_digest } dedicated variant exists; NOT internal(String)",
+            "Variant maps to HTTP 500 at the ADR-0015 error-mapping site",
+            "Constructor plus unit test asserting the 500 status code and body shape pass",
+            "spec_digest is carried on the variant for diagnostics"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/error.rs",
+          "scenario_name": "service_vip_missing_maps_to_http_500",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/error.rs"
+          ],
+          "implementation_notes": "Follow the ViewStoreBoot / Cgroup dedicated-variant precedent per .claude/rules/development.md § Errors — NEVER flatten a typed error to internal(String) at a composition boundary. The variant carries spec_digest for diagnostics. ServiceVipMissing is an internal-invariant violation (a persisted Service with no allocator entry means the submit-time-allocate / boot-rebuild invariant was broken per ADR-0049 §4/§8), so it maps to HTTP 500, not a 4xx. The crafter greps for the ADR-0015 HTTP-mapping site (may be the same file or a separate mapping module). Additive only. TEST PARADIGM: single-example unit test is appropriate here — exact status code (500) plus body shape is a golden assertion. # bypass: error-to-status mapping is a fixed lookup, not a property space.",
+          "deps": ["01-01"]
+        },
+        {
+          "id": "01-03",
+          "name": "Single-cut flip describe response, handler, consumers, OpenAPI",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "WorkloadDescription.spec type flips JobSpecInput → DescribeSpecOutput; utoipa components(schemas(...)) list updated",
+            "describe_workload handler replaces the HTTP 400 let-else with an exhaustive match; Service arm does read-only allocator.get (None → ServiceVipMissing 500); Schedule arm structured-rejects",
+            "All describe consumers updated: CLI describe command plus response parse, integration tests, fixtures unwrapping description.spec",
+            "OpenAPI regenerated via cargo openapi-gen; golden api/openapi.yaml plus the openapi_gate test updated",
+            "Acceptance test: describe a Service returns DescribeSpecOutput::Service with the allocated VIP"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+          "scenario_name": "describe_service_returns_discriminated_shape_with_vip",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/api.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+            "crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs",
+            "crates/overdrive-control-plane/tests/integration/openapi_gate.rs",
+            "api/openapi.yaml",
+            "crates/overdrive-cli/src/http_client.rs"
+          ],
+          "implementation_notes": "@sizing-acknowledged-single-cut — this step's file count is HIGHER by design: it is the single atomic commit mandated by ADR-0064 §6 and feedback_single_cut_greenfield_migrations.md. Do NOT split the type-flip from its consumer updates; intermediate states do not compile (no aliases, no shims, no grace period). Mirror ADR-0064 §4 handler dispatch verbatim: reuse *spec_digest_hash.as_bytes() as the [u8;32] / ServiceSpecDigest allocator key — no second digest compute; lock state.allocator briefly (Arc<tokio::sync::Mutex<…>>), call the non-mutating get, clone the Copy ServiceVip out, drop the lock BEFORE rendering. Remove the #183 pointer comment at handlers.rs:623-627 and the HTTP 400 let-else at 628-635. Schedule arm returns a structured Validation rejection (parallel to the submit handler) — to_describe stays unreachable. Regen OpenAPI via cargo openapi-gen (alias → overdrive-control-plane openapi bin); the golden re-emits with spec: DescribeSpecOutput plus the new per-variant schemas. The CLI describe site is crates/overdrive-cli/src/http_client.rs (WorkloadDescription deserialise) plus whichever command surfaces describe output — the crafter greps for WorkloadDescription / description.spec consumers in the PREPARE pass and adjusts files_to_modify to the actual cascade (~6-10 files per ADR-0064 § Consumer cascade). TEST PARADIGM: the acceptance integration test is single-example (real describe round-trip asserting the discriminated Service shape carries the allocated VIP) — verifies wiring end-to-end, not an invariant; integration tests REMAIN single-example. # bypass: end-to-end wiring verification.",
+          "deps": ["01-02"]
+        }
+      ]
+    }
+  ]
+}

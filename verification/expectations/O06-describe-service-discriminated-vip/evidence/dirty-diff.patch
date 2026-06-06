@@ -1,0 +1,84 @@
+diff --git a/verification/expectations/O06-describe-service-discriminated-vip/README.md b/verification/expectations/O06-describe-service-discriminated-vip/README.md
+index 8173374a..0e6c1204 100644
+--- a/verification/expectations/O06-describe-service-discriminated-vip/README.md
++++ b/verification/expectations/O06-describe-service-discriminated-vip/README.md
+@@ -42,29 +42,32 @@ ADR-0064 the response is widened to a `oneOf` discriminator and the Service
+ arm surfaces the VIP the platform allocated at submit time (ADR-0049) — the
+ address the operator could not previously learn from this endpoint.
+ 
+-Three sub-claims, captured black-box against the built `overdrive` binary on
++Four sub-claims, captured black-box against the built `overdrive` binary on
+ a real kernel (Lima):
+ 
+ 1. **Precondition — deploy accepted.** `overdrive deploy <service-spec>`
+    exits 0 and prints `Accepted.`; the Service intent is persisted and its
+-   VIP allocated at submit time (the precondition the describe read depends
+-   on).
+-2. **O-surface — the real CLI round-trips the widened describe response.**
+-   `overdrive alloc status --job <id>` (which calls `describe_workload` via
+-   the operator's real mTLS HTTP client) exits 0 against the deployed
+-   Service. This is the regression witness for the wire-shape migration: the
+-   pre-#183 shape, or any shape the CLI cannot deserialize, would fail this
+-   call. (Note: no CLI verb renders the VIP itself today — `alloc status`
+-   consumes the describe response only for `spec_digest`. The VIP is carried
+-   in the wire response, proven by sub-claim 3 + the anchor test below.)
+-3. **The #183 deliverable — discriminated shape + VIP on the wire.** A raw
+-   `GET /v1/jobs/{id}` against the running control plane (mTLS, using the
+-   serve-written trust triple) returns JSON whose `spec` carries
++   VIP allocated at submit time (the precondition the reads below depend on).
++2. **O-surface — the operator inspection command works.** `overdrive alloc
++   status --job <id>` (the operator's real mTLS HTTP client against
++   `GET /v1/allocs`, which carries `spec_digest` + the Service `vip` +
++   `listeners` per ADR-0049) exits 0 against the deployed Service and renders
++   the converged allocation.
++3. **O-surface — the operator SEES the VIP in the CLI.** That same `alloc
++   status` output now renders a `VIP: <ipv4>` line (the rendering half of
++   #220 — `render_vip_section`). Before it landed, the VIP was on the wire but
++   the CLI dropped it; this is the operator-visible-VIP proof.
++4. **The #183 deliverable — discriminated describe shape + VIP on the wire.**
++   A raw `GET /v1/jobs/{id}` against the running control plane (mTLS, using
++   the serve-written trust triple) returns JSON whose `spec` carries
+    `"kind": "service"` and a required `"vip"` IPv4 dotted-quad — the
+    discriminated Service arm `JobSpecInput` structurally could not produce.
++   This is the describe endpoint #183 widened (distinct from the `/v1/allocs`
++   surface sub-claims 2–3 exercise; both now expose the VIP).
+ 
+-This is the **operator-observable closure of #183**: the describe inspection
+-path works for Service workloads and exposes the platform-issued address.
++This is the **operator-observable closure of #183**: the describe endpoint
++returns the discriminated Service shape with the platform-issued VIP, and the
++operator's `alloc status` command now both works and prints that VIP.
+ 
+ - Anchor: GH #183 (`WorkloadDescription Service-arm wire-shape widening — oneOf discriminator for describe_workload`) — the issue this expectation closes.
+ - Anchor: ADR-0064 (`docs/product/architecture/adr-0064-describe-side-spec-output-discriminator.md` — `DescribeSpecOutput` distinct kind-discriminated `oneOf`; Service arm carries a REQUIRED `vip: ServiceVip`; OQ-1/OQ-4/OQ-7).
+diff --git a/verification/expectations/O06-describe-service-discriminated-vip/evidence/dirty-status.txt b/verification/expectations/O06-describe-service-discriminated-vip/evidence/dirty-status.txt
+index 139aac89..ce1fc783 100644
+--- a/verification/expectations/O06-describe-service-discriminated-vip/evidence/dirty-status.txt
++++ b/verification/expectations/O06-describe-service-discriminated-vip/evidence/dirty-status.txt
+@@ -1 +1,3 @@
+-?? verification/expectations/O06-describe-service-discriminated-vip/
++ M verification/expectations/O06-describe-service-discriminated-vip/README.md
++ M verification/expectations/O06-describe-service-discriminated-vip/evidence/dirty-status.txt
++ M verification/expectations/O06-describe-service-discriminated-vip/runner.sh
+diff --git a/verification/expectations/O06-describe-service-discriminated-vip/runner.sh b/verification/expectations/O06-describe-service-discriminated-vip/runner.sh
+index c21c5a63..5aac262e 100755
+--- a/verification/expectations/O06-describe-service-discriminated-vip/runner.sh
++++ b/verification/expectations/O06-describe-service-discriminated-vip/runner.sh
+@@ -237,6 +237,17 @@ if [[ "$alloc_rc" == "0" ]]; then
+ else
+   echo "  [FAIL] SC2: alloc status exited '${alloc_rc:-<none>}' — CLI failed to round-trip the describe response"; rc=1
+ fi
++
++# SC2b — the operator CLI now RENDERS the Service VIP (the rendering half of #220).
++# alloc status reads vip from the AllocStatusResponse envelope (ADR-0049) and prints
++# a `VIP: <ipv4>` line for Service reads. Before this landed the VIP was on the wire
++# but dropped by the CLI; this sub-claim is the operator-visible-VIP proof.
++if grep -Eq '^VIP:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$EVIDENCE_DIR/alloc_status_service.out" 2>/dev/null; then
++  echo "  [PASS] SC2b: alloc status renders the Service VIP line (operator-visible)"
++else
++  echo "  [FAIL] SC2b: alloc status output has no 'VIP: <ipv4>' line — CLI VIP rendering missing"; rc=1
++fi
++
+ # Informational (NOT a sub-claim — describe/VIP does not require convergence):
+ converged_secs="$(sed -n 's/^converged_after_secs=//p' "$EVIDENCE_DIR/alloc_status_service.meta" 2>/dev/null)"
+ if grep -qE '^Allocations:[[:space:]]+[1-9]' "$EVIDENCE_DIR/alloc_status_service.out" 2>/dev/null; then
