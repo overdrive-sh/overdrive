@@ -299,7 +299,32 @@ impl WorkflowEngine {
             WorkflowEngineError::UnknownWorkflow { name: spec.name.as_str().to_string() }
         })?;
 
-        let replay_buffer = self.journal.load_journal(workflow_id).await?;
+        let mut replay_buffer = self.journal.load_journal(workflow_id).await?;
+
+        // CA-4 — write `Started` at command-index 0 on FIRST start; idempotent
+        // on resume (ADR-0063 §2 / ADR-0064 §5). The instance has already
+        // started iff its loaded run holds any command (on a genuine first
+        // start the run is empty; on resume it already carries the `Started`
+        // the first start wrote). We must NOT append a second `Started` (the
+        // trap — a duplicated command-index-0 entry the positional cursor
+        // would walk twice). The check is structural (any-command-present),
+        // the same `WorkflowId` re-derived by `WorkflowId::for_correlation`
+        // upstream targeting the same persisted run.
+        if !run_has_started(&replay_buffer) {
+            let (spec_digest, input_digest) = started_digests(spec);
+            let started =
+                LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest });
+            // Append + fsync BEFORE building the cursor + spawning the author
+            // body (ADR-0063 §4 fsync-then-suspend): a crash after this append
+            // but before the spawn re-loads a run that already begins with
+            // `Started` and resumes cleanly (the idempotent-resume path above).
+            self.journal.append(workflow_id, &started).await?;
+            // Reflect the just-appended entry in the in-memory replay buffer so
+            // the cursor partitions a run that ALREADY begins with `Started` at
+            // command-index 0 — the first author `await`-point then records at
+            // command-index 1.
+            replay_buffer.push(started);
+        }
 
         let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new_with_channels(
             Arc::clone(&self.journal),
@@ -461,6 +486,51 @@ impl Drop for LiveInstanceGuard {
     }
 }
 
+/// Compute the input-derived `Started` digests (`spec_digest`,
+/// `input_digest`) for `spec` — the INPUTS the command-index-0 `Started`
+/// entry records on first start (ADR-0063 §2; CA-4). Per
+/// `.claude/rules/development.md` § "Persist inputs, not derived state":
+/// these are content hashes over the workflow-kind identity and the start
+/// input, NOT a pre-computed cache.
+///
+/// Slice 01's [`WorkflowSpec`] carries only the workflow `name` (its
+/// identity); the start input is the spec's identity bytes until a later
+/// slice grows the spec with start parameters (the spec evolves additively,
+/// `overdrive-core/src/workflow/mod.rs`). Both digests are derived here so
+/// the engine — not the test — owns the derivation, matching the journal
+/// characterization test's `ContentHash::of(spec.name…)` choice.
+fn started_digests(spec: &WorkflowSpec) -> (ContentHash, ContentHash) {
+    let spec_digest = ContentHash::of(spec.name.as_str().as_bytes());
+    // The start input. Slice 01 has no separate start-parameter surface on
+    // `WorkflowSpec`, so the input identity is the spec name bytes — the
+    // same input the journal-store characterization test records via
+    // `ProvisionRecord::PAYLOAD` (the workflow-kind constant). When the spec
+    // grows a parameter surface, this hashes those start bytes.
+    let input_digest = ContentHash::of(spec.name.as_str().as_bytes());
+    (spec_digest, input_digest)
+}
+
+/// Whether the loaded run has ALREADY started — the structural idempotency
+/// guard for resume (CA-4). An instance has started iff its persisted run
+/// holds at least one `LoadedEntry::Command`: on a genuine FIRST start the
+/// run is empty, so the engine writes `Started` at command-index 0; on any
+/// resume the run already carries the `Started` the first start wrote (plus
+/// whatever await-points landed before the crash), so the engine must NOT
+/// append a second `Started`.
+///
+/// The guard keys on "any command present," not "first command is
+/// `Started`," deliberately: a run that already carries commands — whether
+/// it begins with `Started` or with a mid-flight await-point — has started,
+/// and appending a fresh `Started` at the END (a non-zero append position)
+/// would corrupt the positional command walk (the cursor would later trip
+/// the Layer-1 determinism gate on the stray trailing `Started`). The
+/// trap (CA-4) is exactly "write `Started` once, on first start" — the
+/// presence of any prior command is the structural proof the instance is
+/// past first start.
+fn run_has_started(loaded: &[LoadedEntry]) -> bool {
+    loaded.iter().any(|entry| matches!(entry, LoadedEntry::Command(_)))
+}
+
 /// The canonical terminal-result string a [`WorkflowResult`] maps to in
 /// the journal `Terminal` entry. Stable labels so a resumed run reads back
 /// the same terminal (the engine maps these back to a `WorkflowResult` in
@@ -535,6 +605,26 @@ fn partition_loaded_run(
         }
     }
     (commands, notifications)
+}
+
+/// The initial command-cursor position for a partitioned command walk —
+/// the command-index of the FIRST author await-point (CA-4, ADR-0064 §3).
+///
+/// `Started` is a real command-index-0 entry the engine writes on first
+/// start, but it is **structural**, not an author await-op: no `ctx.run` /
+/// `ctx.sleep` / `ctx.wait_for_signal` / `ctx.emit_action` maps to it. The
+/// positional cursor must therefore begin PAST it — at command-index 1 —
+/// so the first author await-point replays against command-index 1, not
+/// against the `Started` entry (which would trip the Layer-1 type-at-index
+/// determinism gate, since the author op's expected kind is never
+/// `Started`).
+///
+/// A run that does NOT begin with `Started` (the DST replay-equivalence
+/// harness's 3-arg [`JournalCursorHandle::new`] constructs runs of bare
+/// `RunResult` / `SleepArmed` commands) starts at command-index 0 —
+/// backward-compatible with every pre-CA-4 cursor consumer.
+fn initial_command_cursor(commands: &[JournalCommand]) -> usize {
+    usize::from(matches!(commands.first(), Some(JournalCommand::Started { .. })))
 }
 
 /// The durable [`JournalCursor`] implementation over an
@@ -621,12 +711,13 @@ impl JournalCursorHandle {
         replay_buffer: Vec<LoadedEntry>,
     ) -> Self {
         let (replay_commands, signal_notifications) = partition_loaded_run(replay_buffer);
+        let initial = initial_command_cursor(&replay_commands);
         Self {
             journal,
             workflow_id,
             replay_commands,
             signal_notifications,
-            cursor: Mutex::new(0),
+            cursor: Mutex::new(initial),
             action_emit: None,
             obs: None,
         }
@@ -647,12 +738,13 @@ impl JournalCursorHandle {
         obs: Arc<dyn ObservationStore>,
     ) -> Self {
         let (replay_commands, signal_notifications) = partition_loaded_run(replay_buffer);
+        let initial = initial_command_cursor(&replay_commands);
         Self {
             journal,
             workflow_id,
             replay_commands,
             signal_notifications,
-            cursor: Mutex::new(0),
+            cursor: Mutex::new(initial),
             action_emit: Some(action_emit),
             obs: Some(obs),
         }

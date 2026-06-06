@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 
-use overdrive_control_plane::journal::{JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry};
 
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
@@ -108,5 +108,139 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
         got_result,
         WorkflowResult::Success,
         "the terminal row must carry the workflow's terminal result"
+    );
+}
+
+/// Count the `Started` commands in a loaded run and return the index of
+/// the first `LoadedEntry::Command` (the first command-walk position),
+/// alongside the first `Started`'s digests if present.
+fn started_facts(
+    loaded: &[LoadedEntry],
+) -> (usize, Option<usize>, Option<(ContentHash, ContentHash)>) {
+    let mut started_count = 0usize;
+    let mut first_command_pos: Option<usize> = None;
+    let mut first_started: Option<(ContentHash, ContentHash)> = None;
+    for (pos, entry) in loaded.iter().enumerate() {
+        if let LoadedEntry::Command(command) = entry {
+            if first_command_pos.is_none() {
+                first_command_pos = Some(pos);
+            }
+            if let JournalCommand::Started { spec_digest, input_digest } = command {
+                started_count += 1;
+                if first_started.is_none() {
+                    first_started = Some((*spec_digest, *input_digest));
+                }
+            }
+        }
+    }
+    (started_count, first_command_pos, first_started)
+}
+
+/// CA-4 — the trap itself. `WorkflowEngine::start` writes `Started` at
+/// command-index 0 on first start (the input-derived `spec_digest` /
+/// `input_digest`), and is idempotent on resume: driving `start` a second
+/// time over the persisted journal does NOT append a duplicate `Started`.
+///
+/// ADR-0063 §2 / ADR-0064 §5.
+///
+/// # Port-to-port
+///
+/// The driving port is `WorkflowEngine::start`. The driven port assert is
+/// at the `JournalStore::load_journal` boundary: after the first start the
+/// loaded run's first `Command` is `Started` at command-index 0; after a
+/// resume drives `start` a second time over the SAME persisted journal,
+/// exactly ONE `Started` command exists in the run (no duplicate).
+#[tokio::test]
+async fn start_writes_started_at_command_index_0_idempotent_on_resume() {
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+    let transport: Arc<dyn Transport> = Arc::new(SimTransport::new());
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(0x5eed));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+
+    let target: SocketAddr = "127.0.0.1:9100".parse().expect("valid addr");
+
+    // Two independent engines share ONE journal store — the first start
+    // persists `Started`; a fresh engine over the same journal models the
+    // restart/resume (every previously-running instance reads back its
+    // persisted run, exactly the crash-resume shape).
+    let make_engine = || {
+        let mut registry = WorkflowRegistry::new();
+        registry
+            .register(ProvisionRecord::spec().name, move || Box::new(ProvisionRecord::new(target)));
+        WorkflowEngine::new(
+            Arc::clone(&journal),
+            Arc::clone(&clock),
+            Arc::clone(&transport),
+            Arc::clone(&entropy),
+            registry,
+            Arc::clone(&obs),
+        )
+    };
+
+    let spec: WorkflowSpec = ProvisionRecord::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-provision-0002",
+        &ContentHash::of(spec.name.as_str().as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-provision-0002").expect("valid instance id");
+
+    // The input-derived digests the engine must record (ADR-0063 §2): the
+    // spec's canonical identity and the start input. Per
+    // `development.md` § "Persist inputs, not derived state" — INPUTS, not
+    // a pre-computed cache. Mirrors the journal-store characterization
+    // test's derivation so the engine's choice is pinned, not freeform.
+    let expected_spec_digest = ContentHash::of(spec.name.as_str().as_bytes());
+    let expected_input_digest = ContentHash::of(ProvisionRecord::PAYLOAD);
+
+    // --- First start ---
+    let engine = make_engine();
+    engine.start(&spec, &correlation, &workflow_id).await.expect("first start succeeds");
+    engine.join_all().await;
+
+    let after_first = journal.load_journal(&workflow_id).await.expect("load after first start");
+    let (started_count, first_command_pos, first_started) = started_facts(&after_first);
+
+    assert_eq!(
+        started_count, 1,
+        "first start must write exactly one Started command (ADR-0064 §5), got run {after_first:?}"
+    );
+    assert_eq!(
+        first_command_pos,
+        Some(0),
+        "Started is at command-index 0 — it is the FIRST entry in the run \
+         (the engine writes it before the author body records anything), got {after_first:?}"
+    );
+    assert!(
+        matches!(after_first.first(), Some(LoadedEntry::Command(JournalCommand::Started { .. }))),
+        "the loaded run BEGINS with a Started command (command-index 0), got {after_first:?}"
+    );
+    assert_eq!(
+        first_started,
+        Some((expected_spec_digest, expected_input_digest)),
+        "Started records the input-derived spec_digest / input_digest (ADR-0063 §2), \
+         not a derived cache"
+    );
+
+    // --- Resume drives start a second time over the persisted journal ---
+    let resumed = make_engine();
+    resumed.start(&spec, &correlation, &workflow_id).await.expect("resume start succeeds");
+    resumed.join_all().await;
+
+    let after_resume = journal.load_journal(&workflow_id).await.expect("load after resume");
+    let (resumed_started_count, resumed_first_command_pos, _) = started_facts(&after_resume);
+
+    assert_eq!(
+        resumed_started_count, 1,
+        "resume is idempotent — it must NOT append a second Started (the trap, CA-4), \
+         got run {after_resume:?}"
+    );
+    assert_eq!(
+        resumed_first_command_pos,
+        Some(0),
+        "after resume the run still BEGINS with the original Started at command-index 0, \
+         got {after_resume:?}"
     );
 }

@@ -621,6 +621,27 @@ fn provision_instance() -> (CorrelationKey, WorkflowId, WorkflowSpec) {
     (correlation, workflow_id, spec)
 }
 
+/// The command-index-0 `Started` entry the real `WorkflowEngine::start`
+/// uninterrupted path now writes for `spec` (CA-4, ADR-0063 §2 / ADR-0064
+/// §5). The crash-run constructors below drive a raw `ctx` via
+/// [`JournalCursorHandle::new`] — bypassing `engine.start`, so they never
+/// see the engine's `Started` write. Their hand-built crash journals must
+/// nonetheless BEGIN with the SAME `Started` the engine writes, or the
+/// replay-equivalence oracle (`entry_kinds`) sees the resumed trajectory
+/// `[Started, …]` (the resume goes through `engine.start`, which finds the
+/// `Started` already present and appends none) diverge from a crash journal
+/// that opened with a bare `RunResult`.
+///
+/// The digests mirror the engine's `started_digests` derivation verbatim —
+/// `ContentHash::of(spec.name…)` for both — so the entry is byte-identical
+/// to the one `engine.start` would have written. Production is the source
+/// of truth (`development.md` § "Production code is not shaped by
+/// simulation"); this harness fixture mirrors it.
+fn started_entry(spec: &WorkflowSpec) -> LoadedEntry {
+    let digest = ContentHash::of(spec.name.as_str().as_bytes());
+    LoadedEntry::Command(JournalCommand::Started { spec_digest: digest, input_digest: digest })
+}
+
 /// Build a `WorkflowEngine` over the SHARED `journal` + `obs`, a fresh set
 /// of `Sim*` ports, and a freshly-bound transport inbox so each boot
 /// observes its OWN delivered-datagram count. The engine resolves
@@ -715,7 +736,7 @@ async fn run_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResul
 /// `RunResult`, NO `Terminal`) and the count of effect fires during this
 /// pre-crash run.
 async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<LoadedEntry>, usize) {
-    let (_correlation, workflow_id, _spec) = provision_instance();
+    let (_correlation, workflow_id, spec) = provision_instance();
     let target: SocketAddr =
         WF_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_TARGET is a valid socket addr"));
     let sim_transport = SimTransport::new();
@@ -723,6 +744,13 @@ async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<Loa
         .bind_inbox(target)
         .await
         .unwrap_or_else(|_| unreachable!("bind_inbox is total"));
+    // The first start writes `Started` at command-index 0 (CA-4); the real
+    // `engine.start` does this on the live path. The crash journal must open
+    // with the SAME entry so the resumed trajectory (which re-enters through
+    // `engine.start`, sees the `Started` already present, and appends none)
+    // is byte-identical to an uninterrupted run. The raw-`ctx` step below
+    // then records `RunResult` AFTER it — `[Started, RunResult]`.
+    let _ = journal.append(&workflow_id, &started_entry(&spec)).await;
     {
         let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new(
             Arc::clone(journal),
@@ -1284,7 +1312,7 @@ async fn run_until_crash_in_sleep(
     seed: u64,
     journal: &Arc<dyn JournalStore>,
 ) -> (Vec<LoadedEntry>, usize, usize) {
-    let (_correlation, workflow_id, _spec) = provision_sleep_instance();
+    let (_correlation, workflow_id, spec) = provision_sleep_instance();
     let pre: SocketAddr =
         WF_SLEEP_PRE_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_SLEEP_PRE_TARGET valid"));
     let post: SocketAddr =
@@ -1294,6 +1322,11 @@ async fn run_until_crash_in_sleep(
         sim_transport.bind_inbox(pre).await.unwrap_or_else(|_| unreachable!("bind_inbox total"));
     let mut post_inbox =
         sim_transport.bind_inbox(post).await.unwrap_or_else(|_| unreachable!("bind_inbox total"));
+    // Open the crash journal with `Started` at command-index 0 (CA-4) — the
+    // same leading command `engine.start` writes on the live path — so the
+    // resumed sleep-shape trajectory stays byte-identical to an
+    // uninterrupted one. The raw-`ctx` `RunResult` + `SleepArmed` follow it.
+    let _ = journal.append(&workflow_id, &started_entry(&spec)).await;
     {
         let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new(
             Arc::clone(journal),
