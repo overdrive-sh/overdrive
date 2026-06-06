@@ -315,6 +315,38 @@ impl RcgenCa {
             .as_secs()
     }
 
+    /// Install `material` into `lock`, or — when a concurrent writer won the
+    /// race — verify the winner is byte-identical (idempotent adoption) and fail
+    /// loud with [`CaError::adoption_conflict`] otherwise.
+    ///
+    /// [`OnceLock::set`] returns `Err` ONLY on a lost race. The racer that won
+    /// may be a concurrent `root_material()` / `intermediate_material()` caller,
+    /// which mints a FRESH EPHEMERAL key/serial (`KeyPair::generate` draws new
+    /// randomness) — NOT interchangeable with the persisted material we are
+    /// adopting. Discarding the `set` error (`let _ = lock.set(material)`) would
+    /// silently leave the lock holding the ephemeral material, so every later
+    /// `issue_intermediate` / `issue_svid` / `trust_bundle` would sign under the
+    /// WRONG anchor, orphaning every cert relying parties pinned. The lost-race
+    /// branch therefore enforces the SAME divergence contract as the pre-check
+    /// guard in the adoption callers, one race-window later: identical winner →
+    /// idempotent `Ok(())`; divergent winner → `adoption_conflict`.
+    fn set_or_verify_winner<T>(
+        lock: &OnceLock<T>,
+        material: T,
+        cert_der: impl Fn(&T) -> &[u8],
+        kind: &'static str,
+    ) -> Result<(), CaError> {
+        if let Err(rejected) = lock.set(material) {
+            let winner = lock.get().unwrap_or_else(|| {
+                unreachable!("OnceLock is populated immediately after a failed set")
+            });
+            if cert_der(winner) != cert_der(&rejected) {
+                return Err(CaError::adoption_conflict(kind));
+            }
+        }
+        Ok(())
+    }
+
     /// Draw `SERIAL_BYTES` random bytes from the injected entropy source.
     ///
     /// Returns the raw bytes (for the rcgen `SerialNumber`) paired with their
@@ -528,10 +560,13 @@ impl Ca for RcgenCa {
             return Err(CaError::adoption_conflict("root"));
         }
 
-        // `set` only fails on a lost race; the winning value is the same
-        // persisted root, so reading it back is correct.
-        let _ = self.root_material.set(material);
-        Ok(())
+        // `set` only fails on a lost race, and the winner may be an ephemeral
+        // root minted by a concurrent `root_material()` caller — a DIFFERENT key
+        // that is NOT interchangeable with the persisted root. Verify the winner
+        // is byte-identical (idempotent adoption) or fail loud, enforcing the
+        // same divergence contract as the pre-check guard above one race-window
+        // later — never silently adopt the ephemeral racer's anchor.
+        Self::set_or_verify_winner(&self.root_material, material, |m| &m.cert_der, "root")
     }
 
     fn adopt_persisted_intermediate(
@@ -566,10 +601,18 @@ impl Ca for RcgenCa {
             return Err(CaError::adoption_conflict("intermediate"));
         }
 
-        // `set` only fails on a lost race; the winning value is the same
-        // persisted intermediate, so reading it back is correct.
-        let _ = self.intermediate_material.set(material);
-        Ok(())
+        // `set` only fails on a lost race, and the winner may be an ephemeral
+        // intermediate minted by a concurrent `intermediate_material()` caller —
+        // a DIFFERENT key that is NOT interchangeable with the persisted one.
+        // Verify the winner is byte-identical (idempotent adoption) or fail loud,
+        // enforcing the same divergence contract as the pre-check guard above one
+        // race-window later — never silently adopt the ephemeral racer's anchor.
+        Self::set_or_verify_winner(
+            &self.intermediate_material,
+            material,
+            |m| &m.cert_der,
+            "intermediate",
+        )
     }
 
     fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
@@ -589,5 +632,162 @@ impl Ca for RcgenCa {
             CaCertPem::new(root.cert_pem.clone()),
             Some(CaCertPem::new(intermediate.cert_pem.clone())),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IntermediateMaterial, RcgenCa, RootMaterial};
+    use overdrive_core::traits::ca::CaError;
+    use overdrive_core::{CertSerial, NodeId};
+    use std::sync::OnceLock;
+
+    fn serial() -> CertSerial {
+        CertSerial::new("ab").unwrap_or_else(|_| unreachable!("`ab` is a valid CertSerial"))
+    }
+
+    fn root_with(cert_der: Vec<u8>) -> RootMaterial {
+        RootMaterial {
+            key_pem: "key".to_string(),
+            cert_pem: "cert".to_string(),
+            cert_der,
+            serial: serial(),
+        }
+    }
+
+    fn intermediate_with(cert_der: Vec<u8>) -> IntermediateMaterial {
+        IntermediateMaterial {
+            node: NodeId::new("node-a").unwrap_or_else(|_| unreachable!("valid NodeId literal")),
+            key_pem: "key".to_string(),
+            cert_pem: "cert".to_string(),
+            cert_der,
+            serial: serial(),
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Branch 1 — empty lock installs the material and returns Ok.
+    // ---------------------------------------------------------------------
+
+    /// An empty `OnceLock` accepts the material: the `set` succeeds (no `Err`
+    /// branch taken), the call returns `Ok(())`, and the lock now holds exactly
+    /// the bytes we passed.
+    #[test]
+    fn set_or_verify_winner_installs_into_empty_lock() {
+        let lock: OnceLock<RootMaterial> = OnceLock::new();
+
+        let result =
+            RcgenCa::set_or_verify_winner(&lock, root_with(vec![1, 2, 3]), |m| &m.cert_der, "root");
+
+        assert!(result.is_ok(), "empty lock must accept the material");
+        assert_eq!(
+            lock.get().map(|m| m.cert_der.as_slice()),
+            Some([1u8, 2, 3].as_slice()),
+            "the lock must now hold the installed material",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Branch 2 — lost race against a byte-identical winner is idempotent Ok.
+    // ---------------------------------------------------------------------
+
+    /// A lost race (`set` returns `Err`) whose winner is byte-identical to the
+    /// material being adopted is the idempotent same-anchor case: it returns
+    /// `Ok(())` and leaves the winner in place. This is the "both racers adopt
+    /// the same persisted root" path the old comment described — the only case
+    /// in which discarding the `set` error was ever harmless.
+    #[test]
+    fn set_or_verify_winner_is_idempotent_for_byte_identical_winner() {
+        let lock: OnceLock<RootMaterial> = OnceLock::new();
+        // Pre-populate: a concurrent writer already won the race with the SAME
+        // persisted bytes.
+        lock.set(root_with(vec![9, 9, 9])).unwrap_or_else(|_| unreachable!("first set wins"));
+
+        let result =
+            RcgenCa::set_or_verify_winner(&lock, root_with(vec![9, 9, 9]), |m| &m.cert_der, "root");
+
+        assert!(result.is_ok(), "byte-identical winner is an idempotent no-op");
+        assert_eq!(
+            lock.get().map(|m| m.cert_der.as_slice()),
+            Some([9u8, 9, 9].as_slice()),
+            "the winning material stays in place",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Branch 3 — lost race against a DIVERGENT winner fails loud. REGRESSION.
+    // ---------------------------------------------------------------------
+
+    /// THE REGRESSION ASSERTION. A lost race whose winner is a DIFFERENT cert
+    /// (simulating a concurrent ephemeral `root_material()` caller that minted a
+    /// fresh key between the pre-check and the `set`) MUST surface
+    /// `CaError::AdoptionConflict { which: "root" }` — never silently adopt the
+    /// ephemeral racer's anchor.
+    ///
+    /// Falsifiability: the pre-fix `let _ = lock.set(material); Ok(())` returned
+    /// `Ok(())` here, silently leaving the WRONG (ephemeral) root in the lock so
+    /// every subsequent signature chained to an orphaned anchor. This assertion
+    /// fails against that code and passes only with the verify-winner fix.
+    /// Pre-populating the lock before the call faithfully reproduces "the lock
+    /// got populated between the pre-check and the set".
+    #[test]
+    fn set_or_verify_winner_rejects_divergent_root_winner() {
+        // Distinct byte pairs exercise the `!=` comparison against several
+        // shapes (different content, different length, single-byte flip) so a
+        // mutant flipping `!=`→`==` or short-circuiting the comparison is killed.
+        for (winner_bytes, adopted_bytes) in [
+            (vec![1u8, 2, 3], vec![4u8, 5, 6]),
+            (vec![1u8, 2, 3], vec![1u8, 2, 4]),
+            (vec![0u8], vec![0u8, 0]),
+            (vec![], vec![7u8]),
+        ] {
+            let lock: OnceLock<RootMaterial> = OnceLock::new();
+            lock.set(root_with(winner_bytes.clone()))
+                .unwrap_or_else(|_| unreachable!("first set wins"));
+
+            let result = RcgenCa::set_or_verify_winner(
+                &lock,
+                root_with(adopted_bytes.clone()),
+                |m| &m.cert_der,
+                "root",
+            );
+
+            assert!(
+                matches!(result, Err(CaError::AdoptionConflict { which: "root" })),
+                "divergent winner {winner_bytes:?} vs adopted {adopted_bytes:?} must be an \
+                 AdoptionConflict(\"root\"), got {result:?}",
+            );
+            // The ephemeral winner stays in the lock; the helper does NOT
+            // overwrite it (OnceLock cannot) — the failure is the signal, not a
+            // silent swap.
+            assert_eq!(
+                lock.get().map(|m| m.cert_der.as_slice()),
+                Some(winner_bytes.as_slice()),
+                "the ephemeral winner is unchanged; the conflict is surfaced, not absorbed",
+            );
+        }
+    }
+
+    /// The intermediate adoption path threads its own `kind` through the helper:
+    /// a divergent winner surfaces `AdoptionConflict { which: "intermediate" }`,
+    /// proving the `kind` argument is propagated (not hardcoded to "root").
+    #[test]
+    fn set_or_verify_winner_rejects_divergent_intermediate_winner_with_its_kind() {
+        let lock: OnceLock<IntermediateMaterial> = OnceLock::new();
+        lock.set(intermediate_with(vec![1, 1, 1]))
+            .unwrap_or_else(|_| unreachable!("first set wins"));
+
+        let result = RcgenCa::set_or_verify_winner(
+            &lock,
+            intermediate_with(vec![2, 2, 2]),
+            |m| &m.cert_der,
+            "intermediate",
+        );
+
+        assert!(
+            matches!(result, Err(CaError::AdoptionConflict { which: "intermediate" })),
+            "divergent intermediate winner must surface AdoptionConflict(\"intermediate\"), \
+             got {result:?}",
+        );
     }
 }
