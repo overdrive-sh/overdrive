@@ -221,6 +221,20 @@ fn sim_ca_svid_serial_is_deterministic_and_at_least_64_bits() {
         "SVID serial (drawn via seeded Entropy) must be identical across two same-seed runs",
     );
 
+    // (c2) the node-held leaf private key (ADR-0063 D9) is a non-empty PKCS#8 PEM
+    // and is BIT-IDENTICAL across two same-seed runs — it is a fixture `const`,
+    // so K5 (serial-only determinism) is preserved: the leaf key does not vary
+    // with the seed, only the serial does.
+    assert!(
+        svid_a.leaf_key().as_pem().contains("-----BEGIN PRIVATE KEY-----"),
+        "SVID leaf key must be a PKCS#8 PRIVATE KEY PEM block (node-held, D9)",
+    );
+    assert_eq!(
+        svid_a.leaf_key().as_pem(),
+        svid_b.leaf_key().as_pem(),
+        "SVID leaf key (fixture const) must be bit-identical across two same-seed runs (K5)",
+    );
+
     // (d) the serial is at least 64 bits wide (CA/B Forum floor). The serial is
     // lowercase hex of the drawn bytes, so its byte width is `len() / 2`.
     let serial_byte_width = svid_a.serial().as_str().len() / 2;

@@ -251,28 +251,41 @@ impl SvidRequest {
 
 /// Minted workload-SVID material returned by [`Ca::issue_svid`].
 ///
-/// Carries the leaf certificate (PEM + DER), its serial, and the SPIFFE
-/// identity it was minted for — all contract-observable. Per research
-/// Finding 5 the leaf's *private key* is generated and held by the requesting
-/// workload's keypair flow, NOT by the CA, so it is not part of this output.
+/// Carries the leaf certificate (PEM + DER), its serial, the SPIFFE identity it
+/// was minted for, and the **matching leaf private key** (PKCS#8 PEM) — all
+/// contract-observable. Per ADR-0063 D9 (node-held custody) the adapter
+/// *generates* the leaf keypair, signs the cert with it, and **returns** the
+/// private half here: the holder is the **node agent** that performs the TLS 1.3
+/// handshake on the workload's behalf (whitepaper §7), not the workload (Overdrive
+/// is sidecarless — there is no in-pod agent to generate or hold a key). This is
+/// the deliberate exception to "keys never leave the signer" (research Finding 5),
+/// which applies to the root/intermediate *signing* keys, not to the leaf
+/// credential the CA mints for a relying party to use. The [`leaf_key`] is never
+/// an audit input and is never persisted in the audit trail (ADR-0063 D6 — a
+/// private key is not an audit fact).
+///
+/// [`leaf_key`]: SvidMaterial::leaf_key
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SvidMaterial {
     cert_pem: CaCertPem,
     cert_der: CaCertDer,
     serial: CertSerial,
     spiffe_id: SpiffeId,
+    leaf_key: CaKeyPem,
 }
 
 impl SvidMaterial {
-    /// Assemble SVID material from its observable parts.
+    /// Assemble SVID material from its observable parts, including the matching
+    /// node-held leaf private key (PKCS#8 PEM, ADR-0063 D9).
     #[must_use]
     pub const fn new(
         cert_pem: CaCertPem,
         cert_der: CaCertDer,
         serial: CertSerial,
         spiffe_id: SpiffeId,
+        leaf_key: CaKeyPem,
     ) -> Self {
-        Self { cert_pem, cert_der, serial, spiffe_id }
+        Self { cert_pem, cert_der, serial, spiffe_id, leaf_key }
     }
 
     /// The SVID leaf certificate in PEM form.
@@ -297,6 +310,20 @@ impl SvidMaterial {
     #[must_use]
     pub const fn spiffe_id(&self) -> &SpiffeId {
         &self.spiffe_id
+    }
+
+    /// The **matching leaf private key** (PKCS#8 PEM), node-held per ADR-0063 D9.
+    ///
+    /// This is the private half of the credential the node agent feeds to rustls
+    /// to perform the TLS 1.3 handshake on the workload's behalf. Its public half
+    /// is embedded in [`cert_pem`](SvidMaterial::cert_pem) /
+    /// [`cert_der`](SvidMaterial::cert_der) — the cert↔key correspondence the
+    /// `Ca::issue_svid` postcondition guarantees and that makes the SVID usable in
+    /// an mTLS handshake (the absence of this field was the orphaned-key bug D9
+    /// closes). Never an audit input (ADR-0063 D6); never persisted.
+    #[must_use]
+    pub const fn leaf_key(&self) -> &CaKeyPem {
+        &self.leaf_key
     }
 }
 
@@ -556,6 +583,20 @@ pub trait Ca: Send + Sync {
     /// serial drawn via the `Entropy` port (≥64 bits, CA/B Forum floor —
     /// research Finding 10). The single URI SAN is a structural consequence of
     /// the single-identity request, not a checked-then-asserted property.
+    ///
+    /// The returned `SvidMaterial` ALSO carries the **matching PKCS#8 leaf
+    /// private key** via [`SvidMaterial::leaf_key`] (ADR-0063 D9): the adapter
+    /// *generates* the leaf keypair (the workload/agent does NOT supply a public
+    /// key or CSR — Overdrive is sidecarless, whitepaper §7), signs the cert with
+    /// it, and returns the private half for **node-held** custody — the node agent
+    /// that runs the TLS 1.3 handshake on the workload's behalf is the holder. The
+    /// cert's embedded public key MUST correspond to this returned private key
+    /// (the cert↔key correspondence that makes the SVID usable in an mTLS
+    /// handshake; its absence was the orphaned-key bug D9 closes). This supersedes
+    /// the prior "workload's keypair flow" model (research Finding 5 governs the
+    /// root/intermediate *signing* keys, which stay adapter-held; the leaf
+    /// credential is the deliberate node-held exception). The leaf key is NOT an
+    /// audit input and is never persisted (ADR-0063 D6).
     ///
     /// # Edge cases
     /// There is **no bad-SAN-cardinality edge case at this method** — the

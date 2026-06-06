@@ -423,10 +423,15 @@ impl Ca for RcgenCa {
         let issuer_params = self.intermediate_params(&intermediate.node, &[0u8; SERIAL_BYTES])?;
         let issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&issuer_params, &issuer_key);
 
-        // The leaf keypair: the workload's own signing key. Per research
-        // Finding 5 the leaf's private key is NOT a CA-boundary output, so it is
-        // generated here only to sign the cert and then dropped — `SvidMaterial`
-        // carries no key.
+        // The leaf keypair: generated here (D7 — the crypto-backend CSPRNG via
+        // rcgen), used to sign the cert, and per ADR-0063 D9 RETAINED and
+        // RETURNED on `SvidMaterial` — NOT dropped. Custody is node-held: the
+        // node agent that runs the TLS 1.3 handshake on the workload's behalf
+        // (whitepaper §7) is the holder. Dropping it (the pre-D9 bug) orphaned
+        // every issued SVID — the cert embedded `leaf_key`'s public half but no
+        // entity held the matching private half, so the cert was unusable in any
+        // mTLS handshake. Finding 5's "keys never leave the signer" applies to
+        // the root/intermediate signing keys, not to this leaf credential.
         let leaf_key = KeyPair::generate().map_err(|source| {
             CaError::signing_failed(format!("svid leaf keypair generation: {source}"))
         })?;
@@ -488,11 +493,16 @@ impl Ca for RcgenCa {
             CaError::signing_failed(format!("svid sign by intermediate: {source}"))
         })?;
 
+        // Serialize the leaf private key to PKCS#8 "PRIVATE KEY" PEM and return
+        // it on `SvidMaterial` (ADR-0063 D9 — node-held). The public half is the
+        // one embedded in `cert` above, so `leaf_key` is the matching private
+        // half the node agent feeds to rustls.
         Ok(SvidMaterial::new(
             CaCertPem::new(cert.pem()),
             CaCertDer::new(cert.der().to_vec()),
             serial,
             spec.subject().clone(),
+            CaKeyPem::new(leaf_key.serialize_pem()),
         ))
     }
 

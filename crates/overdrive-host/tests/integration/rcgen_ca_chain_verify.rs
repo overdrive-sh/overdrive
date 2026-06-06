@@ -387,3 +387,72 @@ fn rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile() {
     let window_secs = validity.not_after.timestamp() - validity.not_before.timestamp();
     assert_eq!(window_secs, 3600, "SVID validity window is ~1 hour (3600s)");
 }
+
+/// `@real-io` `@adapter-integration` `@S-04` — ADR-0063 D9 (node-held leaf-key
+/// custody): the returned `SvidMaterial` carries the MATCHING leaf private key,
+/// and the cert's embedded public key corresponds to that private key. This is
+/// the cert↔key correspondence the orphaned-key bug violated (the adapter
+/// generated a leaf keypair, signed the cert, then DROPPED the key — every
+/// issued SVID embedded a public key whose private half no entity held,
+/// unusable in any mTLS handshake) and that `openssl verify` never checks
+/// (chain well-formedness ≠ key possession).
+///
+/// Falsifiability: against the pre-D9 code (no `leaf_key` field / key dropped),
+/// this test cannot even be written — `svid.leaf_key()` does not exist. With the
+/// field present but populated from a DIFFERENT key than the one that signed the
+/// cert, the SPKI comparison AND the sign/verify round-trip both fail. It passes
+/// only when the returned private key is the genuine private half of the cert's
+/// embedded public key.
+#[test]
+fn rcgen_svid_returns_matching_leaf_private_key_for_node_custody() {
+    use rcgen::PublicKeyData;
+
+    // GIVEN a host CA and a workload SVID request for a specific identity.
+    let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .expect("trust-domain SpiffeId parses");
+    let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
+    let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+        .expect("workload SpiffeId parses");
+    let req = SvidRequest::new(workload);
+
+    // WHEN the leaf is minted through the driving port (D9 returns cert + key).
+    let svid = ca.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf + returns its key");
+
+    // THEN the returned leaf key is a non-empty PKCS#8 "PRIVATE KEY" PEM block —
+    // the node-held credential the agent feeds to rustls (the field that did not
+    // exist before D9).
+    let leaf_key_pem = svid.leaf_key().as_pem();
+    assert!(
+        leaf_key_pem.contains("-----BEGIN PRIVATE KEY-----"),
+        "leaf key must be a PKCS#8 PRIVATE KEY PEM block, got: {leaf_key_pem}"
+    );
+
+    // AND the public key DERIVED FROM the returned private key equals the public
+    // key EMBEDDED IN the issued cert — the cert↔key correspondence `openssl
+    // verify` never checks (chain well-formedness ≠ key possession). Both sides
+    // are reduced to their SubjectPublicKeyInfo (SPKI) DER and compared
+    // byte-for-byte:
+    //   - cert side: x509-parser exposes the cert's `subject_pki.raw` SPKI DER.
+    //   - key side: rcgen reloads the PKCS#8 PEM (`KeyPair::from_pem`) and
+    //     re-serializes its public half as SPKI DER (`subject_public_key_info`,
+    //     the `PublicKeyData` trait method — the same SPKI shape x509-parser
+    //     reads from the cert, proven equal by rcgen's own round-trip test).
+    // A dropped key (the orphaned-key bug — no field at all) makes this test
+    // impossible to write; a mismatched key makes these diverge; the genuine
+    // matching private half makes them byte-identical, proving the SVID is usable
+    // in an mTLS handshake (the node agent holds the key for the cert it presents).
+    let reloaded = KeyPair::from_pem(leaf_key_pem)
+        .expect("returned leaf key reloads as a valid PKCS#8 keypair");
+    let key_spki_der = reloaded.subject_public_key_info();
+
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(svid.cert_der().as_der())
+        .expect("parse svid DER");
+    let cert_spki_der = cert.tbs_certificate.subject_pki.raw;
+
+    assert_eq!(
+        cert_spki_der,
+        key_spki_der.as_slice(),
+        "the cert's embedded public key (SPKI) must equal the public half of the returned leaf \
+         private key — the cert↔key correspondence the orphaned-key bug violated"
+    );
+}

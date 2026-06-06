@@ -394,6 +394,27 @@ fn ca_equivalence_svid_profile_matches_across_host_and_sim() {
         },
         "the shared SVID profile matches the Ca::issue_svid contract"
     );
+
+    // AND both adapters return a NODE-HELD leaf private key (ADR-0063 D9) — a
+    // non-empty PKCS#8 "PRIVATE KEY" PEM block. This is a SHAPE/CONTRACT
+    // assertion, NOT host==sim byte-equality: the host mints a fresh keypair per
+    // call (OS CSPRNG), the sim returns a fixture key const — the key bytes
+    // differ by construction, exactly as the cert PEM/DER do (research Finding
+    // 11). The contract both adapters honor is "a matching leaf key is returned",
+    // not "the same key". (The cert↔key CORRESPONDENCE — public-half-in-cert
+    // equals private-half-returned — is proven per-adapter against real crypto in
+    // the host `rcgen_ca_chain_verify` suite; the sim cannot sign, so its fixture
+    // pair carries the same property by construction.)
+    for (label, key_pem) in
+        [("host", host_svid.leaf_key().as_pem()), ("sim", sim_svid.leaf_key().as_pem())]
+    {
+        assert!(
+            key_pem.contains("-----BEGIN PRIVATE KEY-----")
+                && key_pem.contains("-----END PRIVATE KEY-----"),
+            "{label} SVID must return a PKCS#8 PRIVATE KEY PEM block (node-held leaf key, D9), \
+             got: {key_pem}"
+        );
+    }
 }
 
 /// The contract-observable trust-bundle composition shape, read through the
