@@ -196,6 +196,61 @@ fn job_alloc_status_renders_no_listeners_section() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// #220 — Service alloc status renders the platform-issued VIP so the
+// operator-visible frontend address is surfaced. The VIP already rides
+// on `AllocStatusResponse.vip` (ADR-0049 / #183) but the kind-aware
+// renderer dropped it. VIP is Service-only and grouped with `Listeners:`
+// (VIP first); omitted entirely for non-Service.
+// ---------------------------------------------------------------------------
+
+/// A Service whose response carries a VIP renders a `VIP:` line with the
+/// platform-issued address on the kind-aware path.
+#[test]
+fn service_alloc_status_renders_vip_when_present() {
+    let mut response = fixture_response(
+        "dns-resolver",
+        WorkloadKind::Service,
+        vec![fixture_row("alloc-0", AllocStateWire::Running, None, Some("123@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.vip = Some("10.96.0.2".to_string());
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    assert!(
+        rendered.contains("VIP:"),
+        "Service alloc-status must render a 'VIP:' label when a VIP is present; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("10.96.0.2"),
+        "Service alloc-status must surface the platform-issued VIP address; got:\n{rendered}",
+    );
+}
+
+/// A Service with no VIP (`vip: None`) renders NO `VIP:` line — the line
+/// is presence-guarded, never rendered as `VIP: None`. (`fixture_response`
+/// defaults `vip: None`.)
+#[test]
+fn service_alloc_status_renders_no_vip_line_when_absent() {
+    let response = fixture_response(
+        "dns-resolver",
+        WorkloadKind::Service,
+        vec![fixture_row("alloc-0", AllocStateWire::Running, None, Some("123@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    assert!(
+        !rendered.contains("VIP:"),
+        "a Service with no VIP must NOT render a 'VIP:' line — it is omitted, never \
+         rendered as 'VIP: None'; got:\n{rendered}",
+    );
+}
+
 // Property: for every `(port, protocol)` listener set, the rendered
 // Service output contains the exact `<port>/<protocol>` token for each
 // listener, using the canonical lowercase protocol form — and renders

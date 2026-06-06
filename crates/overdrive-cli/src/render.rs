@@ -181,6 +181,11 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
     // Renders each row's state, its structured `reason`, and the verbatim
     // driver `error` detail (e.g. `bind: Address already in use`).
     render_allocation_rows(&mut s, &out.snapshot.rows);
+    // VIP + Listeners are the Service frontend — group them (VIP first).
+    // The VIP rides on the snapshot envelope (`vip: Some(..)` for a
+    // Service, `None` for Job/Schedule per ADR-0049 / #183); the line is
+    // omitted entirely when absent.
+    render_vip_section(&mut s, out.snapshot.vip.as_deref());
     // Listeners are an INTENT property carried on the snapshot envelope,
     // independent of allocations/convergence — render them at ANY
     // allocation count (including 0) so a pre-convergence UDP Service
@@ -216,6 +221,25 @@ fn render_allocation_rows(
             let _ = writeln!(out, "    exit code: {code}");
         }
     }
+}
+
+/// Append the operator-facing `VIP:` line to `out` IFF the workload
+/// carries a platform-issued Service VIP. `AllocStatusResponse.vip` is
+/// `Some` only for `WorkloadKind::Service` reads (populated from the
+/// allocator memo per ADR-0049 / #183); `None` for Job/Schedule, in
+/// which case the line is omitted entirely (never `VIP: None`) — the
+/// same presence-guard discipline as `render_listeners_section`. The
+/// VIP is the Service frontend address; it is grouped with `Listeners:`
+/// (VIP first). The label is aligned to the same value column as
+/// `Workload ID:` / `Spec digest:` / `Allocations:` (offset 15). Shared
+/// by both `alloc_status` (the live command renderer) and
+/// `alloc_status_kind_aware` so the two paths cannot drift.
+fn render_vip_section(out: &mut String, vip: Option<&str>) {
+    use std::fmt::Write as _;
+    let Some(vip) = vip else {
+        return;
+    };
+    let _ = writeln!(out, "VIP:           {vip}");
 }
 
 /// Append the operator-facing `Listeners:` section to `out` IFF the
@@ -763,6 +787,13 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
                     since,
                 );
             }
+            // VIP + Listeners are the Service frontend — group them (VIP
+            // first). The VIP rides on the response envelope (`vip:
+            // Some(..)` for a Service, `None` otherwise per ADR-0049 /
+            // #183); shares `render_vip_section` with the live
+            // `alloc_status` path so the two cannot drift. Omitted
+            // entirely when absent.
+            render_vip_section(&mut s, out.vip.as_deref());
             // Listeners section — Service-only, rendered IFF the
             // intent declared at least one listener. Shares
             // `render_listeners_section` with `alloc_status` (the live
