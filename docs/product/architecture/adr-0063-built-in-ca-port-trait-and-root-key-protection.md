@@ -209,14 +209,14 @@ subkey   = HKDF-SHA256-Expand(
              HKDF-SHA256-Extract(salt, KEK),
              info = "overdrive/ca/root-key/v1",
              L = 32)
-ciphertext, tag = AES-256-GCM-Seal(subkey, nonce, root_key_der, aad = kek_id)
+ciphertext, tag = AES-256-GCM-Seal(subkey, nonce, root_key_bytes, aad = kek_id)
 
 RootCaKeyRecordV1 {
     kek_id:      KekId,        // which KEK this was sealed under (key rotation)
     salt:        [u8; 32],     // HKDF salt, random per seal
     info:        Vec<u8>,      // HKDF info / domain-separation label
     nonce:       [u8; 12],     // AES-GCM nonce, random per seal
-    ciphertext:  Vec<u8>,      // sealed root private key (DER)
+    ciphertext:  Vec<u8>,      // sealed root private key (boot path seals PEM; codec is format-agnostic)
     aead_tag:    [u8; 16],     // GCM auth tag (may be appended to ciphertext)
 }
 ```
