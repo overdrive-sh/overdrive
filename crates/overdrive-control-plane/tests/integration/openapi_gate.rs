@@ -66,6 +66,10 @@ fn openapi_gen_output_contains_every_api_type_schema() {
         "SubmitWorkloadRequest",
         "SubmitWorkloadResponse",
         "WorkloadDescription",
+        // ADR-0064 describe-side oneOf wire shape (step 01-03).
+        "DescribeSpecOutput",
+        "ServiceSpecOutput",
+        "ScheduleSpecOutput",
         "ClusterStatus",
         "BrokerCountersBody",
         "AllocStatusResponse",

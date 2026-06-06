@@ -64,6 +64,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-06T15:49:45Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T15:51:07Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T15:57:50Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T15:59:02Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: AT (Service describe) plus rewritten Job round-trip tests cover all reachable behaviors; Schedule arm structurally unreachable in Phase 1 (ScheduleV1::from_submit is itself a RED scaffold); ServiceVipMissing 500 unit-tested in error.rs at 01-02. No additional unit test reaches GREEN.",
+      "t": "2026-06-06T15:59:23Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-06T16:05:15Z"
     }
   ]
 }

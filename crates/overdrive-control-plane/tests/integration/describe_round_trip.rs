@@ -18,15 +18,33 @@
 //! the `tests/integration.rs` entrypoint.
 
 use std::net::SocketAddr;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
+use axum::Json;
+use axum::body::to_bytes;
+use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use overdrive_control_plane::api::{
     ErrorBody, SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
 };
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_control_plane::handlers::{describe_workload, submit_workload};
+use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
+use overdrive_control_plane::{AppState, ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, Job, JobSpecInput, ResourcesInput};
-use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::api::describe::DescribeSpecOutput;
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
+use overdrive_core::id::NodeId;
+use overdrive_core::traits::driver::{Driver, DriverType};
+use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_host::RealCgroupFs;
+use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_store_local::LocalIntentStore;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -163,11 +181,13 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
 
     // 3. spec must round-trip byte-identical (via rkyv) to the submitted
     //    spec — `Job::from_submit(spec)` applied to both sides must produce
-    //    byte-identical archives.
+    //    byte-identical archives. Post-ADR-0064 the describe response is a
+    //    `DescribeSpecOutput` oneOf; a Job submit describes as the `Job` arm
+    //    carrying the verbatim `JobSpecInput` projection.
     assert_eq!(
         description.spec,
-        payments_spec(),
-        "described spec must be byte-identical (via rkyv) to the submitted spec",
+        DescribeSpecOutput::Job(payments_spec()),
+        "described spec must be the Job arm carrying the byte-identical (via rkyv) submitted spec",
     );
 
     // 4. spec_digest must be present and non-empty — the per-write
@@ -354,6 +374,135 @@ async fn describe_returns_spec_digest_matching_submit_response() {
 }
 
 // -----------------------------------------------------------------------
+// AC (step 01-03) — describe a Service returns `DescribeSpecOutput::Service`
+// carrying the platform-issued VIP.
+//
+// Port-to-port (in-process driving ports): submit a Service through the
+// production `submit_workload` handler so the VIP is allocated under the
+// SAME `spec_digest_hash.as_bytes()` key the describe handler reads, then
+// drive the production `describe_workload` handler and assert the response
+// is `WorkloadDescription { spec: DescribeSpecOutput::Service(ServiceSpecOutput
+// { vip, .. }), .. }` carrying the issued VIP.
+//
+// Litmus: reverting the handler's exhaustive match (back to the HTTP-400
+// Service rejection) turns this test RED — the Service arm would no longer
+// describe. Sharing the AppState between the two handler calls is the
+// load-bearing detail; the allocator memo is keyed by the content-addressed
+// digest the submit handler derives, so describe's read-only `get` hits.
+// -----------------------------------------------------------------------
+
+/// Build an in-process `AppState` whose `allocator` carries the default
+/// `VipRange`, sharing a single tempdir-backed `LocalIntentStore` so the
+/// VIP `submit_workload` allocates survives into the `describe_workload`
+/// read. Mirrors `vip_allocator_lifecycle.rs::build_state_with_range`.
+fn build_in_process_state(tmp: &TempDir) -> AppState {
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store) as Arc<dyn IntentStore>,
+    )));
+    AppState::new(
+        store,
+        store_path,
+        obs,
+        Arc::new(runtime),
+        driver,
+        Arc::new(SimClock::new()),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        NodeId::new("writer-1").expect("NodeId"),
+        allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
+        std::net::Ipv4Addr::LOCALHOST,
+    )
+}
+
+/// Compose a `ServiceSpecInput` with a single `(port, "tcp")` listener
+/// and an `exec` driver. Mirrors the shape used by
+/// `vip_allocator_lifecycle.rs`.
+fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
+    ServiceSpecInput {
+        id: id.to_owned(),
+        replicas: 2,
+        resources: ResourcesInput { cpu_milli: 250, memory_bytes: 268_435_456 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
+    }
+}
+
+#[tokio::test]
+async fn describe_service_returns_discriminated_shape_with_vip() {
+    let tmp = TempDir::new().expect("tempdir");
+    let state = build_in_process_state(&tmp);
+
+    // ---- (1) Submit the Service through the production handler — this
+    //          allocates the VIP under the content-addressed spec_digest.
+    let spec = service_spec("frontend", 8080);
+    let submit_response = submit_workload(
+        State(state.clone()),
+        HeaderMap::new(),
+        Json(SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec.clone()) }),
+    )
+    .await
+    .expect("Service submit must succeed against the default pool");
+    let submit_bytes =
+        to_bytes(submit_response.into_body(), usize::MAX).await.expect("submit body bytes");
+    let submit_body: SubmitWorkloadResponse =
+        serde_json::from_slice(&submit_bytes).expect("decode SubmitWorkloadResponse");
+    let issued_vip = submit_body.vip.clone().expect("Service submit echoes the allocated VIP");
+
+    // ---- (2) Describe the Service through the production handler.
+    let description = describe_workload(State(state), Path(submit_body.workload_id.clone()))
+        .await
+        .expect("describe of a submitted Service must succeed (no HTTP-400 rejection)")
+        .0;
+
+    // ---- (3) The response carries the discriminated Service arm with the
+    //          platform-issued VIP and the operator-declared fields.
+    let service = match &description.spec {
+        DescribeSpecOutput::Service(svc) => svc,
+        other => {
+            panic!("describe of a Service must return DescribeSpecOutput::Service; got {other:?}")
+        }
+    };
+    assert_eq!(
+        service.vip.to_string(),
+        issued_vip,
+        "described Service VIP must equal the VIP submit allocated under the same spec_digest",
+    );
+    assert_eq!(service.id, "frontend", "described Service id must round-trip");
+    assert_eq!(service.replicas, 2, "described Service replicas must round-trip");
+    assert_eq!(
+        service.listeners.len(),
+        1,
+        "described Service must carry the single operator-declared listener; got {:?}",
+        service.listeners,
+    );
+    assert_eq!(service.listeners[0].port, 8080, "described listener port must round-trip");
+
+    // ---- (4) spec_digest is the canonical 64-char SHA-256 hex and matches
+    //          the digest submit returned — the round-trip witness.
+    assert_eq!(
+        description.spec_digest, submit_body.spec_digest,
+        "described spec_digest must match the digest submit returned",
+    );
+    assert_eq!(
+        description.spec_digest.len(),
+        64,
+        "described spec_digest must be 64 hex chars (SHA-256); got {}",
+        description.spec_digest.len(),
+    );
+}
+
+// -----------------------------------------------------------------------
 // AC — submit-then-describe proptest. Mandatory rkyv-roundtrip call site
 // per `.claude/rules/testing.md` §Property-based testing.
 // -----------------------------------------------------------------------
@@ -432,8 +581,8 @@ proptest! {
 
             prop_assert_eq!(
                 &description.spec,
-                &spec,
-                "described spec must round-trip byte-identical via rkyv",
+                &DescribeSpecOutput::Job(spec.clone()),
+                "described spec must be the Job arm carrying the byte-identical (via rkyv) spec",
             );
             prop_assert_eq!(
                 &description.spec_digest,

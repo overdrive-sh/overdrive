@@ -29,6 +29,7 @@
 
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::describe::{DescribeSpecOutput, ScheduleSpecOutput, ServiceSpecOutput};
 use overdrive_core::api::submit::{
     ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput,
 };
@@ -145,14 +146,19 @@ pub enum IdempotencyOutcome {
 /// the canonical spec digest per ADR-0014 and US-03 AC (amended by
 /// ADR-0020).
 ///
-/// `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
-/// CLI parses this response into a concrete type rather than a value
-/// bag. `spec_digest` equals the lowercase-hex SHA-256 of the
-/// rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
-/// same value the original `POST /v1/jobs` returned for this `workload_id`.
+/// `spec` is typed (`DescribeSpecOutput`), never `serde_json::Value` —
+/// the CLI parses this response into a concrete type rather than a value
+/// bag. Per ADR-0064 it is a kind-discriminated `oneOf` (the describe-side
+/// inverse of the submit-side `SubmitSpecInput` per ADR-0051): `Job` carries
+/// the verbatim `JobSpecInput` projection, `Service` carries
+/// `ServiceSpecOutput` (with the platform-issued VIP the submit shape
+/// structurally forbids), and `Schedule` carries `ScheduleSpecOutput`.
+/// `spec_digest` equals the lowercase-hex SHA-256 of the rkyv-archived
+/// bytes pulled out of the `IntentStore` — i.e. the same value the original
+/// `POST /v1/jobs` returned for this `workload_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WorkloadDescription {
-    pub spec: JobSpecInput,
+    pub spec: DescribeSpecOutput,
     pub spec_digest: String,
 }
 
@@ -360,6 +366,17 @@ pub struct ErrorBody {
         StopWorkloadResponse,
         StopOutcome,
         WorkloadDescription,
+        // ADR-0064 describe-side wire shape — `DescribeSpecOutput` is the
+        // kind-discriminated `oneOf` response now carried by
+        // `WorkloadDescription.spec` (the describe-side inverse of
+        // `SubmitSpecInput`). Per-variant payload schemas (Service /
+        // Schedule) are registered explicitly so they appear in the
+        // OpenAPI document's `components.schemas` section regardless of
+        // the renderer's nested-resolution behavior. The Job arm reuses
+        // `JobSpecInput`, already registered below.
+        DescribeSpecOutput,
+        ServiceSpecOutput,
+        ScheduleSpecOutput,
         ClusterStatus,
         BrokerCountersBody,
         AllocStatusResponse,

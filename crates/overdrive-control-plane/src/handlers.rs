@@ -19,8 +19,9 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use overdrive_core::aggregate::{
-    AggregateError, IntentKey, Job, JobSpecInput, ServiceV1, WorkloadIntent, WorkloadKind,
+    AggregateError, IntentKey, Job, ServiceV1, WorkloadIntent, WorkloadKind,
 };
+use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::reconcilers::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
@@ -614,27 +615,67 @@ pub async fn describe_workload(
     // 4. Canonical spec_digest — SHA-256 over the rkyv-archived
     //    `WorkloadIntentV1` payload bytes per ADR-0050. Computed
     //    against the typed `WorkloadIntent` so the digest matches
-    //    submit-handler output regardless of variant.
-    let spec_digest = intent
+    //    submit-handler output regardless of variant. The `ContentHash`
+    //    object is RETAINED (not collapsed to only its `String` form):
+    //    the Service arm needs `*spec_digest_hash.as_bytes()` to key the
+    //    allocator read with the SAME `[u8; 32]` the submit path keys
+    //    `allocate(...)` with (handlers.rs §4a). `spec_digest` is the
+    //    top-level response field (lowercase-hex).
+    let spec_digest_hash = intent
         .spec_digest()
-        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?
-        .to_string();
+        .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?;
+    let spec_digest = spec_digest_hash.to_string();
 
-    // Per step 02-03d — Service describe is a structural rejection at
-    // this surface in Phase 1 because `WorkloadDescription.spec` is
-    // typed `JobSpecInput`. Widening to a kind-discriminated oneOf
-    // response shape (parallel to ADR-0051's SubmitSpecInput) is
-    // tracked in GH #183. Schedule is similarly out of scope here.
-    let WorkloadIntent::Job(job) = intent else {
-        return Err(ControlPlaneError::Validation {
-            field: Some("id".to_owned()),
-            message:
-                "describe is only available for Job workloads in Phase 1 (Service/Schedule describe wire shape is GH #183)"
-                    .to_owned(),
-        });
+    // 5. Project the persisted intent onto the kind-discriminated
+    //    describe-wire `oneOf` per ADR-0064. The describe response is the
+    //    inverse-direction sibling of submit's `SubmitSpecInput`: where
+    //    submit projects `client JSON → WorkloadIntent`, describe projects
+    //    `WorkloadIntent (+ VIP) → client JSON`.
+    let spec = match intent {
+        // Job carries no platform-derived field; the `to_describe`
+        // projection delegates to the existing `From<&Job>` render path
+        // (ADR-0064 § 2).
+        WorkloadIntent::Job(job) => DescribeSpecOutput::Job(job.to_describe()),
+        // Service surfaces the platform-issued VIP — read-only from the
+        // allocator memo (ADR-0064 OQ-7), NEVER allocated here. The memo
+        // is keyed by the content-addressed digest's `[u8; 32]` bytes,
+        // identical to the submit path's `allocate(digest_bytes)` key
+        // (handlers.rs §4a). The guard is dropped BEFORE rendering — there
+        // is no `.await` between lock and drop, so the allocator mutex is
+        // never held across an await point (`.claude/rules/development.md`
+        // § "Never hold a lock across `.await`").
+        WorkloadIntent::Service(svc) => {
+            let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+            let guard = state.allocator.lock().await;
+            let vip = guard.get(&digest_bytes);
+            drop(guard);
+            // A persisted-and-describable Service always has an allocated
+            // VIP — submit-time admission allocates before the intent is
+            // written (ADR-0049 § 4) and the boot rebuild re-seeds the memo
+            // from the intent SSOT (ADR-0049 § 8). A missing entry is a
+            // broken allocate-or-rebuild invariant, surfaced as HTTP 500
+            // (`ServiceVipMissing`), never `None` on the wire (ADR-0064 OQ-4).
+            let vip = vip
+                .ok_or(ControlPlaneError::ServiceVipMissing { spec_digest: spec_digest.clone() })?;
+            DescribeSpecOutput::Service(svc.to_describe(vip))
+        }
+        // Schedule describe is unreachable in Phase 1 — no Schedule can be
+        // persisted (`ScheduleV1::from_submit` is itself a RED scaffold per
+        // ADR-0064 OQ-5). Reject with the same structured `Validation`
+        // shape the submit handler uses for the unrealised Schedule path,
+        // so client tooling branching on the error discriminator stays
+        // consistent across submit and describe.
+        WorkloadIntent::Schedule(_) => {
+            return Err(ControlPlaneError::Validation {
+                field: Some("id".to_owned()),
+                message:
+                    "describe is not available for Schedule workloads in Phase 1 (Schedule submit is unrealised)"
+                        .to_owned(),
+            });
+        }
     };
 
-    Ok(Json(api::WorkloadDescription { spec: JobSpecInput::from(&job), spec_digest }))
+    Ok(Json(api::WorkloadDescription { spec, spec_digest }))
 }
 
 /// `POST /v1/jobs/{id}/stop` — record a stop intent for a previously-

@@ -27,6 +27,7 @@ use overdrive_control_plane::api::{
     WorkloadDescription,
 };
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
 use utoipa::ToSchema;
 
@@ -117,8 +118,12 @@ fn idempotency_outcome_serialises_lowercase_unchanged() {
 
 #[test]
 fn job_description_round_trips_with_typed_spec() {
-    let original =
-        WorkloadDescription { spec: sample_job_spec(), spec_digest: "deadbeef".repeat(8) };
+    // Post-ADR-0064 `WorkloadDescription.spec` is the kind-discriminated
+    // `DescribeSpecOutput` oneOf; a Job describes as the `Job` arm.
+    let original = WorkloadDescription {
+        spec: DescribeSpecOutput::Job(sample_job_spec()),
+        spec_digest: "deadbeef".repeat(8),
+    };
     let wire = serde_json::to_string(&original).expect("serialise WorkloadDescription");
     let round_tripped: WorkloadDescription =
         serde_json::from_str(&wire).expect("deserialise WorkloadDescription");
