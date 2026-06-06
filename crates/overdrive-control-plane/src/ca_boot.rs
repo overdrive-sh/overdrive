@@ -282,7 +282,7 @@ async fn load_persistent_root(
     // Earned-Trust probe (b): the persisted envelope MUST decrypt under the
     // resolved KEK. A tampered / wrong-KEK / corrupt record refuses startup
     // with NO silent re-mint.
-    let key_der = codec.open(kek, kek_id, &record).map_err(|source| {
+    let key_pem_bytes = codec.open(kek, kek_id, &record).map_err(|source| {
         tracing::error!(
             name: "health.startup.refused",
             kek_id = %kek_id,
@@ -302,7 +302,7 @@ async fn load_persistent_root(
             ),
         })?;
 
-    decode_cert_material(&cert_material, key_der)
+    decode_cert_material(&cert_material, key_pem_bytes)
 }
 
 /// Newline-framed encoding of the public root cert material: PEM, DER (base16),
@@ -332,7 +332,7 @@ fn encode_cert_material(root: &RootCaHandle) -> Vec<u8> {
 
 /// Decode the newline-framed public cert material + decrypted key into a
 /// [`RootCaHandle`] presenting the byte-identical root identity.
-fn decode_cert_material(bytes: &[u8], key_der: Vec<u8>) -> Result<RootCaHandle, CaBootError> {
+fn decode_cert_material(bytes: &[u8], key_pem_bytes: Vec<u8>) -> Result<RootCaHandle, CaBootError> {
     let text = std::str::from_utf8(bytes).map_err(|_| CaBootError::Ca {
         source: CaError::signing_failed("persisted cert material is not valid UTF-8"),
     })?;
@@ -353,10 +353,11 @@ fn decode_cert_material(bytes: &[u8], key_der: Vec<u8>) -> Result<RootCaHandle, 
     let der = decode_hex(der_hex).ok_or_else(malformed)?;
     let serial = CertSerial::new(serial_str).map_err(|_| malformed())?;
 
-    // The decrypted key DER is re-presented as PEM-shaped sign-capability
-    // material; the identity assertion is on the public cert (cert_pem /
-    // cert_der / serial), which is byte-identical to first boot.
-    let key_pem = String::from_utf8(key_der).map_err(|_| CaBootError::Ca {
+    // The decrypted key is PEM-shaped sign-capability material (the root
+    // signing key was sealed in PEM form, not DER); the identity assertion is
+    // on the public cert (cert_pem / cert_der / serial), which is
+    // byte-identical to first boot.
+    let key_pem = String::from_utf8(key_pem_bytes).map_err(|_| CaBootError::Ca {
         source: CaError::signing_failed("decrypted root key is not valid UTF-8 PEM"),
     })?;
 

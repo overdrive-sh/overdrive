@@ -10,7 +10,7 @@
 //!                       HKDF-SHA256-Extract(salt, KEK),
 //!                       info = "overdrive/ca/root-key/v1",
 //!                       L = 32)
-//! ciphertext, tag = AES-256-GCM-Seal(subkey, nonce, root_key_der, aad = kek_id)
+//! ciphertext, tag = AES-256-GCM-Seal(subkey, nonce, root_key_bytes, aad = kek_id)
 //! ```
 //!
 //! `salt` (32 bytes) and `nonce` (12 bytes) are drawn fresh per seal from the
@@ -100,13 +100,19 @@ impl RootKeyAeadCodec {
         Self { rng: SystemRandom::new() }
     }
 
-    /// Seal `root_key_der` under the KEK named `kek_id`, producing a
+    /// Seal `root_key_bytes` under the KEK named `kek_id`, producing a
     /// persistable [`RootCaKeyRecord`].
     ///
     /// HKDF-SHA256-derives a per-use subkey from the resolved KEK (fresh
-    /// random salt), then AES-256-GCM-seals `root_key_der` under it (fresh
+    /// random salt), then AES-256-GCM-seals `root_key_bytes` under it (fresh
     /// random nonce, AAD = `kek_id` bytes). The returned record carries the
     /// AEAD inputs only — never the plaintext key.
+    ///
+    /// `root_key_bytes` is the opaque serialized private key the caller wants
+    /// sealed; the codec is format-agnostic. The production boot path
+    /// (`ca_boot::boot_ca`) seals the root signing key in **PEM** form, so the
+    /// at-rest ciphertext decrypts back to PEM — a durable contract (see the
+    /// `persisted_root_key_envelope_seals_pem_not_der` regression test).
     ///
     /// # Errors
     /// * [`CaError::SigningFailed`] when the KEK cannot be resolved, the
@@ -117,7 +123,7 @@ impl RootKeyAeadCodec {
         &self,
         kek: &dyn Kek,
         kek_id: &KekId,
-        root_key_der: &[u8],
+        root_key_bytes: &[u8],
     ) -> Result<RootCaKeyRecord, CaError> {
         let material = kek.resolve(kek_id).map_err(|err| map_resolve_err(&err))?;
 
@@ -134,7 +140,7 @@ impl RootKeyAeadCodec {
         // Seal in place: copy the plaintext into a working buffer, encrypt it,
         // and take the tag out separately so it lands in the record's distinct
         // `aead_tag` field (matching the persisted-shape contract).
-        let mut in_out = root_key_der.to_vec();
+        let mut in_out = root_key_bytes.to_vec();
         let nonce = Nonce::assume_unique_for_key(nonce_bytes);
         let tag = key
             .seal_in_place_separate_tag(nonce, Aad::from(aad_bytes(kek_id)), &mut in_out)
@@ -151,7 +157,8 @@ impl RootKeyAeadCodec {
     }
 
     /// Open a sealed [`RootCaKeyRecord`] under the KEK named `supplied_kek_id`,
-    /// recovering the byte-identical root key DER.
+    /// recovering the byte-identical sealed key bytes (the production boot path
+    /// seals — and therefore recovers — the root signing key in PEM form).
     ///
     /// # Errors
     /// * [`CaError::WrongKek`] when `supplied_kek_id` ≠ the record's `kek_id`

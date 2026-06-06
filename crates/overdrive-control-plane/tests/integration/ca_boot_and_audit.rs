@@ -34,6 +34,7 @@ use async_trait::async_trait;
 use overdrive_control_plane::ca_boot::{self, CaBootError};
 use overdrive_control_plane::ca_issuance::{self, CaIssuanceError};
 use overdrive_core::ca::kek::KEK_LEN;
+use overdrive_core::ca::root_key_envelope::RootCaKeyRecord;
 use overdrive_core::traits::ca::{
     Ca, CaError, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
 };
@@ -125,6 +126,60 @@ async fn root_ca_is_reused_across_control_plane_restart() {
         "second boot must present the byte-identical root cert DER"
     );
     assert_eq!(first.serial(), second.serial(), "second boot must present the same root serial");
+}
+
+// ---------------------------------------------------------------------------
+// Regression — durable at-rest format: the sealed root key is PEM, not DER
+// ---------------------------------------------------------------------------
+
+/// `@real-io` `@adapter-integration` `@S-02` — durable-format regression
+/// guard (`aead_codec` param/doc said "DER" while the boot path seals PEM).
+///
+/// The at-rest envelope format is a durable protocol: a maintainer who reads
+/// "DER" in the codec/field docs and "corrects" `generate_and_persist_root`
+/// to seal `signing_key().as_der()` instead of `as_pem()` would make every
+/// PREVIOUSLY-persisted record fail to decrypt on upgrade (the load path
+/// parses the decrypted bytes as UTF-8 PEM). This pins the contract at the
+/// boot seam: the plaintext recovered from a freshly-persisted envelope MUST
+/// be PEM-armored, not DER. Swap the seal to DER and this goes RED — binary
+/// DER is not valid UTF-8 and carries no PEM armor.
+#[tokio::test]
+async fn persisted_root_key_envelope_seals_pem_not_der() {
+    // GIVEN a first boot that generates + envelope-encrypts + persists the root.
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+
+    let intent = intent_store(&store_dir);
+    ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+        .await
+        .expect("first boot generates + persists the sealed root-key envelope");
+
+    // WHEN the persisted envelope is read back and opened under the same KEK.
+    let envelope_bytes = intent
+        .get(b"ca/root/key-envelope/v1")
+        .await
+        .expect("intent store get")
+        .expect("the first boot persisted a root-key envelope");
+    let record = RootCaKeyRecord::from_store_bytes(
+        &envelope_bytes,
+        std::path::Path::new("<intent-store>"),
+        Some("ca/root/key-envelope/v1"),
+    )
+    .expect("persisted envelope decodes into a RootCaKeyRecord");
+    let recovered = codec.open(&kek, &kek_id, &record).expect("envelope opens under the KEK");
+
+    // THEN the sealed plaintext is the PEM form of the signing key — NOT DER.
+    // DER is binary (would fail this UTF-8 decode); PEM is valid UTF-8 + armored.
+    let pem = std::str::from_utf8(&recovered)
+        .expect("sealed root key must be PEM (valid UTF-8); a DER payload would be binary");
+    assert!(
+        pem.contains("-----BEGIN") && pem.contains("PRIVATE KEY-----"),
+        "the sealed root-key plaintext must be PEM-armored, not DER; got a non-PEM payload"
+    );
 }
 
 // ---------------------------------------------------------------------------

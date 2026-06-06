@@ -163,7 +163,8 @@ pub type RootCaKeyRecordLatest = RootCaKeyRecordV1;
 /// * `salt` — HKDF-SHA-256 salt.
 /// * `info` — HKDF-SHA-256 info / context-binding bytes.
 /// * `nonce` — AES-GCM nonce (96-bit / 12-byte for GCM).
-/// * `ciphertext` — the sealed root-key DER bytes.
+/// * `ciphertext` — the sealed root-key bytes (the boot path seals the root
+///   signing key in PEM form; the codec itself is format-agnostic).
 /// * `aead_tag` — the AES-GCM authentication tag (128-bit / 16-byte).
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct RootCaKeyRecordV1 {
@@ -175,7 +176,8 @@ pub struct RootCaKeyRecordV1 {
     pub info: Vec<u8>,
     /// AES-GCM nonce (12 bytes for 96-bit GCM nonces).
     pub nonce: Vec<u8>,
-    /// Sealed root-key DER bytes (AES-GCM ciphertext).
+    /// Sealed root-key bytes (AES-GCM ciphertext). The boot path seals the
+    /// root signing key in PEM form; the AEAD codec is format-agnostic.
     pub ciphertext: Vec<u8>,
     /// AES-GCM authentication tag (16 bytes).
     pub aead_tag: Vec<u8>,
