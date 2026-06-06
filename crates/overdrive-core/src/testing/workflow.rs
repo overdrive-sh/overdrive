@@ -75,6 +75,9 @@ impl ProvisionRecord {
         WorkflowSpec {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            // These reference workflows take no typed input — the opaque
+            // CBOR `input` is empty (additive-field compile-fixup, step 01-02).
+            input: Vec::new(),
         }
     }
 }
@@ -153,6 +156,9 @@ impl ProvisionRecordWithSleep {
         WorkflowSpec {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            // These reference workflows take no typed input — the opaque
+            // CBOR `input` is empty (additive-field compile-fixup, step 01-02).
+            input: Vec::new(),
         }
     }
 }
@@ -222,6 +228,9 @@ impl ProvisionRecordWithSignalEmit {
         WorkflowSpec {
             name: WorkflowName::new(Self::WORKFLOW_NAME)
                 .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            // These reference workflows take no typed input — the opaque
+            // CBOR `input` is empty (additive-field compile-fixup, step 01-02).
+            input: Vec::new(),
         }
     }
 }

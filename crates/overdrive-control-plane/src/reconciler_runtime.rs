@@ -2130,7 +2130,13 @@ async fn hydrate_workflow_desired_instances(
         instances.insert(
             correlation,
             WorkflowInstanceState {
-                spec: WorkflowSpec { name },
+                // Additive-field compile-fixup (step 01-02): the desired-intent
+                // value currently persists ONLY the workflow-kind name bytes
+                // (action-shim still writes `spec.name`); the full
+                // `archive_for_store` persist + `from_store_bytes` hydrate that
+                // carries `input` lands in Slice 03 (#217 engine discharge).
+                // Until then the reconstructed spec's input is empty.
+                spec: WorkflowSpec { name, input: Vec::new() },
                 running_in_intent: true,
                 has_live_task: false,
                 terminal: None,

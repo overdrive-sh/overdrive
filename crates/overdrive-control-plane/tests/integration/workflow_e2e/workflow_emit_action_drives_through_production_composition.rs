@@ -121,7 +121,10 @@ impl EmittingWorkflow {
     const WORKFLOW_NAME: &'static str = "emitting-trigger-workflow";
 
     fn spec() -> WorkflowSpec {
-        WorkflowSpec { name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name") }
+        WorkflowSpec {
+            name: WorkflowName::new(Self::WORKFLOW_NAME).expect("valid kebab name"),
+            input: Vec::new(),
+        }
     }
 }
 

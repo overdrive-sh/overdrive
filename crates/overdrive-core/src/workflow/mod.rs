@@ -30,6 +30,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
 use crate::reconcilers::Action;
 use crate::traits::{Clock, Entropy, Transport};
 
@@ -1336,7 +1337,25 @@ impl<'de> serde::Deserialize<'de> for SignalValue {
 
 /// Identity of a workflow to start. Kebab-case, `^[a-z][a-z0-9-]{0,62}$`
 /// — the same shape as `ReconcilerName`, the peer primitive's identity.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Derives `rkyv::{Archive, Serialize, Deserialize}` because it is embedded
+/// inline in the rkyv-archived [`WorkflowSpecV1`] payload (the durable
+/// `Action::StartWorkflow` intent crosses the rkyv `IntentStore` boundary
+/// via [`WorkflowSpec::archive_for_store`]). The inner `String` is a private
+/// field; rkyv archives the validated canonical form and re-materialises it
+/// without re-validating (the bytes were produced by `new()` at write time).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct WorkflowName(String);
 
 /// Maximum length for a workflow name (1 lead + up to 62 interior).
@@ -1401,16 +1420,201 @@ pub enum WorkflowNameError {
 }
 
 /// The concrete workflow spec carried by `Action::StartWorkflow`
-/// (ADR-0064 §1) — replaces the former unit placeholder at
-/// `reconcilers/mod.rs`.
+/// (ADR-0064 §1, ADR-0065 §5) — the durable START INTENT for a workflow
+/// instance, read back on every restart through the rkyv `IntentStore`
+/// boundary.
 ///
-/// Slice 01 carries the workflow's identity; later slices grow the spec
-/// additively (parameters, version) as the engine + lifecycle reconciler
-/// land.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowSpec {
+/// # Why this is an rkyv versioned-envelope payload (ADR-0048 §4b)
+///
+/// `WorkflowSpec` grew from identity-only (`{ name }`) to an input-bearing
+/// durable aggregate (`{ name, input }`). It now crosses a durable-storage
+/// boundary as the persisted `Action::StartWorkflow` intent, so per
+/// `.claude/rules/development.md` § "rkyv schema evolution" it MUST be
+/// wrapped in a per-type rkyv versioned envelope ([`WorkflowSpecEnvelope`])
+/// with a co-located typed codec ([`Self::archive_for_store`] /
+/// [`Self::from_store_bytes`]) — the same shape the `Job` aggregate uses.
+///
+/// # `input` is an INPUT, opaque to the engine
+///
+/// `input` is the CBOR-encoded `W::Input` the workflow body receives —
+/// persisted as the INPUT it is (`.claude/rules/development.md` § "Persist
+/// inputs, not derived state"), NOT a derived value. The engine never
+/// decodes it: the `ErasedWorkflowAdapter` (later slice) is the sole site
+/// that CBOR-decodes it into the workflow's typed `Input`. The rkyv envelope
+/// wraps the OUTER `WorkflowSpec` only; the inner `input: Vec<u8>` stays
+/// opaque CBOR — the rkyv-outer / CBOR-inner separation ("aggregate
+/// envelopes wrap the outer type only").
+///
+/// # Alias-to-payload (UI-02)
+///
+/// `WorkflowSpec` is a `pub type` alias to the V1 payload
+/// ([`WorkflowSpecV1`]) so call sites construct it with struct-literal
+/// syntax (`WorkflowSpec { name, input }`). The envelope enum is
+/// codec-internal and NOT re-exported from `overdrive_core::lib.rs`
+/// (ADR-0048 §2 Layer 1 — cross-crate writers reach it only via the verbose
+/// `overdrive_core::workflow::WorkflowSpecEnvelope` path, discouraged at
+/// review; the load-bearing structural defense is the Layer 2 dst-lint
+/// variant-construction scanner).
+///
+/// Slice 01 carries identity + input; later slices grow the spec additively
+/// (version, scheduling) — an additive field appends to `WorkflowSpecV1`
+/// only until it breaks the archived layout, at which point a `V2` envelope
+/// variant is minted per the version-bump procedure.
+pub type WorkflowSpec = WorkflowSpecV1;
+
+/// Documentation alias for "the latest [`WorkflowSpec`] payload" — the shape
+/// [`WorkflowSpecEnvelope::into_latest`] projects to. Identical to
+/// [`WorkflowSpec`] today (both point at [`WorkflowSpecV1`]); on a `V2` bump
+/// both re-alias to the new payload in the same commit.
+pub type WorkflowSpecRecordLatest = WorkflowSpecV1;
+
+/// The V1 payload of the [`WorkflowSpec`] versioned envelope — the durable
+/// workflow START intent (ADR-0048 §4b, ADR-0065 §5).
+///
+/// `pub` (not `pub(crate)`) because rustc E0446 rejects a `pub(crate)` type
+/// referenced from the `pub` [`VersionedEnvelope`] trait's `type Latest`
+/// assignment; ADR-0048 §2 Layer 1 is enforced instead by NON-RE-EXPORT from
+/// `overdrive_core::lib.rs` plus the Layer 2 dst-lint scanner. The fields are
+/// `pub` so callers use struct-literal `WorkflowSpec { name, input }` via the
+/// [`WorkflowSpec`] alias.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct WorkflowSpecV1 {
     /// Identity of the workflow to start.
     pub name: WorkflowName,
+    /// The opaque CBOR-encoded `W::Input` (an INPUT — `.claude/rules/
+    /// development.md` § "Persist inputs, not derived state"). The engine
+    /// treats this as opaque bytes; only the `ErasedWorkflowAdapter` decodes
+    /// it into the workflow's typed `Input`. May be empty (a workflow whose
+    /// `Input` is `()` encodes to a 1-byte CBOR `null`, or to empty depending
+    /// on the author's adapter — the codec does not interpret it).
+    pub input: Vec<u8>,
+}
+
+/// The per-type rkyv versioned envelope for [`WorkflowSpec`] (ADR-0048 §1).
+///
+/// Exactly one variant today (`V1`). Codec-internal: writers go through
+/// [`VersionedEnvelope::latest`] (`WorkflowSpecEnvelope::latest`), readers
+/// through [`decode_envelope_bytes`] /
+/// [`WorkflowSpec::from_store_bytes`]. NOT re-exported from
+/// `overdrive_core::lib.rs` (ADR-0048 §2 Layer 1).
+///
+/// On a `V2` bump: append `V2(WorkflowSpecV2)` (NEVER reorder existing
+/// variants — the rkyv discriminant tags are positional), re-alias
+/// [`WorkflowSpec`] / [`WorkflowSpecRecordLatest`] to the new payload, add a
+/// `From<WorkflowSpecV1> for WorkflowSpecV2` impl, re-pin
+/// [`Self::discriminant_offset_from_end`], and add a `FIXTURE_V2` golden-bytes
+/// fixture — all in the same commit per the version-bump procedure.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum WorkflowSpecEnvelope {
+    /// The V1 payload — the only variant today.
+    V1(WorkflowSpecV1),
+}
+
+impl VersionedEnvelope for WorkflowSpecEnvelope {
+    type Latest = WorkflowSpecV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `WorkflowSpecEnvelope` archives, measured from
+    /// the END of the archive bytes (rkyv 0.8 places the fixed-size root —
+    /// including the outer enum discriminant byte — at the buffer tail, so
+    /// the from-end offset is stable across all `input` / `name` lengths).
+    ///
+    /// Empirically pinned against the canonical V1 payload by the
+    /// schema-evolution fixture's triangulation test
+    /// (`workflow_spec_envelope_discriminant_offset_triangulates`). Re-pin
+    /// alongside `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant
+    /// or layout change, per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(WORKFLOW_SPEC_DISCRIMINANT_OFFSET_FROM_END)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first variant).
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "WorkflowSpecEnvelope"
+    }
+}
+
+/// Empirically-pinned from-end discriminant offset for
+/// [`WorkflowSpecEnvelope`] V1 archives — the production-side half of the
+/// two-source triangulation (the test side pins
+/// `GOLDEN_DISCRIMINANT_OFFSET_V1` independently). Pinned in DELIVER Slice 01
+/// (step 01-02): rkyv rejects a flip at `from_end == 20` of the canonical
+/// archive with `invalid discriminant for enum 'ArchivedWorkflowSpecEnvelope'`.
+/// Update BOTH this constant and the test-side golden in the same commit on
+/// any `V<N+1>` bump.
+const WORKFLOW_SPEC_DISCRIMINANT_OFFSET_FROM_END: usize = 20;
+
+impl WorkflowSpecV1 {
+    /// Archive this [`WorkflowSpec`] for persistence through the
+    /// `IntentStore` (the co-located typed codec — ADR-0048 §4b). Wraps the
+    /// payload in [`WorkflowSpecEnvelope::V1`] via
+    /// [`VersionedEnvelope::latest`] (the single write-side wrapping site)
+    /// and rkyv-serialises.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(bytes)`, `bytes` is the canonical rkyv archive of
+    /// `WorkflowSpecEnvelope::latest(self.clone())`. Two archivals of the
+    /// same logical spec produce byte-identical output (rkyv archives are
+    /// canonical by construction). Callers pass `bytes.as_ref()` to the
+    /// `IntentStore` byte-level write surface.
+    ///
+    /// # Observable invariants
+    ///
+    /// `WorkflowSpec::from_store_bytes(&self.archive_for_store()?)` returns
+    /// `Ok(self_owned)` bit-equivalent to `self` (the round-trip property the
+    /// `workflow_spec_archive_round_trips_through_store_codec` proptest pins).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError::Malformed`] if the rkyv serialiser fails
+    /// (unreachable for valid payloads).
+    pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
+        let envelope = WorkflowSpecEnvelope::latest(self.clone());
+        rkyv::to_bytes::<rkyv::rancor::Error>(&envelope)
+            .map_err(|source| EnvelopeError::Malformed { source })
+    }
+
+    /// Decode persisted bytes back into a [`WorkflowSpec`] (the co-located
+    /// typed codec read side — ADR-0048 §4b). Runs the pre-decode
+    /// known-variant probe, rkyv-deserialises into [`WorkflowSpecEnvelope`],
+    /// and projects via [`VersionedEnvelope::into_latest`].
+    ///
+    /// # Edge cases
+    ///
+    /// * Empty / truncated / corrupt `bytes` → [`EnvelopeError::Malformed`].
+    /// * Future-binary `V<N+1>` bytes → [`EnvelopeError::UnknownVersion`].
+    ///
+    /// # Intent fail-fast precursor (ADR-0065 §5)
+    ///
+    /// This returns the codec-level [`EnvelopeError`] directly. The
+    /// intent-store hydrate site (Slice 03, #217 engine discharge) wraps this
+    /// in the `IntentStore` error surface AND emits the
+    /// `health.startup.refused` event before refusing to start — the
+    /// asymmetric-read policy (ADR-0048 §3, intent is SSOT) lives one layer up
+    /// at the driving port, not in this codec primitive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError`] when the bytes do not decode to a known
+    /// variant that projects cleanly to [`WorkflowSpecV1`].
+    pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, EnvelopeError> {
+        decode_envelope_bytes::<WorkflowSpecEnvelope>(bytes)
+    }
 }
 
 #[cfg(test)]
@@ -1474,6 +1678,21 @@ mod tests {
         ciborium::from_reader(bytes.as_slice()).expect("decode from CBOR")
     }
 
+    /// A valid [`WorkflowSpec`] across the observable input space: every
+    /// kebab `name` shape the `WorkflowName` grammar accepts, paired with an
+    /// arbitrary opaque `input` byte vector (the erased `W::Input`, including
+    /// the empty case). `input` is generated as raw bytes — the codec treats
+    /// it as opaque, so the property must hold for any byte content, not just
+    /// well-formed CBOR.
+    fn arb_workflow_spec() -> impl Strategy<Value = WorkflowSpec> {
+        ("[a-z][a-z0-9-]{0,62}", prop::collection::vec(any::<u8>(), 0..=128)).prop_map(
+            |(raw, input)| WorkflowSpec {
+                name: WorkflowName::new(&raw).expect("generator emits a valid kebab name"),
+                input,
+            },
+        )
+    }
+
     proptest! {
         /// `TerminalErrorRoundtrip` (AC#7) — for EVERY `TerminalError` value
         /// across all four `TerminalErrorKind` variants (including the
@@ -1521,6 +1740,28 @@ mod tests {
             if raw.len() <= TERMINAL_ERROR_DETAIL_MAX {
                 prop_assert_eq!(once.detail(), raw.as_str(), "within-cap detail preserved verbatim");
             }
+        }
+
+        /// `WorkflowSpecCodecRoundtrip` (#217 / NEW-3 compensating PBT for the
+        /// EXEMPT golden-bytes fixture) — the co-located typed codec is a
+        /// symmetric pair: for EVERY `WorkflowSpec` (every `name` shape, every
+        /// opaque `input` including empty), `archive_for_store` →
+        /// `from_store_bytes` yields a value byte-equal to the original
+        /// (ADR-0048 §4b, the `Job` aggregate precedent). This is the
+        /// observable invariant the `VersionedEnvelope` round-trip contract
+        /// pins for the OUTER rkyv layer; the inner `input` bytes survive
+        /// opaque (the rkyv-outer / CBOR-inner separation).
+        #[test]
+        fn workflow_spec_archive_round_trips_through_store_codec(spec in arb_workflow_spec()) {
+            let bytes = spec.archive_for_store().expect("archive_for_store on a valid spec");
+            let decoded = WorkflowSpec::from_store_bytes(bytes.as_ref())
+                .expect("from_store_bytes on freshly-archived bytes");
+            prop_assert_eq!(&decoded, &spec, "WorkflowSpec round-trips through the store codec");
+            prop_assert_eq!(
+                decoded.input.as_slice(),
+                spec.input.as_slice(),
+                "opaque input bytes survive the rkyv outer round-trip verbatim",
+            );
         }
     }
 

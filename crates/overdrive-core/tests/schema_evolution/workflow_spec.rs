@@ -39,15 +39,17 @@
 //! ability to run) against a type that does not exist yet — the Rust
 //! analogue of a fixture that cannot be skipped.
 //!
-//! Slice 01 DELIVER steps, in one commit:
+//! Slice 01 DELIVER steps (step 01-02), all in one commit:
+//!
 //!   1. Create `WorkflowSpecV1` + `WorkflowSpecEnvelope` (V1) + the
 //!      `VersionedEnvelope` impl + the co-located typed codec
 //!      (`WorkflowSpec::archive_for_store` / `from_store_bytes`).
 //!   2. Run `print_fixture_v1_bytes` (below) and paste the hex into
 //!      `FIXTURE_V1`; pin `GOLDEN_DISCRIMINANT_OFFSET_V1` from the same run.
 //!   3. UNCOMMENT `mod workflow_spec;` in `tests/schema_evolution.rs`.
-//! Until step 3 the three `#[test]`s here do not run; the file ships the
-//! spec, the harness shape, and the regeneration aid DELIVER needs.
+//!
+//! All three steps landed in step 01-02; the three `#[test]`s below now run
+//! on every `overdrive-core` schema-evolution build.
 
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::workflow::{
@@ -64,10 +66,14 @@ use super::harness::{
 /// against unilateral drift of either pin, per ADR-0048). On a `V<N+1>`
 /// bump BOTH this constant and the trait method update in the same commit.
 ///
-/// PLACEHOLDER — DELIVER Slice 01 pins the real value by regenerating
-/// `FIXTURE_V1` and locating the trailing-root discriminant byte (mirror
-/// `alloc_status_row.rs::GOLDEN_DISCRIMINANT_OFFSET_V1`).
-const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 0;
+/// Pinned in DELIVER Slice 01 (step 01-02) by regenerating `FIXTURE_V1` and
+/// flipping each byte to locate the trailing-root discriminant byte: rkyv
+/// rejects a flip at `from_end == 20` with `invalid discriminant for enum
+/// 'ArchivedWorkflowSpecEnvelope'` (mirror
+/// `alloc_status_row.rs::GOLDEN_DISCRIMINANT_OFFSET_V1`). On a `V<N+1>` bump
+/// re-pin BOTH this constant and
+/// `WorkflowSpecEnvelope::discriminant_offset_from_end()` in the same commit.
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 20;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one of them
@@ -90,14 +96,18 @@ fn canonical_v1_payload() -> WorkflowSpecRecordLatest {
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkflowSpecEnvelope::V1(canonical_v1_payload())`.
 ///
-/// PLACEHOLDER — minted by `print_fixture_v1_bytes` (below) in DELIVER
-/// Slice 01 once `WorkflowSpecV1` compiles, then pasted verbatim.
+/// Minted by `print_fixture_v1_bytes` (below) in DELIVER Slice 01 (step
+/// 01-02) and pasted verbatim. Decodes as
+/// `WorkflowSpecEnvelope::V1(WorkflowSpecV1 { name: "provision-record",
+/// input: [0xa1, 0x63, 0x66, 0x6f, 0x6f, 0x18, 0x2a] })`.
+///
 /// Pre-shipment regeneration is allowed under
 /// `feedback_single_cut_greenfield_migrations.md`; once V1 ships to a
 /// deployed consumer this constant becomes immutable per
 /// `.claude/rules/development.md` § "rkyv schema evolution" — future
 /// variants need a `V2` envelope.
-const FIXTURE_V1: &str = "__RED_SCAFFOLD__regenerate_in_deliver_slice_01__";
+const FIXTURE_V1: &str =
+    "70726f766973696f6e2d7265636f7264a163666f6f182a000000000090000000e4ffffffecffffff07000000";
 
 /// `@property` `@D5` `@issue-217` (NEW-3) — golden-bytes roundtrip:
 /// hex-decode `FIXTURE_V1`, rkyv-deserialise into `WorkflowSpecEnvelope`,

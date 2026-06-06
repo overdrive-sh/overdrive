@@ -50,5 +50,5 @@ mod schema_evolution {
     // commit that creates `WorkflowSpecEnvelope`: (1) run the file's
     // `print_fixture_v1_bytes` to mint `FIXTURE_V1`, (2) pin
     // `GOLDEN_DISCRIMINANT_OFFSET_V1`, (3) UNCOMMENT the line below.
-    // mod workflow_spec; // NEW-3 / D5 / #217 — UNCOMMENT in DELIVER Slice 01
+    mod workflow_spec; // NEW-3 / D5 / #217 — wired in DELIVER Slice 01 (step 01-02)
 }

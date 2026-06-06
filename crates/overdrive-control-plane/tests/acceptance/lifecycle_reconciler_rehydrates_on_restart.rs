@@ -46,7 +46,10 @@ fn fresh_tick(now: Instant) -> TickContext {
 }
 
 fn provision_spec() -> WorkflowSpec {
-    WorkflowSpec { name: WorkflowName::new("provision-record").expect("valid workflow name") }
+    WorkflowSpec {
+        name: WorkflowName::new("provision-record").expect("valid workflow name"),
+        input: Vec::new(),
+    }
 }
 
 fn correlation_for(spec: &WorkflowSpec) -> CorrelationKey {

@@ -1317,8 +1317,10 @@ mod tests {
     }
 
     fn start_workflow(slug: &str) -> (Action, CorrelationKey, WorkflowSpec) {
-        let spec =
-            WorkflowSpec { name: WorkflowName::new("provision-record").expect("valid kebab name") };
+        let spec = WorkflowSpec {
+            name: WorkflowName::new("provision-record").expect("valid kebab name"),
+            input: Vec::new(),
+        };
         let correlation = CorrelationKey::derive(
             slug,
             &ContentHash::of(spec.name.as_str().as_bytes()),
