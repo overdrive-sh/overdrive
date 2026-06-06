@@ -77,8 +77,8 @@ impl JournalCursor for RecordingCursor {
         Ok(())
     }
 
-    async fn replay_sleep(&self) -> Option<Duration> {
-        None
+    async fn replay_sleep(&self) -> Result<Option<Duration>, WorkflowCtxError> {
+        Ok(None)
     }
 
     async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
@@ -86,13 +86,16 @@ impl JournalCursor for RecordingCursor {
         Ok(())
     }
 
-    async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
+    async fn replay_signal(
+        &self,
+        _signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
         // Slice-01/02 fixture: the signal + emit await-surfaces (slice 03)
         // are not exercised here — their port-to-port coverage lives in the
         // control-plane JournalCursorHandle tests + the sim DST invariants.
         // These methods exist only to satisfy the trait after the additive
         // surface landed; always-live / no-op behaviour.
-        None
+        Ok(None)
     }
 
     async fn record_signal_awaited(&self, _signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
@@ -116,8 +119,8 @@ impl JournalCursor for RecordingCursor {
         Ok(())
     }
 
-    async fn replay_emit(&self) -> bool {
-        false
+    async fn replay_emit(&self) -> Result<bool, WorkflowCtxError> {
+        Ok(false)
     }
 
     async fn emit_action(&self, _action: Action) -> Result<(), WorkflowCtxError> {

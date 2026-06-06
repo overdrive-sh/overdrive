@@ -477,6 +477,32 @@ const fn workflow_result_label(result: &WorkflowResult) -> &'static str {
     }
 }
 
+/// The deterministic, address-free kind-label of a [`JournalCommand`] —
+/// the stable `expected`/`actual` payload the fail-closed determinism gate
+/// (D4, ADR-0064 §3) reports on a Layer-1 type-at-index mismatch.
+///
+/// A stable variant-kind label (an `as_str()`-style projection per
+/// `.claude/rules/development.md` § "Label enums own their string
+/// representation"), NEVER an address-bearing `Debug` of the whole entry: a
+/// `WorkflowCtxError::NonDeterministic` carrying `{:?}` of the recorded
+/// command would embed pointers / field values that vary across runs and
+/// seeds, breaking the byte-identical-trajectory property DST replay relies
+/// on (`.claude/rules/testing.md` § "Tier 1"). The label lives here, at the
+/// cursor (its sole consumer), rather than on the `JournalCommand` enum:
+/// the enum is defined in `journal/mod.rs`, outside this step's edit
+/// boundary, and the cursor is the only site that needs the deterministic
+/// label.
+const fn command_kind(command: &JournalCommand) -> &'static str {
+    match command {
+        JournalCommand::Started { .. } => "Started",
+        JournalCommand::RunResult { .. } => "RunResult",
+        JournalCommand::SleepArmed { .. } => "SleepArmed",
+        JournalCommand::SignalAwaited { .. } => "SignalAwaited",
+        JournalCommand::ActionEmitted { .. } => "ActionEmitted",
+        JournalCommand::Terminal { .. } => "Terminal",
+    }
+}
+
 /// Partition the flat loaded run (the dumb-store ordered
 /// `Vec<LoadedEntry>`) into the positional command walk plus the
 /// `SignalKey`-correlated notification lookup — the D2 partition, performed
@@ -658,29 +684,44 @@ impl JournalCursorHandle {
 impl JournalCursor for JournalCursorHandle {
     async fn replay_run(&self, name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        // Replay only while the command-cursor is within the loaded command
-        // walk AND the command at the cursor is a RunResult. (`Started` /
-        // `Terminal` commands are not ctx.run await-points; slice 01 records
-        // only RunResult commands between Started and Terminal, but guarding
-        // on the variant keeps the cursor honest if a future slice
-        // interleaves other await commands.) A command-cursor past the walk
-        // (or at a non-run command) is the live path → `Ok(None)`.
-        let Some(JournalCommand::RunResult { name: recorded_name, result_bytes, .. }) =
-            self.replay_commands.get(*cursor)
-        else {
+        // A command-cursor PAST the loaded command walk is the genuine live
+        // path → `Ok(None)`. (Only an out-of-bounds cursor is live; an
+        // in-bounds foreign variant is Layer-1 divergence, handled below.)
+        let Some(command) = self.replay_commands.get(*cursor) else {
             drop(cursor);
             return Ok(None);
         };
-        // Replay-determinism check (POSITIONAL identity; `name` is the
-        // diagnostic + determinism guard). A recorded step whose name
-        // diverges from the replaying body's name at this cursor is a
-        // non-deterministic trajectory — fail closed (ADR-0064 §3). Do NOT
-        // advance the cursor on a mismatch.
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3,
+        // Restate RT0016 shape). The await-op being replayed is `ctx.run`,
+        // whose expected command kind is `RunResult`. A recorded command of
+        // ANY OTHER kind at this cursor (a `SleepArmed`, `SignalAwaited`,
+        // `ActionEmitted`, `Started`, or `Terminal`) is a divergent
+        // trajectory: return `NonDeterministic`, do NOT advance the cursor,
+        // and do NOT fall through to the live path. This CLOSES the trap's
+        // twin — the former `let ... else { Ok(None) }` that silently
+        // fell to live on a variant mismatch, re-executing the effect.
+        let JournalCommand::RunResult { name: recorded_name, result_bytes, .. } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic { expected, actual: name.to_string() });
+        };
+        // LAYER 2 — name-within-`RunResult` fail-closed gate (D4). The
+        // variant matches, but a recorded step whose name diverges from the
+        // replaying body's `ctx.run` name at this cursor is still a
+        // non-deterministic trajectory — fail closed. Do NOT advance the
+        // cursor on a mismatch. (Identity is POSITIONAL; `name` is the
+        // determinism guard, not the cursor identity.)
         if recorded_name != name {
             let expected = recorded_name.clone();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic { expected, actual: name.to_string() });
         }
+        // LAYER 3 (content/digest comparison) is DEFERRED to
+        // https://github.com/overdrive-sh/overdrive/issues/214 — slice 01 does
+        // NOT compare `result_digest`/`result_bytes` against a re-derived
+        // value at the cursor. Layers 1 + 2 are the determinism gate for this
+        // step; the digest is recorded (for K4 replay-equivalence) but not
+        // diffed here.
         let bytes = result_bytes.clone();
         *cursor += 1;
         drop(cursor);
@@ -707,23 +748,35 @@ impl JournalCursor for JournalCursorHandle {
         Ok(())
     }
 
-    async fn replay_sleep(&self) -> Option<Duration> {
+    async fn replay_sleep(&self) -> Result<Option<Duration>, WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        // Replay only while the command-cursor is within the loaded command
-        // walk AND the command at the cursor is a SleepArmed. A command-cursor
-        // past the walk (or at a non-sleep command) is the live path →
-        // `None`. The recorded `deadline_unix` is the absolute deadline (an
-        // input); the ctx recomputes the remaining wait against the live
-        // clock. Advance the command-cursor by exactly 1 on a replay hit.
-        let deadline = match self.replay_commands.get(*cursor) {
-            Some(JournalCommand::SleepArmed { deadline_unix, .. }) => {
-                *cursor += 1;
-                Some(*deadline_unix)
-            }
-            _ => None,
+        // A command-cursor PAST the loaded command walk is the genuine live
+        // path → `Ok(None)`.
+        let Some(command) = self.replay_commands.get(*cursor) else {
+            drop(cursor);
+            return Ok(None);
         };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3). The
+        // await-op being replayed is `ctx.sleep`, whose expected command
+        // kind is `SleepArmed`. A recorded command of any other kind at this
+        // cursor is divergence: return `NonDeterministic`, do NOT advance,
+        // do NOT fall through to live (the former `_ => None` arm silently
+        // fell to live — that twin is now closed). The recorded
+        // `deadline_unix` is the absolute deadline (an input); the ctx
+        // recomputes the remaining wait against the live clock. Advance the
+        // command-cursor by exactly 1 on a replay hit.
+        let JournalCommand::SleepArmed { deadline_unix, .. } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                expected,
+                actual: "SleepArmed".to_string(),
+            });
+        };
+        let deadline = *deadline_unix;
+        *cursor += 1;
         drop(cursor);
-        deadline
+        Ok(Some(deadline))
     }
 
     async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
@@ -740,7 +793,10 @@ impl JournalCursor for JournalCursorHandle {
         Ok(())
     }
 
-    async fn replay_signal(&self, signal_key: &SignalKey) -> Option<SignalValue> {
+    async fn replay_signal(
+        &self,
+        signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
         // The notification-lookup contract (D2 / D6 / CA-5). A
         // `ctx.wait_for_signal` records a `SignalAwaited` COMMAND (in the
@@ -750,6 +806,8 @@ impl JournalCursor for JournalCursorHandle {
         // lookup, NEVER by position — the retired `*cursor += 2`
         // two-positional-entry walk is GONE.
         //
+        // - **Live (cursor past the walk)** — `Ok(None)`: the live path arms
+        //   a fresh wait.
         // - **Completed wait** — a `SignalAwaited` command at the cursor AND
         //   a matching `SignalSeen` notification in the lookup map: a replay
         //   HIT. Return the recorded value WITHOUT re-reading the surface and
@@ -758,16 +816,31 @@ impl JournalCursor for JournalCursorHandle {
         //   the cursor; ADR-0064 §4). [S-WP-03-02]
         // - **Crashed while blocked** — a `SignalAwaited` command at the
         //   cursor with NO matching `SignalSeen` notification: NOT a replay
-        //   hit. Return None so the live path re-blocks on the SAME signal;
-        //   `record_signal_awaited` then advances past the lone
+        //   hit. Return `Ok(None)` so the live path re-blocks on the SAME
+        //   signal; `record_signal_awaited` then advances past the lone
         //   `SignalAwaited` command. [S-WP-03-01]
-        // - **Live / non-signal command** — None (the live path arms a fresh
-        //   wait).
-        if !matches!(self.replay_commands.get(*cursor), Some(JournalCommand::SignalAwaited { .. }))
-        {
+        let Some(command) = self.replay_commands.get(*cursor) else {
             drop(cursor);
-            return None;
-        }
+            return Ok(None);
+        };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3). The
+        // await-op being replayed is `ctx.wait_for_signal`, whose expected
+        // command kind is `SignalAwaited`. A recorded command of any other
+        // kind at this cursor is divergence: return `NonDeterministic`, do
+        // NOT advance, do NOT fall through to live (the former
+        // `!matches!(..) { return None }` silently fell to live on a foreign
+        // variant — that twin is now closed). NOTE: the
+        // crashed-while-blocked case below (a `SignalAwaited` with no
+        // matching notification) is NOT divergence — it is the
+        // re-block-on-resume shape, which stays `Ok(None)`.
+        let JournalCommand::SignalAwaited { .. } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                expected,
+                actual: "SignalAwaited".to_string(),
+            });
+        };
         // Correlated lookup — find the SignalSeen by its key, wherever it
         // landed in the interleaved on-disk stream (NOT at SignalAwaited+1).
         let Some(JournalNotification::SignalSeen { value, .. }) =
@@ -775,16 +848,16 @@ impl JournalCursor for JournalCursorHandle {
         else {
             // SignalAwaited command with no matching SignalSeen notification
             // — crashed while blocked. NOT a replay hit; re-block on the live
-            // path.
+            // path. This is NOT a Layer-1 divergence (the variant matched).
             drop(cursor);
-            return None;
+            return Ok(None);
         };
         let value = value.clone();
         // Advance past the SignalAwaited COMMAND by exactly 1 — the
         // notification is off the walk (it never advances the cursor).
         *cursor += 1;
         drop(cursor);
-        Some(value)
+        Ok(Some(value))
     }
 
     async fn record_signal_awaited(&self, signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
@@ -868,23 +941,38 @@ impl JournalCursor for JournalCursorHandle {
         Ok(())
     }
 
-    async fn replay_emit(&self) -> bool {
+    async fn replay_emit(&self) -> Result<bool, WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        // A replay hit requires a recorded ActionEmitted COMMAND at the
-        // command-cursor: the Action was already sent on a prior run, so it
-        // is NOT re-sent (exactly-once ON THE REPLAY PATH — ADR-0064 §4). The
-        // live path in `emit_action` is at-least-once: a recorded
-        // ActionEmitted is what makes resume idempotent, so a run that sent
-        // but failed to record it (no command here) re-sends. See
-        // `emit_action` below. Advance the command-cursor by exactly 1 on a
-        // replay hit.
-        let is_replay =
-            matches!(self.replay_commands.get(*cursor), Some(JournalCommand::ActionEmitted { .. }));
-        if is_replay {
-            *cursor += 1;
-        }
+        // A command-cursor PAST the loaded command walk is the genuine live
+        // path → `Ok(false)`: the live `emit_action` sends + records.
+        let Some(command) = self.replay_commands.get(*cursor) else {
+            drop(cursor);
+            return Ok(false);
+        };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3). The
+        // await-op being replayed is `ctx.emit_action`, whose expected
+        // command kind is `ActionEmitted`. A recorded command of any other
+        // kind at this cursor is divergence: return `NonDeterministic`, do
+        // NOT advance, do NOT fall through to live (the former
+        // `matches!(..)`-then-`false` silently fell to live on a foreign
+        // variant — that twin is now closed). A replay hit returns `Ok(true)`
+        // — the Action was already sent on a prior run, so it is NOT re-sent
+        // (exactly-once ON THE REPLAY PATH — ADR-0064 §4). The live path in
+        // `emit_action` is at-least-once: a recorded ActionEmitted is what
+        // makes resume idempotent, so a run that sent but failed to record it
+        // (cursor past the walk → `Ok(false)` above) re-sends. Advance the
+        // command-cursor by exactly 1 on a replay hit.
+        let JournalCommand::ActionEmitted { .. } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                expected,
+                actual: "ActionEmitted".to_string(),
+            });
+        };
+        *cursor += 1;
         drop(cursor);
-        is_replay
+        Ok(true)
     }
 
     async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError> {

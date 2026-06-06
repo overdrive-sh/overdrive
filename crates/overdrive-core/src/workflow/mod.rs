@@ -243,6 +243,46 @@ pub enum WorkflowCtxError {
 /// `record_run` is a no-op models a non-durable "always-live" execution
 /// — the shape the core/sim tests inject when no real journal is wired
 /// (see [`AlwaysLiveCursor`]).
+///
+/// ## Determinism fail-closed contract (D4, ADR-0064 §3 — Layers 1 + 2)
+///
+/// Every command-replay method (`replay_run`, `replay_sleep`,
+/// `replay_signal`, `replay_emit`) gates the recorded command at the
+/// command-cursor against the await-op being replayed, in two layers:
+///
+/// - **Layer 1 — type-at-index** (Restate RT0016 shape). The await-op names
+///   its expected [`JournalCommand`] kind (`ctx.run` → `RunResult`,
+///   `ctx.sleep` → `SleepArmed`, `ctx.wait_for_signal` → `SignalAwaited`,
+///   `ctx.emit_action` → `ActionEmitted`). An IN-BOUNDS recorded command of
+///   any OTHER kind at the cursor is a divergent trajectory.
+/// - **Layer 2 — name within `RunResult`**. The variant matches but the
+///   recorded `RunResult` name diverges from the replaying body's `ctx.run`
+///   name.
+///
+/// **Post:** on a Layer-1 OR Layer-2 mismatch the cursor returns
+/// [`WorkflowCtxError::NonDeterministic`] `{ expected, actual }`, does NOT
+/// advance the command-cursor, and does NOT fall through to the live path
+/// (no `Ok(None)` / `Ok(false)`). `expected`/`actual` are DETERMINISTIC: a
+/// stable variant-kind label (an `as_str()`-style command-kind label, per
+/// `.claude/rules/development.md` § "Label enums own their string
+/// representation") or the recorded `RunResult` name — NEVER an
+/// address-bearing `Debug` of the whole entry, so the trajectory stays
+/// byte-identical across seeds (the DST replay-equivalence property).
+///
+/// **Invariant:** a divergent journal is an ERROR, never a silent
+/// re-execution. An in-bounds cursor only ever resolves to a replay HIT
+/// (matching kind, and matching name for `RunResult`) or a fail-closed
+/// `NonDeterministic`; the live path is reached ONLY when the command-cursor
+/// is PAST the loaded command walk. The one non-divergent in-bounds-yet-live
+/// shape is `replay_signal`'s crashed-while-blocked case (a `SignalAwaited`
+/// command with no matching `SignalSeen` notification), which re-blocks via
+/// `Ok(None)` — the variant matched, so it is not a Layer-1 violation.
+///
+/// **Layer 3 (content/digest comparison) is OUT of scope for this contract**
+/// — deferred to <https://github.com/overdrive-sh/overdrive/issues/214>. The
+/// `result_digest` / `value_digest` / `action_digest` are recorded (for K4
+/// replay-equivalence) but the cursor does NOT diff them at replay; Layers
+/// 1 + 2 are the determinism gate.
 #[async_trait]
 pub trait JournalCursor: Send + Sync {
     /// Check the cursor for a recorded `ctx.run` step at the current
@@ -302,7 +342,15 @@ pub trait JournalCursor: Send + Sync {
     ///   computes the deadline from `clock.unix_now() + duration`, records
     ///   it via [`record_sleep_armed`](Self::record_sleep_armed), and then
     ///   parks on the Clock deadline.
-    async fn replay_sleep(&self) -> Option<Duration>;
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::NonDeterministic`] when an in-bounds
+    /// recorded command at the cursor is NOT a `SleepArmed` — the replaying
+    /// `ctx.sleep` await-op landed on a foreign command kind (Layer-1
+    /// type-at-index fail-closed gate, D4). The cursor does NOT advance and
+    /// does NOT fall through to live.
+    async fn replay_sleep(&self) -> Result<Option<Duration>, WorkflowCtxError>;
 
     /// Record a freshly-armed `ctx.sleep` deadline durably and advance the
     /// cursor (the live path, ADR-0064 §3 sleep branch).
@@ -363,7 +411,20 @@ pub trait JournalCursor: Send + Sync {
     ///   the retired `*cursor += 2` positional walk is gone (CA-5).
     /// - A notification never advances the command-cursor and is never
     ///   consumed as a command.
-    async fn replay_signal(&self, signal_key: &SignalKey) -> Option<SignalValue>;
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::NonDeterministic`] when an in-bounds
+    /// recorded command at the cursor is NOT a `SignalAwaited` — the
+    /// replaying `ctx.wait_for_signal` await-op landed on a foreign command
+    /// kind (Layer-1 type-at-index fail-closed gate, D4). The cursor does NOT
+    /// advance and does NOT fall through to live. The crashed-while-blocked
+    /// case (a `SignalAwaited` with no matching `SignalSeen` notification) is
+    /// NOT divergence — it stays `Ok(None)` so the live path re-blocks.
+    async fn replay_signal(
+        &self,
+        signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError>;
 
     /// Durably record the `SignalAwaited` armed entry for `signal_key`
     /// (ADR-0063 §4 fsync-then-suspend) and advance the cursor — the FIRST
@@ -449,7 +510,15 @@ pub trait JournalCursor: Send + Sync {
     /// - **Live (cursor at journal end):** returns `false` — the caller
     ///   sends the Action on the engine's Action channel, then records
     ///   `ActionEmitted` durably before returning.
-    async fn replay_emit(&self) -> bool;
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowCtxError::NonDeterministic`] when an in-bounds
+    /// recorded command at the cursor is NOT an `ActionEmitted` — the
+    /// replaying `ctx.emit_action` await-op landed on a foreign command kind
+    /// (Layer-1 type-at-index fail-closed gate, D4). The cursor does NOT
+    /// advance and does NOT fall through to live.
+    async fn replay_emit(&self) -> Result<bool, WorkflowCtxError>;
 
     /// Send `action` on the engine's Action channel (→ Raft, the same
     /// channel the reconciler runtime consumes — NEVER a direct
@@ -505,16 +574,23 @@ impl JournalCursor for AlwaysLiveCursor {
         Ok(())
     }
 
-    async fn replay_sleep(&self) -> Option<Duration> {
-        None
+    async fn replay_sleep(&self) -> Result<Option<Duration>, WorkflowCtxError> {
+        // Always-live: no recorded command at the cursor, so the Layer-1
+        // gate never fires — the live path arms a fresh sleep.
+        Ok(None)
     }
 
     async fn record_sleep_armed(&self, _deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
         Ok(())
     }
 
-    async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
-        None
+    async fn replay_signal(
+        &self,
+        _signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+        // Always-live: no recorded command at the cursor; the live path arms
+        // a fresh wait.
+        Ok(None)
     }
 
     async fn record_signal_awaited(&self, _signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
@@ -542,8 +618,10 @@ impl JournalCursor for AlwaysLiveCursor {
         Ok(())
     }
 
-    async fn replay_emit(&self) -> bool {
-        false
+    async fn replay_emit(&self) -> Result<bool, WorkflowCtxError> {
+        // Always-live: no recorded command at the cursor; the live path
+        // sends + records.
+        Ok(false)
     }
 
     async fn emit_action(&self, _action: Action) -> Result<(), WorkflowCtxError> {
@@ -685,8 +763,10 @@ impl WorkflowCtx {
     /// durable record of the armed deadline fails.
     pub async fn sleep(&self, duration: Duration) -> Result<(), WorkflowCtxError> {
         // Replay path — recompute remaining wait from the recorded
-        // absolute deadline (an input), never a persisted remaining cache.
-        if let Some(deadline_unix) = self.journal.replay_sleep().await {
+        // absolute deadline (an input), never a persisted remaining cache. A
+        // foreign command kind at the cursor fails closed via `?`
+        // (NonDeterministic, Layer-1 D4).
+        if let Some(deadline_unix) = self.journal.replay_sleep().await? {
             let now = self.clock.unix_now();
             if let Some(remaining) = deadline_unix.checked_sub(now) {
                 self.clock.sleep(remaining).await;
@@ -746,7 +826,10 @@ impl WorkflowCtx {
         // re-read the signal surface. A SignalAwaited with no following
         // SignalSeen is NOT a replay hit (replay_signal returns None), so
         // the live block below re-enters on the SAME signal.
-        if let Some(value) = self.journal.replay_signal(&signal_key).await {
+        // A foreign command kind at the cursor fails closed via `?`
+        // (NonDeterministic, Layer-1 D4); a SignalAwaited with no matching
+        // SignalSeen is `Ok(None)` (re-block on the live path below).
+        if let Some(value) = self.journal.replay_signal(&signal_key).await? {
             return Ok(value);
         }
         // Live path, first half — record SignalAwaited durably (fsync per
@@ -812,7 +895,9 @@ impl WorkflowCtx {
         // Replay path — the Action was already emitted on a prior run; do
         // NOT re-send it (exactly-once on the replay path; the live path
         // below is at-least-once — see the rustdoc "Honest semantics").
-        if self.journal.replay_emit().await {
+        // A foreign command kind at the cursor fails closed via `?`
+        // (NonDeterministic, Layer-1 D4).
+        if self.journal.replay_emit().await? {
             return Ok(());
         }
         // Live path — the engine sends on the Action channel then records

@@ -386,3 +386,123 @@ async fn cursor_walks_commands_only_and_resolves_signal_seen_by_key_not_position
     let entries = journal.load_journal(&workflow_id).await.expect("load");
     assert!(entries.is_empty(), "a pure replay appends nothing; got {entries:?}");
 }
+
+/// ADR-0064 §3 fail-closed determinism gate (D4), Layers 1 + 2.
+///
+/// **Layer 1 (type-at-index, Restate RT0016 shape).** Every command-replay
+/// method checks the recorded `JournalCommand` variant TYPE at the
+/// command-cursor against the await-op being replayed. A `ctx.run` await
+/// landing on a recorded `SleepArmed` command is a divergent trajectory:
+/// the cursor returns `WorkflowCtxError::NonDeterministic { expected, actual }`,
+/// does NOT advance the cursor, and does NOT fall through to the live path
+/// (no `Ok(None)`). This is the trap's twin — the former silent fall-to-live
+/// on a variant mismatch (the old `let ... else { Ok(None) }`), now CLOSED.
+///
+/// **Layer 2 (name within `RunResult`).** A recorded `RunResult` whose name
+/// diverges from the replaying body's `ctx.run` name at this cursor is the
+/// same fail-closed `NonDeterministic`.
+///
+/// Both halves assert: (a) `NonDeterministic` is returned, (b) the
+/// `expected`/`actual` payload is a deterministic kind-label / recorded name
+/// (never an address-bearing whole-entry `Debug`), and (c) the cursor did NOT
+/// advance and did NOT fall through to live — proven by the journal staying
+/// EMPTY (a fall-to-live would have polled the future, fired the effect, and
+/// appended a `RunResult`).
+///
+/// Port-to-port: the driving port is `WorkflowCtx::run`; the driven port is
+/// the `SimJournalStore` behind the cursor (observed via `load_journal` — a
+/// fail-closed replay appends nothing).
+#[tokio::test]
+async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterministic() {
+    // ----- Layer 1: type-at-index mismatch -----
+    // The loaded run records a SleepArmed at command-cursor 0, but the
+    // replaying body issues a `ctx.run` await — a divergent trajectory.
+    let layer1_buffer = vec![LoadedEntry::Command(JournalCommand::SleepArmed {
+        deadline_unix: Duration::from_secs(60),
+    })];
+    let (ctx, journal, workflow_id) = ctx_only(layer1_buffer);
+
+    let layer1 = ctx
+        .run(STEP_NAME, async move {
+            // This future MUST NOT be polled: a fail-closed gate returns the
+            // error WITHOUT reaching the live path. If it were polled the
+            // effect below would fire and a RunResult would be appended.
+            Ok::<usize, String>(1)
+        })
+        .await;
+
+    match layer1 {
+        Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
+            // `expected` is the deterministic kind-label of the recorded
+            // command at the cursor (a stable as_str()-style label), NOT an
+            // address-bearing Debug of the whole entry.
+            assert_eq!(
+                expected, "SleepArmed",
+                "expected names the recorded command KIND at the cursor (deterministic label)"
+            );
+            // `actual` names the await-op the body issued at this cursor —
+            // here the `ctx.run` step name, equally deterministic.
+            assert_eq!(
+                actual, STEP_NAME,
+                "actual names the await-op the body replayed (the ctx.run step name)"
+            );
+            // Neither value carries an address-bearing whole-entry Debug:
+            // assert the stable labels do not contain Rust pointer/struct
+            // syntax that a `{:?}` of the entry would (DST trajectories must
+            // stay byte-identical across seeds).
+            for value in [&expected, &actual] {
+                assert!(
+                    !value.contains("0x") && !value.contains('{') && !value.contains("deadline"),
+                    "expected/actual must be a stable kind-label, not a whole-entry Debug: {value:?}"
+                );
+            }
+        }
+        other => panic!(
+            "Layer 1 type-at-index mismatch must fail closed with NonDeterministic, got {other:?}"
+        ),
+    }
+
+    // No advance, no fall-through: a fail-closed gate appends NOTHING. A
+    // silent fall-to-live (the trap's twin) would have polled the future and
+    // appended a RunResult here.
+    let layer1_entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert!(
+        layer1_entries.is_empty(),
+        "Layer 1 fail-closed must not advance / fall through to live; got {layer1_entries:?}"
+    );
+
+    // ----- Layer 2: name-in-RunResult mismatch -----
+    // The loaded run records a RunResult under a DIFFERENT name than the
+    // replaying body's ctx.run step — divergence within the matching variant.
+    let recorded_bytes = encode_run_result(&Ok(7usize));
+    let layer2_buffer = vec![LoadedEntry::Command(JournalCommand::RunResult {
+        name: "recorded-name".to_string(),
+        result_digest: ContentHash::of(&recorded_bytes),
+        result_bytes: recorded_bytes,
+    })];
+    let (ctx2, journal2, workflow_id2) = ctx_only(layer2_buffer);
+
+    let layer2 = ctx2.run("body-name", async move { Ok::<usize, String>(1) }).await;
+
+    match layer2 {
+        Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
+            assert_eq!(
+                expected, "recorded-name",
+                "Layer 2 expected is the recorded RunResult name (deterministic)"
+            );
+            assert_eq!(
+                actual, "body-name",
+                "Layer 2 actual is the replaying body's ctx.run name (deterministic)"
+            );
+        }
+        other => {
+            panic!("Layer 2 name mismatch must fail closed with NonDeterministic, got {other:?}")
+        }
+    }
+
+    let layer2_entries = journal2.load_journal(&workflow_id2).await.expect("load");
+    assert!(
+        layer2_entries.is_empty(),
+        "Layer 2 fail-closed must not advance / append; got {layer2_entries:?}"
+    );
+}
