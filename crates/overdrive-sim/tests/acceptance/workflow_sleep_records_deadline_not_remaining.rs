@@ -24,7 +24,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::traits::Clock;
@@ -45,7 +45,7 @@ fn ctx_on(
     journal: &Arc<dyn JournalStore>,
     clock: Arc<dyn Clock>,
     workflow_id: &WorkflowId,
-    replay_buffer: Vec<JournalEntry>,
+    replay_buffer: Vec<LoadedEntry>,
 ) -> WorkflowCtx {
     let cursor: Arc<dyn JournalCursor> =
         Arc::new(JournalCursorHandle::new(Arc::clone(journal), workflow_id.clone(), replay_buffer));
@@ -77,14 +77,14 @@ async fn sleep_armed_journal_entry_records_deadline_input_not_a_remaining_durati
     }
 
     // Observable outcome 1 — the live path appended exactly one
-    // `SleepArmed` entry carrying `deadline_unix` (an INPUT). The
-    // `JournalEntry` enum has NO "remaining_ms" / "remaining_duration"
-    // slot by construction; we assert positively on the recorded deadline.
+    // `SleepArmed` command carrying `deadline_unix` (an INPUT). The
+    // `JournalCommand` enum has NO "remaining_ms" / "remaining_duration"
+    // slot AND no in-entry `step` (D5) by construction; we assert
+    // positively on the recorded deadline.
     let loaded = journal.load_journal(&workflow_id).await.expect("load journal");
     assert_eq!(loaded.len(), 1, "live ctx.sleep appended exactly one SleepArmed entry");
     let recorded_deadline = match &loaded[0] {
-        JournalEntry::SleepArmed { step, deadline_unix } => {
-            assert_eq!(*step, 0, "SleepArmed records the await-point step index (an input)");
+        LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix }) => {
             assert_eq!(
                 *deadline_unix, arm_deadline_unix,
                 "SleepArmed records the absolute deadline (an input), not a remaining-duration cache",

@@ -26,7 +26,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::testing::workflow::ProvisionRecordWithSleep;
@@ -51,7 +51,7 @@ async fn ctx_on(
     journal: &Arc<dyn JournalStore>,
     clock: Arc<dyn Clock>,
     workflow_id: &WorkflowId,
-    replay_buffer: Vec<JournalEntry>,
+    replay_buffer: Vec<LoadedEntry>,
 ) -> (WorkflowCtx, SimInbox, SimInbox) {
     let pre: SocketAddr = PRE_TARGET.parse().expect("pre addr");
     let post: SocketAddr = POST_TARGET.parse().expect("post addr");
@@ -122,7 +122,9 @@ async fn post_sleep_step_fires_only_at_or_after_the_original_deadline_regardless
     let deadline_in_journal = loaded
         .iter()
         .find_map(|e| match e {
-            JournalEntry::SleepArmed { deadline_unix, .. } => Some(*deadline_unix),
+            LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix, .. }) => {
+                Some(*deadline_unix)
+            }
             _ => None,
         })
         .expect("the arming boot recorded a SleepArmed deadline");
@@ -131,7 +133,7 @@ async fn post_sleep_step_fires_only_at_or_after_the_original_deadline_regardless
         "SleepArmed records the ORIGINAL absolute deadline (an input)"
     );
     assert!(
-        !loaded.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })),
+        !loaded.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. }))),
         "crashed mid-sleep — no Terminal recorded yet"
     );
 

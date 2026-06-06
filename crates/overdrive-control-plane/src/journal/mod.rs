@@ -14,14 +14,35 @@
 //!
 //! Per ADR-0063 §2 the journal is mutable, evolving, runtime-owned
 //! memory — ADR-0035's codec case, not ADR-0048's content-addressed
-//! case. [`JournalEntry`] is a CBOR (`ciborium`) `#[serde]` enum with
+//! case. [`LoadedEntry`] (and its two leaf enums [`JournalCommand`] /
+//! [`JournalNotification`]) are CBOR (`ciborium`) `#[serde]` types with
 //! additive schema evolution via `#[serde(default)]`. Each await-surface
 //! slice (02 `ctx.sleep`, 03 `ctx.wait_for_signal` / `ctx.emit_action`)
-//! adds one entry variant additively — no version-bump, no
-//! golden-fixture ceremony. Step results are recorded as their
-//! CBOR-encoded bytes plus a `result_digest` (the `ctx.run` durable-step
-//! result), never a derived deadline/remaining cache
+//! adds one variant additively — no version-bump, no golden-fixture
+//! ceremony, **no `#[serde(tag = "v")]` envelope** (greenfield
+//! single-cut; no surviving on-disk journals). Step results are recorded
+//! as their CBOR-encoded bytes plus a `result_digest` (the `ctx.run`
+//! durable-step result), never a derived deadline/remaining cache
 //! (`.claude/rules/development.md` § "Persist inputs, not derived state").
+//!
+//! # The typed command/notification split (ADR-0063 §2 / ADR-0064 §3)
+//!
+//! The journal stream is **typed by replay role**, closing the latent
+//! replay-corruption trap where `Started`/`Terminal` were second-class
+//! under a positional walk and a variant mismatch at the cursor silently
+//! fell through to the live path:
+//!
+//! - [`JournalCommand`] — the replayable, **cursor-advancing** class.
+//!   Every command occupies one position in the positional replay walk;
+//!   identity is positional (a command's index in the command sequence
+//!   IS its replay identity — no persisted `step` field).
+//! - [`JournalNotification`] — the `SignalKey`-correlated class, resolved
+//!   by lookup and **never advancing the cursor** (its sole variant is
+//!   `SignalSeen`).
+//! - [`LoadedEntry`] — the on-disk/append/load boundary sum. Commands and
+//!   notifications interleave in one ordered table; the store is a dumb
+//!   ordered log and never classifies. The cursor partitions once at
+//!   construction (D2; step 01-03).
 //!
 //! # Adapters
 //!
@@ -175,26 +196,48 @@ pub enum WorkflowIdError {
     BadShape,
 }
 
-/// A single `await`-point record in a workflow instance's journal.
+/// A replayable, **cursor-advancing** journal command (ADR-0063 §2 /
+/// ADR-0064 §3, D1).
 ///
-/// CBOR-encoded (`ciborium`) per ADR-0063 §2. Additive schema evolution:
-/// future await-surface slices add variants under `#[serde(default)]`
-/// without a version-bump. The `step` field is the monotonic await-point
-/// index (the journal cursor — ADR-0064 §3).
+/// A command advances the cursor; identity is positional — a command's
+/// index in the partitioned `Vec<JournalCommand>` IS its replay identity.
+/// There is deliberately **no in-entry `step` field**: a persisted `step`
+/// would be a derived cache of "my own position"
+/// (`.claude/rules/development.md` § "Persist inputs, not derived state",
+/// D5). The store counts entries for `next_step`; the cursor derives the
+/// command-index from partition position (step 01-03).
 ///
-/// Every variant records **inputs / result digests**, never a derived
-/// deadline or "remaining" cache (`.claude/rules/development.md`
-/// § "Persist inputs, not derived state"). Slice 02's `SleepArmed` will
-/// record the absolute `deadline` (an input), not the remaining wait;
-/// resume recomputes remaining from `deadline − clock.now()`.
+/// # Variants and ordering
 ///
-/// `#[serde(tag = "v")]`-style versioned-envelope migration is reserved
-/// for the first breaking change; slice 01 has no breaking history.
+/// `Started` is command-index 0 (the engine writes it on first start —
+/// step 01-05); subsequent `await`-points occupy ascending command
+/// indices; `Terminal` is the last command. `Started`/`Terminal` are
+/// **first-class commands** here — the trap closed by this split was that
+/// they were second-class under the old positional walk that could only
+/// consume `await`-point entries.
+///
+/// # Codec
+///
+/// CBOR-encoded (`ciborium`). Additive schema evolution: future
+/// await-surface slices add variants under `#[serde(default)]` without a
+/// version-bump. Every variant records **inputs / result digests**, never
+/// a derived deadline or "remaining" cache.
+///
+/// # Edge cases / invariants
+///
+/// - A command always advances the cursor by exactly 1 on replay.
+/// - `SleepArmed` records the ABSOLUTE `deadline_unix` (an input); resume
+///   recomputes remaining from `deadline_unix − clock.unix_now()`, never
+///   a persisted "remaining" field.
+/// - A `SignalAwaited` command with no matching `SignalSeen` notification
+///   (looked up off the walk) is the "crashed while still blocked" shape:
+///   resume re-blocks on the same key.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum JournalEntry {
-    /// The workflow instance started (slice 01). Records the spec digest
-    /// (the workflow *kind* + parameters identity) and the input digest
-    /// (the instance's start parameters) — both inputs.
+pub enum JournalCommand {
+    /// The workflow instance started (slice 01) — command-index 0.
+    /// Records the spec digest (the workflow *kind* + parameters
+    /// identity) and the input digest (the instance's start parameters) —
+    /// both inputs.
     Started {
         /// SHA-256 digest of the workflow spec's canonical identity.
         spec_digest: overdrive_core::id::ContentHash,
@@ -202,22 +245,17 @@ pub enum JournalEntry {
         input_digest: overdrive_core::id::ContentHash,
     },
 
-    /// A `ctx.run` durable step resolved (slice 01). Records the
-    /// await-point step index, the step name (diagnostics + the
-    /// replay-determinism check), the result digest, and the CBOR-encoded
-    /// step result bytes the replay path decodes — the inputs
-    /// replay-equivalence (K4) re-derives and compares against.
+    /// A `ctx.run` durable step resolved (slice 01). Records the step name
+    /// (diagnostics + the replay-determinism check), the result digest,
+    /// and the CBOR-encoded step result bytes the replay path decodes —
+    /// the inputs replay-equivalence (K4) re-derives and compares against.
     ///
-    /// Identity is POSITIONAL (the `step` cursor index); `name` is carried
-    /// for diagnostics and the determinism check, not for identity (the
-    /// per-step `correlation` of the prior `ctx.call` model was dead weight
-    /// once the cursor became positional, and was removed).
+    /// Identity is POSITIONAL (the command-index); `name` is carried for
+    /// diagnostics and the Layer-2 determinism check, not for identity.
     RunResult {
-        /// The monotonic await-point index (journal cursor).
-        step: u32,
         /// The `ctx.run` step name — diagnostics + the replay-determinism
         /// check (a recorded name diverging from the replaying body's name
-        /// at this cursor fails closed; ADR-0064 §3).
+        /// at this command-index fails closed; ADR-0064 §3).
         name: String,
         /// SHA-256 digest of the step's CBOR-encoded result — sufficient
         /// for replay-equivalence (K4); the digest of `result_bytes`.
@@ -228,93 +266,57 @@ pub enum JournalEntry {
         result_bytes: Vec<u8>,
     },
 
-    /// A `ctx.sleep` was armed (slice 02). Records the await-point step
-    /// index and the ABSOLUTE wall-clock `deadline_unix` (an INPUT —
-    /// `clock.unix_now()` at arm time + the sleep duration). Resume
-    /// recomputes the remaining wait as `deadline_unix − clock.unix_now()`
-    /// — there is deliberately NO persisted "remaining duration" field
+    /// A `ctx.sleep` was armed (slice 02). Records the ABSOLUTE
+    /// wall-clock `deadline_unix` (an INPUT — `clock.unix_now()` at arm
+    /// time + the sleep duration). Resume recomputes the remaining wait as
+    /// `deadline_unix − clock.unix_now()` — there is deliberately NO
+    /// persisted "remaining duration" field
     /// (`.claude/rules/development.md` § "Persist inputs, not derived
-    /// state"; a remaining cache would silently desync from the live
-    /// clock on resume).
+    /// state"; a remaining cache would silently desync from the live clock
+    /// on resume).
     ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2 — a new variant on a
-    /// CBOR `#[serde]` enum is additive by construction (older journals
-    /// never contain it; readers ignore unknown future variants). No
-    /// version bump, no golden fixture.
+    /// Additive `#[serde(default)]` per ADR-0063 §2.
     SleepArmed {
-        /// The monotonic await-point index (journal cursor).
-        step: u32,
         /// Absolute wall-clock deadline (duration since the UNIX epoch)
         /// computed at arm time — an input, not a derived remaining cache.
         deadline_unix: std::time::Duration,
     },
 
     /// A `ctx.wait_for_signal` was armed (slice 03). Records the
-    /// await-point step index and the [`SignalKey`] the workflow blocked
-    /// on (an INPUT — the key the body named). A `SignalAwaited` with no
-    /// following `SignalSeen` is the "crashed while still blocked" shape:
-    /// resume re-blocks on the SAME key (the crash-safety contract proven
-    /// by step 03-02).
+    /// [`SignalKey`](overdrive_core::workflow::SignalKey) the workflow
+    /// blocked on (an INPUT — the key the body named). A `SignalAwaited`
+    /// command with no matching `SignalSeen` notification is the "crashed
+    /// while still blocked" shape: resume re-blocks on the SAME key (the
+    /// crash-safety contract proven by step 03-02).
     ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2 — a new variant on a
-    /// CBOR `#[serde]` enum is additive by construction (older journals
-    /// never contain it). No version bump, no golden fixture.
+    /// Additive `#[serde(default)]` per ADR-0063 §2.
     SignalAwaited {
-        /// The monotonic await-point index (journal cursor).
-        step: u32,
         /// The signal key the workflow body blocked on — an input.
         signal_key: overdrive_core::workflow::SignalKey,
     },
 
-    /// A `ctx.wait_for_signal` was satisfied (slice 03). Records the
-    /// await-point step index, the [`SignalKey`], and the
-    /// `value_digest` — the content digest of the observed
-    /// [`SignalValue`]'s bytes (an INPUT, per
-    /// `.claude/rules/development.md` § "Persist inputs, not derived
-    /// state"; the digest of the value the body received). The value
-    /// itself is carried in `value` so a resumed run replays the exact
-    /// value the live run observed without re-reading the signal surface.
-    ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2.
-    SignalSeen {
-        /// The monotonic await-point index (journal cursor).
-        step: u32,
-        /// The signal key that was satisfied — an input.
-        signal_key: overdrive_core::workflow::SignalKey,
-        /// SHA-256 digest of the observed signal value's bytes — the
-        /// input replay-equivalence (K4) re-derives and compares.
-        value_digest: overdrive_core::id::ContentHash,
-        /// The observed signal value, carried so a resumed run replays the
-        /// exact value the live run received without re-reading the signal
-        /// surface (ADR-0064 §4, exactly-once on the replay path).
-        value: overdrive_core::workflow::SignalValue,
-    },
-
     /// A `ctx.emit_action` sent a typed Action on the Action channel
-    /// (slice 03). Records the await-point step index and the
-    /// `action_digest` — the content digest of the emitted Action's
-    /// inputs (per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state"). The presence of this entry at the cursor makes
-    /// the emit idempotent on resume: a resumed run sees `ActionEmitted`
-    /// and does NOT re-send the Action (exactly-once *on the replay path*).
-    /// This is NOT an unconditional exactly-once guarantee — the live emit
-    /// is send-before-record, so a crash AFTER the send but BEFORE this
-    /// entry is journaled leaves no `ActionEmitted` at the cursor and the
-    /// resume re-sends (at-least-once; safety rests on downstream
-    /// idempotency). See `WorkflowCtx::emit_action` "Honest semantics".
-    /// ADR-0064 §4.
+    /// (slice 03). Records the `action_digest` — the content digest of the
+    /// emitted Action's inputs (per `.claude/rules/development.md`
+    /// § "Persist inputs, not derived state"). The presence of this
+    /// command at the cursor makes the emit idempotent on resume: a
+    /// resumed run sees `ActionEmitted` and does NOT re-send the Action
+    /// (exactly-once *on the replay path*). This is NOT an unconditional
+    /// exactly-once guarantee — the live emit is send-before-record, so a
+    /// crash AFTER the send but BEFORE this command is journaled leaves no
+    /// `ActionEmitted` at the cursor and the resume re-sends
+    /// (at-least-once; safety rests on downstream idempotency). See
+    /// `WorkflowCtx::emit_action` "Honest semantics". ADR-0064 §4.
     ///
     /// Additive `#[serde(default)]` per ADR-0063 §2.
     ActionEmitted {
-        /// The monotonic await-point index (journal cursor).
-        step: u32,
         /// SHA-256 digest of the emitted Action's canonical inputs.
         action_digest: overdrive_core::id::ContentHash,
     },
 
-    /// The workflow ran to a terminal value (slice 01). Records the
-    /// terminal result string form — the engine maps this back to a
-    /// `WorkflowResult` on read.
+    /// The workflow ran to a terminal value (slice 01) — the last command.
+    /// Records the terminal result string form — the engine maps this back
+    /// to a `WorkflowResult` on read.
     Terminal {
         /// Operator-facing terminal result (canonical string form of
         /// the `WorkflowResult` the engine returned).
@@ -322,19 +324,88 @@ pub enum JournalEntry {
     },
 }
 
+/// A `SignalKey`-correlated journal notification (ADR-0063 §2 /
+/// ADR-0064 §4, D1).
+///
+/// A notification is resolved by `SignalKey` lookup and **never advances
+/// the cursor** — it lives off the positional command walk. Its sole
+/// variant is `SignalSeen`: the satisfied half of a `ctx.wait_for_signal`,
+/// paired by `SignalKey` with the `SignalAwaited` command. The cursor
+/// partitions the loaded run into the command sequence plus a
+/// `BTreeMap<SignalKey, JournalNotification>` once at construction (D2;
+/// step 01-03); a `SignalAwaited` command with no matching notification
+/// re-blocks on resume.
+///
+/// Deliberately minimal (D6): a single notification shape, no general
+/// Restate-style `NotificationId` correlation model — single-node Phase 1
+/// has exactly one notification kind, and the general model is rejected,
+/// not deferred.
+///
+/// CBOR-encoded (`ciborium`); additive `#[serde(default)]` evolution per
+/// ADR-0063 §2. No in-entry `step` field — identity is the `SignalKey`,
+/// never a position (D5).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum JournalNotification {
+    /// A `ctx.wait_for_signal` was satisfied (slice 03). Records the
+    /// [`SignalKey`](overdrive_core::workflow::SignalKey), the
+    /// `value_digest` (the content digest of the observed
+    /// [`SignalValue`](overdrive_core::workflow::SignalValue)'s bytes — an
+    /// INPUT, per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state"), and the observed `value` itself, carried so a
+    /// resumed run replays the exact value the live run received without
+    /// re-reading the signal surface (ADR-0064 §4, exactly-once on the
+    /// replay path).
+    SignalSeen {
+        /// The signal key that was satisfied — an input. The correlation
+        /// key the cursor looks this notification up by.
+        signal_key: overdrive_core::workflow::SignalKey,
+        /// SHA-256 digest of the observed signal value's bytes — the
+        /// input replay-equivalence (K4) re-derives and compares.
+        value_digest: overdrive_core::id::ContentHash,
+        /// The observed signal value, carried so a resumed run replays the
+        /// exact value the live run received without re-reading the signal
+        /// surface (ADR-0064 §4).
+        value: overdrive_core::workflow::SignalValue,
+    },
+}
+
+/// The on-disk/append/load boundary representation — the dumb-store
+/// ordered-table shape (ADR-0063 §2 / ADR-0064 §3, D1).
+///
+/// Commands and notifications **interleave in one ordered table**; the
+/// store ([`JournalStore`]) is a dumb ordered log and never classifies.
+/// [`JournalStore::append`] takes a `LoadedEntry`;
+/// [`JournalStore::load_journal`] returns the flat ordered
+/// `Vec<LoadedEntry>` in append order. The cursor partitions this sum
+/// ONCE at construction into the positional command walk plus the
+/// `SignalKey`-keyed notification lookup (D2; step 01-03) — classification
+/// is the cursor's job, not the store's.
+///
+/// `LoadedEntry` is the one genuinely-new type in the split: a thin
+/// boundary sum over the two existing-derived leaf enums, not a new
+/// component. CBOR-encoded (`ciborium`), no `#[serde(tag = "v")]` envelope
+/// bump (greenfield single-cut).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LoadedEntry {
+    /// A replayable, cursor-advancing [`JournalCommand`].
+    Command(JournalCommand),
+    /// A `SignalKey`-correlated, off-the-walk [`JournalNotification`].
+    Notification(JournalNotification),
+}
+
 /// Errors from a `JournalStore` operation. Pass-through embedding via
 /// `#[from]` per `.claude/rules/development.md` § Errors — mirrors
 /// [`crate::view_store::ViewStoreError`].
 #[derive(Debug, Error)]
 pub enum JournalStoreError {
-    /// CBOR encode failure — the [`JournalEntry`] could not be
+    /// CBOR encode failure — the [`LoadedEntry`] could not be
     /// serialised. Should not happen for the straightforward derive;
     /// surfaces on exotic custom impls only.
     #[error("CBOR encode failed: {0}")]
     Encode(String),
 
     /// CBOR decode failure — a persisted entry could not be decoded.
-    /// Indicates schema skew between the in-memory [`JournalEntry`]
+    /// Indicates schema skew between the in-memory [`LoadedEntry`]
     /// shape and the on-disk bytes; the runtime surfaces this as a hard
     /// boot failure (Earned-Trust gate).
     #[error("CBOR decode failed: {0}")]
@@ -432,28 +503,33 @@ pub enum ProbeError {
 /// structural difference from `ViewStore`'s single-blob-overwrite
 /// contract that makes the journal a distinct port (ADR-0063 §1).
 ///
-/// Encodes/decodes [`JournalEntry`] via `ciborium` internally — the
-/// trait surface takes/returns typed `JournalEntry`, not raw bytes,
-/// because (unlike `ViewStore`'s heterogeneous-`View` problem) the
-/// journal stores one homogeneous entry type, so no dyn-compat byte
-/// indirection is needed.
+/// Encodes/decodes [`LoadedEntry`] via `ciborium` internally — the trait
+/// surface takes/returns typed `LoadedEntry`, not raw bytes, because
+/// (unlike `ViewStore`'s heterogeneous-`View` problem) the journal stores
+/// one homogeneous boundary sum, so no dyn-compat byte indirection is
+/// needed. **The store is a dumb ordered log** — commands and
+/// notifications interleave; the store never classifies (D2; the cursor
+/// partitions at construction, step 01-03).
 #[async_trait]
 pub trait JournalStore: Send + Sync {
-    /// Append one [`JournalEntry`] to `workflow_id`'s run at the entry's
-    /// implied next step, durably (one fsync'd write) BEFORE return.
+    /// Append one [`LoadedEntry`] to `workflow_id`'s run at the next
+    /// storage append-position, durably (one fsync'd write) BEFORE return.
     ///
     /// # Preconditions
     ///
     /// `workflow_id` is a valid instance id; `entry` is a well-formed
-    /// [`JournalEntry`].
+    /// [`LoadedEntry`] (a command or a notification — the store does not
+    /// distinguish them).
     ///
     /// # Postconditions
     ///
     /// On `Ok(())` the entry is durable and a subsequent
     /// [`load_journal`](Self::load_journal) for the same `workflow_id`
     /// returns it appended at the END of the ordered run (append
-    /// order == load order). Per ADR-0063 §4 (fsync-then-memory): the
-    /// fsync completes before this returns, so a crash after `Ok(())`
+    /// order == load order). A notification and a command append
+    /// identically — the store assigns the `u32` by append position over
+    /// ALL entries, never by class. Per ADR-0063 §4 (fsync-then-memory):
+    /// the fsync completes before this returns, so a crash after `Ok(())`
     /// preserves the entry across the next boot's `load_journal`.
     ///
     /// # Edge cases
@@ -461,8 +537,11 @@ pub trait JournalStore: Send + Sync {
     /// - First append for a fresh `workflow_id` creates that instance's
     ///   run (no prior `Started` required by the store; ordering is the
     ///   engine's concern).
-    /// - The store assigns the step index by append position; appending
-    ///   N entries yields steps `0..N` in append order.
+    /// - The store assigns the step index by append position over ALL
+    ///   entries (commands + notifications); appending N entries yields
+    ///   steps `0..N` in append order. This storage append-position is
+    ///   NOT the command-index — the cursor derives the command-index from
+    ///   the partition (D3).
     ///
     /// # Errors
     ///
@@ -473,17 +552,20 @@ pub trait JournalStore: Send + Sync {
     /// - [`JournalStoreError::Encode`] — the entry could not be
     ///   CBOR-encoded.
     /// - [`JournalStoreError::Io`] — underlying engine I/O failure.
-    async fn append(&self, workflow_id: &WorkflowId, entry: &JournalEntry) -> Result<()>;
+    async fn append(&self, workflow_id: &WorkflowId, entry: &LoadedEntry) -> Result<()>;
 
     /// Load the full ordered run for `workflow_id` — a range scan
-    /// `(id, 0)..=(id, u32::MAX)` decoded into a `Vec<JournalEntry>` in
-    /// step order (ADR-0063 §3).
+    /// `(id, 0)..=(id, u32::MAX)` decoded into a flat `Vec<LoadedEntry>`
+    /// in append order (ADR-0063 §3).
     ///
     /// # Postconditions
     ///
     /// Returns the entries previously [`append`](Self::append)ed for
     /// `workflow_id`, byte-equal after the CBOR round-trip, in append
-    /// (== ascending step) order.
+    /// (== ascending storage-step) order. The store does NOT partition
+    /// the run into commands and notifications — that is the cursor's job
+    /// (D2). Commands and notifications are returned interleaved exactly
+    /// as they were appended.
     ///
     /// # Edge cases
     ///
@@ -497,7 +579,7 @@ pub trait JournalStore: Send + Sync {
     ///   CBOR-decoded (schema skew); the runtime treats this as a hard
     ///   boot failure.
     /// - [`JournalStoreError::Io`] — underlying engine I/O failure.
-    async fn load_journal(&self, workflow_id: &WorkflowId) -> Result<Vec<JournalEntry>>;
+    async fn load_journal(&self, workflow_id: &WorkflowId) -> Result<Vec<LoadedEntry>>;
 
     /// Earned-Trust startup probe per ADR-0063 §4 (reused from
     /// ADR-0035 § Earned Trust).

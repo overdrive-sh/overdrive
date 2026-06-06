@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry};
 
 use overdrive_core::UnixInstant;
@@ -149,9 +149,10 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     // arm would leave the journal empty.
     let entries = journal.load_journal(&workflow_id).await.expect("load journal");
     assert!(
-        entries
-            .iter()
-            .any(|e| matches!(e, JournalEntry::Terminal { result } if result == "Success")),
+        entries.iter().any(|e| matches!(
+            e,
+            LoadedEntry::Command(JournalCommand::Terminal { result }) if result == "Success"
+        )),
         "the engine must drive run to a Terminal(Success) journal entry off the shim; got {entries:?}"
     );
 }

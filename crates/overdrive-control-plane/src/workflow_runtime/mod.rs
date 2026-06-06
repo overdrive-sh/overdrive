@@ -25,12 +25,13 @@
 //!   exactly-once guarantee on the replay path (K1). The cursor advances.
 //! - **Live (cursor == buffer length):** the handle returns `Ok(None)`;
 //!   the ctx polls the step's future, then the handle appends a
-//!   [`JournalEntry::RunResult`] with fsync BEFORE returning (ADR-0063
+//!   [`JournalCommand::RunResult`] (wrapped as a
+//!   [`LoadedEntry::Command`]) with fsync BEFORE returning (ADR-0063
 //!   §4 fsync-then-suspend) and advances the cursor.
 //!
 //! On `run` returning a [`WorkflowResult`], the engine appends a
-//! [`JournalEntry::Terminal`] recording the canonical result string — the
-//! durable terminal surface for slice 01.
+//! [`JournalCommand::Terminal`] recording the canonical result string —
+//! the durable terminal surface for slice 01.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
@@ -53,7 +54,7 @@ use overdrive_core::workflow::{
     WorkflowResult, WorkflowSpec,
 };
 
-use crate::journal::{JournalEntry, JournalStore, WorkflowId};
+use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
 
 /// The sender half of the engine's **Action channel** — the channel whose
 /// receiver the production `spawn_workflow_emit_drain` task forwards into
@@ -366,8 +367,9 @@ impl WorkflowEngine {
             // ADR-0064 §2 / §3): append the canonical result string via
             // the sanctioned journal path. A real failure to append is
             // surfaced via tracing; the next resume re-drives `run`.
-            let terminal =
-                JournalEntry::Terminal { result: workflow_result_label(&result).to_string() };
+            let terminal = LoadedEntry::Command(JournalCommand::Terminal {
+                result: workflow_result_label(&result).to_string(),
+            });
             if let Err(err) = journal.append(&workflow_id, &terminal).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -471,9 +473,19 @@ const fn workflow_result_label(result: &WorkflowResult) -> &'static str {
 pub struct JournalCursorHandle {
     journal: Arc<dyn JournalStore>,
     workflow_id: WorkflowId,
-    /// The entries loaded at (re)start. The cursor reads recorded results
-    /// from this buffer on replay; the live path appends to the journal.
-    replay_buffer: Vec<JournalEntry>,
+    /// The entries loaded at (re)start, as the flat ordered
+    /// [`LoadedEntry`] stream the store returns (commands + notifications
+    /// interleaved). The cursor reads recorded results from this buffer on
+    /// replay; the live path appends to the journal.
+    ///
+    /// NOTE (RED scaffold, step 01-01 → 01-03): this still drives a
+    /// POSITIONAL walk over the interleaved `LoadedEntry` stream. The D2
+    /// partition — into a `Vec<JournalCommand>` positional walk + a
+    /// `BTreeMap<SignalKey, JournalNotification>` correlated lookup, and
+    /// the retirement of the `*cursor + 2` signal walk — lands in step
+    /// 01-03. The positional walk over `LoadedEntry` here is the
+    /// behaviour-preserving intermediate.
+    replay_buffer: Vec<LoadedEntry>,
     /// The current await-point index — advanced on every replay hit and
     /// every live record. Interior-mutable so `&self` ctx ops can move it.
     cursor: Mutex<usize>,
@@ -517,7 +529,7 @@ impl JournalCursorHandle {
     pub fn new(
         journal: Arc<dyn JournalStore>,
         workflow_id: WorkflowId,
-        replay_buffer: Vec<JournalEntry>,
+        replay_buffer: Vec<LoadedEntry>,
     ) -> Self {
         Self {
             journal,
@@ -539,7 +551,7 @@ impl JournalCursorHandle {
     pub fn new_with_channels(
         journal: Arc<dyn JournalStore>,
         workflow_id: WorkflowId,
-        replay_buffer: Vec<JournalEntry>,
+        replay_buffer: Vec<LoadedEntry>,
         action_emit: ActionEmitSender,
         obs: Arc<dyn ObservationStore>,
     ) -> Self {
@@ -564,7 +576,7 @@ impl JournalCursorHandle {
     async fn append_then_advance(
         &self,
         cursor: &mut usize,
-        entry: &JournalEntry,
+        entry: &LoadedEntry,
     ) -> Result<(), WorkflowCtxError> {
         self.journal
             .append(&self.workflow_id, entry)
@@ -586,8 +598,11 @@ impl JournalCursor for JournalCursorHandle {
         // the variant keeps the cursor honest if a future slice
         // interleaves other await entries.) A cursor past the buffer (or
         // at a non-run entry) is the live path → `Ok(None)`.
-        let Some(JournalEntry::RunResult { name: recorded_name, result_bytes, .. }) =
-            self.replay_buffer.get(*cursor)
+        let Some(LoadedEntry::Command(JournalCommand::RunResult {
+            name: recorded_name,
+            result_bytes,
+            ..
+        })) = self.replay_buffer.get(*cursor)
         else {
             drop(cursor);
             return Ok(None);
@@ -610,17 +625,16 @@ impl JournalCursor for JournalCursorHandle {
 
     async fn record_run(&self, name: &str, result_bytes: &[u8]) -> Result<(), WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         // The result digest is the content hash of the CBOR-encoded step
         // result — slice 01 records both the digest (replay-equivalence)
-        // and the bytes (for byte-equal replay).
+        // and the bytes (for byte-equal replay). No in-entry `step` —
+        // identity is positional (D5).
         let result_digest = ContentHash::of(result_bytes);
-        let entry = JournalEntry::RunResult {
-            step,
+        let entry = LoadedEntry::Command(JournalCommand::RunResult {
             name: name.to_string(),
             result_digest,
             result_bytes: result_bytes.to_vec(),
-        };
+        });
         // Append + fsync BEFORE returning (ADR-0063 §4). On failure the
         // cursor does NOT advance — the engine must not continue against
         // an unjournaled effect.
@@ -637,7 +651,7 @@ impl JournalCursor for JournalCursorHandle {
         // recorded `deadline_unix` is the absolute deadline (an input);
         // the ctx recomputes the remaining wait against the live clock.
         let deadline = match self.replay_buffer.get(*cursor) {
-            Some(JournalEntry::SleepArmed { deadline_unix, .. }) => {
+            Some(LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix, .. })) => {
                 *cursor += 1;
                 Some(*deadline_unix)
             }
@@ -649,10 +663,10 @@ impl JournalCursor for JournalCursorHandle {
 
     async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         // Record the ABSOLUTE deadline (an input), never a remaining
         // cache (`development.md` § "Persist inputs, not derived state").
-        let entry = JournalEntry::SleepArmed { step, deadline_unix };
+        // No in-entry `step` — identity is positional (D5).
+        let entry = LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix });
         // Append + fsync BEFORE returning (ADR-0063 §4, fsync-then-park).
         // On failure the cursor does NOT advance — the engine must not
         // park against an unjournaled sleep.
@@ -681,11 +695,15 @@ impl JournalCursor for JournalCursorHandle {
         //
         // Identity is POSITIONAL — `signal_key` is carried for diagnostics;
         // the cursor index is the identity.
-        if !matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::SignalAwaited { .. })) {
+        if !matches!(
+            self.replay_buffer.get(*cursor),
+            Some(LoadedEntry::Command(JournalCommand::SignalAwaited { .. }))
+        ) {
             drop(cursor);
             return None;
         }
-        let Some(JournalEntry::SignalSeen { value, .. }) = self.replay_buffer.get(*cursor + 1)
+        let Some(LoadedEntry::Notification(JournalNotification::SignalSeen { value, .. })) =
+            self.replay_buffer.get(*cursor + 1)
         else {
             // SignalAwaited with no following SignalSeen — crashed while
             // blocked. NOT a replay hit; re-block on the live path.
@@ -709,16 +727,20 @@ impl JournalCursor for JournalCursorHandle {
         // the live block on the SAME key. This is the load-bearing
         // crash-safety case (S-WP-03-01). POSITIONAL identity — `signal_key`
         // is carried for diagnostics; the cursor index is the identity.
-        if matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::SignalAwaited { .. })) {
+        if matches!(
+            self.replay_buffer.get(*cursor),
+            Some(LoadedEntry::Command(JournalCommand::SignalAwaited { .. }))
+        ) {
             *cursor += 1;
             drop(cursor);
             return Ok(());
         }
-        // Live path — record the SignalAwaited armed entry (an input: the
+        // Live path — record the SignalAwaited armed command (an input: the
         // key the body blocked on) durably before the ctx begins blocking
-        // (ADR-0063 §4 fsync-then-suspend).
-        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
-        let awaited = JournalEntry::SignalAwaited { step, signal_key: signal_key.clone() };
+        // (ADR-0063 §4 fsync-then-suspend). No in-entry `step` — identity
+        // is positional (D5).
+        let awaited =
+            LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: signal_key.clone() });
         self.append_then_advance(&mut cursor, &awaited).await?;
         drop(cursor);
         Ok(())
@@ -759,14 +781,16 @@ impl JournalCursor for JournalCursorHandle {
         // at a DISTINCT cursor position from SignalAwaited, so a crash
         // BETWEEN them leaves SignalAwaited with no SignalSeen — the
         // re-block-on-resume shape.
-        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
+        // SignalSeen is a NOTIFICATION (SignalKey-correlated), no in-entry
+        // `step` (D1/D5). Recorded at a DISTINCT cursor position from the
+        // SignalAwaited command so a crash BETWEEN them leaves SignalAwaited
+        // with no SignalSeen — the re-block-on-resume shape.
         let value_digest = ContentHash::of(value.as_str().as_bytes());
-        let seen = JournalEntry::SignalSeen {
-            step,
+        let seen = LoadedEntry::Notification(JournalNotification::SignalSeen {
             signal_key: signal_key.clone(),
             value_digest,
             value: value.clone(),
-        };
+        });
         self.append_then_advance(&mut cursor, &seen).await?;
         drop(cursor);
         Ok(())
@@ -780,8 +804,10 @@ impl JournalCursor for JournalCursorHandle {
         // `emit_action` is at-least-once: a recorded ActionEmitted is what
         // makes resume idempotent, so a run that sent but failed to record
         // it (no entry here) re-sends. See `emit_action` below.
-        let is_replay =
-            matches!(self.replay_buffer.get(*cursor), Some(JournalEntry::ActionEmitted { .. }));
+        let is_replay = matches!(
+            self.replay_buffer.get(*cursor),
+            Some(LoadedEntry::Command(JournalCommand::ActionEmitted { .. }))
+        );
         if is_replay {
             *cursor += 1;
         }
@@ -796,7 +822,6 @@ impl JournalCursor for JournalCursorHandle {
         // the enum derives only Debug/Clone/Eq, no Serialize; the Debug
         // form is a stable canonical projection of the inputs). Per
         // `development.md` § "Persist inputs, not derived state".
-        let step = u32::try_from(*cursor).unwrap_or(u32::MAX);
         let action_digest = ContentHash::of(format!("{action:?}").as_bytes());
         // Send the typed Action on the Action channel (→ Raft) — the
         // channel the production `spawn_workflow_emit_drain` task forwards
@@ -826,8 +851,9 @@ impl JournalCursor for JournalCursorHandle {
                 .map_err(|err| WorkflowCtxError::ActionChannel { message: err.to_string() })?;
         }
         // Record ActionEmitted durably before returning (ADR-0063 §4): a
-        // resumed run sees this entry and does NOT re-send the Action.
-        let entry = JournalEntry::ActionEmitted { step, action_digest };
+        // resumed run sees this command and does NOT re-send the Action.
+        // No in-entry `step` — identity is positional (D5).
+        let entry = LoadedEntry::Command(JournalCommand::ActionEmitted { action_digest });
         self.append_then_advance(&mut cursor, &entry).await?;
         drop(cursor);
         Ok(())

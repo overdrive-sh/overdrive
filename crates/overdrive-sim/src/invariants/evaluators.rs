@@ -53,7 +53,9 @@ use overdrive_core::workflow::{
     JournalCursor, SignalValue, WorkflowCtx, WorkflowResult, WorkflowSpec,
 };
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{
+    JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
+};
 use overdrive_control_plane::workflow_runtime::{
     JournalCursorHandle, WorkflowEngine, WorkflowRegistry,
 };
@@ -685,7 +687,7 @@ async fn drain_terminal(
 
 /// Drive an uninterrupted `ProvisionRecord` run to terminal through the
 /// engine; return the loaded journal trajectory + terminal result.
-async fn run_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResult>) {
+async fn run_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResult>) {
     let (correlation, workflow_id, spec) = provision_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
@@ -712,7 +714,7 @@ async fn run_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResu
 /// honestly. Returns the persisted journal (carrying the recorded
 /// `RunResult`, NO `Terminal`) and the count of effect fires during this
 /// pre-crash run.
-async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<JournalEntry>, usize) {
+async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<LoadedEntry>, usize) {
     let (_correlation, workflow_id, _spec) = provision_instance();
     let target: SocketAddr =
         WF_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_TARGET is a valid socket addr"));
@@ -779,10 +781,14 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     let (correlation, workflow_id, spec) = provision_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let (pre_resume, _crash_fires) = run_until_crash(seed, &journal).await;
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })) {
+    if !pre_resume
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+    {
         return fail(format!("crash run left no recorded RunResult: {pre_resume:?}"));
     }
-    if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+    if pre_resume.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. })))
+    {
         return fail(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
     }
 
@@ -822,8 +828,10 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
     // uninterrupted one (the recorded RunResult is the same; both reach
     // a Terminal entry), and the terminal results match.
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
-    let recorded_run = |run: &[JournalEntry]| -> Option<JournalEntry> {
-        run.iter().find(|e| matches!(e, JournalEntry::RunResult { .. })).cloned()
+    let recorded_run = |run: &[LoadedEntry]| -> Option<LoadedEntry> {
+        run.iter()
+            .find(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+            .cloned()
     };
     if recorded_run(&resumed) != recorded_run(&uninterrupted) {
         return fail(format!(
@@ -831,7 +839,7 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
              {resumed:?} vs {uninterrupted:?}"
         ));
     }
-    if !resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+    if !resumed.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. }))) {
         return fail(format!("resumed run did not append a Terminal entry: {resumed:?}"));
     }
     if resumed_terminal != uninterrupted_terminal {
@@ -959,7 +967,7 @@ async fn drive_signal_to_terminal(
 
 /// Drive an uninterrupted `ProvisionRecordWithSignalEmit` run to terminal;
 /// return the loaded journal trajectory + terminal result.
-async fn run_signal_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResult>) {
+async fn run_signal_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResult>) {
     let (correlation, workflow_id, spec) = provision_signal_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
@@ -991,7 +999,7 @@ async fn run_signal_until_crash_while_blocked(
     spec: &WorkflowSpec,
     correlation: &CorrelationKey,
     workflow_id: &WorkflowId,
-) -> Result<(usize, Vec<JournalEntry>), String> {
+) -> Result<(usize, Vec<LoadedEntry>), String> {
     let (engine, clock) = provision_signal_engine(seed, Arc::clone(journal), Arc::clone(obs));
     let Some(mut emits) = engine.take_action_emit_receiver().await else {
         return Err("crash engine had no emit receiver".to_owned());
@@ -1054,16 +1062,23 @@ async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String
             "crash run emitted {crash_pre_emits} Actions while blocked on the signal (expected 0)"
         ));
     }
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::SignalAwaited { .. })) {
+    if !pre_resume
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::SignalAwaited { .. })))
+    {
         return Some(format!("crash run did not block (no SignalAwaited): {pre_resume:?}"));
     }
-    if pre_resume.iter().any(|e| matches!(e, JournalEntry::SignalSeen { .. })) {
+    if pre_resume
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Notification(JournalNotification::SignalSeen { .. })))
+    {
         return Some(format!(
             "crash run was NOT blocked (SignalSeen present) — the signal resolved prematurely: \
              {pre_resume:?}"
         ));
     }
-    if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+    if pre_resume.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. })))
+    {
         return Some(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
     }
 
@@ -1123,8 +1138,8 @@ async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String
 /// duplicate), append a `Terminal`, and reach the same terminal result.
 /// Returns `None` on equivalence, `Some(cause)` on the first violation.
 fn assert_signal_replay_equivalence(
-    resumed: &[JournalEntry],
-    uninterrupted: &[JournalEntry],
+    resumed: &[LoadedEntry],
+    uninterrupted: &[LoadedEntry],
     resumed_terminal: &WorkflowResult,
     uninterrupted_terminal: &WorkflowResult,
 ) -> Option<String> {
@@ -1140,15 +1155,17 @@ fn assert_signal_replay_equivalence(
              {uninterrupted:?}"
         ));
     }
-    let awaited_count =
-        resumed.iter().filter(|e| matches!(e, JournalEntry::SignalAwaited { .. })).count();
+    let awaited_count = resumed
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::SignalAwaited { .. })))
+        .count();
     if awaited_count != 1 {
         return Some(format!(
             "resumed run has {awaited_count} SignalAwaited entries (expected 1 — re-block appends \
              no duplicate): {resumed:?}"
         ));
     }
-    if !resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+    if !resumed.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. }))) {
         return Some(format!("resumed signal+emit run did not append a Terminal: {resumed:?}"));
     }
     if resumed_terminal != uninterrupted_terminal {
@@ -1266,7 +1283,7 @@ async fn drive_sleep_to_terminal(engine: &WorkflowEngine, clock: &Arc<SimClock>)
 async fn run_until_crash_in_sleep(
     seed: u64,
     journal: &Arc<dyn JournalStore>,
-) -> (Vec<JournalEntry>, usize, usize) {
+) -> (Vec<LoadedEntry>, usize, usize) {
     let (_correlation, workflow_id, _spec) = provision_sleep_instance();
     let pre: SocketAddr =
         WF_SLEEP_PRE_TARGET.parse().unwrap_or_else(|_| unreachable!("WF_SLEEP_PRE_TARGET valid"));
@@ -1314,7 +1331,7 @@ async fn run_until_crash_in_sleep(
 
 /// Drive an uninterrupted `ProvisionRecordWithSleep` run to terminal through
 /// the engine; return the loaded journal trajectory + terminal result.
-async fn run_sleep_uninterrupted(seed: u64) -> (Vec<JournalEntry>, Option<WorkflowResult>) {
+async fn run_sleep_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowResult>) {
     let (correlation, workflow_id, spec) = provision_sleep_instance();
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
@@ -1342,7 +1359,10 @@ async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
     // (1) Uninterrupted run — the reference trajectory across the sleep.
     let (uninterrupted, uninterrupted_terminal) = run_sleep_uninterrupted(seed).await;
     let uninterrupted_terminal = uninterrupted_terminal?;
-    if !uninterrupted.iter().any(|e| matches!(e, JournalEntry::SleepArmed { .. })) {
+    if !uninterrupted
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::SleepArmed { .. })))
+    {
         return Some(format!(
             "uninterrupted sleep run recorded no SleepArmed entry: {uninterrupted:?}"
         ));
@@ -1367,14 +1387,8 @@ async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
              sleep — it must be 0)"
         ));
     }
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })) {
-        return Some(format!("crash run left no recorded pre-sleep RunResult: {pre_resume:?}"));
-    }
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::SleepArmed { .. })) {
-        return Some(format!("crash run did not span the sleep (no SleepArmed): {pre_resume:?}"));
-    }
-    if pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
-        return Some(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
+    if let Some(cause) = crash_journal_spans_sleep_shape(&pre_resume) {
+        return Some(cause);
     }
 
     // (3) Resume from the persisted journal through the engine. The recorded
@@ -1452,7 +1466,7 @@ async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
              resumed={resumed:?} crash={pre_resume:?}"
         ));
     }
-    if !resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })) {
+    if !resumed.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. }))) {
         return Some(format!("resumed sleep run did not append a Terminal entry: {resumed:?}"));
     }
     if resumed_terminal != uninterrupted_terminal {
@@ -1464,37 +1478,64 @@ async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
     None
 }
 
+/// Assert the crash-injected sleep run's persisted journal has the
+/// pre-sleep crash shape: a recorded pre-sleep `RunResult` AND a
+/// `SleepArmed` (the crash spanned the sleep window) AND NO `Terminal`
+/// (the crash landed before terminal). Returns `Some(cause)` on the first
+/// violation, `None` when all three hold.
+fn crash_journal_spans_sleep_shape(pre_resume: &[LoadedEntry]) -> Option<String> {
+    if !pre_resume
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+    {
+        return Some(format!("crash run left no recorded pre-sleep RunResult: {pre_resume:?}"));
+    }
+    if !pre_resume
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::SleepArmed { .. })))
+    {
+        return Some(format!("crash run did not span the sleep (no SleepArmed): {pre_resume:?}"));
+    }
+    if pre_resume.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. })))
+    {
+        return Some(format!("crash run wrote a Terminal before the crash: {pre_resume:?}"));
+    }
+    None
+}
+
 /// The ordered sequence of journal-entry KINDS — the replay-equivalence
 /// shape oracle that ignores clock-derived absolute values (a `SleepArmed`
 /// deadline is computed from the live clock's wall-clock epoch).
-fn entry_kinds(run: &[JournalEntry]) -> Vec<&'static str> {
+///
+/// Classifies the typed [`LoadedEntry`] boundary sum (D1): commands and
+/// notifications interleave in one ordered run; the kind string names the
+/// inner variant regardless of class — `SignalSeen` is a notification,
+/// every other kind is a command.
+fn entry_kinds(run: &[LoadedEntry]) -> Vec<&'static str> {
     run.iter()
         .map(|e| match e {
-            JournalEntry::Started { .. } => "Started",
-            JournalEntry::RunResult { .. } => "RunResult",
-            JournalEntry::SleepArmed { .. } => "SleepArmed",
-            // Slice-03 additive await-surface variants (ADR-0064 §4).
-            // Exhaustiveness extension forced by the additive enum — the
-            // replay-equivalence kind-oracle names each await-point kind.
-            JournalEntry::SignalAwaited { .. } => "SignalAwaited",
-            JournalEntry::SignalSeen { .. } => "SignalSeen",
-            JournalEntry::ActionEmitted { .. } => "ActionEmitted",
-            JournalEntry::Terminal { .. } => "Terminal",
+            LoadedEntry::Command(JournalCommand::Started { .. }) => "Started",
+            LoadedEntry::Command(JournalCommand::RunResult { .. }) => "RunResult",
+            LoadedEntry::Command(JournalCommand::SleepArmed { .. }) => "SleepArmed",
+            LoadedEntry::Command(JournalCommand::SignalAwaited { .. }) => "SignalAwaited",
+            LoadedEntry::Command(JournalCommand::ActionEmitted { .. }) => "ActionEmitted",
+            LoadedEntry::Command(JournalCommand::Terminal { .. }) => "Terminal",
+            LoadedEntry::Notification(JournalNotification::SignalSeen { .. }) => "SignalSeen",
         })
         .collect()
 }
 
 /// Whether two runs have the same ordered sequence of entry kinds.
-fn entry_kinds_match(a: &[JournalEntry], b: &[JournalEntry]) -> bool {
+fn entry_kinds_match(a: &[LoadedEntry], b: &[LoadedEntry]) -> bool {
     entry_kinds(a) == entry_kinds(b)
 }
 
 /// The deterministic recorded-step contents — each `RunResult`'s name +
 /// result bytes (clock-independent, so byte-comparable across runs).
-fn recorded_run_steps(run: &[JournalEntry]) -> Vec<(String, Vec<u8>)> {
+fn recorded_run_steps(run: &[LoadedEntry]) -> Vec<(String, Vec<u8>)> {
     run.iter()
         .filter_map(|e| match e {
-            JournalEntry::RunResult { name, result_bytes, .. } => {
+            LoadedEntry::Command(JournalCommand::RunResult { name, result_bytes, .. }) => {
                 Some((name.clone(), result_bytes.clone()))
             }
             _ => None,
@@ -1503,9 +1544,11 @@ fn recorded_run_steps(run: &[JournalEntry]) -> Vec<(String, Vec<u8>)> {
 }
 
 /// The recorded `SleepArmed` deadline in a run, if any.
-fn sleep_armed_deadline(run: &[JournalEntry]) -> Option<Duration> {
+fn sleep_armed_deadline(run: &[LoadedEntry]) -> Option<Duration> {
     run.iter().find_map(|e| match e {
-        JournalEntry::SleepArmed { deadline_unix, .. } => Some(*deadline_unix),
+        LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix, .. }) => {
+            Some(*deadline_unix)
+        }
         _ => None,
     })
 }
@@ -1638,7 +1681,10 @@ pub async fn evaluate_workflow_exactly_once_effect_on_resume(seed: u64) -> Invar
     if crash_fires != 1 {
         return fail(format!("pre-crash run fired the effect {crash_fires} times (expected 1)"));
     }
-    if !pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })) {
+    if !pre_resume
+        .iter()
+        .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+    {
         return fail(format!("crash run recorded no RunResult: {pre_resume:?}"));
     }
 

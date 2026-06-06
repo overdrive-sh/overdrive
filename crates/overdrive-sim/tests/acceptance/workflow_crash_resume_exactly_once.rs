@@ -35,7 +35,19 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::StreamExt;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
+
+/// Whether `run` contains a `RunResult` command. Helper so the assertions
+/// stay one-liners (the typed `LoadedEntry::Command(JournalCommand::…)`
+/// matcher would otherwise wrap across three lines each).
+fn has_run_result(run: &[LoadedEntry]) -> bool {
+    run.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+}
+
+/// Whether `run` contains a `Terminal` command.
+fn has_terminal(run: &[LoadedEntry]) -> bool {
+    run.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. })))
+}
 use overdrive_control_plane::workflow_runtime::{
     JournalCursorHandle, WorkflowEngine, WorkflowRegistry,
 };
@@ -174,11 +186,11 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
 
     let pre_resume_journal = journal_b.load_journal(&workflow_id).await.expect("load B");
     assert!(
-        pre_resume_journal.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })),
+        has_run_result(&pre_resume_journal),
         "the crash left a recorded RunResult: {pre_resume_journal:?}"
     );
     assert!(
-        !pre_resume_journal.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })),
+        !has_terminal(&pre_resume_journal),
         "the crash happened BEFORE terminal — no Terminal entry: {pre_resume_journal:?}"
     );
 
@@ -213,11 +225,13 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
     // carries a Terminal entry alongside the (single, replayed) RunResult.
     let resumed_journal = journal_b.load_journal(&workflow_id).await.expect("load C");
     assert!(
-        resumed_journal.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })),
+        has_terminal(&resumed_journal),
         "the resumed run reached terminal: {resumed_journal:?}"
     );
-    let run_results =
-        resumed_journal.iter().filter(|e| matches!(e, JournalEntry::RunResult { .. })).count();
+    let run_results = resumed_journal
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+        .count();
     assert_eq!(
         run_results, 1,
         "resume must not append a second RunResult — the recorded one is replayed: {resumed_journal:?}"
@@ -226,8 +240,10 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
     // Cross-run journal byte-equality on the recorded step: the resumed
     // run's RunResult is the one the crash recorded (K2 — committed step
     // not lost), and matches the uninterrupted run's recorded step.
-    let recorded_run = |run: &[JournalEntry]| -> Option<JournalEntry> {
-        run.iter().find(|e| matches!(e, JournalEntry::RunResult { .. })).cloned()
+    let recorded_run = |run: &[LoadedEntry]| -> Option<LoadedEntry> {
+        run.iter()
+            .find(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
+            .cloned()
     };
     assert_eq!(
         recorded_run(&resumed_journal),

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use redb::Database;
 
 use overdrive_control_plane::journal::redb::RedbJournalStore;
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_core::id::ContentHash;
 
 /// The shared `ProvisionRecord` fixture's spec name + payload, inlined
@@ -61,20 +61,19 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
 
     // The journal's first entry records the workflow's INPUTS (ADR-0063
     // §2 `Started`), derived from the shared `ProvisionRecord` fixture.
-    let started = JournalEntry::Started {
+    let started = LoadedEntry::Command(JournalCommand::Started {
         spec_digest: spec_digest_of(PROVISION_RECORD_WORKFLOW_NAME),
         input_digest: ContentHash::of(PROVISION_RECORD_PAYLOAD),
-    };
+    });
     // The `ctx.run` step result is recorded as its CBOR bytes + a RESULT
-    // DIGEST keyed by the await-point step index (US-WP-2 AC1 — the
-    // RunResult under audit).
+    // DIGEST (US-WP-2 AC1 — the RunResult under audit). No in-entry `step`
+    // (D5 — identity is positional).
     let result_bytes = b"provision-write-response".to_vec();
-    let run_result = JournalEntry::RunResult {
-        step: 0,
+    let run_result = LoadedEntry::Command(JournalCommand::RunResult {
         name: "provision-write".to_string(),
         result_digest: ContentHash::of(&result_bytes),
         result_bytes,
-    };
+    });
 
     // --- Append through the production adapter on a REAL redb file. ---
     {
@@ -115,11 +114,11 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
     // check).
     let found_run_result = loaded
         .iter()
-        .find(|e| matches!(e, JournalEntry::RunResult { .. }))
+        .find(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. })))
         .expect("the RunResult entry must be present in the real redb journal");
     assert_eq!(
         *found_run_result, run_result,
-        "the read-back RunResult must equal the recorded one (result_digest + name + step + bytes)"
+        "the read-back RunResult must equal the recorded one (result_digest + name + bytes)"
     );
 
     // Observable outcome 3 (K5 / O6) — NO second storage engine: the

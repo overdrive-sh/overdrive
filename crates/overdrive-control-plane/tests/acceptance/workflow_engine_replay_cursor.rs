@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use std::sync::Arc as StdArc;
@@ -73,7 +73,7 @@ async fn run_provision_step(
 /// bound inbox (to observe delivered datagrams), the journal (to inspect
 /// what the cursor recorded), and the instance id.
 async fn ctx_with_buffer(
-    replay_buffer: Vec<JournalEntry>,
+    replay_buffer: Vec<LoadedEntry>,
 ) -> (WorkflowCtx, SimInbox, Arc<dyn JournalStore>, WorkflowId) {
     let target: SocketAddr = TARGET.parse().expect("addr");
     let sim_transport = SimTransport::new();
@@ -108,12 +108,11 @@ fn target() -> SocketAddr {
 async fn replay_returns_recorded_result_without_firing_transport() {
     let recorded: Result<usize, String> = Ok(4242usize);
     let recorded_bytes = encode_run_result(&recorded);
-    let buffer = vec![JournalEntry::RunResult {
-        step: 0,
+    let buffer = vec![LoadedEntry::Command(JournalCommand::RunResult {
         name: STEP_NAME.to_string(),
         result_digest: ContentHash::of(&recorded_bytes),
         result_bytes: recorded_bytes,
-    }];
+    })];
     let (ctx, mut inbox, journal, workflow_id) = ctx_with_buffer(buffer).await;
 
     let result = run_provision_step(&ctx, target()).await.expect("replayed run");
@@ -164,9 +163,10 @@ async fn live_fires_effect_then_records_and_advances() {
     let expected_bytes = encode_run_result(&Ok(PAYLOAD.len()));
     let entries = journal.load_journal(&workflow_id).await.expect("load");
     assert_eq!(entries.len(), 1, "live path appends exactly one entry; got {entries:?}");
+    // The single appended entry IS the run's first command (positional
+    // identity, D5 — no in-entry `step` to assert).
     match &entries[0] {
-        JournalEntry::RunResult { step, name, result_bytes, result_digest } => {
-            assert_eq!(*step, 0, "first live run records step 0");
+        LoadedEntry::Command(JournalCommand::RunResult { name, result_bytes, result_digest }) => {
             assert_eq!(name, STEP_NAME, "the recorded step name is the ctx.run name");
             assert_eq!(
                 *result_bytes, expected_bytes,
@@ -201,17 +201,23 @@ async fn two_live_runs_record_at_ascending_step_indices() {
     assert_eq!((first, second), (11, 22), "each live step returns its own value");
 
     let entries = journal.load_journal(&workflow_id).await.expect("load");
-    let steps: Vec<(u32, String)> = entries
+    // The cursor advance is now witnessed by POSITION in the loaded run
+    // (D5 — identity is positional; there is no in-entry `step`). Pairing
+    // each command with its index pins that step-a landed first (index 0)
+    // and step-b second (index 1) — a non-advancing cursor would record
+    // both at the same position (one entry, or step-b overwriting step-a).
+    let steps: Vec<(usize, String)> = entries
         .iter()
-        .map(|e| match e {
-            JournalEntry::RunResult { step, name, .. } => (*step, name.clone()),
+        .enumerate()
+        .map(|(index, e)| match e {
+            LoadedEntry::Command(JournalCommand::RunResult { name, .. }) => (index, name.clone()),
             other => panic!("expected RunResult, got {other:?}"),
         })
         .collect();
     assert_eq!(
         steps,
-        vec![(0u32, "step-a".to_string()), (1u32, "step-b".to_string())],
-        "two live runs record at ascending step indices — the cursor advanced past step 0"
+        vec![(0usize, "step-a".to_string()), (1usize, "step-b".to_string())],
+        "two live runs record at ascending positions — the cursor advanced past position 0"
     );
 }
 
@@ -222,12 +228,11 @@ async fn two_live_runs_record_at_ascending_step_indices() {
 #[tokio::test]
 async fn replay_advances_cursor_so_next_step_is_live_at_step_one() {
     let recorded_bytes = encode_run_result(&Ok(7usize));
-    let buffer = vec![JournalEntry::RunResult {
-        step: 0,
+    let buffer = vec![LoadedEntry::Command(JournalCommand::RunResult {
         name: "step-a".to_string(),
         result_digest: ContentHash::of(&recorded_bytes),
         result_bytes: recorded_bytes,
-    }];
+    })];
     let (ctx, _inbox, journal, workflow_id) = ctx_with_buffer(buffer).await;
 
     // Step 0: replays the recorded result (cursor advances past it).
@@ -241,12 +246,16 @@ async fn replay_advances_cursor_so_next_step_is_live_at_step_one() {
     assert_eq!(live, 42, "step-b runs live");
 
     let entries = journal.load_journal(&workflow_id).await.expect("load");
-    // Only step-b was appended live (step-a was replayed, not re-recorded),
-    // and it landed at step 1 — proving the replay advanced the cursor.
+    // Only step-b was appended live (step-a was replayed, not re-recorded).
+    // The replay advanced the cursor past the recorded step-a, so the live
+    // step-b records at command-index 1 — but since step-a was NOT
+    // re-appended, the loaded run for this instance holds ONLY step-b. The
+    // proof the replay advanced the cursor is that step-b is the SOLE
+    // appended entry (a non-advancing cursor would have re-recorded step-a
+    // or mis-routed step-b). Identity is positional (D5) — no `step` field.
     assert_eq!(entries.len(), 1, "only the live step-b was appended; got {entries:?}");
     match &entries[0] {
-        JournalEntry::RunResult { step, name, .. } => {
-            assert_eq!(*step, 1, "the live step-b records at step 1 — replay advanced the cursor");
+        LoadedEntry::Command(JournalCommand::RunResult { name, .. }) => {
             assert_eq!(name, "step-b", "the appended entry is the live step-b");
         }
         other => panic!("expected RunResult, got {other:?}"),

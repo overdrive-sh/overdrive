@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::traits::Transport;
@@ -61,7 +61,7 @@ async fn run_step(
 async fn ctx_on(
     journal: Arc<dyn JournalStore>,
     workflow_id: &WorkflowId,
-    replay_buffer: Vec<JournalEntry>,
+    replay_buffer: Vec<LoadedEntry>,
 ) -> (WorkflowCtx, SimInbox) {
     let target: SocketAddr = TARGET.parse().expect("addr");
     let sim_transport = SimTransport::new();
@@ -104,8 +104,9 @@ async fn committed_step_is_read_back_from_journal_and_run_resumes_from_first_unr
     let committed = journal.load_journal(&workflow_id).await.expect("load after crash");
     assert_eq!(committed.len(), 1, "exactly the one committed step survives: {committed:?}");
     match &committed[0] {
-        JournalEntry::RunResult { step, name, result_bytes, .. } => {
-            assert_eq!(*step, 0, "the committed step is step 0");
+        LoadedEntry::Command(JournalCommand::RunResult { name, result_bytes, .. }) => {
+            // No in-entry `step` to assert (D5 — identity is positional);
+            // the committed step is structurally the run's first command.
             assert_eq!(name, STEP_NAME, "the committed step records its ctx.run name");
             let decoded: Result<usize, String> =
                 ciborium::from_reader(result_bytes.as_slice()).expect("decode recorded result");

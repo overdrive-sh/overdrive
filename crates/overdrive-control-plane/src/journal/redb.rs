@@ -10,7 +10,7 @@
 //! The journal's table layout is DISTINCT from the ViewStore's
 //! single-blob-overwrite-per-target shape: ONE append-only table
 //! `__wf_journal__` keyed `(WorkflowId-bytes, u32)` with CBOR-encoded
-//! [`JournalEntry`] blobs as values (ADR-0063 §3). The reserved
+//! [`LoadedEntry`] blobs as values (ADR-0063 §3). The reserved
 //! `__wf_journal__` name uses the double-underscore prefix outside the
 //! `ReconcilerName` validator grammar so it cannot collide with a
 //! per-reconciler ViewStore table sharing the same file.
@@ -44,7 +44,7 @@ use async_trait::async_trait;
 use redb::{Database, Durability, ReadableTable, TableDefinition};
 
 use super::{
-    JournalEntry, JournalStore, JournalStoreError, ProbeError, Result as JsResult, WorkflowId,
+    JournalStore, JournalStoreError, LoadedEntry, ProbeError, Result as JsResult, WorkflowId,
 };
 
 /// Reserved append-only table for the workflow journal. The
@@ -54,7 +54,7 @@ use super::{
 const JOURNAL_TABLE_NAME: &str = "__wf_journal__";
 
 /// The journal table definition: key is `(WorkflowId-as-str, step)`,
-/// value is the CBOR-encoded [`JournalEntry`] blob. The string key
+/// value is the CBOR-encoded [`LoadedEntry`] blob. The string key
 /// component is the `WorkflowId`'s canonical form; the `u32` is the
 /// monotonic await-point step index — the tuple gives the ascending
 /// `(id, step)` range-scan ordering for free (ADR-0063 §3), mirroring
@@ -94,15 +94,15 @@ impl RedbJournalStore {
 
     /// Encode an entry to CBOR via `ciborium` — the same codec the sim
     /// adapter uses, so any codec skew is caught at the contract boundary.
-    fn encode(entry: &JournalEntry) -> JsResult<Vec<u8>> {
+    fn encode(entry: &LoadedEntry) -> JsResult<Vec<u8>> {
         let mut buf: Vec<u8> = Vec::new();
         ciborium::into_writer(entry, &mut buf)
             .map_err(|e| JournalStoreError::Encode(e.to_string()))?;
         Ok(buf)
     }
 
-    /// Decode CBOR bytes back into a [`JournalEntry`].
-    fn decode(bytes: &[u8]) -> JsResult<JournalEntry> {
+    /// Decode CBOR bytes back into a [`LoadedEntry`].
+    fn decode(bytes: &[u8]) -> JsResult<LoadedEntry> {
         ciborium::from_reader(bytes).map_err(|e| JournalStoreError::Decode(e.to_string()))
     }
 
@@ -126,7 +126,7 @@ impl RedbJournalStore {
 
 #[async_trait]
 impl JournalStore for RedbJournalStore {
-    async fn append(&self, workflow_id: &WorkflowId, entry: &JournalEntry) -> JsResult<()> {
+    async fn append(&self, workflow_id: &WorkflowId, entry: &LoadedEntry) -> JsResult<()> {
         // Encode BEFORE the write txn so an encode failure surfaces
         // cleanly without touching the store.
         let bytes = Self::encode(entry)?;
@@ -153,7 +153,7 @@ impl JournalStore for RedbJournalStore {
         Ok(())
     }
 
-    async fn load_journal(&self, workflow_id: &WorkflowId) -> JsResult<Vec<JournalEntry>> {
+    async fn load_journal(&self, workflow_id: &WorkflowId) -> JsResult<Vec<LoadedEntry>> {
         let read = self.db.begin_read().map_err(map_transaction_error)?;
         let table = match read.open_table(JOURNAL_TABLE) {
             Ok(t) => t,
@@ -284,24 +284,39 @@ mod tests {
         (tmp, db)
     }
 
+    use super::super::{JournalCommand, JournalNotification};
+    use overdrive_core::workflow::{SignalKey, SignalValue};
+
     fn workflow_id() -> WorkflowId {
         WorkflowId::new("wf-test-0001").expect("valid id")
     }
 
-    fn started() -> JournalEntry {
-        JournalEntry::Started {
+    fn started() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::Started {
             spec_digest: ContentHash::of(b"provision-record"),
             input_digest: ContentHash::of(b"provision-record"),
-        }
+        })
     }
 
-    fn run_result(step: u32) -> JournalEntry {
-        JournalEntry::RunResult {
-            step,
+    /// A `RunResult` command — `step` is no longer an in-entry field
+    /// (identity is positional, D5); the `nonce` distinguishes successive
+    /// `RunResult`s in a run so a multi-step fixture round-trips distinctly.
+    fn run_result(nonce: &str) -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::RunResult {
             name: "provision-write".to_string(),
-            result_digest: ContentHash::of(b"resp"),
-            result_bytes: Vec::new(),
-        }
+            result_digest: ContentHash::of(nonce.as_bytes()),
+            result_bytes: nonce.as_bytes().to_vec(),
+        })
+    }
+
+    /// A `SignalSeen` notification — exercises the interleaved
+    /// command/notification on-disk stream the dumb store must preserve.
+    fn signal_seen() -> LoadedEntry {
+        LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key: SignalKey::new("provision-ready").expect("valid signal key"),
+            value_digest: ContentHash::of(b"signal-value"),
+            value: SignalValue::new("signal-value"),
+        })
     }
 
     #[tokio::test]
@@ -310,7 +325,9 @@ mod tests {
         let store = RedbJournalStore::new(db);
         let id = workflow_id();
 
-        let entries = vec![started(), run_result(0), run_result(1)];
+        // Interleave a notification between commands — the store is a dumb
+        // ordered log and must preserve the interleave verbatim (D2).
+        let entries = vec![started(), run_result("a"), signal_seen(), run_result("b")];
         for e in &entries {
             store.append(&id, e).await.expect("append");
         }
@@ -336,12 +353,12 @@ mod tests {
         let b = WorkflowId::new("wf-bbbb").expect("id b");
 
         store.append(&a, &started()).await.expect("append a");
-        store.append(&b, &run_result(0)).await.expect("append b");
+        store.append(&b, &run_result("a")).await.expect("append b");
 
         let loaded_a = store.load_journal(&a).await.expect("load a");
         let loaded_b = store.load_journal(&b).await.expect("load b");
         assert_eq!(loaded_a, vec![started()], "instance a sees only its own run");
-        assert_eq!(loaded_b, vec![run_result(0)], "instance b sees only its own run");
+        assert_eq!(loaded_b, vec![run_result("a")], "instance b sees only its own run");
     }
 
     #[tokio::test]

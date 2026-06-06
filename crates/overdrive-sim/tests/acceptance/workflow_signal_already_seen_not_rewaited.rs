@@ -26,7 +26,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{
+    JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
+};
 use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry};
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::reconcilers::Action;
@@ -107,7 +109,9 @@ async fn a_signal_seen_before_the_crash_is_not_rewaited_on_resume() {
     // The signal was seen — the journal carries SignalSeen with the value.
     let after_run = journal.load_journal(&workflow_id).await.unwrap_or_default();
     let seen = after_run.iter().find_map(|e| match e {
-        JournalEntry::SignalSeen { value, .. } => Some(value.clone()),
+        LoadedEntry::Notification(JournalNotification::SignalSeen { value, .. }) => {
+            Some(value.clone())
+        }
         _ => None,
     });
     assert_eq!(
@@ -121,14 +125,17 @@ async fn a_signal_seen_before_the_crash_is_not_rewaited_on_resume() {
     // ---- (2) Build a FRESH journal that ends right after SignalSeen (no
     //          Terminal): truncate the recorded journal to the point a
     //          crash-just-after-SignalSeen would leave it. ----
-    let truncated: Vec<JournalEntry> = after_run
+    let truncated: Vec<LoadedEntry> = after_run
         .iter()
-        .take_while(|e| !matches!(e, JournalEntry::Terminal { .. }))
-        .filter(|e| !matches!(e, JournalEntry::ActionEmitted { .. }))
+        .take_while(|e| !matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. })))
+        .filter(|e| !matches!(e, LoadedEntry::Command(JournalCommand::ActionEmitted { .. })))
         .cloned()
         .collect();
     assert!(
-        truncated.iter().any(|e| matches!(e, JournalEntry::SignalSeen { .. })),
+        truncated.iter().any(|e| matches!(
+            e,
+            LoadedEntry::Notification(JournalNotification::SignalSeen { .. })
+        )),
         "the truncated crash journal still carries SignalSeen: {truncated:?}"
     );
     let resume_journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
@@ -167,8 +174,10 @@ async fn a_signal_seen_before_the_crash_is_not_rewaited_on_resume() {
     // The resume did NOT append a second SignalAwaited/SignalSeen pair —
     // the recorded ones were replayed.
     let resumed = resume_journal.load_journal(&workflow_id).await.unwrap_or_default();
-    let seen_count =
-        resumed.iter().filter(|e| matches!(e, JournalEntry::SignalSeen { .. })).count();
+    let seen_count = resumed
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Notification(JournalNotification::SignalSeen { .. })))
+        .count();
     assert_eq!(
         seen_count, 1,
         "exactly one SignalSeen — replay did not re-record the wait: {resumed:?}"

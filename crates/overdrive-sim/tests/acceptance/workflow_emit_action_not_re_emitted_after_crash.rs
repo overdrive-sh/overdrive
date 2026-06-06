@@ -27,7 +27,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{
     ActionEmitReceiver, WorkflowEngine, WorkflowRegistry,
 };
@@ -122,7 +122,8 @@ async fn an_action_emitted_before_the_crash_is_not_re_emitted_on_resume() {
 
     let full = journal.load_journal(&workflow_id).await.unwrap_or_default();
     assert!(
-        full.iter().any(|e| matches!(e, JournalEntry::ActionEmitted { .. })),
+        full.iter()
+            .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::ActionEmitted { .. }))),
         "the live emit records ActionEmitted: {full:?}"
     );
     drop(emits_a);
@@ -131,10 +132,15 @@ async fn an_action_emitted_before_the_crash_is_not_re_emitted_on_resume() {
 
     // ---- (2) Crash AFTER ActionEmitted, BEFORE Terminal: truncate the
     //          journal at the Terminal boundary (ActionEmitted retained). ----
-    let truncated: Vec<JournalEntry> =
-        full.iter().take_while(|e| !matches!(e, JournalEntry::Terminal { .. })).cloned().collect();
+    let truncated: Vec<LoadedEntry> = full
+        .iter()
+        .take_while(|e| !matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. })))
+        .cloned()
+        .collect();
     assert!(
-        truncated.iter().any(|e| matches!(e, JournalEntry::ActionEmitted { .. })),
+        truncated
+            .iter()
+            .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::ActionEmitted { .. }))),
         "the crash journal retains ActionEmitted (crash was AFTER the emit): {truncated:?}"
     );
     let resume_journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
@@ -174,8 +180,10 @@ async fn an_action_emitted_before_the_crash_is_not_re_emitted_on_resume() {
     );
     // The resume did NOT append a second ActionEmitted — it replayed.
     let resumed = resume_journal.load_journal(&workflow_id).await.unwrap_or_default();
-    let emitted_count =
-        resumed.iter().filter(|e| matches!(e, JournalEntry::ActionEmitted { .. })).count();
+    let emitted_count = resumed
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::ActionEmitted { .. })))
+        .count();
     assert_eq!(
         emitted_count, 1,
         "exactly one ActionEmitted — replay did not re-record the emit: {resumed:?}"

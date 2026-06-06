@@ -35,7 +35,22 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{
+    JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
+};
+
+/// Whether `run` contains a `SignalAwaited` command. Helper so the
+/// assertions stay one-liners (the typed matcher would otherwise wrap
+/// across three lines each, pushing the test body past the line cap).
+fn has_signal_awaited(run: &[LoadedEntry]) -> bool {
+    run.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::SignalAwaited { .. })))
+}
+
+/// Whether `run` contains a `SignalSeen` notification.
+fn has_signal_seen(run: &[LoadedEntry]) -> bool {
+    run.iter()
+        .any(|e| matches!(e, LoadedEntry::Notification(JournalNotification::SignalSeen { .. })))
+}
 use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry};
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::reconcilers::Action;
@@ -136,12 +151,9 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     // OBSERVABLE 2 — the journal carries SignalAwaited with NO SignalSeen
     // (blocked, not satisfied). This is the crash-while-blocked shape.
     let pre_crash = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    assert!(has_signal_awaited(&pre_crash), "blocking must record SignalAwaited: {pre_crash:?}");
     assert!(
-        pre_crash.iter().any(|e| matches!(e, JournalEntry::SignalAwaited { .. })),
-        "blocking must record SignalAwaited: {pre_crash:?}"
-    );
-    assert!(
-        !pre_crash.iter().any(|e| matches!(e, JournalEntry::SignalSeen { .. })),
+        !has_signal_seen(&pre_crash),
         "a still-blocked run must have NO SignalSeen recorded: {pre_crash:?}"
     );
 
@@ -206,13 +218,15 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     );
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
     assert!(
-        resumed.iter().any(|e| matches!(e, JournalEntry::SignalSeen { .. })),
+        has_signal_seen(&resumed),
         "the satisfied wait records SignalSeen on resume: {resumed:?}"
     );
     // Exactly ONE SignalAwaited across the whole history — the resume did
     // NOT append a duplicate (it advanced past the recorded one).
-    let awaited_count =
-        resumed.iter().filter(|e| matches!(e, JournalEntry::SignalAwaited { .. })).count();
+    let awaited_count = resumed
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::SignalAwaited { .. })))
+        .count();
     assert_eq!(
         awaited_count, 1,
         "resume re-blocks on the SAME SignalAwaited — no duplicate appended: {resumed:?}"

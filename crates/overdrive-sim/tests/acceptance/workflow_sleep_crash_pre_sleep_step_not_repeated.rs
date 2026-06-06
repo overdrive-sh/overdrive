@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{
     JournalCursorHandle, WorkflowEngine, WorkflowRegistry,
 };
@@ -187,15 +187,21 @@ async fn crash_during_sleep_window_does_not_repeat_the_pre_sleep_step() {
 
     let pre_resume = journal.load_journal(&workflow_id).await.expect("load crash journal");
     assert!(
-        pre_resume.iter().any(|e| matches!(e, JournalEntry::RunResult { .. })),
+        pre_resume
+            .iter()
+            .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::RunResult { .. }))),
         "the crash left a recorded pre-sleep RunResult: {pre_resume:?}"
     );
     assert!(
-        pre_resume.iter().any(|e| matches!(e, JournalEntry::SleepArmed { .. })),
+        pre_resume
+            .iter()
+            .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::SleepArmed { .. }))),
         "the crash spanned the sleep window — SleepArmed is recorded: {pre_resume:?}"
     );
     assert!(
-        !pre_resume.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })),
+        !pre_resume
+            .iter()
+            .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. }))),
         "the crash happened BEFORE terminal — no Terminal entry: {pre_resume:?}"
     );
 
@@ -231,14 +237,20 @@ async fn crash_during_sleep_window_does_not_repeat_the_pre_sleep_step() {
     // crash + remaining-wait resume.
     let resumed = journal.load_journal(&workflow_id).await.expect("load resumed");
     assert!(
-        resumed.iter().any(|e| matches!(e, JournalEntry::Terminal { .. })),
+        resumed.iter().any(|e| matches!(e, LoadedEntry::Command(JournalCommand::Terminal { .. }))),
         "the resumed run reached terminal: {resumed:?}"
     );
     // No second pre-sleep RunResult was appended — the recorded one was
     // replayed (the structural witness of exactly-once on the pre-sleep step).
     let pre_sleep_runs = resumed
         .iter()
-        .filter(|e| matches!(e, JournalEntry::RunResult { name, .. } if name == "provision-write-pre-sleep"))
+        .filter(|e| {
+            matches!(
+                e,
+                LoadedEntry::Command(JournalCommand::RunResult { name, .. })
+                    if name == "provision-write-pre-sleep"
+            )
+        })
         .count();
     assert_eq!(
         pre_sleep_runs, 1,

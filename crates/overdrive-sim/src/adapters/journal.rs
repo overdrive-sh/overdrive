@@ -41,7 +41,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 
 use overdrive_control_plane::journal::{
-    JournalEntry, JournalStore, JournalStoreError, ProbeError, Result as JsResult, WorkflowId,
+    JournalCommand, JournalStore, JournalStoreError, LoadedEntry, ProbeError, Result as JsResult,
+    WorkflowId,
 };
 
 /// Reserved workflow id the Earned-Trust probe writes its sentinel entry
@@ -101,15 +102,15 @@ impl SimJournalStore {
 
     /// Encode an entry to CBOR bytes via `ciborium` — the same codec the
     /// production redb adapter uses, so the sim catches codec skew.
-    fn encode(entry: &JournalEntry) -> JsResult<Vec<u8>> {
+    fn encode(entry: &LoadedEntry) -> JsResult<Vec<u8>> {
         let mut buf: Vec<u8> = Vec::new();
         ciborium::into_writer(entry, &mut buf)
             .map_err(|e| JournalStoreError::Encode(e.to_string()))?;
         Ok(buf)
     }
 
-    /// Decode CBOR bytes back into a `JournalEntry`.
-    fn decode(bytes: &[u8]) -> JsResult<JournalEntry> {
+    /// Decode CBOR bytes back into a `LoadedEntry`.
+    fn decode(bytes: &[u8]) -> JsResult<LoadedEntry> {
         ciborium::from_reader(bytes).map_err(|e| JournalStoreError::Decode(e.to_string()))
     }
 
@@ -134,7 +135,7 @@ impl Default for SimJournalStore {
 
 #[async_trait]
 impl JournalStore for SimJournalStore {
-    async fn append(&self, workflow_id: &WorkflowId, entry: &JournalEntry) -> JsResult<()> {
+    async fn append(&self, workflow_id: &WorkflowId, entry: &LoadedEntry) -> JsResult<()> {
         // Encode BEFORE taking the lock / checking injection so an encode
         // failure surfaces cleanly without mutating any state.
         let bytes = Self::encode(entry)?;
@@ -154,7 +155,7 @@ impl JournalStore for SimJournalStore {
         Ok(())
     }
 
-    async fn load_journal(&self, workflow_id: &WorkflowId) -> JsResult<Vec<JournalEntry>> {
+    async fn load_journal(&self, workflow_id: &WorkflowId) -> JsResult<Vec<LoadedEntry>> {
         let lo = (workflow_id.clone(), 0u32);
         let hi = (workflow_id.clone(), u32::MAX);
         let storage = self.storage.lock();
@@ -184,7 +185,9 @@ impl JournalStore for SimJournalStore {
 
         let probe_id = WorkflowId::new(PROBE_WORKFLOW_ID)
             .unwrap_or_else(|_| unreachable!("PROBE_WORKFLOW_ID is a valid instance id"));
-        let sentinel = JournalEntry::Terminal { result: "earned-trust-probe-v1".to_string() };
+        let sentinel = LoadedEntry::Command(JournalCommand::Terminal {
+            result: "earned-trust-probe-v1".to_string(),
+        });
         let wrote = Self::encode(&sentinel).map_err(|source| ProbeError::WriteFailed { source })?;
 
         // Write → read back byte-equal → delete, all under one lock so
@@ -210,7 +213,9 @@ impl JournalStore for SimJournalStore {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use overdrive_control_plane::journal::JournalNotification;
     use overdrive_core::id::ContentHash;
+    use overdrive_core::workflow::{SignalKey, SignalValue};
     use proptest::prelude::*;
 
     /// Strategy for a 32-byte digest wrapped as `ContentHash`.
@@ -218,23 +223,53 @@ mod tests {
         proptest::array::uniform32(any::<u8>()).prop_map(ContentHash::from_bytes)
     }
 
-    /// Strategy for one arbitrary `JournalEntry` (all slice-01 variants).
-    fn journal_entry_strategy() -> impl Strategy<Value = JournalEntry> {
-        prop_oneof![
+    /// Strategy for an arbitrary `SignalKey`. The grammar is
+    /// `^[a-z][a-z0-9-]{0,126}$` — lead char MUST be `[a-z]`.
+    fn signal_key_strategy() -> impl Strategy<Value = SignalKey> {
+        "[a-z][a-z0-9-]{0,31}"
+            .prop_map(|raw| SignalKey::new(&raw).expect("kebab body is a valid SignalKey"))
+    }
+
+    /// Strategy for one arbitrary [`LoadedEntry`] — emits BOTH
+    /// `Command(...)` (every replayable, cursor-advancing variant) and
+    /// `Notification(...)` (the sole `SignalSeen` notification) so the
+    /// roundtrip exercises the interleaved on-disk stream the store must
+    /// preserve (D1/D2). NO `step` generator — identity is structural, the
+    /// in-entry `step` was dropped (D5).
+    fn loaded_entry_strategy() -> impl Strategy<Value = LoadedEntry> {
+        let command = prop_oneof![
             (content_hash_strategy(), content_hash_strategy()).prop_map(
-                |(spec_digest, input_digest)| JournalEntry::Started { spec_digest, input_digest }
+                |(spec_digest, input_digest)| JournalCommand::Started { spec_digest, input_digest }
             ),
             (
-                any::<u32>(),
                 "[a-z0-9-]{1,32}",
                 content_hash_strategy(),
                 proptest::collection::vec(any::<u8>(), 0..32)
             )
-                .prop_map(|(step, name, result_digest, result_bytes)| {
-                    JournalEntry::RunResult { step, name, result_digest, result_bytes }
+                .prop_map(|(name, result_digest, result_bytes)| {
+                    JournalCommand::RunResult { name, result_digest, result_bytes }
                 }),
-            "[a-zA-Z ]{1,32}".prop_map(|result| JournalEntry::Terminal { result }),
+            (0u64..u64::from(u32::MAX)).prop_map(|secs| JournalCommand::SleepArmed {
+                deadline_unix: std::time::Duration::from_secs(secs),
+            }),
+            signal_key_strategy()
+                .prop_map(|signal_key| JournalCommand::SignalAwaited { signal_key }),
+            content_hash_strategy()
+                .prop_map(|action_digest| JournalCommand::ActionEmitted { action_digest }),
+            "[a-zA-Z ]{1,32}".prop_map(|result| JournalCommand::Terminal { result }),
         ]
+        .prop_map(LoadedEntry::Command);
+
+        let notification = (signal_key_strategy(), content_hash_strategy(), "[a-zA-Z ]{0,32}")
+            .prop_map(|(signal_key, value_digest, value)| {
+                LoadedEntry::Notification(JournalNotification::SignalSeen {
+                    signal_key,
+                    value_digest,
+                    value: SignalValue::new(value),
+                })
+            });
+
+        prop_oneof![command, notification]
     }
 
     fn workflow_id() -> WorkflowId {
@@ -242,12 +277,15 @@ mod tests {
     }
 
     proptest! {
-        /// Round-trip property (ADR-0063 §3): an arbitrary run of entries
-        /// appended to a fresh instance loads back byte-equal and in
-        /// append order. The `Symmetric`/`Roundtrip` Hebert-ch.3 pattern.
+        /// Round-trip property (ADR-0063 §3): an arbitrary INTERLEAVED run
+        /// of commands and notifications appended to a fresh instance
+        /// loads back byte-equal and in append order. The
+        /// `Symmetric`/`Roundtrip` Hebert-ch.3 pattern over the
+        /// `Vec<LoadedEntry>` boundary representation (D1/D2) — the store
+        /// is a dumb ordered log that preserves the interleave verbatim.
         #[test]
         fn append_then_load_round_trips_losslessly_and_in_order(
-            entries in proptest::collection::vec(journal_entry_strategy(), 0..16)
+            entries in proptest::collection::vec(loaded_entry_strategy(), 0..16)
         ) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
@@ -275,10 +313,10 @@ mod tests {
     async fn injected_fsync_failure_makes_append_fail_without_persisting() {
         let store = SimJournalStore::new();
         let id = workflow_id();
-        let entry = JournalEntry::Started {
+        let entry = LoadedEntry::Command(JournalCommand::Started {
             spec_digest: ContentHash::of(b"provision-record"),
             input_digest: ContentHash::of(b"provision-record"),
-        };
+        });
 
         store.inject_fsync_failure();
         let err = store.append(&id, &entry).await.expect_err("injected append must fail");

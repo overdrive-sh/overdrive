@@ -41,7 +41,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::journal::{JournalEntry, JournalStore, WorkflowId};
+use overdrive_control_plane::journal::{
+    JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
+};
 use overdrive_control_plane::workflow_runtime::{
     ActionEmitReceiver, WorkflowEngine, WorkflowRegistry,
 };
@@ -127,19 +129,18 @@ async fn a_send_whose_action_emitted_record_fails_re_emits_on_resume() {
     journal
         .append(
             &workflow_id,
-            &JournalEntry::SignalAwaited { step: 0, signal_key: signal_key.clone() },
+            &LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: signal_key.clone() }),
         )
         .await
         .expect("seed SignalAwaited");
     journal
         .append(
             &workflow_id,
-            &JournalEntry::SignalSeen {
-                step: 1,
+            &LoadedEntry::Notification(JournalNotification::SignalSeen {
                 signal_key,
                 value_digest: ContentHash::of(seen_value.as_str().as_bytes()),
                 value: seen_value,
-            },
+            }),
         )
         .await
         .expect("seed SignalSeen");
@@ -169,7 +170,9 @@ async fn a_send_whose_action_emitted_record_fails_re_emits_on_resume() {
     // journal is still just the two seeded signal entries.
     let after_injection = journal.load_journal(&workflow_id).await.unwrap_or_default();
     assert!(
-        !after_injection.iter().any(|e| matches!(e, JournalEntry::ActionEmitted { .. })),
+        !after_injection
+            .iter()
+            .any(|e| matches!(e, LoadedEntry::Command(JournalCommand::ActionEmitted { .. }))),
         "the failed record left no ActionEmitted at the cursor: {after_injection:?}"
     );
     drop(emits_a);
@@ -201,8 +204,10 @@ async fn a_send_whose_action_emitted_record_fails_re_emits_on_resume() {
     // The resume DID journal ActionEmitted this time (injection cleared) — a
     // further resume would now replay it exactly-once.
     let resumed = journal.load_journal(&workflow_id).await.unwrap_or_default();
-    let emitted_count =
-        resumed.iter().filter(|e| matches!(e, JournalEntry::ActionEmitted { .. })).count();
+    let emitted_count = resumed
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::ActionEmitted { .. })))
+        .count();
     assert_eq!(
         emitted_count, 1,
         "the successful resume records exactly one ActionEmitted: {resumed:?}"
