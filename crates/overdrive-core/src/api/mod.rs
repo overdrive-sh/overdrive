@@ -17,6 +17,8 @@
 //! [`crate::aggregate::ServiceV1::from_submit`], and
 //! [`crate::aggregate::ScheduleV1::from_submit`].
 
+pub mod describe;
 pub mod submit;
 
+pub use describe::{DescribeSpecOutput, ScheduleSpecOutput, ServiceSpecOutput};
 pub use submit::{ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput};

@@ -917,6 +917,90 @@ impl From<&Job> for JobSpecInput {
 }
 
 // ---------------------------------------------------------------------------
+// Describe-wire render constructors — the inverse of the `from_submit`
+// family per ADR-0064 § 3. Validation lives on the submit side
+// (`from_submit`); rendering lives here (`to_describe`). Each projects a
+// persisted intent payload onto its describe-wire shape in
+// `crate::api::describe`.
+// ---------------------------------------------------------------------------
+
+impl JobV1 {
+    /// Project a persisted `JobV1` onto its describe-wire shape per
+    /// ADR-0064 § 3. The Job arm carries no platform-derived field, so
+    /// this delegates to the existing [`From<&Job>`] impl. (`Job =
+    /// JobV1`.)
+    #[must_use]
+    pub fn to_describe(&self) -> JobSpecInput {
+        JobSpecInput::from(self)
+    }
+}
+
+impl ServiceV1 {
+    /// Project a persisted `ServiceV1` plus its platform-issued VIP onto
+    /// the describe-wire [`crate::api::describe::ServiceSpecOutput`] per
+    /// ADR-0064 § 3.
+    ///
+    /// The `vip` is passed in by the handler after a read-only
+    /// `allocator.get(&spec_digest)` (ADR-0064 OQ-7) — the allocator
+    /// memo is the source of truth (ADR-0049 § 5a), so the VIP is NOT
+    /// read from the spec (the spec carries no VIP). Keeping the VIP a
+    /// parameter keeps this render constructor pure and the dependency
+    /// direction correct: `overdrive-core` does not reach into the
+    /// control plane (ADR-0064 § 3).
+    ///
+    /// Listeners project from the intent shape (`NonZeroU16` / `Proto`)
+    /// back to the wire shape (`u16` / lowercase protocol string), in
+    /// declaration order — the inverse of the projection
+    /// [`ServiceV1::from_submit`] applies.
+    #[must_use]
+    pub fn to_describe(
+        &self,
+        vip: crate::id::ServiceVip,
+    ) -> crate::api::describe::ServiceSpecOutput {
+        let WorkloadDriver::Exec(exec) = &self.driver;
+        let listeners = self
+            .listeners
+            .iter()
+            .map(|listener| crate::api::submit::ListenerInput {
+                port: listener.port.get(),
+                protocol: listener.protocol.as_str().to_owned(),
+            })
+            .collect();
+        crate::api::describe::ServiceSpecOutput {
+            id: self.id.to_string(),
+            replicas: self.replicas.get(),
+            resources: ResourcesInput {
+                cpu_milli: self.resources.cpu_milli,
+                memory_bytes: self.resources.memory_bytes,
+            },
+            driver: DriverInput::Exec(ExecInput {
+                command: exec.command.clone(),
+                args: exec.args.clone(),
+            }),
+            listeners,
+            vip,
+        }
+    }
+}
+
+impl ScheduleV1 {
+    /// RED scaffold per `.claude/rules/testing.md` § "Production-side
+    /// scaffolds": Schedule describe is unreachable in Phase 1 (no
+    /// Schedule can be persisted — [`ScheduleV1::from_submit`] is itself
+    /// a scaffold). The describe handler returns a structured rejection
+    /// on `WorkloadIntent::Schedule`, so this body is unreachable from
+    /// any existing test. Lands GREEN when the Schedule submit path
+    /// ships per ADR-0064 OQ-5.
+    #[expect(clippy::todo, reason = "RED scaffold — lands with Schedule submit per OQ-5")]
+    #[must_use]
+    pub fn to_describe(&self) -> crate::api::describe::ScheduleSpecOutput {
+        todo!(
+            "RED scaffold: ScheduleV1::to_describe lands with the Schedule submit path per ADR-0064 OQ-5"
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Node aggregate
 // ---------------------------------------------------------------------------
 
