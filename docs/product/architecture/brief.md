@@ -1460,7 +1460,8 @@ Rules to enforce:
 | 0062 | Listener-fact in-memory view — `ListenerFactStore` (`Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for stop) replaces the O(S²) per-tick `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row `store.get(&row.service_id)` is O(1) and drops the prior `vip == row.vip` listener scan; boot-rebuilt from intent + edge-maintained on submit/stop (key derived via `ServiceId::derive(&vip, port, "service-map")`); steady-state hydrate pays zero redb reads. Not a persisted View (no durable state — intent store is SSOT; honors "persist inputs, not derived state"). Extends 0035; amends 0042; references 0049 (allocator lifecycle imitated, not extended); preserves 0060 C3. Candidate (d) per reconciler-desired-hydration-efficiency research | Accepted |
 | 0063 | Built-in CA — `Ca` port trait (`overdrive-core`; pure, no rcgen) + `RcgenCa` host adapter (all rcgen/crypto-backend [`ring` today; aws-lc-rs + FIPS pending #204]/HKDF/AES-256-GCM) + `SimCa` sim adapter (fixture P-256 keys); 3-tier hierarchy (self-signed P-256 root → pathLen=0 node intermediate → single-URI-SAN SVID, 1h TTL); single-node (one intermediate). Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore; KEK in Linux kernel keyring delivered per-boot by systemd-creds (TPM/host-key); HKDF-SHA256-from-KEK subkey → AES-256-GCM (reconciliation A); pure `CertSpec` builder in core, host adapter translates to `rcgen::CertificateParams` (reconciliation B). Serials via `Entropy`; key-gen via backend CSPRNG (not injectable, F11). `issued_certificates` ObservationStore audit row. Refuse-to-start on decrypt failure — never silent re-mint. `ca_equivalence` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only (`tls_bootstrap.rs` keeps the control-plane-HTTPS consumer). GH #28 [2.6] | Accepted |
 | 0063 | **Workflow primitive** — workflow `await`-point journal is a **second redb table layout** on the shared runtime-owned substrate (`<data_dir>/reconcilers/memory.redb`), distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`, value = CBOR `JournalEntry` (`ciborium`, ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — mutable runtime memory, additive entry-variants per slice via `#[serde(default)]`); fsync-then-suspend ordering + Earned-Trust `probe()` reused from 0035; `SleepArmed` records the deadline (input, not "remaining"). Resolves DIVERGE D4/open-Q3 in favour of redb (R2); supersedes pre-DIVERGE "per-primitive libSQL" phrasing. Extends 0035. Single-node scope; cross-node resume (#205) not precluded | Accepted |
-| 0064 | **Workflow primitive** — `Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowSpec` in NEW `overdrive-core::workflow` (no tokio in core; injected ports + `async_trait`); durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**. Engine↔reconciler boundary: the workflow-lifecycle reconciler stays a **pure-sync ADR-0035 reconciler** emitting `Action::StartWorkflow` + observing terminal rows; the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`. Check-then-record journal replay ⇒ bit-identical replay (K4); `ctx` surface additive per slice (`call`/`sleep`/`wait_for_signal`/`emit_action`); `WorkflowResult` distinct from `TerminalCondition` (inherits the SemVer convention, not the type); `ctx.emit_action` → Action channel → Raft (no IntentStore bypass). Companion to 0063 | Accepted |
+| 0064 | **Workflow primitive** — `Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowSpec` in NEW `overdrive-core::workflow` (no tokio in core; injected ports + `async_trait`); durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**. Engine↔reconciler boundary: the workflow-lifecycle reconciler stays a **pure-sync ADR-0035 reconciler** emitting `Action::StartWorkflow` + observing terminal rows; the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`. Check-then-record journal replay ⇒ bit-identical replay (K4); `ctx` surface additive per slice (`call`/`sleep`/`wait_for_signal`/`emit_action`); `WorkflowResult` distinct from `TerminalCondition` (inherits the SemVer convention, not the type); `ctx.emit_action` → Action channel → Raft (no IntentStore bypass). Companion to 0063 | Accepted (§2/§3/§5/§6 amended by 0065) |
+| 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowSpec { name, input }` crosses Raft via rkyv `WorkflowSpecEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks #40. Amends ADR-0064 §2/§3/§5/§6 | Proposed |
 
 ---
 
@@ -4737,10 +4738,173 @@ Journal retention/compaction — [#208](https://github.com/overdrive-sh/overdriv
 workflow SDK + version-skew code-graph hashing — [#209](https://github.com/overdrive-sh/overdrive/issues/209)
 (no design element hinges on code-graph hashing, R1/D-INH-6).
 
+## Phase 1 workflow-result-error-model extension (2026-06-06; ADR-0065 amends ADR-0064 §2/§3/§5/§6)
+
+Extension landed by feature `workflow-result-error-model` (PROPOSE mode; the
+evidence base is the 4-platform research
+`docs/research/workflow-durable-execution/result-error-retry-semantics-research.md`,
+High confidence — there was no DISCUSS wave). It reshapes the **workflow body
+contract** of §89 to the Restate/Temporal/DBOS/Step-Functions shape: the body
+returns its **typed value with a terminal-error failure channel**, and the
+status enum survives only as an **engine-owned control-plane projection**.
+Nothing in §90–§93 (the journal substrate, the replay cursor, the
+engine↔reconciler boundary) is rewritten; §98's command/notification split is
+carried forward verbatim. Greenfield single-cut — `WorkflowResult` is deleted,
+the new contract lands in the same change (the only registered workflow is the
+`provision-record` test fixture).
+
+**The reshape, by decision (ADR-0065 §§1–5):**
+
+- **§89 amended — `WorkflowResult` deleted; body returns
+  `Result<Output, TerminalError>`.** The `Workflow` trait grows associated
+  `type Output` / `type Input` (CBOR-serializable) and `async fn run(&self, ctx,
+  input: Self::Input) -> Result<Self::Output, TerminalError>`. Success is the
+  typed `Output` (not a contentless `Success` variant); terminal failure is a
+  `TerminalError`; retryable failures never reach the return type (the engine
+  absorbs + re-drives them, §4). ADR-0065 §1.
+- **D1 — object safety via author-edge typing + engine-boundary CBOR
+  erasure.** The typed `Workflow` trait is not object-safe; a generic
+  `ErasedWorkflowAdapter<W>` blanket-erases `Output`/`Input` to CBOR into an
+  object-safe `ErasedWorkflow { run_erased(&self, ctx, input_bytes) ->
+  Result<Vec<u8>, TerminalError> }`. The engine holds `Box<dyn ErasedWorkflow>`;
+  the registry maps `WorkflowName → Box<dyn Fn() -> Box<dyn ErasedWorkflow>>`.
+  This is the SAME typed-edge / CBOR-erased-interior split `ctx.run<T>` already
+  uses for step results — not a new mechanism. ADR-0065 §1.
+- **D2 — `TerminalError` is a concrete core type** (`overdrive-core::workflow`):
+  `{ kind: TerminalErrorKind, detail: String }`, `kind ∈ {Explicit,
+  BudgetExhausted, MalformedInput, OutputEncode}`, `detail` length-capped at
+  construction. The bounded typed kind + capped author-detail closes the
+  free-text `reason: String` replay-determinism hazard the §89 engine's
+  panic-containment path worked around. `BudgetExhausted` is engine-minted.
+  ADR-0065 §2.
+- **D3 — `WorkflowStatus` is the engine-owned control-plane projection**,
+  distinct from the body return AND from `TerminalCondition` (ADR-0037):
+  `{Completed{output: Vec<u8>}, Failed{terminal: TerminalError}, Cancelled,
+  TimedOut}` (`#[non_exhaustive]`; `Cancelled`/`TimedOut` are forward variants
+  the Phase-1 engine never writes but the lifecycle reconciler matches
+  exhaustively). The engine maps `Ok(output)` → `Completed{output}`,
+  `Err(TerminalError)`/budget-exhausted → `Failed{terminal}`. It is carried by
+  the journal `JournalCommand::Terminal` (`result: WorkflowResult` →
+  `status: WorkflowStatus`) and `ObservationRow::WorkflowTerminal` (same field
+  rename); `WorkflowInstanceState.terminal` becomes `Option<WorkflowStatus>`
+  (the `terminal.is_some()` convergence check is unchanged). This is the crux
+  of the research finding — the body return and the observable status are two
+  different types. ADR-0065 §3.
+- **D4 — retryable-vs-terminal model + retry budget in the engine/journal,
+  NOT the body.** Retryable = engine absorbs + re-drives from the journal;
+  terminal = explicit `Err(TerminalError)` or engine-minted `BudgetExhausted`
+  on budget exhaustion. The budget POLICY is an engine constant (not
+  persisted); the budget INPUTS (attempts, last-failure) derive from journal
+  `RetryAttempted` entries (an additive `#[serde(default)]` command, ADR-0063
+  §2) recomputed against the live policy. This CONTRASTS the reconciler
+  `RetryMemory`-in-`View` precedent (a reconciler has no engine; a workflow
+  does — the journal is the single durable SSOT, not a second View store). The
+  full re-drive loop is Slice 04; Slices 01–03 land the types + success/
+  explicit-terminal paths (body contract stable from Slice 01). ADR-0065 §4.
+- **D5 — typed `WorkflowSpec.input` crossing Raft with rkyv-envelope
+  discipline; resolves [#217](https://github.com/overdrive-sh/overdrive/issues/217).**
+  `WorkflowSpec { name: WorkflowName, input: Vec<u8> }` (opaque CBOR
+  `W::Input`). The durable desired-intent persists the FULL spec via a
+  `WorkflowSpecEnvelope` (V1) + co-located typed codec
+  (`WorkflowSpec::archive_for_store`/`from_store_bytes`, the ADR-0048 `Job`
+  precedent — intent-class durable state read across restarts, NOT the journal
+  CBOR class), replacing the action-shim's current `spec.name` bytes write and
+  the reconciler's `WorkflowName::new(from_utf8(value))` read.
+  `started_digests` now derives `input_digest = ContentHash::of(&spec.input)`
+  and `spec_digest = ContentHash::of(spec.name…)` — they diverge as intended
+  (discharges the engine's `TODO(#217)`). The rkyv envelope wraps the OUTER
+  `WorkflowSpec`; the inner `input` stays opaque CBOR. **Unblocks
+  [#40](https://github.com/overdrive-sh/overdrive/issues/40)** (cert-rotation,
+  the validating consumer of typed input + typed output). ADR-0065 §5.
+
+**C4 — Container (L2), the body-contract + spec-input reshape.** Containers
+are the same Rust crates as §97/§98; what changes is the *body return type*,
+the *erasure adapter*, the *status projection type*, and the *typed durable
+spec*. Annotated for the reshape:
+
+```mermaid
+C4Container
+  title Container Diagram — Workflow result/error model
+  Person(devon, "Platform Engineer (Devon)")
+  System_Boundary(node, "Overdrive node (single binary)") {
+    Container(core, "overdrive-core", "Rust crate (class: core)", "workflow module: Workflow trait now { type Output; type Input; run(ctx, input) -> Result<Output, TerminalError> }. NEW: ErasedWorkflow + ErasedWorkflowAdapter<W> (CBOR erasure), TerminalError, WorkflowStatus (control-plane projection). WorkflowResult DELETED. WorkflowSpec { name, input } + WorkflowSpecEnvelope (rkyv V1) + typed codec. No tokio.")
+    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "WorkflowEngine holds Box<dyn ErasedWorkflow>; run_erased(ctx, input_bytes); maps Ok→Completed / Err(TerminalError)→Failed; started_digests input_digest off spec.input (#217). action-shim persists full spec via archive_for_store; lifecycle reconciler reads from_store_bytes. Journal Terminal carries WorkflowStatus; RetryAttempted command (D4).")
+    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "replay_equivalence_provision_record asserts Completed{output} projection; NEW WorkflowTerminalStatusProjection invariant (Err(TerminalError)→Failed round-trips). SimJournalStore carries WorkflowStatus.")
+    ContainerDb(redb, "redb file (shared substrate)", "ACID KV", "ViewStore tables + __wf_journal__ (CBOR LoadedEntry, Terminal now carries WorkflowStatus) + workflow-instance intent (rkyv WorkflowSpecEnvelope). One Arc<Database>.")
+  }
+  Rel(devon, core, "impl Workflow { type Output=CertOutput; type Input=CertSpec; run -> Result<Output, TerminalError> } (#40)")
+  Rel(ctrl, core, "ErasedWorkflowAdapter erases Output/Input to CBOR; engine drives run_erased; maps to WorkflowStatus")
+  Rel(ctrl, redb, "RedbJournalStore append (Terminal{status}) ; IntentStore put/get full WorkflowSpec via rkyv envelope codec")
+  Rel(sim, core, "DST asserts the body-return → status-projection mapping")
+```
+
+**C4 — Component (L3), the erasure + projection boundary.** The one subsystem
+this feature reshapes internally — the author-typed edge, the CBOR erasure
+adapter, the engine's status mapping, and the typed-spec durable codec:
+
+```mermaid
+C4Component
+  title Component Diagram — Workflow body contract + spec input (L3)
+  Container_Boundary(core, "overdrive-core::workflow") {
+    Component(wf, "Workflow<Output, Input>", "trait", "Author edge: run(ctx, input: Input) -> Result<Output, TerminalError>")
+    Component(erased, "ErasedWorkflow", "trait (object-safe)", "run_erased(ctx, input_bytes) -> Result<Vec<u8>, TerminalError>")
+    Component(adapter, "ErasedWorkflowAdapter<W>", "blanket impl", "Decodes input_bytes -> W::Input; calls run; encodes W::Output -> bytes")
+    Component(terr, "TerminalError", "type", "{ kind, detail } — bounded, serde, journal/obs input")
+    Component(status, "WorkflowStatus", "enum (#[non_exhaustive])", "Completed{output} | Failed{terminal} | Cancelled | TimedOut")
+    Component(spec, "WorkflowSpec + WorkflowSpecEnvelope", "type + rkyv V1", "{ name, input } ; archive_for_store / from_store_bytes")
+  }
+  Container_Boundary(ctrl, "overdrive-control-plane::workflow_runtime") {
+    Component(engine, "WorkflowEngine", "struct", "Box<dyn ErasedWorkflow>; run_erased; status mapping; started_digests(input=spec.input)")
+    Component(registry, "WorkflowRegistry", "struct", "WorkflowName -> factory<Box<dyn ErasedWorkflow>>")
+  }
+  Rel(adapter, wf, "wraps + drives the typed body")
+  Rel(adapter, erased, "implements (blanket)")
+  Rel(adapter, terr, "malformed_input / output_encode on codec failure")
+  Rel(engine, registry, "resolve(name) -> Box<dyn ErasedWorkflow>")
+  Rel(engine, erased, "run_erased(ctx, input_bytes)")
+  Rel(engine, status, "maps Ok(bytes)->Completed / Err(TerminalError)->Failed")
+  Rel(engine, spec, "from_store_bytes on resume; input_digest off spec.input")
+```
+
+### Reuse Analysis (this extension)
+
+| Existing component | Decision | Justification |
+|---|---|---|
+| `ctx.run<T>` CBOR typed-edge/erased-interior | REUSE (pattern) | D1's erasure adapter is the same erasure `ctx.run<T>` already does. |
+| `WorkflowSpec` (name-only) | EXTEND | add `input` + rkyv envelope + typed codec. |
+| `Action::StartWorkflow` variant | REUSE (unchanged) | `spec` reshapes; variant shape unchanged. |
+| `JournalCommand::Terminal`, `::` (additive) | EXTEND | `result`→`status`; `RetryAttempted` additive (ADR-0063 §2). |
+| `ObservationRow::WorkflowTerminal` | EXTEND | `result`→`status`. |
+| `WorkflowInstanceState.terminal` | EXTEND | `Option<WorkflowStatus>`; convergence check unchanged. |
+| `started_digests` `TODO(#217)` | MODIFY | `input_digest` off `spec.input`. |
+| `persist_workflow_intents` / `hydrate_workflow_desired_instances` | MODIFY | persist/read full spec via rkyv codec (#217 value+read sides). |
+| `Job::archive_for_store` / envelope (ADR-0048) | REUSE (pattern) | `WorkflowSpec` codec is the same shape. |
+| `RetryMemory` reconciler precedent | CONTRAST (do NOT reuse) | reconciler has no engine → View; workflow has an engine → journal-derived budget (D4). |
+| `WorkflowResult` | DELETE | greenfield single-cut; replaced by `Result<Output, TerminalError>` + `WorkflowStatus`. |
+
+### Quality-attribute scenarios (this extension)
+
+| Attribute | Target | How addressed |
+|---|---|---|
+| Functional suitability — correctness | The durable terminal carries no engine-derived non-deterministic value | Typed `WorkflowStatus`; bounded `TerminalError` (D2/D3); closes the `reason: String` hazard |
+| Reliability — recoverability | Terminal replays losslessly incl. the typed output bytes | `Completed{output}` in journal `Terminal` + obs row; short-circuit re-publishes (§91 carried forward) |
+| Reliability — fault tolerance | Retryable failures never end the workflow; budget exhaustion is engine-minted | D4 engine-owned retry; `WorkflowBudgetExhaustionMintsTerminal` DST invariant (Slice 04) |
+| Maintainability — modifiability | Author writes domain types, not status variants | typed `Output`/`Input`; #40 cert-rotation is the consumer |
+| Maintainability — testability | The erasure adapter + body-return→status mapping are unit/DST testable | `ErasedWorkflowAdapter` isolated; `WorkflowTerminalStatusProjection` invariant |
+| Maintainability — modifiability | Parameter-bearing durable intent evolves safely | `WorkflowSpecEnvelope` (rkyv V1) + golden-bytes schema-evolution fixture (ADR-0048) |
+
+### External integrations — none (carried forward from §96)
+
+This feature reshapes types and the engine's body-contract; no new external
+boundary. When cert-rotation (#40) lands its ACME/DNS effects (Phase 3+), the
+`ctx.run` closure is the contract-test seam (Pact-shaped) — annotated for the
+platform-architect handoff, unchanged from §96.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-06-06 | **workflow-result-error-model — body returns `Result<Output, TerminalError>`; status enum becomes an engine-owned projection; typed `WorkflowSpec.input` (ADR-0065 amends ADR-0064 §2/§3/§5/§6).** PROPOSE mode, evidence base = the 4-platform research (Restate/Temporal/DBOS/Step Functions, High confidence) — no DISCUSS wave. Adds the "Phase 1 workflow-result-error-model extension" section (§ body-contract reshape, D1–D5, C4 L2+L3, Reuse Analysis, quality scenarios) and ADR-0065 to the index; marks ADR-0064 §2/§3/§5/§6 amended. Greenfield single-cut: `WorkflowResult` deleted, new contract lands in the same change (only the `provision-record` test fixture is registered). Resolves #217 (input_digest off parameter bytes), unblocks #40 (cert-rotation). — Morgan. |
 | 2026-06-06 | **built-in-ca Reuse-Analysis correction — `ObservationStore` is EXTEND (additive), not REUSE AS-IS (DELIVER back-propagation).** The `issued_certificates` audit row first shipped via a non-compliant concrete-adapter bypass (a parallel redb table + inherent methods on `LocalObservationStore`, which was NOT DST-testable because it never routed through the port). The user directed the correction (2026-06-06) to the faithful "mirroring `AllocStatusRow`/`NodeHealthRow`" shape ADR-0063 D6 always intended: the audit now routes through the `ObservationStore` trait on BOTH `LocalObservationStore` and `SimObservationStore` (commit `aab5a69b`). The fix added TWO purely-additive trait members — `ObservationRow::IssuedCertificate(IssuedCertificateRow)` (a new enum variant, like the 5 existing sibling rows) and `ObservationStore::issued_certificate_rows()` (a typed reader mirroring `alloc_status_rows()`/`node_health_rows()`/`service_backends_rows()`). NO existing `ObservationStore` method signature changed; the additions grow the enum + reader exactly as every prior observation row did. The brief's Reuse-Analysis row + verdict tally are corrected (ObservationStore: REUSE AS-IS → EXTEND; tally 6 REUSE-AS-IS → 5 REUSE-AS-IS + 1 EXTEND); ADR-0063 D6 gains a one-line clarification of what "mirroring `AllocStatusRow`/`NodeHealthRow`" means (additive variant + reader through the port on both adapters, not a concrete-adapter-only surface). No prior decision reversed — D6 always specified the observation-row pattern; this only corrects a brief line that had become factually stale relative to the landed, DST-testable shape. — Morgan. |
 | 2026-06-06 | **built-in-ca `issue_svid` contract clarification — single-URI-SAN enforced by TYPE, not an adapter runtime guard (Option A; DELIVER-surfaced).** DELIVER step 04 found the `Ca::issue_svid` rustdoc + the brief/ADR trait-contract prose claimed the adapter "rejects an empty or oversized SAN set with `CaError::InvalidSan` before any cert" — a rejection the request type (`SvidRequest { spiffe_id: SpiffeId }`, one validated identity by construction) makes *unreachable* (aspirational-doc bug per `development.md` § "No aspirational docs"). User ratified **Option A — type-enforced** (2026-06-06) on the strength of `docs/research/security/svid-request-cardinality-enforcement-research.md` (committed `b6a5278b`; SPIFFE X.509-SVID §2 "exactly one URI SAN" + §5.2 places the runtime MUST-reject at the *relying party*, not the issuer; SPIRE reference impl carries a single `spiffeid.ID` not a SAN slice; "parse, don't validate"). The `## built-in-ca extension` § "`Ca` trait surface" prose is corrected to the three-layer enforcement-location statement: (1) the request type makes ≠1 unrepresentable; (2) the pure-core `CertSpec::svid(Vec<SpiffeId>)` parse is the single fallible boundary (rejects 0/≥2, tested at L1 by S-04-02); (3) the runtime reject lives at the verifier (#26), not `issue_svid`. ADR-0063 D5 gains the same enforcement-location note + an Amendments changelog entry; the `Ca` trait SIGNATURE is unchanged (no widening — `SvidRequest` is correct under Option A). DISTILL scenarios S-04-09 + S-04-10 (which tested the type-unreachable adapter path) are RETIRED as redundant under Option A (S-04-08 already asserts host single-URI-SAN; S-04-06 asserts cross-adapter SAN-cardinality equivalence; S-04-02 tests the live `CertSpec` parse reject); built-in-ca scenario count 39 → 37, `@error` 15/39 → 13/37 (non-gating DISTILL metric, accepted as a consequence of the type-honest design). No prior decision reversed — D5 already put policy in core; this only pins WHERE the runtime reject lives and retires the aspirational claim. The crafter applies the corrected `issue_svid` rustdoc + retires the two scaffolds. — Morgan. |
 | 2026-06-05 | **built-in-ca extension** (GH #28 [2.6]; GUIDE mode — locked decisions from 2026-06-05 Q&A). New `## built-in-ca extension` section under Application Architecture. Added ADR-0063 (built-in CA: `Ca` port trait in `overdrive-core` [pure, no rcgen — dst-lint boundary verified: core is `crate_class = "core"`, bans `rand::*`/FFI] + `RcgenCa` host adapter [all rcgen 0.14.8 `features = ["ring", "pem"]` (bump from current 0.13.2 pin — DELIVER first-compile prerequisite; extension APIs stable 0.13→0.14, builder API changed so `mint_ephemeral_ca` migrates too)/crypto-backend (`ring` today; aws-lc-rs + FIPS pending #204)/HKDF/AES-256-GCM] + `SimCa` sim adapter [fixture P-256 keys, `SeededEntropy` serials]; 3-tier self-signed-P-256-root → pathLen=0-intermediate → single-URI-SAN-SVID hierarchy, single-node = one intermediate). **Reconciliation A resolved**: root-key AEAD = HKDF-SHA256-derive a per-use subkey from the kernel-keyring KEK → AES-256-GCM (passphrase-KDF dropped; HKDF buys domain-separation + rotation seam for #40/HSM). **Reconciliation B resolved**: pure `CertSpec` builder in core owns cert-extension policy (single-URI-SAN rejection, pathLen=0, keyUsage sets — DST-testable), host adapter translates `CertSpec → rcgen::CertificateParams`. Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore (intent, never observation — whitepaper §4); KEK in Linux kernel keyring, delivered per-boot by systemd-creds (TPM/host-key root-of-trust), `OVERDRIVE_CA_KEK` dev-only fallback. Refuse-to-start (`health.startup.refused`) on decrypt failure — never silent re-mint. Serials via `Entropy` (DST-deterministic); key-gen via backend CSPRNG (not injectable, research F11). `issued_certificates` ObservationStore audit row (research F15). Earned-Trust probe (wire→probe→use): KEK-present + envelope-decrypt + credential-present, refuse-to-start on failure. `tests/integration/ca_equivalence.rs` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only — `tls_bootstrap.rs` keeps serving the control-plane-HTTPS / operator-CLI consumer (Phase 5 / #81 replaces it). C4 L1+L2+L3 (Mermaid) added at `c4-diagrams.md` § "Built-in CA". Reuse: 6 REUSE-AS-IS (`IntentStore`/`ObservationStore`/`Entropy`/`SpiffeId`/`CertSerial`/`NodeId`/`VersionedEnvelope`), 1 REUSE-proven-via-new-adapter (rcgen usage from `mint_ephemeral_ca`), 1 LEAVE-AS-IS-distinct-consumer (`tls_bootstrap.rs`), 8 CREATE-NEW (justified). Deferrals all cite existing issues: #40 rotation (needs #39), #36 multi-node CA, #104/#83 multi-region, #81/Phase 5/7 operator-auth/revocation, separate consumer feature for mTLS+kTLS. ADR index grows by 1 (0063). No roadmap (DELIVER owns that). — Morgan. |
