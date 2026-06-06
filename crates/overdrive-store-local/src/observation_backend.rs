@@ -269,7 +269,7 @@ struct Inner {
     /// an instance terminated.
     ///
     /// Per the slice-01 doctrine (ADR-0064 §2): the DURABLE terminal
-    /// record is the engine-side redb+CBOR journal (`JournalEntry::Terminal`,
+    /// record is the engine-side redb+CBOR journal (`JournalCommand::Terminal`,
     /// K5); the observation row is the LIVE convergence signal only, so a
     /// process-local in-memory index is the correct shape here — it
     /// matches what `subscribe_all` already provides (live, not
@@ -409,7 +409,7 @@ impl ObservationStore for LocalObservationStore {
                 }
                 // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out to
                 // subscribers; the durable terminal record for slice-01 is
-                // the engine-side redb+CBOR journal (`JournalEntry::Terminal`,
+                // the engine-side redb+CBOR journal (`JournalCommand::Terminal`,
                 // K5), and the workflow-lifecycle reconciler reads this row
                 // off the live observation stream to converge the instance.
                 // No typed redb table is persisted here: a cold-boot

@@ -68,11 +68,12 @@ pub mod handlers;
 // `Ipv4Addr` through `AppState.host_ipv4` to the
 // `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
 pub mod iface;
-// workflow-primitive step 01-03 — `JournalStore` port + `JournalEntry`
-// CBOR enum + `WorkflowId` for the §18 workflow await-point journal
-// (ADR-0063). A second redb table layout on the shared runtime substrate,
-// distinct from `view_store`. Real `RedbJournalStore` adapter lands 01-04;
-// engine wiring 01-05.
+// workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
+// CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +
+// `WorkflowId` for the §18 workflow await-point journal (ADR-0063). A
+// second redb table layout on the shared runtime substrate, distinct from
+// `view_store`. Real `RedbJournalStore` adapter lands 01-04; engine wiring
+// 01-05.
 pub mod journal;
 // reconciler-listener-fact-view step 01-01 — in-memory listener-fact
 // projection (ADR-0062) replacing the `ServiceMapHydrator`'s O(S²)

@@ -539,9 +539,28 @@ pub trait JournalStore: Send + Sync {
     ///   engine's concern).
     /// - The store assigns the step index by append position over ALL
     ///   entries (commands + notifications); appending N entries yields
-    ///   steps `0..N` in append order. This storage append-position is
-    ///   NOT the command-index — the cursor derives the command-index from
-    ///   the partition (D3).
+    ///   steps `0..N` in append order. The adapter's `next_step` count is
+    ///   count-ALL: it counts every entry regardless of class, so a
+    ///   notification advances the storage append-position exactly as a
+    ///   command does.
+    ///
+    /// # Invariants
+    ///
+    /// - **Append order == load order.** Entries are returned by
+    ///   [`load_journal`](Self::load_journal) in the order they were
+    ///   appended; the store never reorders.
+    /// - **Storage append-position is NOT the command-index.** The `u32`
+    ///   the store assigns is the position over ALL entries (commands AND
+    ///   notifications interleaved). The replay command-index — a command's
+    ///   identity in the positional replay walk — is derived by the cursor
+    ///   AFTER it partitions the run (D3; step 01-03), by counting ONLY the
+    ///   `Command(_)` entries that precede it. The store does NOT compute,
+    ///   persist, or expose the command-index; classification is the
+    ///   cursor's job, not the store's (D2). A future HA `JournalStore`
+    ///   adapter (#205) re-implements this dumb ordered log over a
+    ///   different substrate WITHOUT re-deriving replay semantics: it owns
+    ///   only "append at the next position, load in order"; the
+    ///   append-position-vs-command-index distinction stays at the cursor.
     ///
     /// # Errors
     ///
@@ -572,6 +591,21 @@ pub trait JournalStore: Send + Sync {
     /// Returns an empty `Vec` for a `workflow_id` with no appended
     /// entries (unknown / fresh instance) — never an error. This is the
     /// common case for an instance that has not started.
+    ///
+    /// # Invariants
+    ///
+    /// - **Dumb ordered log (D2).** The returned `Vec` is the flat run as
+    ///   appended — commands and notifications interleaved, in
+    ///   append-position order. The store never partitions the run into a
+    ///   command sequence + a `SignalKey`-keyed notification lookup; the
+    ///   cursor does that ONCE at construction (step 01-03).
+    /// - **Append-position, not command-index.** The Vec index of an entry
+    ///   is its storage append-position over ALL entries, NOT its replay
+    ///   command-index. The cursor derives the command-index by counting
+    ///   only the preceding `Command(_)` entries after it partitions (D3) —
+    ///   a future HA adapter (#205) re-implements the load over a different
+    ///   substrate without re-deriving that replay semantics; the store
+    ///   owes only "hand back the verbatim ordered run."
     ///
     /// # Errors
     ///

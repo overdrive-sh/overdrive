@@ -20,8 +20,11 @@
 
 use overdrive_core::id::ContentHash;
 use overdrive_core::testing::workflow::ProvisionRecord;
+use overdrive_core::workflow::{SignalKey, SignalValue};
 
-use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
+use overdrive_control_plane::journal::{
+    JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
+};
 use overdrive_sim::adapters::journal::SimJournalStore;
 
 /// Build the `Started` entry's `spec_digest` from the fixture's spec —
@@ -99,4 +102,100 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
         }
         other => panic!("second entry must be RunResult, got {other:?}"),
     }
+}
+
+/// D2/D3 dumb-store contract — the `JournalStore` is a dumb ordered log
+/// over `LoadedEntry`: commands and notifications **interleave** in one
+/// ordered run, the store never classifies, append order == load order,
+/// and the storage append-position (which `next_step` counts) advances
+/// for BOTH classes — a notification is counted exactly like a command.
+///
+/// Port-to-port: drives the `JournalStore` driving port (`append` /
+/// `load_journal`) of the `SimJournalStore` adapter. The observable
+/// outcome is the flat ordered `Vec<LoadedEntry>` returned by
+/// `load_journal` — byte-equal to what was appended, with the interleaved
+/// `SignalSeen` notification preserved in its append position (not
+/// partitioned, not dropped, not reordered ahead of the commands). This
+/// pins the contract the cursor (step 01-03) relies on: the partition is
+/// the cursor's job; the store must hand it the verbatim interleave.
+///
+/// This is a characterization test — the store already behaves this way
+/// (the plumbing shipped in step 01-01); the test pins the dumb-store
+/// contract going forward so a future HA adapter (#205) cannot quietly
+/// start classifying / partitioning in the store layer.
+#[tokio::test]
+async fn loaded_entry_run_round_trips_with_interleaved_command_and_notification() {
+    let store = SimJournalStore::new();
+    let workflow_id = WorkflowId::new("wf-interleave-0001").expect("valid workflow id");
+
+    // A run that INTERLEAVES a Command and a Notification: the
+    // `SignalAwaited` command (the workflow blocked on a key) sits BETWEEN
+    // a `Started` command and the satisfying `SignalSeen` notification,
+    // and a closing `Terminal` command follows. The store must preserve
+    // every entry in append position, never hoisting the notification out
+    // of the ordered run.
+    let signal_key = SignalKey::new("provision-ready").expect("valid signal key");
+
+    let started = LoadedEntry::Command(JournalCommand::Started {
+        spec_digest: ContentHash::of(ProvisionRecord::WORKFLOW_NAME.as_bytes()),
+        input_digest: ContentHash::of(ProvisionRecord::PAYLOAD),
+    });
+    let awaited =
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: signal_key.clone() });
+    let seen = LoadedEntry::Notification(JournalNotification::SignalSeen {
+        signal_key: signal_key.clone(),
+        value_digest: ContentHash::of(b"ready"),
+        value: SignalValue::new("ready"),
+    });
+    let terminal =
+        LoadedEntry::Command(JournalCommand::Terminal { result: "Completed".to_string() });
+
+    // The run as appended — a Command, a Command, a NOTIFICATION, a Command.
+    let appended = vec![started, awaited, seen, terminal];
+    for entry in &appended {
+        store.append(&workflow_id, entry).await.expect("append interleaved entry");
+    }
+
+    // Observable outcome 1 — the flat ordered run round-trips byte-equal,
+    // interleave preserved. The store did NOT partition the notification
+    // out of the command sequence (that is the cursor's job, D2).
+    let loaded = store.load_journal(&workflow_id).await.expect("load journal");
+    assert_eq!(
+        loaded, appended,
+        "the dumb store returns the interleaved command/notification run \
+         byte-equal in append order — it never partitions",
+    );
+
+    // Observable outcome 2 — the storage append-position counted BOTH
+    // classes. Four entries were appended (3 commands + 1 notification);
+    // load returns four. The notification occupies an append-position
+    // exactly like a command — `next_step` (count-all over the run) would
+    // have advanced for it. If the store classified, the notification
+    // would be absent here and the length would be 3.
+    assert_eq!(
+        loaded.len(),
+        4,
+        "append-position / next_step counts every entry — the notification \
+         is counted, not skipped (count-all parity, D3)",
+    );
+
+    // The interleaved notification sits at its append position (index 2),
+    // BETWEEN the SignalAwaited command and the Terminal command — proving
+    // the store preserved ordering across the class boundary rather than
+    // grouping notifications separately.
+    assert!(
+        matches!(loaded[2], LoadedEntry::Notification(JournalNotification::SignalSeen { .. })),
+        "the notification stays at its interleaved append position (index 2), got {:?}",
+        loaded[2],
+    );
+    assert!(
+        matches!(loaded[1], LoadedEntry::Command(JournalCommand::SignalAwaited { .. })),
+        "the SignalAwaited command precedes the notification, got {:?}",
+        loaded[1],
+    );
+    assert!(
+        matches!(loaded[3], LoadedEntry::Command(JournalCommand::Terminal { .. })),
+        "the Terminal command follows the interleaved notification, got {:?}",
+        loaded[3],
+    );
 }
