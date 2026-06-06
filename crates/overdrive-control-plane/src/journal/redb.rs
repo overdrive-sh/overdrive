@@ -106,21 +106,32 @@ impl RedbJournalStore {
         ciborium::from_reader(bytes).map_err(|e| JournalStoreError::Decode(e.to_string()))
     }
 
-    /// The next step index for `workflow_id` = the count of entries
-    /// already appended for it (append position 1:1 with ascending step
-    /// per the [`JournalStore::append`] contract). A range scan over
-    /// `(id, 0)..=(id, u32::MAX)` counts this instance's contiguous run.
+    /// The next step index for `workflow_id`. Append position is 1:1 with
+    /// ascending step per the [`JournalStore::append`] contract, and an
+    /// instance's steps are contiguous from 0 (`append` is the sole writer
+    /// and nothing deletes a real instance's entries), so the next step is
+    /// `last_step + 1`. Derived by a reverse peek at the back of the
+    /// `(id, 0)..=(id, u32::MAX)` range — `redb::Range` is a
+    /// `DoubleEndedIterator`, so `.next_back()` is an O(log N) reverse
+    /// B-tree cursor seek, NOT an O(N) forward walk. An empty range (no
+    /// entries yet) yields step 0.
     fn next_step(
         table: &impl ReadableTable<(&'static str, u32), &'static [u8]>,
         workflow_id: &WorkflowId,
     ) -> JsResult<u32> {
         let id = workflow_id.as_str();
-        let count = table.range((id, 0u32)..=(id, u32::MAX)).map_err(map_storage_error)?.count();
-        u32::try_from(count).map_err(|_| {
-            JournalStoreError::Io(std::io::Error::other(
-                "a single workflow instance cannot exceed u32::MAX journal entries",
-            ))
-        })
+        match table.range((id, 0u32)..=(id, u32::MAX)).map_err(map_storage_error)?.next_back() {
+            None => Ok(0),
+            Some(entry) => {
+                let (key, _value) = entry.map_err(map_storage_error)?;
+                let (_id, last_step) = key.value();
+                last_step.checked_add(1).ok_or_else(|| {
+                    JournalStoreError::Io(std::io::Error::other(
+                        "a single workflow instance cannot exceed u32::MAX journal entries",
+                    ))
+                })
+            }
+        }
     }
 }
 
@@ -343,6 +354,55 @@ mod tests {
         let id = WorkflowId::new("wf-never-started").expect("valid id");
         let loaded = store.load_journal(&id).await.expect("load empty");
         assert!(loaded.is_empty(), "an instance with no entries loads as an empty run");
+    }
+
+    /// Regression guard for the O(1) `next_step` reverse-peek derivation.
+    /// `next_step` must assign a fresh, non-colliding step on every append
+    /// across a long contiguous run. A broken `next_step` (one that returns
+    /// a step colliding with an existing key) would make the subsequent
+    /// `insert` OVERWRITE a prior entry, so `load_journal` would return
+    /// fewer distinct entries than were appended — observable here through
+    /// the public API. K = 64 exercises the `next_back` path well past a
+    /// single step.
+    #[tokio::test]
+    async fn next_step_assigns_contiguous_non_colliding_steps_across_a_long_run() {
+        const K: u32 = 64;
+        let (_tmp, db) = db();
+        let store = RedbJournalStore::new(Arc::clone(&db));
+        let id = workflow_id();
+
+        // Each entry is made unique by varying the nonce, so a collision /
+        // overwrite is observable as a missing or duplicated entry.
+        let expected: Vec<LoadedEntry> =
+            (0..K).map(|n| run_result(&format!("entry-{n}"))).collect();
+        for entry in &expected {
+            store.append(&id, entry).await.expect("append");
+        }
+
+        // Public-API observation: exactly K distinct entries, in append
+        // order, no collision / overwrite / drop.
+        let loaded = store.load_journal(&id).await.expect("load");
+        assert_eq!(loaded.len(), K as usize, "every append must yield a distinct stored entry");
+        assert_eq!(loaded, expected, "no collision, no overwrite, preserved append order");
+
+        // Tighter pin of the contiguity invariant `next_step` depends on:
+        // the stored step components are exactly the contiguous 0..K.
+        let read = db.begin_read().expect("read txn");
+        let table = read.open_table(JOURNAL_TABLE).expect("journal table");
+        let stored_steps: Vec<u32> = table
+            .range((id.as_str(), 0u32)..=(id.as_str(), u32::MAX))
+            .expect("range scan")
+            .map(|entry| {
+                let (key, _value) = entry.expect("range entry");
+                let (_id, step) = key.value();
+                step
+            })
+            .collect();
+        assert_eq!(
+            stored_steps,
+            (0..K).collect::<Vec<u32>>(),
+            "next_step must produce the contiguous step sequence 0..K"
+        );
     }
 
     #[tokio::test]

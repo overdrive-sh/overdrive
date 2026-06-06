@@ -115,16 +115,24 @@ impl SimJournalStore {
         ciborium::from_reader(bytes).map_err(|e| JournalStoreError::Decode(e.to_string()))
     }
 
-    /// The next step index for `workflow_id` = the count of entries
-    /// already appended for it. Append order maps 1:1 to ascending step
-    /// per the [`JournalStore::append`] contract.
+    /// The next step index for `workflow_id`. Append order maps 1:1 to
+    /// ascending step per the [`JournalStore::append`] contract, and an
+    /// instance's steps are contiguous from 0 (`append` is the sole writer;
+    /// no real instance deletes entries), so the next step is
+    /// `last_step + 1`. Derived by a reverse peek at the back of the
+    /// `(id, 0)..=(id, u32::MAX)` `BTreeMap` range — `.next_back()` is an
+    /// O(log N) reverse cursor seek, mirroring the production redb adapter's
+    /// `Range::next_back` derivation for DST contract parity. An empty range
+    /// yields step 0.
     fn next_step(storage: &BTreeMap<(WorkflowId, u32), Vec<u8>>, workflow_id: &WorkflowId) -> u32 {
-        // Count entries whose key's first component is this workflow_id.
-        // BTreeMap range gives the contiguous slice for free.
         let lo = (workflow_id.clone(), 0u32);
         let hi = (workflow_id.clone(), u32::MAX);
-        u32::try_from(storage.range(lo..=hi).count())
-            .unwrap_or_else(|_| unreachable!("a single instance cannot exceed u32::MAX entries"))
+        match storage.range(lo..=hi).next_back() {
+            None => 0,
+            Some(((_id, last_step), _value)) => last_step.checked_add(1).unwrap_or_else(|| {
+                unreachable!("a single instance cannot exceed u32::MAX entries")
+            }),
+        }
     }
 }
 
@@ -320,6 +328,42 @@ mod tests {
         let id = WorkflowId::new("wf-never-started").expect("valid id");
         let loaded = store.load_journal(&id).await.expect("load empty");
         assert!(loaded.is_empty(), "an instance with no entries loads as an empty run");
+    }
+
+    /// A `RunResult` command varied by `nonce` so successive entries in a
+    /// run are distinct — a collision / overwrite is then observable as a
+    /// missing or duplicated entry on load.
+    fn run_result(nonce: &str) -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: "provision-write".to_string(),
+            result_digest: ContentHash::of(nonce.as_bytes()),
+            result_bytes: nonce.as_bytes().to_vec(),
+        })
+    }
+
+    /// Regression guard mirroring the redb adapter's: the O(1) `next_step`
+    /// reverse-peek must assign a fresh, non-colliding step on every append
+    /// across a long contiguous run. A broken `next_step` returning a
+    /// colliding step would make `append` overwrite a prior `BTreeMap`
+    /// entry, so `load_journal` would return fewer distinct entries than
+    /// were appended — observable through the public API. (The sim storage
+    /// map is private, so unlike the redb test there is no raw-key
+    /// assertion; the public-API distinctness check is the pin.)
+    #[tokio::test]
+    async fn next_step_assigns_contiguous_non_colliding_steps_across_a_long_run() {
+        const K: u32 = 64;
+        let store = SimJournalStore::new();
+        let id = workflow_id();
+
+        let expected: Vec<LoadedEntry> =
+            (0..K).map(|n| run_result(&format!("entry-{n}"))).collect();
+        for entry in &expected {
+            store.append(&id, entry).await.expect("append");
+        }
+
+        let loaded = store.load_journal(&id).await.expect("load");
+        assert_eq!(loaded.len(), K as usize, "every append must yield a distinct stored entry");
+        assert_eq!(loaded, expected, "no collision, no overwrite, preserved append order");
     }
 
     #[tokio::test]

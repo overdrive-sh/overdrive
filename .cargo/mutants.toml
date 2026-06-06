@@ -378,6 +378,30 @@ exclude_re = [
     # removed in the same commit and a real test kills the mutant.
     "replace ProbeRunner::probe -> Result<\\(\\), ProbeRunnerError> with Ok\\(\\(\\)\\)",
 
+    # `RedbJournalStore::next_step -> JsResult<u32>` whole-function
+    # return-value replacements. Same class as the `ProbeRunner::probe`
+    # and `Default::default` entries above: cargo-mutants synthesises
+    # return-value replacement bodies for a function returning a custom
+    # `Result` alias (`JsResult<u32>` = `Result<u32, JournalStoreError>`),
+    # but the synthesised bodies `JsResult::new()`, `JsResult::new(0/1)`,
+    # `JsResult::from(0/1)`, and `JsResult::from_iter([0/1])` are not real
+    # constructors on `Result`, so every one fails to compile (E0599) and
+    # reports UNVIABLE. With the function-body replacement being the only
+    # mutant cargo-mutants generates for this diff (the `next_back` /
+    # `None => Ok(0)` / `checked_add(1)` sub-expressions are not targets of
+    # any operator that yields viable code for this shape), the gate sees
+    # `total=7 unviable=7` and (correctly) refuses to call it a quality
+    # signal. The behaviour the function depends on IS guarded — the
+    # `next_step_assigns_contiguous_non_colliding_steps_across_a_long_run`
+    # regression test kills both real-bug shapes (`checked_add(0)`
+    # collision → only 1 distinct stored entry; `None => Ok(1)` → stored
+    # steps `1..=64` not `0..63`, caught by the raw-key contiguity
+    # assertion), verified by hand-mutation when the test was authored.
+    # The exclusion masks only the unviable-synthesis tooling artifact,
+    # exactly as the `ProbeRunner::probe -> Result<(), ProbeRunnerError>
+    # with Ok(())` entry does for that function's custom-Result return.
+    "RedbJournalStore::next_step -> JsResult<u32> with JsResult::",
+
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement
     # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,
