@@ -45,6 +45,13 @@
 
 pub mod action_shim;
 pub mod api;
+// built-in-ca (GH #28, ADR-0063 D2/D3/D8) — CA boot composition root:
+// generate-or-load the persistent root + Earned-Trust probe + refuse-to-start.
+pub mod ca_boot;
+// built-in-ca (GH #28, ADR-0063 D6) — CA issuance + audit binding: every
+// workload SVID issuance writes an `issued_certificates` observation row, bound
+// so an audit-write failure refuses the issuance (no silent issuance).
+pub mod ca_issuance;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
 // backend-discovery-bridge-service-reachability step 02-01 —

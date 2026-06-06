@@ -24,7 +24,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
-    KeyPair, KeyUsagePurpose, SanType,
+    Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -272,6 +272,16 @@ pub fn mint_ephemeral_ca_with_hostname(
         .map_err(|source| TlsBootstrapError::Rcgen { context: "ca self-sign", source })?;
     let ca_cert_pem = ca_cert.pem();
 
+    // rcgen 0.14: leaf certs are signed via an `Issuer` rather than the
+    // 0.13 `signed_by(&key, &ca_cert, &ca_key)` 3-arg shape. The issuer
+    // carries the CA's distinguished name, key-identifier method, and
+    // key usages — all sourced from `ca_params` (the same params that
+    // produced `ca_cert`), so the issuer field stamped on each leaf is
+    // byte-identical to the 0.13 output. `from_params` borrows both
+    // `ca_params` and `ca_key`, so the single issuer is reused for the
+    // server and client leaves without consuming either.
+    let ca_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&ca_params, &ca_key);
+
     // --- Server leaf --------------------------------------------------
     // ADR-0010 §R3: the production path targets four SAN entries
     // (`127.0.0.1`, `::1`, `localhost`, and the host hostname). If
@@ -327,7 +337,7 @@ pub fn mint_ephemeral_ca_with_hostname(
     server_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
 
     let server_cert = server_params
-        .signed_by(&server_key, &ca_cert, &ca_key)
+        .signed_by(&server_key, &ca_issuer)
         .map_err(|source| TlsBootstrapError::Rcgen { context: "server sign", source })?;
     let server_leaf_cert_pem = server_cert.pem();
     let server_leaf_key_pem = server_key.serialize_pem();
@@ -347,7 +357,7 @@ pub fn mint_ephemeral_ca_with_hostname(
     client_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
 
     let client_cert = client_params
-        .signed_by(&client_key, &ca_cert, &ca_key)
+        .signed_by(&client_key, &ca_issuer)
         .map_err(|source| TlsBootstrapError::Rcgen { context: "client sign", source })?;
     let client_leaf_cert_pem = client_cert.pem();
     let client_leaf_key_pem = client_key.serialize_pem();

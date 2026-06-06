@@ -450,17 +450,17 @@ fn lookup_required(
     install_hint: &str,
 ) -> Result<String> {
     for key in keys {
-        if let Ok(val) = std::env::var(key) {
-            if !val.is_empty() {
-                return Ok(val);
-            }
+        if let Ok(val) = std::env::var(key)
+            && !val.is_empty()
+        {
+            return Ok(val);
         }
     }
     for key in keys {
-        if let Some((_, val)) = env_file.iter().find(|(k, _)| k == key) {
-            if !val.is_empty() {
-                return Ok(val.clone());
-            }
+        if let Some((_, val)) = env_file.iter().find(|(k, _)| k == key)
+            && !val.is_empty()
+        {
+            return Ok(val.clone());
         }
     }
     bail!("none of {:?} set in the environment or `.env`. {}", keys, install_hint)
@@ -521,26 +521,26 @@ fn lima(action: LimaAction) -> Result<()> {
     // lets cargo aliases (e.g. `cargo verifier-regress`) that route
     // through `xtask lima run --` work transparently from both the host
     // and from inside the VM.
-    if let LimaAction::Run { no_sudo, ref args } = action {
-        if inside_lima() {
-            if args.is_empty() {
-                bail!("no command given; use `cargo xtask lima run -- cargo dst` etc.");
-            }
-            if no_sudo {
-                return sh("(lima passthrough)", Command::new(&args[0]).args(&args[1..]));
-            }
-            return sh(
-                "(lima passthrough, sudo)",
-                Command::new("sudo")
-                    .args(["-E", "env"])
-                    .arg(format!("PATH={}", std::env::var("PATH").unwrap_or_default()))
-                    .arg(format!(
-                        "CARGO_TARGET_DIR={}",
-                        std::env::var("CARGO_TARGET_DIR").unwrap_or_default()
-                    ))
-                    .args(args),
-            );
+    if let LimaAction::Run { no_sudo, ref args } = action
+        && inside_lima()
+    {
+        if args.is_empty() {
+            bail!("no command given; use `cargo xtask lima run -- cargo dst` etc.");
         }
+        if no_sudo {
+            return sh("(lima passthrough)", Command::new(&args[0]).args(&args[1..]));
+        }
+        return sh(
+            "(lima passthrough, sudo)",
+            Command::new("sudo")
+                .args(["-E", "env"])
+                .arg(format!("PATH={}", std::env::var("PATH").unwrap_or_default()))
+                .arg(format!(
+                    "CARGO_TARGET_DIR={}",
+                    std::env::var("CARGO_TARGET_DIR").unwrap_or_default()
+                ))
+                .args(args),
+        );
     }
 
     which_or_hint(

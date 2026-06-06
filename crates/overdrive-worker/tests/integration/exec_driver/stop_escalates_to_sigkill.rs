@@ -73,10 +73,10 @@ async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<()
             Ok(status) => {
                 if let Some(line) = status.lines().find(|l| l.starts_with("SigIgn:")) {
                     let hex = line.trim_start_matches("SigIgn:").trim();
-                    if let Ok(mask) = u64::from_str_radix(hex, 16) {
-                        if mask & SIGTERM_BIT != 0 {
-                            return Ok(());
-                        }
+                    if let Ok(mask) = u64::from_str_radix(hex, 16)
+                        && mask & SIGTERM_BIT != 0
+                    {
+                        return Ok(());
                     }
                 }
             }

@@ -191,7 +191,7 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
     );
 }
 
-fn spec_descriptors_len(spec: &overdrive_core::traits::driver::AllocationSpec) -> usize {
+const fn spec_descriptors_len(spec: &overdrive_core::traits::driver::AllocationSpec) -> usize {
     spec.probe_descriptors.len()
 }
 

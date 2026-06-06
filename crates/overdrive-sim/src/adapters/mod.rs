@@ -16,6 +16,7 @@
 
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
 
+pub mod ca;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod dataplane;
@@ -33,4 +34,5 @@ pub mod view_store;
 // slices 01-03.
 pub mod probers;
 
+pub use ca::SimCa;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};

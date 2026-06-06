@@ -82,7 +82,7 @@ fn resolve_node_id(config: &NodeConfig) -> Result<NodeId, NodeHealthWriteError> 
         ))
     })?;
     let hostname_str = hostname_os.into_string().map_err(|os| {
-        NodeHealthWriteError::IdResolve(format!("hostname is not valid UTF-8: {os:?}"))
+        NodeHealthWriteError::IdResolve(format!("hostname is not valid UTF-8: {}", os.display()))
     })?;
     NodeId::new(&hostname_str).map_err(|e| {
         NodeHealthWriteError::IdResolve(format!(

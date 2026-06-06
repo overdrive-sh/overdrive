@@ -1,0 +1,434 @@
+{
+  "roadmap": {
+    "project_id": "built-in-ca",
+    "created_at": "2026-06-05T00:00:00Z",
+    "total_steps": 17,
+    "goal": "Implement the platform's built-in X.509 Certificate Authority (GH #28): a persistent 3-tier trust hierarchy (root -> per-node intermediate pathLen=0 -> workload SVID with a single SPIFFE URI SAN) behind a Ca port trait, with the root key envelope-encrypted at rest (HKDF-SHA256 -> AES-256-GCM, KEK in kernel keyring via systemd-creds), an issued_certificates audit row, and DST-deterministic issuance. Turn the 39 RED scaffolds GREEN in trust-hierarchy dependency order.",
+    "notes": [
+      "TDD: every step turns one or more of the 39 authored RED scaffolds GREEN. The scaffolds (#[should_panic(expected = \"RED scaffold\")]) are the executable acceptance SSOT; distill/test-scenarios.md is the GIVEN/WHEN/THEN companion. GREEN replaces each panic! body with real assertions (L1/L2 default-lane) or real crypto/keyring calls (L3 integration-tests, Lima).",
+      "TECH STATE (do NOT plan a bump step): rcgen 0.14.8 (features = [\"ring\", \"pem\"], MSRV 1.88) is ALREADY committed (35958ecb); mint_ephemeral_ca is ALREADY migrated to the 0.14 Issuer API (Issuer::from_params(&params, &key) + 2-arg signed_by(&key, &issuer)). Crypto provider = ring (ECDSA P-256 + AES-256-GCM + HKDF-SHA256). aws-lc-rs + FIPS 140-3 Cert #4816 are deferred to #204. RcgenCa only confirms IsCa::Ca(BasicConstraints::Constrained(0)) / SanType::URI(Ia5String) / KeyUsagePurpose at first compile (all present in 0.14.8).",
+      "REUSE (HARD GATE): REUSE-AS-IS IntentStore, ObservationStore, Entropy, SpiffeId/CertSerial/NodeId (overdrive-core/src/id.rs), VersionedEnvelope/codec::envelope. CREATE-NEW (the 8): Ca trait, CertSpec, RcgenCa, SimCa, Kek port, RootCaKeyEnvelope, IssuedCertificateRow(Envelope), the AEAD codec. tls_bootstrap.rs is LEAVE-AS-IS (distinct consumer = control-plane HTTPS; do NOT touch beyond the already-done rcgen migration).",
+      "DECISIONS honored (ADR-0063 D1-D8 / DES-CA-1..10): Ca trait speaks project newtypes + typed PEM/DER byte newtypes, never rcgen types; root key = rkyv RootCaKeyEnvelope in IntentStore (intent, never observation); KEK in kernel keyring via systemd-creds; HKDF-from-KEK subkey -> AES-256-GCM (AAD = kek_id); pure CertSpec in core (host translates to rcgen::CertificateParams); serials via Entropy (key-gen via backend CSPRNG, not injectable); issued_certificates ObservationStore audit row; refuse-to-start (typed CaError + health.startup.refused) on decrypt/KEK-probe failure, never silent re-mint; single-node = exactly one intermediate; Earned-Trust probe (KEK-present + envelope-decrypt + credential-present) is wire->probe->use at the composition root.",
+      "WALKING SKELETON: realised across Slices 01->04 (root -> persist -> intermediate -> SVID -> full chain verifies). The single @walking_skeleton scenario is S-04-07 (rcgen_full_svid_chain_verifies_root_intermediate_svid), landed in step 04-03 -- the completion point of the skeleton, before the Slice-05 enhancements (the project-defined 'early' relative to Release 1).",
+      "DELIVER HANDOFF NOTE 1 (@error 40% bar): the 39 scaffolds carry 15 @error scenarios = 38.5%, one short of the BDD 40% target. To clear it WITHOUT new files, DELIVER MAY add one @error scenario to ca_cert_spec_policy.rs -- a wrong-trust-domain SpiffeId rejection (SVID request whose SpiffeId is outside the trust domain -> CertSpecError, distinct from InvalidSan). Attach to step 04-01 if taken. OPTIONAL and at DELIVER/reviewer discretion -- the eight scaffold files are the authored DISTILL SSOT; this is an additive in-file scenario, not a scaffold rewrite. If added, it is NOT one of the 39 mapped scenarios.",
+      "DELIVER HANDOFF NOTE 2 (trust_bundle wire-format): pin trust_bundle() to ADR-0063 D1 -- TrustBundle = root anchor + intermediate as untrusted chain material (typed byte newtype, e.g. TrustBundlePem). Cross-adapter mixing is NOT asserted (host and sim have different roots by construction); each adapter's own leaf verifies against its own bundle. Pinned in step 05-02 (S-05-02).",
+      "DELIVER HANDOFF NOTE 3 (no rcgen bump step): per TECH STATE above -- the DISTILL/ADR-0063-Consequences 'bump 0.13.2 -> 0.14.8 first-compile gate' framing is STALE; the bump and mint_ephemeral_ca migration are already committed. No step bumps rcgen.",
+      "OBSERVED STALENESS (orchestrator action): ADR-0063 § Consequences still states 'Target is rcgen 0.14.8; the workspace currently pins 0.13.2 -- the bump is a DELIVER first-compile gate' and the DISTILL handoff (feature-delta.md) still says 'bump rcgen 0.13.2 -> 0.14.8'. These are now factually wrong (rcgen 0.14 + Issuer-API migration committed in 35958ecb). The feature-delta DESIGN sections were corrected this pass; the ADR Consequences + DISTILL handoff were OUT of the architect's instructed edit scope (DESIGN-sections-only). Surfaced for the orchestrator to decide whether to correct the ADR/DISTILL via the architect.",
+      "TEST DISCIPLINE: L1 (overdrive-core CertSpec policy + schema_evolution golden-bytes) and L2 (overdrive-sim SimCa) run in the DEFAULT lane (no integration-tests feature). L3 (overdrive-host RcgenCa crypto + openssl verify; overdrive-control-plane boot/issuance/equivalence) are gated behind the integration-tests feature and run via Lima (cargo xtask lima run -- cargo nextest run ... --features integration-tests). The macOS --no-run compile gate is necessary but not sufficient for L3.",
+      "PARADIGM: this is a Rust workspace following object-oriented ports-and-adapters (@nw-software-crafter). The Hypothesis/assert_state_delta TEST PARADIGM MANDATE in the nw-roadmap skill is Python-specific and does NOT apply -- the project test discipline (.claude/rules/testing.md) is the authority: proptest for PBT (S-04-01/02 single-URI-SAN are PBT-full at L1), rkyv golden-bytes for schema evolution, example-based sad paths at L3, the ca_equivalence DST contract test as the structural guard. See feature-delta.md DISTILL § Mandate Compliance.",
+      "DEFERRALS cite real issues only: #40 (rotation lifecycle, needs #39 workflow primitive), #36 (multi-node per-node intermediates + node attestation), #204 (aws-lc-rs switch + FIPS), #39 (workflow primitive). No invented numbers."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 01 - Root CA behind the Ca port trait",
+      "description": "US-CA-01: rcgen + ring mint a SPIFFE-hierarchy self-signed P-256 root behind the Ca port trait, DST-deterministic via the sim adapter, openssl-verifiable via the host adapter. Lands the cross-cutting foundation (pure CertSpec policy, the Ca trait, CaError, handle/material newtypes) that every later slice builds on.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Core CertSpec sum type, root profile, error taxonomy",
+          "criteria": [
+            "CertRole sum type { Root, Intermediate { path_len }, Svid } exists in overdrive-core; invalid role/extension combinations are unrepresentable.",
+            "CertSpec::root() yields a profile that is CA:TRUE, carries keyCertSign and cRLSign, marks keyUsage critical, carries NO pathLen, and subject is the trust domain only (no path component).",
+            "CertSpecError variants are distinct per failure mode; an invalid SAN cardinality surfaces CertSpecError::InvalidSan, NOT a flattened Internal(String) catch-all.",
+            "overdrive-core stays dst-lint-clean (crate_class = core; no rcgen/ring/rand on its compile path)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/ca_cert_spec_policy.rs",
+          "scenario_name": "root_spec_is_self_signed_ca_with_key_cert_sign_and_crl_sign, cert_spec_error_variants_are_distinct_per_failure_mode",
+          "scenario_ids": "S-01-01, S-01-05",
+          "files_to_modify": [
+            "crates/overdrive-core/src/ca/cert_spec.rs",
+            "crates/overdrive-core/src/ca/mod.rs",
+            "crates/overdrive-core/src/lib.rs",
+            "crates/overdrive-core/tests/acceptance/ca_cert_spec_policy.rs"
+          ],
+          "deps": [],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "Pure L1 policy, default lane. Foundation of the feature: build the CertRole sum type + CertSpec builder + CertSpecError ONCE here; later slices (03-01 intermediate, 04-01 SVID) extend the same cert_spec.rs with the other role profiles -- this is per-slice extension forced by the slice-grouping mandate, NOT batchable into one step (each role carries distinct extensions/invariants). Per development.md type-driven design: make invalid states unrepresentable. CertSpecError per development.md 'Distinct failure modes get distinct error variants'. S-01-05 carries both @S-01 and @S-04 (cross-role error-taxonomy guard); it lands here with the error enum. DELIVER HANDOFF NOTE 1: if clearing the 40% @error bar, the wrong-trust-domain SpiffeId rejection scenario is a natural in-file addition here or at 04-01 (optional). Reuse SpiffeId/CertSerial from overdrive-core/src/id.rs as-is. PARADIGM: object-oriented Rust; the @error variant-distinctness is an example-based assertion, not PBT (PBT-full is reserved for the single-URI-SAN property at 04-01)."
+        },
+        {
+          "id": "01-02",
+          "name": "Ca trait, CaError, handles, plus SimCa root issuance",
+          "criteria": [
+            "Ca trait (root / issue_intermediate / issue_svid / trust_bundle) exists in overdrive-core/src/traits/ca.rs speaking project newtypes + typed PEM/DER byte newtypes, never rcgen types; every method rustdoc pins preconditions/postconditions/edge-cases/observable-invariants.",
+            "CaError and the handle/material newtypes (RootCaHandle, IntermediateHandle, SvidMaterial, SvidRequest, TrustBundle) exist with contract-observable accessors.",
+            "SimCa (overdrive-sim, adapter-sim) implements Ca::root() loading a fixture P-256 key; root() is bit-identical across two runs at the same seed (0x5EED).",
+            "SimCa takes its dependencies (fixture key, Kek, Entropy) as required constructor parameters, never defaulted."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs",
+          "scenario_name": "sim_ca_root_is_bit_identical_across_two_runs_at_same_seed",
+          "scenario_ids": "S-01-02",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/ca.rs",
+            "crates/overdrive-core/src/traits/mod.rs",
+            "crates/overdrive-sim/src/adapters/ca.rs",
+            "crates/overdrive-sim/src/adapters/mod.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "The Ca trait + CaError + handles ride with the first adapter that implements them (SimCa root). Trait-contract rigor per development.md 'Trait definitions specify behavior, not just signature' -- pin edge cases (empty SAN -> CaError::InvalidSan, re-issue distinct serial, pathLen=0 enforced, trust_bundle composition) even though they are exercised in later steps. Per ADR-0063 D1 the trait surface speaks newtypes only (CaCertPem/SvidMaterial/TrustBundlePem) so rcgen never reaches core. SimCa fixture key loaded via PEM (key-gen is NOT injectable -- research F11/ADR-0063 D7); serials via SeededEntropy through the existing Entropy port. Port-trait dependency discipline (development.md): constructor params required, no with_clock-style builder, no production-binding default. overdrive-sim owns turmoil/StdRng; the fixture key + SimCa stay in adapter-sim. PARADIGM: example-based L2 determinism (byte-equality across two same-seed runs), not PBT."
+        },
+        {
+          "id": "01-03",
+          "name": "RcgenCa root self-sign plus root profile equivalence",
+          "criteria": [
+            "RcgenCa (overdrive-host, adapter-host) implements Ca::root(): translates CertSpec::root() to rcgen::CertificateParams and self-signs a P-256 root via the ring backend.",
+            "openssl verify -CAfile root.pem root.pem exits 0; x509-parser confirms CA:TRUE, keyCertSign, keyUsage critical on the real cert bytes.",
+            "The contract-observable root profile (is_ca, key_usages, key_usage_critical, subject) is equivalent across RcgenCa (host) and SimCa (sim) via the trait accessors (key/serial bytes excluded -- sim fixture key differs by construction).",
+            "All rcgen/ring usage stays inside overdrive-host; overdrive-core compile path remains rcgen/ring-free."
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+          "scenario_name": "rcgen_root_is_a_valid_self_signed_ca_via_openssl_verify, ca_equivalence_root_profile_matches_across_host_and_sim",
+          "scenario_ids": "S-01-04, S-01-03",
+          "files_to_modify": [
+            "crates/overdrive-host/src/ca/rcgen_ca.rs",
+            "crates/overdrive-host/src/ca/mod.rs",
+            "crates/overdrive-host/src/lib.rs",
+            "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_equivalence.rs"
+          ],
+          "deps": ["01-01", "01-02"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, run via Lima. The root equivalence scenario (S-01-03) folds in here because this is the first step where BOTH adapters implement root() -- attaching it to the host step (rather than a standalone test-only step) keeps it from being validation-only and makes the equivalence the natural acceptance of the host adapter. The equivalence harness lives in overdrive-control-plane (the ONLY crate that dev-deps both overdrive-host and overdrive-sim -- the sim/host split is load-bearing per CLAUDE.md). NO rcgen bump: reuse the already-migrated 0.14 Issuer-API pattern from tls_bootstrap.rs::mint_ephemeral_ca (Issuer::from_params + 2-arg signed_by; self_signed for the root) -- but do NOT touch tls_bootstrap.rs (distinct consumer). Confirm SanType::URI(Ia5String) / IsCa / KeyUsagePurpose against 0.14.8 at first compile. openssl verify is a real subprocess per testing.md Tier 3 (assert on observable kernel/tool output, not internal reachability)."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 02 - Root CA key envelope-encrypted at rest",
+      "description": "US-CA-02: the root survives restart with its key protected by authenticated encryption (HKDF-SHA256 -> AES-256-GCM via ring), KEK in the kernel keyring delivered by systemd-creds. Decrypt/KEK-probe failure refuses startup (typed CaError + health.startup.refused), never silently re-mints. Guardrail K3: zero plaintext key bytes at rest.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "RootCaKeyEnvelope rkyv versioned envelope and golden bytes",
+          "criteria": [
+            "RootCaKeyRecordV1 payload + codec-internal RootCaKeyEnvelope { V1(..) } exist per ADR-0048: public alias-to-payload (pub type RootCaKeyRecord = RootCaKeyRecordV1), envelope NOT re-exported from lib.rs, writes go through RootCaKeyEnvelope::latest(..).",
+            "RootCaKeyRecordV1 persists inputs not derived state: kek_id, salt, info, nonce, ciphertext, aead_tag (the AEAD envelope fields) -- never a decoded key.",
+            "FIXTURE_V1 golden bytes round-trip: hex-decode -> rkyv-deserialise -> into_latest() equals the canonical Latest projection; discriminant_offset_from_end() agrees with an independent pin.",
+            "An unknown/forward envelope version surfaces EnvelopeError via probe_known_variant (intent fail-fast), not a garbage decode."
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution/root_ca_key.rs",
+          "scenario_name": "root_ca_key_envelope_v1_golden_bytes_roundtrip, root_ca_key_envelope_discriminant_offset_triangulates, root_ca_key_envelope_unknown_version_probe_surfaces_error",
+          "scenario_ids": "S-02-08, S-02-09, S-02-10",
+          "files_to_modify": [
+            "crates/overdrive-core/src/ca/root_key_envelope.rs",
+            "crates/overdrive-core/src/ca/mod.rs",
+            "crates/overdrive-core/tests/schema_evolution/root_ca_key.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 archive, default lane (pure rkyv, no I/O). Reuse VersionedEnvelope / codec::envelope / EnvelopeError / probe_known_variant as-is from overdrive-core/src/codec/envelope.rs. Per ADR-0048 + testing.md 'Archive schema-evolution roundtrip': existing FIXTURE_V1 literals are NEVER touched once minted; adding V2 later adds a new fixture + assertion in one commit. The typed codec (RootCaKeyRecord::archive_for_store / from_store_bytes) co-locates on the payload per ADR-0048 §4b; decode failure on the intent path emits health.startup.refused + IntentStoreError::Envelope (intent fail-fast -- asymmetric vs observation which logs-and-skips). dst-lint-clean (core). The discriminant-offset two-source pin is the structural defense against silent layout drift; see user memory feedback_rkyv_envelope_forward_traps for the known forward gaps to avoid."
+        },
+        {
+          "id": "02-02",
+          "name": "Kek port plus HKDF to AES-256-GCM root-key AEAD codec",
+          "criteria": [
+            "Kek provider port exists in overdrive-core (newtype KekId; provider yields raw 256-bit KEK bytes); no keyring/FFI in core.",
+            "The host AEAD codec seals the root key: HKDF-SHA256 derive a per-use subkey from the KEK (salt + info = overdrive/ca/root-key/v1), then AES-256-GCM-Seal with AAD = kek_id; open round-trips to byte-identical key DER under the same KEK.",
+            "The serialized RootCaKeyRecord (and its IntentStore blob) byte-scanned for the plaintext key DER finds ZERO occurrences (KPI K3, fail-closed).",
+            "A tampered ciphertext fails open with a distinct corrupt/tampered-envelope CaError; a wrong KEK fails with a distinct wrong-KEK CaError (the GCM auth tag + AAD distinguish them)."
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/rcgen_ca_root_key_envelope.rs",
+          "scenario_name": "root_key_envelope_seals_and_opens_round_trip_under_same_kek, root_key_envelope_contains_no_plaintext_key_bytes, root_key_envelope_tampered_ciphertext_fails_distinct_from_wrong_kek, root_key_envelope_wrong_kek_fails_distinct_from_tampered",
+          "scenario_ids": "S-02-01, S-02-02, S-02-03, S-02-04",
+          "files_to_modify": [
+            "crates/overdrive-core/src/ca/kek.rs",
+            "crates/overdrive-core/src/ca/mod.rs",
+            "crates/overdrive-host/src/ca/aead_codec.rs",
+            "crates/overdrive-host/src/ca/mod.rs",
+            "crates/overdrive-host/tests/integration/rcgen_ca_root_key_envelope.rs"
+          ],
+          "deps": ["02-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. ADR-0063 D4 (reconciliation A): HKDF-from-KEK over direct-AEAD buys domain separation (vary info) + a rotation seam (kek_id + per-seal salt) for #40/HSM at negligible cost. All HKDF-SHA256 + AES-256-GCM via ring (the workspace provider; aws-lc-rs/FIPS -> #204). The Kek PORT is core (pure, dst-lint-clean); the AEAD codec is host (ring FFI). Distinct error variants per development.md 'Distinct failure modes get distinct error variants' -- tampered vs wrong-KEK is an AC (AEAD auth tag distinguishes; AAD = kek_id defends KEK-confusion). K3 byte-scan is fail-closed: any plaintext-key occurrence fails. Persist inputs not derived state (development.md): store ciphertext + AEAD params, recompute (decrypt) on read."
+        },
+        {
+          "id": "02-03",
+          "name": "SystemdCredsKeyring Kek plus CA boot probe and refuse-to-start",
+          "criteria": [
+            "SystemdCredsKeyring (overdrive-host) implements the Kek port: systemd-creds LoadCredentialEncrypted -> kernel keyring (add_key/keyctl); the dev-only OVERDRIVE_CA_KEK fallback is gated and logged, refused in production unless explicitly opted in.",
+            "Control-plane boot wiring composes the CA, persists the envelope-encrypted root on first boot, and on subsequent boot decrypts and reuses the SAME root identity (same public key) across restart.",
+            "Earned-Trust probe (wire->probe->use) at the composition root: a persisted envelope that cannot be decrypted refuses startup with a typed CaError + health.startup.refused and mints NO new root.",
+            "An absent keyring KEK (and no dev opt-in) refuses startup before any issuance and generates NO throwaway KEK."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs",
+          "scenario_name": "root_ca_is_reused_across_control_plane_restart, boot_refuses_to_start_on_envelope_decrypt_failure_without_remint, boot_refuses_to_start_when_kek_absent_from_keyring",
+          "scenario_ids": "S-02-05, S-02-06, S-02-07",
+          "files_to_modify": [
+            "crates/overdrive-host/src/ca/keyring.rs",
+            "crates/overdrive-host/src/ca/mod.rs",
+            "crates/overdrive-control-plane/src/ca_boot.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs"
+          ],
+          "deps": ["02-01", "02-02", "01-03"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. ADR-0063 D3 + D8 Earned-Trust: the boot path probes (a) KEK present in keyring (keyctl/add_key round-trip) and (b) the persisted envelope decrypts (trial HKDF-derive + AES-GCM-open) BEFORE the control plane accepts traffic; failure refuses startup, never silent re-mint (a re-mint orphans every issued identity). Refuse-to-start is the composition-root invariant. RootCaKeyEnvelope persistence uses the existing IntentStore (LocalStore over redb) as-is -- CA material is intent, never observation (whitepaper §4). The exact control-plane file (ca_boot.rs vs extending the existing serve/bootstrap path) is a crafter HOW-decision; create a focused module rather than bloating an existing handler. Cgroup-free boot path -- the refuse-to-start scenarios assert startup outcome + health.startup.refused + absence of a newly-minted root (fail-closed universe). systemd-creds + kernel keyring are Linux production ABIs probed via Earned-Trust (not network services -> no consumer-driven contract tests needed). Tests run as root via cargo xtask lima run --."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 03 - Per-node intermediate CA, pathLen-constrained",
+      "description": "US-CA-03: the platform issues a pathLen=0 node intermediate signed by the root, bounding node-compromise blast radius. Single-node = exactly one intermediate. pathLen=0 is enforced (a chain where the intermediate signs a further CA fails verification), not merely set. Signing failure fails node bootstrap loudly.",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Core CertSpec intermediate profile pathLen zero",
+          "criteria": [
+            "CertSpec::intermediate() yields a profile that is CA:TRUE with pathLenConstraint=0 (CertRole::Intermediate { path_len: 0 }), carries keyCertSign, and marks keyUsage critical.",
+            "The profile is pure core policy (dst-lint-clean); the sum type makes the pathLen an explicit field, not a sentinel.",
+            "The intermediate profile shares the same CertSpec surface the host and sim adapters consume (no divergent shortcut)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/ca_cert_spec_policy.rs",
+          "scenario_name": "intermediate_spec_is_ca_true_with_path_len_zero_and_key_cert_sign",
+          "scenario_ids": "S-03-01",
+          "files_to_modify": [
+            "crates/overdrive-core/src/ca/cert_spec.rs",
+            "crates/overdrive-core/tests/acceptance/ca_cert_spec_policy.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 pure, default lane. Extends the cert_spec.rs sum type from 01-01 with the Intermediate role profile -- a distinct role with distinct extensions (CA:TRUE + pathLen=0 + keyCertSign), placed in this slice per the slice-grouping mandate (NOT a batch-duplicate of 01-01/04-01; each role profile is a separate invariant). Per ADR-0063 D5 the pathLen lives in core policy so it is DST-testable and shared by both adapters. The 0.14.8 mapping is IsCa::Ca(BasicConstraints::Constrained(0)) (confirmed present) -- but that translation is the host adapter's job (03-03), not core's. PARADIGM: example-based profile assertion."
+        },
+        {
+          "id": "03-02",
+          "name": "SimCa intermediate issuance chains to fixture root",
+          "criteria": [
+            "SimCa::issue_intermediate(&node) issues a deterministic intermediate: both material and serial are byte-identical across two runs at the same seed.",
+            "The issued intermediate chains to the fixture root (issuer linkage observable via the trait accessor).",
+            "Serial is drawn via SeededEntropy through the existing Entropy port."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs",
+          "scenario_name": "sim_ca_intermediate_is_deterministic_and_chains_to_fixture_root",
+          "scenario_ids": "S-03-02",
+          "files_to_modify": [
+            "crates/overdrive-sim/src/adapters/ca.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs"
+          ],
+          "deps": ["01-02", "03-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L2 sim, default lane. Extends SimCa (from 01-02) with issue_intermediate. Deterministic = serial via SeededEntropy + fixture intermediate key loaded via PEM (key-gen not injectable). Chains-to-fixture-root is an observable linkage (the intermediate's issuer == the fixture root's subject/serial). Per CLAUDE.md ordered-collection discipline and testing.md K3 seed->bit-identical: the two-run byte-equality is the determinism assertion. PARADIGM: example-based L2 determinism."
+        },
+        {
+          "id": "03-03",
+          "name": "RcgenCa intermediate signed-by root, pathLen enforced, equivalence",
+          "criteria": [
+            "RcgenCa::issue_intermediate signs an intermediate by the root (rcgen Issuer::from_params + 2-arg signed_by), CA:TRUE, pathLenConstraint=0, keyCertSign, keyUsage critical.",
+            "openssl verify -CAfile root.pem intermediate.pem exits 0; x509-parser confirms CA:TRUE, pathLen=0, keyCertSign, keyUsage critical on real bytes.",
+            "pathLen=0 is ENFORCED not merely set: a constructed root -> intermediate -> further-CA chain fails openssl verification (non-zero exit).",
+            "The intermediate contract-observable profile (is_ca, path_len, chains_to_root, key_usages) is equivalent across host and sim adapters."
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+          "scenario_name": "rcgen_intermediate_chains_to_root_via_openssl_verify, rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced, ca_equivalence_intermediate_profile_matches_across_host_and_sim",
+          "scenario_ids": "S-03-04, S-03-05, S-03-03",
+          "files_to_modify": [
+            "crates/overdrive-host/src/ca/rcgen_ca.rs",
+            "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_equivalence.rs"
+          ],
+          "deps": ["01-03", "03-01", "03-02"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. Extends RcgenCa (from 01-03) with issue_intermediate; intermediate equivalence (S-03-03) folds in here (both adapters now implement issue_intermediate). pathLen=0 ENFORCEMENT (S-03-05) is the load-bearing sad path: build a real root->intermediate->further-CA chain and assert openssl verify FAILS -- proves the constraint is honored by the verifier, not just present in the cert (research Finding 4). Reuse the 0.14 signed_by pattern from mint_ephemeral_ca (do NOT touch tls_bootstrap.rs). IsCa::Ca(BasicConstraints::Constrained(0)) is the 0.14.8 translation. openssl verify is a real subprocess (Tier 3: assert on tool exit/output, not internal reachability)."
+        },
+        {
+          "id": "03-04",
+          "name": "Node-bootstrap intermediate issuance fails loudly on signing failure",
+          "criteria": [
+            "Node-bootstrap wiring issues the single node intermediate at bootstrap (single-node = one node -> one intermediate).",
+            "When the root key is unavailable (decrypt failed upstream), issue_intermediate surfaces a typed CaError and node bootstrap fails loudly.",
+            "No half-provisioned workload state is left behind on intermediate-signing failure."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs",
+          "scenario_name": "intermediate_signing_failure_fails_node_bootstrap_loudly",
+          "scenario_ids": "S-03-06",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/ca_boot.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs"
+          ],
+          "deps": ["02-03", "03-03"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. Wires intermediate issuance into the node-bootstrap path (single-node: one intermediate, no node-registration verb -- multi-node per-node intermediates + node attestation are #36). Loud-fail per ADR-0063: a signing failure (root key unavailable) surfaces a typed CaError; the node does not run workloads it cannot identify, and leaves no half-provisioned state (reconciler-discipline: no adopt-and-skip of a partial). Extends the ca_boot.rs module from 02-03. Universe: node-bootstrap outcome (fails loudly) + absence of half-provisioned state (fail-closed). Example-based sad path (Mandate 11)."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Slice 04 - Workload SVID with single SPIFFE URI SAN (walking skeleton)",
+      "description": "US-CA-04: mint a SPIFFE-spec-compliant SVID (exactly one spiffe:// URI SAN, CA:FALSE, keyUsage=digitalSignature critical, ~1h TTL, CSPRNG serial via Entropy) that validates through the full 3-tier chain. COMPLETES THE WALKING SKELETON (S-04-07: full Root->Intermediate->SVID chain verifies under openssl verify). KPI K2: the single-URI-SAN invariant is enforced (0 or >=2 rejected pre-issuance), DST-deterministic serials (K5).",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Core CertSpec SVID profile and single-URI-SAN invariant (PBT)",
+          "criteria": [
+            "CertSpec::svid(..) yields a leaf: CA:FALSE, exactly one URI SAN equal to the requested SpiffeId, keyUsage=digitalSignature critical, NO keyCertSign/cRLSign.",
+            "For any SpiffeId yielding exactly one spiffe:// URI SAN the profile is a spec-compliant leaf (proptest property over a SpiffeId strategy).",
+            "For any SAN projection yielding zero or two-or-more URI SANs, CertSpec::svid returns Err(CertSpecError::InvalidSan) before any partial spec escapes (proptest property, KPI K2 negative).",
+            "The sole URI SAN preserves the SpiffeId newtype's canonical-lowercase form exactly (e.g. spiffe://overdrive.local/job/payments/alloc/a1b2c3)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/ca_cert_spec_policy.rs",
+          "scenario_name": "svid_spec_carries_exactly_one_uri_san_and_leaf_key_usage, svid_spec_rejects_zero_or_multiple_uri_sans_before_any_cert, svid_spec_subject_uri_equals_requested_spiffe_id",
+          "scenario_ids": "S-04-01, S-04-02, S-04-03",
+          "files_to_modify": [
+            "crates/overdrive-core/src/ca/cert_spec.rs",
+            "crates/overdrive-core/tests/acceptance/ca_cert_spec_policy.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 pure, default lane, PBT-FULL at GREEN. The single-URI-SAN invariant (KPI K2) is the highest-value invariant in the feature -- per ADR-0063 D5 it lives in core (CertSpec::svid precondition), so it is DST-testable and dst-lint-clean. PARADIGM (mandatory here, the one PBT-full step): S-04-01 and S-04-02 are proptest! properties -- S-04-01 over a SpiffeId strategy yielding exactly one spiffe:// URI; S-04-02 over a strategy generating 0 and >=2 URI-SAN inputs, asserting Err(CertSpecError::InvalidSan) for every case with no partial spec escaping (Hebert ch.6 negative testing). S-04-03 is the example-pinned readability companion. Reuse SpiffeId (overdrive-core/src/id.rs) + its Arbitrary impl if present (generators live next to the types per testing.md); if absent, add the strategy. DELIVER HANDOFF NOTE 1: the optional wrong-trust-domain SpiffeId rejection @error scenario (to clear the 40% bar) is a natural addition to this file."
+        },
+        {
+          "id": "04-02",
+          "name": "SimCa SVID issuance, deterministic 64-bit serial, single URI SAN",
+          "criteria": [
+            "SimCa::issue_svid(&req) mints an SVID whose serial (drawn via SeededEntropy::fill) is byte-identical across two runs at seed 0x5EED.",
+            "Each serial is at least 64 bits wide (CA/B Forum floor, research Finding 10).",
+            "The sim SVID carries exactly one URI SAN equal to the SpiffeId and is CA:FALSE (shares the core CertSpec policy, no divergent sim shortcut)."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs",
+          "scenario_name": "sim_ca_svid_serial_is_deterministic_and_at_least_64_bits, sim_ca_svid_carries_single_uri_san_and_is_not_a_ca",
+          "scenario_ids": "S-04-04, S-04-05",
+          "files_to_modify": [
+            "crates/overdrive-sim/src/adapters/ca.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs"
+          ],
+          "deps": ["01-02", "04-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L2 sim, default lane. Extends SimCa (from 01-02) with issue_svid -- consuming the SAME CertSpec::svid policy from 04-01 (proving the sim does not diverge on the single-URI-SAN rule). Serial via SeededEntropy through the Entropy port -> DST-deterministic (two same-seed runs byte-identical); >=64-bit width assertion (serial.len()*8 >= 64). Fixture leaf signed by the fixture intermediate. PARADIGM: example-based L2 determinism + profile assertion (the generative single-URI-SAN PROPERTY is at L1/04-01; L2 asserts the sim honors it for the example SpiffeId)."
+        },
+        {
+          "id": "04-03",
+          "name": "RcgenCa SVID, full chain verifies (walking skeleton), leaf profile, bad-SAN reject",
+          "criteria": [
+            "RcgenCa::issue_svid mints a real SVID (serial via Entropy) signed by the node intermediate; WALKING SKELETON: openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem exits 0.",
+            "The real SVID leaf carries exactly one URI SAN equal to the SpiffeId, CA:FALSE, keyUsage=digitalSignature critical, NO keyCertSign/cRLSign, validity ~1h (x509-parser on real bytes).",
+            "A SvidRequest whose SpiffeId would yield zero or >=2 URI SANs is rejected with CaError::InvalidSan before producing any certificate bytes (the core guard fires in the host adapter).",
+            "All rcgen/ring usage stays in overdrive-host."
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+          "scenario_name": "rcgen_full_svid_chain_verifies_root_intermediate_svid, rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile, rcgen_svid_request_with_bad_san_cardinality_is_rejected_pre_issuance",
+          "scenario_ids": "S-04-07 (walking_skeleton), S-04-08, S-04-09",
+          "files_to_modify": [
+            "crates/overdrive-host/src/ca/rcgen_ca.rs",
+            "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs"
+          ],
+          "deps": ["01-03", "03-03", "04-01", "04-02"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. THE WALKING-SKELETON COMPLETION (S-04-07, @walking_skeleton): the headline end-to-end proof -- a real workload SVID chain-verifies Root->Intermediate->SVID via openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem -> exit 0. Litmus (Dim 5): Sam runs openssl verify himself and confirms the workload identity validates to the root. Requires the full chain from prior steps (root 01-03, intermediate 03-03). serial via the Entropy port (OsEntropy in prod). SVID = SanType::URI(Ia5String) single SAN, CA:FALSE, keyUsage=digitalSignature critical, ~1h TTL (research Finding 6). Bad-SAN rejection (S-04-09): the CertSpec::svid core guard fires inside the host adapter -> CaError::InvalidSan before any cert bytes. No operator CLI verb (D-CA-4) -- openssl verify is the honest external entry point. NO rcgen bump (already 0.14.8)."
+        },
+        {
+          "id": "04-04",
+          "name": "SVID and bad-SAN equivalence across host and sim adapters",
+          "criteria": [
+            "The SVID contract-observable profile (is_ca, san_uris cardinality+value, key_usages, issuer_linkage) is equivalent across RcgenCa (host) and SimCa (sim) for the same SpiffeId; both leaves are CA:FALSE with exactly one URI SAN and keyUsage=digitalSignature critical.",
+            "A bad-SAN request (SpiffeId yielding 0 or >=2 URI SANs) is rejected identically by both adapters with the SAME CaError::InvalidSan before any cert (the policy lives in core, not the adapter).",
+            "The SvidMaterial / SVID-handle contract-observable accessor surface (san_uris, is_ca, key_usages, issuer_linkage) is finalized on the Ca trait types."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/ca_equivalence.rs",
+          "scenario_name": "ca_equivalence_svid_profile_matches_across_host_and_sim, ca_equivalence_bad_san_request_rejected_identically_by_both",
+          "scenario_ids": "S-04-06, S-04-10",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/ca.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_equivalence.rs"
+          ],
+          "deps": ["04-02", "04-03"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. The SVID equivalence is the highest-value structural guard in the feature (development.md 'The DST equivalence test is the structural guard') -- it proves the sim adapter does not diverge on the K2 single-URI-SAN policy from the host adapter. NOT validation-only: this step finalizes the SvidMaterial / SVID-handle contract-observable accessor surface on overdrive-core/src/traits/ca.rs (san_uris cardinality+value, is_ca, key_usages, issuer_linkage) -- the first point the full SVID observable surface is asserted cross-adapter. Error parity (S-04-10): both adapters reject bad-SAN with the SAME CaError::InvalidSan before any cert (ADR-0063 A2 -- policy in core, not adapter). Cross-adapter mixing is NOT asserted (host/sim different roots). The equivalence harness lives in overdrive-control-plane (only crate dev-deping both host + sim)."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Slice 05 - Trust bundle, issued-cert audit, re-issue on demand",
+      "description": "US-CA-05: an SVID validates against the platform-composed trust bundle, every issuance writes an issued_certificates audit row (no silent issuance), and re-issue works without a control-plane restart -- the mechanism the #40 rotation workflow will drive. Adds the IssuedCertificateRow rkyv envelope (mirroring AllocStatusRow/NodeHealthRow) and pins the trust_bundle() wire-format from ADR-0063 D1.",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "IssuedCertificateRow rkyv versioned envelope and golden bytes",
+          "criteria": [
+            "IssuedCertificateRowV1 payload + codec-internal IssuedCertificateRowEnvelope { V1(..) } exist per ADR-0048, mirroring the AllocStatusRow/NodeHealthRow alias-to-payload + ...V1 envelope pattern; columns serial, spiffe_id, issuer_serial, not_before, not_after, node_id, issued_at.",
+            "FIXTURE_V1 golden bytes round-trip: hex-decode -> rkyv-deserialise -> into_latest() equals the canonical Latest projection; discriminant_offset_from_end() agrees with an independent pin.",
+            "An unknown/forward audit-row version surfaces EnvelopeError via probe_known_variant; the observation decode path logs-and-skips the row (convergence proceeds for surviving rows -- observation tolerates, asymmetric vs intent)."
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution/issued_certificate_row.rs",
+          "scenario_name": "issued_certificate_row_envelope_v1_golden_bytes_roundtrip, issued_certificate_row_envelope_discriminant_offset_triangulates, issued_certificate_row_envelope_unknown_version_probe_surfaces_error",
+          "scenario_ids": "S-05-06, S-05-07, S-05-08",
+          "files_to_modify": [
+            "crates/overdrive-core/src/ca/issued_certificate_row.rs",
+            "crates/overdrive-core/src/ca/mod.rs",
+            "crates/overdrive-core/tests/schema_evolution/issued_certificate_row.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 archive, default lane (pure rkyv). Mirror the AllocStatusRow/NodeHealthRow envelope pattern in overdrive-core/src/traits/observation_store.rs (per ADR-0063 D6 + brief Reuse evidence); the crafter MAY co-locate the new row in observation_store.rs instead of a separate ca/issued_certificate_row.rs if that better matches the existing pattern (HOW-decision). This is an OBSERVATION row (the record of what was issued) -- never intent (the CA material is intent, D2). Asymmetric unknown-version handling: observation logs-and-skips (vs intent fail-fast at 02-01). Reuse VersionedEnvelope/codec::envelope/EnvelopeError as-is. Existing FIXTURE_V1 literals never touched once minted (ADR-0048). dst-lint-clean. See user memory feedback_rkyv_envelope_forward_traps."
+        },
+        {
+          "id": "05-02",
+          "name": "trust_bundle on both adapters, re-issue distinct leaf, bundle equivalence",
+          "criteria": [
+            "Ca::trust_bundle() returns a TrustBundle = root anchor + intermediate as untrusted chain material (ADR-0063 D1 wire-format), implemented on both RcgenCa and SimCa; each adapter's own leaf verifies against its own bundle.",
+            "The trust-bundle composition shape (root_anchor, intermediate_as_untrusted_chain) is equivalent across host and sim via the trait accessors (cross-adapter mixing NOT asserted -- different roots).",
+            "SimCa re-issue for the SAME SpiffeId in sequence yields a fresh, distinct leaf (distinct serial, new validity window); no per-SpiffeId cached leaf is reused."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/ca_equivalence.rs",
+          "scenario_name": "ca_equivalence_trust_bundle_shape_matches_across_host_and_sim, sim_ca_reissue_for_same_spiffe_id_yields_a_fresh_distinct_leaf",
+          "scenario_ids": "S-05-02, S-05-01",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/ca.rs",
+            "crates/overdrive-host/src/ca/rcgen_ca.rs",
+            "crates/overdrive-sim/src/adapters/ca.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_equivalence.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs"
+          ],
+          "deps": ["01-02", "01-03", "04-04"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "DELIVER HANDOFF NOTE 2 -- PIN the trust_bundle() wire-format from ADR-0063 D1: TrustBundle (typed byte newtype, e.g. TrustBundlePem) = root anchor + intermediate as untrusted chain material. The trait surface speaks the typed bundle newtype, never rcgen types. Cross-adapter mixing is NOT asserted (host and sim have different roots by construction); the assertion is each adapter's own leaf verifies against its own bundle (host leaf vs host bundle via openssl verify; sim leaf vs sim bundle via the sim's verify path). S-05-01 (re-issue distinct leaf, L2 sim, default lane) proves determinism is per-call-sequence, NOT per-SpiffeId-cached -- two consecutive issue_svid for the same SpiffeId yield distinct serials/validity. This step spans L2 (sim re-issue, default lane in sim_ca_deterministic.rs) and L3 (bundle equivalence, gated in ca_equivalence.rs); the two test files run in their respective lanes. trust_bundle lands on the Ca trait type (TrustBundle) + both adapters."
+        },
+        {
+          "id": "05-03",
+          "name": "Issuance writes audit row, no silent issuance, re-issue without restart",
+          "criteria": [
+            "Every issuance writes an issued_certificates ObservationStore row; read back via the ObservationStore the row's serial, spiffe_id, and issuer_serial match the minted cert.",
+            "An issuance whose issued_certificates row cannot be written surfaces a CaError and hands out NO unaudited certificate (issuance is never silent).",
+            "An SVID is re-issued on demand for an existing SpiffeId (fresh leaf, distinct serial, new validity) with NO control-plane restart."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs",
+          "scenario_name": "issuance_writes_issued_certificates_row_matching_the_minted_cert, issuance_that_cannot_write_audit_row_surfaces_an_error, svid_is_reissued_on_demand_without_control_plane_restart",
+          "scenario_ids": "S-05-03, S-05-04, S-05-05",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/ca_issuance.rs",
+            "crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs"
+          ],
+          "deps": ["05-01", "05-02", "04-03", "02-03"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L3, gated integration-tests, Lima. Wires SVID issuance into the workload-start path with the issued_certificates audit write. ADR-0063 D6: the row is OBSERVATION (gossiped when #36 lands; single-node = local), written via the existing ObservationStore (mirroring alloc_status/node_health plumbing) -- reuse as-is. No silent issuance (S-05-04): bind issuance + audit so an audit-write failure surfaces CaError and no unaudited cert escapes (issuance + audit observable together). Re-issue without restart (S-05-05): re-issue is on-demand on the running control plane -- the #40 rotation workflow will drive the scheduled trigger (this provides only the mechanism). The exact control-plane file (ca_issuance.rs vs extending the workload-lifecycle path) is a crafter HOW-decision; create a focused module. Read-back uses the ObservationStore accessor (the issued_certificates row is the operator-observable surface via the existing alloc status path -- graduates to verification expectation O05). Example-based sad path for S-05-04."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/ca/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-sim/src/adapters/",
+      "crates/overdrive-host/src/ca/",
+      "crates/overdrive-control-plane/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/acceptance/",
+      "crates/overdrive-core/tests/schema_evolution/",
+      "crates/overdrive-sim/tests/acceptance/",
+      "crates/overdrive-host/tests/integration/",
+      "crates/overdrive-control-plane/tests/integration/"
+    ],
+    "excluded_patterns": [
+      "crates/overdrive-control-plane/src/tls_bootstrap.rs"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  }
+}

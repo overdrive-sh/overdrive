@@ -503,26 +503,24 @@ impl WorkloadLifecycle {
                 // re-emit. Without this guard the action shim's
                 // level-triggered re-enqueue would emit FinalizeFailed
                 // every tick forever once the alloc reached terminal.
-                if desired.workload_kind == WorkloadKind::Job {
-                    if let Some(terminal_alloc) =
+                if desired.workload_kind == WorkloadKind::Job
+                    && let Some(terminal_alloc) =
                         active_allocs_vec.iter().find(|r| is_natural_exit(r))
-                    {
-                        if matches!(
-                            terminal_alloc.terminal,
-                            Some(
-                                TerminalCondition::Completed { .. }
-                                    | TerminalCondition::Failed { .. }
-                            )
-                        ) {
-                            return (Vec::new(), view.clone());
-                        }
-                        let typed = classify_natural_exit_terminal(terminal_alloc);
-                        let action = Action::FinalizeFailed {
-                            alloc_id: terminal_alloc.alloc_id.clone(),
-                            terminal: Some(typed),
-                        };
-                        return (vec![action], view.clone());
+                {
+                    if matches!(
+                        terminal_alloc.terminal,
+                        Some(
+                            TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. }
+                        )
+                    ) {
+                        return (Vec::new(), view.clone());
                     }
+                    let typed = classify_natural_exit_terminal(terminal_alloc);
+                    let action = Action::FinalizeFailed {
+                        alloc_id: terminal_alloc.alloc_id.clone(),
+                        terminal: Some(typed),
+                    };
+                    return (vec![action], view.clone());
                 }
 
                 // Failed alloc with attempt budget remaining and

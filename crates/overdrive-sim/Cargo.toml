@@ -67,9 +67,10 @@ color-eyre.workspace     = true
 # `integration-tests` — workspace-wide convention. Every workspace
 # member declares this feature so `cargo {check,test,mutants}
 # --features integration-tests` resolves uniformly under per-package
-# scoping. This crate has no integration-shaped tests of its own — the
-# declaration is a deliberate no-op. See `.claude/rules/testing.md`
-# §"Integration vs unit gating".
+# scoping. Gates the real-crypto `sim_ca_fixture_cert_key_match`
+# integration scenario (parses the `SimCa` fixture key/cert bytes via
+# `rcgen` / `x509-parser`) out of the default unit lane. See
+# `.claude/rules/testing.md` §"Integration vs unit gating".
 integration-tests = []
 
 [dev-dependencies]
@@ -83,6 +84,15 @@ proptest.workspace = true
 # every `ObservationStore` adapter exercises this harness from its
 # own test suite to enforce the LWW contract at trait level.
 overdrive-core = { workspace = true, features = ["test-utils"] }
+# Dev-dep ONLY — the `sim_ca_fixture_cert_key_match` integration test parses
+# the `SimCa` fixture leaf key/cert bytes to prove cert↔key correspondence
+# (mirrors the host adapter's `rcgen_svid_returns_matching_leaf_private_key`
+# proof, ported to the sim consts). `overdrive-sim` MUST NOT gain these in
+# `[dependencies]` — the sim treats fixture material as opaque bytes and never
+# parses real crypto on its production path (the dst-lint discipline applies to
+# `[dependencies]`, not the test-only graph). Gated behind `integration-tests`.
+rcgen.workspace        = true
+x509-parser.workspace  = true
 
 [lints]
 workspace = true

@@ -382,10 +382,9 @@ impl Reconciler for ServiceMapHydrator {
                 entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
             } else if let Some(ServiceHydrationStatus::Completed { fingerprint, .. }) =
                 actual_status
+                && *fingerprint == desired_svc.fingerprint
             {
-                if *fingerprint == desired_svc.fingerprint {
-                    next_view.retries.remove(service_id);
-                }
+                next_view.retries.remove(service_id);
             }
         }
 

@@ -782,21 +782,19 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
             // `error` field if present (the action shim threads
             // `prior_row.detail` / `prior_row.stderr_tail` onto the
             // wire row body's `error` field).
-            if matches!(verdict, JobVerdict::Failed) {
-                if let Some(last) = out.rows.last() {
-                    if let Some(err) = &last.error {
-                        if !err.is_empty() {
-                            s.push('\n');
-                            let _ = writeln!(
-                                s,
-                                "stderr (last {} lines):",
-                                overdrive_core::traits::driver::STDERR_TAIL_LINES
-                            );
-                            for line in err.lines() {
-                                let _ = writeln!(s, "  {line}");
-                            }
-                        }
-                    }
+            if matches!(verdict, JobVerdict::Failed)
+                && let Some(last) = out.rows.last()
+                && let Some(err) = &last.error
+                && !err.is_empty()
+            {
+                s.push('\n');
+                let _ = writeln!(
+                    s,
+                    "stderr (last {} lines):",
+                    overdrive_core::traits::driver::STDERR_TAIL_LINES
+                );
+                for line in err.lines() {
+                    let _ = writeln!(s, "  {line}");
                 }
             }
             s
@@ -1160,11 +1158,11 @@ pub fn format_service_failed_block(
         );
     }
 
-    if let Some(detail) = stderr_tail {
-        if !detail.is_empty() {
-            let _ = writeln!(s, "  last-event: {detail}");
-            let _ = writeln!(s, "  stderr_tail: \"{detail}\"");
-        }
+    if let Some(detail) = stderr_tail
+        && !detail.is_empty()
+    {
+        let _ = writeln!(s, "  last-event: {detail}");
+        let _ = writeln!(s, "  stderr_tail: \"{detail}\"");
     }
 
     let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");

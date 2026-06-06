@@ -79,7 +79,7 @@ pub fn classify_http_status(code: u16) -> ProbeOutcome {
 /// 250ms"`).
 fn format_duration(d: Duration) -> String {
     let total_ms = d.as_millis();
-    if total_ms >= 1000 && total_ms % 1000 == 0 {
+    if total_ms >= 1000 && total_ms.is_multiple_of(1000) {
         format!("{}s", d.as_secs())
     } else if total_ms >= 1000 {
         format!("{:.1}s", d.as_secs_f64())

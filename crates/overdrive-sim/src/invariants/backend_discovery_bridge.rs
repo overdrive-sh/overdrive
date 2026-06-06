@@ -230,14 +230,13 @@ async fn scenario_single_alloc() -> Result<(), String> {
             .service_backends_rows(&sid)
             .await
             .map_err(|e| format!("service_backends_rows: {e}"))?;
-        if let Some(row) = rows.first() {
-            if row.backends.len() == 1
-                && row.vip == Ipv4Addr::new(10, 1, 0, 1)
-                && row.updated_at.writer == writer_node_id()
-                && row.updated_at.counter == u64::from(tick_idx).saturating_add(1)
-            {
-                return Ok(());
-            }
+        if let Some(row) = rows.first()
+            && row.backends.len() == 1
+            && row.vip == Ipv4Addr::new(10, 1, 0, 1)
+            && row.updated_at.writer == writer_node_id()
+            && row.updated_at.counter == u64::from(tick_idx).saturating_add(1)
+        {
+            return Ok(());
         }
     }
 
@@ -276,10 +275,10 @@ async fn scenario_multi_alloc() -> Result<(), String> {
             .service_backends_rows(&sid)
             .await
             .map_err(|e| format!("service_backends_rows: {e}"))?;
-        if let Some(row) = rows.first() {
-            if row.backends.len() == 3 {
-                return Ok(());
-            }
+        if let Some(row) = rows.first()
+            && row.backends.len() == 3
+        {
+            return Ok(());
         }
     }
 
@@ -330,10 +329,11 @@ async fn scenario_alloc_replacement() -> Result<(), String> {
             .service_backends_rows(&sid)
             .await
             .map_err(|e| format!("service_backends_rows: {e}"))?;
-        if let Some(row) = rows.first() {
-            if row.backends.len() == 1 && row.updated_at.counter > first_counter {
-                return Ok(());
-            }
+        if let Some(row) = rows.first()
+            && row.backends.len() == 1
+            && row.updated_at.counter > first_counter
+        {
+            return Ok(());
         }
     }
 

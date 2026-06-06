@@ -43,6 +43,17 @@ mod integration {
     #[path = "../common/dataplane_lo.rs"]
     pub mod dataplane_lo;
 
+    // built-in-ca (GH #28) — DISTILL RED scaffolds. `ca_equivalence` is the
+    // central `Ca` trait-contract enforcement test driving BOTH `RcgenCa`
+    // (host) and `SimCa` (sim) through the same call sequence (ADR-0063 D8;
+    // development.md § "The DST equivalence test is the structural guard").
+    // This crate is the only home — it dev-deps both host and sim adapters.
+    // `ca_boot_and_audit` proves the consumer wiring: refuse-to-start
+    // (Earned Trust), root reuse across restart, audit-row write, no silent
+    // issuance, re-issue without restart.
+    mod ca_boot_and_audit;
+    mod ca_equivalence;
+
     mod concurrent_submit_toctou;
     /// Action-shim `deregister_local_backend::dispatch` mutation kill
     /// per ADR-0053 § 3 — asserts the post-dispatch observable state

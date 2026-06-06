@@ -94,10 +94,10 @@ pub async fn evaluate_backend_set_swap_atomic() -> InvariantResult {
         observer_handles.push(tokio::spawn(async move {
             let mut snapshots: Vec<Vec<Backend>> = Vec::new();
             for _ in 0..POLLS_PER_OBSERVER {
-                if let Some(snapshot) = dp.service_backends(vip) {
-                    if snapshots.last().is_none_or(|prev| *prev != snapshot) {
-                        snapshots.push(snapshot);
-                    }
+                if let Some(snapshot) = dp.service_backends(vip)
+                    && snapshots.last().is_none_or(|prev| *prev != snapshot)
+                {
+                    snapshots.push(snapshot);
                 }
                 tokio::task::yield_now().await;
             }

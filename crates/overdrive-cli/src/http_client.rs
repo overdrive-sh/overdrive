@@ -513,10 +513,10 @@ fn has_rustls_cert_error(err: &reqwest::Error) -> bool {
     while let Some(cause) = source {
         // Direct downcast: rustls::Error appears in the chain when a
         // cert-verification failure was the immediate TLS fault.
-        if let Some(rustls_err) = cause.downcast_ref::<rustls::Error>() {
-            if matches!(rustls_err, rustls::Error::InvalidCertificate(_)) {
-                return true;
-            }
+        if let Some(rustls_err) = cause.downcast_ref::<rustls::Error>()
+            && matches!(rustls_err, rustls::Error::InvalidCertificate(_))
+        {
+            return true;
         }
         // Fallback: rustls' webpki/aws-lc-rs verifier errors are
         // sometimes wrapped (e.g. via std::io::Error or hyper-tls

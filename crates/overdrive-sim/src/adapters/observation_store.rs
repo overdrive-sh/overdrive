@@ -54,9 +54,10 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
+use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::id::{AllocationId, NodeId, ServiceId};
+use overdrive_core::id::{AllocationId, CertSerial, NodeId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
@@ -120,6 +121,13 @@ struct PeerState {
     /// the latest observed outcome; LWW resolution on
     /// `last_observed_at_unix_ms`.
     by_probe_results: Mutex<BTreeMap<(AllocationId, ProbeIdx), ProbeResultRow>>,
+    /// `issued_certificates` audit index — keyed on the issued
+    /// certificate's `CertSerial` (ADR-0063 D6). Append-only: serials
+    /// are CSPRNG-drawn, so a key collision is the issuance bug, not an
+    /// LWW case; there is no `updated_at` to compare. `BTreeMap` for
+    /// deterministic iteration across seeds
+    /// (`.claude/rules/development.md` § "Ordered-collection choice").
+    by_issued_certificate: Mutex<BTreeMap<CertSerial, IssuedCertificateRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Test-only FIFO of write failures to inject. Each call to
     /// [`SimObservationStore::write`] pops the front entry; when the
@@ -140,6 +148,7 @@ impl PeerState {
             by_service_backends: Mutex::new(BTreeMap::new()),
             by_reconcile_conflict: Mutex::new(BTreeMap::new()),
             by_probe_results: Mutex::new(BTreeMap::new()),
+            by_issued_certificate: Mutex::new(BTreeMap::new()),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
         })
@@ -154,6 +163,7 @@ impl PeerState {
             ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
             ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
             ObservationRow::ReconcileConflict(incoming) => self.apply_reconcile_conflict(incoming),
+            ObservationRow::IssuedCertificate(incoming) => self.apply_issued_certificate(incoming),
         };
 
         if accepted {
@@ -225,6 +235,26 @@ impl PeerState {
         }
     }
 
+    /// Append-only merge for `issued_certificates` (ADR-0063 D6). Keyed
+    /// on the issued certificate's `CertSerial`. Unlike the LWW siblings
+    /// there is no `updated_at` to compare — the **first** row written at
+    /// a given serial is immutable and is never overwritten.
+    ///
+    /// A serial already present is therefore a no-op: serials are
+    /// CSPRNG-drawn, so a collision is an issuance replay / retry / bug,
+    /// or (once `issued_certificates` is gossiped, GH #36) idempotent
+    /// re-delivery. Returns `true` only on a fresh insert, `false` on a
+    /// duplicate — so the duplicate is not re-fanned-out, mirroring the
+    /// `LocalObservationStore::apply_issued_certificate` write path.
+    fn apply_issued_certificate(&self, incoming: &IssuedCertificateRow) -> bool {
+        let mut by_serial = self.by_issued_certificate.lock();
+        if by_serial.contains_key(&incoming.serial) {
+            return false;
+        }
+        by_serial.insert(incoming.serial.clone(), incoming.clone());
+        true
+    }
+
     /// LWW merge for `alloc_status`. Returns `true` when the incoming
     /// row dominates or is new; `false` when it loses to an existing
     /// entry.
@@ -293,6 +323,12 @@ impl PeerState {
     fn probe_results_for_alloc(&self, alloc_id: &AllocationId) -> Vec<ProbeResultRow> {
         let by_pr = self.by_probe_results.lock();
         by_pr.iter().filter(|((aid, _), _)| aid == alloc_id).map(|(_, row)| row.clone()).collect()
+    }
+
+    /// Snapshot every `issued_certificates` audit row this peer holds,
+    /// ascending by `CertSerial` (deterministic `BTreeMap` iteration).
+    fn issued_certificate_snapshot(&self) -> Vec<IssuedCertificateRow> {
+        self.by_issued_certificate.lock().values().cloned().collect()
     }
 
     /// Snapshot every alloc-status row this peer holds as LWW winner,
@@ -442,6 +478,16 @@ impl ObservationStore for SimObservationStore {
         // the broadcast channel or the read snapshot; the index is
         // already maintained that way by `apply_node_health`.
         Ok(self.inner.node_health_snapshot().into_values().collect())
+    }
+
+    async fn issued_certificate_rows(
+        &self,
+    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError> {
+        // Append-only audit surface — every recorded issuance, keyed by
+        // `CertSerial` under `BTreeMap` for deterministic iteration
+        // across seeds. No LWW winner to resolve (serials are unique
+        // per issuance).
+        Ok(self.inner.issued_certificate_snapshot())
     }
 
     async fn service_hydration_results_rows(

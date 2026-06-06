@@ -123,11 +123,11 @@ fn assert_single_bridge_enqueue<'a>(
     let mut found: Option<(&overdrive_core::reconcilers::ReconcilerName, &TargetResource)> = None;
     let mut count = 0;
     for action in actions {
-        if let Action::EnqueueEvaluation { reconciler, target } = action {
-            if reconciler.as_str() == "backend-discovery-bridge" {
-                count += 1;
-                found = Some((reconciler, target));
-            }
+        if let Action::EnqueueEvaluation { reconciler, target } = action
+            && reconciler.as_str() == "backend-discovery-bridge"
+        {
+            count += 1;
+            found = Some((reconciler, target));
         }
     }
     assert_eq!(
@@ -151,11 +151,11 @@ fn assert_single_service_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let mut count = 0;
     let mut found_target: Option<&TargetResource> = None;
     for action in actions {
-        if let Action::EnqueueEvaluation { reconciler, target } = action {
-            if reconciler.as_str() == "service-lifecycle" {
-                count += 1;
-                found_target = Some(target);
-            }
+        if let Action::EnqueueEvaluation { reconciler, target } = action
+            && reconciler.as_str() == "service-lifecycle"
+        {
+            count += 1;
+            found_target = Some(target);
         }
     }
     assert_eq!(

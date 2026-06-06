@@ -22,9 +22,10 @@ crate_class = "adapter-host"
 # --features integration-tests` resolves uniformly under per-package
 # scoping (cargo refuses the bare feature on packages that do not
 # declare it, which breaks mutation testing's per-mutant invocations).
-# This crate has no integration-shaped tests of its own — the
-# declaration is a deliberate no-op. See `.claude/rules/testing.md`
-# §"Integration vs unit gating".
+# Gates this crate's integration suite (`tests/integration/*.rs` — the
+# `RcgenCa` real-crypto + `openssl verify` acceptance tests, built-in-ca
+# / GH #28). See `.claude/rules/testing.md` §"Integration vs unit
+# gating".
 integration-tests = []
 
 [dependencies]
@@ -32,13 +33,50 @@ overdrive-core.workspace = true
 async-trait.workspace    = true
 bytes.workspace          = true
 rand.workspace           = true
+# `rcgen` (ring + pem) — `RcgenCa` (the production `Ca` host adapter,
+# ADR-0063 D1) owns ALL rcgen / crypto-backend usage. This is a
+# `[dependencies]` (production) entry, not a dev-dep: `RcgenCa` is
+# production code. `overdrive-core` stays rcgen/ring-free (dst-lint).
+rcgen                    = { workspace = true }
+# `ring` — the workspace crypto provider (ADR-0063 D4 / #204 for the
+# aws-lc-rs/FIPS switch). `RootKeyAeadCodec` (the root-key AEAD host
+# codec) uses ring's HKDF-SHA256 + AES-256-GCM directly to seal the
+# root CA private key at rest. Production crypto dep, not transitive.
+# `overdrive-core` stays ring-free (dst-lint).
+ring                     = { workspace = true }
+# `linux-keyutils` — `SystemdCredsKeyring` holds the resolved KEK in the
+# Linux kernel session keyring (`add_key` user-type key; read back via
+# `keyctl` search+read) per ADR-0063 D3, so the persistent holder across
+# the process lifetime is kernel space, not the process heap. Pure-Rust
+# safe wrapper — preserves the crate's `#![forbid(unsafe_code)]`.
+linux-keyutils.workspace = true
 tokio.workspace          = true
+# `tracing` — `SystemdCredsKeyring` (the production `Kek` provider) emits
+# the gated-dev-fallback warnings (`ca.kek.dev_fallback_refused` /
+# `ca.kek.dev_fallback_used`) so the dev `OVERDRIVE_CA_KEK` path is never
+# silent (ADR-0063 D3 / Earned Trust). Structured-event names only.
+tracing.workspace        = true
 # `uuid` v4 — used by `RealCgroupFs::probe` to mint a per-call probe
 # directory under `<probe_root>/.overdrive-probe-<uuid>/`. Parallel
 # probes (under test or in production composition root races) MUST
 # scope independent scratch namespaces — UUID v4 provides that with
 # no coordination cost.
 uuid                     = { workspace = true }
+
+[dev-dependencies]
+# `x509-parser` — byte-level assertions on the REAL cert bytes the
+# `RcgenCa` host adapter produces (CA:TRUE, keyUsage critical, no
+# pathLen) in the integration suite. `tempfile` scopes the on-disk
+# PEM the `openssl verify` subprocess gate reads. Both dev-only —
+# the integration tests under `tests/integration/` consume them.
+x509-parser.workspace    = true
+tempfile.workspace       = true
+# `serial_test` — the `SystemdCredsKeyring` kernel-keyring integration suite
+# has an env-mutating absent-KEK case (clears `OVERDRIVE_CA_KEK` /
+# `OVERDRIVE_CA_KEK_DEV_OPT_IN`); `#[serial(env)]` serialises it against
+# other env-touching tests per `.claude/rules/testing.md` § "Tests that
+# mutate process-global state".
+serial_test.workspace    = true
 
 [lints]
 workspace = true

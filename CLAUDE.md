@@ -129,3 +129,23 @@ The valid moves when tempted to write "deferred to a future X":
 Architects, crafters, and reviewers all enforce this: any of them spotting a deferral without an issue number must flag it in handoff and refuse to land the artifact until either the issue is created or the deferral language is dropped. The same applies to existing artifacts touched during a dispatch — fix the reference rather than propagate it.
 
 This extends `.claude/rules/development.md` § "Documentation" (*No aspirational docs. Never document behaviour that is not implemented.*) to forward pointers as well as backward claims.
+
+## Reading GitHub issues — always fetch comments (`--comments`)
+
+When viewing a GitHub issue, **always pass `--comments`**: `gh issue
+view <N> --comments` (or `gh issue view <url> --comments`). The bare
+`gh issue view <N>` returns only the issue body and drops the entire
+comment thread — and the comments are where the load-bearing context
+usually lives: ratified decisions, scope corrections, research
+findings, design-input updates, and "actually we're doing X instead"
+reversals that never make it back into the original body. Reading the
+body alone gives a stale or incomplete picture and leads to citing an
+issue for the wrong scope.
+
+This applies everywhere an issue is read: verifying an existing issue
+before citing it (per the deferral rule above — "verified by `gh issue
+view <N>`" means **`--comments`**), triaging, picking up work, or
+answering a question about an issue's status. The same holds for PRs:
+`gh pr view <N> --comments` when the review discussion matters. When in
+doubt, fetch the comments — the cost is one flag; the cost of missing a
+decision recorded only in a comment is propagating a wrong assumption.

@@ -176,33 +176,33 @@ pub(crate) fn classify_driver_failure(
     _command: &str,
 ) -> TransitionReason {
     // `spawn <path>: No such file or directory (os error 2)`
-    if let Some(rest) = text.strip_prefix("spawn ") {
-        if let Some((path, tail)) = split_once_after_path(rest) {
-            if tail.starts_with("No such file or directory") {
-                return TransitionReason::ExecBinaryNotFound { path: path.to_owned() };
-            }
-            if tail.starts_with("Permission denied") {
-                return TransitionReason::ExecPermissionDenied { path: path.to_owned() };
-            }
-            if tail.starts_with("Exec format error") {
-                return TransitionReason::ExecBinaryInvalid {
-                    path: path.to_owned(),
-                    kind: "exec_format_error".to_owned(),
-                };
-            }
+    if let Some(rest) = text.strip_prefix("spawn ")
+        && let Some((path, tail)) = split_once_after_path(rest)
+    {
+        if tail.starts_with("No such file or directory") {
+            return TransitionReason::ExecBinaryNotFound { path: path.to_owned() };
+        }
+        if tail.starts_with("Permission denied") {
+            return TransitionReason::ExecPermissionDenied { path: path.to_owned() };
+        }
+        if tail.starts_with("Exec format error") {
+            return TransitionReason::ExecBinaryInvalid {
+                path: path.to_owned(),
+                kind: "exec_format_error".to_owned(),
+            };
         }
     }
 
     // `cgroup setup failed: <kind>: <source>`
-    if let Some(rest) = text.strip_prefix("cgroup setup failed: ") {
-        if let Some(idx) = rest.find(": ") {
-            let kind = &rest[..idx];
-            let source = &rest[idx + 2..];
-            return TransitionReason::CgroupSetupFailed {
-                kind: kind.to_owned(),
-                source: source.to_owned(),
-            };
-        }
+    if let Some(rest) = text.strip_prefix("cgroup setup failed: ")
+        && let Some(idx) = rest.find(": ")
+    {
+        let kind = &rest[..idx];
+        let source = &rest[idx + 2..];
+        return TransitionReason::CgroupSetupFailed {
+            kind: kind.to_owned(),
+            source: source.to_owned(),
+        };
     }
 
     // Unclassified — fall through to internal error with the verbatim text.

@@ -26,7 +26,7 @@ do not rewrite prior sections without a corresponding ADR marked
 |---|---|---|
 | System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted)** |
 | Domain Model | Hera (future) | placeholder |
-| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060)** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063)** |
 
 ---
 
@@ -1458,6 +1458,7 @@ Rules to enforce:
 | 0058 | **docs-platform (website)** — build-time one-index enforcement assertion (Node build step in `website/`, NOT a Rust gate): every `source.getPages()` page has a reachable `.md`, appears in `llms.txt`, and is in the search index; blog joins the same index — makes the C-4 invariant structural | Accepted |
 | 0060 | `ServiceFrontend` newtype on `Dataplane::update_service` — threads per-service `(ServiceVip [V4-by-construction], NonZeroU16 port, Proto)` so the REVERSE_NAT key set is derivable per declared proto (fixes GH #163 UDP reverse-NAT bypass); per-proto purge on empty backends; three-tier `ReverseNatLockstep` gate. Supersedes phase-2 §5 Q-Sig locked-A (paper, never landed); records shipped option-C as true from-state (Phase 2.2 / udp-service-support) | Accepted |
 | 0062 | Listener-fact in-memory view — `ListenerFactStore` (`Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for stop) replaces the O(S²) per-tick `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row `store.get(&row.service_id)` is O(1) and drops the prior `vip == row.vip` listener scan; boot-rebuilt from intent + edge-maintained on submit/stop (key derived via `ServiceId::derive(&vip, port, "service-map")`); steady-state hydrate pays zero redb reads. Not a persisted View (no durable state — intent store is SSOT; honors "persist inputs, not derived state"). Extends 0035; amends 0042; references 0049 (allocator lifecycle imitated, not extended); preserves 0060 C3. Candidate (d) per reconciler-desired-hydration-efficiency research | Accepted |
+| 0063 | Built-in CA — `Ca` port trait (`overdrive-core`; pure, no rcgen) + `RcgenCa` host adapter (all rcgen/crypto-backend [`ring` today; aws-lc-rs + FIPS pending #204]/HKDF/AES-256-GCM) + `SimCa` sim adapter (fixture P-256 keys); 3-tier hierarchy (self-signed P-256 root → pathLen=0 node intermediate → single-URI-SAN SVID, 1h TTL); single-node (one intermediate). Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore; KEK in Linux kernel keyring delivered per-boot by systemd-creds (TPM/host-key); HKDF-SHA256-from-KEK subkey → AES-256-GCM (reconciliation A); pure `CertSpec` builder in core, host adapter translates to `rcgen::CertificateParams` (reconciliation B). Serials via `Entropy`; key-gen via backend CSPRNG (not injectable, F11). `issued_certificates` ObservationStore audit row. Refuse-to-start on decrypt failure — never silent re-mint. `ca_equivalence` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only (`tls_bootstrap.rs` keeps the control-plane-HTTPS consumer). GH #28 [2.6] | Accepted |
 
 ---
 
@@ -4157,10 +4158,224 @@ DO-NOT-REUSE-with-rationale (ViewStore Views; action-shim). The CREATE NEW is
 justified — no existing structure hosts cluster-wide-keyed listener facts
 without abusing the View contract or the allocator's SRP.
 
+## built-in-ca extension
+
+This section extends the Application Architecture with the built-in CA
+primitive (GH #28 [2.6]). Nothing prior is rewritten; the only supersession is
+**ADR-0010 for *workload identity*** — its ephemeral CA (`tls_bootstrap.rs`)
+keeps serving the control-plane-HTTPS / operator-CLI consumer unchanged.
+
+**ADR:** ADR-0063. **DESIGN artifacts:** `docs/feature/built-in-ca/`.
+**C4:** `c4-diagrams.md` § "Built-in CA" (L1 + L2 + L3, Mermaid).
+**Date:** 2026-06-05. **Mode:** GUIDE (locked decisions from 2026-06-05 Q&A).
+
+### Capability and DDD
+
+One bounded context — **workload identity / CA** — spanning ~4 crates. The
+core domain is "mint a forgery-proof, chain-verifiable, SPIFFE-compliant
+identity the platform owns." Three certificate roles form a 3-tier hierarchy:
+**Root CA** (self-signed P-256, CA:TRUE, keyCertSign|cRLSign) → **Node
+Intermediate CA** (signed by root, pathLen=0 — cannot mint further CAs) →
+**Workload SVID** (leaf, exactly ONE `spiffe://` URI SAN, CA:FALSE,
+keyUsage=digitalSignature critical, 1h TTL). The CA *material* is **intent**
+(linearizable, IntentStore); the *audit of what was issued* is **observation**
+(`issued_certificates`, gossiped when #36 lands). These never merge
+(whitepaper §4). This is a *supporting* security primitive that the
+mTLS+kTLS handshake consumer, the SPIFFE-billing pillar, and the FIPS tier
+(FIPS posture is **contingent on #204** — the aws-lc-rs switch; the workspace
+is on `ring` today, which is not FIPS-validated) build on — it mints
+identities; it does not perform handshakes or rotation.
+
+### Component decomposition (which crate gets what)
+
+| Component | Crate (class) | Responsibility |
+|---|---|---|
+| `Ca` trait | `overdrive-core` (core) | Pure port trait — `root` / `issue_intermediate` / `issue_svid` / `trust_bundle`. Speaks newtypes + typed PEM/DER byte newtypes. NO rcgen. |
+| `CertSpec` builder | `overdrive-core` (core) | Pure cert policy — `CertRole` + the role→extension mapping; `svid()` enforces the single-URI-SAN invariant. DST-testable, dst-lint-clean. |
+| `RootCaKeyEnvelope` | `overdrive-core` (core) | rkyv versioned envelope (ADR-0048) for the root key at rest; payload carries the AEAD fields. |
+| `IssuedCertificateRowEnvelope` | `overdrive-core` (core) | rkyv envelope for the `issued_certificates` observation row, mirroring `AllocStatusRow`. |
+| `Kek` provider port | `overdrive-core` (core) | The pluggable KEK-source seam (`kek() -> KekBytes`). |
+| `RcgenCa` | `overdrive-host` (adapter-host) | Implements `Ca`. ALL rcgen + crypto-backend usage (`ring` today; aws-lc-rs switch pending #204); `CertSpec → rcgen::CertificateParams` translation; signing-key custody. |
+| Root-key AEAD codec | `overdrive-host` (adapter-host) | HKDF-SHA256 subkey-derive from keyring KEK → AES-256-GCM seal/open. |
+| `SystemdCredsKeyring` | `overdrive-host` (adapter-host) | `Kek` provider — systemd-creds → kernel keyring; `OVERDRIVE_CA_KEK` dev-only fallback. |
+| `SimCa` + fixture `Kek` | `overdrive-sim` (adapter-sim) | Implements `Ca` via fixture P-256 PEM keys; serials via `SeededEntropy`; shares the `CertSpec` policy. |
+| Boot/issuance wiring | `overdrive-control-plane`, `overdrive-worker` | Control-plane boot → `root()`; node bootstrap → `issue_intermediate(node)`; workload-start → `issue_svid(req)` + audit-row write. |
+
+### Driving ports (inbound) and driven ports (outbound)
+
+**Driving** (trigger CA behaviour): control-plane bootstrap → `root()`
+(generate-or-load); node bootstrap → `issue_intermediate(node)`;
+workload-start (existing allocation lifecycle) → `issue_svid(req)`. **No
+operator CLI verb** — by design (D-CA-4); the only operator-observable read
+surface is the `issued_certificates` row via the existing `alloc status` path.
+The #40 rotation **workflow** (deferred) is a future driving caller.
+
+**Driven** (CA reaches out): `IntentStore` (persist/read
+`RootCaKeyEnvelope`); `ObservationStore` (write `issued_certificates`);
+`Kek` provider → kernel keyring + systemd-creds; `Entropy` (serials). All
+are required constructor parameters on the consuming types — never defaulted
+(`.claude/rules/development.md` § "Port-trait dependencies").
+
+### `Ca` trait surface (signatures; full contract in trait rustdoc)
+
+```rust
+pub trait Ca: Send + Sync {
+    fn root(&self) -> Result<RootCaHandle, CaError>;
+    fn issue_intermediate(&self, node: &NodeId) -> Result<IntermediateHandle, CaError>;
+    fn issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial, CaError>;
+    fn trust_bundle(&self) -> Result<TrustBundle, CaError>;
+}
+```
+
+Per `.claude/rules/development.md` § "Trait definitions specify behavior", the
+rustdoc on every method pins preconditions / postconditions / edge cases /
+observable invariants. For `issue_svid`, the single-URI-SAN invariant is
+honored **by construction**, not by a runtime cardinality guard: `SvidRequest
+{ spiffe_id: SpiffeId }` carries exactly one validated identity, so a
+zero-or-≥2-SAN request is *unrepresentable* at the adapter (no
+`CaError::InvalidSan` branch inside `issue_svid` to reach). Enforcement is
+three-layer (ADR-0063 D5): (1) the request type makes ≠1 unrepresentable; (2)
+the pure-core `CertSpec::svid(Vec<SpiffeId>)` parse is the single fallible
+boundary (rejects 0/≥2 with `CertSpecError`, tested at L1 by S-04-02); (3) the
+SPIFFE-spec-mandated *runtime* reject (X.509-SVID §5.2) lives at the
+relying-party verifier (#26 sockops/kTLS), not the issuer. (Research:
+`docs/research/security/svid-request-cardinality-enforcement-research.md` —
+SPIFFE §2/§5.2 + SPIRE reference impl + "parse, don't validate".) The rustdoc
+also pins re-issue idempotency (fresh serial, new validity window, same
+SpiffeId) and what `issue_intermediate` guarantees about pathLen (=0, enforced
+not merely set). The **enforcement** is
+`crates/<crate>/tests/integration/ca_equivalence.rs` — a DST equivalence test
+driving `RcgenCa` and `SimCa` through the same call sequence asserting
+observable equivalence.
+
+### Technology choices (OSS-first; all in-graph)
+
+| Choice | License | Rationale |
+|---|---|---|
+| `rcgen` 0.14.8 (`ring` feature, MSRV 1.88) | MIT/Apache-2.0 | X.509 generation; every required extension present (research F1/F4); already in workspace (current pin 0.13.2 → **bump to `rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }` is a DELIVER first-compile prerequisite**). The `ring` feature matches the workspace crypto provider (ADR-0039's `aws-lc-rs` switch is unimplemented; #204). Extension/SAN/keyUsage APIs (`IsCa::Ca(BasicConstraints::Constrained(0))`, `SanType::URI(Ia5String)`, `KeyUsagePurpose`) are stable 0.13.2→0.14.x; the 0.14 cert-builder API changed (`params.self_signed`/`params.signed_by` flow), so `mint_ephemeral_ca` (written against 0.13) migrates in the same change. Verify builder + extension surface at first compile. |
+| `ring` (workspace crypto provider) | ISC + OpenSSL/SSLeay/MIT | Crypto backend **today** — `rustls` and `rcgen` both pin the `ring` feature; provides P-256 signing, AES-256-GCM AEAD, HKDF-SHA256 (all the built-in-CA design needs). **FIPS 140-3 (Cert #4816) requires aws-lc-rs and is pending #204** (ADR-0039's intended switch is unimplemented; `ring` is not FIPS-validated). The `fips` feature is unavailable until #204 lands. |
+| Linux kernel keyring (`add_key`/`keyctl`) | kernel ABI | KEK held in kernel space, not heap (locked Q1b). |
+| systemd-creds (`LoadCredentialEncrypted`) | system ABI | Per-boot KEK delivery, host-key/TPM-backed (locked Q4). |
+| `rkyv` (existing envelope machinery) | MIT | Root key at rest + audit row (ADR-0048); reused, not reinvented. |
+
+No proprietary technology. P-256 (ECDSA) is the research default; the `fips`
+feature is the enterprise-tier upgrade path — **contingent on #204** (the
+aws-lc-rs switch; unavailable while the workspace is on `ring`), and not forced
+in Phase 2.6 regardless.
+
+### Reconciliation decisions resolved (stated, not punted)
+
+- **(A) AEAD shape — HKDF-from-KEK, not direct-AEAD or passphrase-KDF.** The
+  KEK is now a raw 256-bit keyring key (Q1b), so the DISCUSS passphrase-KDF
+  (scrypt/argon2) is **dropped**. `RcgenCa` HKDF-SHA256-derives a per-use
+  subkey from the keyring KEK (`info = "overdrive/ca/root-key/v1"`, random
+  `salt`), then AES-256-GCM-seals the root key (aad = `kek_id`). Envelope =
+  `{kek_id, salt, info, nonce, ciphertext, aead_tag}`. Rationale: HKDF costs
+  one extract+expand and buys domain separation (reuse the KEK for future
+  secrets via `info`) + a clean rotation seam (`kek_id`/`salt`) — exactly what
+  #40 and a future HSM KEK provider need. (ADR-0063 D4.)
+- **(B) Pure cert-param construction in core; host adapter does the rcgen
+  call.** `CertSpec` (core) owns the *decision* of which extensions each role
+  carries (the single-URI-SAN rejection, pathLen=0, CA:TRUE/FALSE, keyUsage
+  sets); `RcgenCa` (host) translates `CertSpec → rcgen::CertificateParams` and
+  signs. rcgen stays entirely out of core. Rationale: the highest-value
+  invariant (single-URI-SAN, K2) becomes DST-testable and the sim adapter
+  shares the policy. (ADR-0063 D5.)
+
+### Root-key protection scheme (the trust-anchor path)
+
+Root key → HKDF+AES-256-GCM-sealed under the keyring KEK → `RootCaKeyEnvelope`
+in IntentStore (redb; Raft-replicated in HA). KEK in kernel keyring, delivered
+per-boot by systemd-creds (TPM/host-key root-of-trust). **First boot**:
+generate root → seal → persist. **Subsequent boot**: systemd-creds → keyring →
+read envelope → HKDF-derive → AES-GCM-open. **Decrypt failure → refuse to
+start** (`health.startup.refused`, typed `CaError`) — NEVER silent re-mint
+(a re-mint orphans every issued identity). AEAD authentication distinguishes
+tampered-envelope from wrong-KEK as distinct errors. Dev/non-systemd:
+`OVERDRIVE_CA_KEK` env, gated dev-only.
+
+### Earned Trust (probe contract — wire → probe → use)
+
+The composition root (`overdrive-cli serve`) probes the CA before the control
+plane accepts traffic: (a) KEK present in keyring (round-trip `add_key`/read);
+(b) the persisted envelope decrypts (trial HKDF + AES-GCM-open); (c)
+systemd-creds delivery present (absent credential + absent dev opt-in →
+refuse-to-start, never silent generated-KEK fallback). Probe failure refuses
+startup with `health.startup.refused`. This mirrors the ADR-0054 `CgroupFs`
+and ADR-0049 allocator Earned-Trust precedents. Fault-injection scenarios
+(tampered ciphertext, wrong KEK, absent credential) flagged for DISTILL.
+
+### Quality-attribute scenarios (built-in-ca extension)
+
+| Attribute | Scenario | Strategy |
+|---|---|---|
+| Security/integrity (K1,K2,K3) | Every SVID chain-verifies; single-URI-SAN; no plaintext key at rest | 3-tier hierarchy verified by `openssl verify` (Tier 3); `CertSpec::svid` rejection (core); AES-256-GCM envelope + keyring KEK; IntentStore byte-scan test |
+| Testability (K5) | CA composes deterministically under DST | Serials via `Entropy` (`SeededEntropy`); fixture keys in `SimCa`; `ca_equivalence` DST test |
+| Reliability | Trust anchor survives restart; never orphans identities | Persistent envelope reuse; refuse-to-start over silent re-mint |
+| Operational simplicity (K4) | Zero external identity components | CA ships inside the one binary — no SPIRE/cert-manager/Vault |
+| Maintainability | KEK source / rotation / multi-node extend without format change | `Kek` provider port; `kek_id`/HKDF rotation seam; `CertSpec` role enum |
+
+### Reuse Analysis (HARD GATE)
+
+| Candidate | Verdict | Evidence |
+|---|---|---|
+| `tls_bootstrap.rs` ephemeral CA (ADR-0010) | **LEAVE AS-IS (distinct consumer)** | Serves control-plane-HTTPS / operator-CLI (`:7001`), CN-only, 2-tier, ephemeral. This feature is *workload identity* (SPIFFE SAN, 3-tier, persistent). Per DISCUSS D-CA-5 it is NOT deleted; Phase 5 operator-mTLS (#81) replaces it. Its proven rcgen usage (P-256, `self_signed`, `signed_by`, `SanType`, `KeyUsagePurpose`, `IsCa`) *de-risks* `RcgenCa` but is not shared code. |
+| Existing `rcgen` usage | **REUSE (proven), via new adapter** | `mint_ephemeral_ca` proves the *extension* API surface (`IsCa`, `SanType`, `KeyUsagePurpose`, P-256) — these shapes are stable 0.13.2→0.14.x, so they de-risk `RcgenCa`'s extension/SAN/keyUsage translation. But `mint_ephemeral_ca` is written against the 0.13 *builder* API (`self_signed`/`signed_by`), which changed in 0.14; the bump to 0.14.8 (DELIVER prerequisite) requires migrating it too, so the builder calls are **not** de-risked. `RcgenCa` re-shapes the extension usage behind the `Ca` trait — same extension APIs, new structure (persistence, SPIFFE SAN, intermediate tier, HKDF/AEAD are net-new). |
+| `IntentStore` trait | **REUSE AS-IS** | `LocalStore` already persists certificates-class intent (its docstring names "certificates"); `RootCaKeyEnvelope` is one more typed value through the existing typed-codec boundary (ADR-0048 § 4b). No trait change. |
+| `ObservationStore` trait | **EXTEND (additive)** | `issued_certificates` is one more observation row mirroring `AllocStatusRow`/`NodeHealthRow` (alias-to-payload + `…V1` envelope), routed through the port on BOTH `LocalObservationStore` and `SimObservationStore` (DST-testable): one additive `ObservationRow::IssuedCertificate` variant + one additive typed reader `issued_certificate_rows()`, mirroring the sibling rows (`alloc_status_rows`/`node_health_rows`); no existing method-signature changes — the enum + reader grow additively exactly as every prior observation row did (DELIVER correction, commit `aab5a69b`). |
+| `Entropy` port | **REUSE AS-IS** | `Entropy::fill` already exists; serials drawn through it → DST-deterministic. `OsEntropy`/`SeededEntropy` unchanged. |
+| `SpiffeId` / `CertSerial` / `NodeId` | **REUSE AS-IS** | All three exist in `id.rs` (`SpiffeId` canonical-lowercase + trust-domain/path accessors; `CertSerial(String)` hex bounded; `NodeId` validated). Used directly in the trait + `CertSpec` + audit row. |
+| `VersionedEnvelope` / `codec::envelope` | **REUSE AS-IS** | `RootCaKeyEnvelope` + `IssuedCertificateRowEnvelope` implement the existing `VersionedEnvelope` trait; reuse `decode_envelope_bytes` / `probe_known_variant`. Each carries the golden-bytes fixture obligation (new fixtures; existing untouched). |
+| `Ca` trait + `CertSpec` + `RcgenCa` + `SimCa` + `Kek` provider + 2 envelopes | **CREATE NEW (justified)** | No existing port covers certificate authority; no existing pure builder covers cert-extension policy; the keyring/systemd-creds KEK provider is net-new. Each justified — no existing alternative. |
+
+**Verdict: 5 REUSE AS-IS, 1 EXTEND (additive — `ObservationStore`), 1
+REUSE-proven-via-new-adapter, 1 LEAVE-AS-IS (distinct consumer), 8 CREATE-NEW
+(justified).** The reuse-heavy profile is the expected shape — the crypto
+stack, state layers, newtypes, and envelope machinery all already exist; the
+feature is the *composition* behind a new port trait. The one EXTEND
+(`ObservationStore`) is purely additive — a new `ObservationRow` variant + a
+new typed reader, the same shape every prior observation row was added
+(DELIVER correction, commit `aab5a69b`).
+
+### Open questions deferred to DISTILL / DELIVER
+
+- Golden-bytes `FIXTURE_V1` + empirically-pinned `discriminant_offset_from_end`
+  for both new envelopes (ADR-0048 obligation; real work).
+- Fault-injection scenario set for the Earned-Trust probes (tampered
+  ciphertext, wrong KEK, absent systemd credential).
+- The exact `rcgen` **0.14.8** API confirmation (`Constrained(0)` /
+  `SanType::URI`) + bump from the current 0.13.2 pin to `features = ["ring",
+  "pem"]` (MSRV 1.88) + `mint_ephemeral_ca`
+  migration to the 0.14 builder API + `ring` feature non-conflict with the
+  workspace `rustls`/`ring` provider (research Gap 3; the `aws-lc-rs` switch is
+  #204) — first-compile check in
+  Slice 01.
+- Tier-2 expansion recommendation (NOT auto-expanded, lean default): an
+  `alternatives-considered` deep-dive for the AEAD shape (A1–A6 in ADR-0063
+  already cover this) and a `journey-deep-dive` for the boot error-path map —
+  both optional; the ADR + SSOT journey already carry the substance.
+
+### Out-of-scope (deferrals — all cite EXISTING issues, no inventions)
+
+| Non-goal | Owner |
+|---|---|
+| Certificate rotation lifecycle (workflow) | **#40 [3.3]** (needs workflow primitive **#39 [3.2]**) |
+| Root CA rotation (dual-bundle two-phase) | **#40** |
+| Multi-node per-node intermediates + node attestation | **#36 [2.14]** (`Depends on #28`) |
+| Multi-region CA federation | **#104 [7.1]** + **#83 [5.17]** |
+| Operator cert minting / OIDC / Biscuit | **Phase 5/7**, **#81** |
+| Gossip-propagated revocation (CRL/OCSP) | **Phase 5** (SVID revocation-by-expiry, 1h TTL, is the model) |
+| mTLS handshake + kTLS session-key install | **Separate consumer feature** (whitepaper §8 Kernel mTLS) |
+| SPIFFE Workload API + SVID distribution to workloads | **Phase 7+** / consumer feature (research Gap 1) |
+| HSM / KMS KEK source | **Later phase** — the `Kek` provider port is the seam |
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-06-06 | **built-in-ca Reuse-Analysis correction — `ObservationStore` is EXTEND (additive), not REUSE AS-IS (DELIVER back-propagation).** The `issued_certificates` audit row first shipped via a non-compliant concrete-adapter bypass (a parallel redb table + inherent methods on `LocalObservationStore`, which was NOT DST-testable because it never routed through the port). The user directed the correction (2026-06-06) to the faithful "mirroring `AllocStatusRow`/`NodeHealthRow`" shape ADR-0063 D6 always intended: the audit now routes through the `ObservationStore` trait on BOTH `LocalObservationStore` and `SimObservationStore` (commit `aab5a69b`). The fix added TWO purely-additive trait members — `ObservationRow::IssuedCertificate(IssuedCertificateRow)` (a new enum variant, like the 5 existing sibling rows) and `ObservationStore::issued_certificate_rows()` (a typed reader mirroring `alloc_status_rows()`/`node_health_rows()`/`service_backends_rows()`). NO existing `ObservationStore` method signature changed; the additions grow the enum + reader exactly as every prior observation row did. The brief's Reuse-Analysis row + verdict tally are corrected (ObservationStore: REUSE AS-IS → EXTEND; tally 6 REUSE-AS-IS → 5 REUSE-AS-IS + 1 EXTEND); ADR-0063 D6 gains a one-line clarification of what "mirroring `AllocStatusRow`/`NodeHealthRow`" means (additive variant + reader through the port on both adapters, not a concrete-adapter-only surface). No prior decision reversed — D6 always specified the observation-row pattern; this only corrects a brief line that had become factually stale relative to the landed, DST-testable shape. — Morgan. |
+| 2026-06-06 | **built-in-ca `issue_svid` contract clarification — single-URI-SAN enforced by TYPE, not an adapter runtime guard (Option A; DELIVER-surfaced).** DELIVER step 04 found the `Ca::issue_svid` rustdoc + the brief/ADR trait-contract prose claimed the adapter "rejects an empty or oversized SAN set with `CaError::InvalidSan` before any cert" — a rejection the request type (`SvidRequest { spiffe_id: SpiffeId }`, one validated identity by construction) makes *unreachable* (aspirational-doc bug per `development.md` § "No aspirational docs"). User ratified **Option A — type-enforced** (2026-06-06) on the strength of `docs/research/security/svid-request-cardinality-enforcement-research.md` (committed `b6a5278b`; SPIFFE X.509-SVID §2 "exactly one URI SAN" + §5.2 places the runtime MUST-reject at the *relying party*, not the issuer; SPIRE reference impl carries a single `spiffeid.ID` not a SAN slice; "parse, don't validate"). The `## built-in-ca extension` § "`Ca` trait surface" prose is corrected to the three-layer enforcement-location statement: (1) the request type makes ≠1 unrepresentable; (2) the pure-core `CertSpec::svid(Vec<SpiffeId>)` parse is the single fallible boundary (rejects 0/≥2, tested at L1 by S-04-02); (3) the runtime reject lives at the verifier (#26), not `issue_svid`. ADR-0063 D5 gains the same enforcement-location note + an Amendments changelog entry; the `Ca` trait SIGNATURE is unchanged (no widening — `SvidRequest` is correct under Option A). DISTILL scenarios S-04-09 + S-04-10 (which tested the type-unreachable adapter path) are RETIRED as redundant under Option A (S-04-08 already asserts host single-URI-SAN; S-04-06 asserts cross-adapter SAN-cardinality equivalence; S-04-02 tests the live `CertSpec` parse reject); built-in-ca scenario count 39 → 37, `@error` 15/39 → 13/37 (non-gating DISTILL metric, accepted as a consequence of the type-honest design). No prior decision reversed — D5 already put policy in core; this only pins WHERE the runtime reject lives and retires the aspirational claim. The crafter applies the corrected `issue_svid` rustdoc + retires the two scaffolds. — Morgan. |
+| 2026-06-05 | **built-in-ca extension** (GH #28 [2.6]; GUIDE mode — locked decisions from 2026-06-05 Q&A). New `## built-in-ca extension` section under Application Architecture. Added ADR-0063 (built-in CA: `Ca` port trait in `overdrive-core` [pure, no rcgen — dst-lint boundary verified: core is `crate_class = "core"`, bans `rand::*`/FFI] + `RcgenCa` host adapter [all rcgen 0.14.8 `features = ["ring", "pem"]` (bump from current 0.13.2 pin — DELIVER first-compile prerequisite; extension APIs stable 0.13→0.14, builder API changed so `mint_ephemeral_ca` migrates too)/crypto-backend (`ring` today; aws-lc-rs + FIPS pending #204)/HKDF/AES-256-GCM] + `SimCa` sim adapter [fixture P-256 keys, `SeededEntropy` serials]; 3-tier self-signed-P-256-root → pathLen=0-intermediate → single-URI-SAN-SVID hierarchy, single-node = one intermediate). **Reconciliation A resolved**: root-key AEAD = HKDF-SHA256-derive a per-use subkey from the kernel-keyring KEK → AES-256-GCM (passphrase-KDF dropped; HKDF buys domain-separation + rotation seam for #40/HSM). **Reconciliation B resolved**: pure `CertSpec` builder in core owns cert-extension policy (single-URI-SAN rejection, pathLen=0, keyUsage sets — DST-testable), host adapter translates `CertSpec → rcgen::CertificateParams`. Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore (intent, never observation — whitepaper §4); KEK in Linux kernel keyring, delivered per-boot by systemd-creds (TPM/host-key root-of-trust), `OVERDRIVE_CA_KEK` dev-only fallback. Refuse-to-start (`health.startup.refused`) on decrypt failure — never silent re-mint. Serials via `Entropy` (DST-deterministic); key-gen via backend CSPRNG (not injectable, research F11). `issued_certificates` ObservationStore audit row (research F15). Earned-Trust probe (wire→probe→use): KEK-present + envelope-decrypt + credential-present, refuse-to-start on failure. `tests/integration/ca_equivalence.rs` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only — `tls_bootstrap.rs` keeps serving the control-plane-HTTPS / operator-CLI consumer (Phase 5 / #81 replaces it). C4 L1+L2+L3 (Mermaid) added at `c4-diagrams.md` § "Built-in CA". Reuse: 6 REUSE-AS-IS (`IntentStore`/`ObservationStore`/`Entropy`/`SpiffeId`/`CertSerial`/`NodeId`/`VersionedEnvelope`), 1 REUSE-proven-via-new-adapter (rcgen usage from `mint_ephemeral_ca`), 1 LEAVE-AS-IS-distinct-consumer (`tls_bootstrap.rs`), 8 CREATE-NEW (justified). Deferrals all cite existing issues: #40 rotation (needs #39), #36 multi-node CA, #104/#83 multi-region, #81/Phase 5/7 operator-auth/revocation, separate consumer feature for mTLS+kTLS. ADR index grows by 1 (0063). No roadmap (DELIVER owns that). — Morgan. |
 | 2026-04-21 | Initial Application Architecture section (Phase 1 foundation) — Morgan. |
 | 2026-06-03 | Listener-fact in-memory view extension (ADR-0062). New `ListenerFactStore` (in-memory `Arc<Mutex<…>>` on `AppState`; primary `BTreeMap<ServiceId, ListenerRow>` keyed by the hydrator's read key + secondary `BTreeMap<WorkloadId, Vec<ServiceId>>` cleanup index for the stop path) replaces the per-tick cluster-wide `gather_service_listener_facts` scan in the `ServiceMapHydrator` hydrate arm; per-row read `store.get(&row.service_id)` is O(1) and eliminates the prior `vip == row.vip` listener scan. Boot-rebuilt from intent + edge-maintained on `submit_workload`/`stop_workload` (co-located with the VIP-memo mutation; key derived via `ServiceId::derive(&vip, listener.port, "service-map")`); steady-state hydrate pays zero redb reads (restores ADR-0035 contract without a persisted View). Candidate (d) per `docs/research/control-plane/reconciler-desired-hydration-efficiency.md`. `gather_*` relocated+renamed to `ListenerFactStore::rebuild_from_intent` (boot path; both maps); per-tick caller deleted. DELIVER invariants: (A) zero steady-state `scan_prefix` (counting decorator on the trait-public `IntentStore::scan_prefix`), (B) store byte-equivalent to re-scan over all `ServiceId` entries incl. multi-listener, (C) guard never held across `.await`. Extends ADR-0035; amends ADR-0042; references ADR-0049 (allocator lifecycle imitated, NOT extended); preserves ADR-0060 C3. Reuse: 1 CREATE NEW, 4 EXTEND, 2 DO-NOT-REUSE. — Morgan. (Second-review rekey `WorkloadId`→`ServiceId` + stop-path cleanup index + invariants B/C clarified + `scan_prefix` trait-visibility verified.) |
 | 2026-06-02 | UDP service support extension — `ServiceFrontend` on `update_service`, per-proto reverse-NAT, three-tier lockstep gate (GH #163, ADR-0060) — Morgan. |

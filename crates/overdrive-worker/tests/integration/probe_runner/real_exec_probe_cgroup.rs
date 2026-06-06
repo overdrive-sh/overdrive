@@ -165,11 +165,11 @@ async fn given_real_cgroup_scope_when_cgroup_exec_prober_runs_then_pid_membershi
     let procs_path = scope_dir.join("cgroup.procs");
     let mut pid: Option<u32> = None;
     for _ in 0..200 {
-        if let Ok(contents) = tokio::fs::read_to_string(&procs_path).await {
-            if let Some(first) = contents.lines().find_map(|l| l.trim().parse::<u32>().ok()) {
-                pid = Some(first);
-                break;
-            }
+        if let Ok(contents) = tokio::fs::read_to_string(&procs_path).await
+            && let Some(first) = contents.lines().find_map(|l| l.trim().parse::<u32>().ok())
+        {
+            pid = Some(first);
+            break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

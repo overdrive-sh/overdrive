@@ -1,0 +1,643 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "built-in-ca",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:06:25Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:09:43Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance assertions fully drive the CertSpec policy at this layer",
+      "t": "2026-06-05T07:09:51Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:11:22Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:13:28Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:35:45Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:36:18Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance assertion fully drives deterministic root issuance at this layer; root() is a single observable port operation with no internal decomposition to test in isolation",
+      "t": "2026-06-05T07:36:24Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:41:18Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS commit=7ddba035eb6d03109635f5f01a3ac87a6489722d",
+      "t": "2026-06-05T07:42:59Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T07:43:20Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T09:17:55Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T09:25:13Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the two activated acceptance tests fully drive RcgenCa::root (a single observable port operation translating the existing pure CertSpec::root); no unit decomposition needed. Adapter code uses real-infra integration tests, never mocked unit tests.",
+      "t": "2026-06-05T09:25:13Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T09:25:14Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T09:27:42Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T10:43:00Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T10:44:10Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: schema-evolution golden-bytes + discriminant triangulation + unknown-version probe tests fully drive the pure rkyv envelope; no internal decomposition to unit-test in isolation",
+      "t": "2026-06-05T10:44:17Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T10:49:07Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T10:55:33Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T11:36:40Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T11:41:34Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: L3 example-only ATs fully specify the codec behaviour (seal/open round-trip, K3 byte-scan, tampered-vs-wrong-KEK distinction); pure core Kek port surface (newtype getters + fixture impl) is exercised through the codec ATs end-to-end, no separate mocked unit layer needed",
+      "t": "2026-06-05T11:41:35Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T11:46:46Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T11:53:05Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:27:06Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:33:28Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: adapter/composition-root wiring is proven by the three L3 integration ATs driving the ca_boot port over real RcgenCa + LocalIntentStore + SystemdCredsKeyring + RootKeyAeadCodec; no separate mocked unit test would add behavioral coverage (Mandate 4 \u2014 adapters use real-infra integration tests, never mocks)",
+      "t": "2026-06-05T12:33:28Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:35:10Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T12:42:53Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T13:32:13Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T13:32:47Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: example-based AT fully drives the pure CertSpec::intermediate profile surface (role/is_ca/path_len/key_usages/key_usage_critical/subject) through the public port; no internal decomposition to unit-test in isolation. Mirrors 01-01/01-02/01-03. Single-URI-SAN PBT belongs to Slice 04.",
+      "t": "2026-06-05T13:32:54Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T13:34:44Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T13:37:03Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T14:36:08Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T14:37:35Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single observable port operation (issue_intermediate) with no internal decomposition; the acceptance test exercises the full deterministic-issuance + chains-to-root surface through the Ca driving port. Same rationale as prior sim CA steps.",
+      "t": "2026-06-05T14:37:42Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T14:39:07Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T14:43:07Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:12:31Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:19:59Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single observable port operation (issue_intermediate); adapter code is integration-tested via the three L3 ATs, not mocked \u2014 mirrors 01-03/03-01/03-02",
+      "t": "2026-06-05T15:19:59Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:19:59Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:22:53Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:31:40Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:31:40Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single observable port operation (bootstrap_node_intermediate wiring issue_intermediate into node bootstrap); adapter/infra wiring exercised via the L3 integration AT with a real LocalIntentStore, never mocked unit tests; the AT fully drives the wiring and reaches GREEN without unit decomposition \u2014 mirrors 03-01/03-02/03-03",
+      "t": "2026-06-05T15:31:46Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:33:40Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:36:49Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:51:22Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:54:09Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure core policy; the two acceptance proptest properties (S-04-01 leaf-profile invariants, S-04-02 InvalidSan rejection) ARE the port-to-port coverage at the CertSpec::svid driving port \u2014 no separate decomposition layer to unit-test",
+      "t": "2026-06-05T15:54:09Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:54:09Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T15:56:03Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:05:06Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:05:10Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: sim-adapter method fully driven to GREEN through the Ca driving port by the two ATs (S-04-04/05); no separate unit decomposition needed (established pattern for 01-02/03-02)",
+      "t": "2026-06-05T16:05:16Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:05:20Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:06:39Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:26:00Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: activated S-04-07 (walking_skeleton) + S-04-08 (leaf profile) scaffolds; both failed for business-logic reason (issue_svid unimplemented) then driven GREEN. S-04-09 (bad-SAN reject) NOT activated: structurally unreachable through issue_svid(&SvidRequest) -- a valid single SpiffeId always projects to exactly one URI SAN, so CertSpec::svid cannot yield 0/>=2 at the adapter; satisfying it needs widening SvidRequest to a SAN set (overdrive-core, out of scope). Scaffold remains #[should_panic]; blocker surfaced for design decision.",
+      "t": "2026-06-05T16:26:08Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RcgenCa is an adapter-host crypto adapter exercised exclusively by L3 integration ATs over real rcgen + real openssl verify (Mandate 4 -- adapters are integration-tested, never mocked unit tests). The two activated ATs (S-04-07 chain-verify, S-04-08 leaf profile via x509-parser) fully drive issue_svid through the Ca driving port to GREEN -- no separate decomposition layer to unit-test, matching the 01-03/03-03 pattern.",
+      "t": "2026-06-05T16:26:16Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: implemented RcgenCa::issue_svid (CA:FALSE single-URI-SAN leaf, digitalSignature critical, ~1h validity, Entropy serial, signed by cached node intermediate); refactored issue_intermediate to mint-once-and-cache so the leaf chains to the same intermediate. Full overdrive-host integration suite GREEN in Lima: 13/13 passed (incl. S-01/S-03 root+intermediate, S-04-07 openssl-verify chain exit 0, S-04-08 x509-parser leaf profile). clippy -D warnings clean. S-04-09 remains a #[should_panic] scaffold (structural blocker, see RED_ACCEPTANCE).",
+      "t": "2026-06-05T16:26:24Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 18666841 (2 files: rcgen_ca.rs + rcgen_ca_chain_verify.rs). Lefthook gates passed (fmt, doctest, clippy, nextest-affected 1386 passed/0 failed). Delivers S-04-07 (walking skeleton) + S-04-08 (leaf profile). S-04-09 explicitly documented as BLOCKED in commit body -- bad-SAN reject unreachable through issue_svid(&SvidRequest) without widening SvidRequest (overdrive-core, out of scope); needs a design decision. Step 04-03 is a PARTIAL completion (2/3 scenarios); not logging the step as fully complete.",
+      "t": "2026-06-05T16:26:32Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:28:03Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:28:03Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T16:28:03Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:42:15Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:44:28Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-04-06 is an L3 cross-adapter equivalence guard fully driven through the Ca::issue_svid driving port over real crypto (x509-parser on real cert DER from both RcgenCa and SimCa); there is no separate decomposition layer to unit-test. The Option-A cleanup (rustdoc + dead CaError::InvalidSan removal + uniform error mapping) is non-behavioural refactor exercised by the existing host/sim issue_svid green tests, not new logic requiring a unit test.",
+      "t": "2026-06-05T17:44:37Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:48:29Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:50:14Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:56:33Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T17:57:19Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: golden-bytes + discriminant-offset triangulation + unknown-version probe ARE the L1 archive coverage (pure rkyv, no I/O); they exercise the public envelope/codec surface port-to-port. No GREEN decomposition needs additional unit tests \u2014 mirrors GREEN sibling 02-01 (root_ca_key.rs).",
+      "t": "2026-06-05T17:57:27Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:02:30Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:04:09Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:09:33Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:15:50Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: ATs fully drove GREEN \u2014 S-05-02 trust_bundle composition + S-05-01 faithful per-call serial observable need no decomposition unit tests (port-to-port through Ca trait); no complex GREEN to decompose",
+      "t": "2026-06-05T18:15:50Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:15:50Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS commit=922f2c39",
+      "t": "2026-06-05T18:18:34Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:19:07Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:23:52Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:34:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: L3 acceptance tests over real LocalObservationStore + a failing audit double at the driven-port boundary fully drive GREEN port-to-port (issuance+audit binding, read-back match, no-silent-issuance, re-issue freshness); no separate PBT unit test adds behavioral coverage.",
+      "t": "2026-06-05T18:34:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:34:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T18:36:39Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-05T19:02:57Z"
+    }
+  ]
+}

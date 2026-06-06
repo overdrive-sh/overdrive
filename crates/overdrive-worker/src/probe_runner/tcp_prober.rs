@@ -111,7 +111,7 @@ fn connect_error_to_reason(err: &std::io::Error, timeout: Duration) -> String {
 /// through unchanged.
 fn format_duration(d: Duration) -> String {
     let total_ms = d.as_millis();
-    if total_ms >= 1000 && total_ms % 1000 == 0 {
+    if total_ms >= 1000 && total_ms.is_multiple_of(1000) {
         format!("{}s", d.as_secs())
     } else if total_ms >= 1000 {
         // Non-integer seconds — render the fractional form.
