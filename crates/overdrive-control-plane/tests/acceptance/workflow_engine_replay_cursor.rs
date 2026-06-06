@@ -24,14 +24,18 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
+use overdrive_control_plane::journal::{
+    JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId,
+};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use std::sync::Arc as StdArc;
 
 use overdrive_core::id::ContentHash;
 use overdrive_core::traits::{Clock, Entropy, Transport};
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowCtxError};
+use overdrive_core::workflow::{
+    JournalCursor, SignalKey, SignalValue, WorkflowCtx, WorkflowCtxError,
+};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -260,4 +264,125 @@ async fn replay_advances_cursor_so_next_step_is_live_at_step_one() {
         }
         other => panic!("expected RunResult, got {other:?}"),
     }
+}
+
+/// Build a `WorkflowCtx` over a `SimJournalStore` seeded with `replay_buffer`,
+/// returning the ctx + the backing journal + the instance id. No transport
+/// inbox is bound — this scenario drives replayed `ctx.run` / `ctx.wait_for_signal`
+/// only (the replay path resolves both from the recorded run, never firing an
+/// effect or reading a live signal surface).
+fn ctx_only(replay_buffer: Vec<LoadedEntry>) -> (WorkflowCtx, Arc<dyn JournalStore>, WorkflowId) {
+    let transport: Arc<dyn Transport> = Arc::new(SimTransport::new());
+    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(0x5eed));
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let workflow_id = WorkflowId::new("wf-cursor-cmd-walk").expect("valid id");
+    let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new(
+        Arc::clone(&journal),
+        workflow_id.clone(),
+        replay_buffer,
+    ));
+    let ctx = WorkflowCtx::new(clock, transport, entropy, cursor);
+    (ctx, journal, workflow_id)
+}
+
+/// ADR-0064 §3 / §4 (D2/D6, CA-5): the cursor walks COMMANDS ONLY and
+/// resolves a `SignalSeen` by `SignalKey` lookup — NOT by position. The
+/// `*cursor += 2` two-positional-entry signal walk is RETIRED: a
+/// `SignalAwaited` command advances the command-cursor by exactly 1, and the
+/// matching `SignalSeen` notification is found off the walk by its key,
+/// wherever it lands in the interleaved on-disk stream.
+///
+/// The loaded run interleaves three commands and one notification, with the
+/// `SignalSeen` placed AFTER a trailing `RunResult` command — so the
+/// notification is NOT at `SignalAwaited_position + 1`. This is the
+/// falsifying shape for the retired positional `+2` walk: the old code read
+/// the entry at `SignalAwaited + 1` (a `RunResult`, here), found no
+/// `SignalSeen` there, and treated the wait as "crashed while blocked"
+/// (re-block), stranding the trailing command. Under correlated lookup the
+/// notification resolves by key, the command-cursor advances exactly 1 past
+/// the `SignalAwaited`, and the trailing `RunResult` replays at the next
+/// command position.
+///
+/// Loaded run (interleaved) and the partition it produces:
+///
+/// ```text
+/// Loaded Vec<LoadedEntry>:
+///   [0] Command(RunResult "step-a")
+///   [1] Command(SignalAwaited K)
+///   [2] Command(RunResult "step-b")            <- NOT a SignalSeen
+///   [3] Notification(SignalSeen K = "ack")     <- off the positional walk
+///
+/// Partitioned at the cursor:
+///   replay_commands      = [RunResult a, SignalAwaited K, RunResult b]
+///   signal_notifications = { K -> SignalSeen("ack") }
+/// ```
+///
+/// Port-to-port: driving ports are `WorkflowCtx::run` and
+/// `WorkflowCtx::wait_for_signal`; the driven port is the `SimJournalStore`
+/// behind the cursor (observed via `load_journal` — replay appends nothing).
+#[tokio::test]
+async fn cursor_walks_commands_only_and_resolves_signal_seen_by_key_not_position() {
+    let key = SignalKey::new("cert-ready").expect("valid signal key");
+    let recorded_value = SignalValue::new("ack");
+
+    let first_bytes = encode_run_result(&Ok(7usize));
+    let second_bytes = encode_run_result(&Ok(99usize));
+
+    let buffer = vec![
+        // [0] command — replayed first (command-cursor 0 → 1)
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: "step-a".to_string(),
+            result_digest: ContentHash::of(&first_bytes),
+            result_bytes: first_bytes,
+        }),
+        // [1] command — the armed wait (command-cursor 1 → 2 on resolve)
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: key.clone() }),
+        // [2] command — replayed after the signal resolves (command-cursor 2 → 3).
+        //     Under the retired positional `+2` walk this sits where a
+        //     SignalSeen would have to be; correlated lookup ignores its
+        //     position entirely.
+        LoadedEntry::Command(JournalCommand::RunResult {
+            name: "step-b".to_string(),
+            result_digest: ContentHash::of(&second_bytes),
+            result_bytes: second_bytes,
+        }),
+        // [3] NOTIFICATION — resolved by SignalKey lookup, off the walk. Its
+        //     position (3, NOT SignalAwaited+1=2) is the load-bearing proof
+        //     that resolution is correlated, not positional.
+        LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key: key.clone(),
+            value_digest: ContentHash::of(recorded_value.as_str().as_bytes()),
+            value: recorded_value.clone(),
+        }),
+    ];
+
+    let (ctx, journal, workflow_id) = ctx_only(buffer);
+
+    // Command-index 0 — step-a replays from the recorded run.
+    let a: Result<usize, String> =
+        ctx.run("step-a", async move { Ok::<usize, String>(0) }).await.expect("replay step-a");
+    assert_eq!(a, Ok(7), "step-a replays the recorded result");
+
+    // Command-index 1 — wait_for_signal resolves SignalSeen by SignalKey
+    // lookup (NOT by reading position SignalAwaited+1, which holds step-b).
+    // This is the retired `+2` proof: a positional walk would have read
+    // step-b at SignalAwaited+1, missed the SignalSeen, and re-blocked.
+    let value =
+        ctx.wait_for_signal(key.clone()).await.expect("signal resolves from recorded notification");
+    assert_eq!(value, recorded_value, "the wait resolves to the recorded SignalSeen value by key");
+
+    // Command-index 2 — step-b MUST replay. It only does if wait_for_signal
+    // advanced the command-cursor by exactly 1 (past the SignalAwaited), NOT
+    // 2 (which would skip step-b) and NOT 0 (which would re-replay it as the
+    // wait). This is the "advance by exactly 1" + "notification never
+    // advances the cursor" proof.
+    let b: Result<usize, String> =
+        ctx.run("step-b", async move { Ok::<usize, String>(0) }).await.expect("replay step-b");
+    assert_eq!(b, Ok(99), "step-b replays at command-index 2 — the cursor advanced by exactly 1");
+
+    // The whole run was a replay — the cursor appended NOTHING (every step,
+    // including the signal, was resolved from the loaded run).
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert!(entries.is_empty(), "a pure replay appends nothing; got {entries:?}");
 }

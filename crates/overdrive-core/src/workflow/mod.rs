@@ -185,10 +185,45 @@ pub enum WorkflowCtxError {
 ///
 /// # The check-then-record contract (ADR-0064 §3)
 ///
-/// Every `ctx` await-op is a check-then-record point. Identity is
-/// POSITIONAL — the cursor index, exactly as the sleep branch already is.
-/// `name` is carried for diagnostics and a replay-determinism check, not
-/// for identity. For `ctx.run` the cursor is consulted via
+/// Every `ctx` await-op is a check-then-record point. The durable handle
+/// (`overdrive-control-plane::workflow_runtime`) partitions the loaded run
+/// ONCE at construction into a positional **command** walk
+/// (`Vec<JournalCommand>`) plus a `SignalKey`-correlated **notification**
+/// lookup (`BTreeMap<SignalKey, JournalNotification>`) — D2 / ADR-0064 §3,
+/// CA-5. Two contracts govern the two classes:
+///
+/// ## Command-advance contract (commands advance the cursor, by exactly 1)
+///
+/// **Post:** a replay hit at command-index N returns the recorded
+/// [`JournalCommand`]'s result and advances the command-cursor by exactly
+/// 1. A live op appends the command durably (append + fsync, ADR-0063 §4)
+/// and advances by exactly 1.
+///
+/// **Invariant:** the cursor advances over `JournalCommand`s ONLY —
+/// `Started`, `RunResult`, `SleepArmed`, `SignalAwaited`, `ActionEmitted`,
+/// `Terminal`. A notification (`SignalSeen`) NEVER advances it; recording a
+/// notification leaves the command-cursor where it was. There is no
+/// `*cursor += 2` two-positional-entry walk — that conflation of an
+/// armed-command with a satisfied-notification is RETIRED (the trap CA-5
+/// closes).
+///
+/// ## Notification-lookup contract (`SignalSeen` resolved by key, never position)
+///
+/// **Post:** a `SignalSeen` is resolved by [`SignalKey`] lookup in the
+/// `BTreeMap<SignalKey, JournalNotification>` — never by position. On a
+/// `ctx.wait_for_signal` replay the cursor points at the `SignalAwaited`
+/// COMMAND; the matching `SignalSeen` is found off the walk by its key,
+/// wherever it landed in the interleaved on-disk stream, and the
+/// command-cursor advances by exactly 1 (past the `SignalAwaited`). A
+/// `SignalAwaited` command with NO matching `SignalSeen` notification (the
+/// "crashed while still blocked" shape) is NOT a replay hit — `replay_signal`
+/// returns `None` so the live path re-blocks on the SAME key.
+///
+/// **Invariant:** a notification is never consumed AS a command — it lives
+/// off the positional command walk entirely, so it can never be mistaken
+/// for a `SignalAwaited` (or any other command) at a cursor position.
+///
+/// For `ctx.run` the cursor is consulted via
 /// [`replay_run`](Self::replay_run):
 ///
 /// - **Replay (cursor < journal length):** the handle returns
@@ -291,25 +326,43 @@ pub trait JournalCursor: Send + Sync {
     /// against an unjournaled sleep.
     async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError>;
 
-    /// Check the cursor for a recorded `ctx.wait_for_signal` outcome at the
-    /// current step (the slice-03 signal await-surface, ADR-0064 §4).
+    /// Check the cursor for a recorded `ctx.wait_for_signal` outcome
+    /// (the slice-03 signal await-surface, ADR-0064 §4).
+    ///
+    /// Resolution is by the **notification-lookup contract** (D6 / CA-5):
+    /// the `SignalSeen` is found by `signal_key` lookup in the
+    /// `BTreeMap<SignalKey, JournalNotification>`, NEVER by position. The
+    /// command-cursor advances over the `SignalAwaited` COMMAND only.
     ///
     /// # Postconditions
     ///
-    /// - **Replay (cursor < journal length):** returns
-    ///   `Some(recorded_signal_value)` — the [`SignalValue`] recorded in a
-    ///   `SignalSeen` entry when the signal was first observed satisfied
-    ///   (`development.md` § "Persist inputs, not derived state"; the value
-    ///   is the input the workflow body received). The caller returns it
-    ///   WITHOUT re-reading the signal surface. Implementations advance the
-    ///   cursor on a replay hit. A recorded `SignalAwaited` with no matching
-    ///   `SignalSeen` (the workflow crashed while still blocked) is NOT a
-    ///   replay hit — `replay_signal` returns `None` so the live path
-    ///   re-blocks on the SAME signal (the crash-safety contract proven by
-    ///   step 03-02).
-    /// - **Live (cursor at journal end):** returns `None` — the caller
-    ///   records `SignalAwaited`, reads the typed signal surface, and on a
-    ///   hit records `SignalSeen { value }` before returning the value.
+    /// - **Replay (command-cursor at a `SignalAwaited` command WITH a
+    ///   matching `SignalSeen` notification):** returns
+    ///   `Some(recorded_signal_value)` — the [`SignalValue`] recorded in the
+    ///   `SignalSeen` notification when the signal was first observed
+    ///   satisfied (`development.md` § "Persist inputs, not derived state";
+    ///   the value is the input the workflow body received). The caller
+    ///   returns it WITHOUT re-reading the signal surface. Implementations
+    ///   advance the command-cursor by exactly 1 (past the `SignalAwaited`
+    ///   command); the notification does NOT advance it (it is off the
+    ///   walk).
+    /// - **Crashed-while-blocked (command-cursor at a `SignalAwaited`
+    ///   command with NO matching `SignalSeen` notification):** NOT a replay
+    ///   hit — returns `None` so the live path re-blocks on the SAME signal
+    ///   (the crash-safety contract proven by step 03-02). The command-cursor
+    ///   does NOT advance here; `record_signal_awaited` advances past the
+    ///   recorded `SignalAwaited`.
+    /// - **Live (command-cursor past the loaded commands, or not at a
+    ///   `SignalAwaited`):** returns `None` — the caller records
+    ///   `SignalAwaited`, reads the typed signal surface, and on a hit
+    ///   records `SignalSeen { value }` before returning the value.
+    ///
+    /// # Invariants
+    ///
+    /// - The `SignalSeen` is correlated by `signal_key`, never by position —
+    ///   the retired `*cursor += 2` positional walk is gone (CA-5).
+    /// - A notification never advances the command-cursor and is never
+    ///   consumed as a command.
     async fn replay_signal(&self, signal_key: &SignalKey) -> Option<SignalValue>;
 
     /// Durably record the `SignalAwaited` armed entry for `signal_key`
@@ -319,16 +372,19 @@ pub trait JournalCursor: Send + Sync {
     ///
     /// # Postconditions
     ///
-    /// - **Live (cursor at journal end):** appends a `SignalAwaited
-    ///   { signal_key }` entry durably and advances the cursor, then
-    ///   returns `Ok(())`. The ctx then enters its Clock-driven block on
-    ///   the signal surface.
-    /// - **Crash-while-blocked replay (cursor points to a `SignalAwaited`
-    ///   with no following `SignalSeen`):** the entry is ALREADY recorded
-    ///   (the prior run crashed while blocked), so this does NOT append a
-    ///   duplicate — it advances the cursor PAST the recorded
-    ///   `SignalAwaited` and returns `Ok(())`. The ctx re-enters the live
-    ///   block on the SAME `signal_key` (read from the recorded entry).
+    /// - **Live (command-cursor past the loaded commands):** appends a
+    ///   `SignalAwaited { signal_key }` COMMAND durably and advances the
+    ///   command-cursor by exactly 1, then returns `Ok(())`. The ctx then
+    ///   enters its Clock-driven block on the signal surface.
+    /// - **Crash-while-blocked replay (command-cursor at a `SignalAwaited`
+    ///   command with no matching `SignalSeen` notification):** the command
+    ///   is ALREADY recorded (the prior run crashed while blocked, having
+    ///   recorded the `SignalAwaited` command but never the `SignalSeen`
+    ///   notification — `replay_signal` returned `None` because no matching
+    ///   notification exists in the lookup map), so this does NOT append a
+    ///   duplicate — it advances the command-cursor PAST the recorded
+    ///   `SignalAwaited` command and returns `Ok(())`. The ctx re-enters the
+    ///   live block on the SAME `signal_key` (read from the recorded command).
     ///   This is the load-bearing crash-safety case (S-WP-03-01).
     ///
     /// # Errors
@@ -352,8 +408,8 @@ pub trait JournalCursor: Send + Sync {
         signal_key: &SignalKey,
     ) -> Result<Option<SignalValue>, WorkflowCtxError>;
 
-    /// Durably record the `SignalSeen { value }` entry for `signal_key`
-    /// (ADR-0063 §4) and advance the cursor — the SECOND half of the live
+    /// Durably record the `SignalSeen { value }` NOTIFICATION for
+    /// `signal_key` (ADR-0063 §4) — the SECOND half of the live
     /// `ctx.wait_for_signal` path, AFTER the engine observed the signal
     /// present. Records the observed `value` as an input so a resumed run
     /// replays it via [`replay_signal`](Self::replay_signal) without
@@ -361,12 +417,15 @@ pub trait JournalCursor: Send + Sync {
     ///
     /// # Postconditions
     ///
-    /// On `Ok(())` the `SignalSeen { signal_key, value }` entry is durably
-    /// journaled and the cursor has advanced. Because `SignalAwaited` (via
-    /// [`record_signal_awaited`](Self::record_signal_awaited)) and
-    /// `SignalSeen` are recorded at DISTINCT cursor positions, a crash
-    /// BETWEEN them leaves `SignalAwaited` with no `SignalSeen` — the
-    /// re-block-on-resume shape.
+    /// On `Ok(())` the `SignalSeen { signal_key, value }` notification is
+    /// durably journaled (appended as a `LoadedEntry::Notification`). Per the
+    /// notification-lookup contract (D6) this does NOT advance the
+    /// command-cursor — a notification lives off the positional command walk.
+    /// The preceding `SignalAwaited` COMMAND (via
+    /// [`record_signal_awaited`](Self::record_signal_awaited)) DID advance the
+    /// cursor; a crash AFTER `SignalAwaited` advanced but BEFORE this
+    /// notification is journaled leaves the `SignalAwaited` command with no
+    /// matching `SignalSeen` notification — the re-block-on-resume shape.
     ///
     /// # Errors
     ///

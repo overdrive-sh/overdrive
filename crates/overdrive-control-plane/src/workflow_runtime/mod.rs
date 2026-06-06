@@ -13,21 +13,33 @@
 //! instances should exist; the engine manages HOW each instance's steps
 //! execute between start and terminal.
 //!
-//! # The replay cursor (ADR-0064 §3)
+//! # The replay cursor (ADR-0064 §3, the command/notification partition)
 //!
-//! On (re)start the engine loads the instance's journal into a **replay
-//! buffer** and constructs a [`JournalCursorHandle`] at step 0. Each
-//! `ctx.run` durable step is check-then-record (POSITIONAL identity — the
-//! cursor index):
+//! On (re)start the engine `load_journal`s the instance's flat ordered
+//! `Vec<LoadedEntry>` and constructs a [`JournalCursorHandle`], which
+//! **partitions it ONCE at construction** (D2 / CA-5) into a positional
+//! command walk (`Vec<JournalCommand>`) plus a `SignalKey`-correlated
+//! notification lookup (`BTreeMap<SignalKey, JournalNotification>`). The
+//! cursor walks the COMMANDS only, advancing by exactly 1 per replayed
+//! command; notifications are resolved off the walk by key and never advance
+//! the cursor. The retired `*cursor += 2` two-positional-entry signal walk is
+//! gone. Each `ctx.run` durable step is check-then-record (the command-index
+//! is the identity):
 //!
-//! - **Replay (cursor < buffer length):** the handle returns the recorded
-//!   CBOR result bytes WITHOUT polling the step's future — the
-//!   exactly-once guarantee on the replay path (K1). The cursor advances.
-//! - **Live (cursor == buffer length):** the handle returns `Ok(None)`;
-//!   the ctx polls the step's future, then the handle appends a
-//!   [`JournalCommand::RunResult`] (wrapped as a
-//!   [`LoadedEntry::Command`]) with fsync BEFORE returning (ADR-0063
-//!   §4 fsync-then-suspend) and advances the cursor.
+//! - **Replay (command-cursor < command-walk length):** the handle returns
+//!   the recorded CBOR result bytes WITHOUT polling the step's future — the
+//!   exactly-once guarantee on the replay path (K1). The command-cursor
+//!   advances by 1.
+//! - **Live (command-cursor == command-walk length):** the handle returns
+//!   `Ok(None)`; the ctx polls the step's future, then the handle appends a
+//!   [`JournalCommand::RunResult`] (wrapped as a [`LoadedEntry::Command`])
+//!   with fsync BEFORE returning (ADR-0063 §4 fsync-then-suspend) and
+//!   advances the command-cursor by 1.
+//!
+//! A `ctx.wait_for_signal` resolves its `SignalSeen` by
+//! `signal_notifications.get(signal_key)` — never by position; a
+//! `SignalAwaited` command with no matching `SignalSeen` notification
+//! re-blocks (the "crashed while blocked" shape, now structural).
 //!
 //! On `run` returning a [`WorkflowResult`], the engine appends a
 //! [`JournalCommand::Terminal`] recording the canonical result string —
@@ -465,29 +477,80 @@ const fn workflow_result_label(result: &WorkflowResult) -> &'static str {
     }
 }
 
+/// Partition the flat loaded run (the dumb-store ordered
+/// `Vec<LoadedEntry>`) into the positional command walk plus the
+/// `SignalKey`-correlated notification lookup — the D2 partition, performed
+/// ONCE at [`JournalCursorHandle`] construction (ADR-0064 §3, CA-5).
+///
+/// Every [`LoadedEntry::Command`] lands in the returned `Vec<JournalCommand>`
+/// in append order (its index there is its replay command-index, D3); every
+/// [`LoadedEntry::Notification`]'s `SignalSeen` lands in the returned
+/// `BTreeMap` keyed by its `SignalKey`. The store never classifies — this is
+/// the cursor's job (D2). `BTreeMap`, not `HashMap`, per
+/// `.claude/rules/development.md` § "Ordered-collection choice" (DST
+/// determinism).
+///
+/// A duplicate `SignalSeen` for the same key (not expected for the
+/// single-node Phase-1 one-notification model — D6) keeps the LAST observed
+/// value via `BTreeMap::insert`'s overwrite semantics; the append-order
+/// last write is the most recent observation.
+fn partition_loaded_run(
+    loaded: Vec<LoadedEntry>,
+) -> (Vec<JournalCommand>, BTreeMap<SignalKey, JournalNotification>) {
+    let mut commands = Vec::new();
+    let mut notifications = BTreeMap::new();
+    for entry in loaded {
+        match entry {
+            LoadedEntry::Command(command) => commands.push(command),
+            LoadedEntry::Notification(notification) => {
+                let JournalNotification::SignalSeen { ref signal_key, .. } = notification;
+                notifications.insert(signal_key.clone(), notification);
+            }
+        }
+    }
+    (commands, notifications)
+}
+
 /// The durable [`JournalCursor`] implementation over an
-/// `Arc<dyn JournalStore>` + a per-instance replay buffer and cursor
+/// `Arc<dyn JournalStore>` + a per-instance partitioned run and cursor
 /// (ADR-0064 §3). This is the concrete handle the [`WorkflowCtx`] consults
 /// at every await-point — the control-plane-side I/O the core trait
 /// declaration delegates to.
+///
+/// The loaded run is partitioned ONCE at construction (via
+/// [`partition_loaded_run`]) into a positional command walk
+/// (`replay_commands`) plus a `SignalKey`-correlated notification lookup
+/// (`signal_notifications`); the cursor walks commands ONLY and advances by
+/// exactly 1 per replayed command. The retired `*cursor += 2`
+/// two-positional-entry signal walk is gone — a `SignalSeen` is resolved by
+/// key, off the walk (D2 / CA-5).
 pub struct JournalCursorHandle {
     journal: Arc<dyn JournalStore>,
     workflow_id: WorkflowId,
-    /// The entries loaded at (re)start, as the flat ordered
-    /// [`LoadedEntry`] stream the store returns (commands + notifications
-    /// interleaved). The cursor reads recorded results from this buffer on
-    /// replay; the live path appends to the journal.
+    /// The replayable, **cursor-advancing** commands of the loaded run, in
+    /// append order — the positional command walk (D2 / ADR-0064 §3,
+    /// CA-5). Partitioned ONCE at construction from the flat
+    /// `Vec<LoadedEntry>` the store returns: every `LoadedEntry::Command`
+    /// lands here in order. The cursor walks THIS vector only and advances
+    /// by exactly 1 per replayed command; notifications never advance it.
+    replay_commands: Vec<JournalCommand>,
+    /// The `SignalKey`-correlated notifications of the loaded run — the
+    /// off-the-walk lookup map (D2 / D6 / ADR-0064 §4, CA-5). Partitioned
+    /// ONCE at construction: every `LoadedEntry::Notification`'s
+    /// `SignalSeen` lands here keyed by its `SignalKey`. `replay_signal`
+    /// resolves a satisfied wait by `signal_notifications.get(signal_key)`
+    /// — never by position; the retired `*cursor += 2` positional signal
+    /// walk is gone.
     ///
-    /// NOTE (RED scaffold, step 01-01 → 01-03): this still drives a
-    /// POSITIONAL walk over the interleaved `LoadedEntry` stream. The D2
-    /// partition — into a `Vec<JournalCommand>` positional walk + a
-    /// `BTreeMap<SignalKey, JournalNotification>` correlated lookup, and
-    /// the retirement of the `*cursor + 2` signal walk — lands in step
-    /// 01-03. The positional walk over `LoadedEntry` here is the
-    /// behaviour-preserving intermediate.
-    replay_buffer: Vec<LoadedEntry>,
-    /// The current await-point index — advanced on every replay hit and
-    /// every live record. Interior-mutable so `&self` ctx ops can move it.
+    /// `BTreeMap`, not `HashMap`, per `.claude/rules/development.md`
+    /// § "Ordered-collection choice" — the map is observed by the DST
+    /// `replay_equivalence_provision_record` invariant (step 01-06) and
+    /// must iterate deterministically across seeds.
+    signal_notifications: BTreeMap<SignalKey, JournalNotification>,
+    /// The current **command**-cursor index into [`replay_commands`] —
+    /// advanced on every command replay hit and every live command record,
+    /// by exactly 1. A notification record (`record_signal_seen`) does NOT
+    /// advance it. Interior-mutable so `&self` ctx ops can move it.
     cursor: Mutex<usize>,
     /// The sender half of the engine's Action channel (→ Raft). The live
     /// `ctx.emit_action` path sends the typed Action here — the channel the
@@ -531,10 +594,12 @@ impl JournalCursorHandle {
         workflow_id: WorkflowId,
         replay_buffer: Vec<LoadedEntry>,
     ) -> Self {
+        let (replay_commands, signal_notifications) = partition_loaded_run(replay_buffer);
         Self {
             journal,
             workflow_id,
-            replay_buffer,
+            replay_commands,
+            signal_notifications,
             cursor: Mutex::new(0),
             action_emit: None,
             obs: None,
@@ -555,10 +620,12 @@ impl JournalCursorHandle {
         action_emit: ActionEmitSender,
         obs: Arc<dyn ObservationStore>,
     ) -> Self {
+        let (replay_commands, signal_notifications) = partition_loaded_run(replay_buffer);
         Self {
             journal,
             workflow_id,
-            replay_buffer,
+            replay_commands,
+            signal_notifications,
             cursor: Mutex::new(0),
             action_emit: Some(action_emit),
             obs: Some(obs),
@@ -591,18 +658,15 @@ impl JournalCursorHandle {
 impl JournalCursor for JournalCursorHandle {
     async fn replay_run(&self, name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        // Replay only while the cursor is within the loaded run AND the
-        // entry at the cursor is a RunResult. (`Started` / `Terminal`
-        // entries are not ctx.run await-points; slice 01 records only
-        // RunResult entries between Started and Terminal, but guarding on
-        // the variant keeps the cursor honest if a future slice
-        // interleaves other await entries.) A cursor past the buffer (or
-        // at a non-run entry) is the live path → `Ok(None)`.
-        let Some(LoadedEntry::Command(JournalCommand::RunResult {
-            name: recorded_name,
-            result_bytes,
-            ..
-        })) = self.replay_buffer.get(*cursor)
+        // Replay only while the command-cursor is within the loaded command
+        // walk AND the command at the cursor is a RunResult. (`Started` /
+        // `Terminal` commands are not ctx.run await-points; slice 01 records
+        // only RunResult commands between Started and Terminal, but guarding
+        // on the variant keeps the cursor honest if a future slice
+        // interleaves other await commands.) A command-cursor past the walk
+        // (or at a non-run command) is the live path → `Ok(None)`.
+        let Some(JournalCommand::RunResult { name: recorded_name, result_bytes, .. }) =
+            self.replay_commands.get(*cursor)
         else {
             drop(cursor);
             return Ok(None);
@@ -645,13 +709,14 @@ impl JournalCursor for JournalCursorHandle {
 
     async fn replay_sleep(&self) -> Option<Duration> {
         let mut cursor = self.cursor.lock().await;
-        // Replay only while the cursor is within the loaded run AND the
-        // entry at the cursor is a SleepArmed. A cursor past the buffer
-        // (or at a non-sleep entry) is the live path → `None`. The
-        // recorded `deadline_unix` is the absolute deadline (an input);
-        // the ctx recomputes the remaining wait against the live clock.
-        let deadline = match self.replay_buffer.get(*cursor) {
-            Some(LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix, .. })) => {
+        // Replay only while the command-cursor is within the loaded command
+        // walk AND the command at the cursor is a SleepArmed. A command-cursor
+        // past the walk (or at a non-sleep command) is the live path →
+        // `None`. The recorded `deadline_unix` is the absolute deadline (an
+        // input); the ctx recomputes the remaining wait against the live
+        // clock. Advance the command-cursor by exactly 1 on a replay hit.
+        let deadline = match self.replay_commands.get(*cursor) {
+            Some(JournalCommand::SleepArmed { deadline_unix, .. }) => {
                 *cursor += 1;
                 Some(*deadline_unix)
             }
@@ -675,62 +740,64 @@ impl JournalCursor for JournalCursorHandle {
         Ok(())
     }
 
-    async fn replay_signal(&self, _signal_key: &SignalKey) -> Option<SignalValue> {
+    async fn replay_signal(&self, signal_key: &SignalKey) -> Option<SignalValue> {
         let mut cursor = self.cursor.lock().await;
-        // A `ctx.wait_for_signal` records a PAIR of entries at distinct
-        // cursor positions: `SignalAwaited` (when blocking begins) then
-        // `SignalSeen { value }` (when the signal is observed satisfied).
-        // On replay the cursor points at the `SignalAwaited`:
+        // The notification-lookup contract (D2 / D6 / CA-5). A
+        // `ctx.wait_for_signal` records a `SignalAwaited` COMMAND (in the
+        // command walk) and a `SignalSeen` NOTIFICATION (off the walk,
+        // `SignalKey`-keyed). On replay the command-cursor points at the
+        // `SignalAwaited` command; the `SignalSeen` is resolved by KEY
+        // lookup, NEVER by position — the retired `*cursor += 2`
+        // two-positional-entry walk is GONE.
         //
-        // - **Completed wait** — `SignalAwaited` followed by `SignalSeen`:
-        //   a replay HIT. Return the recorded value WITHOUT re-reading the
-        //   surface and advance the cursor PAST BOTH entries (the live run
-        //   received this exact value; ADR-0064 §4). [S-WP-03-02]
-        // - **Crashed while blocked** — `SignalAwaited` with NO following
-        //   `SignalSeen`: NOT a replay hit. Return None so the live path
-        //   re-blocks on the SAME signal; `record_signal_awaited` then
-        //   advances past the lone `SignalAwaited`. [S-WP-03-01]
-        // - **Live / non-signal entry** — None (the live path arms a fresh
+        // - **Completed wait** — a `SignalAwaited` command at the cursor AND
+        //   a matching `SignalSeen` notification in the lookup map: a replay
+        //   HIT. Return the recorded value WITHOUT re-reading the surface and
+        //   advance the command-cursor by EXACTLY 1 (past the `SignalAwaited`
+        //   command only; the notification is off the walk and never advances
+        //   the cursor; ADR-0064 §4). [S-WP-03-02]
+        // - **Crashed while blocked** — a `SignalAwaited` command at the
+        //   cursor with NO matching `SignalSeen` notification: NOT a replay
+        //   hit. Return None so the live path re-blocks on the SAME signal;
+        //   `record_signal_awaited` then advances past the lone
+        //   `SignalAwaited` command. [S-WP-03-01]
+        // - **Live / non-signal command** — None (the live path arms a fresh
         //   wait).
-        //
-        // Identity is POSITIONAL — `signal_key` is carried for diagnostics;
-        // the cursor index is the identity.
-        if !matches!(
-            self.replay_buffer.get(*cursor),
-            Some(LoadedEntry::Command(JournalCommand::SignalAwaited { .. }))
-        ) {
+        if !matches!(self.replay_commands.get(*cursor), Some(JournalCommand::SignalAwaited { .. }))
+        {
             drop(cursor);
             return None;
         }
-        let Some(LoadedEntry::Notification(JournalNotification::SignalSeen { value, .. })) =
-            self.replay_buffer.get(*cursor + 1)
+        // Correlated lookup — find the SignalSeen by its key, wherever it
+        // landed in the interleaved on-disk stream (NOT at SignalAwaited+1).
+        let Some(JournalNotification::SignalSeen { value, .. }) =
+            self.signal_notifications.get(signal_key)
         else {
-            // SignalAwaited with no following SignalSeen — crashed while
-            // blocked. NOT a replay hit; re-block on the live path.
+            // SignalAwaited command with no matching SignalSeen notification
+            // — crashed while blocked. NOT a replay hit; re-block on the live
+            // path.
             drop(cursor);
             return None;
         };
         let value = value.clone();
-        // Advance past BOTH the SignalAwaited and the SignalSeen.
-        *cursor += 2;
+        // Advance past the SignalAwaited COMMAND by exactly 1 — the
+        // notification is off the walk (it never advances the cursor).
+        *cursor += 1;
         drop(cursor);
         Some(value)
     }
 
     async fn record_signal_awaited(&self, signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
         let mut cursor = self.cursor.lock().await;
-        // Crash-while-blocked replay: a SignalAwaited is ALREADY recorded
-        // at the cursor (the prior run crashed while blocked, recording
-        // SignalAwaited but never SignalSeen — replay_signal returned None
-        // because there is no following SignalSeen). Do NOT append a
-        // duplicate — advance PAST the recorded SignalAwaited and re-enter
-        // the live block on the SAME key. This is the load-bearing
-        // crash-safety case (S-WP-03-01). POSITIONAL identity — `signal_key`
-        // is carried for diagnostics; the cursor index is the identity.
-        if matches!(
-            self.replay_buffer.get(*cursor),
-            Some(LoadedEntry::Command(JournalCommand::SignalAwaited { .. }))
-        ) {
+        // Crash-while-blocked replay: a SignalAwaited COMMAND is ALREADY at
+        // the command-cursor (the prior run crashed while blocked, recording
+        // the SignalAwaited command but never the SignalSeen notification —
+        // replay_signal returned None because there is no matching SignalSeen
+        // notification in the lookup map). Do NOT append a duplicate —
+        // advance the command-cursor PAST the recorded SignalAwaited command
+        // (by exactly 1) and re-enter the live block on the SAME key. This is
+        // the load-bearing crash-safety case (S-WP-03-01).
+        if matches!(self.replay_commands.get(*cursor), Some(JournalCommand::SignalAwaited { .. })) {
             *cursor += 1;
             drop(cursor);
             return Ok(());
@@ -773,41 +840,46 @@ impl JournalCursor for JournalCursorHandle {
         signal_key: &SignalKey,
         value: &SignalValue,
     ) -> Result<(), WorkflowCtxError> {
-        let mut cursor = self.cursor.lock().await;
-        // Record SignalSeen { value } durably at the NEXT cursor position
-        // (ADR-0063 §4): the value_digest is the content digest of the
-        // observed value's bytes (an input); the value itself is carried so
-        // a resumed run replays it without re-reading the surface. Recorded
-        // at a DISTINCT cursor position from SignalAwaited, so a crash
-        // BETWEEN them leaves SignalAwaited with no SignalSeen — the
-        // re-block-on-resume shape.
+        // Record SignalSeen { value } durably (ADR-0063 §4): the
+        // value_digest is the content digest of the observed value's bytes
+        // (an input); the value itself is carried so a resumed run replays it
+        // by `SignalKey` lookup without re-reading the surface.
+        //
         // SignalSeen is a NOTIFICATION (SignalKey-correlated), no in-entry
-        // `step` (D1/D5). Recorded at a DISTINCT cursor position from the
-        // SignalAwaited command so a crash BETWEEN them leaves SignalAwaited
-        // with no SignalSeen — the re-block-on-resume shape.
+        // `step` (D1/D5). Per the notification-lookup contract (D2/D6) this
+        // does NOT advance the command-cursor — a notification lives off the
+        // positional command walk. The preceding SignalAwaited COMMAND (via
+        // `record_signal_awaited`) already advanced the cursor; a crash AFTER
+        // that advance but BEFORE this notification is durable leaves the
+        // SignalAwaited command with no matching SignalSeen notification —
+        // the re-block-on-resume shape. The append is therefore a plain
+        // durable journal write with NO cursor mutation (the
+        // `append_then_advance` helper is for commands only).
         let value_digest = ContentHash::of(value.as_str().as_bytes());
         let seen = LoadedEntry::Notification(JournalNotification::SignalSeen {
             signal_key: signal_key.clone(),
             value_digest,
             value: value.clone(),
         });
-        self.append_then_advance(&mut cursor, &seen).await?;
-        drop(cursor);
+        self.journal
+            .append(&self.workflow_id, &seen)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
         Ok(())
     }
 
     async fn replay_emit(&self) -> bool {
         let mut cursor = self.cursor.lock().await;
-        // A replay hit requires a recorded ActionEmitted at the cursor: the
-        // Action was already sent on a prior run, so it is NOT re-sent
-        // (exactly-once ON THE REPLAY PATH — ADR-0064 §4). The live path in
-        // `emit_action` is at-least-once: a recorded ActionEmitted is what
-        // makes resume idempotent, so a run that sent but failed to record
-        // it (no entry here) re-sends. See `emit_action` below.
-        let is_replay = matches!(
-            self.replay_buffer.get(*cursor),
-            Some(LoadedEntry::Command(JournalCommand::ActionEmitted { .. }))
-        );
+        // A replay hit requires a recorded ActionEmitted COMMAND at the
+        // command-cursor: the Action was already sent on a prior run, so it
+        // is NOT re-sent (exactly-once ON THE REPLAY PATH — ADR-0064 §4). The
+        // live path in `emit_action` is at-least-once: a recorded
+        // ActionEmitted is what makes resume idempotent, so a run that sent
+        // but failed to record it (no command here) re-sends. See
+        // `emit_action` below. Advance the command-cursor by exactly 1 on a
+        // replay hit.
+        let is_replay =
+            matches!(self.replay_commands.get(*cursor), Some(JournalCommand::ActionEmitted { .. }));
         if is_replay {
             *cursor += 1;
         }
