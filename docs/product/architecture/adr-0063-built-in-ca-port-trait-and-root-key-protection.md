@@ -90,6 +90,16 @@ pub trait Ca: Send + Sync {
     /// Generate or load the persistent self-signed root CA.
     fn root(&self) -> Result<RootCaHandle, CaError>;
 
+    /// Re-seed the adapter with the persisted root after a restart so
+    /// issuance chains to the persisted anchor (see D3 "Subsequent boot").
+    /// Default no-op (`Ok(())`) for adapters whose root is stable by
+    /// construction (the sim fixture root); the lazily-generating host
+    /// adapter (`RcgenCa`) overrides it to seed its in-memory root cache
+    /// from the decrypted handle. Idempotent for the same root; fails loud
+    /// with a typed `CaError` if a divergent root was already minted
+    /// (issuance-before-adoption).
+    fn adopt_persisted_root(&self, root: &RootCaHandle) -> Result<(), CaError>;
+
     /// Issue (or re-issue) the node intermediate CA, pathLen=0, signed
     /// by the root. Single-node: one node → one intermediate.
     fn issue_intermediate(&self, node: &NodeId) -> Result<IntermediateHandle, CaError>;
@@ -182,7 +192,18 @@ The keyring/systemd-creds plumbing is a **host-adapter concern**
   1. systemd-creds → kernel keyring (KEK re-supplied).
   2. Read `RootCaKeyRecord` from IntentStore; HKDF-derive the subkey from the
      keyring KEK using the record's `salt` + `info`; AES-256-GCM-decrypt.
-  3. **Decrypt failure (wrong KEK, tampered ciphertext) → refuse to start**
+  3. **Re-seed the CA adapter with the persisted root via
+     `Ca::adopt_persisted_root`** (after a successful decrypt, before any
+     issuance). This is load-bearing because the lazily-generating host
+     adapter (`RcgenCa`) holds its root signing key only in memory: without
+     this re-seed a fresh post-restart adapter would mint a *new* ephemeral
+     root on its first signing call and every subsequently-issued
+     `issue_intermediate` / `issue_svid` / `trust_bundle` would chain to that
+     ephemeral root instead of the persisted anchor relying parties trust —
+     silently breaking the chain. Adoption happens **once, before any
+     issuance**, and is idempotent for the same root (a divergent
+     already-minted root fails loud with a typed `CaError`).
+  4. **Decrypt failure (wrong KEK, tampered ciphertext) → refuse to start**
      with a typed `CaError` + `health.startup.refused`. **Never silently
      re-mint** — a re-mint orphans every issued identity. AEAD authentication
      distinguishes "tampered envelope" from "wrong KEK" (distinct error
@@ -495,10 +516,16 @@ the system accepts traffic — *wire then probe then use*:
 - **KEK present in keyring** — probe `keyctl`/`add_key` round-trips the KEK
   before any decrypt; a missing/empty KEK refuses startup
   (`health.startup.refused`), not a panic mid-issuance.
-- **Persisted envelope decrypts** — on subsequent boot, the adapter performs a
-  trial HKDF-derive + AES-GCM-open of the persisted `RootCaKeyRecord` at
-  composition time; an auth failure (tampered) or wrong-KEK failure refuses
-  startup with the *distinct* typed error.
+- **Persisted envelope decrypts, then the root is adopted** — on subsequent
+  boot, the adapter performs a trial HKDF-derive + AES-GCM-open of the
+  persisted `RootCaKeyRecord` at composition time; an auth failure (tampered)
+  or wrong-KEK failure refuses startup with the *distinct* typed error. The
+  *use* step closes the loop: after the trial decrypt succeeds, the boot path
+  installs the persisted root into the adapter via `Ca::adopt_persisted_root`
+  **before** any issuance — so "use" means "issue under the persisted root,"
+  not "lazily mint a fresh ephemeral one." Without this adopt the
+  decrypt-probe would prove the persisted key is recoverable yet the very next
+  signing op would still chain to a new ephemeral root, defeating the probe.
 - **systemd-creds delivery** — the host adapter treats an absent
   `LoadCredentialEncrypted` credential (and the absence of the dev
   `OVERDRIVE_CA_KEK` opt-in) as a refuse-to-start, not a silent fallback to a
@@ -529,6 +556,32 @@ for DISTILL.
 
 ## Changelog
 
+- 2026-06-06 — **D3 / Earned-Trust reconciliation — `adopt_persisted_root`
+  re-seed seam on subsequent boot (DELIVER-surfaced). No decision reversed.**
+  The shipped boot path `ca_boot::load_persistent_root` decrypted the persisted
+  root key and rebuilt a `RootCaHandle` but never fed it back into the CA
+  adapter. Because `RcgenCa` caches its root signing key only in an in-memory
+  `OnceLock` populated lazily on the first signing call, a fresh post-restart
+  adapter had an empty cache — so its first issuance (`issue_intermediate` /
+  `issue_svid` / `trust_bundle`) minted a brand-new *ephemeral* root and nothing
+  chained to the persisted anchor relying parties trust. The fix added a new
+  `Ca` trait seam — `fn adopt_persisted_root(&self, root: &RootCaHandle) ->
+  Result<()>` (default no-op `Ok(())`; `RcgenCa` overrides it to seed its
+  `root_material` `OnceLock` from the decrypted handle; `SimCa` keeps the
+  default because its root is a fixture `const`). `ca_boot::load_persistent_root`
+  now calls `ca.adopt_persisted_root(&handle)` after decrypting and **before**
+  returning (i.e. before any issuance); the adopt is idempotent for the same
+  root and fails loud with a typed `CaError` if a divergent root was already
+  minted (issuance-before-adoption). This amendment brings the ADR narrative
+  into line with the shipped behaviour: D3 "Subsequent boot" gains the adopt
+  step (new step 3, decrypt-failure renumbered to step 4); the Earned-Trust
+  "Persisted envelope decrypts" bullet names the *use* step accurately
+  (issue-under-persisted-root, not lazily-mint-fresh); and the D1 `Ca` method
+  surface gains `adopt_persisted_root`. **No D-point decision is altered** —
+  the boot shape D3 always intended (recover the persisted root, issue under
+  it, refuse-to-start over silent re-mint) is unchanged; this only documents
+  the trait seam that makes the recovered root actually reach issuance.
+  — Morgan.
 - 2026-06-06 — **D6 clarification — `issued_certificates` is an additive
   `ObservationRow` variant + typed reader through the port, not a
   concrete-adapter surface (DELIVER back-propagation). No decision reversed.**
