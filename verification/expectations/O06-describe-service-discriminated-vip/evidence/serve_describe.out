@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
      Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
 EVID="/Users/marcus/conductor/workspaces/helios/adelaide/verification/expectations/O06-describe-service-discriminated-vip/evidence"
 REPO="/Users/marcus/conductor/workspaces/helios/adelaide"
@@ -154,8 +154,8 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o06-cfg.dAB1Lo data=/tmp/od-o06-data.8tyJ40
-# serve ready: trust triple at /tmp/od-o06-cfg.dAB1Lo/.overdrive/config (pid 1463206)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o06-cfg.zmP6wr data=/tmp/od-o06-data.9vMOcB
+# serve ready: trust triple at /tmp/od-o06-cfg.zmP6wr/.overdrive/config (pid 1526425)
 # deploy exit: 0
 # alloc status exit: 0 (converged_after=1s)
 # describe GET /v1/jobs/dns-resolver -> HTTP 200

@@ -13,8 +13,8 @@ exit 0'`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
 # building overdrive binary
-# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o06-cfg.dAB1Lo data=/tmp/od-o06-data.8tyJ40
-# serve ready: trust triple at /tmp/od-o06-cfg.dAB1Lo/.overdrive/config (pid 1463206)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o06-cfg.zmP6wr data=/tmp/od-o06-data.9vMOcB
+# serve ready: trust triple at /tmp/od-o06-cfg.zmP6wr/.overdrive/config (pid 1526425)
 # deploy exit: 0
 # alloc status exit: 0 (converged_after=1s)
 # describe GET /v1/jobs/dns-resolver -> HTTP 200
@@ -25,6 +25,7 @@ INNER_DONE serve_status=ready deploy_rc=0 alloc_rc=0 describe_http=200
   [PASS] SC1: deploy exited 0
   [PASS] 'deploy_service.out' contains: Accepted.
   [PASS] SC2: alloc status exited 0 — CLI deserialised DescribeSpecOutput
+  [PASS] SC2b: alloc status renders the Service VIP line (operator-visible)
   [info] workload converged to >=1 allocation after ~1s (captured running, not the 0-alloc empty-state)
   [PASS] SC3a: describe response carries "kind":"service" (discriminated)
   [PASS] SC3b: describe response carries platform-issued "vip" IPv4

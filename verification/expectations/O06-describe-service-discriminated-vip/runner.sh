@@ -237,6 +237,17 @@ if [[ "$alloc_rc" == "0" ]]; then
 else
   echo "  [FAIL] SC2: alloc status exited '${alloc_rc:-<none>}' — CLI failed to round-trip the describe response"; rc=1
 fi
+
+# SC2b — the operator CLI now RENDERS the Service VIP (the rendering half of #220).
+# alloc status reads vip from the AllocStatusResponse envelope (ADR-0049) and prints
+# a `VIP: <ipv4>` line for Service reads. Before this landed the VIP was on the wire
+# but dropped by the CLI; this sub-claim is the operator-visible-VIP proof.
+if grep -Eq '^VIP:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$EVIDENCE_DIR/alloc_status_service.out" 2>/dev/null; then
+  echo "  [PASS] SC2b: alloc status renders the Service VIP line (operator-visible)"
+else
+  echo "  [FAIL] SC2b: alloc status output has no 'VIP: <ipv4>' line — CLI VIP rendering missing"; rc=1
+fi
+
 # Informational (NOT a sub-claim — describe/VIP does not require convergence):
 converged_secs="$(sed -n 's/^converged_after_secs=//p' "$EVIDENCE_DIR/alloc_status_service.meta" 2>/dev/null)"
 if grep -qE '^Allocations:[[:space:]]+[1-9]' "$EVIDENCE_DIR/alloc_status_service.out" 2>/dev/null; then
