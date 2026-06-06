@@ -16,8 +16,10 @@
 //!    of `bpf_prog_info` — only changes this fn and its call sites).
 //! 3. [`evaluate`] — pure decision fn: given baselines + candidates +
 //!    policy, returns [`GateOutcome::Pass`] or `Fail { breaches }`.
-//!    No I/O, no subprocess. Self-tested at
-//!    `crates/overdrive-dataplane/tests/integration/verifier_budget_gate.rs`.
+//!    No I/O, no subprocess. Self-tested by the inline `#[cfg(test)]`
+//!    module at the bottom of this file (the gate logic is a
+//!    binary-internal module, so its tests cannot live in the crate's
+//!    integration-test tree).
 //!
 //! # Signal source
 //!
@@ -33,8 +35,19 @@
 //!
 //! # Gate policy
 //!
-//! - **Growth gate**: fail if `measured > baseline * (1 + max_growth_fraction)`.
-//!   Default `max_growth_fraction = 0.05` (>5%).
+//! - **Growth gate**: fail if growth breaches BOTH a relative AND an
+//!   absolute threshold — `measured > baseline * (1 +
+//!   max_growth_fraction)` AND `measured - baseline > max_growth_insns`.
+//!   Defaults `max_growth_fraction = 0.05` (>5%), `max_growth_insns =
+//!   50`. The absolute floor exists because the relative gate's
+//!   sensitivity scales inversely with program size: for a ~150K-insn
+//!   XDP program 5% ≈ 7,500 insns of headroom, but for a 28-insn
+//!   `cgroup_connect4_service` program 5% ≈ 1.4 insns — a single
+//!   correctness-preserving instruction would trip it. Requiring both
+//!   thresholds keeps the 5% relative gate fully effective on the large
+//!   XDP programs (any relative breach there is thousands of insns, far
+//!   above a 50-insn floor) while making sub-100-insn programs immune
+//!   to noise-level deltas. See issue #201.
 //! - **Ceiling-proximity gate**: fail if `measured >= ceiling *
 //!   (1 - ceiling_proximity_fraction)`. Default
 //!   `ceiling_proximity_fraction = 0.10`, `ceiling_insns = 1_000_000`
@@ -86,12 +99,21 @@ pub struct MeasuredRecord {
 }
 
 /// Threshold policy for the gate. `Default` matches the project rules:
-/// >5% growth, >10% of 1M ceiling.
+/// >5% growth AND >50-insn absolute growth, >10% of 1M ceiling.
 #[derive(Debug, Clone)]
 pub struct GatePolicy {
     /// Fraction of the baseline above which growth is a breach.
-    /// 0.05 = >5%.
+    /// 0.05 = >5%. A growth breach requires this AND
+    /// [`GatePolicy::max_growth_insns`] to be exceeded together.
     pub max_growth_fraction: f64,
+    /// Absolute instruction-count floor below which growth is never a
+    /// breach, regardless of how large the relative fraction is. 50 =
+    /// a program may grow by up to 50 verified instructions without
+    /// tripping the growth gate. This neutralises the relative gate's
+    /// pathological tightness on tiny programs (where 5% is 1–2 insns)
+    /// while leaving it fully effective on the large XDP programs (a
+    /// relative breach there is thousands of insns). See issue #201.
+    pub max_growth_insns: u64,
     /// Per-program kernel complexity ceiling. `1_000_000` is the
     /// `CAP_BPF` ceiling for kernels 5.10+ (`.claude/rules/testing.md`
     /// § Tier 4 / `BPF_COMPLEXITY_LIMIT_INSNS`).
@@ -106,6 +128,7 @@ impl Default for GatePolicy {
     fn default() -> Self {
         Self {
             max_growth_fraction: 0.05,
+            max_growth_insns: 50,
             ceiling_insns: 1_000_000,
             ceiling_proximity_fraction: 0.10,
         }
@@ -117,12 +140,18 @@ impl Default for GatePolicy {
 /// per-breach messages without recomputing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BreachKind {
-    /// `measured > baseline * (1 + max_growth_fraction)`.
+    /// Growth breached BOTH thresholds: `measured > baseline * (1 +
+    /// max_growth_fraction)` AND `measured - baseline >
+    /// max_growth_insns`.
     GrowthExceeded {
         /// Threshold fraction the policy was configured with (e.g.
         /// 0.05 for >5%); pinned in the breach so the renderer can
         /// echo it verbatim.
         threshold_fraction: f64,
+        /// Absolute instruction-count floor the policy was configured
+        /// with (e.g. 50); pinned so the renderer echoes both halves
+        /// of the AND condition that fired.
+        threshold_insns: u64,
     },
     /// `measured >= ceiling * (1 - ceiling_proximity_fraction)`.
     CeilingProximity {
@@ -189,14 +218,27 @@ pub fn evaluate(
         let measured_f = candidate.verified_insns as f64;
         let growth_fraction =
             if baseline.verified_insns == 0 { 0.0 } else { (measured_f - baseline_f) / baseline_f };
+        // Absolute growth in verified instructions. `saturating_sub`
+        // floors at 0 when the candidate shrank below baseline — a
+        // shrink is never a growth breach.
+        let growth_insns = candidate.verified_insns.saturating_sub(baseline.verified_insns);
 
-        if growth_fraction > policy.max_growth_fraction {
+        // A growth breach requires BOTH the relative AND the absolute
+        // threshold to be exceeded. The absolute floor stops the
+        // relative gate from gating tiny programs on 1–2-insn
+        // noise-level deltas; the relative gate stops the absolute
+        // floor from waving through a large proportional jump. See
+        // issue #201.
+        if growth_fraction > policy.max_growth_fraction && growth_insns > policy.max_growth_insns {
             breaches.push(Breach {
                 program: baseline.program.clone(),
                 baseline_insns: baseline.verified_insns,
                 measured_insns: candidate.verified_insns,
                 growth_fraction,
-                kind: BreachKind::GrowthExceeded { threshold_fraction: policy.max_growth_fraction },
+                kind: BreachKind::GrowthExceeded {
+                    threshold_fraction: policy.max_growth_fraction,
+                    threshold_insns: policy.max_growth_insns,
+                },
             });
             continue;
         }
@@ -320,14 +362,17 @@ pub fn render_failure(breaches: &[Breach]) -> String {
     out.push_str("verifier-regress: gate failed — verifier-budget regression detected\n");
     for breach in breaches {
         match &breach.kind {
-            BreachKind::GrowthExceeded { threshold_fraction } => {
+            BreachKind::GrowthExceeded { threshold_fraction, threshold_insns } => {
+                let growth_insns = breach.measured_insns.saturating_sub(breach.baseline_insns);
                 let _ = writeln!(
                     out,
-                    "  • {} — verified_insns: baseline={}, measured={}, growth={:.2}% (threshold > {:.0}%)",
+                    "  • {} — verified_insns: baseline={}, measured={}, growth=+{} insns / {:.2}% (threshold > {} insns AND > {:.0}%)",
                     breach.program,
                     breach.baseline_insns,
                     breach.measured_insns,
+                    growth_insns,
                     breach.growth_fraction * 100.0,
+                    threshold_insns,
                     threshold_fraction * 100.0,
                 );
             }
@@ -378,6 +423,136 @@ mod tests {
         let candidates = vec![MeasuredRecord { program: "x".to_string(), verified_insns: 1000 }];
         let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
         assert!(matches!(outcome, GateOutcome::Pass));
+    }
+
+    #[test]
+    fn evaluate_passes_when_tiny_program_grows_below_absolute_floor() {
+        // The motivating case from issue #201: cgroup_connect4_service
+        // baseline 26 → 28 is +2 insns = 7.69% relative growth — above
+        // the 5% relative threshold, but only 2 insns, far below the
+        // 50-insn absolute floor. Requiring BOTH thresholds keeps tiny
+        // programs editable.
+        let baselines = vec![BaselineRecord { program: "cgroup".to_string(), verified_insns: 26 }];
+        let candidates = vec![MeasuredRecord { program: "cgroup".to_string(), verified_insns: 28 }];
+        let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
+        assert!(
+            matches!(outcome, GateOutcome::Pass),
+            "+2 insns (7.69%) is below the 50-insn floor — must pass: {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn evaluate_fails_when_large_program_grows_above_both_thresholds() {
+        // The large-XDP case: 150_000 → 160_000 is +10_000 insns =
+        // 6.67% — above the 5% relative threshold AND far above the
+        // 50-insn absolute floor. Both tripped → breach.
+        let baselines =
+            vec![BaselineRecord { program: "xdp".to_string(), verified_insns: 150_000 }];
+        let candidates =
+            vec![MeasuredRecord { program: "xdp".to_string(), verified_insns: 160_000 }];
+        let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
+        let breaches = match outcome {
+            GateOutcome::Pass => {
+                panic!("+10_000 insns (6.67%) breaches both thresholds — must fail")
+            }
+            GateOutcome::Fail { breaches } => breaches,
+        };
+        assert_eq!(breaches.len(), 1);
+        assert!(matches!(
+            breaches[0].kind,
+            BreachKind::GrowthExceeded { threshold_fraction: 0.05, threshold_insns: 50 }
+        ));
+    }
+
+    #[test]
+    fn evaluate_passes_when_absolute_growth_exceeds_floor_but_relative_does_not() {
+        // Relative gate is still load-bearing: +60 insns is above the
+        // 50-insn floor, but on a 150_000-insn baseline that is only
+        // 0.04% — below the 5% relative threshold. The AND requires the
+        // relative half too, so this passes. Guards against the gate
+        // collapsing to absolute-only.
+        let baselines =
+            vec![BaselineRecord { program: "xdp".to_string(), verified_insns: 150_000 }];
+        let candidates =
+            vec![MeasuredRecord { program: "xdp".to_string(), verified_insns: 150_060 }];
+        let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
+        assert!(
+            matches!(outcome, GateOutcome::Pass),
+            "+60 insns at 0.04% is below the 5% relative threshold — must pass: {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn evaluate_growth_floor_is_strictly_greater_than_not_equal() {
+        // Boundary: growth exactly at the absolute floor (50 insns)
+        // with the relative threshold also exceeded must PASS — the
+        // comparison is `>` not `>=`. baseline 100 → 150 is +50 insns
+        // (== floor) and 50% (>> 5%): the relative half is tripped, so
+        // only the strict-greater absolute comparison keeps this a pass.
+        let policy = GatePolicy::default();
+        let at_floor = evaluate(
+            &[BaselineRecord { program: "p".to_string(), verified_insns: 100 }],
+            &[MeasuredRecord { program: "p".to_string(), verified_insns: 150 }],
+            &policy,
+        );
+        assert!(
+            matches!(at_floor, GateOutcome::Pass),
+            "+50 insns == floor must pass (strict >): {at_floor:?}"
+        );
+        // One instruction past the floor (51 insns, still 51% relative)
+        // tips both halves → breach.
+        let past_floor = evaluate(
+            &[BaselineRecord { program: "p".to_string(), verified_insns: 100 }],
+            &[MeasuredRecord { program: "p".to_string(), verified_insns: 151 }],
+            &policy,
+        );
+        assert!(
+            matches!(past_floor, GateOutcome::Fail { .. }),
+            "+51 insns > floor with relative also tripped must fail: {past_floor:?}"
+        );
+    }
+
+    #[test]
+    fn evaluate_relative_threshold_is_strictly_greater_than_not_equal() {
+        // Boundary on the relative half: growth EXACTLY at the relative
+        // threshold (with the absolute floor also exceeded) must PASS —
+        // the comparison is `>` not `>=`. Uses a custom 0.5 fraction so
+        // the ratio is exactly representable in f64 (500 / 1000 = 0.5,
+        // bit-identical to the 0.5 literal — no float-equality
+        // fragility): baseline 1000 → 1500 is +500 insns (>> 50 floor)
+        // and exactly 50%.
+        let policy = GatePolicy { max_growth_fraction: 0.5, ..GatePolicy::default() };
+        let outcome = evaluate(
+            &[BaselineRecord { program: "p".to_string(), verified_insns: 1000 }],
+            &[MeasuredRecord { program: "p".to_string(), verified_insns: 1500 }],
+            &policy,
+        );
+        assert!(
+            matches!(outcome, GateOutcome::Pass),
+            "growth exactly at the relative threshold must pass (strict >): {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn render_failure_includes_growth_breach_details() {
+        // render_failure must surface the program name, both insn
+        // counts, the absolute growth, and BOTH halves of the AND
+        // threshold — a viewer reading the gate output needs all of
+        // them to understand why the breach fired.
+        let breaches = vec![Breach {
+            program: "xdp_service_map_lookup".to_string(),
+            baseline_insns: 150_000,
+            measured_insns: 160_000,
+            growth_fraction: 10_000.0 / 150_000.0,
+            kind: BreachKind::GrowthExceeded { threshold_fraction: 0.05, threshold_insns: 50 },
+        }];
+        let rendered = render_failure(&breaches);
+        assert!(rendered.contains("xdp_service_map_lookup"), "names the program: {rendered:?}");
+        assert!(rendered.contains("150000"), "echoes the baseline: {rendered:?}");
+        assert!(rendered.contains("160000"), "echoes the measurement: {rendered:?}");
+        assert!(rendered.contains("+10000 insns"), "echoes the absolute growth: {rendered:?}");
+        assert!(rendered.contains("50 insns"), "echoes the absolute threshold: {rendered:?}");
+        assert!(rendered.contains("5%"), "echoes the relative threshold: {rendered:?}");
     }
 
     #[test]
