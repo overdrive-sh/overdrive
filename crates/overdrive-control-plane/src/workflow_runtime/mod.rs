@@ -544,8 +544,14 @@ fn started_digests(spec: &WorkflowSpec) -> (ContentHash, ContentHash) {
     // The start input. Slice 01 has no separate start-parameter surface on
     // `WorkflowSpec`, so the input identity is the spec name bytes — the
     // same input the journal-store characterization test records via
-    // `ProvisionRecord::PAYLOAD` (the workflow-kind constant). When the spec
-    // grows a parameter surface, this hashes those start bytes.
+    // `ProvisionRecord::PAYLOAD` (the workflow-kind constant).
+    //
+    // TODO(#217): when `WorkflowSpec` grows a start-parameter surface,
+    // hash the serialised parameter bytes here instead of the name bytes so
+    // `spec_digest` and `input_digest` diverge as intended. The compiler will
+    // NOT flag this site when the spec gains fields (both digests still
+    // type-check against `spec.name`); this marker is the only obligation
+    // record that the input digest must switch off the name bytes.
     let input_digest = ContentHash::of(spec.name.as_str().as_bytes());
     (spec_digest, input_digest)
 }
@@ -1162,6 +1168,23 @@ impl JournalCursor for JournalCursorHandle {
         // the enum derives only Debug/Clone/Eq, no Serialize; the Debug
         // form is a stable canonical projection of the inputs). Per
         // `development.md` § "Persist inputs, not derived state".
+        //
+        // STABILITY — K4 replay-equivalence (load-bearing once Layer-3
+        // digest comparison lands, #214): this digest is deterministic only
+        // while `Action`'s Debug form is. Every collection-bearing `Action`
+        // variant uses `BTreeMap`/`BTreeSet`, whose Debug iterates in `Ord`
+        // order — never `HashMap`/`HashSet`, whose Debug order is
+        // per-process-random and would make the same inputs hash differently
+        // across runs. This precondition is mechanically enforced, not merely
+        // convention: `Action` lives in `overdrive-core` (crate_class =
+        // "core"), so a future variant introducing a `HashMap`/`HashSet`
+        // fails the dst-lint gate at PR time (development.md §
+        // "Ordered-collection choice") unless it carries a
+        // `// dst-lint: hashmap-ok` waiver. The sharp hazard is therefore a
+        // `hashmap-ok` waiver on an `Action` variant: it would pass the gate
+        // while silently breaking this digest's cross-run stability. Do not
+        // add one without first making the digest input canonical (e.g. an
+        // explicit sorted projection of the variant's fields).
         let action_digest = ContentHash::of(format!("{action:?}").as_bytes());
         // Send the typed Action on the Action channel (→ Raft) — the
         // channel the production `spawn_workflow_emit_drain` task forwards

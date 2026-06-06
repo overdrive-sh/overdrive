@@ -155,10 +155,10 @@ fn find_provision_record_run_body(file: &syn::File) -> Option<syn::Block> {
             continue;
         }
         for impl_item in &item_impl.items {
-            if let ImplItem::Fn(method) = impl_item {
-                if method.sig.ident == "run" {
-                    return Some(method.block.clone());
-                }
+            if let ImplItem::Fn(method) = impl_item
+                && method.sig.ident == "run"
+            {
+                return Some(method.block.clone());
             }
         }
     }
@@ -173,12 +173,11 @@ struct CtxRunScan {
 
 impl<'ast> Visit<'ast> for CtxRunScan {
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        if node.method == "run" {
-            if let syn::Expr::Path(receiver) = &*node.receiver {
-                if receiver.path.segments.last().is_some_and(|s| s.ident == "ctx") {
-                    self.found = true;
-                }
-            }
+        if node.method == "run"
+            && let syn::Expr::Path(receiver) = &*node.receiver
+            && receiver.path.segments.last().is_some_and(|s| s.ident == "ctx")
+        {
+            self.found = true;
         }
         syn::visit::visit_expr_method_call(self, node);
     }

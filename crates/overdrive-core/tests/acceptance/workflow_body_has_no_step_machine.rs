@@ -118,15 +118,13 @@ impl<'ast> Visit<'ast> for BodyScan {
         self.collect_local_enums(&block.stmts);
         // Track `let <name> = <local-enum-ctor>;` bindings.
         for stmt in &block.stmts {
-            if let Stmt::Local(local) = stmt {
-                if let syn::Pat::Ident(pat_ident) = &local.pat {
-                    if let Some(init) = &local.init {
-                        if let Some(enum_name) = self.scrutinee_step_enum(&init.expr) {
-                            let _ = enum_name;
-                            self.step_bindings.insert(pat_ident.ident.to_string());
-                        }
-                    }
-                }
+            if let Stmt::Local(local) = stmt
+                && let syn::Pat::Ident(pat_ident) = &local.pat
+                && let Some(init) = &local.init
+                && let Some(enum_name) = self.scrutinee_step_enum(&init.expr)
+            {
+                let _ = enum_name;
+                self.step_bindings.insert(pat_ident.ident.to_string());
             }
         }
         syn::visit::visit_block(self, block);
@@ -173,10 +171,10 @@ fn find_provision_record_run_body(file: &syn::File) -> Option<syn::Block> {
             continue;
         }
         for impl_item in &item_impl.items {
-            if let ImplItem::Fn(method) = impl_item {
-                if method.sig.ident == "run" {
-                    return Some(method.block.clone());
-                }
+            if let ImplItem::Fn(method) = impl_item
+                && method.sig.ident == "run"
+            {
+                return Some(method.block.clone());
             }
         }
     }
