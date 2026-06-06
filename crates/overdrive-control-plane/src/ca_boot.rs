@@ -156,7 +156,7 @@ pub async fn boot_ca(
 
     match intent.get(ROOT_KEY_ENVELOPE_KEY).await? {
         Some(envelope_bytes) => {
-            load_persistent_root(kek, kek_id, codec, intent, &envelope_bytes).await
+            load_persistent_root(ca, kek, kek_id, codec, intent, &envelope_bytes).await
         }
         None => generate_and_persist_root(ca, kek, kek_id, codec, intent).await,
     }
@@ -263,9 +263,12 @@ async fn generate_and_persist_root(
     Ok(root)
 }
 
-/// Subsequent boot: decrypt the persisted envelope (Earned-Trust probe b) and
-/// reconstruct the SAME root identity from the persisted public cert material.
+/// Subsequent boot: decrypt the persisted envelope (Earned-Trust probe b),
+/// reconstruct the SAME root identity from the persisted public cert material,
+/// and re-seed the CA adapter with it so issuance signs under the persisted
+/// root rather than a freshly-minted ephemeral one (the chain-break fix).
 async fn load_persistent_root(
+    ca: &dyn Ca,
     kek: &dyn Kek,
     kek_id: &KekId,
     codec: &RootKeyAeadCodec,
@@ -302,7 +305,17 @@ async fn load_persistent_root(
             ),
         })?;
 
-    decode_cert_material(&cert_material, key_pem_bytes)
+    let handle = decode_cert_material(&cert_material, key_pem_bytes)?;
+
+    // Re-seed the CA adapter with the persisted root BEFORE any issuance. A
+    // fresh adapter (e.g. `RcgenCa` with an empty cache) would otherwise mint a
+    // new ephemeral root on its first signing call, and nothing signed under it
+    // would chain to the persisted anchor relying parties pin (the chain-break
+    // fix). Idempotent for the same root; fails loud if a divergent root was
+    // already minted (issuance-before-adoption — see `Ca::adopt_persisted_root`).
+    ca.adopt_persisted_root(&handle).map_err(|source| CaBootError::Ca { source })?;
+
+    Ok(handle)
 }
 
 /// Newline-framed encoding of the public root cert material: PEM, DER (base16),

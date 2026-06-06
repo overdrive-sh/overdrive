@@ -484,8 +484,11 @@ pub trait Ca: Send + Sync {
     /// # Preconditions
     /// The adapter holds (or can mint) a root signing key. The sim adapter
     /// loads a fixture P-256 key; the host adapter generates one via the
-    /// crypto backend's CSPRNG on first boot and decrypts the persisted
-    /// envelope on subsequent boots (ADR-0063 D3).
+    /// crypto backend's CSPRNG on first boot. On subsequent boots the boot
+    /// path (`ca_boot`) decrypts the persisted envelope under the KEK and
+    /// re-seeds the adapter via [`adopt_persisted_root`](Ca::adopt_persisted_root)
+    /// BEFORE any issuance; `root()` then returns that adopted material rather
+    /// than lazily minting a fresh (ephemeral) root (ADR-0063 D3).
     ///
     /// # Postconditions
     /// On `Ok`, the returned [`RootCaHandle`] is a self-signed P-256
@@ -595,6 +598,52 @@ pub trait Ca: Send + Sync {
     /// The bundle is deterministic for a given root/intermediate pair — same
     /// anchors compose to byte-identical bundle PEM.
     fn trust_bundle(&self) -> Result<TrustBundle>;
+
+    /// Re-seed the adapter with the persisted root after a restart.
+    ///
+    /// # Why this exists
+    /// An adapter that *lazily generates* its root (the host `RcgenCa`) holds
+    /// the root signing key only in memory. After a control-plane restart a
+    /// fresh adapter's cache is empty; the boot path (`ca_boot`) decrypts the
+    /// persisted root under the KEK, but unless that material is fed back into
+    /// the adapter the adapter's first signing call mints a BRAND-NEW
+    /// (ephemeral) root — and every certificate signed under it
+    /// ([`issue_intermediate`](Ca::issue_intermediate),
+    /// [`issue_svid`](Ca::issue_svid), [`trust_bundle`](Ca::trust_bundle))
+    /// fails to chain to the persisted anchor relying parties pin. This method
+    /// is the seam that closes that chain-break: the boot path calls it to
+    /// install the persisted root into the adapter before any issuance.
+    ///
+    /// # Preconditions
+    /// `root` is the **byte-identical persisted root**: `signing_key()` is the
+    /// decrypted root private key (PEM), and the cert PEM / DER / serial are the
+    /// persisted public material. The boot path adopts exactly once, on a fresh
+    /// adapter, BEFORE any issuance.
+    ///
+    /// # Postconditions
+    /// On `Ok`, every subsequent [`root`](Ca::root) returns the adopted handle,
+    /// and [`issue_intermediate`](Ca::issue_intermediate) /
+    /// [`issue_svid`](Ca::issue_svid) / [`trust_bundle`](Ca::trust_bundle) sign
+    /// under the adopted root key.
+    ///
+    /// # Edge cases / idempotency / ordering
+    /// Adoption is idempotent for the SAME root: adopting the byte-identical
+    /// root a second time is a no-op `Ok(())`. Adopting AFTER the adapter has
+    /// already minted a *different* root is a logic error (issuance ran before
+    /// adoption — the ephemeral-root chain-break has already occurred) and MUST
+    /// fail loud with a typed [`CaError`], never silently retain the ephemeral
+    /// root.
+    ///
+    /// # Default
+    /// A no-op `Ok(())` — correct for adapters whose root is **stable by
+    /// construction** across instances. The sim adapter (`SimCa`) loads a
+    /// fixture `const` root identical on every boot, so there is no ephemeral
+    /// divergence to repair and the default is sound. Adapters that *lazily
+    /// generate* a root (the host `RcgenCa`) MUST override this.
+    fn adopt_persisted_root(&self, root: &RootCaHandle) -> Result<()> {
+        let _ = root;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

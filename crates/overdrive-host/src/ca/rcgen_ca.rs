@@ -492,6 +492,41 @@ impl Ca for RcgenCa {
         ))
     }
 
+    fn adopt_persisted_root(&self, root: &RootCaHandle) -> Result<(), CaError> {
+        // Re-seed the lazily-generated root cache with the persisted root the
+        // boot path decrypted, BEFORE any signing call. Without this, a fresh
+        // `RcgenCa` (empty `OnceLock`) mints a new ephemeral root on first
+        // issuance and nothing chains to the persisted anchor (the chain-break
+        // this closes). Mirrors `RootMaterial`'s chain-determinism rationale:
+        // a stable root key is what makes `issue_intermediate` sign against the
+        // SAME root relying parties pin.
+        let material = RootMaterial {
+            key_pem: root.signing_key().as_pem().to_string(),
+            cert_pem: root.cert_pem().as_pem().to_string(),
+            cert_der: root.cert_der().as_der().to_vec(),
+            serial: root.serial().clone(),
+        };
+
+        // Fail-loud guard (contract: adoption after a DIVERGENT root was minted
+        // means issuance ran before adoption — the ephemeral-root chain-break
+        // already happened). First adoption wins; re-adopting the SAME root is
+        // an idempotent no-op.
+        if let Some(existing) = self.root_material.get() {
+            if existing.cert_der == material.cert_der {
+                return Ok(());
+            }
+            return Err(CaError::signing_failed(
+                "adopt_persisted_root after a divergent root was already minted — issuance ran \
+                 before adoption",
+            ));
+        }
+
+        // `set` only fails on a lost race; the winning value is the same
+        // persisted root, so reading it back is correct.
+        let _ = self.root_material.set(material);
+        Ok(())
+    }
+
     fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
         // The trust anchor is the persistent root certificate (minted once,
         // cached) — the relying party pins it. The chain material is the cached

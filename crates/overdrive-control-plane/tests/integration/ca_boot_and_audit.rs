@@ -129,6 +129,101 @@ async fn root_ca_is_reused_across_control_plane_restart() {
 }
 
 // ---------------------------------------------------------------------------
+// Regression — issued chain anchors on the PERSISTED root after restart
+// ---------------------------------------------------------------------------
+
+/// `@real-io` `@adapter-integration` `@S-02` `@error` — chain-to-persisted-root
+/// regression guard (built-in-ca / GH #28).
+///
+/// The bug: `RcgenCa` holds its root signing key ONLY in an in-memory
+/// `OnceLock`. After a control-plane restart a FRESH `RcgenCa` is constructed
+/// with an empty cache. `load_persistent_root` decrypts the persisted root key
+/// and rebuilds a `RootCaHandle`, but never feeds it back into the adapter — so
+/// the adapter's first signing call lazily mints a BRAND-NEW ephemeral root.
+/// Anything signed under it (the node intermediate, every SVID) does NOT chain
+/// to the persisted root that relying parties anchor on → broken chain after
+/// every restart.
+///
+/// This pins the contract end-to-end: after a genuine restart (the first store
+/// handle is dropped before the second opens), a workload SVID issued through
+/// the freshly-constructed adapter MUST chain to the FIRST boot's persisted
+/// root. The discriminating proof is `openssl verify` — the ephemeral and
+/// persisted roots share the same subject DN (trust domain), so only crypto
+/// verification (not byte-equality) detects the signature mismatch. Without the
+/// `adopt_persisted_root` fix the restart intermediate is signed by an ephemeral
+/// root and `openssl verify` against the persisted root FAILS (non-zero); with
+/// the fix it PASSES (exit 0).
+#[tokio::test]
+async fn issued_chain_anchors_on_persisted_root_after_restart() {
+    // GIVEN a first boot that generates + persists the root, then bootstraps the
+    // node intermediate under it. Capture the FIRST boot's persisted root cert
+    // PEM — the relying-party anchor every later restart must chain to.
+    let store_dir = TempDir::new().expect("intent-store tempdir");
+    let creds_dir = TempDir::new().expect("creds tempdir");
+    stage_kek_credential(&creds_dir, 0x11);
+    let kek = SystemdCredsKeyring::with_credentials_dir(creds_dir.path());
+    let codec = RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+    let node = issuing_node();
+
+    let first_root_pem = {
+        let intent = intent_store(&store_dir);
+        let root = ca_boot::boot_ca(&host_ca(), &kek, &kek_id, &codec, &intent)
+            .await
+            .expect("first boot generates + persists the root");
+        root.cert_pem().as_pem().to_owned()
+    };
+
+    // WHEN a fresh process restarts: a NEW `RcgenCa` (empty OnceLock), boot_ca
+    // (loads the persisted root AND adopts it into the adapter), THEN bootstrap
+    // the node intermediate, THEN issue a workload SVID. ORDER MATTERS: boot_ca
+    // must adopt the persisted root before any signing call, so the intermediate
+    // is signed under the persisted root, not a freshly-minted ephemeral one.
+    let (restart_inter_pem, restart_svid_pem) = {
+        let restart_ca = host_ca();
+        let intent = intent_store(&store_dir);
+        ca_boot::boot_ca(&restart_ca, &kek, &kek_id, &codec, &intent)
+            .await
+            .expect("restart boot loads + adopts the persisted root");
+        let inter = ca_boot::bootstrap_node_intermediate(&restart_ca, &node, &intent)
+            .await
+            .expect("restart node bootstrap signs the intermediate under the adopted root");
+        let svid =
+            restart_ca.issue_svid(&workload_request()).expect("restart issues a workload SVID");
+        (inter.cert_pem().as_pem().to_owned(), svid.cert_pem().as_pem().to_owned())
+    };
+
+    // THEN `openssl verify -CAfile <FIRST-boot persisted root.pem> -untrusted
+    // <restart intermediate.pem> <restart svid.pem>` exits 0 — the full restart
+    // chain anchors on the PERSISTED root. Under the bug the restart intermediate
+    // is signed by an ephemeral root and this verification FAILS.
+    let dir = TempDir::new().expect("pem tempdir");
+    let root_pem_path = dir.path().join("root.pem");
+    let inter_pem_path = dir.path().join("intermediate.pem");
+    let svid_pem_path = dir.path().join("svid.pem");
+    std::fs::write(&root_pem_path, first_root_pem.as_bytes()).expect("write root.pem");
+    std::fs::write(&inter_pem_path, restart_inter_pem.as_bytes()).expect("write intermediate.pem");
+    std::fs::write(&svid_pem_path, restart_svid_pem.as_bytes()).expect("write svid.pem");
+
+    let output = std::process::Command::new("openssl")
+        .arg("verify")
+        .arg("-CAfile")
+        .arg(&root_pem_path)
+        .arg("-untrusted")
+        .arg(&inter_pem_path)
+        .arg(&svid_pem_path)
+        .output()
+        .expect("invoke openssl verify");
+    assert!(
+        output.status.success(),
+        "the restart-issued chain must verify against the FIRST boot's persisted root \
+         (chain-to-persisted-root after restart): stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Regression — durable at-rest format: the sealed root key is PEM, not DER
 // ---------------------------------------------------------------------------
 
