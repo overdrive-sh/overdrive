@@ -497,6 +497,37 @@ pub enum ControlPlaneError {
     #[error("listener-fact projection rebuild failed at boot: {0}")]
     ListenerFactRebuild(Box<crate::reconciler_runtime::ConvergenceError>),
 
+    /// Describe-side internal-invariant violation per ADR-0064 § 4 /
+    /// OQ-4: the `describe_workload` handler's read-only
+    /// `allocator.get(&spec_digest)` returned `None` for a persisted
+    /// `WorkloadIntent::Service`. A persisted-and-describable Service
+    /// ALWAYS has an allocated VIP — submit-time admission allocates
+    /// before the intent is written (ADR-0049 § 4) and the boot rebuild
+    /// re-seeds the allocator memo from the intent SSOT (ADR-0049 § 8).
+    /// A miss therefore means one of those invariants was broken; it is
+    /// an internal failure, NOT a client-visible 4xx.
+    ///
+    /// A DEDICATED variant per `.claude/rules/development.md` § "Errors
+    /// → Never flatten a typed error to `Internal(String)`" — carries
+    /// the lowercase-hex `spec_digest` (the same digest the describe
+    /// handler computes for the top-level response field) so an operator
+    /// can trace which Service lost its allocator memo without
+    /// `Display`-grepping. Maps to HTTP 500 with the `internal` error
+    /// kind in [`to_response`].
+    #[error(
+        "service VIP missing for spec_digest {spec_digest}: the allocator memo \
+         has no entry for this persisted Service. Submit-time admission allocates \
+         a VIP before the intent is written (ADR-0049 § 4) and the boot rebuild \
+         re-seeds the memo from the intent SSOT (ADR-0049 § 8), so this indicates \
+         a broken allocate-or-rebuild invariant — not operator-actionable input."
+    )]
+    ServiceVipMissing {
+        /// Lowercase-hex SHA-256 digest of the Service spec — the
+        /// describe handler's top-level `spec_digest` string, threaded
+        /// through for diagnostics.
+        spec_digest: String,
+    },
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -727,6 +758,18 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: source.to_string(), field: None },
         ),
+        err @ ControlPlaneError::ServiceVipMissing { .. } => (
+            // ADR-0064 § 4 / OQ-4: a persisted Service with no allocator
+            // entry is an internal-invariant violation (the
+            // submit-time-allocate / boot-rebuild contract was broken),
+            // NOT operator-actionable input — so it maps to HTTP 500
+            // `internal`, never a 4xx. `err.to_string()` carries the
+            // `spec_digest` and the named invariant into `body.message`
+            // for diagnostics, matching the `Tls(e)` / `CgroupBootstrap(e)`
+            // precedent above.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: err.to_string(), field: None },
+        ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: msg, field: None },
@@ -738,5 +781,47 @@ impl IntoResponse for ControlPlaneError {
     fn into_response(self) -> Response {
         let (status, body) = to_response(self);
         (status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ADR-0064 § 4 / OQ-4: a persisted-and-describable Service ALWAYS
+    /// has an allocated VIP (submit-time admission allocates before the
+    /// intent is written; the boot rebuild re-seeds the allocator memo
+    /// from the intent SSOT — ADR-0049 § 4 / § 8). A `None` from the
+    /// read-only `allocator.get(&spec_digest)` at describe time is
+    /// therefore an INTERNAL-INVARIANT violation, not a client-visible
+    /// 4xx — it means the allocate-or-rebuild invariant was broken. It
+    /// maps to HTTP 500 with the `internal` error kind, and the rendered
+    /// message names the `spec_digest` so an operator can trace which
+    /// Service lost its allocator memo.
+    ///
+    /// `ServiceVipMissing` is a DEDICATED variant per
+    /// `.claude/rules/development.md` § "Errors → Never flatten a typed
+    /// error to `Internal(String)`" — NOT `ControlPlaneError::internal(...)`.
+    #[test]
+    fn service_vip_missing_maps_to_http_500() {
+        let spec_digest =
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_owned();
+
+        let err = ControlPlaneError::ServiceVipMissing { spec_digest: spec_digest.clone() };
+
+        let (status, body) = to_response(err);
+
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "a missing allocator entry is an internal-invariant violation → HTTP 500, not a 4xx",
+        );
+        assert_eq!(body.error, "internal");
+        assert!(body.field.is_none(), "ServiceVipMissing is not a field-level validation error");
+        assert!(
+            body.message.contains(&spec_digest),
+            "the rendered message must name the spec_digest for diagnostics; got {:?}",
+            body.message,
+        );
     }
 }
