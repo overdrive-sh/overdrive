@@ -35,12 +35,14 @@ use overdrive_control_plane::ca_boot::{self, CaBootError};
 use overdrive_control_plane::ca_issuance::{self, CaIssuanceError};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::RootCaKeyRecord;
+use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{
     Ca, CaError, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
 };
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::{IntentStore, IntentStoreError};
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::{RcgenCa, RootKeyAeadCodec, SystemdCredsKeyring};
@@ -777,6 +779,63 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
     assert_eq!(
         row.issuer_serial, issuer_serial,
         "audit row issuer_serial must match the node intermediate's serial"
+    );
+}
+
+/// `@real-io` `@adapter-integration` `@S-05` — regression (built-in-ca review):
+/// the `issued_certificates` audit window must FAITHFULLY mirror the window the
+/// host issuer actually signs the leaf with. The issuer sets `not_before = now
+/// − SKEW_TOLERANCE` and `not_after = not_before + WORKLOAD_SVID_TTL`
+/// (`overdrive-host` `RcgenCa`); the auditor must record the SAME shape from the
+/// SAME `overdrive_core::ca` constants. Before the fix the auditor recorded
+/// `not_before = issued_at` (omitting the skew back-off), so the audit row
+/// claimed the leaf was invalid for the first 60 s of its real validity — a
+/// systematic, drift-prone discrepancy. This test pins the back-off; it fails
+/// RED against the pre-fix `not_before = issued_at` computation.
+#[tokio::test]
+async fn audit_window_mirrors_the_issued_leaf_window_with_skew_backoff() {
+    // GIVEN a host CA, a real observation-store binding (the PORT), and a clock
+    // pinned to a fixed Unix second so the recorded window is deterministic.
+    const ISSUED_AT_SECS: u64 = 1_700_000_005;
+    let obs_dir = TempDir::new().expect("obs-store tempdir");
+    let ca = host_ca();
+    let audit = audit_store(&obs_dir);
+    let clock = FixedClock::at_unix_secs(ISSUED_AT_SECS);
+    let node = issuing_node();
+    let request = workload_request();
+
+    // WHEN the workload-start path issues the SVID through the issuance seam.
+    ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
+        .await
+        .expect("issuance + audit write succeeds");
+
+    // THEN the single audit row's window is reconstructed from the SHARED
+    // constants: `issued_at` is the clock snapshot, `not_before` is backed off
+    // by `SKEW_TOLERANCE`, and the window width is exactly `WORKLOAD_SVID_TTL`.
+    let rows = audit.issued_certificate_rows().await.expect("read back audit rows");
+    assert_eq!(rows.len(), 1, "exactly one issued_certificates row must be written per issuance");
+    let row = &rows[0];
+
+    let issued_at = UnixInstant::from_unix_duration(Duration::from_secs(ISSUED_AT_SECS));
+    let expected_not_before = UnixInstant::from_unix_duration(
+        issued_at.as_unix_duration().saturating_sub(SKEW_TOLERANCE),
+    );
+    let expected_not_after = expected_not_before + WORKLOAD_SVID_TTL;
+
+    assert_eq!(row.issued_at, issued_at, "audit issued_at must be the clock snapshot, unchanged");
+    assert_eq!(
+        row.not_before, expected_not_before,
+        "audit not_before must back off by SKEW_TOLERANCE to mirror the issued leaf — not start at issued_at"
+    );
+    assert_eq!(
+        row.not_after, expected_not_after,
+        "audit not_after must be not_before + WORKLOAD_SVID_TTL (window width = the leaf TTL)"
+    );
+    // The regression guard: the pre-fix code recorded not_before = issued_at.
+    // Pin that it no longer does, so a future revert is caught loud.
+    assert_ne!(
+        row.not_before, issued_at,
+        "regression: audit not_before must NOT equal issued_at — that omits the 60s skew back-off the leaf is signed with"
     );
 }
 

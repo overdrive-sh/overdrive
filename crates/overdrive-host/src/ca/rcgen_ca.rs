@@ -21,6 +21,7 @@ use std::sync::{Arc, OnceLock};
 
 use std::time::Duration;
 
+use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, RootCaHandle};
 use overdrive_core::traits::ca::{IntermediateHandle, SvidMaterial, SvidRequest, TrustBundle};
 use overdrive_core::traits::entropy::Entropy;
@@ -36,17 +37,12 @@ use rcgen::{
 /// draw width so the entropy contract is identical across adapters.
 const SERIAL_BYTES: usize = 16;
 
-/// SVID leaf validity window — ~1 hour (research Finding 6). Short-lived
-/// workload identities keep the node-compromise / rotation blast radius small;
-/// the #40 rotation workflow re-issues before expiry. The leaf's `not_after` is
-/// `not_before + WORKLOAD_SVID_TTL`.
-const WORKLOAD_SVID_TTL: Duration = Duration::from_secs(3600);
-
-/// Clock-skew back-off applied to the SVID `not_before`. A freshly-minted leaf
-/// must verify under a relying party whose clock is marginally behind the
-/// issuer's; backing `not_before` off by this margin avoids a spurious
-/// "certificate is not yet valid" rejection at the verify boundary.
-const SKEW_TOLERANCE: Duration = Duration::from_secs(60);
+// `WORKLOAD_SVID_TTL` (leaf validity width) and `SKEW_TOLERANCE` (the
+// `not_before` back-off) are the SINGLE source of truth in
+// `overdrive_core::ca` — see imports above. The control-plane `ca_issuance`
+// auditor records the audit window from the SAME two constants, so the window
+// the leaf is SIGNED with and the window the `issued_certificates` audit row
+// RECORDS cannot drift (ADR-0063 D6).
 
 /// The canonical node identity whose intermediate signs workload SVIDs when no
 /// intermediate has been explicitly issued yet. Single-node (Phase 2.6) has

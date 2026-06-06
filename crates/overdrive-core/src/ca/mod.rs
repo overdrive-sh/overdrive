@@ -14,3 +14,6 @@ pub mod cert_spec;
 pub mod issued_certificate_row;
 pub mod kek;
 pub mod root_key_envelope;
+pub mod validity;
+
+pub use validity::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};

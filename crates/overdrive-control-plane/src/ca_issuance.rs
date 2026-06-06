@@ -39,10 +39,9 @@
 //! restart. This is the mechanism the #40 rotation workflow will later drive on
 //! a schedule; this module provides only the mechanism, not the trigger.
 
-use std::time::Duration;
-
 use overdrive_core::NodeId;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::{
@@ -50,18 +49,21 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::wall_clock::UnixInstant;
 
-/// Audit validity window the control plane records for a freshly-issued
-/// workload SVID — ~1 hour, matching the workload-SVID TTL profile (research
-/// Finding 6).
-///
-/// The leaf's exact `not_before`/`not_after` are an adapter-internal detail
-/// ([`SvidMaterial`] exposes no validity accessors per ADR-0063 D1 / research
-/// Finding 5 — the leaf key never crosses the trait boundary, and neither does
-/// the window). The audit row therefore records the control plane's OBSERVED
-/// issuance window (`issued_at` plus this TTL) as the audit input, per
-/// "persist inputs, not derived state" — the window the platform issued for,
-/// observed at the moment of issuance.
-const WORKLOAD_SVID_AUDIT_TTL: Duration = Duration::from_secs(3600);
+// The audit validity window is reconstructed from the SAME two
+// `overdrive_core::ca` constants the host issuer signs the leaf with —
+// [`WORKLOAD_SVID_TTL`] (the validity width) and [`SKEW_TOLERANCE`] (the
+// `not_before` back-off) — see imports above. There is no separate
+// "audit TTL" constant: the window the audit row records IS, by definition,
+// the window the leaf was issued for, so it MUST derive from the same SSOT
+// (a local copy reintroduces the drift ADR-0063 D6 exists to prevent).
+//
+// The leaf's exact `not_before`/`not_after` are an adapter-internal detail
+// ([`SvidMaterial`] exposes no validity accessors per ADR-0063 D1 / research
+// Finding 5 — the leaf key never crosses the trait boundary, and neither does
+// the window). The audit row therefore *reconstructs* the issuance window from
+// the observed `issued_at` plus the shared constants, per "persist inputs, not
+// derived state" — the inputs being `issued_at`, `SKEW_TOLERANCE`, and
+// `WORKLOAD_SVID_TTL`, all known to the control plane.
 
 /// A CA-issuance failure — the issuance did NOT complete, and (critically) NO
 /// unaudited certificate was handed out.
@@ -159,12 +161,18 @@ pub async fn issue_and_audit(
     let svid = ca.issue_svid(request).map_err(CaIssuanceError::ca)?;
 
     // Observe the issuance facts. `issued_at` is the clock snapshot; the
-    // validity window is the control plane's observed issuance window (the leaf
-    // exposes no validity accessor, so the audit row records the window the
-    // platform issued for — an input, not a derived classification).
+    // validity window mirrors the window the host issuer actually SIGNS the
+    // leaf with — `not_before` backed off by `SKEW_TOLERANCE`, width
+    // `WORKLOAD_SVID_TTL` — reconstructed from the SAME `overdrive_core::ca`
+    // constants the issuer uses, so the recorded window cannot drift from the
+    // issued leaf (ADR-0063 D6). `saturating_sub` keeps the arithmetic
+    // panic-free; production `issued_at` is a real Unix time far above the
+    // back-off, so the floor never bites.
     let issued_at = UnixInstant::from_clock(clock);
-    let not_before = issued_at;
-    let not_after = issued_at + WORKLOAD_SVID_AUDIT_TTL;
+    let not_before = UnixInstant::from_unix_duration(
+        issued_at.as_unix_duration().saturating_sub(SKEW_TOLERANCE),
+    );
+    let not_after = not_before + WORKLOAD_SVID_TTL;
 
     let row = IssuedCertificateRow {
         serial: svid.serial().clone(),
