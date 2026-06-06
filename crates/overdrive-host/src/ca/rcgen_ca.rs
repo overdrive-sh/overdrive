@@ -179,8 +179,12 @@ impl RcgenCa {
             cert_der: cert.der().to_vec(),
             serial,
         };
-        // `set` only fails on a lost race; the winning value is equivalent
-        // (same trust domain), so reading back the stored material is correct.
+        // On a lost race `set` returns Err and our `material` is dropped here.
+        // The two racers generate DIFFERENT keys/serials, so the values are NOT
+        // interchangeable — correctness comes solely from OnceLock: every caller
+        // reads back the single winning material via `get()` below. Do not add a
+        // "trust domains match, reuse either value" short-circuit; that would be
+        // incorrect because the key bytes and serial differ between racers.
         let _ = self.root_material.set(material);
         Ok(self
             .root_material
