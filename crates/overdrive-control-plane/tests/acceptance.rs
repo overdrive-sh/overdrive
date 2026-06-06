@@ -267,6 +267,10 @@ mod acceptance {
     // test does not exercise.
     mod workflow_engine_terminal_labels;
     mod workflow_engine_writes_terminal_row; // slice-01 AC5 — engine writes terminal obs row
+    // Bug fix (fix-workflow-terminal-redrive) — start must short-circuit on a
+    // durable Terminal: a restart over an already-terminal journal must not
+    // append a second Terminal nor re-run the author body (RCA Option 1).
+    mod workflow_engine_terminal_short_circuit;
     // Bug fix — a panicked `async fn run` must converge to a Failed
     // terminal + unconditional live-instance teardown (catch_unwind + RAII
     // drop guard), not strand the instance.
