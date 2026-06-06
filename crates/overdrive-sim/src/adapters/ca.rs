@@ -161,6 +161,18 @@ const FIXTURE_INTERMEDIATE_CERT_DER: &[u8] = &[
 /// it chains root → intermediate → leaf: the genuinely intermediate-signed cert
 /// was minted offline via `openssl` (one-time) and embedded here as opaque
 /// bytes, exactly as the `FIXTURE_ROOT_*` / `FIXTURE_INTERMEDIATE_*` consts.
+///
+/// **Fixed-identity limitation.** The embedded URI SAN is frozen at
+/// `spiffe://overdrive.local/workload/sim-svid` — the sim holds these bytes
+/// opaquely and never re-mints crypto (research Finding 11), so it cannot
+/// substitute an arbitrary requested identity. These bytes therefore only
+/// satisfy the [`Ca::issue_svid`] postcondition ("exactly one URI SAN equal to
+/// `req.spiffe_id()`") when the request IS that fixture identity. For any other
+/// `req.spiffe_id()`, [`SvidMaterial::spiffe_id`] reflects the request but this
+/// cert's SAN does NOT — they diverge. A DST scenario that parses `cert_der()` /
+/// `cert_pem()` to verify the SAN against `spiffe_id()` must use the fixture
+/// identity (as `ca_equivalence` deliberately does), or it will observe the
+/// mismatch.
 const FIXTURE_SVID_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----\n\
 MIICATCCAaagAwIBAgIKTB6is8TV5vcIGTAKBggqhkjOPQQDAjA8MR4wHAYDVQQK\n\
 DBVvdmVyZHJpdmUtc2ltLWZpeHR1cmUxGjAYBgNVBAMMEW5vZGUtaW50ZXJtZWRp\n\
@@ -180,6 +192,11 @@ vwECIQCwWUwcOCM7P0wcLY39Sr/Epa24FzXiqp7hswLzDGr/Xw==\n\
 /// intermediate's subject DN, and it carries exactly one `spiffe://` URI SAN and
 /// the `CA:FALSE` basicConstraints — the leaf-profile shape observable through
 /// [`CaCertDer::as_der`] without parsing crypto.
+///
+/// **Fixed-identity limitation** (see [`FIXTURE_SVID_CERT_PEM`]): the embedded
+/// URI SAN is frozen at `spiffe://overdrive.local/workload/sim-svid`. These
+/// bytes only match [`SvidMaterial::spiffe_id`] for that fixture identity; for
+/// any other `req.spiffe_id()` the SAN in this DER diverges from the request.
 const FIXTURE_SVID_CERT_DER: &[u8] = &[
     0x30, 0x82, 0x02, 0x01, 0x30, 0x82, 0x01, 0xa6, 0xa0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x0a, 0x4c,
     0x1e, 0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19, 0x30, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48,
@@ -309,6 +326,18 @@ impl Ca for SimCa {
         // load-bearing DST determinism dependency, exactly as the host adapter
         // will draw it via `OsEntropy`. Two `SimCa` over the same seed draw the
         // identical serial here, so the whole handle is byte-identical.
+        //
+        // FIXED-IDENTITY LIMITATION: the returned `spiffe_id` below tracks the
+        // request (`spec.subject()` == `req.spiffe_id()`), but the cert bytes
+        // carry the FROZEN fixture SAN `spiffe://overdrive.local/workload/sim-svid`
+        // — the sim holds them opaquely and cannot re-mint with an arbitrary SAN
+        // (research Finding 11). So for any non-fixture request the cert-byte SAN
+        // diverges from `spiffe_id()`, and the `Ca::issue_svid` postcondition
+        // ("exactly one URI SAN equal to `req.spiffe_id()`") holds at the byte
+        // level ONLY for the fixture identity. A DST test that parses
+        // `cert_der()` to check the SAN must issue for the fixture identity (as
+        // `ca_equivalence` does); one that only observes `spiffe_id()` / serial
+        // determinism is unaffected. See `FIXTURE_SVID_CERT_PEM`.
         Ok(SvidMaterial::new(
             CaCertPem::new(FIXTURE_SVID_CERT_PEM.to_owned()),
             CaCertDer::new(FIXTURE_SVID_CERT_DER.to_vec()),
