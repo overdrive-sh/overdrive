@@ -1,0 +1,7 @@
+Workload ID:   dns-resolver
+Spec digest:   38080643ea47bfe84478b34daad3830389d313754eb0bd86133c2a7f8a0a535e
+Allocations:   1
+  alloc-dns-resolver-0: Running
+    reason: driver started
+Listeners:
+  15353/udp

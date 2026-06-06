@@ -1,0 +1,7 @@
+# probe: XDP attachments POST-TEARDOWN (after sweep)
+Device "ovd-veth-bk@ovd-veth-cli" does not exist.
+Device "ovd-veth-cli@ovd-veth-bk" does not exist.
+Device "ws-9692-0b@ws-9692-0a" does not exist.
+Device "ws-9692-0a@ws-9692-0b" does not exist.
+--- bpftool prog show (xdp/sched_cls only) ---
+(none)

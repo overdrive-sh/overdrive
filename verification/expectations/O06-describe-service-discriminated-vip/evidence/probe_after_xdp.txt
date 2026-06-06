@@ -1,0 +1,8 @@
+# probe: XDP attachments AFTER (pre-teardown)
+Device "ovd-veth-bk@ovd-veth-cli" does not exist.
+Device "ovd-veth-cli@ovd-veth-bk" does not exist.
+Device "ws-9692-0b@ws-9692-0a" does not exist.
+Device "ws-9692-0a@ws-9692-0b" does not exist.
+--- bpftool prog show (xdp/sched_cls only) ---
+88326: xdp  name xdp_service_map  tag e27cb436929af1bb  gpl
+88327: xdp  name xdp_reverse_nat  tag 2a8f6be27062f6f1  gpl

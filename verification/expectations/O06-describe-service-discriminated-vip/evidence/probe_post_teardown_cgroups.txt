@@ -1,0 +1,2 @@
+# probe: workload cgroups POST-TEARDOWN (after sweep)
+(no alloc-*.scope)

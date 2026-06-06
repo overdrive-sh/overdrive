@@ -1,0 +1,1 @@
+{"spec":{"kind":"service","id":"dns-resolver","replicas":1,"resources":{"cpu_milli":250,"memory_bytes":67108864},"exec":{"command":"/usr/bin/socat","args":["-T15","UDP-RECVFROM:15353,fork","PIPE"]},"listeners":[{"port":15353,"protocol":"udp"}],"vip":"10.96.0.2"},"spec_digest":"38080643ea47bfe84478b34daad3830389d313754eb0bd86133c2a7f8a0a535e"}

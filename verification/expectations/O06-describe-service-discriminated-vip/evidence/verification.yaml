@@ -1,0 +1,13 @@
+expectation_id: "O06"
+date_utc: "2026-06-06T16:49:50Z"
+overdrive_sha: "07ede7fc8300cca46370ed133c59c0bc46f40729"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "490c48f9ed2df372db27a62de4ec7177d6490f20"
+harness_invocation: "verification/harness/run-expectation.sh O06"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["GH #183 (`WorkloadDescription Service-arm wire-shape widening — oneOf discriminator for describe_workload`) — the issue this expectation closes.","ADR-0064 (`docs/product/architecture/adr-0064-describe-side-spec-output-discriminator.md` — `DescribeSpecOutput` distinct kind-discriminated `oneOf`; Service arm carries a REQUIRED `vip: ServiceVip`; OQ-1/OQ-4/OQ-7).","acceptance test `describe_service_returns_discriminated_shape_with_vip` (`crates/overdrive-control-plane/tests/integration/describe_round_trip.rs`, commit `e848cbdd`) — the "what, forever" Tier-3 witness that the describe response is `DescribeSpecOutput::Service { vip, .. }` carrying the submit-allocated VIP. Predates this verification.","ADR-0049 (`docs/product/architecture/adr-0049-platform-issued-service-vip-allocator.md` — the VIP is platform-issued, keyed by `spec_digest`; the operator never names it; describe SURFACES it read-only)."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.
