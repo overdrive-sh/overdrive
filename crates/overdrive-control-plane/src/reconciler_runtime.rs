@@ -2159,7 +2159,7 @@ async fn hydrate_workflow_actual_instances(
     let mut instances = hydrate_workflow_desired_instances(state).await?;
 
     // Join the engine's live-task set → `has_live_task`.
-    let live = state.workflow_engine.live_instances().await;
+    let live = state.workflow_engine.live_instances();
     for correlation in &live {
         if let Some(instance) = instances.get_mut(correlation) {
             instance.has_live_task = true;

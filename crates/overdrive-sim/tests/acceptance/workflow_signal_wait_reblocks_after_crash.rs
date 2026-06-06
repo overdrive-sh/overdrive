@@ -117,7 +117,7 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     // OBSERVABLE 1 — the run is STILL BLOCKED (the future is pending): the
     // engine reports the instance as live, no terminal row exists, and NO
     // Action was emitted. This is the genuine block on an absent signal.
-    let live_while_blocked = engine_a.live_instances().await;
+    let live_while_blocked = engine_a.live_instances();
     assert!(
         live_while_blocked.contains(&correlation),
         "the run must STILL be blocked on the absent signal (engine task live)"
@@ -168,7 +168,7 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     // OBSERVABLE 3 — RE-BLOCKED on the SAME signal: the resumed run is
     // still live, no terminal, no emit. The wait survived the crash.
     assert!(
-        engine_b.live_instances().await.contains(&correlation),
+        engine_b.live_instances().contains(&correlation),
         "on resume the run must RE-BLOCK on the same absent signal"
     );
     assert_eq!(

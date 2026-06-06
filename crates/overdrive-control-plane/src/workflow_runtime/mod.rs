@@ -33,10 +33,13 @@
 //! durable terminal surface for slice 01.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::FutureExt;
+use parking_lot::Mutex as PlMutex;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -169,11 +172,16 @@ pub struct WorkflowEngine {
     /// running-in-intent instance with no live task and no terminal row
     /// is the re-emit trigger on restart.
     ///
-    /// `Arc<Mutex<BTreeSet<..>>>` so the spawned task can drop its own
-    /// entry on terminal without holding `&self`. `BTreeSet` for
-    /// deterministic iteration per `.claude/rules/development.md`
+    /// `Arc<PlMutex<BTreeSet<..>>>` so the spawned task can drop its own
+    /// entry on terminal without holding `&self`. A `parking_lot::Mutex`
+    /// (not `tokio::sync::Mutex`) because the teardown is driven by a
+    /// SYNC RAII drop guard ([`LiveInstanceGuard`]) whose `Drop` cannot
+    /// `.await`; the set is point-accessed (insert / remove / clone) and
+    /// never held across an `.await`, so a sync mutex is the correct fit
+    /// (`development.md` § "Never hold a lock across `.await`"). `BTreeSet`
+    /// for deterministic iteration per `.claude/rules/development.md`
     /// § "Ordered-collection choice".
-    live_instances: Arc<Mutex<BTreeSet<CorrelationKey>>>,
+    live_instances: Arc<PlMutex<BTreeSet<CorrelationKey>>>,
     /// The receiver half of the Action channel, parked here until a
     /// consumer takes it via [`Self::take_action_emit_receiver`]. The
     /// engine owns BOTH halves so [`Self::new`]'s signature stays
@@ -217,7 +225,7 @@ impl WorkflowEngine {
             action_emit,
             registry: Arc::new(registry),
             tasks: Mutex::new(JoinSet::new()),
-            live_instances: Arc::new(Mutex::new(BTreeSet::new())),
+            live_instances: Arc::new(PlMutex::new(BTreeSet::new())),
             action_emit_rx: Mutex::new(Some(action_emit_rx)),
         }
     }
@@ -245,8 +253,11 @@ impl WorkflowEngine {
     /// which is exactly the re-emit trigger the lifecycle reconciler
     /// needs to crash-resume a running-in-intent instance.
     #[must_use]
-    pub async fn live_instances(&self) -> BTreeSet<CorrelationKey> {
-        self.live_instances.lock().await.clone()
+    pub fn live_instances(&self) -> BTreeSet<CorrelationKey> {
+        // `parking_lot::Mutex` — sync lock, no `.await`, so this is a plain
+        // sync getter (it was `async` while the field was a
+        // `tokio::sync::Mutex`).
+        self.live_instances.lock().clone()
     }
 
     /// Start (or resume) the workflow instance `workflow_id` for `spec`,
@@ -302,14 +313,55 @@ impl WorkflowEngine {
         // true) — the reconciler must NOT re-emit StartWorkflow for an
         // instance the engine is already driving (ADR-0064 §5).
         let live_instances = Arc::clone(&self.live_instances);
-        live_instances.lock().await.insert(correlation.clone());
+        live_instances.lock().insert(correlation.clone());
+
+        // The RAII teardown guard. Its `Drop` removes the correlation from
+        // `live_instances` UNCONDITIONALLY — even if the terminal-write code
+        // below panics (a panic in `journal.append` / `obs.write`) the guard
+        // still fires on unwind, closing the leak that stranded a panicked
+        // instance. The guard is MOVED into the async block and drops at the
+        // end of it, AFTER the terminal write, preserving the load-bearing
+        // terminal-then-remove ordering (see the comment at the tail of the
+        // spawned block).
+        let teardown =
+            LiveInstanceGuard { set: Arc::clone(&live_instances), key: correlation.clone() };
 
         // Spawn the author's async body as a tracked task (ADR-0064 §5 —
         // the engine owns a tokio task set, the same way the reconciler
         // runtime owns its tick task).
         let mut tasks = self.tasks.lock().await;
         tasks.spawn(async move {
-            let result = workflow.run(&ctx).await;
+            // Hold the teardown guard for the whole task body. `_teardown`
+            // (leading underscore) keeps it alive until end-of-scope without
+            // an "unused" warning; its `Drop` does the live-instance removal.
+            let _teardown = teardown;
+            // Contain a panic in the UNTRUSTED author `run` future. Without
+            // this, a panic unwinds past the terminal-write below and the
+            // JoinSet absorbs it (production never `join_next`s) — the
+            // instance is left with no terminal row and (pre-guard) a leaked
+            // live entry: the workflow-lifecycle reconciler then sees
+            // "running-in-intent, no terminal" and cannot converge. Mapping
+            // the panic to `Failed` runs the EXISTING terminal-write path, so
+            // the reconciler converges. The `reason` is derived ONLY from the
+            // deterministic downcast payload (never the address-bearing raw
+            // box) so the terminal string stays stable across runs.
+            let result = match AssertUnwindSafe(workflow.run(&ctx)).catch_unwind().await {
+                Ok(terminal) => terminal,
+                Err(panic) => {
+                    let reason = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "workflow panicked".to_string());
+                    tracing::error!(
+                        target: "overdrive::workflow_engine",
+                        workflow_id = %workflow_id,
+                        reason = %reason,
+                        "workflow run panicked; converging instance to Failed terminal",
+                    );
+                    WorkflowResult::Failed { reason }
+                }
+            };
             // Durable terminal record (slice-01 terminal surface,
             // ADR-0064 §2 / §3): append the canonical result string via
             // the sanctioned journal path. A real failure to append is
@@ -341,15 +393,17 @@ impl WorkflowEngine {
                     "failed to write workflow terminal observation row",
                 );
             }
-            // Drop the live-task entry AFTER the terminal row is written
-            // (ADR-0064 §5). Ordering is load-bearing: a hydrate_actual
-            // that observes `has_live_task = false` MUST also be able to
-            // observe the terminal row, otherwise the reconciler would
-            // see "running-in-intent, no live task, no terminal" and
+            // The live-task entry is dropped AFTER the terminal row is
+            // written (ADR-0064 §5) — NOT by an explicit `remove` here, but
+            // by `_teardown`'s `Drop` at end-of-scope, which is reached only
+            // after both terminal writes above. Ordering is load-bearing: a
+            // hydrate_actual that observes `has_live_task = false` MUST also
+            // be able to observe the terminal row, otherwise the reconciler
+            // would see "running-in-intent, no live task, no terminal" and
             // re-emit StartWorkflow — re-running a workflow that already
-            // completed. Removing the live entry only after the terminal
-            // write closes that window.
-            live_instances.lock().await.remove(&correlation);
+            // completed. The guard dropping last closes that window AND
+            // guarantees the entry is removed even if a terminal write above
+            // panics (defense-in-depth backstop to the `catch_unwind`).
         });
         drop(tasks);
         Ok(())
@@ -361,6 +415,35 @@ impl WorkflowEngine {
     pub async fn join_all(&self) {
         let mut tasks = self.tasks.lock().await;
         while tasks.join_next().await.is_some() {}
+    }
+}
+
+/// RAII teardown guard for a live workflow instance. Its `Drop` removes
+/// the instance's [`CorrelationKey`] from the engine's `live_instances`
+/// set UNCONDITIONALLY — on the normal terminal path AND on an unwind
+/// through the spawned task body (e.g. a panic in the terminal-write code
+/// that the `catch_unwind` around `run` does not cover).
+///
+/// This is the defense-in-depth half of the panic-containment fix: the
+/// `catch_unwind` around the author `run` future converts a `run` panic to
+/// a `Failed` terminal so the existing terminal-write path runs; this guard
+/// guarantees the live-instance entry is torn down even if THAT path
+/// panics. A stranded live entry is the bug this closes — it makes the
+/// workflow-lifecycle reconciler's `hydrate_actual` derive
+/// `has_live_task = true` forever, suppressing re-emit.
+///
+/// `Drop` is sync and acquires the `parking_lot::Mutex` directly (no
+/// `.await`), which is why `live_instances` is a `parking_lot::Mutex`. A
+/// double-remove (guard fires after some other removal) is a harmless
+/// `BTreeSet` no-op.
+struct LiveInstanceGuard {
+    set: Arc<PlMutex<BTreeSet<CorrelationKey>>>,
+    key: CorrelationKey,
+}
+
+impl Drop for LiveInstanceGuard {
+    fn drop(&mut self) {
+        self.set.lock().remove(&self.key);
     }
 }
 

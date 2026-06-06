@@ -239,7 +239,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
 
     // --- (2) the engine task completed: no live instance remains.
     assert!(
-        !state.workflow_engine.live_instances().await.contains(&correlation),
+        !state.workflow_engine.live_instances().contains(&correlation),
         "the engine must drop the live-task entry once run reaches terminal"
     );
 

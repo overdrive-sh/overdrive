@@ -262,4 +262,8 @@ mod acceptance {
     mod workflow_emit_action_lands_in_raft_channel;
     mod workflow_engine_replay_cursor; // S-WP-01-05 replay-cursor unit tests // S-WP-03-03
     mod workflow_engine_writes_terminal_row; // slice-01 AC5 — engine writes terminal obs row
+    // Bug fix — a panicked `async fn run` must converge to a Failed
+    // terminal + unconditional live-instance teardown (catch_unwind + RAII
+    // drop guard), not strand the instance.
+    mod workflow_panic_converges_to_failed_terminal;
 }
