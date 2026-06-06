@@ -314,6 +314,30 @@ pub enum JournalCommand {
         action_digest: overdrive_core::id::ContentHash,
     },
 
+    /// The engine recorded a retry ATTEMPT after absorbing a transient
+    /// (retryable) failure and before re-driving the body (slice 04,
+    /// ADR-0065 §4). Records the `attempt_digest` — the content digest of
+    /// the attempt's INPUTS (per `.claude/rules/development.md` § "Persist
+    /// inputs, not derived state"). The journal is the single durable SSOT
+    /// for the instance's retry state: the engine recomputes `attempts` (and
+    /// the next backoff window) from the COUNT of these commands against the
+    /// live `WORKFLOW_RETRY_BUDGET` policy on each re-drive — never a
+    /// persisted attempt-count or deadline cache. Once the count reaches the
+    /// budget the engine mints
+    /// [`TerminalError::budget_exhausted`](overdrive_core::workflow::TerminalError::budget_exhausted)
+    /// → [`WorkflowStatus::Failed`](overdrive_core::workflow::WorkflowStatus).
+    ///
+    /// Additive `#[serde(default)]` per ADR-0063 §2 — an older journal
+    /// without this variant decodes cleanly (the variant is simply absent;
+    /// the additive-variant tolerance the codec provides). NOT cursor
+    /// identity — like every other command it advances the positional walk
+    /// by exactly 1 on replay; no in-entry `step` (D5).
+    RetryAttempted {
+        /// SHA-256 digest of the retry attempt's canonical inputs — an
+        /// input, not a derived attempt-count cache.
+        attempt_digest: overdrive_core::id::ContentHash,
+    },
+
     /// The workflow ran to a terminal value (slice 01) — the last command.
     /// Records the FULL [`WorkflowStatus`](overdrive_core::workflow::WorkflowStatus)
     /// the engine projected (not a lossy string label), so a resumed run

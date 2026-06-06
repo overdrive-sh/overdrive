@@ -285,6 +285,8 @@ mod tests {
                 .prop_map(|signal_key| JournalCommand::SignalAwaited { signal_key }),
             content_hash_strategy()
                 .prop_map(|action_digest| JournalCommand::ActionEmitted { action_digest }),
+            content_hash_strategy()
+                .prop_map(|attempt_digest| JournalCommand::RetryAttempted { attempt_digest }),
             workflow_status_strategy().prop_map(|status| JournalCommand::Terminal { status }),
         ]
         .prop_map(LoadedEntry::Command);

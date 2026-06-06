@@ -314,28 +314,45 @@ impl TerminalError {
         Self { kind: TerminalErrorKind::OutputEncode, detail: Self::cap_detail(detail) }
     }
 
+    /// The body signalled a RETRYABLE failure
+    /// ([`TerminalErrorKind::Retryable`], ADR-0065 §4) — a transient the
+    /// engine absorbs and re-drives, NEVER a terminal the workflow ends on.
+    /// `detail` is length-capped at construction.
+    ///
+    /// This is the body's transient channel: returning `Err(retryable(..))`
+    /// tells the engine "this attempt failed transiently; re-drive me." The
+    /// engine never surfaces a `Retryable` as a durable terminal — it
+    /// re-drives until the transient clears (→ `Completed`) or the budget is
+    /// exhausted (→ engine-minted [`Self::budget_exhausted`]). Contrast
+    /// [`Self::explicit`], the "do not retry; fail the workflow" terminal.
+    #[must_use]
+    pub fn retryable(detail: &str) -> Self {
+        Self { kind: TerminalErrorKind::Retryable, detail: Self::cap_detail(detail) }
+    }
+
+    /// Whether this terminal is the RETRYABLE transient channel
+    /// ([`TerminalErrorKind::Retryable`]) the engine absorbs and re-drives
+    /// (ADR-0065 §4). The engine's retry classifier consults this: a
+    /// `true` outcome re-drives (subject to the budget); every other kind
+    /// is a real terminal.
+    #[must_use]
+    pub const fn is_retryable(&self) -> bool {
+        matches!(self.kind, TerminalErrorKind::Retryable)
+    }
+
     /// The engine minted this terminal because the retry budget was
     /// exhausted ([`TerminalErrorKind::BudgetExhausted`], ADR-0065 §4).
     ///
-    /// **Engine-only** (`pub(crate)`): author / test code outside this crate
-    /// cannot construct `BudgetExhausted`, because the retry budget is
-    /// engine-owned — the body never authors a budget-exhaustion terminal.
-    /// `detail` is length-capped at construction.
-    ///
-    /// The in-crate roundtrip property exercises this ctor; the production
-    /// engine consumer (budget-exhaustion minting) lands in the retry-loop
-    /// slice (ADR-0065 §4, Slice 04). `expect(dead_code)` is gated to the
-    /// non-test build (the test build DOES use it) and self-removes the
-    /// moment the engine slice wires it in.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "engine-only BudgetExhausted ctor; production consumer lands Slice 04 (ADR-0065 §4)"
-        )
-    )]
+    /// **Engine-minted, never body-authored.** A workflow body cannot
+    /// produce `BudgetExhausted` through its own logic — it signals
+    /// transients via [`Self::retryable`], and the ENGINE mints this once
+    /// the journal-derived attempt count reaches `WORKFLOW_RETRY_BUDGET`.
+    /// The ctor is `pub` so the engine (in `overdrive-control-plane`, a
+    /// separate crate) can mint it on exhaustion; authors have no reason to
+    /// call it and would only produce a misleading terminal. `detail` is
+    /// length-capped at construction.
     #[must_use]
-    pub(crate) fn budget_exhausted(detail: &str) -> Self {
+    pub fn budget_exhausted(detail: &str) -> Self {
         Self { kind: TerminalErrorKind::BudgetExhausted, detail: Self::cap_detail(detail) }
     }
 
@@ -365,10 +382,20 @@ pub enum TerminalErrorKind {
     /// `TerminalError` / Temporal non-retryable `ApplicationFailure` shape).
     /// Constructed via [`TerminalError::explicit`].
     Explicit,
+    /// The body signalled a RETRYABLE failure (ADR-0065 §4): a transient
+    /// the engine ABSORBS and re-drives from the journal, NEVER a terminal
+    /// the workflow ends on. The engine classifies a `Retryable` outcome,
+    /// records a `RetryAttempted` journal command, parks on the injected
+    /// `Clock` for the backoff window, and re-drives — until the budget is
+    /// exhausted, at which point it mints [`Self::BudgetExhausted`]. A
+    /// `Retryable` therefore NEVER reaches a workflow instance's durable
+    /// terminal: the engine either re-drives past it (the transient clears →
+    /// `Completed`) or replaces it with `BudgetExhausted`. Constructed via
+    /// [`TerminalError::retryable`]; classified by [`TerminalError::is_retryable`].
+    Retryable,
     /// The engine minted this terminal because the retry budget was
     /// exhausted (ADR-0065 §4). Author code never constructs this — the
-    /// engine does, on exhaustion, via the `pub(crate)`
-    /// [`TerminalError::budget_exhausted`].
+    /// engine does, on exhaustion, via [`TerminalError::budget_exhausted`].
     BudgetExhausted,
     /// The start input could not be CBOR-decoded into the workflow's typed
     /// `Input` (the `ErasedWorkflowAdapter` decode failure). A

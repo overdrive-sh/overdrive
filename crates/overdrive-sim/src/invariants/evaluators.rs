@@ -1572,6 +1572,7 @@ const fn journal_command_kind(command: &JournalCommand) -> &'static str {
         JournalCommand::SleepArmed { .. } => "SleepArmed",
         JournalCommand::SignalAwaited { .. } => "SignalAwaited",
         JournalCommand::ActionEmitted { .. } => "ActionEmitted",
+        JournalCommand::RetryAttempted { .. } => "RetryAttempted",
         JournalCommand::Terminal { .. } => "Terminal",
     }
 }

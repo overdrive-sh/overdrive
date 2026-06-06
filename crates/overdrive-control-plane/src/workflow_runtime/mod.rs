@@ -385,23 +385,20 @@ impl WorkflowEngine {
             replay_buffer.push(started);
         }
 
-        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new_with_channels(
-            Arc::clone(&self.journal),
-            workflow_id.clone(),
-            replay_buffer,
-            self.action_emit.clone(),
-            Arc::clone(&self.obs),
-        ));
-
-        let ctx = WorkflowCtx::new(
-            Arc::clone(&self.clock),
-            Arc::clone(&self.transport),
-            Arc::clone(&self.entropy),
-            cursor,
-        );
-
+        // NOTE (ADR-0065 §4, D4 retry-re-drive): the `JournalCursorHandle` +
+        // `WorkflowCtx` are NOT built here once-and-for-all anymore — they are
+        // (re)built INSIDE the spawned task on EACH drive from the freshly
+        // reloaded journal, so a re-drive replays the completed steps
+        // byte-equal and re-fires the failed one. `replay_buffer` (loaded
+        // above, with the just-appended `Started` reflected) seeds the FIRST
+        // drive; subsequent drives reload via `journal.load_journal`. We
+        // therefore capture the raw ports + the journal, not a pre-built ctx.
         let journal = Arc::clone(&self.journal);
         let obs = Arc::clone(&self.obs);
+        let clock = Arc::clone(&self.clock);
+        let transport = Arc::clone(&self.transport);
+        let entropy = Arc::clone(&self.entropy);
+        let action_emit = self.action_emit.clone();
         let correlation = correlation.clone();
         let workflow_id = workflow_id.clone();
         // The opaque CBOR `input` bytes the erased body decodes into its
@@ -439,44 +436,25 @@ impl WorkflowEngine {
             // (leading underscore) keeps it alive until end-of-scope without
             // an "unused" warning; its `Drop` does the live-instance removal.
             let _teardown = teardown;
-            // Drive the object-safe erased body over the opaque input bytes
-            // and PROJECT the outcome to a `WorkflowStatus` (ADR-0065 §3):
-            //   - `Ok(bytes)`            → `Completed { output: bytes }`
-            //   - `Err(terminal)`        → `Failed { terminal }`  (the body's
-            //                              authored failure OR the adapter's
-            //                              MalformedInput / OutputEncode)
-            //   - panic (catch_unwind)   → `Failed { TerminalError::explicit }`
-            //
-            // Contain a panic in the UNTRUSTED author `run` future. Without
-            // this, a panic unwinds past the terminal-write below and the
-            // JoinSet absorbs it (production never `join_next`s) — the
-            // instance is left with no terminal row and (pre-guard) a leaked
-            // live entry: the workflow-lifecycle reconciler then sees
-            // "running-in-intent, no terminal" and cannot converge. Mapping
-            // the panic to `Failed` runs the EXISTING terminal-write path, so
-            // the reconciler converges. The detail is derived ONLY from the
-            // deterministic downcast payload (the &str / String panic message,
-            // NEVER the address-bearing raw box) so the durable terminal stays
-            // byte-stable across runs — closing the ADR-0064 §3 hazard.
-            let run = AssertUnwindSafe(workflow.run_erased(&ctx, &input_bytes)).catch_unwind();
-            let status = match run.await {
-                Ok(Ok(output)) => WorkflowStatus::Completed { output },
-                Ok(Err(terminal)) => WorkflowStatus::Failed { terminal },
-                Err(panic) => {
-                    let detail = panic
-                        .downcast_ref::<&str>()
-                        .map(|s| (*s).to_string())
-                        .or_else(|| panic.downcast_ref::<String>().cloned())
-                        .unwrap_or_else(|| "workflow panicked".to_string());
-                    tracing::error!(
-                        target: "overdrive::workflow_engine",
-                        workflow_id = %workflow_id,
-                        detail = %detail,
-                        "workflow run panicked; converging instance to Failed terminal",
-                    );
-                    WorkflowStatus::Failed { terminal: TerminalError::explicit(&detail) }
-                }
-            };
+
+            // Drive the body to a durable terminal through the RETRY-RE-DRIVE
+            // loop (ADR-0065 §4, D4) — extracted so `start` stays small and
+            // the loop has a single focused home. `replay_buffer` (loaded
+            // above, with the just-appended `Started` reflected) seeds the
+            // FIRST drive; subsequent re-drives reload from the journal.
+            let status = drive_to_terminal(
+                workflow.as_ref(),
+                &input_bytes,
+                replay_buffer,
+                &journal,
+                &obs,
+                &clock,
+                &transport,
+                &entropy,
+                &action_emit,
+                &workflow_id,
+            )
+            .await;
             // Durable terminal record (slice-01 terminal surface,
             // ADR-0064 §2 / §3): append the FULL `WorkflowStatus` via the
             // sanctioned journal path — not a lossy label — so a resumed
@@ -635,6 +613,157 @@ fn terminal_status(loaded: &[LoadedEntry]) -> Option<WorkflowStatus> {
     })
 }
 
+/// Drive `workflow` over `input_bytes` to a durable terminal
+/// [`WorkflowStatus`] through the retry-re-drive loop (ADR-0065 §4, D4).
+/// Extracted from [`WorkflowEngine::start`]'s spawned task so the loop has a
+/// single focused home and `start` stays small.
+///
+/// `seed` is the FIRST drive's loaded run (with the just-appended `Started`
+/// reflected); every subsequent re-drive reloads from `journal` so the
+/// freshly-recorded `RetryAttempted` (off the command walk) and any completed
+/// author steps are accounted for. Each iteration:
+///
+/// 1. (re)load the run + build a FRESH cursor + ctx over it, so a re-drive
+///    replays completed steps byte-equal and re-fires the failed one (the
+///    canonical Temporal/Restate re-execute-from-top-and-short-circuit shape);
+/// 2. drive the object-safe erased body (panic-contained);
+/// 3. PROJECT the outcome to a [`WorkflowStatus`] (ADR-0065 §3);
+/// 4. classify via [`redrive_decision`] against the journal-derived attempt
+///    count + the [`WORKFLOW_RETRY_BUDGET`] policy: a RETRYABLE outcome with
+///    budget remaining appends a `RetryAttempted` (the attempt INPUT), parks
+///    on the injected `Clock` for the backoff window, and re-drives;
+///    otherwise the status is the durable terminal (a `Completed`, a
+///    body-authored explicit/malformed terminal, or the engine-minted
+///    `BudgetExhausted` on exhaustion).
+///
+/// The body contract is UNCHANGED — this is pure engine growth; the backoff
+/// park is the SAME injected `Clock` production uses, with no DST-only branch
+/// (`development.md` § "Production code is not shaped by simulation").
+#[allow(clippy::too_many_arguments)]
+async fn drive_to_terminal(
+    workflow: &dyn ErasedWorkflow,
+    input_bytes: &[u8],
+    seed: Vec<LoadedEntry>,
+    journal: &Arc<dyn JournalStore>,
+    obs: &Arc<dyn ObservationStore>,
+    clock: &Arc<dyn Clock>,
+    transport: &Arc<dyn Transport>,
+    entropy: &Arc<dyn Entropy>,
+    action_emit: &ActionEmitSender,
+    workflow_id: &WorkflowId,
+) -> WorkflowStatus {
+    let mut seed = Some(seed);
+    loop {
+        // (1) Load + partition into a fresh cursor for this drive.
+        let drive_buffer = match seed.take() {
+            Some(buffer) => buffer,
+            None => match journal.load_journal(workflow_id).await {
+                Ok(buffer) => buffer,
+                Err(err) => {
+                    // A reload failure on re-drive is surfaced and ends the
+                    // instance as a Failed terminal (the engine must not spin
+                    // re-driving against an unreadable journal).
+                    tracing::error!(
+                        target: "overdrive::workflow_engine",
+                        workflow_id = %workflow_id,
+                        err = %err,
+                        "failed to reload journal on workflow re-drive; converging to Failed",
+                    );
+                    return WorkflowStatus::Failed {
+                        terminal: TerminalError::explicit("journal reload failed on re-drive"),
+                    };
+                }
+            },
+        };
+        let attempts = attempts_from_journal(&drive_buffer);
+        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new_with_channels(
+            Arc::clone(journal),
+            workflow_id.clone(),
+            drive_buffer,
+            action_emit.clone(),
+            Arc::clone(obs),
+        ));
+        let ctx =
+            WorkflowCtx::new(Arc::clone(clock), Arc::clone(transport), Arc::clone(entropy), cursor);
+
+        // (2) Drive the object-safe erased body over the opaque input bytes,
+        // PANIC-CONTAINED. Without `catch_unwind` a panic unwinds past the
+        // terminal-write and the JoinSet absorbs it (production never
+        // `join_next`s) — the instance is left with no terminal row and
+        // (pre-guard) a leaked live entry: the workflow-lifecycle reconciler
+        // then sees "running-in-intent, no terminal" and cannot converge.
+        // Mapping the panic to `Failed` runs the terminal-write path so the
+        // reconciler converges. The detail is derived ONLY from the
+        // deterministic downcast payload (the &str / String panic message,
+        // NEVER the address-bearing raw box) so the durable terminal stays
+        // byte-stable across runs (ADR-0064 §3 hazard).
+        let run = AssertUnwindSafe(workflow.run_erased(&ctx, input_bytes)).catch_unwind();
+        // (3) PROJECT the drive outcome to a `WorkflowStatus`:
+        //   - `Ok(bytes)`          → `Completed { output: bytes }`
+        //   - `Err(terminal)`      → `Failed { terminal }` (body failure OR
+        //                            adapter MalformedInput/OutputEncode OR the
+        //                            body's `retryable` signal)
+        //   - panic (catch_unwind) → `Failed { Explicit }`
+        let drive_status = match run.await {
+            Ok(Ok(output)) => WorkflowStatus::Completed { output },
+            Ok(Err(terminal)) => WorkflowStatus::Failed { terminal },
+            Err(panic) => {
+                let detail = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "workflow panicked".to_string());
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    detail = %detail,
+                    "workflow run panicked; converging instance to Failed terminal",
+                );
+                WorkflowStatus::Failed { terminal: TerminalError::explicit(&detail) }
+            }
+        };
+
+        // (4) Classify: re-drive the transient (budget permitting) or return
+        // this status as the durable terminal.
+        match redrive_decision(&drive_status, attempts, WORKFLOW_RETRY_BUDGET) {
+            RedriveDecision::Terminal(status) => return status,
+            RedriveDecision::Redrive => {
+                // Record the attempt INPUT (D4) — a `RetryAttempted` command
+                // (off the cursor walk; engine bookkeeping). The attempt count
+                // is recomputed from the journal on the next iteration, never a
+                // persisted counter. The digest is over the attempt's inputs
+                // (the instance id + attempt index) per "Persist inputs, not
+                // derived state".
+                let attempt_digest = ContentHash::of(
+                    format!("{}:retry:{attempts}", workflow_id.as_str()).as_bytes(),
+                );
+                let entry = LoadedEntry::Command(JournalCommand::RetryAttempted { attempt_digest });
+                if let Err(err) = journal.append(workflow_id, &entry).await {
+                    // A failure to durably record the attempt ends the instance
+                    // (the engine must not re-drive against an unjournaled
+                    // attempt — the count would be wrong on resume). Surface and
+                    // converge to Failed.
+                    tracing::error!(
+                        target: "overdrive::workflow_engine",
+                        workflow_id = %workflow_id,
+                        err = %err,
+                        "failed to append RetryAttempted; converging to Failed",
+                    );
+                    return WorkflowStatus::Failed {
+                        terminal: TerminalError::explicit("retry bookkeeping append failed"),
+                    };
+                }
+                // Park on the injected Clock for the backoff window (recomputed
+                // from the journal-derived attempt count against the live
+                // policy — never a persisted deadline). Under SimClock this
+                // parks until the harness advances logical time; under
+                // SystemClock it is a real timer. Loop: reload + re-drive.
+                clock.sleep(backoff_for_attempt(attempts)).await;
+            }
+        }
+    }
+}
+
 /// The deterministic, address-free kind-label of a [`JournalCommand`] —
 /// the stable `expected`/`actual` payload the fail-closed determinism gate
 /// (D4, ADR-0064 §3) reports on a Layer-1 type-at-index mismatch.
@@ -657,7 +786,107 @@ const fn command_kind(command: &JournalCommand) -> &'static str {
         JournalCommand::SleepArmed { .. } => "SleepArmed",
         JournalCommand::SignalAwaited { .. } => "SignalAwaited",
         JournalCommand::ActionEmitted { .. } => "ActionEmitted",
+        JournalCommand::RetryAttempted { .. } => "RetryAttempted",
         JournalCommand::Terminal { .. } => "Terminal",
+    }
+}
+
+/// The engine's retry budget — the MAXIMUM number of transient re-drives an
+/// instance gets before the engine mints
+/// [`TerminalError::budget_exhausted`](overdrive_core::workflow::TerminalError::budget_exhausted)
+/// (ADR-0065 §4, D4).
+///
+/// This is the budget POLICY: an engine constant analogous to the
+/// reconciler [`RETRY_BACKOFFS`](crate::worker) table, consulted by the
+/// engine and NEVER persisted (per `.claude/rules/development.md` § "Persist
+/// inputs, not derived state" — the policy is a function; the INPUTS, the
+/// `RetryAttempted` journal commands, are what persist). The budget lives in
+/// the ENGINE, contrasting the reconciler `RetryMemory` View precedent: a
+/// reconciler has no engine, so ADR-0035 puts its retry memory in the View;
+/// a workflow HAS an engine, so the budget belongs here (D4).
+///
+/// `3` re-drives is the Phase-1 value: enough to ride out a brief transient
+/// without unbounded churn. Once the journal's `RetryAttempted` count
+/// reaches this, the engine stops re-driving and mints `BudgetExhausted`.
+pub const WORKFLOW_RETRY_BUDGET: u32 = 3;
+
+/// The Phase-1 backoff schedule consulted before each transient re-drive
+/// (ADR-0065 §4). `attempt` is the number of re-drives ALREADY recorded
+/// (the `RetryAttempted` count) — i.e. the 0-indexed window before the
+/// `attempt+1`-th drive.
+///
+/// Total over every index (saturating, no panic past the schedule), and
+/// deterministic — the engine parks on the injected `Clock` for the
+/// returned duration, recomputed from the journal-derived attempt count on
+/// each re-drive (never a persisted deadline cache). The values mirror the
+/// reconciler `RETRY_BACKOFFS` shape (50ms / 100ms / 200ms), clamped to the
+/// last entry for any index past the table — modest, since under `SimClock`
+/// the harness drives logical time and the absolute value is immaterial to
+/// the re-drive count.
+#[must_use]
+fn backoff_for_attempt(attempt: u32) -> Duration {
+    const SCHEDULE: [Duration; 3] =
+        [Duration::from_millis(50), Duration::from_millis(100), Duration::from_millis(200)];
+    let idx = (attempt as usize).min(SCHEDULE.len() - 1);
+    SCHEDULE[idx]
+}
+
+/// Count the `RetryAttempted` commands in a loaded run — the engine's
+/// journal-derived attempt total (ADR-0065 §4, D4). The journal is the
+/// single durable SSOT for the instance's retry state: the attempt count is
+/// RECOMPUTED from the count of these inputs on every re-drive (and on
+/// crash-resume), never read from a persisted attempt-count field
+/// (`.claude/rules/development.md` § "Persist inputs, not derived state").
+/// Only `RetryAttempted` commands count — `Started`, `RunResult`,
+/// `Terminal`, notifications, etc. do not.
+#[must_use]
+fn attempts_from_journal(loaded: &[LoadedEntry]) -> u32 {
+    let count = loaded
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::RetryAttempted { .. })))
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// The engine's transient-classification + budget-gate decision over a
+/// drive's projected [`WorkflowStatus`] (ADR-0065 §4, D4).
+///
+/// A `Failed { terminal }` whose `terminal.is_retryable()` is the transient
+/// channel: the engine RE-DRIVES while attempts remain under the budget, and
+/// MINTS `Failed { BudgetExhausted }` once `attempts >= budget`. Every other
+/// outcome — `Completed`, an explicit / malformed / output-encode `Failed`,
+/// or the engine-authored `Cancelled` / `TimedOut` — is a real terminal the
+/// engine records as-is (a body-authored terminal is NEVER re-driven).
+#[derive(Debug, PartialEq, Eq)]
+enum RedriveDecision {
+    /// Absorb the transient and re-drive the body from the journal.
+    Redrive,
+    /// Record this status as the instance's durable terminal (no re-drive).
+    Terminal(WorkflowStatus),
+}
+
+/// Classify a drive's projected status against the journal-derived
+/// `attempts` and the `budget` policy. Pure — no I/O, deterministic — so it
+/// is unit-tested directly (the re-drive loop in [`WorkflowEngine::start`]
+/// consults it per drive). See [`RedriveDecision`].
+#[must_use]
+fn redrive_decision(status: &WorkflowStatus, attempts: u32, budget: u32) -> RedriveDecision {
+    match status {
+        WorkflowStatus::Failed { terminal } if terminal.is_retryable() => {
+            if attempts >= budget {
+                // Budget exhausted — the engine MINTS BudgetExhausted (the
+                // body never authors it). The retryable detail is carried
+                // forward so the operator sees the last transient cause.
+                RedriveDecision::Terminal(WorkflowStatus::Failed {
+                    terminal: TerminalError::budget_exhausted(terminal.detail()),
+                })
+            } else {
+                RedriveDecision::Redrive
+            }
+        }
+        // Completed, explicit/malformed/output-encode Failed, Cancelled,
+        // TimedOut — a real terminal, recorded as-is, never re-driven.
+        other => RedriveDecision::Terminal(other.clone()),
     }
 }
 
@@ -685,6 +914,17 @@ fn partition_loaded_run(
     let mut notifications = BTreeMap::new();
     for entry in loaded {
         match entry {
+            // `RetryAttempted` is engine retry-bookkeeping (ADR-0065 §4), NOT
+            // an author await-op — no `ctx.run` / `ctx.sleep` /
+            // `ctx.wait_for_signal` / `ctx.emit_action` maps to it. It must
+            // therefore stay OFF the positional command walk the cursor
+            // matches author await-ops against (the same reason `Started` is
+            // skipped by `initial_command_cursor`): a re-driven body's first
+            // await-op would otherwise land on a `RetryAttempted` and trip
+            // the Layer-1 type-at-index determinism gate. The engine counts
+            // these from the FULL loaded run via `attempts_from_journal`, not
+            // from the walk.
+            LoadedEntry::Command(JournalCommand::RetryAttempted { .. }) => {}
             LoadedEntry::Command(command) => commands.push(command),
             LoadedEntry::Notification(notification) => {
                 let JournalNotification::SignalSeen { ref signal_key, .. } = notification;
@@ -1272,3 +1512,116 @@ impl JournalCursor for JournalCursorHandle {
 // `JournalStore` (the dev-dep cycle), so `Arc<SimJournalStore> as
 // Arc<dyn JournalStore>` fails to unify. The `tests/` target compiles
 // against the published lib + dev-deps, where the trait identities match.
+//
+// The PURE retry-decision helpers below (`attempts_from_journal`,
+// `redrive_decision`, `backoff_for_attempt`) need NO `Sim*` adapter — they
+// operate on hand-built `LoadedEntry` vecs / kinds / counters — so their
+// unit tests CAN live here (D4 retry-re-drive loop, step 04-01).
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RedriveDecision, WORKFLOW_RETRY_BUDGET, attempts_from_journal, backoff_for_attempt,
+        redrive_decision,
+    };
+    use crate::journal::{JournalCommand, LoadedEntry};
+    use overdrive_core::id::ContentHash;
+    use overdrive_core::workflow::{TerminalError, TerminalErrorKind, WorkflowStatus};
+
+    /// A `RetryAttempted` command for the count fixtures.
+    fn retry_attempted() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::RetryAttempted {
+            attempt_digest: ContentHash::of(b"attempt"),
+        })
+    }
+
+    /// A non-`RetryAttempted` command (a `Started`) — must NOT be counted.
+    fn started() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::Started {
+            spec_digest: ContentHash::of(b"spec"),
+            input_digest: ContentHash::of(b"input"),
+        })
+    }
+
+    /// `attempts_from_journal` counts ONLY `RetryAttempted` commands — the
+    /// attempt INPUTS are derived from the journal, never a separate store
+    /// (D4 / `development.md` "Persist inputs, not derived state"). Other
+    /// commands (`Started`, `Terminal`, …) interleaved in the run must not
+    /// inflate the count.
+    #[test]
+    fn attempts_from_journal_counts_only_retry_attempted_commands() {
+        // Empty run — no attempts yet.
+        assert_eq!(attempts_from_journal(&[]), 0);
+        // A run with Started + 2 RetryAttempted + a non-retry command: only
+        // the 2 RetryAttempted are counted.
+        let run = vec![started(), retry_attempted(), retry_attempted(), started()];
+        assert_eq!(
+            attempts_from_journal(&run),
+            2,
+            "only RetryAttempted commands count toward the attempt total"
+        );
+    }
+
+    /// `redrive_decision` is the engine's transient classifier + budget
+    /// gate. A RETRYABLE terminal re-drives WHILE attempts remain, and
+    /// MINTS `BudgetExhausted` once the budget is consumed. An explicit /
+    /// malformed / output-encode terminal is NEVER re-driven (the body
+    /// authored a real terminal). A `Completed` is terminal-success.
+    #[test]
+    fn redrive_decision_classifies_transient_and_gates_on_budget() {
+        let retryable = WorkflowStatus::Failed { terminal: TerminalError::retryable("transient") };
+        let explicit = WorkflowStatus::Failed { terminal: TerminalError::explicit("boom") };
+        let completed = WorkflowStatus::Completed { output: Vec::new() };
+
+        // Retryable with budget remaining → re-drive.
+        assert_eq!(
+            redrive_decision(&retryable, 0, WORKFLOW_RETRY_BUDGET),
+            RedriveDecision::Redrive
+        );
+        assert_eq!(
+            redrive_decision(&retryable, WORKFLOW_RETRY_BUDGET - 1, WORKFLOW_RETRY_BUDGET),
+            RedriveDecision::Redrive,
+            "the last in-budget attempt still re-drives"
+        );
+
+        // Retryable with budget EXHAUSTED → mint BudgetExhausted.
+        match redrive_decision(&retryable, WORKFLOW_RETRY_BUDGET, WORKFLOW_RETRY_BUDGET) {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
+                assert_eq!(
+                    terminal.kind(),
+                    TerminalErrorKind::BudgetExhausted,
+                    "exhaustion mints BudgetExhausted"
+                );
+            }
+            other => {
+                panic!("exhausted retryable must mint Failed{{BudgetExhausted}}, got {other:?}")
+            }
+        }
+
+        // Explicit terminal → terminal as-is, NEVER re-driven (body authored
+        // it), even with budget remaining.
+        match redrive_decision(&explicit, 0, WORKFLOW_RETRY_BUDGET) {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
+                assert_eq!(terminal.kind(), TerminalErrorKind::Explicit);
+            }
+            other => panic!("an explicit terminal must NOT be re-driven, got {other:?}"),
+        }
+
+        // Completed → terminal-success, never re-driven.
+        assert!(matches!(
+            redrive_decision(&completed, 0, WORKFLOW_RETRY_BUDGET),
+            RedriveDecision::Terminal(WorkflowStatus::Completed { .. })
+        ));
+    }
+
+    /// The backoff schedule is total over every attempt index (no panic /
+    /// underflow past the budget) and deterministic.
+    #[test]
+    fn backoff_for_attempt_is_total_and_deterministic() {
+        for n in 0..(WORKFLOW_RETRY_BUDGET + 4) {
+            let a = backoff_for_attempt(n);
+            let b = backoff_for_attempt(n);
+            assert_eq!(a, b, "backoff is deterministic for attempt {n}");
+        }
+    }
+}
