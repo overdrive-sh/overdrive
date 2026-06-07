@@ -277,6 +277,10 @@ not describe them as present until there is:
   drivers are named in the trait but unimplemented.
 - **The ingress gateway, the policy engine, native telemetry, and the LLM
   self-healing agent.** Each is part of the design; none is wired into `serve`.
+- **Workload identity.** The built-in certificate authority that issues SPIFFE
+  SVIDs to workloads is implemented as a primitive but not wired into `serve`; the
+  operator-facing TLS above is unaffected. See the
+  [identity model](/docs/concepts/identity).
 - **Cross-host load balancing.** Service traffic reaches same-host backends
   through the cgroup `connect4` path. The XDP `SERVICE_MAP` / `REVERSE_NAT_MAP`
   path that forwards to a backend on another node is built and tested but
