@@ -215,6 +215,13 @@ impl<W: Workflow> ErasedWorkflow for ErasedWorkflowAdapter<W> {
         // `wait_for_signal` with no transient) stays Pending. The transient takes
         // precedence over a body that completed in the same poll, preserving the
         // prior "ctx transient overrides the body return" guarantee.
+        //
+        // LOAD-BEARING INVARIANT: every body `Pending` is either waker-registered
+        // (a genuine `ctx.sleep` / `wait_for_signal` park registers `cx`'s waker, so
+        // the Clock re-polls us) OR transient-flagged (caught here in the same poll).
+        // A future returning `Pending` WITHOUT registering a waker AND WITHOUT setting
+        // the transient slot would hang this drive forever — no `ctx` op does that,
+        // and a `ctx.run` transient sets the slot synchronously before its `pending()`.
         let mut body = self.0.run(ctx, input);
         let step: DriveStep<W::Output> = std::future::poll_fn(|cx| {
             use std::task::Poll;
@@ -245,7 +252,7 @@ impl<W: Workflow> ErasedWorkflow for ErasedWorkflowAdapter<W> {
                 Err(WorkflowDriveError::Transient(transient))
             }
             DriveStep::Body(body_result) => {
-                // Body's `Err(TerminalError)` → `WorkflowDriveError::Terminal` (#[from]).
+                // Body's `Err(TerminalError)` → `WorkflowDriveError::Terminal` (manual From; TerminalError is !Error).
                 let output = body_result?;
                 // Typed-edge OUT: encode W::Output to CBOR. An encode failure is a
                 // programming error in the Output type's serde impl (output_encode).
@@ -662,7 +669,7 @@ pub enum WorkflowStatus {
 /// `emit_action`) now return `Result<_, TerminalError>`: an infra
 /// `WorkflowCtxError` raised inside a ctx op is **projected** to
 /// [`TerminalError::explicit`] at the ctx-op boundary (via
-/// [`WorkflowCtx::infra_terminal`]) so a workflow body composes the ops with a
+/// `infra_terminal`) so a workflow body composes the ops with a
 /// clean `?` against its own `Result<Output, TerminalError>` return. This type
 /// therefore survives only as:
 ///
@@ -1618,7 +1625,7 @@ impl WorkflowCtx {
     /// failure occurs inside the journal cursor (non-deterministic replay,
     /// journal-record failure, deserialise failure) — projected to kind
     /// [`Explicit`](TerminalErrorKind::Explicit) at the ctx-op boundary via
-    /// [`Self::infra_terminal`] (ADR-0065 §4 Model Z); a CBOR
+    /// `infra_terminal` (ADR-0065 §4 Model Z); a CBOR
     /// serialise/deserialise failure on the step's own value is likewise
     /// projected. A `StepError::Retryable` TRANSIENT step is NOT an error the
     /// body observes — it PARKS the body and is surfaced by the engine as
@@ -1737,7 +1744,7 @@ impl WorkflowCtx {
     /// when an engine-internal infra failure occurs inside the journal cursor
     /// (a non-deterministic replay at this cursor, or the live-path durable
     /// record of the armed deadline failing) — projected at the ctx-op boundary
-    /// via [`Self::infra_terminal`] (ADR-0065 §4 Model Z). It no longer returns
+    /// via `infra_terminal` (ADR-0065 §4 Model Z). It no longer returns
     /// a `WorkflowCtxError`.
     pub async fn sleep(&self, duration: Duration) -> Result<(), TerminalError> {
         if let Some(deadline_unix) =
@@ -1792,7 +1799,7 @@ impl WorkflowCtx {
     /// when an engine-internal infra failure occurs inside the journal cursor
     /// (the signal-surface read failing, a non-deterministic replay, or a
     /// durable record failing) — projected at the ctx-op boundary via
-    /// [`Self::infra_terminal`] (ADR-0065 §4 Model Z). It no longer returns a
+    /// `infra_terminal` (ADR-0065 §4 Model Z). It no longer returns a
     /// `WorkflowCtxError`.
     pub async fn wait_for_signal(
         &self,
@@ -1850,7 +1857,7 @@ impl WorkflowCtx {
     /// when an engine-internal infra failure occurs inside the journal cursor
     /// (the Action channel send failing — channel closed / full — a
     /// non-deterministic replay, or the durable record failing) — projected at
-    /// the ctx-op boundary via [`Self::infra_terminal`] (ADR-0065 §4 Model Z).
+    /// the ctx-op boundary via `infra_terminal` (ADR-0065 §4 Model Z).
     /// It no longer returns a `WorkflowCtxError`.
     pub async fn emit_action(&self, action: Action) -> Result<(), TerminalError> {
         if self.journal.replay_emit().await.map_err(Self::infra_terminal)? {

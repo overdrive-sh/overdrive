@@ -866,10 +866,11 @@ const fn command_kind(command: &JournalCommand) -> &'static str {
 /// **Gap 2 (ADR-0065 Amendment 2026-06-07):** a per-`ctx.run` `RunRetryPolicy`
 /// now governs the re-drive count, and [`RunRetryPolicy::default`] reproduces
 /// THIS constant exactly (`max_attempts == WORKFLOW_RETRY_BUDGET`). This
-/// constant + [`backoff_for_attempt`] are RETAINED as the default-policy SSOT:
-/// the equivalence is pinned by the `default_policy_reproduces_engine_constants`
-/// unit test (since `overdrive-core` cannot reference this engine-crate constant
-/// directly). They are not deleted.
+/// constant is retained as the source of the default policy's attempt budget;
+/// `RunRetryPolicy::default()` is the sole backoff SSOT (the standalone engine
+/// backoff schedule fn was deleted). The equivalence is pinned by the
+/// `default_policy_reproduces_engine_constants` unit test (since `overdrive-core`
+/// cannot reference this engine-crate constant directly).
 ///
 /// `3` re-drives is the Phase-1 value: enough to ride out a brief transient
 /// without unbounded churn. Once the journal's `RetryAttempted` count reaches
@@ -1696,7 +1697,7 @@ impl JournalCursor for JournalCursorHandle {
 // against the published lib + dev-deps, where the trait identities match.
 //
 // The PURE retry-decision helpers below (`attempts_from_journal`,
-// `redrive_decision`, `backoff_for_attempt`) need NO `Sim*` adapter — they
+// `redrive_decision`, `retry_window_start`) need NO `Sim*` adapter — they
 // operate on hand-built `LoadedEntry` vecs / kinds / counters — so their
 // unit tests CAN live here (D4 retry-re-drive loop, step 04-01).
 
