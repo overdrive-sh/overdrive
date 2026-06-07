@@ -1484,21 +1484,18 @@ async fn hydrate_desired(
             Ok(AnyState::WorkloadLifecycle(s))
         }
         // ADR-0064 §5 — the workflow-lifecycle reconciler's hydrate-desired.
-        // Scan the `workflows/` intent prefix (written by the action-shim's
-        // `dispatch_with_workflow_intent` on every committed
-        // `Action::StartWorkflow`); each persisted row is a desired
-        // instance, keyed by its `CorrelationKey`, carrying the workflow
-        // spec's kind name (the input the engine resolves to a factory —
-        // per `development.md` § "Persist inputs, not derived state").
-        //
-        // The reconcile body reads `actual.instances`, so the desired side
-        // marks `running_in_intent = true` for every persisted instance and
-        // leaves the engine/obs-derived fields (`has_live_task`,
-        // `terminal`) at their defaults; `hydrate_actual` produces the
-        // merged per-instance state the reconcile body consumes.
+        // `WorkflowLifecycle::reconcile` reads ONLY `actual` (the merged
+        // desired+actual projection); its `desired` parameter is unused.
+        // `hydrate_actual` → `hydrate_workflow_actual_instances` already
+        // begins from the `workflows/` intent SSOT scan
+        // (`hydrate_workflow_desired_instances`) and overlays the
+        // engine/obs-derived fields. Scanning the same prefix here too would
+        // be a second read whose result `reconcile(_desired, actual, ...)`
+        // discards on its first line — so the desired side returns an empty
+        // `WorkflowLifecycleState`. The regression guard is
+        // `tests::workflow_lifecycle_hydrate::hydrate_desired_does_not_rescan_workflow_intent`.
         AnyReconciler::WorkflowLifecycle(_) => {
-            let instances = hydrate_workflow_desired_instances(state).await?;
-            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -3248,6 +3245,163 @@ mod tests {
                  later Startup/idx-1 Fail row must be excluded because BOTH role AND probe_idx \
                  must match (kills && → || mutant at reconciler_runtime.rs:1937); got {:?}",
                 fact.latest_startup_probe
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // workflow-lifecycle hydrate boundary — regression guard against
+    // the redundant double-scan of the `workflows/` intent prefix.
+    //
+    // `WorkflowLifecycle::reconcile` reads ONLY `actual` (the merged
+    // desired+actual projection); its `desired` parameter is `_desired`
+    // (unused). Meanwhile `hydrate_actual` → `hydrate_workflow_actual_
+    // instances` already starts from the intent SSOT scan as its base.
+    // The `hydrate_desired` arm must therefore NOT scan a second time —
+    // it returns an empty `WorkflowLifecycleState`. This module pins
+    // that contract so the discarded second scan cannot be reintroduced.
+    // -----------------------------------------------------------------
+    mod workflow_lifecycle_hydrate {
+        use std::sync::Arc;
+
+        use overdrive_core::aggregate::IntentKey;
+        use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
+        use overdrive_core::reconcilers::{AnyState, TargetResource};
+        use overdrive_core::traits::driver::{Driver, DriverType};
+        use overdrive_core::traits::intent_store::IntentStore;
+        use overdrive_core::traits::observation_store::ObservationStore;
+        use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+        use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::adapters::dataplane::SimDataplane;
+        use overdrive_sim::adapters::driver::SimDriver;
+        use overdrive_sim::adapters::observation_store::SimObservationStore;
+        use overdrive_store_local::LocalIntentStore;
+        use tempfile::TempDir;
+
+        use crate::AppState;
+        use crate::reconciler_runtime::{
+            ReconcilerRuntime, hydrate_actual_for_test, hydrate_desired_for_test,
+        };
+
+        fn writer_node() -> NodeId {
+            NodeId::new("writer-1").expect("valid NodeId")
+        }
+
+        fn wf_target() -> TargetResource {
+            TargetResource::new("workflow/all").expect("valid target")
+        }
+
+        fn provision_spec() -> WorkflowStart {
+            WorkflowStart {
+                name: WorkflowName::new("provision-record").expect("valid workflow name"),
+                input: Vec::new(),
+            }
+        }
+
+        fn correlation_for(spec: &WorkflowStart) -> CorrelationKey {
+            CorrelationKey::derive(
+                "wf-provision-0001",
+                &ContentHash::of(spec.name.as_str().as_bytes()),
+                "start-workflow",
+            )
+        }
+
+        /// Build an `AppState` over a real (tempdir) `LocalIntentStore`
+        /// and persist one workflow-instance desired-intent row at
+        /// `workflows/<correlation>` — the exact key/value shape the
+        /// production `persist_workflow_intents` writes for a committed
+        /// `Action::StartWorkflow`.
+        async fn build_state_with_workflow_intent(
+            tmp: &TempDir,
+            spec: &WorkflowStart,
+            correlation: &CorrelationKey,
+        ) -> AppState {
+            let runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
+                .expect("runtime new");
+            let store_path = tmp.path().join("intent.redb");
+            let store =
+                Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+            let obs: Arc<dyn ObservationStore> =
+                Arc::new(SimObservationStore::single_peer(writer_node(), 0));
+
+            // Mirror `persist_workflow_intents`: key =
+            // `IntentKey::for_workflow_instance(correlation)`, value =
+            // the FULL `WorkflowStart` spec via the co-located codec.
+            let key = IntentKey::for_workflow_instance(correlation);
+            let archived = spec.archive_for_store().expect("archive WorkflowStart");
+            store.put(key.as_bytes(), archived.as_ref()).await.expect("put workflow intent");
+
+            let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+            let allocator =
+                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            AppState::new(
+                store,
+                store_path,
+                obs,
+                Arc::new(runtime),
+                driver,
+                Arc::new(SimClock::new()),
+                Arc::new(SimDataplane::new()),
+                writer_node(),
+                allocator,
+                crate::test_empty_listener_facts(),
+                std::net::Ipv4Addr::LOCALHOST,
+            )
+        }
+
+        /// Regression: `hydrate_desired` for the workflow-lifecycle
+        /// reconciler must NOT scan the `workflows/` prefix — it returns
+        /// an empty `WorkflowLifecycleState`. The same prefix is scanned
+        /// by `hydrate_actual` (whose `WorkflowInstanceState` the pure
+        /// reconcile body actually reads), so a desired-side scan is a
+        /// redundant second read whose result is discarded by
+        /// `reconcile(_desired, actual, ...)`.
+        ///
+        /// The companion `hydrate_actual` assertion makes this
+        /// non-vacuous: it proves the intent row IS persisted and IS
+        /// readable, so "desired is empty" reflects the new contract, not
+        /// a missing fixture.
+        #[tokio::test]
+        async fn hydrate_desired_does_not_rescan_workflow_intent() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let spec = provision_spec();
+            let correlation = correlation_for(&spec);
+            let state = build_state_with_workflow_intent(&tmp, &spec, &correlation).await;
+            let reconciler = crate::workflow_lifecycle();
+
+            // hydrate_actual scans the intent prefix as its base and
+            // surfaces the persisted instance — running-in-intent with no
+            // live engine task and no terminal row (the empty-registry
+            // default engine holds no live tasks).
+            let actual = hydrate_actual_for_test(&reconciler, &wf_target(), &state)
+                .await
+                .expect("hydrate_actual ok");
+            let AnyState::WorkflowLifecycle(actual_state) = actual else {
+                panic!("expected WorkflowLifecycle actual state");
+            };
+            let instance = actual_state
+                .instances
+                .get(&correlation)
+                .expect("hydrate_actual must surface the persisted workflow instance");
+            assert!(
+                instance.running_in_intent,
+                "the persisted workflow intent marks the instance running-in-intent"
+            );
+
+            // hydrate_desired must NOT scan again — the desired side is
+            // empty by design (the merged projection lives in `actual`).
+            let desired = hydrate_desired_for_test(&reconciler, &wf_target(), &state)
+                .await
+                .expect("hydrate_desired ok");
+            let AnyState::WorkflowLifecycle(desired_state) = desired else {
+                panic!("expected WorkflowLifecycle desired state");
+            };
+            assert!(
+                desired_state.instances.is_empty(),
+                "hydrate_desired for the workflow-lifecycle reconciler must NOT re-scan the \
+                 `workflows/` intent prefix — reconcile reads only `actual`, so the desired side \
+                 returns an empty WorkflowLifecycleState; got {} instance(s)",
+                desired_state.instances.len()
             );
         }
     }

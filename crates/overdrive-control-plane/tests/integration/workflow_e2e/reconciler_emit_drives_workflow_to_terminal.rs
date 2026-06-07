@@ -244,12 +244,17 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     );
 
     // --- (4) the workflow-lifecycle reconciler converges the instance to
-    //     terminated. With the workflow intent persisted (desired:
-    //     running_in_intent) AND the terminal row observed (actual:
-    //     terminal=Some), the pure reconcile emits NO StartWorkflow — the
-    //     instance is converged. We assert at the hydrate boundary that
-    //     desired sees the instance and actual sees it terminal, then that
-    //     reconcile emits no re-start.
+    //     terminated. The merged per-instance projection the pure reconcile
+    //     body consumes lives entirely in `actual` (the `workflows/` intent
+    //     SSOT scan + the engine live-task set + the observed terminal row);
+    //     `reconcile` ignores its `desired` parameter, so `hydrate_desired`
+    //     returns an EMPTY state and does NOT re-scan the `workflows/` prefix
+    //     a second time (regression guard:
+    //     `reconciler_runtime::tests::workflow_lifecycle_hydrate`). With the
+    //     terminal row observed (actual: terminal=Some), the pure reconcile
+    //     emits NO StartWorkflow — the instance is converged. We assert at
+    //     the hydrate boundary that desired is empty and actual sees the
+    //     instance terminal, then that reconcile emits no re-start.
     let wf_name = ReconcilerName::new("workflow-lifecycle").expect("valid reconciler name");
     let wf_target = TargetResource::new("workflow/all").expect("valid target");
     // A fresh reconciler value for the hydrate-boundary assertions — the
@@ -270,13 +275,12 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     let AnyState::WorkflowLifecycle(actual_state) = actual else {
         panic!("expected WorkflowLifecycle actual state");
     };
-    let desired_instance = desired_state
-        .instances
-        .get(&correlation)
-        .expect("hydrate_desired must read the persisted workflow intent");
     assert!(
-        desired_instance.running_in_intent,
-        "the persisted workflow intent marks the instance running-in-intent"
+        desired_state.instances.is_empty(),
+        "hydrate_desired for the workflow-lifecycle reconciler must NOT re-scan the workflows/ \
+         prefix — the merged projection lives in `actual` and `reconcile` ignores `desired`; \
+         got {} desired instance(s)",
+        desired_state.instances.len()
     );
     let actual_instance =
         actual_state.instances.get(&correlation).expect("hydrate_actual must surface the instance");
