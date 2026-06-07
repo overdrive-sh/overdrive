@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 68d1eb21062545e0b80627185b41a1fac887bff487ca27df9fee6fb45f8aec5f # shrinks to set = IntentSet { services: [("svc-0", ServiceVip(10.96.0.1), [Listener { port: 29448, protocol: Tcp }, Listener { port: 29448, protocol: Tcp }])] }

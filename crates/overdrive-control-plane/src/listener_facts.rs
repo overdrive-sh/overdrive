@@ -1041,6 +1041,18 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(i, listeners)| {
+                    // `ServiceV1::from_submit` rejects duplicate
+                    // (port, protocol) listener triples
+                    // (ParseError::ListenerDuplicate), so the generator
+                    // must emit a unique-per-service listener set or the
+                    // rebuild path panics on `.expect("valid service")`.
+                    // Dedup preserving first-seen order so byte-equivalence
+                    // (which observes inner-Vec order) still holds.
+                    let mut seen = std::collections::HashSet::new();
+                    let listeners: Vec<Listener> = listeners
+                        .into_iter()
+                        .filter(|l| seen.insert((l.port, l.protocol)))
+                        .collect();
                     let name = format!("svc-{i}");
                     let octet = u8::try_from(1 + i).unwrap_or(1);
                     let v = ServiceVip::new(
