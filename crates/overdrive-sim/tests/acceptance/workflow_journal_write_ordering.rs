@@ -60,7 +60,7 @@ async fn run_step(
     let transport = Arc::clone(ctx.transport());
     let payload = Bytes::from_static(PAYLOAD);
     ctx.run(STEP_NAME, async move {
-        transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+        Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
     })
     .await
 }

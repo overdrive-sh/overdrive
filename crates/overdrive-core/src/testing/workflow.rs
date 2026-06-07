@@ -118,7 +118,7 @@ impl Workflow for ProvisionRecord {
         let payload = Bytes::from_static(Self::PAYLOAD);
         let sent: Result<usize, String> = ctx
             .run("provision-write", async move {
-                transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+                Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
             })
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
@@ -293,10 +293,10 @@ impl Workflow for ProvisionRecordWithSleep {
         let first_payload = Bytes::from_static(Self::FIRST_PAYLOAD);
         let first: Result<usize, String> = ctx
             .run("provision-write-pre-sleep", async move {
-                first_transport
+                Ok(first_transport
                     .send_datagram(first_target, first_payload)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string()))
             })
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
@@ -312,10 +312,10 @@ impl Workflow for ProvisionRecordWithSleep {
         let second_payload = Bytes::from_static(Self::SECOND_PAYLOAD);
         let second: Result<usize, String> = ctx
             .run("provision-write-post-sleep", async move {
-                second_transport
+                Ok(second_transport
                     .send_datagram(second_target, second_payload)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string()))
             })
             .await
             .unwrap_or_else(|err| Err(err.to_string()));

@@ -67,7 +67,7 @@ async fn run_provision_step(
     let transport = StdArc::clone(ctx.transport());
     let payload = Bytes::from_static(PAYLOAD);
     ctx.run(STEP_NAME, async move {
-        transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+        Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
     })
     .await
 }
@@ -190,7 +190,7 @@ async fn live_fires_effect_then_records_and_advances() {
 /// Run a trivial CBOR-serializable step under `step_name` through `ctx.run`
 /// (no transport effect — exercises the cursor advance directly).
 async fn run_named(ctx: &WorkflowCtx, step_name: &str, value: u64) -> u64 {
-    ctx.run(step_name, async move { value }).await.expect("run named step")
+    ctx.run(step_name, async move { Ok(value) }).await.expect("run named step")
 }
 
 /// ADR-0064 §3 cursor advance (live path): two sequential live `ctx.run`
@@ -241,8 +241,10 @@ async fn replay_advances_cursor_so_next_step_is_live_at_step_one() {
     let (ctx, _inbox, journal, workflow_id) = ctx_with_buffer(buffer).await;
 
     // Step 0: replays the recorded result (cursor advances past it).
-    let replayed: Result<usize, String> =
-        ctx.run("step-a", async move { Ok::<usize, String>(999) }).await.expect("replayed step-a");
+    let replayed: Result<usize, String> = ctx
+        .run("step-a", async move { Ok(Ok::<usize, String>(999)) })
+        .await
+        .expect("replayed step-a");
     assert_eq!(replayed, Ok(7), "step-a is replayed from the recorded result");
 
     // Step 1: live (cursor advanced past the replayed entry) — records a
@@ -362,7 +364,7 @@ async fn cursor_walks_commands_only_and_resolves_signal_seen_by_key_not_position
 
     // Command-index 0 — step-a replays from the recorded run.
     let a: Result<usize, String> =
-        ctx.run("step-a", async move { Ok::<usize, String>(0) }).await.expect("replay step-a");
+        ctx.run("step-a", async move { Ok(Ok::<usize, String>(0)) }).await.expect("replay step-a");
     assert_eq!(a, Ok(7), "step-a replays the recorded result");
 
     // Command-index 1 — wait_for_signal resolves SignalSeen by SignalKey
@@ -379,7 +381,7 @@ async fn cursor_walks_commands_only_and_resolves_signal_seen_by_key_not_position
     // wait). This is the "advance by exactly 1" + "notification never
     // advances the cursor" proof.
     let b: Result<usize, String> =
-        ctx.run("step-b", async move { Ok::<usize, String>(0) }).await.expect("replay step-b");
+        ctx.run("step-b", async move { Ok(Ok::<usize, String>(0)) }).await.expect("replay step-b");
     assert_eq!(b, Ok(99), "step-b replays at command-index 2 — the cursor advanced by exactly 1");
 
     // The whole run was a replay — the cursor appended NOTHING (every step,
@@ -428,7 +430,7 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
             // This future MUST NOT be polled: a fail-closed gate returns the
             // error WITHOUT reaching the live path. If it were polled the
             // effect below would fire and a RunResult would be appended.
-            Ok::<usize, String>(1)
+            Ok(Ok::<usize, String>(1))
         })
         .await;
 
@@ -483,7 +485,7 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
     })];
     let (ctx2, journal2, workflow_id2) = ctx_only(layer2_buffer);
 
-    let layer2 = ctx2.run("body-name", async move { Ok::<usize, String>(1) }).await;
+    let layer2 = ctx2.run("body-name", async move { Ok(Ok::<usize, String>(1)) }).await;
 
     match layer2 {
         Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
@@ -622,7 +624,7 @@ async fn replay_sleep_returns_recorded_deadline_and_advances_so_next_command_rep
     // Command-index 1 — the post-sleep step replays, proving the cursor
     // advanced by exactly 1.
     let after: Result<usize, String> = ctx
-        .run("after-sleep", async move { Ok::<usize, String>(0) })
+        .run("after-sleep", async move { Ok(Ok::<usize, String>(0)) })
         .await
         .expect("post-sleep step replays at command-index 1");
     assert_eq!(after, Ok(7), "the post-sleep step replays its recorded result");
@@ -743,7 +745,7 @@ async fn crash_while_blocked_resume_advances_past_recorded_signal_awaited() {
     // Command-index 1 — the post-signal step replays, proving the crash-block
     // branch advanced the cursor by exactly 1.
     let after: Result<usize, String> = ctx
-        .run("after-signal", async move { Ok::<usize, String>(0) })
+        .run("after-signal", async move { Ok(Ok::<usize, String>(0)) })
         .await
         .expect("post-signal step replays at command-index 1");
     assert_eq!(after, Ok(42), "the post-signal step replays its recorded result");
@@ -809,7 +811,7 @@ async fn replay_emit_short_circuits_and_advances_so_next_command_replays() {
     // Command-index 1 — the post-emit step replays, proving the cursor
     // advanced by exactly 1.
     let after: Result<usize, String> = ctx
-        .run("after-emit", async move { Ok::<usize, String>(0) })
+        .run("after-emit", async move { Ok(Ok::<usize, String>(0)) })
         .await
         .expect("post-emit step replays at command-index 1");
     assert_eq!(after, Ok(5), "the post-emit step replays its recorded result");

@@ -173,7 +173,7 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
         let payload = Bytes::from_static(ProvisionRecord::PAYLOAD);
         let recorded: Result<usize, String> = ctx
             .run("provision-write", async move {
-                transport.send_datagram(crash_target, payload).await.map_err(|e| e.to_string())
+                Ok(transport.send_datagram(crash_target, payload).await.map_err(|e| e.to_string()))
             })
             .await
             .expect("crash-run records step 0");

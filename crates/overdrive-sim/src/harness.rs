@@ -668,7 +668,7 @@ impl Harness {
             }
             // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
             // counterpart to NEW-5 (`workflow_budget_exhaustion_mints_terminal`).
-            // Drives an always-transient workflow (a `ctx.run_retryable` step
+            // Drives an always-transient workflow (a `ctx.run` step
             // returns `Err(RetryableStepError)`) through the real
             // `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
             // each backoff window via a concurrent ticker so the parked

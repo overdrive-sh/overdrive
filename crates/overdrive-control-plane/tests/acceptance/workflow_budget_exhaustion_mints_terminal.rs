@@ -91,14 +91,14 @@ fn cbor_unit() -> Vec<u8> {
 
 /// A workflow whose STEP always fails transiently: each drive bumps a
 /// shared `AtomicUsize` (so the test can count how many times the engine
-/// re-drove the body) and the `ctx.run_retryable` step's closure returns
+/// re-drove the body) and the `ctx.run` step's closure returns
 /// `Err(RetryableStepError)` — the engine-absorbed TRANSIENT channel
 /// (ADR-0065 §4), NEVER a terminal the body authors. The body's
 /// `Result<(), TerminalError>` return type carries NO failure; the transient
 /// lives in the step + the ctx. The engine re-drives up to
 /// `WORKFLOW_RETRY_BUDGET`, then mints `BudgetExhausted`.
 struct AlwaysTransientWorkflow {
-    /// Bumped once per drive (inside the `ctx.run_retryable` step). The engine
+    /// Bumped once per drive (inside the `ctx.run` step). The engine
     /// re-drives the whole body from the journal on each retry; only `Started`
     /// replays (the transient step is NOT journaled — it re-fires every drive).
     attempts: Arc<AtomicUsize>,
@@ -122,7 +122,7 @@ impl Workflow for AlwaysTransientWorkflow {
 
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The transient failure is signalled at the STEP level: the
-        // `ctx.run_retryable` closure bumps the drive counter and returns
+        // `ctx.run` closure bumps the drive counter and returns
         // `Err(RetryableStepError)`. The engine ABSORBS it (the step is not
         // journaled, the ctx records a TransientStep, `run_erased` surfaces
         // WorkflowDriveError::Transient) and re-drives. The body authors NO
@@ -131,7 +131,7 @@ impl Workflow for AlwaysTransientWorkflow {
         // once the budget is consumed.
         let attempts = Arc::clone(&self.attempts);
         let _step: Result<(), _> = ctx
-            .run_retryable("provision", async move {
+            .run("provision", async move {
                 attempts.fetch_add(1, Ordering::SeqCst);
                 Err::<(), RetryableStepError>(RetryableStepError::new(
                     "transient: provision call failed",
@@ -146,7 +146,7 @@ impl Workflow for AlwaysTransientWorkflow {
     }
 }
 
-/// A workflow whose `ctx.run_retryable` step fails transiently the first
+/// A workflow whose `ctx.run` step fails transiently the first
 /// `clear_after` drives, then succeeds — proving "the transient never reaches
 /// the return type": the same step transient that would exhaust the budget in
 /// NEW-5 instead resolves to a `Completed` terminal when the underlying
@@ -155,7 +155,7 @@ impl Workflow for AlwaysTransientWorkflow {
 /// — the retries were invisible to the body's terminal channel (the step
 /// transient lived in the ctx, never in the body's return value).
 struct ClearsWithinBudgetWorkflow {
-    /// Bumped once per drive (inside the `ctx.run_retryable` step).
+    /// Bumped once per drive (inside the `ctx.run` step).
     attempts: Arc<AtomicUsize>,
     /// The number of leading drives whose step fails transiently; drive
     /// number `clear_after + 1` (1-indexed) succeeds. `clear_after < budget`.
@@ -186,7 +186,7 @@ impl Workflow for ClearsWithinBudgetWorkflow {
         let attempts = Arc::clone(&self.attempts);
         let clear_after = self.clear_after;
         let _step: Result<(), _> = ctx
-            .run_retryable("provision", async move {
+            .run("provision", async move {
                 // 1-indexed drive number after this bump.
                 let drive = attempts.fetch_add(1, Ordering::SeqCst) + 1;
                 if drive <= clear_after {

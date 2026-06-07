@@ -153,10 +153,10 @@ impl Workflow for EmittingWorkflow {
         let target = self.run_target;
         let sent: Result<usize, String> = ctx
             .run("emit-trigger-run", async move {
-                transport
+                Ok(transport
                     .send_datagram(target, bytes::Bytes::from_static(b"emit-trigger"))
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string()))
             })
             .await
             .unwrap_or_else(|err| Err(err.to_string()));

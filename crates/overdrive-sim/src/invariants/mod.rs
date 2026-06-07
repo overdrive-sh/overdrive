@@ -497,7 +497,7 @@ pub enum Invariant {
     /// acceptance at `crates/overdrive-control-plane/tests/acceptance/
     /// workflow_budget_exhaustion_mints_terminal.rs`) and the Slice-04
     /// sibling of `WorkflowTerminalStatusProjection`. Drives a workflow
-    /// whose `ctx.run_retryable` step ALWAYS fails transiently
+    /// whose `ctx.run` step ALWAYS fails transiently
     /// (`Err(RetryableStepError)`) through the real
     /// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
     /// each backoff window so the parked re-drives fire, and asserts the

@@ -137,13 +137,13 @@ pub trait Workflow: Send + Sync {
 ///   failure, a decode failure ([`TerminalError::malformed_input`]), or an
 ///   encode failure ([`TerminalError::output_encode`]) (projected to
 ///   [`WorkflowStatus::Failed`]). An `Err` of [`WorkflowDriveError::Transient`]
-///   is a [`WorkflowCtx::run_retryable`] step that failed transiently — the
-///   engine ABSORBS and re-drives it (ADR-0065 §4), and it NEVER becomes a
-///   durable terminal.
+///   is a [`WorkflowCtx::run`] step whose closure resolved to
+///   `Err(RetryableStepError)` — the engine ABSORBS and re-drives it
+///   (ADR-0065 §4), and it NEVER becomes a durable terminal.
 /// - **Edge cases:** undecodable `input_bytes` ⇒ `Terminal(malformed_input)`
 ///   and the typed body is NEVER entered; an `Output` whose serde impl fails
-///   to encode ⇒ `Terminal(output_encode)`; a `run_retryable` transient ⇒
-///   `Transient`.
+///   to encode ⇒ `Terminal(output_encode)`; a `ctx.run` step whose closure
+///   resolved to `Err(RetryableStepError)` ⇒ `Transient`.
 /// - **Invariants:** `run_erased` is the only engine entry point; the
 ///   typed edge (decode in / encode out) is owned by the adapter, so the
 ///   engine stays type-agnostic. A transient is surfaced as
@@ -193,8 +193,9 @@ impl<W: Workflow> ErasedWorkflow for ErasedWorkflowAdapter<W> {
         let body_result = self.0.run(ctx, input).await;
 
         // TRANSIENT takes precedence over the body's own return value
-        // (ADR-0065 §4). A `ctx.run_retryable` step that failed transiently
-        // recorded a `WorkflowCtxError::TransientStep` in the ctx; the body
+        // (ADR-0065 §4). A `ctx.run` step whose closure resolved to
+        // `Err(RetryableStepError)` recorded a
+        // `WorkflowCtxError::TransientStep` in the ctx; the body
         // could not propagate it through its `Result<Output, TerminalError>`
         // return type, so the ctx is the authoritative carrier. If a
         // transient fired this drive, surface it as `Transient` — the engine
@@ -246,7 +247,7 @@ pub const TERMINAL_ERROR_DETAIL_MAX: usize = 1024;
 ///
 /// **RETRYABLE failures never construct this — the body cannot express
 /// "retry me" through its return type.** A transient is signalled at the
-/// STEP level: a [`WorkflowCtx::run_retryable`] step whose closure resolves
+/// STEP level: a [`WorkflowCtx::run`] step whose closure resolves
 /// to an `Err` of [`RetryableStepError`] surfaces a
 /// [`WorkflowCtxError::TransientStep`] the engine ABSORBS and re-drives
 /// (the [`WorkflowDriveError::Transient`] drive outcome; ADR-0065 §4
@@ -353,7 +354,7 @@ impl TerminalError {
     ///
     /// **Engine-minted, never body-authored.** A workflow body cannot
     /// produce `BudgetExhausted` through its own logic — it signals
-    /// transients at the step level via [`WorkflowCtx::run_retryable`], and
+    /// transients at the step level via [`WorkflowCtx::run`], and
     /// the ENGINE mints this once the journal-derived attempt count reaches
     /// `WORKFLOW_RETRY_BUDGET`.
     /// The ctor is `pub` so the engine (in `overdrive-control-plane`, a
@@ -509,7 +510,7 @@ pub enum WorkflowCtxError {
         actual: String,
     },
 
-    /// A [`WorkflowCtx::run_retryable`] step's closure resolved to an `Err` of
+    /// A [`WorkflowCtx::run`] step's closure resolved to an `Err` of
     /// [`RetryableStepError`] — a TRANSIENT step failure the engine
     /// ABSORBS and re-drives (ADR-0065 §4: "a `ctx.run` step whose `Err` is
     /// re-driven by the engine"). This is the body's ONLY transient channel,
@@ -526,9 +527,9 @@ pub enum WorkflowCtxError {
     /// for diagnostics; neither rides the durable terminal (a transient never
     /// becomes a terminal — the engine's minted `BudgetExhausted` does, with
     /// its own detail).
-    #[error("workflow ctx.run_retryable step {name:?} failed transiently: {detail}")]
+    #[error("workflow ctx.run step {name:?} failed transiently: {detail}")]
     TransientStep {
-        /// The transient step's name (the `ctx.run_retryable` name argument).
+        /// The transient step's name (the `ctx.run` name argument).
         name: String,
         /// The closure-supplied transient detail
         /// ([`RetryableStepError::detail`]).
@@ -567,11 +568,11 @@ pub enum WorkflowCtxError {
     },
 }
 
-/// The closure-side TRANSIENT signal of a [`WorkflowCtx::run_retryable`]
+/// The closure-side TRANSIENT signal of a [`WorkflowCtx::run`]
 /// step (ADR-0065 §4) — the body's ONLY way to say "this attempt failed
 /// transiently; re-drive me."
 ///
-/// A `run_retryable` closure resolves to `Result<T, RetryableStepError>`:
+/// A `ctx.run` closure resolves to `Result<T, RetryableStepError>`:
 /// `Ok(T)` is the durable step result (journaled, replayed exactly-once on
 /// resume), `Err(RetryableStepError)` is a transient the engine ABSORBS.
 /// The ctx turns the closure `Err` into a [`WorkflowCtxError::TransientStep`]
@@ -619,8 +620,9 @@ impl RetryableStepError {
 ///   or the adapter minted a decode/encode terminal; the engine projects
 ///   [`WorkflowStatus::Failed`] (a body-authored terminal is NEVER
 ///   re-driven).
-/// - an `Err` of [`Self::Transient`] — a [`WorkflowCtx::run_retryable`] step
-///   failed transiently; the engine ABSORBS it and re-drives the body from
+/// - an `Err` of [`Self::Transient`] — a [`WorkflowCtx::run`] step whose
+///   closure resolved to `Err(RetryableStepError)`; the engine ABSORBS it
+///   and re-drives the body from
 ///   the journal (budget-gated), minting `BudgetExhausted` on exhaustion.
 ///
 /// This is the type that keeps the transient OFF the body's return type: the
@@ -1125,7 +1127,7 @@ pub struct WorkflowCtx {
     /// [`AlwaysLiveCursor`].
     journal: Arc<dyn JournalCursor>,
     /// The TRANSIENT-step carrier (ADR-0065 §4). A
-    /// [`Self::run_retryable`] step whose closure resolved to an `Err` of
+    /// [`Self::run`] step whose closure resolved to an `Err` of
     /// [`RetryableStepError`] records the resulting
     /// [`WorkflowCtxError::TransientStep`] here; the
     /// [`ErasedWorkflowAdapter`] reads it back via
@@ -1135,11 +1137,11 @@ pub struct WorkflowCtx {
     /// Interior-mutable (`Mutex`) because every `ctx` op takes `&self` — the
     /// same shape `JournalCursorHandle`'s cursor uses. This is the channel
     /// that keeps the transient OFF the body's `Result<Output, TerminalError>`
-    /// return type: the body cannot author a retry, only a `run_retryable`
+    /// return type: the body cannot author a retry, only a `ctx.run`
     /// step can signal one, and the signal lives here, not in the body's
     /// return value (ADR-0065 §2).
     ///
-    /// At most one transient per drive is retained (the FIRST `run_retryable`
+    /// At most one transient per drive is retained (the FIRST `ctx.run`
     /// step that fails — the body short-circuits there in idiomatic use). A
     /// fresh ctx is built per drive by the engine, so this never carries a
     /// stale transient across re-drives.
@@ -1168,10 +1170,10 @@ impl WorkflowCtx {
     }
 
     /// Take (and clear) the transient-step signal recorded by a
-    /// [`Self::run_retryable`] step this drive, if any (ADR-0065 §4).
+    /// [`Self::run`] step this drive, if any (ADR-0065 §4).
     ///
     /// The [`ErasedWorkflowAdapter`] calls this AFTER the body returns: a
-    /// `Some(WorkflowCtxError::TransientStep)` means a `run_retryable` step
+    /// `Some(WorkflowCtxError::TransientStep)` means a `ctx.run` step
     /// failed transiently and the engine must re-drive (it is surfaced as
     /// [`WorkflowDriveError::Transient`]); `None` means no transient fired
     /// and the body's typed `Result<Output, TerminalError>` is the outcome.
@@ -1184,9 +1186,29 @@ impl WorkflowCtx {
 
     /// Run one durable step `f`, named `name`, and return its result —
     /// the general durable-step await-surface (the Restate `ctx.run`
-    /// model). This is the slice-01 await-surface; a workflow body
+    /// model). This is the ONE journaled-step primitive; a workflow body
     /// performs every effect (transport sends, future external calls)
     /// INSIDE a `ctx.run` closure so the result is journaled and replayed.
+    ///
+    /// The closure resolves to <code>Result&lt;T, [RetryableStepError]&gt;</code>
+    /// — the journaled step IS the retry unit (the Restate/Temporal shape):
+    /// - **`Ok(value)`** — the step succeeded. Its `value` is CBOR-journaled
+    ///   (append + fsync per ADR-0063 §4) and returned; a resumed run replays
+    ///   it WITHOUT re-polling `f` (exactly-once on the replay path).
+    /// - **`Err(RetryableStepError)`** — the step failed TRANSIENTLY, the
+    ///   ADR-0065 §4 retry channel. This is the body's ONLY way to request a
+    ///   re-drive; a transient NEVER reaches the body's `Result<Output,
+    ///   TerminalError>` return type (ADR-0065 §2). The result is NOT
+    ///   journaled (the step did not durably complete, so on re-drive it
+    ///   re-fires), the ctx RECORDS a [`WorkflowCtxError::TransientStep`]
+    ///   (read back by the [`ErasedWorkflowAdapter`] and surfaced to the
+    ///   engine as [`WorkflowDriveError::Transient`]), and the method returns
+    ///   that same `Err(WorkflowCtxError::TransientStep)`. The engine
+    ///   re-drives the body from the journal (completed steps replay
+    ///   byte-equal; this step re-fires) up to [`WORKFLOW_RETRY_BUDGET`] —
+    ///   then mints `BudgetExhausted`.
+    ///
+    /// [`WORKFLOW_RETRY_BUDGET`]: <https://docs.rs/overdrive-control-plane>
     ///
     /// **Check-then-record (ADR-0064 §3), POSITIONAL identity.** The op
     /// consults the engine's journal cursor at the current position:
@@ -1194,9 +1216,13 @@ impl WorkflowCtx {
     ///   recorded CBOR bytes are decoded into `T` and returned WITHOUT
     ///   polling `f` — `f` is dropped unpolled, so the effect never
     ///   re-fires. This is the exactly-once guarantee on the replay path.
-    /// - **Live:** otherwise `f` is awaited, its result is CBOR-encoded
+    ///   Only an `Ok` value is ever journaled (a transient is not recorded),
+    ///   so a replay hit always decodes the cleared-step success: a transient
+    ///   step that SUCCEEDED on a prior re-drive replays bit-identically.
+    /// - **Live:** otherwise `f` is awaited; an `Ok` result is CBOR-encoded
     ///   and durably recorded (append + fsync per ADR-0063 §4) via the
-    ///   cursor BEFORE returning, and the cursor advances.
+    ///   cursor BEFORE returning, and the cursor advances. An
+    ///   `Err(RetryableStepError)` short-circuits BEFORE any journaling.
     ///
     /// **Honest semantics:** the effect inside `f` is *at-least-once* (a
     /// crash after `f.await` but before the record is durable re-fires the
@@ -1206,6 +1232,18 @@ impl WorkflowCtx {
     /// makes the replay path exactly-once — it is NOT an unconditional
     /// exactly-once guarantee for the effect itself.
     ///
+    /// # Why the closure error is a dedicated type, not `Result<T, E>` folded
+    ///
+    /// The ADR sanctions "a caller-defined error folded into the step's own
+    /// `T`" (the `Result<usize, String>` pattern); [`RetryableStepError`] is
+    /// the typed form of that — a step transient is unambiguous (an
+    /// `Err(RetryableStepError)`), not conflated with a domain `Result` the
+    /// body wants to inspect. A body that wants the step's success value AND
+    /// to treat a domain error as terminal returns a `Result<T, DomainErr>`
+    /// as the step's own `T` (wrapped `Ok(Ok(..))` / `Ok(Err(..))`); a body
+    /// that wants the engine to re-drive on failure resolves the closure to
+    /// `Err(RetryableStepError)`.
+    ///
     /// `name` is recorded for diagnostics and a replay-determinism check
     /// (a recorded step whose name diverges from the replaying body's
     /// `name` fails closed with [`WorkflowCtxError::NonDeterministic`]).
@@ -1213,6 +1251,8 @@ impl WorkflowCtx {
     ///
     /// # Errors
     ///
+    /// - [`WorkflowCtxError::TransientStep`] — the closure resolved to
+    ///   `Err(RetryableStepError)` (the engine re-drives).
     /// - [`WorkflowCtxError::Serialize`] — the live result could not be
     ///   CBOR-encoded.
     /// - [`WorkflowCtxError::Deserialize`] — a recorded result could not
@@ -1224,87 +1264,12 @@ impl WorkflowCtx {
     pub async fn run<T, F>(&self, name: &str, f: F) -> Result<T, WorkflowCtxError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Send,
-        F: std::future::Future<Output = T> + Send,
-    {
-        // Replay path — decode the recorded result, never poll `f` (the
-        // effect inside `f` never re-fires on the replay path).
-        if let Some(recorded_bytes) = self.journal.replay_run(name).await? {
-            let value: T = ciborium::from_reader(recorded_bytes.as_slice())
-                .map_err(|e| WorkflowCtxError::Deserialize { message: e.to_string() })?;
-            return Ok(value);
-        }
-
-        // Live path — poll `f`, then durably record before returning
-        // (journal-after-effect, ADR-0063 §4). The effect is at-least-once;
-        // the record makes the replay path exactly-once.
-        let result = f.await;
-        let mut bytes: Vec<u8> = Vec::new();
-        ciborium::into_writer(&result, &mut bytes)
-            .map_err(|e| WorkflowCtxError::Serialize { message: e.to_string() })?;
-        self.journal.record_run(name, &bytes).await?;
-        Ok(result)
-    }
-
-    /// Run one durable step `f`, named `name`, whose closure can signal a
-    /// TRANSIENT failure — the ADR-0065 §4 retry channel. This is the body's
-    /// ONLY way to request a re-drive; a transient NEVER reaches the body's
-    /// `Result<Output, TerminalError>` return type (ADR-0065 §2).
-    ///
-    /// The closure resolves to <code>Result&lt;T, [RetryableStepError]&gt;</code>:
-    /// - **`Ok(value)`** — the step succeeded. Its `value` is CBOR-journaled
-    ///   (append + fsync per ADR-0063 §4) and returned, exactly like
-    ///   [`Self::run`]; a resumed run replays it WITHOUT re-polling `f`
-    ///   (exactly-once on the replay path).
-    /// - **`Err(RetryableStepError)`** — the step failed TRANSIENTLY. The
-    ///   result is NOT journaled (the step did not durably complete, so on
-    ///   re-drive it re-fires), the ctx RECORDS a
-    ///   [`WorkflowCtxError::TransientStep`] (read back by the
-    ///   [`ErasedWorkflowAdapter`] and surfaced to the engine as
-    ///   [`WorkflowDriveError::Transient`]), and the method returns that same
-    ///   `Err(WorkflowCtxError::TransientStep)`. The engine re-drives the
-    ///   body from the journal (completed steps replay byte-equal; this step
-    ///   re-fires) up to [`WORKFLOW_RETRY_BUDGET`] — then mints
-    ///   `BudgetExhausted`.
-    ///
-    /// [`WORKFLOW_RETRY_BUDGET`]: <https://docs.rs/overdrive-control-plane>
-    ///
-    /// **Check-then-record (ADR-0064 §3), POSITIONAL identity** — identical
-    /// to [`Self::run`]. On replay a recorded `RunResult` short-circuits to
-    /// the recorded value: a transient step that SUCCEEDED on a prior re-drive
-    /// replays its success bit-identically (the re-drive that cleared the
-    /// transient journaled the `Ok`, so subsequent replays never re-fire it).
-    ///
-    /// # Why the closure error is a dedicated type, not `Result<T, E>` folded
-    ///
-    /// The ADR sanctions "a caller-defined error folded into the step's own
-    /// `T`" (the `Result<usize, String>` pattern); [`RetryableStepError`] is
-    /// the typed form of that — a step transient is unambiguous (an
-    /// `Err(RetryableStepError)`), not conflated with a domain `Result` the
-    /// body wants to inspect. A body that wants the step's success value AND
-    /// to treat a domain error as terminal uses [`Self::run`] with a
-    /// `Result<T, DomainErr>` `T`; a body that wants the engine to re-drive on
-    /// failure uses `run_retryable`.
-    ///
-    /// # Errors
-    ///
-    /// - [`WorkflowCtxError::TransientStep`] — the closure resolved to
-    ///   `Err(RetryableStepError)` (the engine re-drives).
-    /// - [`WorkflowCtxError::Serialize`] — an `Ok` value could not be
-    ///   CBOR-encoded.
-    /// - [`WorkflowCtxError::Deserialize`] — a recorded value could not be
-    ///   CBOR-decoded into `T` on replay.
-    /// - [`WorkflowCtxError::NonDeterministic`] — a recorded step's name
-    ///   diverges from `name` at this cursor position.
-    /// - [`WorkflowCtxError::JournalRecord`] — the live-path durable record
-    ///   failed.
-    pub async fn run_retryable<T, F>(&self, name: &str, f: F) -> Result<T, WorkflowCtxError>
-    where
-        T: serde::Serialize + serde::de::DeserializeOwned + Send,
         F: std::future::Future<Output = Result<T, RetryableStepError>> + Send,
     {
         // Replay path — decode the recorded SUCCESS, never poll `f`. Only an
         // `Ok` value is ever journaled (a transient is not recorded), so a
-        // replay hit always decodes the cleared-step success.
+        // replay hit always decodes the cleared-step success (the effect
+        // inside `f` never re-fires on the replay path).
         if let Some(recorded_bytes) = self.journal.replay_run(name).await? {
             let value: T = ciborium::from_reader(recorded_bytes.as_slice())
                 .map_err(|e| WorkflowCtxError::Deserialize { message: e.to_string() })?;
@@ -1315,7 +1280,9 @@ impl WorkflowCtx {
         // journaling (the step did not complete; it must re-fire on re-drive).
         match f.await {
             Ok(value) => {
-                // Success — journal then return, exactly like `run`.
+                // Success — durably record before returning (journal-after-
+                // effect, ADR-0063 §4). The effect is at-least-once; the record
+                // makes the replay path exactly-once.
                 let mut bytes: Vec<u8> = Vec::new();
                 ciborium::into_writer(&value, &mut bytes)
                     .map_err(|e| WorkflowCtxError::Serialize { message: e.to_string() })?;

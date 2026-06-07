@@ -782,7 +782,7 @@ async fn provision_write_step(ctx: &WorkflowCtx, target: SocketAddr) -> Result<u
     let transport = Arc::clone(ctx.transport());
     let payload = bytes::Bytes::from_static(ProvisionRecord::PAYLOAD);
     ctx.run("provision-write", async move {
-        transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+        Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
     })
     .await
     .unwrap_or_else(|err| Err(err.to_string()))
@@ -1366,7 +1366,7 @@ async fn run_until_crash_in_sleep(
         let pre_payload = bytes::Bytes::from_static(ProvisionRecordWithSleep::FIRST_PAYLOAD);
         let _ = ctx
             .run("provision-write-pre-sleep", async move {
-                pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string())
+                Ok(pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string()))
             })
             .await
             .unwrap_or_else(|err| Err(err.to_string()));
@@ -1826,7 +1826,7 @@ pub async fn evaluate_workflow_journal_write_ordering(seed: u64) -> InvariantRes
         let transport = Arc::clone(ctx.transport());
         let payload = bytes::Bytes::from_static(ProvisionRecord::PAYLOAD);
         ctx.run("provision-write", async move {
-            transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+            Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
         })
     };
 
@@ -2196,8 +2196,9 @@ pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> Invarian
 // `Failed{BudgetExhausted}`; body authored no terminal), which holds
 // regardless of HOW the transient is signalled — so when the Phase-4 review
 // (Option A, ADR-0065 §2 fidelity) moved the transient channel from a
-// since-deleted body-return retryable kind to a `ctx.run_retryable` step, this
-// invariant stayed green: the engine-minted-terminal contract is unchanged.
+// since-deleted body-return retryable kind to a `ctx.run` step whose closure
+// resolves to `Err(RetryableStepError)`, this invariant stayed green: the
+// engine-minted-terminal contract is unchanged.
 
 /// The instance address bound for the always-transient workflow's engine.
 /// Never receives a datagram (the body returns the transient before any
@@ -2205,7 +2206,7 @@ pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> Invarian
 /// the slice-01/02 builders.
 const WF_BUDGET_TARGET: &str = "127.0.0.1:9021";
 
-/// The detail the always-transient reference workflow's `ctx.run_retryable`
+/// The detail the always-transient reference workflow's `ctx.run`
 /// step signals via `RetryableStepError`. A fixed, deterministic string so the
 /// run replays bit-identically across seeds. NOTE: this is the STEP's
 /// transient signal — the engine absorbs it and never surfaces it on the
@@ -2213,7 +2214,7 @@ const WF_BUDGET_TARGET: &str = "127.0.0.1:9021";
 /// detail.
 const WF_BUDGET_TRANSIENT_DETAIL: &str = "transient: provision call failed (step 04-02 D4)";
 
-/// A reference workflow whose `ctx.run_retryable` STEP always fails
+/// A reference workflow whose `ctx.run` STEP always fails
 /// transiently: each drive bumps a shared `AtomicUsize` (so the evaluator can
 /// count how many times the engine re-drove the body) and the step closure
 /// returns `Err(RetryableStepError)` — the engine-absorbed TRANSIENT channel
@@ -2225,7 +2226,7 @@ const WF_BUDGET_TRANSIENT_DETAIL: &str = "transient: provision call failed (step
 /// identical fixture shape the example-based acceptance does, so both tiers
 /// pin the same engine-owned-retry behaviour.
 struct AlwaysTransientFailure {
-    /// Bumped once per drive (inside the `ctx.run_retryable` step). The engine
+    /// Bumped once per drive (inside the `ctx.run` step). The engine
     /// re-drives the whole body from the journal on each retry; the transient
     /// step is NOT journaled, so it re-fires every drive. The total count
     /// across all re-drives is the observable proof the engine — not the body
@@ -2259,7 +2260,7 @@ impl Workflow for AlwaysTransientFailure {
 
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The transient failure is signalled at the STEP level: the
-        // `ctx.run_retryable` closure bumps the drive counter and returns
+        // `ctx.run` closure bumps the drive counter and returns
         // `Err(RetryableStepError)`. The engine ABSORBS it (the step is not
         // journaled; the ctx records a TransientStep; `run_erased` surfaces
         // WorkflowDriveError::Transient) and re-drives. The body authors NO
@@ -2267,7 +2268,7 @@ impl Workflow for AlwaysTransientFailure {
         // engine mints `BudgetExhausted` once the budget is consumed (D4).
         let attempts = Arc::clone(&self.attempts);
         let _step: Result<(), _> = ctx
-            .run_retryable("provision", async move {
+            .run("provision", async move {
                 attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Err::<(), RetryableStepError>(RetryableStepError::new(WF_BUDGET_TRANSIENT_DETAIL))
             })
@@ -2313,7 +2314,7 @@ fn spawn_budget_clock_ticker(
 
 /// Evaluate `WorkflowBudgetExhaustionMintsTerminal` (ADR-0065 §D4).
 ///
-/// Drives an `AlwaysTransientFailure` workflow (a `ctx.run_retryable` step
+/// Drives an `AlwaysTransientFailure` workflow (a `ctx.run` step
 /// that returns `Err(RetryableStepError)` on every drive) through the real
 /// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past each
 /// backoff window via a concurrent ticker so the parked re-drives fire, then
@@ -2444,7 +2445,7 @@ pub async fn evaluate_workflow_budget_exhaustion_mints_terminal(seed: u64) -> In
         ));
     };
 
-    // AC3 — the body authored NO failure: its `ctx.run_retryable` step failed
+    // AC3 — the body authored NO failure: its `ctx.run` step failed
     // transiently on every drive, which the engine absorbed and re-drove.
     // `BudgetExhausted` is a kind ONLY the engine mints (the body cannot author
     // it — it has no access to the budget, and a step transient is not a

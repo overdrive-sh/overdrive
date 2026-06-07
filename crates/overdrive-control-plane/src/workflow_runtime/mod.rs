@@ -48,7 +48,7 @@
 //! §3/§4): `Ok(bytes)` → `Completed { output: bytes }`,
 //! `Err(WorkflowDriveError::Terminal)` → `Failed { terminal }`, and
 //! `Err(WorkflowDriveError::Transient)` → the retry-re-drive channel (a
-//! `ctx.run_retryable` step failed transiently — the engine ABSORBS it and
+//! `ctx.run` step failed transiently — the engine ABSORBS it and
 //! re-drives from the journal up to [`WORKFLOW_RETRY_BUDGET`], minting
 //! `Failed { BudgetExhausted }` on exhaustion). A transient NEVER reaches the
 //! body's `Result<Output, TerminalError>` return type (ADR-0065 §2) — the
@@ -636,7 +636,7 @@ fn terminal_status(loaded: &[LoadedEntry]) -> Option<WorkflowStatus> {
 /// 2. drive the object-safe erased body (panic-contained);
 /// 3. CLASSIFY the `Result<Vec<u8>, WorkflowDriveError>` into a
 ///    [`DriveOutcome`] (ADR-0065 §3/§4): `Completed` / `Terminal` /
-///    `Transient` (the transient comes ONLY from a `ctx.run_retryable` step,
+///    `Transient` (the transient comes ONLY from a `ctx.run` step,
 ///    NEVER from the body's `TerminalError` return);
 /// 4. classify via [`redrive_decision`] against the journal-derived attempt
 ///    count + the [`WORKFLOW_RETRY_BUDGET`] policy: a `Transient` outcome with
@@ -715,13 +715,13 @@ async fn drive_to_terminal(
         //                                          failure OR adapter
         //                                          MalformedInput/OutputEncode)
         //   - `Err(Transient(_))`               → re-drive channel (a
-        //                                          `ctx.run_retryable` step
+        //                                          `ctx.run` step
         //                                          failed transiently; ADR-0065
         //                                          §4) — NEVER a durable
         //                                          terminal directly
         //   - panic (catch_unwind)              → `Failed { Explicit }`
         // A `Transient` is the ONLY re-drive trigger — it can come ONLY from a
-        // `run_retryable` step, NEVER from the body's `Result<Output,
+        // `ctx.run` step, NEVER from the body's `Result<Output,
         // TerminalError>` return type (ADR-0065 §2). The body's terminal
         // channel is purely terminal.
         let outcome = match run.await {
@@ -882,7 +882,7 @@ fn attempts_from_journal(loaded: &[LoadedEntry]) -> u32 {
 /// the panic-containment path.
 ///
 /// The transient is its OWN variant — it can come ONLY from a
-/// `ctx.run_retryable` step (ADR-0065 §4), NEVER from the body's
+/// `ctx.run` step (ADR-0065 §4), NEVER from the body's
 /// `Result<Output, TerminalError>` return type (which maps to
 /// [`Self::Completed`] / [`Self::Terminal`] only). This is the type-level
 /// guarantee that a body cannot author a retry: there is no path from a
@@ -895,7 +895,7 @@ enum DriveOutcome {
     /// decode/encode terminal, or the body panicked — a real terminal,
     /// never re-driven.
     Terminal(TerminalError),
-    /// A `ctx.run_retryable` step failed transiently — the engine absorbs
+    /// A `ctx.run` step failed transiently — the engine absorbs
     /// and re-drives (budget-gated). Carries the last transient detail so a
     /// minted `BudgetExhausted` can surface the operator-facing cause.
     Transient {
@@ -909,7 +909,7 @@ enum DriveOutcome {
 /// drive's [`DriveOutcome`] (ADR-0065 §4, D4).
 ///
 /// A [`DriveOutcome::Transient`] is the transient channel — a
-/// `ctx.run_retryable` step failure the engine RE-DRIVES while attempts
+/// `ctx.run` step failure the engine RE-DRIVES while attempts
 /// remain under the budget, MINTING `Failed { BudgetExhausted }` once
 /// `attempts >= budget`. Every other outcome — a `Completed`, or an
 /// explicit / malformed / output-encode / panic `Terminal` — is a real
@@ -1643,7 +1643,7 @@ mod tests {
     }
 
     /// `redrive_decision` is the engine's transient classifier + budget
-    /// gate. A `DriveOutcome::Transient` (a `ctx.run_retryable` step failure)
+    /// gate. A `DriveOutcome::Transient` (a `ctx.run` step failure)
     /// re-drives WHILE attempts remain, and MINTS `BudgetExhausted` once the
     /// budget is consumed. A `DriveOutcome::Terminal` (an explicit /
     /// malformed / output-encode / panic terminal) is NEVER re-driven — the

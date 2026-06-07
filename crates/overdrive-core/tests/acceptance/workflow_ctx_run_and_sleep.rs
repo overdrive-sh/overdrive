@@ -185,7 +185,7 @@ async fn run_live_polls_step_and_records_cbor_result() {
     let value: u64 = ctx
         .run("compute", async move {
             polled_in.store(true, std::sync::atomic::Ordering::SeqCst);
-            7u64
+            Ok(7u64)
         })
         .await
         .expect("live run");
@@ -219,7 +219,7 @@ async fn run_replay_returns_recorded_result_without_polling() {
     let value: u64 = ctx
         .run("compute", async move {
             polled_in.store(true, std::sync::atomic::Ordering::SeqCst);
-            7u64
+            Ok(7u64)
         })
         .await
         .expect("replayed run");
@@ -243,7 +243,7 @@ async fn run_replay_with_name_mismatch_fails_non_deterministic() {
     let ctx = ctx_with(cursor, Arc::new(RecordingClock::at(Duration::ZERO)));
 
     let err = ctx
-        .run::<u64, _>("different-step", async move { 1u64 })
+        .run::<u64, _>("different-step", async move { Ok(1u64) })
         .await
         .expect_err("name mismatch must fail closed");
 
@@ -306,7 +306,7 @@ async fn run_wraps_a_transport_effect_and_records_its_result() {
     let effect_transport = Arc::clone(ctx.transport());
     let sent: Result<usize, String> = ctx
         .run("provision-write", async move {
-            effect_transport.send_datagram(target, payload).await.map_err(|e| e.to_string())
+            Ok(effect_transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
         })
         .await
         .expect("live run wrapping the transport effect");

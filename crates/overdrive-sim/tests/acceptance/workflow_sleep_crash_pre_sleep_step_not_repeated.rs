@@ -143,7 +143,7 @@ async fn crash_during_sleep(
         let pre_payload = Bytes::from_static(ProvisionRecordWithSleep::FIRST_PAYLOAD);
         let recorded: Result<usize, String> = ctx
             .run("provision-write-pre-sleep", async move {
-                pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string())
+                Ok(pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string()))
             })
             .await
             .expect("crash-run records pre-sleep step");
