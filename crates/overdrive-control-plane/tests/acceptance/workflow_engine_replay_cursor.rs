@@ -451,6 +451,14 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
                 "a divergent journal projects to an Explicit terminal at the ctx-op boundary"
             );
             let detail = terminal.detail();
+            // Layer 1 is the type-at-index gate: BOTH `expected` and `actual`
+            // are command-KIND labels in the same namespace — the recorded
+            // command's kind (`expected`) vs the await-op's own expected kind
+            // (`actual`), matching the sibling arms (replay_sleep →
+            // "SleepArmed", replay_signal → "SignalAwaited", replay_emit →
+            // "ActionEmitted"). The diverging step name is a Layer-2 concern
+            // and MUST NOT appear in a Layer-1 detail.
+            //
             // `expected` is the deterministic kind-label of the recorded
             // command at the cursor (a stable as_str()-style label), NOT an
             // address-bearing Debug of the whole entry.
@@ -458,11 +466,17 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
                 detail.contains("SleepArmed"),
                 "detail names the recorded command KIND at the cursor (deterministic label): {detail:?}"
             );
-            // The await-op the body issued at this cursor — the `ctx.run` step
-            // name — is equally deterministic and present in the detail.
+            // `actual` reports the await-op's own command KIND (`RunResult`),
+            // same namespace as `expected` — NOT the ctx.run step name.
             assert!(
-                detail.contains(STEP_NAME),
-                "detail names the await-op the body replayed (the ctx.run step name): {detail:?}"
+                detail.contains("RunResult"),
+                "Layer 1 reports the await-op's command KIND (RunResult), not the ctx.run step name: {detail:?}"
+            );
+            // The cross-namespace step name is a Layer-2 concern and must not
+            // leak into a Layer-1 type-at-index detail.
+            assert!(
+                !detail.contains(STEP_NAME),
+                "Layer 1 must NOT leak the cross-namespace step name; both fields are command-kind labels: {detail:?}"
             );
             // The projected detail carries no address-bearing whole-entry Debug:
             // the deterministic labels do not contain Rust pointer/struct syntax

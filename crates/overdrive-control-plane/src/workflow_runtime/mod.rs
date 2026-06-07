@@ -1313,9 +1313,19 @@ impl JournalCursor for JournalCursorHandle {
         // twin — the former `let ... else { Ok(None) }` that silently
         // fell to live on a variant mismatch, re-executing the effect.
         let JournalCommand::RunResult { name: recorded_name, result_bytes, .. } = command else {
+            // Both fields are command-KIND labels in the same namespace: the
+            // recorded command's kind (`expected`) vs the await-op's own
+            // expected kind (`actual` = "RunResult", since the replaying op is
+            // `ctx.run`). This matches the sibling Layer-1 arms (replay_sleep →
+            // "SleepArmed", replay_signal → "SignalAwaited", replay_emit →
+            // "ActionEmitted"). The diverging step `name` is a Layer-2 concern,
+            // never surfaced here.
             let expected = command_kind(command).to_string();
             drop(cursor);
-            return Err(WorkflowCtxError::NonDeterministic { expected, actual: name.to_string() });
+            return Err(WorkflowCtxError::NonDeterministic {
+                expected,
+                actual: "RunResult".to_string(),
+            });
         };
         // LAYER 2 — name-within-`RunResult` fail-closed gate (D4). The
         // variant matches, but a recorded step whose name diverges from the
