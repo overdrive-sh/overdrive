@@ -2,6 +2,48 @@
 
 This project follows the **object-oriented** paradigm. Use @nw-software-crafter for implementation.
 
+## Implement to the design — never invent API surface
+
+When implementing against an accepted design (an ADR, `brief.md`, a
+feature-delta, a roadmap step), match the design's **exact public API
+shape**. Do **not** invent new public surface — a new method, type, enum
+variant, trait, or parameter — to make tests green or to fill a gap the
+design left underspecified. The design is a contract, not a suggestion;
+an implementation that adds API the ADR did not call for has *diverged*,
+even if every test passes.
+
+When the design specifies a *model* but not the exact *signature* (e.g.
+"the transient is the step's `Err` re-driven by the engine" without the
+function shape), the gap is **not** licence to improvise. **STOP and
+surface the gap** to the user / orchestrator and get the shape pinned —
+never reach for the nearest mechanism that compiles. A subagent that
+grades itself on "tests green" will invent surface; that is the failure
+mode this rule exists to prevent.
+
+This binds three roles:
+
+- **Crafters**: build only the API the design names. If you need a
+  primitive the design doesn't specify, return a blocker — do not add a
+  public method/type/variant on your own initiative.
+- **Orchestrators dispatching crafters**: for any design-sensitive
+  surface, pin the **exact signature** in the dispatch and explicitly
+  forbid inventing API. Granting latitude ("pick the cleanest shape,"
+  "add a variant if needed") *causes* divergence — do not.
+- **Reviewers / orchestrators accepting work**: verify the output
+  against the design's API shape, not just "tests pass." A green suite
+  over a divergent API is a rejection, not an approval.
+
+**Precedent** (the `workflow-result-error-model` feature, ADR-0065):
+crafters twice invented surface the ADR did not sanction — a
+`TerminalErrorKind::Retryable` variant (a "terminal error" that wasn't
+terminal, flatly contradicting the ADR's "retryable never reaches the
+return type"), then a second `ctx.run_retryable` step method instead of
+the ADR's single `ctx.run`. Both compiled and passed their tests; both
+were design divergences caught only in adversarial review and by the
+user, and both cost a rework cycle. The cost of surfacing a gap is one
+message; the cost of inventing past it is a wrong contract that
+propagates until someone notices.
+
 ## Repository structure
 
 Workspace crates live under `crates/` (plus `xtask/` for build tooling).
