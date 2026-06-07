@@ -2296,6 +2296,74 @@ case-insensitive. The canonical form emitted by `Display` is lowercase.
 SHA-256-style content hashes stay case-sensitive (they are not
 human-typed).
 
+### One shared length ceiling for label-shaped ids
+
+**Every label-shaped identifier shares ONE length ceiling
+(`overdrive_core::id::LABEL_MAX`, 253 — the DNS-name maximum). A
+*derived* id MUST size its own ceiling off that shared const, never a
+bespoke smaller magic number.** When id B is produced by mapping id A
+into B's grammar, B's ceiling must be large enough to hold the *entire*
+mapped A. If B's ceiling is smaller than A's, the mapping truncates —
+and truncation of a content-addressed id is an **identity collision**:
+two distinct A values that share a truncated prefix collapse onto one B.
+
+The lossy-truncation collision is the same defect class as § "Check-and-act
+must be atomic" (two distinct things silently treated as one), reached
+through a different door: there, a discarded race verdict; here, a
+discarded suffix. The fix shape is also the same — make the collision
+*unrepresentable* (size the ceiling so truncation cannot happen) rather
+than detect-and-recover after the fact.
+
+#### Why a content-addressed suffix makes this acute
+
+The canonical correlation form is `target:purpose/<hex>` — the
+discriminating, content-addressed `<hex>` sits at the **end** of the
+string. End-of-string is exactly the region truncation drops. So the
+*one part of the key that guarantees distinctness* is the first casualty.
+Any id whose entropy is concentrated in a suffix (hashes, ULIDs, content
+addresses) is maximally vulnerable to prefix-preserving truncation.
+
+#### The rule
+
+- **Derive the ceiling, don't invent one.**
+  `const B_MAX: usize = overdrive_core::id::LABEL_MAX + PREFIX.len();` —
+  account for any fixed prefix the mapping prepends (a `wf-`-style
+  leading-char guarantee consumes from the budget). Do NOT write
+  `const B_MAX: usize = 127;` and hope the inputs stay short.
+- **A truncation guard in a mapping loop is a smell.** If
+  `if out.len() >= MAX { break; }` can fire for a valid input, the
+  ceiling is too small. Size it so the guard is *structurally
+  unreachable* for every in-range input, and say so in a comment — keep
+  the guard only as a defensive invariant against future grammar drift,
+  never as a routine path.
+- **"Inputs are short in practice" is not a sizing argument.** It is the
+  exact hand-wave that ships the latent collision. Size for the input
+  type's declared maximum, not its typical value.
+
+#### Symptoms during review
+
+- A second, smaller length const for an id that is *derived from* another
+  id (`WORKFLOW_ID_MAX = 127` while `CorrelationKey` is `LABEL_MAX = 253`).
+- A doc comment calling truncation "defensive" or "correlation keys are
+  already short" — that is the latent-collision tell, not a safety margin.
+- A mapping/sanitising loop with a `break` on a length ceiling, where the
+  source type's max exceeds the destination ceiling.
+
+#### Precedent
+
+`WorkflowId::for_correlation` (`crates/overdrive-control-plane/src/journal/mod.rs`)
+truncated the mapped `CorrelationKey` to a bespoke 127-char ceiling while
+correlation keys may be 253. Two keys sharing their first 124 mapped chars
+but differing only in the dropped suffix derived the **same**
+`WorkflowId`; the second instance's `start()` opened the first's journal
+(silent no-op on a `Terminal` row, or wrong-sequence replay). Fixed by
+sizing `WORKFLOW_ID_MAX = overdrive_core::id::LABEL_MAX + WF_PREFIX.len()`
+so the full key always maps without truncation. (Note: the char-fold step
+`:`/`/` → `-` is *independently* lossy, but only collides hand-built
+`CorrelationKey::new()` keys carrying those chars; every `derive()`-built
+key keeps its full hash suffix once truncation is gone, so all in-tree
+usage is collision-free.)
+
 ### Documentation
 
 - **Rustdoc `///` on every public item.** If the public API is not worth

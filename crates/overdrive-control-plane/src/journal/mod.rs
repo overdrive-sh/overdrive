@@ -72,17 +72,36 @@ pub type Result<T, E = JournalStoreError> = std::result::Result<T, E>;
 /// `overdrive-core::workflow`): a `WorkflowName` names a class of
 /// workflows (`provision-record`); a `WorkflowId` names one live or
 /// terminated instance of it. The grammar mirrors the kebab-label shape
-/// used across the codebase: `^[a-z0-9][a-z0-9-]{0,126}$` (instance ids
+/// used across the codebase: `^[a-z0-9][a-z0-9-]{0,255}$` (instance ids
 /// are machine-minted, so a wider interior than `WorkflowName`'s 63-char
-/// cap is allowed for embedded ULIDs / hashes).
+/// cap is allowed for embedded ULIDs / hashes, and the ceiling holds the
+/// full `wf-`-prefixed mapping of a maximum-length `CorrelationKey`
+/// without truncation — see [`WORKFLOW_ID_MAX`]).
 ///
 /// Node-independent by construction (no embedded node id), leaving room
 /// for the Phase-2 cross-node resume / HA adapter (#205, ADR-0066 §5).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorkflowId(String);
 
-/// Maximum length for a workflow-instance id (1 lead + up to 126 interior).
-const WORKFLOW_ID_MAX: usize = 127;
+/// The stable prefix every derived instance id carries. Guarantees a
+/// grammar-valid leading char (and a non-empty body) regardless of what
+/// the source correlation key began with.
+const WF_PREFIX: &str = "wf-";
+
+/// Maximum length for a workflow-instance id.
+///
+/// Sized off the single shared label ceiling
+/// ([`overdrive_core::id::LABEL_MAX`], 253 — the DNS-name maximum) plus
+/// room for the [`WF_PREFIX`]. A `WorkflowId` is a label *derived from* a
+/// [`CorrelationKey`] (also bounded by `LABEL_MAX`), and
+/// [`WorkflowId::for_correlation`] prepends `wf-`; the ceiling must
+/// therefore be `LABEL_MAX + "wf-".len()` so that mapping a maximum-length
+/// correlation key NEVER truncates. Truncation here previously collapsed
+/// two distinct correlation keys (sharing a truncated prefix but differing
+/// in the dropped suffix) onto ONE id, opening the wrong instance's
+/// journal — see `.claude/rules/development.md` § "One shared length
+/// ceiling for label-shaped ids".
+const WORKFLOW_ID_MAX: usize = overdrive_core::id::LABEL_MAX + WF_PREFIX.len();
 
 impl WorkflowId {
     /// Validating constructor.
@@ -90,7 +109,7 @@ impl WorkflowId {
     /// # Preconditions
     ///
     /// `raw` must be non-empty, at most [`WORKFLOW_ID_MAX`] chars, and
-    /// match `^[a-z0-9][a-z0-9-]{0,126}$` (ASCII lowercase / digits /
+    /// match `^[a-z0-9][a-z0-9-]{0,255}$` (ASCII lowercase / digits /
     /// hyphen, leading char alphanumeric).
     ///
     /// # Postconditions
@@ -140,17 +159,26 @@ impl WorkflowId {
     ///
     /// The correlation key's canonical form (`target:purpose/<hex>`)
     /// carries `:` and `/`, which the `WorkflowId` grammar
-    /// (`^[a-z0-9][a-z0-9-]{0,126}$`) rejects. The derivation maps every
+    /// (`^[a-z0-9][a-z0-9-]{0,255}$`) rejects. The derivation maps every
     /// char outside `[a-z0-9-]` to `-`, lowercases ASCII uppercase, and
-    /// prefixes a stable `wf-` so the leading-char rule holds even if the
-    /// correlation began with a now-mapped char. The result is bounded by
-    /// truncation to [`WORKFLOW_ID_MAX`] (correlation keys are already
-    /// short, so truncation is defensive). The mapping is total and
-    /// deterministic — equal correlations always yield equal ids.
+    /// prefixes a stable [`WF_PREFIX`] so the leading-char rule holds even
+    /// if the correlation began with a now-mapped char. The mapping is
+    /// total and deterministic — equal correlations always yield equal ids.
+    ///
+    /// **No truncation.** [`WORKFLOW_ID_MAX`] is sized as
+    /// `LABEL_MAX + WF_PREFIX.len()`, and a [`CorrelationKey`] is itself
+    /// bounded by `LABEL_MAX`; the mapped result (one output char per input
+    /// char, plus the prefix) therefore always fits. The discriminating
+    /// content-addressed suffix at the *end* of the key always survives.
+    /// This is load-bearing: a smaller ceiling would truncate that suffix
+    /// and collapse two distinct correlation keys (sharing a truncated
+    /// prefix) onto one journal id — the bug this sizing closes. The
+    /// length guard below is retained as a defensive invariant but is
+    /// unreachable for any valid `CorrelationKey`.
     #[must_use]
     pub fn for_correlation(correlation: &overdrive_core::id::CorrelationKey) -> Self {
         let mut id = String::with_capacity(WORKFLOW_ID_MAX);
-        id.push_str("wf-");
+        id.push_str(WF_PREFIX);
         for c in correlation.as_str().chars() {
             let mapped = if c.is_ascii_uppercase() {
                 c.to_ascii_lowercase()
@@ -159,15 +187,20 @@ impl WorkflowId {
             } else {
                 '-'
             };
+            // Unreachable for any valid CorrelationKey (bounded by
+            // LABEL_MAX, and WORKFLOW_ID_MAX = LABEL_MAX + WF_PREFIX.len()):
+            // kept only as a defensive invariant against a future
+            // grammar/ceiling drift, NOT as a routine truncation path.
             if id.len() >= WORKFLOW_ID_MAX {
                 break;
             }
             id.push(mapped);
         }
-        // The `wf-` prefix guarantees a valid leading char and a
-        // non-empty body; every interior char is in `[a-z0-9-]` by the
-        // mapping above; length is bounded by the loop guard. The
-        // grammar therefore cannot reject the result.
+        // The WF_PREFIX guarantees a valid leading char and a non-empty
+        // body; every interior char is in `[a-z0-9-]` by the mapping
+        // above; length is bounded by WORKFLOW_ID_MAX (= LABEL_MAX +
+        // WF_PREFIX.len(), which holds the full mapped key). The grammar
+        // therefore cannot reject the result.
         #[allow(clippy::expect_used)]
         Self::new(&id).expect("WorkflowId::for_correlation produces a grammar-valid id")
     }
@@ -191,8 +224,8 @@ pub enum WorkflowIdError {
         /// The maximum permitted length.
         max: usize,
     },
-    /// The id did not match `^[a-z0-9][a-z0-9-]{0,126}$`.
-    #[error("workflow id must match ^[a-z0-9][a-z0-9-]{{0,126}}$")]
+    /// The id did not match `^[a-z0-9][a-z0-9-]{0,255}$`.
+    #[error("workflow id must match ^[a-z0-9][a-z0-9-]{{0,255}}$")]
     BadShape,
 }
 
@@ -797,5 +830,66 @@ mod tests {
             "wf-abc123",
             "digits survive the char map verbatim — they are not folded to '-'"
         );
+    }
+
+    /// Regression — journal-key collision for long correlation keys.
+    ///
+    /// `WorkflowId::for_correlation` used to truncate the mapped id to a
+    /// bespoke 127-char ceiling (`wf-` prefix + at most 124 correlation
+    /// chars), while a `CorrelationKey` may be up to
+    /// [`overdrive_core::id::LABEL_MAX`] (253) chars. Two distinct keys that
+    /// shared their first 124 mapped chars but differed only past that
+    /// boundary truncated to the SAME `WorkflowId` — the second instance's
+    /// `start()` then opened the first instance's journal (silent no-op on a
+    /// `Terminal` row, or a wrong-sequence replay). The canonical
+    /// `target:purpose/<hex>` form places the discriminating
+    /// content-addressed suffix at the END of the string, i.e. in exactly
+    /// the region truncation dropped.
+    ///
+    /// The fix unifies the ceiling on the shared `LABEL_MAX` (plus room for
+    /// the `wf-` prefix), so a maximum-length correlation key never
+    /// truncates and the end-of-string discriminant always survives.
+    #[test]
+    fn for_correlation_long_keys_sharing_truncated_prefix_do_not_collide() {
+        // 124 shared mapped chars — exactly the slice the old 127-char
+        // ceiling (3 prefix + 124) preserved. Both keys are identical here
+        // and diverge only AFTER it, in the region the old code dropped.
+        let shared_prefix = "a".repeat(124);
+        let key_a =
+            CorrelationKey::new(&format!("{shared_prefix}:start/1111111111")).expect("valid key");
+        let key_b =
+            CorrelationKey::new(&format!("{shared_prefix}:start/2222222222")).expect("valid key");
+        assert_ne!(key_a, key_b, "the two correlation keys are genuinely distinct");
+
+        let id_a = WorkflowId::for_correlation(&key_a);
+        let id_b = WorkflowId::for_correlation(&key_b);
+
+        // The defect: both ids were `wf-` + the shared 124-char prefix.
+        assert_ne!(
+            id_a, id_b,
+            "distinct correlation keys differing only past the old truncation \
+             boundary must derive distinct WorkflowIds — else two instances \
+             share one journal"
+        );
+        // The discriminating suffix survives end-to-end (no truncation).
+        assert!(id_a.as_str().ends_with("1111111111"), "key_a suffix preserved");
+        assert!(id_b.as_str().ends_with("2222222222"), "key_b suffix preserved");
+    }
+
+    /// A maximum-length `CorrelationKey` (253 chars) maps without
+    /// truncation: the derived id is the full `wf-`-prefixed mapping and
+    /// stays within the grammar. Pins the `WORKFLOW_ID_MAX = LABEL_MAX +
+    /// WF_PREFIX.len()` sizing against a regression to a smaller ceiling.
+    #[test]
+    fn for_correlation_does_not_truncate_a_maximum_length_key() {
+        let raw = "z".repeat(overdrive_core::id::LABEL_MAX);
+        let key = CorrelationKey::new(&raw).expect("LABEL_MAX-length key is valid");
+        let id = WorkflowId::for_correlation(&key);
+        assert_eq!(
+            id.as_str().len(),
+            "wf-".len() + overdrive_core::id::LABEL_MAX,
+            "the full key is mapped 1:1 with no truncation"
+        );
+        assert_eq!(id.as_str(), format!("wf-{raw}"), "every char survives the map");
     }
 }
