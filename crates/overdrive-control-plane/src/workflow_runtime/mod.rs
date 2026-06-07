@@ -43,12 +43,18 @@
 //!
 //! The engine drives the object-safe [`ErasedWorkflow::run_erased`] over
 //! the start intent's opaque `input` bytes (the typed `Workflow` is
-//! erased to it by the [`ErasedWorkflowAdapter`] in the registry). On a
-//! terminal it projects the body's `Result<Vec<u8>, TerminalError>` to a
-//! [`WorkflowStatus`] — `Ok(bytes)` → `Completed { output: bytes }`,
-//! `Err(terminal)` → `Failed { terminal }` — and appends a
-//! [`JournalCommand::Terminal`] recording that status (ADR-0065 §3), the
-//! durable terminal surface for slice 01.
+//! erased to it by the [`ErasedWorkflowAdapter`] in the registry). It
+//! classifies the drive's `Result<Vec<u8>, WorkflowDriveError>` (ADR-0065
+//! §3/§4): `Ok(bytes)` → `Completed { output: bytes }`,
+//! `Err(WorkflowDriveError::Terminal)` → `Failed { terminal }`, and
+//! `Err(WorkflowDriveError::Transient)` → the retry-re-drive channel (a
+//! `ctx.run_retryable` step failed transiently — the engine ABSORBS it and
+//! re-drives from the journal up to [`WORKFLOW_RETRY_BUDGET`], minting
+//! `Failed { BudgetExhausted }` on exhaustion). A transient NEVER reaches the
+//! body's `Result<Output, TerminalError>` return type (ADR-0065 §2) — the
+//! body's terminal channel is purely terminal. On a real terminal the engine
+//! appends a [`JournalCommand::Terminal`] recording the projected
+//! [`WorkflowStatus`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
@@ -68,7 +74,8 @@ use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
     ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, SignalKey, SignalValue, TerminalError,
-    Workflow, WorkflowCtx, WorkflowCtxError, WorkflowName, WorkflowStart, WorkflowStatus,
+    Workflow, WorkflowCtx, WorkflowCtxError, WorkflowDriveError, WorkflowName, WorkflowStart,
+    WorkflowStatus,
 };
 
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
@@ -627,9 +634,12 @@ fn terminal_status(loaded: &[LoadedEntry]) -> Option<WorkflowStatus> {
 ///    replays completed steps byte-equal and re-fires the failed one (the
 ///    canonical Temporal/Restate re-execute-from-top-and-short-circuit shape);
 /// 2. drive the object-safe erased body (panic-contained);
-/// 3. PROJECT the outcome to a [`WorkflowStatus`] (ADR-0065 §3);
+/// 3. CLASSIFY the `Result<Vec<u8>, WorkflowDriveError>` into a
+///    [`DriveOutcome`] (ADR-0065 §3/§4): `Completed` / `Terminal` /
+///    `Transient` (the transient comes ONLY from a `ctx.run_retryable` step,
+///    NEVER from the body's `TerminalError` return);
 /// 4. classify via [`redrive_decision`] against the journal-derived attempt
-///    count + the [`WORKFLOW_RETRY_BUDGET`] policy: a RETRYABLE outcome with
+///    count + the [`WORKFLOW_RETRY_BUDGET`] policy: a `Transient` outcome with
 ///    budget remaining appends a `RetryAttempted` (the attempt INPUT), parks
 ///    on the injected `Clock` for the backoff window, and re-drives;
 ///    otherwise the status is the durable terminal (a `Completed`, a
@@ -698,15 +708,31 @@ async fn drive_to_terminal(
         // NEVER the address-bearing raw box) so the durable terminal stays
         // byte-stable across runs (ADR-0064 §3 hazard).
         let run = AssertUnwindSafe(workflow.run_erased(&ctx, input_bytes)).catch_unwind();
-        // (3) PROJECT the drive outcome to a `WorkflowStatus`:
-        //   - `Ok(bytes)`          → `Completed { output: bytes }`
-        //   - `Err(terminal)`      → `Failed { terminal }` (body failure OR
-        //                            adapter MalformedInput/OutputEncode OR the
-        //                            body's `retryable` signal)
-        //   - panic (catch_unwind) → `Failed { Explicit }`
-        let drive_status = match run.await {
-            Ok(Ok(output)) => WorkflowStatus::Completed { output },
-            Ok(Err(terminal)) => WorkflowStatus::Failed { terminal },
+        // (3) CLASSIFY the drive outcome (ADR-0065 §3/§4). The erased edge
+        // returns `Result<Vec<u8>, WorkflowDriveError>`:
+        //   - `Ok(bytes)`                       → `Completed { output: bytes }`
+        //   - `Err(Terminal(terminal))`         → `Failed { terminal }` (body
+        //                                          failure OR adapter
+        //                                          MalformedInput/OutputEncode)
+        //   - `Err(Transient(_))`               → re-drive channel (a
+        //                                          `ctx.run_retryable` step
+        //                                          failed transiently; ADR-0065
+        //                                          §4) — NEVER a durable
+        //                                          terminal directly
+        //   - panic (catch_unwind)              → `Failed { Explicit }`
+        // A `Transient` is the ONLY re-drive trigger — it can come ONLY from a
+        // `run_retryable` step, NEVER from the body's `Result<Output,
+        // TerminalError>` return type (ADR-0065 §2). The body's terminal
+        // channel is purely terminal.
+        let outcome = match run.await {
+            Ok(Ok(output)) => DriveOutcome::Completed(output),
+            Ok(Err(WorkflowDriveError::Terminal(terminal))) => DriveOutcome::Terminal(terminal),
+            Ok(Err(WorkflowDriveError::Transient(transient))) => {
+                // The last transient cause is carried forward so a minted
+                // `BudgetExhausted` (on exhaustion) can surface the operator-
+                // facing reason of the final transient.
+                DriveOutcome::Transient { detail: transient_detail(&transient) }
+            }
             Err(panic) => {
                 let detail = panic
                     .downcast_ref::<&str>()
@@ -719,13 +745,14 @@ async fn drive_to_terminal(
                     detail = %detail,
                     "workflow run panicked; converging instance to Failed terminal",
                 );
-                WorkflowStatus::Failed { terminal: TerminalError::explicit(&detail) }
+                // A panic is terminal (the body cannot retry through a panic).
+                DriveOutcome::Terminal(TerminalError::explicit(&detail))
             }
         };
 
         // (4) Classify: re-drive the transient (budget permitting) or return
-        // this status as the durable terminal.
-        match redrive_decision(&drive_status, attempts, WORKFLOW_RETRY_BUDGET) {
+        // the projected status as the durable terminal.
+        match redrive_decision(outcome, attempts, WORKFLOW_RETRY_BUDGET) {
             RedriveDecision::Terminal(status) => return status,
             RedriveDecision::Redrive => {
                 // Record the attempt INPUT (D4) — a `RetryAttempted` command
@@ -848,15 +875,46 @@ fn attempts_from_journal(loaded: &[LoadedEntry]) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
 }
 
-/// The engine's transient-classification + budget-gate decision over a
-/// drive's projected [`WorkflowStatus`] (ADR-0065 §4, D4).
+/// The engine's three-way classification of one drive of the erased body
+/// (ADR-0065 §3/§4) — the input to [`redrive_decision`]. Mirrors the
+/// [`WorkflowDriveError`](overdrive_core::workflow::WorkflowDriveError)
+/// surface plus the success arm, projected from the `run_erased` result +
+/// the panic-containment path.
 ///
-/// A `Failed { terminal }` whose `terminal.is_retryable()` is the transient
-/// channel: the engine RE-DRIVES while attempts remain under the budget, and
-/// MINTS `Failed { BudgetExhausted }` once `attempts >= budget`. Every other
-/// outcome — `Completed`, an explicit / malformed / output-encode `Failed`,
-/// or the engine-authored `Cancelled` / `TimedOut` — is a real terminal the
-/// engine records as-is (a body-authored terminal is NEVER re-driven).
+/// The transient is its OWN variant — it can come ONLY from a
+/// `ctx.run_retryable` step (ADR-0065 §4), NEVER from the body's
+/// `Result<Output, TerminalError>` return type (which maps to
+/// [`Self::Completed`] / [`Self::Terminal`] only). This is the type-level
+/// guarantee that a body cannot author a retry: there is no path from a
+/// `TerminalError` to [`Self::Transient`].
+#[derive(Debug, PartialEq, Eq)]
+enum DriveOutcome {
+    /// The body returned `Ok(Output)` — the CBOR-encoded output bytes.
+    Completed(Vec<u8>),
+    /// The body returned `Err(TerminalError)`, the adapter minted a
+    /// decode/encode terminal, or the body panicked — a real terminal,
+    /// never re-driven.
+    Terminal(TerminalError),
+    /// A `ctx.run_retryable` step failed transiently — the engine absorbs
+    /// and re-drives (budget-gated). Carries the last transient detail so a
+    /// minted `BudgetExhausted` can surface the operator-facing cause.
+    Transient {
+        /// The transient step's detail (carried into a minted
+        /// `BudgetExhausted` on exhaustion).
+        detail: String,
+    },
+}
+
+/// The engine's transient-classification + budget-gate decision over a
+/// drive's [`DriveOutcome`] (ADR-0065 §4, D4).
+///
+/// A [`DriveOutcome::Transient`] is the transient channel — a
+/// `ctx.run_retryable` step failure the engine RE-DRIVES while attempts
+/// remain under the budget, MINTING `Failed { BudgetExhausted }` once
+/// `attempts >= budget`. Every other outcome — a `Completed`, or an
+/// explicit / malformed / output-encode / panic `Terminal` — is a real
+/// terminal the engine records as-is (a body-authored terminal is NEVER
+/// re-driven; the body has no transient channel through its return type).
 #[derive(Debug, PartialEq, Eq)]
 enum RedriveDecision {
     /// Absorb the transient and re-drive the body from the journal.
@@ -865,28 +923,50 @@ enum RedriveDecision {
     Terminal(WorkflowStatus),
 }
 
-/// Classify a drive's projected status against the journal-derived
+/// Classify a drive's [`DriveOutcome`] against the journal-derived
 /// `attempts` and the `budget` policy. Pure — no I/O, deterministic — so it
-/// is unit-tested directly (the re-drive loop in [`WorkflowEngine::start`]
+/// is unit-tested directly (the re-drive loop in [`drive_to_terminal`]
 /// consults it per drive). See [`RedriveDecision`].
+///
+/// Only [`DriveOutcome::Transient`] can re-drive; it is unreachable from a
+/// `TerminalError` (the body's terminal channel is purely terminal —
+/// ADR-0065 §2).
 #[must_use]
-fn redrive_decision(status: &WorkflowStatus, attempts: u32, budget: u32) -> RedriveDecision {
-    match status {
-        WorkflowStatus::Failed { terminal } if terminal.is_retryable() => {
+fn redrive_decision(outcome: DriveOutcome, attempts: u32, budget: u32) -> RedriveDecision {
+    match outcome {
+        DriveOutcome::Transient { detail } => {
             if attempts >= budget {
                 // Budget exhausted — the engine MINTS BudgetExhausted (the
-                // body never authors it). The retryable detail is carried
-                // forward so the operator sees the last transient cause.
+                // body never authors it). The last transient detail is carried
+                // forward so the operator sees the final transient cause.
                 RedriveDecision::Terminal(WorkflowStatus::Failed {
-                    terminal: TerminalError::budget_exhausted(terminal.detail()),
+                    terminal: TerminalError::budget_exhausted(&detail),
                 })
             } else {
                 RedriveDecision::Redrive
             }
         }
-        // Completed, explicit/malformed/output-encode Failed, Cancelled,
-        // TimedOut — a real terminal, recorded as-is, never re-driven.
-        other => RedriveDecision::Terminal(other.clone()),
+        // A real terminal — recorded as-is, never re-driven.
+        DriveOutcome::Completed(output) => {
+            RedriveDecision::Terminal(WorkflowStatus::Completed { output })
+        }
+        DriveOutcome::Terminal(terminal) => {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal })
+        }
+    }
+}
+
+/// The operator-facing detail string from a transient
+/// [`WorkflowCtxError`](overdrive_core::workflow::WorkflowCtxError) — the
+/// cause carried into a minted `BudgetExhausted` (ADR-0065 §4). A
+/// `TransientStep` surfaces its own `detail`; any other `WorkflowCtxError`
+/// that the engine treats as transient (forward, channel #2) surfaces its
+/// `Display`. Deterministic (no addresses) so the minted terminal's bytes
+/// stay byte-stable across re-drives.
+fn transient_detail(transient: &WorkflowCtxError) -> String {
+    match transient {
+        WorkflowCtxError::TransientStep { detail, .. } => detail.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -1521,8 +1601,8 @@ impl JournalCursor for JournalCursorHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        RedriveDecision, WORKFLOW_RETRY_BUDGET, attempts_from_journal, backoff_for_attempt,
-        redrive_decision,
+        DriveOutcome, RedriveDecision, WORKFLOW_RETRY_BUDGET, attempts_from_journal,
+        backoff_for_attempt, redrive_decision,
     };
     use crate::journal::{JournalCommand, LoadedEntry};
     use overdrive_core::id::ContentHash;
@@ -1563,29 +1643,30 @@ mod tests {
     }
 
     /// `redrive_decision` is the engine's transient classifier + budget
-    /// gate. A RETRYABLE terminal re-drives WHILE attempts remain, and
-    /// MINTS `BudgetExhausted` once the budget is consumed. An explicit /
-    /// malformed / output-encode terminal is NEVER re-driven (the body
-    /// authored a real terminal). A `Completed` is terminal-success.
+    /// gate. A `DriveOutcome::Transient` (a `ctx.run_retryable` step failure)
+    /// re-drives WHILE attempts remain, and MINTS `BudgetExhausted` once the
+    /// budget is consumed. A `DriveOutcome::Terminal` (an explicit /
+    /// malformed / output-encode / panic terminal) is NEVER re-driven — the
+    /// transient channel is unreachable from a `TerminalError` (ADR-0065 §2).
+    /// A `DriveOutcome::Completed` is terminal-success.
     #[test]
     fn redrive_decision_classifies_transient_and_gates_on_budget() {
-        let retryable = WorkflowStatus::Failed { terminal: TerminalError::retryable("transient") };
-        let explicit = WorkflowStatus::Failed { terminal: TerminalError::explicit("boom") };
-        let completed = WorkflowStatus::Completed { output: Vec::new() };
+        let transient = || DriveOutcome::Transient { detail: "transient".to_string() };
 
-        // Retryable with budget remaining → re-drive.
+        // Transient with budget remaining → re-drive.
         assert_eq!(
-            redrive_decision(&retryable, 0, WORKFLOW_RETRY_BUDGET),
+            redrive_decision(transient(), 0, WORKFLOW_RETRY_BUDGET),
             RedriveDecision::Redrive
         );
         assert_eq!(
-            redrive_decision(&retryable, WORKFLOW_RETRY_BUDGET - 1, WORKFLOW_RETRY_BUDGET),
+            redrive_decision(transient(), WORKFLOW_RETRY_BUDGET - 1, WORKFLOW_RETRY_BUDGET),
             RedriveDecision::Redrive,
             "the last in-budget attempt still re-drives"
         );
 
-        // Retryable with budget EXHAUSTED → mint BudgetExhausted.
-        match redrive_decision(&retryable, WORKFLOW_RETRY_BUDGET, WORKFLOW_RETRY_BUDGET) {
+        // Transient with budget EXHAUSTED → mint BudgetExhausted (engine-minted;
+        // the body never authored it — a transient is not a TerminalError).
+        match redrive_decision(transient(), WORKFLOW_RETRY_BUDGET, WORKFLOW_RETRY_BUDGET) {
             RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
                 assert_eq!(
                     terminal.kind(),
@@ -1594,13 +1675,14 @@ mod tests {
                 );
             }
             other => {
-                panic!("exhausted retryable must mint Failed{{BudgetExhausted}}, got {other:?}")
+                panic!("exhausted transient must mint Failed{{BudgetExhausted}}, got {other:?}")
             }
         }
 
-        // Explicit terminal → terminal as-is, NEVER re-driven (body authored
-        // it), even with budget remaining.
-        match redrive_decision(&explicit, 0, WORKFLOW_RETRY_BUDGET) {
+        // Explicit terminal → terminal as-is, NEVER re-driven (body authored a
+        // real terminal), even with budget remaining.
+        let explicit = DriveOutcome::Terminal(TerminalError::explicit("boom"));
+        match redrive_decision(explicit, 0, WORKFLOW_RETRY_BUDGET) {
             RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
                 assert_eq!(terminal.kind(), TerminalErrorKind::Explicit);
             }
@@ -1609,7 +1691,7 @@ mod tests {
 
         // Completed → terminal-success, never re-driven.
         assert!(matches!(
-            redrive_decision(&completed, 0, WORKFLOW_RETRY_BUDGET),
+            redrive_decision(DriveOutcome::Completed(Vec::new()), 0, WORKFLOW_RETRY_BUDGET),
             RedriveDecision::Terminal(WorkflowStatus::Completed { .. })
         ));
     }

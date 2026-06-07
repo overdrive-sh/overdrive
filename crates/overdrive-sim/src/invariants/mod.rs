@@ -497,8 +497,8 @@ pub enum Invariant {
     /// acceptance at `crates/overdrive-control-plane/tests/acceptance/
     /// workflow_budget_exhaustion_mints_terminal.rs`) and the Slice-04
     /// sibling of `WorkflowTerminalStatusProjection`. Drives a workflow
-    /// whose body ALWAYS fails transiently
-    /// (`Err(TerminalError::retryable(..))`) through the real
+    /// whose `ctx.run_retryable` step ALWAYS fails transiently
+    /// (`Err(RetryableStepError)`) through the real
     /// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
     /// each backoff window so the parked re-drives fire, and asserts the
     /// engine re-drives up to `WORKFLOW_RETRY_BUDGET` (observed as
@@ -508,8 +508,8 @@ pub enum Invariant {
     /// of its own — the engine-minted `BudgetExhausted` kind (a kind only
     /// the engine produces) IS the observable proof of the
     /// engine-owns-retry / body-owns-only-terminal split (D4). Asserts the
-    /// OUTCOME, not the body's `Retryable` channel, so it stays green if a
-    /// future review changes how the transient is signalled. Authored
+    /// OUTCOME, not the step transient channel, so it stays green regardless
+    /// of how the transient is signalled. Authored
     /// GREEN directly (the retry re-drive loop landed in step 04-01; no
     /// `todo!` scaffold phase needed). The evaluator body lives in
     /// `crate::invariants::evaluators`.
