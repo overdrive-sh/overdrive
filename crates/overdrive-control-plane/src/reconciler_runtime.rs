@@ -3405,4 +3405,114 @@ mod tests {
             );
         }
     }
+
+    // -----------------------------------------------------------------
+    // persist_view eq-diff skip — the WorkflowLifecycle arm elides the
+    // fsync `write_through` when the next view equals the current one.
+    // The Phase 1 `WorkflowLifecycleView` is an empty struct, so the
+    // comparison is ALWAYS equal and existing tests cannot distinguish
+    // the `==` guard from its `!=` mutant (both leave the empty view
+    // observably identical). The only behavioural effect the guard
+    // controls is whether the durable fsync fires — observed here via a
+    // call-counting spy `ViewStore`.
+    // -----------------------------------------------------------------
+    mod workflow_view_persist_elision {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use async_trait::async_trait;
+        use overdrive_core::reconcilers::{
+            AnyReconcilerView, ReconcilerName, TargetResource, WorkflowLifecycleView,
+        };
+        use tempfile::TempDir;
+
+        use crate::reconciler_runtime::ReconcilerRuntime;
+        use crate::view_store::{ProbeError, Result as ViewStoreResult, ViewStore};
+
+        /// Spy `ViewStore` that counts `write_through_bytes` (fsync) calls.
+        /// Storage is a no-op — the test observes only whether the durable
+        /// write fired, which is the sole behavioural effect the eq-diff
+        /// skip in `persist_view`'s WorkflowLifecycle arm controls.
+        #[derive(Default)]
+        struct CountingViewStore {
+            write_through_calls: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ViewStore for CountingViewStore {
+            async fn bulk_load_bytes(
+                &self,
+                _reconciler: &'static str,
+            ) -> ViewStoreResult<BTreeMap<TargetResource, Vec<u8>>> {
+                Ok(BTreeMap::new())
+            }
+
+            async fn write_through_bytes(
+                &self,
+                _reconciler: &'static str,
+                _target: &TargetResource,
+                _cbor: &[u8],
+            ) -> ViewStoreResult<()> {
+                self.write_through_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            async fn delete(
+                &self,
+                _reconciler: &'static str,
+                _target: &TargetResource,
+            ) -> ViewStoreResult<()> {
+                Ok(())
+            }
+
+            async fn probe(&self) -> std::result::Result<(), ProbeError> {
+                Ok(())
+            }
+        }
+
+        /// Kills `reconciler_runtime.rs:607 == → !=` in `persist_view`'s
+        /// WorkflowLifecycle arm. The Phase 1 `WorkflowLifecycleView` is an
+        /// empty struct, so a freshly-hydrated `current` (default) always
+        /// equals the `next_view` the runtime persists — the eq-diff skip
+        /// MUST fire and elide the fsync `write_through` on every tick (the
+        /// optimization the arm's doc-comment promises). Under the correct
+        /// `==` the spy records ZERO write_through calls; the `!=` mutant
+        /// inverts the guard so the early return never fires and the fsync
+        /// runs (count == 1), failing this assertion.
+        #[tokio::test]
+        async fn persist_view_elides_fsync_for_unchanged_workflow_view() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let spy = Arc::new(CountingViewStore::default());
+            let mut runtime =
+                ReconcilerRuntime::new(tmp.path(), Arc::clone(&spy) as Arc<dyn ViewStore>)
+                    .expect("runtime::new");
+            runtime
+                .register(crate::workflow_lifecycle())
+                .await
+                .expect("register workflow-lifecycle");
+
+            let name = ReconcilerName::new("workflow-lifecycle").expect("valid reconciler name");
+            let target = TargetResource::new("workflow/all").expect("valid target");
+
+            // The persisted view equals the freshly-hydrated default (empty
+            // struct) — the eq-diff skip must fire and elide the fsync.
+            runtime
+                .persist_view(
+                    &name,
+                    &target,
+                    AnyReconcilerView::WorkflowLifecycle(WorkflowLifecycleView::default()),
+                )
+                .await
+                .expect("persist_view ok");
+
+            assert_eq!(
+                spy.write_through_calls.load(Ordering::SeqCst),
+                0,
+                "persisting an unchanged (empty) WorkflowLifecycleView must elide the fsync \
+                 write_through (eq-diff skip at persist_view's WorkflowLifecycle arm); a non-zero \
+                 count means the `current == view` guard was inverted (kills the == → != mutant)"
+            );
+        }
+    }
 }
