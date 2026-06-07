@@ -661,6 +661,47 @@ pub enum WorkflowStatus {
     TimedOut,
 }
 
+/// The [`WorkflowCtx`] await-op surface a replay-path divergence was
+/// detected on (ADR-0063 §2 journaled await-ops). Carried by
+/// [`WorkflowCtxError::NonDeterministic`] so the rendered message names
+/// the surface that actually diverged — `replay_sleep` /
+/// `replay_signal` / `replay_emit` mismatches must NOT be reported with
+/// the `ctx.run` prefix the variant once hard-coded for every site.
+///
+/// This is a label enum: it owns its `ctx`-method string representation
+/// via [`as_str`](Self::as_str), per `.claude/rules/development.md`
+/// § "Label enums own their string representation".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AwaitOp {
+    /// `ctx.run` — a journaled step result (`replay_run`).
+    Run,
+    /// `ctx.sleep` — a journaled durable timer (`replay_sleep`).
+    Sleep,
+    /// `ctx.wait_for_signal` — a journaled signal await (`replay_signal`).
+    Signal,
+    /// `ctx.emit_action` — a journaled cluster mutation (`replay_emit`).
+    EmitAction,
+}
+
+impl AwaitOp {
+    /// The author-facing `ctx` method name for this await-op — the
+    /// canonical label rendered in [`WorkflowCtxError::NonDeterministic`].
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Run => "ctx.run",
+            Self::Sleep => "ctx.sleep",
+            Self::Signal => "ctx.wait_for_signal",
+            Self::EmitAction => "ctx.emit_action",
+        }
+    }
+}
+
+impl std::fmt::Display for AwaitOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Engine-internal workflow errors, RETAINED in two roles after the
 /// Model Z amendment (ADR-0065 §4) — but **no longer a [`WorkflowCtx`]
 /// await-op return type.**
@@ -705,18 +746,26 @@ pub enum WorkflowCtxError {
         message: String,
     },
 
-    /// A replay-path `ctx.run` found a recorded step whose name does not
-    /// match the name the workflow body is replaying at this cursor
+    /// A replay-path await-op found a recorded command whose identity does
+    /// not match the one the workflow body is replaying at this cursor
     /// position — a non-deterministic divergence between the recorded
     /// trajectory and the current run. Fail-closed: a workflow body that
-    /// reorders / renames its steps cannot replay a journal recorded
+    /// reorders / renames its await-ops cannot replay a journal recorded
     /// against the prior shape (journal replay must be bit-identical,
     /// `development.md` § "Workflow contract").
-    #[error("workflow ctx.run non-deterministic: expected step {expected:?}, got {actual:?}")]
+    ///
+    /// `op` names the await-op surface the divergence was detected on
+    /// (`replay_run` / `replay_sleep` / `replay_signal` / `replay_emit`)
+    /// so the rendered message is honest about which `ctx` method
+    /// diverged — it is NOT always `ctx.run`.
+    #[error("workflow {op} non-deterministic: expected {expected:?}, got {actual:?}")]
     NonDeterministic {
-        /// The step name recorded in the journal at this cursor.
+        /// The await-op surface the divergence was detected on.
+        op: AwaitOp,
+        /// The command identity (step name / command kind / signal key)
+        /// recorded in the journal at this cursor.
         expected: String,
-        /// The step name the replaying workflow body presented.
+        /// The command identity the replaying workflow body presented.
         actual: String,
     },
 
@@ -2619,6 +2668,57 @@ mod tests {
                 ciborium::from_reader(value_bytes.as_slice()).expect("decode SignalValue");
             assert_eq!(decoded_value, value, "SignalValue round-trips through CBOR bit-equal");
             assert_eq!(decoded_value.as_str(), raw, "opaque payload preserved verbatim");
+        }
+    }
+
+    /// Regression: the `NonDeterministic` Display hard-coded a `ctx.run`
+    /// prefix, so a divergence detected on ANY replay surface — including
+    /// `ctx.sleep` / `ctx.wait_for_signal` / `ctx.emit_action` — rendered
+    /// as "workflow ctx.run non-deterministic", naming a surface that was
+    /// never involved. The message must name the await-op the divergence
+    /// was actually detected on.
+    #[test]
+    fn non_deterministic_display_names_the_diverging_await_op() {
+        // Each replay surface renders its OWN ctx-method label, never a
+        // hard-coded `ctx.run` for the sleep / signal / emit sites (the
+        // bug: a `ctx.sleep` landing on a journal `SignalAwaited` surfaced
+        // "workflow ctx.run non-deterministic", naming a surface that was
+        // never involved).
+        let cases = [
+            (AwaitOp::Run, "ctx.run"),
+            (AwaitOp::Sleep, "ctx.sleep"),
+            (AwaitOp::Signal, "ctx.wait_for_signal"),
+            (AwaitOp::EmitAction, "ctx.emit_action"),
+        ];
+        for (op, label) in cases {
+            assert_eq!(op.as_str(), label, "AwaitOp owns its ctx-method label");
+            let err = WorkflowCtxError::NonDeterministic {
+                op,
+                expected: "RunResult".to_string(),
+                actual: "SleepArmed".to_string(),
+            };
+            let rendered = err.to_string();
+            assert!(
+                rendered.contains(label),
+                "the {op:?} divergence must render its own ctx label {label:?}: {rendered:?}"
+            );
+            // The non-run surfaces must NOT claim `ctx.run` (the bug).
+            if op != AwaitOp::Run {
+                assert!(
+                    !rendered.contains("ctx.run"),
+                    "a {op:?} divergence must not be rendered with a ctx.run prefix: {rendered:?}"
+                );
+            }
+            // The determinism payload still survives verbatim.
+            assert!(
+                rendered.contains("RunResult") && rendered.contains("SleepArmed"),
+                "expected/actual identities survive into the message: {rendered:?}"
+            );
+            // Brace-free: this detail is projected into a `TerminalError`
+            // whose DST byte-identical-trajectory guard rejects whole-entry
+            // `Debug` (`{` / `0x`). `op` renders via its `Display` label,
+            // so no brace is introduced.
+            assert!(!rendered.contains('{'), "rendered detail must stay brace-free: {rendered:?}");
         }
     }
 }

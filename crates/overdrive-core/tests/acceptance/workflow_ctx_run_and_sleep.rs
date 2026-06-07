@@ -27,7 +27,8 @@ use bytes::Bytes;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    JournalCursor, SignalKey, SignalValue, TerminalErrorKind, WorkflowCtx, WorkflowCtxError,
+    AwaitOp, JournalCursor, SignalKey, SignalValue, TerminalErrorKind, WorkflowCtx,
+    WorkflowCtxError,
 };
 
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -65,6 +66,7 @@ impl JournalCursor for RecordingCursor {
         match replay.pop_front() {
             Some((recorded_name, bytes)) if recorded_name == name => Ok(Some(bytes)),
             Some((recorded_name, _)) => Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Run,
                 expected: recorded_name,
                 actual: name.to_string(),
             }),

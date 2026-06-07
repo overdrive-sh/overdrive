@@ -73,9 +73,9 @@ use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, RunRetryPolicy, SignalKey, SignalValue,
-    TerminalError, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowDriveError, WorkflowName,
-    WorkflowStart, WorkflowStatus,
+    AwaitOp, ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, RunRetryPolicy, SignalKey,
+    SignalValue, TerminalError, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowDriveError,
+    WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
@@ -1323,6 +1323,7 @@ impl JournalCursor for JournalCursorHandle {
             let expected = command_kind(command).to_string();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Run,
                 expected,
                 actual: "RunResult".to_string(),
             });
@@ -1336,7 +1337,11 @@ impl JournalCursor for JournalCursorHandle {
         if recorded_name != name {
             let expected = recorded_name.clone();
             drop(cursor);
-            return Err(WorkflowCtxError::NonDeterministic { expected, actual: name.to_string() });
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Run,
+                expected,
+                actual: name.to_string(),
+            });
         }
         // LAYER 3 (content/digest comparison) is DEFERRED to
         // https://github.com/overdrive-sh/overdrive/issues/214 — slice 01 does
@@ -1391,6 +1396,7 @@ impl JournalCursor for JournalCursorHandle {
             let expected = command_kind(command).to_string();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Sleep,
                 expected,
                 actual: "SleepArmed".to_string(),
             });
@@ -1459,6 +1465,7 @@ impl JournalCursor for JournalCursorHandle {
             let expected = command_kind(command).to_string();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Signal,
                 expected,
                 actual: "SignalAwaited".to_string(),
             });
@@ -1478,6 +1485,7 @@ impl JournalCursor for JournalCursorHandle {
             let expected = recorded_key.to_string();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Signal,
                 expected,
                 actual: signal_key.to_string(),
             });
@@ -1525,6 +1533,7 @@ impl JournalCursor for JournalCursorHandle {
                 let expected = recorded_key.to_string();
                 drop(cursor);
                 return Err(WorkflowCtxError::NonDeterministic {
+                    op: AwaitOp::Signal,
                     expected,
                     actual: signal_key.to_string(),
                 });
@@ -1624,6 +1633,7 @@ impl JournalCursor for JournalCursorHandle {
             let expected = command_kind(command).to_string();
             drop(cursor);
             return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::EmitAction,
                 expected,
                 actual: "ActionEmitted".to_string(),
             });
