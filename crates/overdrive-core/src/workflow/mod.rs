@@ -2437,7 +2437,13 @@ impl WorkflowStartV1 {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+    use std::time::Instant;
+
+    use bytes::Bytes;
     use proptest::prelude::*;
+
+    use crate::traits::transport::{Connection, TransportError};
 
     use super::*;
 
@@ -2720,5 +2726,280 @@ mod tests {
             // so no brace is introduced.
             assert!(!rendered.contains('{'), "rendered detail must stay brace-free: {rendered:?}");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // RunRetryPolicy::backoff_window — the per-step retry backoff decision
+    // (ADR-0065 Gap 2). Pins the geometric schedule, the `max_delay` clamp,
+    // and the two total-function guards against degenerate policies.
+    //
+    // The struct's fields are `pub`, so each scenario constructs the exact
+    // policy that drives a specific guard branch. NOTE on the second guard
+    // (`if !clamped.is_finite() || clamped < 0.0`): once the FIRST guard has
+    // returned for every non-finite / negative `factor`, `clamped` is provably
+    // in `[+0.0, max_secs]` (finite, non-negative) on every path that reaches
+    // it, so the `||` → `&&` mutation on that line is a genuine EQUIVALENT
+    // mutant (both operands are always false there). It cannot be excluded via
+    // `.cargo/mutants.toml` `exclude_re` because it shares its description
+    // ("replace || with && in RunRetryPolicy::backoff_window") with the FIRST
+    // guard's `||` (line 584), which IS killable (see `neg_factor` below); a
+    // regex exclusion would mask the real signal. The other four mutations on
+    // that line (delete-!, `< == > <=`) DO flip the guard to fire and are
+    // killed below.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn backoff_window_pins_schedule_clamp_and_degenerate_policies() {
+        let default = RunRetryPolicy::default();
+        // Geometric schedule `50 * 2^attempts`, clamped to `max_delay` (200ms).
+        // attempts=0 → 50ms exercises the happy path through BOTH guards
+        // (factor=1 finite & positive, clamped=0.05 finite & positive) — kills
+        // the delete-! / `< -> >` mutations on both guard lines (each would
+        // return `max_delay` here) plus the `< -> >` on L593.
+        assert_eq!(default.backoff_window(0), Duration::from_millis(50));
+        // attempts=1 → 100ms pins the `initial * factor` arithmetic: `* -> +`
+        // yields 0.05+2.0=2.05 → clamped 200ms; `* -> /` yields 0.025 → 25ms.
+        assert_eq!(default.backoff_window(1), Duration::from_millis(100));
+        // attempts=2 → exactly the clamp boundary; attempts=10 → far past it.
+        assert_eq!(default.backoff_window(2), Duration::from_millis(200));
+        assert_eq!(default.backoff_window(10), Duration::from_millis(200));
+
+        // factor == 0.0 (finite, non-negative, at the `< 0.0` boundary): the
+        // window collapses to ZERO. Kills the `< -> ==` and `< -> <=` mutations
+        // on BOTH guard lines — each would treat the exact zero as "negative"
+        // and wrongly return `max_delay` instead of ZERO.
+        let zero_factor = RunRetryPolicy {
+            initial_delay: Duration::from_millis(50),
+            exponentiation_factor: 0.0,
+            max_delay: Duration::from_millis(200),
+            max_attempts: 3,
+            max_duration: Duration::MAX,
+        };
+        assert_eq!(zero_factor.backoff_window(1), Duration::ZERO);
+
+        // Finite NEGATIVE factor `(-2)^3 = -8`: the FIRST guard (L584) must
+        // catch it and return `max_delay`. With `initial_delay == 0` the scaled
+        // product is `-0.0`, which slips past the SECOND guard's `< 0.0`
+        // (`-0.0 < 0.0` is false) and `try_from_secs_f64(-0.0) == Ok(ZERO)`
+        // (std checks `secs < 0.0`, not the sign bit). So ONLY the first guard
+        // returning `max_delay` yields 200ms — the `|| -> &&` mutation on L584
+        // would continue and produce ZERO.
+        let neg_factor = RunRetryPolicy {
+            initial_delay: Duration::ZERO,
+            exponentiation_factor: -2.0,
+            max_delay: Duration::from_millis(200),
+            max_attempts: 3,
+            max_duration: Duration::MAX,
+        };
+        assert_eq!(neg_factor.backoff_window(3), Duration::from_millis(200));
+    }
+
+    /// `StepError::detail` returns the human detail of WHICHEVER arm it holds —
+    /// the `Retryable` arm's own detail and the `Terminal` arm's delegated
+    /// `TerminalError::detail`. Kills the whole-body `-> ""` / `-> "xyzzy"`
+    /// replacements (both arms return the real detail, not a constant).
+    #[test]
+    fn step_error_detail_returns_each_arm_detail() {
+        assert_eq!(StepError::retryable("transient-boom").detail(), "transient-boom");
+        assert_eq!(StepError::terminal(TerminalError::explicit("hard-stop")).detail(), "hard-stop",);
+    }
+
+    /// A `JournalCursor` whose `emit_action` FAILS — every other op mirrors the
+    /// always-live no-op defaults. Used to make `WorkflowCtx::emit_action`'s
+    /// journal delegation observable: the original projects the cursor failure
+    /// to a `TerminalError`, the `-> Ok(())` mutation skips the journal and
+    /// reports a spurious success.
+    struct EmitFailsCursor;
+
+    #[async_trait]
+    impl JournalCursor for EmitFailsCursor {
+        async fn replay_run(&self, _name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError> {
+            Ok(None)
+        }
+        async fn record_run(
+            &self,
+            _name: &str,
+            _result_bytes: &[u8],
+        ) -> Result<(), WorkflowCtxError> {
+            Ok(())
+        }
+        async fn replay_sleep(&self) -> Result<Option<Duration>, WorkflowCtxError> {
+            Ok(None)
+        }
+        async fn record_sleep_armed(
+            &self,
+            _deadline_unix: Duration,
+        ) -> Result<(), WorkflowCtxError> {
+            Ok(())
+        }
+        async fn replay_signal(
+            &self,
+            _signal_key: &SignalKey,
+        ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+            Ok(None)
+        }
+        async fn record_signal_awaited(
+            &self,
+            _signal_key: &SignalKey,
+        ) -> Result<(), WorkflowCtxError> {
+            Ok(())
+        }
+        async fn poll_signal(
+            &self,
+            _signal_key: &SignalKey,
+        ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+            Ok(Some(SignalValue::empty()))
+        }
+        async fn record_signal_seen(
+            &self,
+            _signal_key: &SignalKey,
+            _value: &SignalValue,
+        ) -> Result<(), WorkflowCtxError> {
+            Ok(())
+        }
+        async fn replay_emit(&self) -> Result<bool, WorkflowCtxError> {
+            Ok(false)
+        }
+        async fn emit_action(&self, _action: Action) -> Result<(), WorkflowCtxError> {
+            Err(WorkflowCtxError::ActionChannel { message: "channel closed".to_string() })
+        }
+    }
+
+    // Same-crate port doubles for the transient-slot + emit tests. These
+    // CANNOT use `overdrive-sim`'s `Sim*` adapters: an in-crate `#[cfg(test)]`
+    // module sees the port traits as `crate::traits::*`, while `overdrive-sim`
+    // implements them against the *external* `overdrive_core` crate view — two
+    // distinct trait identities in the dependency graph, so the `Arc<dyn _>`
+    // coercion fails to compile. The acceptance suite (a separate integration
+    // crate) sees a single `overdrive_core` and can use `Sim*`; in-crate unit
+    // tests must supply their own impls. Every method is `unreachable!()` — the
+    // transient-slot logic and `emit_action`'s journal delegation never touch
+    // clock / transport / entropy.
+
+    struct UnusedClock;
+    #[async_trait]
+    impl Clock for UnusedClock {
+        fn now(&self) -> Instant {
+            unreachable!("clock is not exercised by the transient-slot / emit tests")
+        }
+        fn unix_now(&self) -> Duration {
+            unreachable!("clock is not exercised by the transient-slot / emit tests")
+        }
+        async fn sleep(&self, _duration: Duration) {
+            unreachable!("clock is not exercised by the transient-slot / emit tests")
+        }
+    }
+
+    struct UnusedEntropy;
+    impl Entropy for UnusedEntropy {
+        fn u64(&self) -> u64 {
+            unreachable!("entropy is not exercised by the transient-slot / emit tests")
+        }
+        fn fill(&self, _buf: &mut [u8]) {
+            unreachable!("entropy is not exercised by the transient-slot / emit tests")
+        }
+    }
+
+    struct UnusedTransport;
+    #[async_trait]
+    impl Transport for UnusedTransport {
+        async fn connect(&self, _addr: SocketAddr) -> Result<Box<dyn Connection>, TransportError> {
+            unreachable!("transport is not exercised by the transient-slot / emit tests")
+        }
+        async fn send_datagram(
+            &self,
+            _addr: SocketAddr,
+            _payload: Bytes,
+        ) -> Result<usize, TransportError> {
+            unreachable!("transport is not exercised by the transient-slot / emit tests")
+        }
+    }
+
+    /// Build a `WorkflowCtx` over inert port doubles + the supplied journal
+    /// cursor. The clock/transport/entropy are unused by the transient-slot +
+    /// emit tests but are mandatory constructor args (no builder, no
+    /// defaulting per `development.md` § "Port-trait dependencies").
+    fn test_ctx(journal: Arc<dyn JournalCursor>) -> WorkflowCtx {
+        let clock: Arc<dyn Clock> = Arc::new(UnusedClock);
+        let transport: Arc<dyn Transport> = Arc::new(UnusedTransport);
+        let entropy: Arc<dyn Entropy> = Arc::new(UnusedEntropy);
+        WorkflowCtx::new(clock, transport, entropy, journal)
+    }
+
+    /// `AlwaysLiveCursor` (the non-durable core-test handle) resolves every
+    /// replay surface to the LIVE-path default: `replay_run`/`replay_signal`
+    /// find no recorded command (`None`/`false`, so the live path fires), and
+    /// `poll_signal` resolves immediately to the empty value (present, no
+    /// payload) so a signalless execution never blocks. Kills the
+    /// `replay_run -> Ok(Some(..))`, `poll_signal -> Ok(None)`, and
+    /// `replay_emit -> Ok(true)` mutations.
+    #[tokio::test]
+    async fn always_live_cursor_resolves_replay_ops_to_live_defaults() {
+        let cursor = AlwaysLiveCursor;
+        assert_eq!(
+            cursor.replay_run("any-step").await.expect("replay_run"),
+            None,
+            "no recorded run command → None, so ctx.run polls the live future",
+        );
+        let key = SignalKey::new("sig-key").expect("valid signal key");
+        assert_eq!(
+            cursor.poll_signal(&key).await.expect("poll_signal"),
+            Some(SignalValue::empty()),
+            "a signalless always-live execution resolves to the empty value, not None",
+        );
+        assert!(
+            !cursor.replay_emit().await.expect("replay_emit"),
+            "no recorded ActionEmitted → false, so the live path sends + records",
+        );
+    }
+
+    /// The transient-step carrier (ADR-0065 §4): `record_transient_step` stores
+    /// the first transient, `has_transient_step` PEEKS without clearing, and
+    /// `take_transient_step` returns it and CLEARS the slot. Kills the
+    /// `record -> ()` no-op, `has_transient_step -> false`, and
+    /// `take_transient_step -> None` mutations together.
+    #[tokio::test]
+    async fn workflow_ctx_transient_step_records_peeks_and_takes() {
+        let ctx = test_ctx(Arc::new(AlwaysLiveCursor));
+        assert!(!ctx.has_transient_step(), "a fresh ctx holds no transient");
+        assert!(ctx.take_transient_step().is_none(), "nothing to take on a fresh ctx");
+
+        ctx.record_transient_step(WorkflowCtxError::TransientStep {
+            name: "register".to_string(),
+            detail: "remote 503".to_string(),
+            policy: RunRetryPolicy::default(),
+        });
+
+        // Peek sees the recorded transient and does NOT clear it.
+        assert!(ctx.has_transient_step(), "the recorded transient is visible to a peek");
+        assert!(ctx.has_transient_step(), "a peek does not clear the slot");
+
+        // Take returns the recorded transient and clears the slot.
+        let taken = ctx.take_transient_step().expect("the recorded transient is taken");
+        assert!(
+            matches!(taken, WorkflowCtxError::TransientStep { ref name, .. } if name == "register"),
+            "the taken value is the recorded transient",
+        );
+        assert!(!ctx.has_transient_step(), "take cleared the slot");
+        assert!(ctx.take_transient_step().is_none(), "a second take finds nothing");
+    }
+
+    /// `WorkflowCtx::emit_action` delegates to the journal cursor and projects
+    /// an infra failure to a `TerminalError` (ADR-0065 §4 Model Z). With a
+    /// cursor whose `emit_action` fails, the original returns an `Explicit`
+    /// terminal; the `-> Ok(())` mutation would skip the journal and report a
+    /// spurious success.
+    #[tokio::test]
+    async fn emit_action_projects_journal_failure_to_terminal() {
+        let ctx = test_ctx(Arc::new(EmitFailsCursor));
+        let err = ctx
+            .emit_action(Action::Noop)
+            .await
+            .expect_err("a failing journal emit must surface, not report success");
+        assert_eq!(
+            err.kind(),
+            TerminalErrorKind::Explicit,
+            "an emit-channel failure projects to an Explicit terminal at the ctx-op boundary",
+        );
     }
 }
