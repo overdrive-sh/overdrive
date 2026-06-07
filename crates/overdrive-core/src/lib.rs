@@ -44,6 +44,11 @@ pub mod aggregate;
 // dst-lint-clean: speaks project newtypes / enums, never `rcgen`. The `Ca`
 // port trait + host/sim adapters + root-key envelope land in later slices.
 pub mod ca;
+/// `ClaimSet<K>` — atomic claim primitive that makes the check-and-act
+/// (TOCTOU) split unrepresentable. Reusable concurrency helper; peer of
+/// [`race_once_cell`]. See `.claude/rules/development.md` § "Check-and-act
+/// must be atomic (no TOCTOU)".
+pub mod claim_set;
 // `api::submit` — wire-shape `SubmitSpecInput` enum + per-kind payloads
 // per ADR-0051 (Accepted 2026-05-15). The wire-side member of the
 // three-layer Rust type universe (parser-side `WorkloadSpec` / wire-side
@@ -82,6 +87,11 @@ pub mod maglev;
 // `ProbeResultRow` observation row + envelope per ADR-0054 §5.
 // Lands GREEN in slice 01.
 pub mod observation;
+/// `RaceOnceCell<T>` — write-once cell that surfaces the lost-race verdict
+/// instead of discarding it. Reusable concurrency helper; peer of
+/// [`claim_set`]. See `.claude/rules/development.md` § "Check-and-act must
+/// be atomic (no TOCTOU)".
+pub mod race_once_cell;
 pub mod reconcilers;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ServiceFailureReason`, `ProbeWitness`, `ServiceLifecycleState`,

@@ -1035,15 +1035,20 @@ earlier check is a stale snapshot by the time you act on it.
    operation is the atomic claim-and-act, and the split is
    unrepresentable — the bug cannot be written. This is the
    `make-invalid-states-unrepresentable` lever (§ "Type-driven
-   design"). Codebase precedent: **`ClaimSet<K>`**
-   (`crates/overdrive-control-plane/src/claim_set.rs`) exposes only
-   `try_claim(k) -> Option<ClaimGuard>` (RAII release) and `snapshot()`
-   — no `contains`, no bare `insert`, no `remove`. Its `try_claim`
-   return is `#[must_use]`, so the *next* misuse (dropping the guard,
-   which instantly releases the claim) is itself a compile-time lint.
-   The built-in-ca lost-race fix extracted the same shape as a
-   `set_or_verify_winner` helper (a `RaceOnceCell` is the unwritten
-   peer for the CA `OnceLock`s).
+   design"). Two reusable primitives live in `overdrive-core` for this:
+   - **`ClaimSet<K>`** (`crates/overdrive-core/src/claim_set.rs`)
+     exposes only `try_claim(k) -> Option<ClaimGuard>` (RAII release)
+     and `snapshot()` — no `contains`, no bare `insert`, no `remove`.
+     Its `try_claim` return is `#[must_use]`, so the *next* misuse
+     (dropping the guard, which instantly releases the claim) is itself
+     a compile-time lint.
+   - **`RaceOnceCell<T>`** (`crates/overdrive-core/src/race_once_cell.rs`)
+     wraps a `OnceLock` so the lost-race verdict is consumed, not
+     discarded: `set_or_read_winner` (any winner is read back — the one
+     sanctioned discard, behind a named contract) and `set_or_verify`
+     (a divergent winner returns `SetOutcome::Conflict`). The built-in-ca
+     lost-race fix's `set_or_verify_winner` helper was promoted into it;
+     `RcgenCa` now holds its root/intermediate anchors in `RaceOnceCell`s.
 2. **Use the atomic return in place.** Where a typed primitive is
    overkill, branch on the mutation's own return: `if !set.insert(k) {
    return … }`, `match cell.set(v) { Err(_) => verify_winner(…) }`,
@@ -1083,7 +1088,8 @@ earlier check is a stale snapshot by the time you act on it.
 - **`ade22762`** (built-in-ca) — `adopt_persisted_root` discarded
   `OnceLock::set`'s `Err` on a lost race; the lock ended up holding an
   ephemeral anchor and every subsequent issuance signed under the wrong
-  key, orphaning pinned certs. Fixed with `set_or_verify_winner`.
+  key, orphaning pinned certs. Fixed with `set_or_verify_winner`, since
+  promoted into the `RaceOnceCell<T>` primitive above.
 - **`31265d4b` / ADR-0061** (veth) — `if exists() { adopt-and-skip }`,
   the filesystem/kernel TOCTOU; remedy lives in `reconcilers.md`
   (converge-on-boot).

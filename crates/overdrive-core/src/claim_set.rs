@@ -20,7 +20,7 @@
 //! See `.claude/rules/development.md` § "Check-and-act must be atomic (no
 //! TOCTOU)" for the discipline this primitive embodies, and the precedent it
 //! retires (`WorkflowEngine::start`'s discarded-`insert` concurrent-start
-//! hole, commit `6b9bafde`).
+//! hole, commit `6b9bafde`). Peer primitive: [`crate::race_once_cell`].
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ use parking_lot::Mutex;
 /// [`ClaimGuard`]'s `Drop` is sync.
 ///
 /// ```
-/// use overdrive_control_plane::claim_set::ClaimSet;
+/// use overdrive_core::claim_set::ClaimSet;
 ///
 /// let claims: ClaimSet<u32> = ClaimSet::new();
 ///

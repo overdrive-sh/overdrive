@@ -1926,6 +1926,7 @@ dependencies = [
  "hex",
  "overdrive-core",
  "overdrive-sim",
+ "parking_lot",
  "proptest",
  "rkyv",
  "rstest",

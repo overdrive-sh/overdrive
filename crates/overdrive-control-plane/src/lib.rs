@@ -54,10 +54,6 @@ pub mod ca_boot;
 pub mod ca_issuance;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
-/// `ClaimSet<K>` — atomic claim primitive that makes the check-and-act
-/// (TOCTOU) split unrepresentable (`.claude/rules/development.md`
-/// § "Check-and-act must be atomic"). Backs the engine's live-instance set.
-pub mod claim_set;
 // backend-discovery-bridge-service-reachability step 02-01 —
 // `[dataplane]` config section parser per architecture.md § 5.1.
 // Section presence + the two required interface bindings; refusal

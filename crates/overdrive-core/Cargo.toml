@@ -76,6 +76,15 @@ tracing.workspace = true
 # parser and is NOT on the dst-lint banned-API list.
 toml.workspace = true
 
+# Sync primitive backing the reusable `ClaimSet<K>` concurrency helper
+# (`crate::claim_set`). `parking_lot::Mutex` is a pure, deterministic
+# in-process lock — no clock, entropy, network, or async runtime — so it
+# is NOT on the dst-lint banned-API list, and its uncontended-fast /
+# no-poison shape is the project default (`.claude/rules/development.md`
+# § "Concurrency & async"). `RaceOnceCell` (`crate::race_once_cell`) is
+# pure `std::sync::OnceLock` and needs no extra dep.
+parking_lot.workspace = true
+
 [features]
 # `test-utils` — TEST-ONLY feature. Exposes
 # `overdrive_core::testing::observation_store::run_lww_conformance`, the

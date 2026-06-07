@@ -79,7 +79,8 @@ use overdrive_core::workflow::{
     WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
-use crate::claim_set::ClaimSet;
+use overdrive_core::claim_set::ClaimSet;
+
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
 
 /// The sender half of the engine's **Action channel** — the channel whose
@@ -221,7 +222,7 @@ pub struct WorkflowEngine {
     /// the concurrent-start guard), holds the returned [`ClaimGuard`] for the
     /// drive, and the guard's `Drop` releases on terminal or unwind. There is
     /// no `contains` / bare `insert` surface to split into a TOCTOU. The
-    /// guard type is [`ClaimGuard`](crate::claim_set::ClaimGuard). The
+    /// guard type is [`ClaimGuard`](overdrive_core::claim_set::ClaimGuard). The
     /// snapshot the reconciler reads for `has_live_task` comes from
     /// [`live_instances`](Self::live_instances), which delegates to
     /// `ClaimSet::snapshot`.
