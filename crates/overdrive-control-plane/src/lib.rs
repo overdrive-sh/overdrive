@@ -68,6 +68,13 @@ pub mod handlers;
 // `Ipv4Addr` through `AppState.host_ipv4` to the
 // `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
 pub mod iface;
+// workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
+// CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +
+// `WorkflowId` for the §18 workflow await-point journal (ADR-0066). A
+// second redb table layout on the shared runtime substrate, distinct from
+// `view_store`. Real `RedbJournalStore` adapter lands 01-04; engine wiring
+// 01-05.
+pub mod journal;
 // reconciler-listener-fact-view step 01-01 — in-memory listener-fact
 // projection (ADR-0062) replacing the `ServiceMapHydrator`'s O(S²)
 // per-tick cluster scan with an O(1) keyed read off a maintained view.
@@ -103,6 +110,12 @@ pub mod veth_provisioner;
 pub mod view_store;
 pub mod vip_allocator_config;
 pub mod worker;
+// `workflow_runtime` — the durable-async `WorkflowEngine` (ADR-0064 §1,
+// §3, §5). Drives author `async fn run` futures off the action-shim with
+// crash-safe journal-cursor replay. The `Workflow` trait + `WorkflowCtx`
+// it drives live in `overdrive-core::workflow`; this is the tokio-holding
+// executor that core's trait declaration delegates to.
+pub mod workflow_runtime;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -251,6 +264,21 @@ pub struct AppState {
     /// in 01-04) is removed in the same commit per
     /// `feedback_single_cut_greenfield_migrations.md`.
     pub host_ipv4: std::net::Ipv4Addr,
+    /// The durable-async workflow executor (ADR-0064 §1, §5). The
+    /// reconciler-runtime's action-shim dispatch hands every committed
+    /// `Action::StartWorkflow` to this engine off the shim — exactly as
+    /// `Action::StartAllocation` → `Driver::start`. The engine is composed
+    /// at boot over the real `RedbJournalStore` + injected ports + the
+    /// `ObservationStore`; the workflow-lifecycle reconciler's
+    /// `hydrate_actual` reads its live-task set
+    /// ([`workflow_runtime::WorkflowEngine::live_instances`]) to mark an
+    /// instance running.
+    ///
+    /// Mandatory at construction per `.claude/rules/development.md`
+    /// § "Port-trait dependencies" — there is no `Option`/`None` shim
+    /// (the 01-05/01-06 `dispatch(... None)` placeholder is gone). Tests
+    /// inject an engine over `Sim*` ports.
+    pub workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -286,6 +314,46 @@ pub fn test_default_allocator(
 #[must_use]
 pub fn test_empty_listener_facts() -> Arc<tokio::sync::Mutex<listener_facts::ListenerFactStore>> {
     Arc::new(tokio::sync::Mutex::new(listener_facts::ListenerFactStore::new()))
+}
+
+/// Test-only helper: build a default [`workflow_runtime::WorkflowEngine`]
+/// for the `AppState` shape (ADR-0064 §5). Wires an empty
+/// [`workflow_runtime::WorkflowRegistry`] over an in-memory
+/// `RedbJournalStore`, host `TcpTransport` / `OsEntropy`, and the
+/// supplied `clock` + `obs`.
+///
+/// Used by the broad fixture surface that constructs `AppState` but does
+/// NOT exercise the workflow primitive — an empty registry means a
+/// committed `StartWorkflow` would surface
+/// `WorkflowEngineError::UnknownWorkflow`, but those fixtures never emit
+/// one. Fixtures that DO drive a workflow end-to-end (the step-01-08 e2e)
+/// build their own engine inline with the `ProvisionRecord` factory
+/// registered + a real on-disk journal. Production callers go through the
+/// real engine composition in `run_server_with_obs_and_driver`.
+///
+/// The journal uses redb's in-memory backend so the helper needs no
+/// tempdir and leaves no on-disk residue — correct for a non-durable
+/// fixture default (the durable path is exercised by the e2e + the
+/// `RedbJournalStore` integration test).
+#[must_use]
+pub fn test_default_workflow_engine(
+    obs: Arc<dyn ObservationStore>,
+    clock: Arc<dyn Clock>,
+) -> Arc<workflow_runtime::WorkflowEngine> {
+    #[allow(clippy::expect_used)]
+    let db = redb::Database::builder()
+        .create_with_backend(redb::backends::InMemoryBackend::new())
+        .expect("in-memory redb journal for test engine");
+    let journal: Arc<dyn journal::JournalStore> =
+        Arc::new(journal::RedbJournalStore::new(Arc::new(db)));
+    Arc::new(workflow_runtime::WorkflowEngine::new(
+        journal,
+        clock,
+        Arc::new(overdrive_host::TcpTransport::default()),
+        Arc::new(overdrive_host::OsEntropy),
+        workflow_runtime::WorkflowRegistry::new(),
+        obs,
+    ))
 }
 
 /// Default capacity for the lifecycle-event broadcast channel.
@@ -342,6 +410,60 @@ impl AppState {
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
         host_ipv4: std::net::Ipv4Addr,
     ) -> Self {
+        // Default-compose a `WorkflowEngine` with an EMPTY registry over an
+        // in-memory journal (ADR-0064 §5). `new` is the broad fixture
+        // convenience constructor: the vast majority of `AppState` callers
+        // do not exercise the workflow primitive, so an empty-registry
+        // engine is the correct default (a committed `StartWorkflow` for an
+        // unregistered kind surfaces `WorkflowEngineError::UnknownWorkflow`,
+        // but those callers never emit one). The PRODUCTION boot path and
+        // the workflow end-to-end test use [`Self::new_with_workflow_engine`]
+        // to inject the real engine (real on-disk journal + registered
+        // workflows). This keeps the engine field mandatory (no `Option`
+        // shim) while the convenience constructor stays
+        // ripple-free for the fixture surface.
+        let workflow_engine = test_default_workflow_engine(Arc::clone(&obs), Arc::clone(&clock));
+        Self::new_with_workflow_engine(
+            store,
+            intent_redb_path,
+            obs,
+            runtime,
+            driver,
+            clock,
+            dataplane,
+            node_id,
+            allocator,
+            listener_facts,
+            host_ipv4,
+            workflow_engine,
+        )
+    }
+
+    /// The full constructor that injects the [`workflow_runtime::WorkflowEngine`]
+    /// explicitly (ADR-0064 §5). The production boot path and the
+    /// end-to-end composition test use this so the real engine (on-disk
+    /// journal + registered workflows) is threaded into `AppState`; the
+    /// convenience [`Self::new`] default-composes an empty-registry engine
+    /// for the broad fixture surface.
+    #[must_use]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Every port-trait dependency plus the workflow engine is required at construction per .claude/rules/development.md § Port-trait dependencies; bundling into a builder would make individual deps optional."
+    )]
+    pub fn new_with_workflow_engine(
+        store: Arc<LocalIntentStore>,
+        intent_redb_path: PathBuf,
+        obs: Arc<dyn ObservationStore>,
+        runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+        driver: Arc<dyn Driver>,
+        clock: Arc<dyn Clock>,
+        dataplane: Arc<dyn Dataplane>,
+        node_id: NodeId,
+        allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+        listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
+        host_ipv4: std::net::Ipv4Addr,
+        workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
+    ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
             store,
@@ -357,6 +479,7 @@ impl AppState {
             allocator,
             listener_facts,
             host_ipv4,
+            workflow_engine,
         }
     }
 }
@@ -647,6 +770,14 @@ pub struct ServerHandle {
     /// Without this, `await exit_observer_task` would block
     /// indefinitely on `rx.recv()`. With it, shutdown is bounded.
     exit_observer_task: tokio::task::JoinHandle<()>,
+    /// `JoinHandle` for the workflow emit-drain task — the production
+    /// consumer of the [`workflow_runtime::WorkflowEngine`]'s Action
+    /// channel. It takes the channel receiver once at boot and forwards
+    /// every `ctx.emit_action`'d [`Action`](overdrive_core::reconcilers::Action)
+    /// into [`action_shim::dispatch_with_workflow_intent`] (→ Raft). Per
+    /// ADR-0064 §4 / brief.md §92; spawned in
+    /// [`run_server_with_obs_and_driver`].
+    emit_drain_task: tokio::task::JoinHandle<()>,
     /// Token observed by the convergence-tick spawn loop. Cancelled
     /// in [`Self::shutdown`] BEFORE axum graceful so reconciler tasks
     /// holding `Arc<dyn Driver>` references stop driving the driver
@@ -658,6 +789,12 @@ pub struct ServerHandle {
     /// driven by an in-flight `Driver::stop` lands in obs before the
     /// observer is told to exit.
     exit_observer_shutdown: CancellationToken,
+    /// Token observed by the workflow emit-drain task's `tokio::select!`
+    /// loop. Cancelled in [`Self::shutdown`] alongside the convergence
+    /// loop — the drain task holds an `AppState` clone (and through it
+    /// `Arc<dyn Driver>` references), so it must stop dispatching emitted
+    /// Actions before axum tears down `AppState`.
+    emit_drain_shutdown: CancellationToken,
 }
 
 impl ServerHandle {
@@ -691,6 +828,15 @@ impl ServerHandle {
         //    `action_shim::dispatch`.
         self.convergence_shutdown.cancel();
         let _ = self.convergence_task.await;
+
+        // 1b. Cancel the workflow emit-drain loop and await its
+        //     completion. It holds an `AppState` clone (and through it
+        //     `Arc<dyn Driver>` references), so — like the convergence
+        //     loop — it must stop dispatching emitted Actions before axum
+        //     tears down `AppState`. The join waits for any in-flight
+        //     dispatch of an emitted Action to finish through the shim.
+        self.emit_drain_shutdown.cancel();
+        let _ = self.emit_drain_task.await;
 
         // 2. Trigger axum graceful shutdown. In-flight requests
         //    complete within `drain_deadline`; new connections are
@@ -1093,6 +1239,12 @@ pub async fn run_server_with_obs_and_driver(
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
     runtime.register(workload_lifecycle()).await?;
+    // ADR-0064 §5 — the pure-sync workflow-lifecycle reconciler. Re-emits
+    // `Action::StartWorkflow` for a running-in-intent instance with no live
+    // engine task on restart; the engine (wired into dispatch below)
+    // drives `run` off the shim. `ReconcilerIsPure` holds with it
+    // registered (the reconcile body holds no `.await`).
+    runtime.register(workflow_lifecycle()).await?;
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -1352,7 +1504,38 @@ pub async fn run_server_with_obs_and_driver(
             })?,
     ));
 
-    let state: AppState = AppState::new(
+    // ADR-0064 §5 — compose the durable-async WorkflowEngine into the
+    // production AppState. The engine is built over the real
+    // `RedbJournalStore` (one redb file per node at
+    // `<data_dir>/workflow-journal.redb`, K5) + the injected `Clock`
+    // (same one the convergence loop uses) + host `TcpTransport` /
+    // `OsEntropy` for the workflow `ctx.call` / RNG await-surfaces +
+    // the `ObservationStore` the engine writes terminal rows to.
+    //
+    // Phase 1 has no first-party production workflows (#206 CLI verb +
+    // Phase-3 consumers are the future producers), so the registry is
+    // empty: a committed `StartWorkflow` for an unregistered kind would
+    // surface `WorkflowEngineError::UnknownWorkflow` rather than silently
+    // no-op. The composition itself is what 01-08 makes real — the
+    // engine is now reachable in the production binary, replacing the
+    // 01-05/01-06 `dispatch(... None)` placeholder.
+    let journal_path = config.data_dir.join("workflow-journal.redb");
+    let journal_db = Arc::new(
+        redb::Database::create(&journal_path)
+            .map_err(|e| error::ControlPlaneError::internal("create workflow-journal redb", e))?,
+    );
+    let journal: Arc<dyn journal::JournalStore> =
+        Arc::new(journal::RedbJournalStore::new(journal_db));
+    let workflow_engine = Arc::new(workflow_runtime::WorkflowEngine::new(
+        journal,
+        config.clock.clone(),
+        Arc::new(overdrive_host::TcpTransport::default()),
+        Arc::new(overdrive_host::OsEntropy),
+        workflow_runtime::WorkflowRegistry::new(),
+        Arc::clone(&obs),
+    ));
+
+    let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
         obs,
@@ -1364,6 +1547,7 @@ pub async fn run_server_with_obs_and_driver(
         allocator,
         listener_facts,
         host_ipv4,
+        workflow_engine,
     );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
@@ -1407,6 +1591,21 @@ pub async fn run_server_with_obs_and_driver(
         config.tick_cadence,
         convergence_shutdown.clone(),
     );
+
+    // Spawn the workflow emit-drain task (ADR-0064 §4; brief.md §92).
+    // This is the production CONSUMER of the engine's Action channel —
+    // it takes the receiver once and forwards every `ctx.emit_action`'d
+    // Action into the SAME `action_shim::dispatch_with_workflow_intent`
+    // path a reconciler-emitted Action takes (→ Raft). Without this spawn,
+    // an emitted Action would be undrained in production — sent on the
+    // engine's channel but never reaching the commit path (the gap step
+    // 03-03 closes). Phase 1 has no first-party emit producer (#206 CLI
+    // verb + Phase-3 consumers are the future producers), so the drain is
+    // idle until an emitting workflow runs; the wiring is what makes the
+    // emit path complete end-to-end.
+    let emit_drain_shutdown = CancellationToken::new();
+    let emit_drain_task =
+        spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
@@ -1459,8 +1658,10 @@ pub async fn run_server_with_obs_and_driver(
         server_task,
         convergence_task,
         exit_observer_task,
+        emit_drain_task,
         convergence_shutdown,
         exit_observer_shutdown,
+        emit_drain_shutdown,
     })
 }
 
@@ -1545,6 +1746,100 @@ fn spawn_convergence_loop(
     })
 }
 
+/// Spawn the workflow emit-drain task — the production consumer of the
+/// [`WorkflowEngine`]'s Action channel (ADR-0064 §4; brief.md §92).
+///
+/// Step 03-01 built `ctx.emit_action` so an emitting workflow SENDS its
+/// typed [`Action`] on the engine-owned Action channel, but the channel
+/// receiver was never taken in production — so an emitted Action was
+/// undrained, never reaching the action-shim/Raft commit path. This task
+/// closes that gap: it takes the receiver ONCE (single-shot per
+/// [`WorkflowEngine::take_action_emit_receiver`]) and, for each emitted
+/// [`Action`], forwards it into the SAME production dispatch path a
+/// reconciler-emitted Action takes —
+/// [`action_shim::dispatch_with_workflow_intent`] threaded the real engine
+/// from `state.workflow_engine`. NOT a direct `IntentStore` write, NOT a
+/// parallel undrained channel: the emit reaches Raft through the action
+/// shim exactly as `development.md` § "Workflow contract" rule 6 requires.
+///
+/// The per-Action [`TickContext`] is constructed from the SAME injected
+/// [`Clock`](overdrive_core::traits::clock::Clock) the convergence loop
+/// sources — `state.clock` — never `SystemTime::now()` (dst-lint
+/// enforces). An emitted `StartWorkflow` therefore re-enters the shim's
+/// `StartWorkflow` arm off the engine, an emitted cluster mutation reaches
+/// the same write path, etc. — the emit is a first-class action on the
+/// production commit path.
+///
+/// Cancellation via `shutdown` is observed in `tokio::select!` between
+/// drained items so an in-flight dispatch always completes before exit;
+/// the task also exits when the channel closes (the engine is dropped).
+///
+/// If the receiver was already taken (e.g. a test harness took it first),
+/// the task is a no-op and returns immediately — the single-shot take
+/// yields `None`.
+pub fn spawn_workflow_emit_drain(
+    state: AppState,
+    clock: Arc<dyn overdrive_core::traits::clock::Clock>,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    use overdrive_core::UnixInstant;
+    use overdrive_core::reconcilers::TickContext;
+    tokio::spawn(async move {
+        // Single-shot take of the engine's Action-channel receiver. The
+        // engine owns BOTH halves; this is the production consumer taking
+        // the receiver exactly once at boot.
+        let Some(mut rx) = state.workflow_engine.take_action_emit_receiver().await else {
+            // Already taken (no production producer wired, or a test took
+            // it first). Nothing to drain.
+            return;
+        };
+        let mut tick_n: u64 = 0;
+        loop {
+            tokio::select! {
+                maybe_action = rx.recv() => {
+                    let Some(action) = maybe_action else {
+                        // Channel closed — the engine (and thus every
+                        // sender clone) was dropped. No more emits will
+                        // arrive; exit cleanly.
+                        break;
+                    };
+                    // Build a fresh per-Action TickContext from the injected
+                    // Clock — the same shape `run_convergence_tick` uses, so
+                    // the forwarded Action sees a consistent wall-clock
+                    // snapshot. `now_unix` recomputed each item.
+                    let now = clock.now();
+                    let now_unix = UnixInstant::from_clock(&*clock);
+                    let tick = TickContext {
+                        now,
+                        now_unix,
+                        tick: tick_n,
+                        deadline: now + Duration::from_secs(1),
+                    };
+                    tick_n = tick_n.saturating_add(1);
+                    // Forward the emitted Action into the SAME production
+                    // dispatch path a reconciler-emitted Action takes (→
+                    // Raft). A dispatch error is logged and the drain
+                    // continues — one bad emit must not stall the channel.
+                    if let Err(e) = action_shim::dispatch_with_workflow_intent(
+                        vec![action],
+                        &state,
+                        &tick,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            target: "overdrive::workflow_engine",
+                            ?e,
+                            "workflow emit-drain: dispatch of an emitted Action failed",
+                        );
+                    }
+                }
+                () = shutdown.cancelled() => break,
+            }
+        }
+    })
+}
+
 /// the seed entry for the `AtLeastOneReconcilerRegistered` invariant.
 ///
 /// Returns `AnyReconciler::NoopHeartbeat(NoopHeartbeat)` per the 04-07
@@ -1571,6 +1866,23 @@ pub fn workload_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
     use overdrive_core::reconcilers::{AnyReconciler, WorkloadLifecycle};
 
     AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
+}
+
+/// Construct the `workflow-lifecycle` reconciler per ADR-0064 §5.
+///
+/// The pure-sync reconciler in the two-primitive doctrine: it manages
+/// WHICH workflow instances should exist, re-emitting
+/// `Action::StartWorkflow` for a running-in-intent instance with no live
+/// engine task on restart (US-WP-3 AC4). The engine
+/// ([`workflow_runtime::WorkflowEngine`]) is the async executor driven
+/// off the shim; the reconciler NEVER `.await`s the workflow body
+/// (`ReconcilerIsPure` holds). Registered at boot alongside the other
+/// first-party reconcilers.
+#[must_use]
+pub fn workflow_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, WorkflowLifecycle};
+
+    AnyReconciler::WorkflowLifecycle(WorkflowLifecycle::canonical())
 }
 
 /// Construct the `backend-discovery-bridge` reconciler per

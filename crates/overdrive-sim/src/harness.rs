@@ -401,8 +401,20 @@ impl Harness {
             Invariant::SimObservationLwwConverges => {
                 evaluators::evaluate_sim_observation_lww(cluster).await
             }
-            Invariant::ReplayEquivalentEmptyWorkflow => {
-                evaluators::evaluate_replay_equivalent_empty_workflow(seed)
+            Invariant::ReplayEquivalenceProvisionRecord => {
+                // workflow-primitive step 01-07 — graduates the slice-1
+                // two-SimEntropy-transcripts placeholder into a real
+                // journal replay driving the `WorkflowEngine` +
+                // `SimJournalStore` through the three-run crash-resume
+                // shape (ADR-0064 §3/§6). K4, on the `cargo dst` critical
+                // path.
+                evaluators::evaluate_replay_equivalence_provision_record(seed).await
+            }
+            Invariant::WorkflowJournalWriteOrdering => {
+                evaluators::evaluate_workflow_journal_write_ordering(seed).await
+            }
+            Invariant::WorkflowExactlyOnceEffectOnResume => {
+                evaluators::evaluate_workflow_exactly_once_effect_on_resume(seed).await
             }
             Invariant::EntropyDeterminismUnderReseed => {
                 evaluators::evaluate_entropy_determinism(seed)
@@ -639,6 +651,55 @@ impl Harness {
             // written VIP + backends.
             Invariant::BridgeToHydratorHandoff => {
                 crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff().await
+            }
+            // workflow-result-error-model step 02-01 (ADR-0065 §3, D3) —
+            // GREEN. Drives an always-failing `AlwaysExplicitFailure` workflow
+            // (body returns `Err(TerminalError::explicit)`) through the real
+            // `WorkflowEngine` + `SimJournalStore` and asserts the engine
+            // projects the body's `Err` to `WorkflowStatus::Failed { terminal }`
+            // carrying the authored kind + detail, AND that the SAME status
+            // round-trips byte-equal through BOTH the durable journal
+            // `Terminal { status }` and the observable `WorkflowTerminal {
+            // status }` obs row (D3 lossless projection). Now in
+            // `Invariant::ALL` (wired in `crate::invariants::mod`), so
+            // `cargo dst` dispatches it on every run.
+            Invariant::WorkflowTerminalStatusProjection => {
+                evaluators::evaluate_workflow_terminal_status_projection(seed).await
+            }
+            // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+            // counterpart to NEW-5 (`workflow_budget_exhaustion_mints_terminal`).
+            // Drives an always-transient workflow (a `ctx.run` step
+            // returns `Err(StepError::Retryable)`) through the real
+            // `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
+            // each backoff window via a concurrent ticker so the parked
+            // re-drives fire, and asserts the engine re-drove up to
+            // `WORKFLOW_RETRY_BUDGET` then MINTED `WorkflowStatus::Failed {
+            // terminal: BudgetExhausted }` — the body authored no failure
+            // (D4). Authored GREEN directly (the retry loop landed in 04-01).
+            Invariant::WorkflowBudgetExhaustionMintsTerminal => {
+                evaluators::evaluate_workflow_budget_exhaustion_mints_terminal(seed).await
+            }
+            // workflow-result-error-model ADR-0065 Amendment (2026-06-07)
+            // Gap 1 — the DST counterpart to the step-terminal short-circuit
+            // acceptance. Drives a workflow whose `ctx.run` step resolves to
+            // `Err(StepError::Terminal)` through the real `WorkflowEngine` +
+            // `SimJournalStore` and asserts the engine projects `Failed {
+            // Explicit }` with NO `RetryAttempted` (terminal is never
+            // re-driven). Authored GREEN directly (the `StepError` union's
+            // terminal arm landed in the same diff).
+            Invariant::WorkflowStepTerminalShortCircuits => {
+                evaluators::evaluate_workflow_step_terminal_short_circuits(seed).await
+            }
+            // workflow-result-error-model ADR-0065 Amendment (2026-06-07)
+            // Gap 2 — the DST counterpart to the per-step-policy acceptance.
+            // Drives a workflow whose `ctx.run` step carries a non-default
+            // `RunRetryPolicy` (max_attempts = N ≠ WORKFLOW_RETRY_BUDGET)
+            // through the real `WorkflowEngine` + `SimJournalStore` and asserts
+            // the engine re-drives exactly N times before minting
+            // `BudgetExhausted` (the per-step policy governs), plus a companion
+            // `max_duration` elapsed-window gate. Authored GREEN directly.
+            Invariant::WorkflowPerStepRetryPolicyGovernsRedrive => {
+                evaluators::evaluate_workflow_per_step_retry_policy_governs_redrive(seed).await
             }
         }
     }

@@ -152,6 +152,7 @@ async fn release_action_dispatch_invokes_allocator_release() {
         &writer_node,
         Arc::clone(&allocator),
         &test_broker,
+        None,
     )
     .await
     .expect("dispatch must succeed");

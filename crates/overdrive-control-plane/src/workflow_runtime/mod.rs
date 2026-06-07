@@ -1,0 +1,1984 @@
+//! `WorkflowEngine` — the durable-async executor for the `Workflow`
+//! primitive (ADR-0064 §1, §3, §5).
+//!
+//! The engine is to workflows what `Driver` is to allocations: the async
+//! executor a *pure-sync* reconciler drives **off the action-shim**
+//! (ADR-0023's sanctioned async boundary), NOT a reconciler itself. The
+//! workflow-lifecycle reconciler (lands 01-06) emits
+//! `Action::StartWorkflow`; the action-shim hands the instance to
+//! [`WorkflowEngine::start`], which `load_journal`s, builds a
+//! [`WorkflowCtx`] carrying a durable [`JournalCursor`] handle, and drives
+//! the author's `async fn run` as a tracked `tokio` task. This is the
+//! upheld two-primitive doctrine (R3): the reconciler manages WHICH
+//! instances should exist; the engine manages HOW each instance's steps
+//! execute between start and terminal.
+//!
+//! # The replay cursor (ADR-0064 §3, the command/notification partition)
+//!
+//! On (re)start the engine `load_journal`s the instance's flat ordered
+//! `Vec<LoadedEntry>` and constructs a [`JournalCursorHandle`], which
+//! **partitions it ONCE at construction** (D2 / CA-5) into a positional
+//! command walk (`Vec<JournalCommand>`) plus a `SignalKey`-correlated
+//! notification lookup (`BTreeMap<SignalKey, JournalNotification>`). The
+//! cursor walks the COMMANDS only, advancing by exactly 1 per replayed
+//! command; notifications are resolved off the walk by key and never advance
+//! the cursor. The retired `*cursor += 2` two-positional-entry signal walk is
+//! gone. Each `ctx.run` durable step is check-then-record (the command-index
+//! is the identity):
+//!
+//! - **Replay (command-cursor < command-walk length):** the handle returns
+//!   the recorded CBOR result bytes WITHOUT polling the step's future — the
+//!   exactly-once guarantee on the replay path (K1). The command-cursor
+//!   advances by 1.
+//! - **Live (command-cursor == command-walk length):** the handle returns
+//!   `Ok(None)`; the ctx polls the step's future, then the handle appends a
+//!   [`JournalCommand::RunResult`] (wrapped as a [`LoadedEntry::Command`])
+//!   with fsync BEFORE returning (ADR-0066 §4 fsync-then-suspend) and
+//!   advances the command-cursor by 1.
+//!
+//! A `ctx.wait_for_signal` resolves its `SignalSeen` by `pop_front`ing the
+//! key's per-key FIFO queue in `signal_notifications` — never by position; the
+//! Nth `wait_for_signal(x)` consumes the Nth recorded `SignalSeen{x}`. A
+//! `SignalAwaited` command with no remaining `SignalSeen` notification for the
+//! key (absent key OR drained queue) re-blocks (the "crashed while blocked"
+//! shape, now structural).
+//!
+//! The engine drives the object-safe [`ErasedWorkflow::run_erased`] over
+//! the start intent's opaque `input` bytes (the typed `Workflow` is
+//! erased to it by the [`ErasedWorkflowAdapter`] in the registry). It
+//! classifies the drive's `Result<Vec<u8>, WorkflowDriveError>` (ADR-0065
+//! §3/§4): `Ok(bytes)` → `Completed { output: bytes }`,
+//! `Err(WorkflowDriveError::Terminal)` → `Failed { terminal }`, and
+//! `Err(WorkflowDriveError::Transient)` → the retry-re-drive channel (a
+//! `ctx.run` step failed transiently — the engine ABSORBS it and
+//! re-drives from the journal up to [`WORKFLOW_RETRY_BUDGET`], minting
+//! `Failed { BudgetExhausted }` on exhaustion). A transient NEVER reaches the
+//! body's `Result<Output, TerminalError>` return type (ADR-0065 §2) — the
+//! body's terminal channel is purely terminal. On a real terminal the engine
+//! appends a [`JournalCommand::Terminal`] recording the projected
+//! [`WorkflowStatus`].
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use futures::FutureExt;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
+
+use overdrive_core::id::{ContentHash, CorrelationKey};
+use overdrive_core::reconcilers::Action;
+use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+use overdrive_core::traits::{Clock, Entropy, Transport};
+use overdrive_core::workflow::{
+    AwaitOp, ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, RunRetryPolicy, SignalKey,
+    SignalValue, TerminalError, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowDriveError,
+    WorkflowName, WorkflowStart, WorkflowStatus,
+};
+
+use overdrive_core::claim_set::ClaimSet;
+
+use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
+
+/// The sender half of the engine's **Action channel** — the channel whose
+/// receiver the production `spawn_workflow_emit_drain` task forwards into
+/// the `action_shim` dispatch path (→ Raft commit path), exactly as a
+/// reconciler-emitted Action reaches the shim. A `ctx.emit_action` hands
+/// its typed [`Action`] to this sender (ADR-0064 §4; `development.md`
+/// Workflow contract rule 6 — workflow→cluster mutations go through Raft,
+/// never a direct `IntentStore` write).
+pub type ActionEmitSender = mpsc::UnboundedSender<Action>;
+
+/// The receiver half of the engine's Action channel. In production the
+/// `spawn_workflow_emit_drain` task (the dedicated emit-drain task spawned
+/// in `run_server`) takes this receiver and drains every item into
+/// `action_shim::dispatch_with_workflow_intent`; a test harness may take it
+/// instead. Every item is an [`Action`] a workflow emitted via
+/// `ctx.emit_action`.
+pub type ActionEmitReceiver = mpsc::UnboundedReceiver<Action>;
+
+/// A factory producing a fresh object-safe [`ErasedWorkflow`] on demand.
+/// The engine resolves a [`WorkflowStart`]'s [`WorkflowName`] to one of
+/// these and calls it to obtain a fresh erased instance to drive
+/// (ADR-0065 §1).
+///
+/// The trait object is `ErasedWorkflow` (not [`Workflow`]) because
+/// `Workflow`'s associated `Input` / `Output` make it not object-safe;
+/// [`WorkflowRegistry::register`] wraps the author's TYPED workflow in an
+/// [`ErasedWorkflowAdapter`] internally, so the author never writes the
+/// erasure.
+pub type WorkflowFactory = Box<dyn Fn() -> Box<dyn ErasedWorkflow> + Send + Sync>;
+
+/// Maps a [`WorkflowName`] (the workflow *kind*) to its author-supplied
+/// workflow factory. The composition root registers every first-party
+/// workflow here at boot; the engine looks up `spec.name` on each
+/// `StartWorkflow` and drives the resolved [`ErasedWorkflow`].
+///
+/// `BTreeMap` per `.claude/rules/development.md` § "Ordered-collection
+/// choice" — the registry is small and point-accessed, but keeping it
+/// ordered costs nothing and avoids a `// dst-lint: hashmap-ok` waiver.
+#[derive(Default)]
+pub struct WorkflowRegistry {
+    factories: BTreeMap<WorkflowName, WorkflowFactory>,
+}
+
+impl WorkflowRegistry {
+    /// Construct an empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self { factories: BTreeMap::new() }
+    }
+
+    /// Register a TYPED [`Workflow`] factory under `name`. A later
+    /// `StartWorkflow` carrying a spec with this name drives a fresh
+    /// instance from `factory`. Re-registering the same name replaces the
+    /// prior factory.
+    ///
+    /// The caller hands a `Fn() -> W` for a concrete `W: Workflow`; this
+    /// wraps each produced instance in an [`ErasedWorkflowAdapter`] so the
+    /// engine drives the object-safe [`ErasedWorkflow`] surface (ADR-0065
+    /// §1). The author NEVER writes the erasure — registering a typed
+    /// workflow is the whole contract.
+    pub fn register<W, F>(&mut self, name: WorkflowName, factory: F)
+    where
+        W: Workflow + 'static,
+        F: Fn() -> W + Send + Sync + 'static,
+    {
+        self.factories.insert(name, Box::new(move || Box::new(ErasedWorkflowAdapter(factory()))));
+    }
+
+    /// Resolve a fresh [`ErasedWorkflow`] for `name`, or `None` if
+    /// unregistered.
+    #[must_use]
+    pub fn resolve(&self, name: &WorkflowName) -> Option<Box<dyn ErasedWorkflow>> {
+        self.factories.get(name).map(|factory| factory())
+    }
+}
+
+/// Errors from the workflow engine's start path.
+#[derive(Debug, thiserror::Error)]
+pub enum WorkflowEngineError {
+    /// The `StartWorkflow` spec named a workflow kind not registered in
+    /// the engine's [`WorkflowRegistry`]. The composition root must
+    /// register every first-party workflow at boot.
+    #[error("workflow kind not registered: {name}")]
+    UnknownWorkflow {
+        /// The unregistered workflow name.
+        name: String,
+    },
+
+    /// Loading the instance's journal failed.
+    #[error("load_journal failed: {0}")]
+    LoadJournal(#[from] crate::journal::JournalStoreError),
+}
+
+/// The durable-async executor. Drives author `async fn run` futures as
+/// tracked `tokio` tasks, each consulting a per-instance journal cursor
+/// for crash-safe replay (ADR-0064 §3).
+///
+/// Holds `tokio` (the `JoinSet` task surface) — correctly, because the
+/// engine is `adapter-host`-class control-plane code, NOT `core`. The
+/// `Workflow` trait + `WorkflowCtx` it drives stay in `overdrive-core`
+/// (ADR-0064 §1).
+pub struct WorkflowEngine {
+    journal: Arc<dyn JournalStore>,
+    clock: Arc<dyn Clock>,
+    transport: Arc<dyn Transport>,
+    entropy: Arc<dyn Entropy>,
+    /// The observation store the engine writes the terminal-result row to
+    /// on `run` terminal (ADR-0064 §2). The sanctioned shim
+    /// `ObservationStore::write` path — NOT a direct bypass of the
+    /// channels. Mandatory at construction per
+    /// `.claude/rules/development.md` § "Port-trait dependencies".
+    obs: Arc<dyn ObservationStore>,
+    /// The sender half of the **Action channel** (→ Raft) a workflow's
+    /// `ctx.emit_action` sends on (ADR-0064 §4). Threaded into every
+    /// instance's [`JournalCursorHandle`] so the live emit path hands the
+    /// typed Action to the channel the production `spawn_workflow_emit_drain`
+    /// task forwards into the SAME `action_shim` dispatch path a
+    /// reconciler-emitted Action takes — NOT a direct `IntentStore` write.
+    /// Mandatory at construction per `.claude/rules/development.md`
+    /// § "Port-trait dependencies".
+    action_emit: ActionEmitSender,
+    registry: Arc<WorkflowRegistry>,
+    /// Tracked task set for live instances — the engine owns it the same
+    /// way the reconciler runtime owns its tick task (ADR-0023 §4).
+    tasks: Mutex<JoinSet<()>>,
+    /// The set of instance [`CorrelationKey`]s with a live (running, not
+    /// yet terminal) engine task. Inserted on [`Self::start`], removed by
+    /// the spawned task itself once `run` reaches terminal. This is the
+    /// "engine live-task set" the workflow-lifecycle reconciler's
+    /// `hydrate_actual` reads to populate
+    /// `WorkflowInstanceState::has_live_task` (ADR-0064 §5): a
+    /// running-in-intent instance with no live task and no terminal row
+    /// is the re-emit trigger on restart.
+    ///
+    /// A [`ClaimSet`] so the only reachable operation is an ATOMIC
+    /// claim-and-release: [`start`](Self::start) takes a claim via
+    /// `try_claim` (which returns `None` iff the instance is already live —
+    /// the concurrent-start guard), holds the returned [`ClaimGuard`] for the
+    /// drive, and the guard's `Drop` releases on terminal or unwind. There is
+    /// no `contains` / bare `insert` surface to split into a TOCTOU. The
+    /// guard type is [`ClaimGuard`](overdrive_core::claim_set::ClaimGuard). The
+    /// snapshot the reconciler reads for `has_live_task` comes from
+    /// [`live_instances`](Self::live_instances), which delegates to
+    /// `ClaimSet::snapshot`.
+    live_instances: ClaimSet<CorrelationKey>,
+    /// The receiver half of the Action channel, parked here until a
+    /// consumer takes it via [`Self::take_action_emit_receiver`]. The
+    /// engine owns BOTH halves so [`Self::new`]'s signature stays
+    /// unchanged (the emit channel is an engine-internal wiring detail,
+    /// not a constructor dependency); in production the dedicated
+    /// `spawn_workflow_emit_drain` task takes the receiver once at boot
+    /// and drains emitted Actions into the `action_shim` dispatch path (a
+    /// test harness may take it instead). `Mutex<Option<..>>` so the take
+    /// is `&self` and single-shot.
+    action_emit_rx: Mutex<Option<ActionEmitReceiver>>,
+}
+
+impl WorkflowEngine {
+    /// Construct an engine over the injected journal store + ports +
+    /// workflow registry. Every dependency is mandatory (no builder, no
+    /// defaulting) per `.claude/rules/development.md` § "Port-trait
+    /// dependencies".
+    #[must_use]
+    pub fn new(
+        journal: Arc<dyn JournalStore>,
+        clock: Arc<dyn Clock>,
+        transport: Arc<dyn Transport>,
+        entropy: Arc<dyn Entropy>,
+        registry: WorkflowRegistry,
+        obs: Arc<dyn ObservationStore>,
+    ) -> Self {
+        // The engine owns BOTH halves of the Action channel. The sender is
+        // threaded into every instance's JournalCursorHandle (the live
+        // emit path); the receiver is parked until a consumer takes it via
+        // `take_action_emit_receiver`. An UNBOUNDED channel because the
+        // emit is on the workflow's async task (a bounded send could block
+        // the task across the journal-fsync window); the consumer drains
+        // promptly into the action_shim.
+        let (action_emit, action_emit_rx) = mpsc::unbounded_channel();
+        Self {
+            journal,
+            clock,
+            transport,
+            entropy,
+            obs,
+            action_emit,
+            registry: Arc::new(registry),
+            tasks: Mutex::new(JoinSet::new()),
+            live_instances: ClaimSet::new(),
+            action_emit_rx: Mutex::new(Some(action_emit_rx)),
+        }
+    }
+
+    /// Take the receiver half of the engine's Action channel. Single-shot:
+    /// the first caller receives `Some(receiver)`, subsequent callers
+    /// receive `None`. The consumer drains emitted Actions into the
+    /// `action_shim` dispatch path (→ Raft). In production the consumer is
+    /// the dedicated `spawn_workflow_emit_drain` task spawned in
+    /// `run_server`; a test harness may take it instead. Per ADR-0064 §4
+    /// the drain forwards each emitted Action into the SAME
+    /// `action_shim::dispatch_with_workflow_intent` path a reconciler-emitted
+    /// Action takes; `ctx.emit_action` reuses it rather than bypassing Raft.
+    pub async fn take_action_emit_receiver(&self) -> Option<ActionEmitReceiver> {
+        self.action_emit_rx.lock().await.take()
+    }
+
+    /// Snapshot the set of instance [`CorrelationKey`]s with a live
+    /// (running, not-yet-terminal) engine task. The workflow-lifecycle
+    /// reconciler's `hydrate_actual` reads this to mark
+    /// `WorkflowInstanceState::has_live_task` (ADR-0064 §5).
+    ///
+    /// On a fresh process boot the set is empty — every
+    /// previously-running instance reads as `has_live_task = false`,
+    /// which is exactly the re-emit trigger the lifecycle reconciler
+    /// needs to crash-resume a running-in-intent instance.
+    #[must_use]
+    pub fn live_instances(&self) -> BTreeSet<CorrelationKey> {
+        // Delegates to `ClaimSet::snapshot` — a point-in-time clone of the
+        // held claim keys; no lock is held across an `.await` (the snapshot
+        // is sync and the `ClaimSet` interior is a `parking_lot::Mutex`).
+        self.live_instances.snapshot()
+    }
+
+    /// Start (or resume) the workflow instance `workflow_id` for `spec`,
+    /// off the action-shim (ADR-0064 §5). Resolves `spec.name` to its
+    /// registered [`Workflow`], `load_journal`s the instance's run (empty
+    /// on first start; populated on resume), builds a [`WorkflowCtx`]
+    /// carrying a durable [`JournalCursorHandle`], and spawns `run(&ctx)`
+    /// as a tracked task.
+    ///
+    /// Returns once the task is *spawned* (the async body runs
+    /// concurrently); callers awaiting completion use [`join_all`](Self::join_all).
+    ///
+    /// # Errors
+    ///
+    /// - [`WorkflowEngineError::UnknownWorkflow`] — `spec.name` is not
+    ///   registered.
+    /// - [`WorkflowEngineError::LoadJournal`] — the instance journal could
+    ///   not be loaded.
+    pub async fn start(
+        &self,
+        spec: &WorkflowStart,
+        correlation: &CorrelationKey,
+        workflow_id: &WorkflowId,
+    ) -> Result<(), WorkflowEngineError> {
+        let workflow = self.registry.resolve(&spec.name).ok_or_else(|| {
+            WorkflowEngineError::UnknownWorkflow { name: spec.name.as_str().to_string() }
+        })?;
+
+        let mut replay_buffer = self.journal.load_journal(workflow_id).await?;
+
+        // TERMINAL SHORT-CIRCUIT (fix-workflow-terminal-redrive, RCA Option
+        // 1). If the loaded run ALREADY holds a `JournalCommand::Terminal`,
+        // the instance is COMPLETE. Without this guard, resume would:
+        //   1. re-run the author body (it has no terminal awareness), AND
+        //   2. append a SECOND `Terminal` — `JournalStore::append` is
+        //      append-only with no dedup — so the GC-less journal grows
+        //      unboundedly on every re-drive.
+        // The re-drive is itself driven by a persistent terminal obs-write
+        // failure: the in-memory `WorkflowTerminal` row is lost, the
+        // workflow-lifecycle reconciler sees no terminal + no live task, and
+        // re-emits `StartWorkflow` each tick.
+        //
+        // On the short-circuit we ONLY re-publish the terminal observation
+        // row (idempotent under the instance `CorrelationKey`) from the
+        // journal's FULL `WorkflowStatus` — losslessly, including a
+        // `Failed`'s structured `TerminalError`. We do NOT write `Started`,
+        // build the cursor, spawn the body, or insert into `live_instances`:
+        // the instance is TERMINAL, not live, and the reconciler converges on
+        // `terminal.is_some()` (never on `has_live_task` once a terminal
+        // exists), so no live entry is needed and inserting one would leak.
+        // The obs write carries the SAME non-fatal `tracing::error!`
+        // discipline as the spawn-path terminal write — a failure is
+        // surfaced and the cheap idempotent re-publish is retried next tick;
+        // the journal is NOT touched (no append), so it halts at exactly one
+        // `Terminal`.
+        if let Some(status) = terminal_status(&replay_buffer) {
+            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), status };
+            if let Err(err) = self.obs.write(row).await {
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    err = %err,
+                    "failed to re-publish workflow terminal observation row on terminal short-circuit",
+                );
+            }
+            return Ok(());
+        }
+
+        // CONCURRENT-START GUARD (ADR-0064 §5). Claim this instance ATOMICALLY,
+        // BEFORE any journal-mutating work or the spawn. `try_claim` returns
+        // `None` iff a task is ALREADY driving this instance's journal — and
+        // because `ClaimSet` exposes no separate `contains` / `insert`, the
+        // check-and-claim is a single atomic step with no TOCTOU window for two
+        // concurrent starts to slip through. A second drive built from a
+        // different snapshot of the same journal would interleave its `append`s
+        // with the live drive's, producing a command sequence the positional
+        // check-then-record cursor cannot replay deterministically on the next
+        // boot. The reconciler's `has_live_task` gate normally suppresses the
+        // re-emit, but it is ADVISORY — derived from a `hydrate_actual`
+        // snapshot of this very set — so a `ctx.emit_action` `StartWorkflow`
+        // (or a re-emit racing the snapshot) can still reach `start` for a live
+        // instance and bypass it.
+        //
+        // Claiming BEFORE the `Started` append below also closes the duplicate
+        // command-index-0 "trap" for two racing FIRST starts (both would
+        // otherwise load an empty run and each append a `Started`).
+        //
+        // The returned `ClaimGuard` (`teardown`) releases the claim on `Drop`.
+        // Held HERE so the one fallible `?` that follows (the `Started` append)
+        // releases the claim on its error path; on the success path the guard
+        // is moved into the spawned task and drops AFTER the terminal write
+        // (the load-bearing terminal-then-remove ordering). On a failed claim
+        // the instance is already live and this `start` is a no-op.
+        let Some(teardown) = self.live_instances.try_claim(correlation.clone()) else {
+            return Ok(());
+        };
+
+        // CA-4 — write `Started` at command-index 0 on FIRST start; idempotent
+        // on resume (ADR-0066 §2 / ADR-0064 §5). The instance has already
+        // started iff its loaded run holds any command (on a genuine first
+        // start the run is empty; on resume it already carries the `Started`
+        // the first start wrote). We must NOT append a second `Started` (the
+        // trap — a duplicated command-index-0 entry the positional cursor
+        // would walk twice). The check is structural (any-command-present),
+        // the same `WorkflowId` re-derived by `WorkflowId::for_correlation`
+        // upstream targeting the same persisted run.
+        if !run_has_started(&replay_buffer) {
+            let (spec_digest, input_digest) = started_digests(spec);
+            let started =
+                LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest });
+            // Append + fsync BEFORE building the cursor + spawning the author
+            // body (ADR-0066 §4 fsync-then-suspend): a crash after this append
+            // but before the spawn re-loads a run that already begins with
+            // `Started` and resumes cleanly (the idempotent-resume path above).
+            self.journal.append(workflow_id, &started).await?;
+            // Reflect the just-appended entry in the in-memory replay buffer so
+            // the cursor partitions a run that ALREADY begins with `Started` at
+            // command-index 0 — the first author `await`-point then records at
+            // command-index 1.
+            replay_buffer.push(started);
+        }
+
+        // NOTE (ADR-0065 §4, D4 retry-re-drive): the `JournalCursorHandle` +
+        // `WorkflowCtx` are NOT built here once-and-for-all anymore — they are
+        // (re)built INSIDE the spawned task on EACH drive from the freshly
+        // reloaded journal, so a re-drive replays the completed steps
+        // byte-equal and re-fires the failed one. `replay_buffer` (loaded
+        // above, with the just-appended `Started` reflected) seeds the FIRST
+        // drive; subsequent drives reload via `journal.load_journal`. We
+        // therefore capture the raw ports + the journal, not a pre-built ctx.
+        let journal = Arc::clone(&self.journal);
+        let obs = Arc::clone(&self.obs);
+        let clock = Arc::clone(&self.clock);
+        let transport = Arc::clone(&self.transport);
+        let entropy = Arc::clone(&self.entropy);
+        let action_emit = self.action_emit.clone();
+        let correlation = correlation.clone();
+        let workflow_id = workflow_id.clone();
+        // The opaque CBOR `input` bytes the erased body decodes into its
+        // typed `Input` (ADR-0065 §1). Cloned into the spawned task; the
+        // engine never interprets them — the `ErasedWorkflowAdapter` is the
+        // sole decode site. On a malformed input the adapter returns
+        // `Err(TerminalError::malformed_input)` and the typed body is never
+        // entered (mapped to `Failed` like any other terminal failure).
+        let input_bytes = spec.input.clone();
+
+        // The live-instance claim + RAII `teardown` guard were established
+        // above (the CONCURRENT-START GUARD), BEFORE the `Started` append, so a
+        // hydrate_actual that races the spawn already sees the instance as
+        // running (has_live_task = true) and the reconciler does NOT re-emit
+        // StartWorkflow for an instance the engine is already driving
+        // (ADR-0064 §5). The guard's `Drop` removes the correlation from
+        // `live_instances` UNCONDITIONALLY — even if the terminal-write code
+        // below panics (a panic in `journal.append` / `obs.write`) it still
+        // fires on unwind, closing the leak that stranded a panicked instance.
+        // It is MOVED into the async block and drops at the end of it, AFTER
+        // the terminal write, preserving the load-bearing terminal-then-remove
+        // ordering (see the comment at the tail of the spawned block).
+
+        // Spawn the author's async body as a tracked task (ADR-0064 §5 —
+        // the engine owns a tokio task set, the same way the reconciler
+        // runtime owns its tick task).
+        let mut tasks = self.tasks.lock().await;
+        tasks.spawn(async move {
+            // Hold the teardown guard for the whole task body. `_teardown`
+            // (leading underscore) keeps it alive until end-of-scope without
+            // an "unused" warning; its `Drop` does the live-instance removal.
+            let _teardown = teardown;
+
+            // Drive the body to a durable terminal through the RETRY-RE-DRIVE
+            // loop (ADR-0065 §4, D4) — extracted so `start` stays small and
+            // the loop has a single focused home. `replay_buffer` (loaded
+            // above, with the just-appended `Started` reflected) seeds the
+            // FIRST drive; subsequent re-drives reload from the journal.
+            let status = drive_to_terminal(
+                workflow.as_ref(),
+                &input_bytes,
+                replay_buffer,
+                &journal,
+                &obs,
+                &clock,
+                &transport,
+                &entropy,
+                &action_emit,
+                &workflow_id,
+            )
+            .await;
+            // Durable terminal record (slice-01 terminal surface,
+            // ADR-0064 §2 / §3): append the FULL `WorkflowStatus` via the
+            // sanctioned journal path — not a lossy label — so a resumed
+            // run reads back the exact terminal (including a `Failed`'s
+            // structured `TerminalError`) and the start-time short-circuit can
+            // re-publish the terminal observation row losslessly without
+            // re-running the body. A real failure to append is surfaced via
+            // tracing.
+            let terminal =
+                LoadedEntry::Command(JournalCommand::Terminal { status: status.clone() });
+            if let Err(err) = journal.append(&workflow_id, &terminal).await {
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    err = %err,
+                    "failed to append workflow Terminal journal entry",
+                );
+            }
+            // Terminal-status OBSERVATION row (slice-01 AC5, ADR-0064 §2):
+            // write the terminal through the sanctioned `ObservationStore`
+            // write path — NOT a direct bypass of the channels — keyed by
+            // the instance `CorrelationKey` so the workflow-lifecycle
+            // reconciler finds the status deterministically next tick and
+            // converges the instance. A write failure is surfaced via
+            // tracing; the next resume re-drives `run` and re-writes the
+            // row (the key is stable, so the re-write is idempotent).
+            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), status };
+            if let Err(err) = obs.write(row).await {
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    err = %err,
+                    "failed to write workflow terminal observation row",
+                );
+            }
+            // The live-task entry is dropped AFTER the terminal row is
+            // written (ADR-0064 §5) — NOT by an explicit `remove` here, but
+            // by `_teardown`'s `Drop` at end-of-scope, which is reached only
+            // after both terminal writes above. Ordering is load-bearing: a
+            // hydrate_actual that observes `has_live_task = false` MUST also
+            // be able to observe the terminal row, otherwise the reconciler
+            // would see "running-in-intent, no live task, no terminal" and
+            // re-emit StartWorkflow — re-running a workflow that already
+            // completed. The guard dropping last closes that window AND
+            // guarantees the entry is removed even if a terminal write above
+            // panics (defense-in-depth backstop to the `catch_unwind`).
+        });
+        drop(tasks);
+        Ok(())
+    }
+
+    /// Await every spawned workflow task to completion. Test/inner-loop
+    /// helper so an acceptance test can observe the durable terminal after
+    /// the engine drove `run` off the shim.
+    pub async fn join_all(&self) {
+        let mut tasks = self.tasks.lock().await;
+        while tasks.join_next().await.is_some() {}
+    }
+}
+
+/// Compute the input-derived `Started` digests (`spec_digest`,
+/// `input_digest`) for `spec` — the INPUTS the command-index-0 `Started`
+/// entry records on first start (ADR-0066 §2; CA-4). Per
+/// `.claude/rules/development.md` § "Persist inputs, not derived state":
+/// these are content hashes over the workflow-kind identity and the start
+/// input, NOT a pre-computed cache.
+///
+/// The two digests address DIFFERENT axes and DIVERGE as intended
+/// (ADR-0065 §5, #217 discharged):
+///
+/// - `spec_digest = ContentHash::of(spec.name…)` — the workflow-KIND
+///   identity. Two instances of the same kind share one `spec_digest`
+///   regardless of their inputs.
+/// - `input_digest = ContentHash::of(&spec.input)` — the opaque CBOR
+///   start-INPUT bytes. Two instances of one kind with DIFFERENT inputs get
+///   DIFFERENT `input_digest`s; the SAME input yields the SAME digest.
+///
+/// Both digests are derived here so the engine — not the test — owns the
+/// derivation, matching the migrated `Started`-digest acceptance tests.
+fn started_digests(spec: &WorkflowStart) -> (ContentHash, ContentHash) {
+    let spec_digest = ContentHash::of(spec.name.as_str().as_bytes());
+    // The start input bytes — the opaque CBOR `W::Input` the
+    // `ErasedWorkflowAdapter` decodes (an INPUT, never a derived cache).
+    // Hashing these (NOT the name) is the #217 fix: `spec_digest` and
+    // `input_digest` now diverge per-instance.
+    let input_digest = ContentHash::of(&spec.input);
+    (spec_digest, input_digest)
+}
+
+/// Whether the loaded run has ALREADY started — the structural idempotency
+/// guard for resume (CA-4). An instance has started iff its persisted run
+/// holds at least one `LoadedEntry::Command`: on a genuine FIRST start the
+/// run is empty, so the engine writes `Started` at command-index 0; on any
+/// resume the run already carries the `Started` the first start wrote (plus
+/// whatever await-points landed before the crash), so the engine must NOT
+/// append a second `Started`.
+///
+/// The guard keys on "any command present," not "first command is
+/// `Started`," deliberately: a run that already carries commands — whether
+/// it begins with `Started` or with a mid-flight await-point — has started,
+/// and appending a fresh `Started` at the END (a non-zero append position)
+/// would corrupt the positional command walk (the cursor would later trip
+/// the Layer-1 determinism gate on the stray trailing `Started`). The
+/// trap (CA-4) is exactly "write `Started` once, on first start" — the
+/// presence of any prior command is the structural proof the instance is
+/// past first start.
+fn run_has_started(loaded: &[LoadedEntry]) -> bool {
+    loaded.iter().any(|entry| matches!(entry, LoadedEntry::Command(_)))
+}
+
+/// The full [`WorkflowStatus`] from a `JournalCommand::Terminal` in the
+/// loaded run, if the instance has already reached a durable terminal.
+///
+/// This is the terminal-short-circuit guard for resume
+/// (`docs/feature/fix-workflow-terminal-redrive/deliver/rca.md`, Option 1):
+/// a run that already carries a `Terminal` command is COMPLETE — re-driving
+/// it would re-run the author body AND (since `JournalStore::append` is
+/// append-only, no dedup) append a SECOND `Terminal`, growing the
+/// GC-less journal unboundedly. `start` short-circuits when this returns
+/// `Some`. Returns the cloned full status so the obs terminal row can be
+/// re-published losslessly (including a `Failed`'s structured
+/// `TerminalError`) without reconstructing it from a lossy label.
+fn terminal_status(loaded: &[LoadedEntry]) -> Option<WorkflowStatus> {
+    loaded.iter().find_map(|entry| match entry {
+        LoadedEntry::Command(JournalCommand::Terminal { status }) => Some(status.clone()),
+        _ => None,
+    })
+}
+
+/// Drive `workflow` over `input_bytes` to a durable terminal
+/// [`WorkflowStatus`] through the retry-re-drive loop (ADR-0065 §4, D4).
+/// Extracted from [`WorkflowEngine::start`]'s spawned task so the loop has a
+/// single focused home and `start` stays small.
+///
+/// `seed` is the FIRST drive's loaded run (with the just-appended `Started`
+/// reflected); every subsequent re-drive reloads from `journal` so the
+/// freshly-recorded `RetryAttempted` (off the command walk) and any completed
+/// author steps are accounted for. Each iteration:
+///
+/// 1. (re)load the run + build a FRESH cursor + ctx over it, so a re-drive
+///    replays completed steps byte-equal and re-fires the failed one (the
+///    canonical Temporal/Restate re-execute-from-top-and-short-circuit shape);
+/// 2. drive the object-safe erased body (panic-contained);
+/// 3. CLASSIFY the `Result<Vec<u8>, WorkflowDriveError>` into a
+///    [`DriveOutcome`] (ADR-0065 §3/§4): `Completed` / `Terminal` /
+///    `Transient` (the transient comes ONLY from a `ctx.run` step,
+///    NEVER from the body's `TerminalError` return);
+/// 4. classify via [`redrive_decision`] against the journal-derived attempt
+///    count + the [`WORKFLOW_RETRY_BUDGET`] policy: a `Transient` outcome with
+///    budget remaining appends a `RetryAttempted` (the attempt INPUT), parks
+///    on the injected `Clock` for the backoff window, and re-drives;
+///    otherwise the status is the durable terminal (a `Completed`, a
+///    body-authored explicit/malformed terminal, or the engine-minted
+///    `BudgetExhausted` on exhaustion).
+///
+/// The body contract is UNCHANGED — this is pure engine growth; the backoff
+/// park is the SAME injected `Clock` production uses, with no DST-only branch
+/// (`development.md` § "Production code is not shaped by simulation").
+#[allow(clippy::too_many_arguments)]
+async fn drive_to_terminal(
+    workflow: &dyn ErasedWorkflow,
+    input_bytes: &[u8],
+    seed: Vec<LoadedEntry>,
+    journal: &Arc<dyn JournalStore>,
+    obs: &Arc<dyn ObservationStore>,
+    clock: &Arc<dyn Clock>,
+    transport: &Arc<dyn Transport>,
+    entropy: &Arc<dyn Entropy>,
+    action_emit: &ActionEmitSender,
+    workflow_id: &WorkflowId,
+) -> WorkflowStatus {
+    let mut seed = Some(seed);
+    loop {
+        // (1) Load + partition into a fresh cursor for this drive.
+        let drive_buffer = match seed.take() {
+            Some(buffer) => buffer,
+            None => match journal.load_journal(workflow_id).await {
+                Ok(buffer) => buffer,
+                Err(err) => {
+                    // A reload failure on re-drive is surfaced and ends the
+                    // instance as a Failed terminal (the engine must not spin
+                    // re-driving against an unreadable journal).
+                    tracing::error!(
+                        target: "overdrive::workflow_engine",
+                        workflow_id = %workflow_id,
+                        err = %err,
+                        "failed to reload journal on workflow re-drive; converging to Failed",
+                    );
+                    return WorkflowStatus::Failed {
+                        terminal: TerminalError::explicit("journal reload failed on re-drive"),
+                    };
+                }
+            },
+        };
+        let attempts = attempts_from_journal(&drive_buffer);
+        // Recover the retry-window START instant (ADR-0065 Gap 2) BEFORE the
+        // buffer is moved into the cursor — the `max_duration` gate recomputes
+        // elapsed against it on this drive.
+        let window_started_at = retry_window_start(&drive_buffer);
+        let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new_with_channels(
+            Arc::clone(journal),
+            workflow_id.clone(),
+            drive_buffer,
+            action_emit.clone(),
+            Arc::clone(obs),
+        ));
+        let ctx =
+            WorkflowCtx::new(Arc::clone(clock), Arc::clone(transport), Arc::clone(entropy), cursor);
+
+        // (2) Drive the object-safe erased body over the opaque input bytes,
+        // PANIC-CONTAINED. Without `catch_unwind` a panic unwinds past the
+        // terminal-write and the JoinSet absorbs it (production never
+        // `join_next`s) — the instance is left with no terminal row and
+        // (pre-guard) a leaked live entry: the workflow-lifecycle reconciler
+        // then sees "running-in-intent, no terminal" and cannot converge.
+        // Mapping the panic to `Failed` runs the terminal-write path so the
+        // reconciler converges. The detail is derived ONLY from the
+        // deterministic downcast payload (the &str / String panic message,
+        // NEVER the address-bearing raw box) so the durable terminal stays
+        // byte-stable across runs (ADR-0064 §3 hazard).
+        let run = AssertUnwindSafe(workflow.run_erased(&ctx, input_bytes)).catch_unwind();
+        // (3) CLASSIFY the drive outcome (ADR-0065 §3/§4). The erased edge
+        // returns `Result<Vec<u8>, WorkflowDriveError>`:
+        //   - `Ok(bytes)`                       → `Completed { output: bytes }`
+        //   - `Err(Terminal(terminal))`         → `Failed { terminal }` (body
+        //                                          failure OR adapter
+        //                                          MalformedInput/OutputEncode)
+        //   - `Err(Transient(_))`               → re-drive channel (a
+        //                                          `ctx.run` step
+        //                                          failed transiently; ADR-0065
+        //                                          §4) — NEVER a durable
+        //                                          terminal directly
+        //   - panic (catch_unwind)              → `Failed { Explicit }`
+        // A `Transient` is the ONLY re-drive trigger — it can come ONLY from a
+        // `ctx.run` step, NEVER from the body's `Result<Output,
+        // TerminalError>` return type (ADR-0065 §2). The body's terminal
+        // channel is purely terminal.
+        let outcome = match run.await {
+            Ok(Ok(output)) => DriveOutcome::Completed(output),
+            Ok(Err(WorkflowDriveError::Terminal(terminal))) => DriveOutcome::Terminal(terminal),
+            Ok(Err(WorkflowDriveError::Transient(transient))) => {
+                // The last transient cause is carried forward so a minted
+                // `BudgetExhausted` (on exhaustion) can surface the operator-
+                // facing reason of the final transient. The FAILING step's
+                // `RunRetryPolicy` (ADR-0065 Gap 2) rides the transient signal —
+                // extract it so `redrive_decision` consults THIS step's policy
+                // (`max_attempts` / `max_duration` / backoff) rather than the
+                // global constant. A non-`TransientStep` transient (the forward
+                // infra channel) falls back to the default policy.
+                DriveOutcome::Transient {
+                    detail: transient_detail(&transient),
+                    policy: transient_policy(&transient),
+                }
+            }
+            Err(panic) => {
+                let detail = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "workflow panicked".to_string());
+                tracing::error!(
+                    target: "overdrive::workflow_engine",
+                    workflow_id = %workflow_id,
+                    detail = %detail,
+                    "workflow run panicked; converging instance to Failed terminal",
+                );
+                // A panic is terminal (the body cannot retry through a panic).
+                DriveOutcome::Terminal(TerminalError::explicit(&detail))
+            }
+        };
+
+        // (4) Classify: re-drive the transient (per the FAILING step's
+        // `RunRetryPolicy` — ADR-0065 Gap 2) or return the projected status as
+        // the durable terminal. The decision consults the journal-derived
+        // attempt count, the recovered retry-window START instant (for the
+        // `max_duration` gate; recovered above before the buffer moved into the
+        // cursor), and the live `now` — all INPUTS; the elapsed window and
+        // backoff are RECOMPUTED, never persisted ("Persist inputs, not derived
+        // state").
+        let now = clock.unix_now();
+        match redrive_decision(outcome, attempts, window_started_at, now) {
+            RedriveDecision::Terminal(status) => return status,
+            RedriveDecision::Redrive { backoff } => {
+                // Record the attempt INPUT (D4) — a `RetryAttempted` command
+                // (off the cursor walk; engine bookkeeping). The attempt count
+                // is recomputed from the journal on the next iteration, never a
+                // persisted counter. The digest is over the attempt's inputs
+                // (the instance id + attempt index) per "Persist inputs, not
+                // derived state". The FIRST `RetryAttempted` for the instance
+                // stamps `started_at_unix = Some(now)` — the retry window's
+                // start (an input the `max_duration` gate recovers on later
+                // drives); every subsequent attempt carries `None` (ADR-0065
+                // Gap 2 sub-decision 1).
+                let attempt_digest = ContentHash::of(
+                    format!("{}:retry:{attempts}", workflow_id.as_str()).as_bytes(),
+                );
+                let started_at_unix = if attempts == 0 { Some(now) } else { None };
+                let entry = LoadedEntry::Command(JournalCommand::RetryAttempted {
+                    attempt_digest,
+                    started_at_unix,
+                });
+                if let Err(err) = journal.append(workflow_id, &entry).await {
+                    // A failure to durably record the attempt ends the instance
+                    // (the engine must not re-drive against an unjournaled
+                    // attempt — the count would be wrong on resume). Surface and
+                    // converge to Failed.
+                    tracing::error!(
+                        target: "overdrive::workflow_engine",
+                        workflow_id = %workflow_id,
+                        err = %err,
+                        "failed to append RetryAttempted; converging to Failed",
+                    );
+                    return WorkflowStatus::Failed {
+                        terminal: TerminalError::explicit("retry bookkeeping append failed"),
+                    };
+                }
+                // Park on the injected Clock for the policy-driven backoff
+                // window (`initial_delay * exponentiation_factor^attempts`,
+                // clamped to `max_delay` — computed by `redrive_decision` from
+                // the FAILING step's policy, never the global
+                // `backoff_for_attempt`). Under SimClock this parks until the
+                // harness advances logical time; under SystemClock it is a real
+                // timer. Loop: reload + re-drive.
+                clock.sleep(backoff).await;
+            }
+        }
+    }
+}
+
+/// The deterministic, address-free kind-label of a [`JournalCommand`] —
+/// the stable `expected`/`actual` payload the fail-closed determinism gate
+/// (D4, ADR-0064 §3) reports on a Layer-1 type-at-index mismatch.
+///
+/// A stable variant-kind label (an `as_str()`-style projection per
+/// `.claude/rules/development.md` § "Label enums own their string
+/// representation"), NEVER an address-bearing `Debug` of the whole entry: a
+/// `WorkflowCtxError::NonDeterministic` carrying `{:?}` of the recorded
+/// command would embed pointers / field values that vary across runs and
+/// seeds, breaking the byte-identical-trajectory property DST replay relies
+/// on (`.claude/rules/testing.md` § "Tier 1"). The label lives here, at the
+/// cursor (its sole consumer), rather than on the `JournalCommand` enum:
+/// the enum is defined in `journal/mod.rs`, outside this step's edit
+/// boundary, and the cursor is the only site that needs the deterministic
+/// label.
+const fn command_kind(command: &JournalCommand) -> &'static str {
+    match command {
+        JournalCommand::Started { .. } => "Started",
+        JournalCommand::RunResult { .. } => "RunResult",
+        JournalCommand::SleepArmed { .. } => "SleepArmed",
+        JournalCommand::SignalAwaited { .. } => "SignalAwaited",
+        JournalCommand::ActionEmitted { .. } => "ActionEmitted",
+        JournalCommand::RetryAttempted { .. } => "RetryAttempted",
+        JournalCommand::Terminal { .. } => "Terminal",
+    }
+}
+
+/// The engine's DEFAULT retry budget — the maximum number of transient
+/// re-drives an instance gets when its failing `ctx.run` step set no explicit
+/// [`RunRetryPolicy`](overdrive_core::workflow::RunRetryPolicy), before the
+/// engine mints
+/// [`TerminalError::budget_exhausted`](overdrive_core::workflow::TerminalError::budget_exhausted)
+/// (ADR-0065 §4 D4, Gap 2).
+///
+/// This is the DEFAULT budget POLICY: an engine constant analogous to the
+/// reconciler [`RETRY_BACKOFFS`](crate::worker) table, consulted by the engine
+/// and NEVER persisted (per `.claude/rules/development.md` § "Persist inputs,
+/// not derived state" — the policy is a function; the INPUTS, the
+/// `RetryAttempted` journal commands, are what persist). The budget lives in
+/// the ENGINE, contrasting the reconciler `RetryMemory` View precedent: a
+/// reconciler has no engine, so ADR-0035 puts its retry memory in the View; a
+/// workflow HAS an engine, so the budget belongs here (D4).
+///
+/// **Gap 2 (ADR-0065 Amendment 2026-06-07):** a per-`ctx.run` `RunRetryPolicy`
+/// now governs the re-drive count, and [`RunRetryPolicy::default`] reproduces
+/// THIS constant exactly (`max_attempts == WORKFLOW_RETRY_BUDGET`). This
+/// constant is retained as the source of the default policy's attempt budget;
+/// `RunRetryPolicy::default()` is the sole backoff SSOT (the standalone engine
+/// backoff schedule fn was deleted). The equivalence is pinned by the
+/// `default_policy_reproduces_engine_constants` unit test (since `overdrive-core`
+/// cannot reference this engine-crate constant directly).
+///
+/// `3` re-drives is the Phase-1 value: enough to ride out a brief transient
+/// without unbounded churn. Once the journal's `RetryAttempted` count reaches
+/// the failing step's `max_attempts` (defaulting to this), the engine stops
+/// re-driving and mints `BudgetExhausted`.
+pub const WORKFLOW_RETRY_BUDGET: u32 = 3;
+
+/// Count the `RetryAttempted` commands in a loaded run — the engine's
+/// journal-derived attempt total (ADR-0065 §4, D4). The journal is the
+/// single durable SSOT for the instance's retry state: the attempt count is
+/// RECOMPUTED from the count of these inputs on every re-drive (and on
+/// crash-resume), never read from a persisted attempt-count field
+/// (`.claude/rules/development.md` § "Persist inputs, not derived state").
+/// Only `RetryAttempted` commands count — `Started`, `RunResult`,
+/// `Terminal`, notifications, etc. do not.
+#[must_use]
+fn attempts_from_journal(loaded: &[LoadedEntry]) -> u32 {
+    let count = loaded
+        .iter()
+        .filter(|e| matches!(e, LoadedEntry::Command(JournalCommand::RetryAttempted { .. })))
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// The engine's three-way classification of one drive of the erased body
+/// (ADR-0065 §3/§4) — the input to [`redrive_decision`]. Mirrors the
+/// [`WorkflowDriveError`](overdrive_core::workflow::WorkflowDriveError)
+/// surface plus the success arm, projected from the `run_erased` result +
+/// the panic-containment path.
+///
+/// The transient is its OWN variant — it can come ONLY from a
+/// `ctx.run` step (ADR-0065 §4), NEVER from the body's
+/// `Result<Output, TerminalError>` return type (which maps to
+/// [`Self::Completed`] / [`Self::Terminal`] only). This is the type-level
+/// guarantee that a body cannot author a retry: there is no path from a
+/// `TerminalError` to [`Self::Transient`].
+///
+/// `PartialEq` only (not `Eq`): the `Transient` arm carries a
+/// [`RunRetryPolicy`] whose `exponentiation_factor: f64` field is `PartialEq`
+/// but not `Eq` (ADR-0065 Gap 2).
+#[derive(Debug, PartialEq)]
+enum DriveOutcome {
+    /// The body returned `Ok(Output)` — the CBOR-encoded output bytes.
+    Completed(Vec<u8>),
+    /// The body returned `Err(TerminalError)`, the adapter minted a
+    /// decode/encode terminal, or the body panicked — a real terminal,
+    /// never re-driven.
+    Terminal(TerminalError),
+    /// A `ctx.run` step failed transiently — the engine absorbs
+    /// and re-drives (gated by the FAILING step's policy). Carries the last
+    /// transient detail so a minted `BudgetExhausted` can surface the
+    /// operator-facing cause, plus the failing step's [`RunRetryPolicy`]
+    /// (ADR-0065 Gap 2) so `redrive_decision` consults THIS step's
+    /// `max_attempts` / `max_duration` / backoff rather than the global
+    /// constant.
+    Transient {
+        /// The transient step's detail (carried into a minted
+        /// `BudgetExhausted` on exhaustion).
+        detail: String,
+        /// The failing step's per-step retry policy (ADR-0065 Gap 2). Rides the
+        /// transient signal from `WorkflowCtxError::TransientStep`; defaults to
+        /// [`RunRetryPolicy::default`] for the forward infra-transient channel.
+        policy: RunRetryPolicy,
+    },
+}
+
+/// The engine's transient-classification + retry-gate decision over a
+/// drive's [`DriveOutcome`] (ADR-0065 §4, D4 + Gap 2).
+///
+/// A [`DriveOutcome::Transient`] is the transient channel — a
+/// `ctx.run` step failure the engine RE-DRIVES while the FAILING step's
+/// [`RunRetryPolicy`] permits, MINTING `Failed { BudgetExhausted }` once
+/// `attempts >= policy.max_attempts` OR the elapsed retry window reaches
+/// `policy.max_duration`. Every other outcome — a `Completed`, or an
+/// explicit / malformed / output-encode / panic `Terminal` — is a real
+/// terminal the engine records as-is (a body-authored terminal is NEVER
+/// re-driven; the body has no transient channel through its return type).
+#[derive(Debug, PartialEq, Eq)]
+enum RedriveDecision {
+    /// Absorb the transient and re-drive the body from the journal after
+    /// parking for `backoff` (the policy-driven window —
+    /// [`RunRetryPolicy::backoff_window`], ADR-0065 Gap 2).
+    Redrive {
+        /// The backoff window to park on the injected `Clock` before the
+        /// re-drive (`initial_delay * exponentiation_factor^attempts`, clamped
+        /// to `max_delay`).
+        backoff: Duration,
+    },
+    /// Record this status as the instance's durable terminal (no re-drive).
+    Terminal(WorkflowStatus),
+}
+
+/// Classify a drive's [`DriveOutcome`] against the journal-derived
+/// `attempts`, the recovered retry-window start instant `window_started_at`,
+/// and the live `now` — consulting the FAILING step's [`RunRetryPolicy`]
+/// (carried inside the `Transient` arm; ADR-0065 Gap 2). Pure — no I/O,
+/// deterministic — so it is unit-tested directly (the re-drive loop in
+/// [`drive_to_terminal`] consults it per drive). See [`RedriveDecision`].
+///
+/// A transient re-drives iff BOTH gates pass:
+/// - **attempt-count gate:** `attempts < policy.max_attempts`;
+/// - **duration gate:** the elapsed retry window
+///   (`now − window_started_at`, or zero before the first attempt is
+///   recorded) is `< policy.max_duration`.
+///
+/// On EITHER gate failing the engine MINTS `Failed { BudgetExhausted }` — the
+/// body never authors it (the per-step policy, not the global constant, gates
+/// the decision). On a re-drive the returned `backoff` is the policy's window
+/// for the NEXT attempt (`policy.backoff_window(attempts)`).
+///
+/// Only [`DriveOutcome::Transient`] can re-drive; it is unreachable from a
+/// `TerminalError` (the body's terminal channel is purely terminal —
+/// ADR-0065 §2). `window_started_at` is `None` on the very first transient
+/// (no `RetryAttempted` recorded yet) — the window opens with that first
+/// attempt, so elapsed is treated as zero and the duration gate passes.
+#[must_use]
+fn redrive_decision(
+    outcome: DriveOutcome,
+    attempts: u32,
+    window_started_at: Option<Duration>,
+    now: Duration,
+) -> RedriveDecision {
+    match outcome {
+        DriveOutcome::Transient { detail, policy } => {
+            // Elapsed retry window: recomputed each drive from the recovered
+            // start instant (an input) against the live `now` — never a
+            // persisted deadline. Before the first attempt is recorded the
+            // window has not opened, so elapsed is zero.
+            let elapsed =
+                window_started_at.map_or(Duration::ZERO, |start| now.saturating_sub(start));
+            let attempts_remain = attempts < policy.max_attempts;
+            let within_window = elapsed < policy.max_duration;
+            if attempts_remain && within_window {
+                RedriveDecision::Redrive { backoff: policy.backoff_window(attempts) }
+            } else {
+                // Either gate exhausted — the engine MINTS BudgetExhausted (the
+                // body never authors it). The last transient detail is carried
+                // forward so the operator sees the final transient cause.
+                RedriveDecision::Terminal(WorkflowStatus::Failed {
+                    terminal: TerminalError::budget_exhausted(&detail),
+                })
+            }
+        }
+        // A real terminal — recorded as-is, never re-driven.
+        DriveOutcome::Completed(output) => {
+            RedriveDecision::Terminal(WorkflowStatus::Completed { output })
+        }
+        DriveOutcome::Terminal(terminal) => {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal })
+        }
+    }
+}
+
+/// The operator-facing detail string from a transient
+/// [`WorkflowCtxError`](overdrive_core::workflow::WorkflowCtxError) — the
+/// cause carried into a minted `BudgetExhausted` (ADR-0065 §4). A
+/// `TransientStep` surfaces its own `detail`; any other `WorkflowCtxError`
+/// that the engine treats as transient (forward, channel #2) surfaces its
+/// `Display`. Deterministic (no addresses) so the minted terminal's bytes
+/// stay byte-stable across re-drives.
+fn transient_detail(transient: &WorkflowCtxError) -> String {
+    match transient {
+        WorkflowCtxError::TransientStep { detail, .. } => detail.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// The FAILING step's [`RunRetryPolicy`] carried on a transient
+/// [`WorkflowCtxError`](overdrive_core::workflow::WorkflowCtxError) (ADR-0065
+/// Gap 2). A `TransientStep` rides its own per-step policy (set on the
+/// `RunStep` builder, defaulting when the step set none); any OTHER
+/// `WorkflowCtxError` the engine treats as transient (the forward infra
+/// channel #2) has no per-step policy and falls back to
+/// [`RunRetryPolicy::default`] — observably the pre-Gap-2 behaviour.
+fn transient_policy(transient: &WorkflowCtxError) -> RunRetryPolicy {
+    match transient {
+        WorkflowCtxError::TransientStep { policy, .. } => *policy,
+        _ => RunRetryPolicy::default(),
+    }
+}
+
+/// Recover the retry window's START instant from a loaded run — the absolute
+/// wall-clock instant the FIRST `RetryAttempted` for the instance was recorded
+/// (ADR-0065 Gap 2). Scans for the first `RetryAttempted` carrying
+/// `Some(started_at_unix)` (the engine stamps `Some` on the first attempt,
+/// `None` thereafter; sub-decision 1). `None` when no attempt has been recorded
+/// yet (the window has not opened) or the recorded attempts all predate the
+/// additive field (an older journal — decodes to `None`). The
+/// `max_duration` gate recomputes `elapsed = now − start` from this input on
+/// every drive, never a persisted deadline ("Persist inputs, not derived
+/// state").
+#[must_use]
+fn retry_window_start(loaded: &[LoadedEntry]) -> Option<Duration> {
+    loaded.iter().find_map(|e| match e {
+        LoadedEntry::Command(JournalCommand::RetryAttempted {
+            started_at_unix: Some(start),
+            ..
+        }) => Some(*start),
+        _ => None,
+    })
+}
+
+/// Partition the flat loaded run (the dumb-store ordered
+/// `Vec<LoadedEntry>`) into the positional command walk plus the
+/// `SignalKey`-correlated notification lookup — the D2 partition, performed
+/// ONCE at [`JournalCursorHandle`] construction (ADR-0064 §3, CA-5).
+///
+/// Every [`LoadedEntry::Command`] lands in the returned `Vec<JournalCommand>`
+/// in append order (its index there is its replay command-index, D3); every
+/// [`LoadedEntry::Notification`]'s `SignalSeen` lands in the returned
+/// `BTreeMap`, keyed by its `SignalKey`, appended to a per-key
+/// [`VecDeque`] in append order. The store never classifies — this is the
+/// cursor's job (D2). `BTreeMap`, not `HashMap`, per
+/// `.claude/rules/development.md` § "Ordered-collection choice" (DST
+/// determinism).
+///
+/// Multiple `SignalSeen` for the same key — produced when one instance issues
+/// two `ctx.wait_for_signal` calls on the SAME `SignalKey` — are preserved as
+/// a per-key FIFO queue (`push_back`). Append-order == resolution-order: the
+/// Nth `wait_for_signal(x)` on replay `pop_front`s the Nth recorded
+/// `SignalSeen{x}` (D6's `SignalKey`-keyed model, multi-occurrence). This
+/// restores the positional fidelity the retired `*cursor += 2` walk had;
+/// `BTreeMap::insert`'s last-write-wins (the pre-fix shape) collapsed two
+/// same-key waits to `(v_last, v_last)`.
+fn partition_loaded_run(
+    loaded: Vec<LoadedEntry>,
+) -> (Vec<JournalCommand>, BTreeMap<SignalKey, VecDeque<JournalNotification>>) {
+    let mut commands = Vec::new();
+    let mut notifications: BTreeMap<SignalKey, VecDeque<JournalNotification>> = BTreeMap::new();
+    for entry in loaded {
+        match entry {
+            // `RetryAttempted` is engine retry-bookkeeping (ADR-0065 §4), NOT
+            // an author await-op — no `ctx.run` / `ctx.sleep` /
+            // `ctx.wait_for_signal` / `ctx.emit_action` maps to it. It must
+            // therefore stay OFF the positional command walk the cursor
+            // matches author await-ops against (the same reason `Started` is
+            // skipped by `initial_command_cursor`): a re-driven body's first
+            // await-op would otherwise land on a `RetryAttempted` and trip
+            // the Layer-1 type-at-index determinism gate. The engine counts
+            // these from the FULL loaded run via `attempts_from_journal`, not
+            // from the walk.
+            LoadedEntry::Command(JournalCommand::RetryAttempted { .. }) => {}
+            LoadedEntry::Command(command) => commands.push(command),
+            LoadedEntry::Notification(notification) => {
+                let JournalNotification::SignalSeen { ref signal_key, .. } = notification;
+                // Per-key FIFO: append-order == resolution-order. The Nth
+                // wait_for_signal(x) pop_front's the Nth recorded SignalSeen{x}.
+                notifications.entry(signal_key.clone()).or_default().push_back(notification);
+            }
+        }
+    }
+    (commands, notifications)
+}
+
+/// The initial command-cursor position for a partitioned command walk —
+/// the command-index of the FIRST author await-point (CA-4, ADR-0064 §3).
+///
+/// `Started` is a real command-index-0 entry the engine writes on first
+/// start, but it is **structural**, not an author await-op: no `ctx.run` /
+/// `ctx.sleep` / `ctx.wait_for_signal` / `ctx.emit_action` maps to it. The
+/// positional cursor must therefore begin PAST it — at command-index 1 —
+/// so the first author await-point replays against command-index 1, not
+/// against the `Started` entry (which would trip the Layer-1 type-at-index
+/// determinism gate, since the author op's expected kind is never
+/// `Started`).
+///
+/// A run that does NOT begin with `Started` (the DST replay-equivalence
+/// harness's 3-arg [`JournalCursorHandle::new`] constructs runs of bare
+/// `RunResult` / `SleepArmed` commands) starts at command-index 0 —
+/// backward-compatible with every pre-CA-4 cursor consumer.
+fn initial_command_cursor(commands: &[JournalCommand]) -> usize {
+    usize::from(matches!(commands.first(), Some(JournalCommand::Started { .. })))
+}
+
+/// The durable [`JournalCursor`] implementation over an
+/// `Arc<dyn JournalStore>` + a per-instance partitioned run and cursor
+/// (ADR-0064 §3). This is the concrete handle the [`WorkflowCtx`] consults
+/// at every await-point — the control-plane-side I/O the core trait
+/// declaration delegates to.
+///
+/// The loaded run is partitioned ONCE at construction (via
+/// [`partition_loaded_run`]) into a positional command walk
+/// (`replay_commands`) plus a `SignalKey`-correlated notification lookup
+/// (`signal_notifications`); the cursor walks commands ONLY and advances by
+/// exactly 1 per replayed command. The retired `*cursor += 2`
+/// two-positional-entry signal walk is gone — a `SignalSeen` is resolved by
+/// key, off the walk (D2 / CA-5).
+pub struct JournalCursorHandle {
+    journal: Arc<dyn JournalStore>,
+    workflow_id: WorkflowId,
+    /// The replayable, **cursor-advancing** commands of the loaded run, in
+    /// append order — the positional command walk (D2 / ADR-0064 §3,
+    /// CA-5). Partitioned ONCE at construction from the flat
+    /// `Vec<LoadedEntry>` the store returns: every `LoadedEntry::Command`
+    /// lands here in order. The cursor walks THIS vector only and advances
+    /// by exactly 1 per replayed command; notifications never advance it.
+    replay_commands: Vec<JournalCommand>,
+    /// The `SignalKey`-correlated notifications of the loaded run — the
+    /// off-the-walk lookup map (D2 / D6 / ADR-0064 §4, CA-5). Partitioned
+    /// ONCE at construction: every `LoadedEntry::Notification`'s
+    /// `SignalSeen` lands here, keyed by its `SignalKey`, appended to a
+    /// per-key FIFO [`VecDeque`] in append order. `replay_signal` resolves
+    /// a satisfied wait by `pop_front`ing the key's deque — never by
+    /// position; the retired `*cursor += 2` positional signal walk is gone.
+    ///
+    /// Per-key FIFO (not one-value-per-key): two `ctx.wait_for_signal(x)`
+    /// calls on the SAME key in one instance resolve to the two recorded
+    /// `SignalSeen{x}` values in RECORDED ORDER — the Nth wait pops the Nth
+    /// notification. The pre-fix `BTreeMap<SignalKey, JournalNotification>`
+    /// (last-write-wins) collapsed those to `(v_last, v_last)`, a silent
+    /// live-vs-replay divergence (fix-duplicate-signal-key-replay).
+    ///
+    /// Wrapped in a `Mutex` because `replay_signal` `pop_front`s under
+    /// `&self`. Lock order is fixed: acquire `cursor` FIRST, then
+    /// `signal_notifications` (`replay_signal` holds `cursor` for its whole
+    /// body and only takes this lock inside it).
+    ///
+    /// `BTreeMap`, not `HashMap`, per `.claude/rules/development.md`
+    /// § "Ordered-collection choice" — the map is observed by the DST
+    /// `replay_equivalence_provision_record` invariant (step 01-06) and
+    /// must iterate deterministically across seeds.
+    signal_notifications: Mutex<BTreeMap<SignalKey, VecDeque<JournalNotification>>>,
+    /// The current **command**-cursor index into [`replay_commands`] —
+    /// advanced on every command replay hit and every live command record,
+    /// by exactly 1. A notification record (`record_signal_seen`) does NOT
+    /// advance it. Interior-mutable so `&self` ctx ops can move it.
+    cursor: Mutex<usize>,
+    /// The sender half of the engine's Action channel (→ Raft). The live
+    /// `ctx.emit_action` path sends the typed Action here — the channel the
+    /// production `spawn_workflow_emit_drain` task forwards into the SAME
+    /// `action_shim` dispatch path a reconciler-emitted Action takes, NOT a
+    /// direct `IntentStore` write (ADR-0064 §4; `development.md` Workflow
+    /// contract rule 6).
+    ///
+    /// `None` for the 3-arg [`new`](Self::new) handle used by the DST
+    /// replay-equivalence harness (which drives `ctx.run` / `ctx.sleep`
+    /// only, never `ctx.emit_action`); the engine wires it via
+    /// [`new_with_channels`](Self::new_with_channels).
+    action_emit: Option<ActionEmitSender>,
+    /// The `ObservationStore` the live `ctx.wait_for_signal` path reads
+    /// typed signal rows from (in-process single-node delivery; #207
+    /// cross-node-under-partition is OUT). The full crash-safe signal
+    /// delivery lands in step 03-02; this slice records the
+    /// `SignalAwaited` / `SignalSeen` entries and reads the row surface.
+    ///
+    /// `None` for the 3-arg [`new`](Self::new) handle (the DST harness
+    /// drives no `ctx.wait_for_signal`); the engine wires it via
+    /// [`new_with_channels`](Self::new_with_channels).
+    obs: Option<Arc<dyn ObservationStore>>,
+}
+
+impl JournalCursorHandle {
+    /// Construct a handle over `journal` for `workflow_id`, seeded with the
+    /// `replay_buffer` loaded at (re)start, cursor at step 0, with NO
+    /// Action channel and NO signal surface wired.
+    ///
+    /// This is the handle the DST replay-equivalence harness
+    /// (`overdrive-sim`) constructs — it drives `ctx.run` / `ctx.sleep`
+    /// only, never `ctx.emit_action` / `ctx.wait_for_signal`. A workflow
+    /// that emits / waits-for-signal against this handle gets the
+    /// always-live degenerate behaviour (the emit is dropped, the signal
+    /// resolves empty) exactly like [`AlwaysLiveCursor`]. The engine wires
+    /// the real channels via [`new_with_channels`](Self::new_with_channels).
+    #[must_use]
+    pub fn new(
+        journal: Arc<dyn JournalStore>,
+        workflow_id: WorkflowId,
+        replay_buffer: Vec<LoadedEntry>,
+    ) -> Self {
+        let (replay_commands, signal_notifications) = partition_loaded_run(replay_buffer);
+        let initial = initial_command_cursor(&replay_commands);
+        Self {
+            journal,
+            workflow_id,
+            replay_commands,
+            signal_notifications: Mutex::new(signal_notifications),
+            cursor: Mutex::new(initial),
+            action_emit: None,
+            obs: None,
+        }
+    }
+
+    /// Construct a handle with the engine's Action-channel sender (the live
+    /// `ctx.emit_action` path) and the `ObservationStore` (the live
+    /// `ctx.wait_for_signal` path) wired in addition to the journal +
+    /// replay buffer. The engine uses this for every live instance so the
+    /// emit reaches the Action channel (→ Raft) and the signal read reaches
+    /// the observation surface (ADR-0064 §4).
+    #[must_use]
+    pub fn new_with_channels(
+        journal: Arc<dyn JournalStore>,
+        workflow_id: WorkflowId,
+        replay_buffer: Vec<LoadedEntry>,
+        action_emit: ActionEmitSender,
+        obs: Arc<dyn ObservationStore>,
+    ) -> Self {
+        let (replay_commands, signal_notifications) = partition_loaded_run(replay_buffer);
+        let initial = initial_command_cursor(&replay_commands);
+        Self {
+            journal,
+            workflow_id,
+            replay_commands,
+            signal_notifications: Mutex::new(signal_notifications),
+            cursor: Mutex::new(initial),
+            action_emit: Some(action_emit),
+            obs: Some(obs),
+        }
+    }
+
+    /// Durably append a live-path await-point `entry` and advance the held
+    /// cursor — the append + fsync + advance tail every `record_*` live
+    /// path shares (ADR-0066 §4 fsync-then-suspend). On a durable-append
+    /// failure the cursor does NOT advance (the engine must not continue
+    /// against an unjournaled effect) and the error surfaces as
+    /// [`WorkflowCtxError::JournalRecord`]. The caller holds `cursor` (the
+    /// step index is `*cursor` at call time, already baked into `entry`),
+    /// so the whole record stays inside the caller's lock window.
+    async fn append_then_advance(
+        &self,
+        cursor: &mut usize,
+        entry: &LoadedEntry,
+    ) -> Result<(), WorkflowCtxError> {
+        self.journal
+            .append(&self.workflow_id, entry)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        // mutants: skip — `+= 1` -> `*= 1` is an equivalent mutant here.
+        // `append_then_advance` is ONLY ever called from a live `record_*`
+        // path, which the ctx reaches solely after a `replay_*` returned the
+        // live sentinel — i.e. with `*cursor == replay_commands.len()` (the
+        // command-walk end). Past the walk every subsequent `replay_*` resolves
+        // to the live sentinel regardless of whether the cursor sits at `len`
+        // or `len + k`, so the post-advance value is unobservable and `*= 1`
+        // (identity at the boundary) cannot diverge from `+= 1`. The `-= 1`
+        // mutant IS caught (usize underflow panic on the first live record).
+        *cursor += 1;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl JournalCursor for JournalCursorHandle {
+    async fn replay_run(&self, name: &str) -> Result<Option<Vec<u8>>, WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // A command-cursor PAST the loaded command walk is the genuine live
+        // path → `Ok(None)`. (Only an out-of-bounds cursor is live; an
+        // in-bounds foreign variant is Layer-1 divergence, handled below.)
+        let Some(command) = self.replay_commands.get(*cursor) else {
+            drop(cursor);
+            return Ok(None);
+        };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3,
+        // Restate RT0016 shape). The await-op being replayed is `ctx.run`,
+        // whose expected command kind is `RunResult`. A recorded command of
+        // ANY OTHER kind at this cursor (a `SleepArmed`, `SignalAwaited`,
+        // `ActionEmitted`, `Started`, or `Terminal`) is a divergent
+        // trajectory: return `NonDeterministic`, do NOT advance the cursor,
+        // and do NOT fall through to the live path. This CLOSES the trap's
+        // twin — the former `let ... else { Ok(None) }` that silently
+        // fell to live on a variant mismatch, re-executing the effect.
+        let JournalCommand::RunResult { name: recorded_name, result_bytes, .. } = command else {
+            // Both fields are command-KIND labels in the same namespace: the
+            // recorded command's kind (`expected`) vs the await-op's own
+            // expected kind (`actual` = "RunResult", since the replaying op is
+            // `ctx.run`). This matches the sibling Layer-1 arms (replay_sleep →
+            // "SleepArmed", replay_signal → "SignalAwaited", replay_emit →
+            // "ActionEmitted"). The diverging step `name` is a Layer-2 concern,
+            // never surfaced here.
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Run,
+                expected,
+                actual: "RunResult".to_string(),
+            });
+        };
+        // LAYER 2 — name-within-`RunResult` fail-closed gate (D4). The
+        // variant matches, but a recorded step whose name diverges from the
+        // replaying body's `ctx.run` name at this cursor is still a
+        // non-deterministic trajectory — fail closed. Do NOT advance the
+        // cursor on a mismatch. (Identity is POSITIONAL; `name` is the
+        // determinism guard, not the cursor identity.)
+        if recorded_name != name {
+            let expected = recorded_name.clone();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Run,
+                expected,
+                actual: name.to_string(),
+            });
+        }
+        // LAYER 3 (content/digest comparison) is DEFERRED to
+        // https://github.com/overdrive-sh/overdrive/issues/214 — slice 01 does
+        // NOT compare `result_digest`/`result_bytes` against a re-derived
+        // value at the cursor. Layers 1 + 2 are the determinism gate for this
+        // step; the digest is recorded (for K4 replay-equivalence) but not
+        // diffed here.
+        let bytes = result_bytes.clone();
+        *cursor += 1;
+        drop(cursor);
+        Ok(Some(bytes))
+    }
+
+    async fn record_run(&self, name: &str, result_bytes: &[u8]) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // The result digest is the content hash of the CBOR-encoded step
+        // result — slice 01 records both the digest (replay-equivalence)
+        // and the bytes (for byte-equal replay). No in-entry `step` —
+        // identity is positional (D5).
+        let result_digest = ContentHash::of(result_bytes);
+        let entry = LoadedEntry::Command(JournalCommand::RunResult {
+            name: name.to_string(),
+            result_digest,
+            result_bytes: result_bytes.to_vec(),
+        });
+        // Append + fsync BEFORE returning (ADR-0066 §4). On failure the
+        // cursor does NOT advance — the engine must not continue against
+        // an unjournaled effect.
+        self.append_then_advance(&mut cursor, &entry).await?;
+        drop(cursor);
+        Ok(())
+    }
+
+    async fn replay_sleep(&self) -> Result<Option<Duration>, WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // A command-cursor PAST the loaded command walk is the genuine live
+        // path → `Ok(None)`.
+        let Some(command) = self.replay_commands.get(*cursor) else {
+            drop(cursor);
+            return Ok(None);
+        };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3). The
+        // await-op being replayed is `ctx.sleep`, whose expected command
+        // kind is `SleepArmed`. A recorded command of any other kind at this
+        // cursor is divergence: return `NonDeterministic`, do NOT advance,
+        // do NOT fall through to live (the former `_ => None` arm silently
+        // fell to live — that twin is now closed). The recorded
+        // `deadline_unix` is the absolute deadline (an input); the ctx
+        // recomputes the remaining wait against the live clock. Advance the
+        // command-cursor by exactly 1 on a replay hit.
+        let JournalCommand::SleepArmed { deadline_unix, .. } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Sleep,
+                expected,
+                actual: "SleepArmed".to_string(),
+            });
+        };
+        let deadline = *deadline_unix;
+        *cursor += 1;
+        drop(cursor);
+        Ok(Some(deadline))
+    }
+
+    async fn record_sleep_armed(&self, deadline_unix: Duration) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // Record the ABSOLUTE deadline (an input), never a remaining
+        // cache (`development.md` § "Persist inputs, not derived state").
+        // No in-entry `step` — identity is positional (D5).
+        let entry = LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix });
+        // Append + fsync BEFORE returning (ADR-0066 §4, fsync-then-park).
+        // On failure the cursor does NOT advance — the engine must not
+        // park against an unjournaled sleep.
+        self.append_then_advance(&mut cursor, &entry).await?;
+        drop(cursor);
+        Ok(())
+    }
+
+    async fn replay_signal(
+        &self,
+        signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // The notification-lookup contract (D2 / D6 / CA-5). A
+        // `ctx.wait_for_signal` records a `SignalAwaited` COMMAND (in the
+        // command walk) and a `SignalSeen` NOTIFICATION (off the walk,
+        // `SignalKey`-keyed). On replay the command-cursor points at the
+        // `SignalAwaited` command; the `SignalSeen` is resolved by KEY
+        // lookup, NEVER by position — the retired `*cursor += 2`
+        // two-positional-entry walk is GONE.
+        //
+        // - **Live (cursor past the walk)** — `Ok(None)`: the live path arms
+        //   a fresh wait.
+        // - **Completed wait** — a `SignalAwaited` command at the cursor AND
+        //   a matching `SignalSeen` notification in the lookup map: a replay
+        //   HIT. Return the recorded value WITHOUT re-reading the surface and
+        //   advance the command-cursor by EXACTLY 1 (past the `SignalAwaited`
+        //   command only; the notification is off the walk and never advances
+        //   the cursor; ADR-0064 §4). [S-WP-03-02]
+        // - **Crashed while blocked** — a `SignalAwaited` command at the
+        //   cursor with NO matching `SignalSeen` notification: NOT a replay
+        //   hit. Return `Ok(None)` so the live path re-blocks on the SAME
+        //   signal; `record_signal_awaited` then advances past the lone
+        //   `SignalAwaited` command. [S-WP-03-01]
+        let Some(command) = self.replay_commands.get(*cursor) else {
+            drop(cursor);
+            return Ok(None);
+        };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3). The
+        // await-op being replayed is `ctx.wait_for_signal`, whose expected
+        // command kind is `SignalAwaited`. A recorded command of any other
+        // kind at this cursor is divergence: return `NonDeterministic`, do
+        // NOT advance, do NOT fall through to live (the former
+        // `!matches!(..) { return None }` silently fell to live on a foreign
+        // variant — that twin is now closed). NOTE: the
+        // crashed-while-blocked case below (a `SignalAwaited` with no
+        // matching notification) is NOT divergence — it is the
+        // re-block-on-resume shape, which stays `Ok(None)`.
+        let JournalCommand::SignalAwaited { signal_key: recorded_key } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Signal,
+                expected,
+                actual: "SignalAwaited".to_string(),
+            });
+        };
+        // LAYER 2 — key-within-`SignalAwaited` fail-closed gate (D4). The
+        // variant matches, but a recorded `SignalAwaited` whose `signal_key`
+        // diverges from the replaying body's `ctx.wait_for_signal` key at this
+        // cursor is a non-deterministic trajectory — fail closed. Do NOT
+        // advance the cursor on a mismatch. Mirrors the `RunResult` Layer-2
+        // name check above. Without this, a key change at the same cursor
+        // passes Layer 1, the notification lookup on the NEW key misses,
+        // `replay_signal` returns `Ok(None)` as "crashed while blocked", and
+        // `record_signal_awaited` silently consumes the recorded
+        // `SignalAwaited{old}` with no `NonDeterministic`. (Identity is
+        // POSITIONAL; the key is the determinism guard, not the cursor identity.)
+        if recorded_key != signal_key {
+            let expected = recorded_key.to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::Signal,
+                expected,
+                actual: signal_key.to_string(),
+            });
+        }
+        // Correlated FIFO lookup — pop the NEXT unconsumed SignalSeen for
+        // this key off the per-key queue, wherever it landed in the
+        // interleaved on-disk stream (NOT at SignalAwaited+1). FIFO order
+        // matches the command-walk order of same-key `SignalAwaited`s, so the
+        // Nth wait_for_signal(x) consumes the Nth recorded SignalSeen{x}.
+        // Lock order: cursor (already held) THEN notifications.
+        let mut notifications = self.signal_notifications.lock().await;
+        let Some(JournalNotification::SignalSeen { value, .. }) =
+            notifications.get_mut(signal_key).and_then(VecDeque::pop_front)
+        else {
+            // SignalAwaited command with no remaining SignalSeen notification
+            // for this key (absent key OR drained deque) — crashed while
+            // blocked. NOT a replay hit; re-block on the live path. This is
+            // NOT a Layer-1 divergence (the variant matched).
+            drop(notifications);
+            drop(cursor);
+            return Ok(None);
+        };
+        drop(notifications);
+        // Advance past the SignalAwaited COMMAND by exactly 1 — the
+        // notification is off the walk (it never advances the cursor).
+        *cursor += 1;
+        drop(cursor);
+        Ok(Some(value))
+    }
+
+    async fn record_signal_awaited(&self, signal_key: &SignalKey) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // Crash-while-blocked replay: a SignalAwaited COMMAND is ALREADY at
+        // the command-cursor (the prior run crashed while blocked, recording
+        // the SignalAwaited command but never the SignalSeen notification —
+        // replay_signal returned None because there is no matching SignalSeen
+        // notification in the lookup map). Do NOT append a duplicate —
+        // advance the command-cursor PAST the recorded SignalAwaited command
+        // (by exactly 1) and re-enter the live block on the SAME key. This is
+        // the load-bearing crash-safety case (S-WP-03-01).
+        if let Some(JournalCommand::SignalAwaited { signal_key: recorded_key }) =
+            self.replay_commands.get(*cursor)
+        {
+            // Crash-while-blocked: the recorded key MUST match the key the
+            // body is re-blocking on. A divergent key is non-determinism —
+            // already caught upstream by `replay_signal`'s Layer-2 gate, which
+            // fails closed before this method is reached. This guard is
+            // defense-in-depth: only advance past the recorded `SignalAwaited`
+            // when the keys match; a mismatch fails closed rather than
+            // silently consuming the recorded command.
+            if recorded_key != signal_key {
+                let expected = recorded_key.to_string();
+                drop(cursor);
+                return Err(WorkflowCtxError::NonDeterministic {
+                    op: AwaitOp::Signal,
+                    expected,
+                    actual: signal_key.to_string(),
+                });
+            }
+            *cursor += 1;
+            drop(cursor);
+            return Ok(());
+        }
+        // Live path — record the SignalAwaited armed command (an input: the
+        // key the body blocked on) durably before the ctx begins blocking
+        // (ADR-0066 §4 fsync-then-suspend). No in-entry `step` — identity
+        // is positional (D5).
+        let awaited =
+            LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: signal_key.clone() });
+        self.append_then_advance(&mut cursor, &awaited).await?;
+        drop(cursor);
+        Ok(())
+    }
+
+    async fn poll_signal(
+        &self,
+        signal_key: &SignalKey,
+    ) -> Result<Option<SignalValue>, WorkflowCtxError> {
+        // Engine-internal block check — read the typed signal row from the
+        // ObservationStore signal surface (in-process single-node delivery;
+        // #207 cross-node-under-partition is OUT). Does NOT journal: this is
+        // the engine's blocking poll, not a workflow await-point. A missing
+        // row is `Ok(None)` (still blocked); a present row is its value. A
+        // surface READ failure is surfaced as `Signal` (distinct from
+        // "absent"). A handle with no obs wired (the 3-arg DST-harness
+        // `new`) has no signal surface, so resolves to the empty value
+        // (present, no payload) — degenerate always-live behaviour, never
+        // reached by a signal-blocking workflow under the engine.
+        let Some(obs) = self.obs.as_ref() else {
+            return Ok(Some(SignalValue::empty()));
+        };
+        obs.workflow_signal(signal_key)
+            .await
+            .map_err(|err| WorkflowCtxError::Signal { message: err.to_string() })
+    }
+
+    async fn record_signal_seen(
+        &self,
+        signal_key: &SignalKey,
+        value: &SignalValue,
+    ) -> Result<(), WorkflowCtxError> {
+        // Record SignalSeen { value } durably (ADR-0066 §4): the
+        // value_digest is the content digest of the observed value's bytes
+        // (an input); the value itself is carried so a resumed run replays it
+        // by `SignalKey` lookup without re-reading the surface.
+        //
+        // SignalSeen is a NOTIFICATION (SignalKey-correlated), no in-entry
+        // `step` (D1/D5). Per the notification-lookup contract (D2/D6) this
+        // does NOT advance the command-cursor — a notification lives off the
+        // positional command walk. The preceding SignalAwaited COMMAND (via
+        // `record_signal_awaited`) already advanced the cursor; a crash AFTER
+        // that advance but BEFORE this notification is durable leaves the
+        // SignalAwaited command with no matching SignalSeen notification —
+        // the re-block-on-resume shape. The append is therefore a plain
+        // durable journal write with NO cursor mutation (the
+        // `append_then_advance` helper is for commands only).
+        let value_digest = ContentHash::of(value.as_str().as_bytes());
+        let seen = LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key: signal_key.clone(),
+            value_digest,
+            value: value.clone(),
+        });
+        self.journal
+            .append(&self.workflow_id, &seen)
+            .await
+            .map_err(|err| WorkflowCtxError::JournalRecord { message: err.to_string() })?;
+        Ok(())
+    }
+
+    async fn replay_emit(&self) -> Result<bool, WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // A command-cursor PAST the loaded command walk is the genuine live
+        // path → `Ok(false)`: the live `emit_action` sends + records.
+        let Some(command) = self.replay_commands.get(*cursor) else {
+            drop(cursor);
+            return Ok(false);
+        };
+        // LAYER 1 — type-at-index fail-closed gate (D4, ADR-0064 §3). The
+        // await-op being replayed is `ctx.emit_action`, whose expected
+        // command kind is `ActionEmitted`. A recorded command of any other
+        // kind at this cursor is divergence: return `NonDeterministic`, do
+        // NOT advance, do NOT fall through to live (the former
+        // `matches!(..)`-then-`false` silently fell to live on a foreign
+        // variant — that twin is now closed). A replay hit returns `Ok(true)`
+        // — the Action was already sent on a prior run, so it is NOT re-sent
+        // (exactly-once ON THE REPLAY PATH — ADR-0064 §4). The live path in
+        // `emit_action` is at-least-once: a recorded ActionEmitted is what
+        // makes resume idempotent, so a run that sent but failed to record it
+        // (cursor past the walk → `Ok(false)` above) re-sends. Advance the
+        // command-cursor by exactly 1 on a replay hit.
+        let JournalCommand::ActionEmitted { .. } = command else {
+            let expected = command_kind(command).to_string();
+            drop(cursor);
+            return Err(WorkflowCtxError::NonDeterministic {
+                op: AwaitOp::EmitAction,
+                expected,
+                actual: "ActionEmitted".to_string(),
+            });
+        };
+        *cursor += 1;
+        drop(cursor);
+        Ok(true)
+    }
+
+    async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError> {
+        let mut cursor = self.cursor.lock().await;
+        // action_digest is the content digest of the emitted Action's
+        // canonical inputs (deterministic over the Action's Debug form —
+        // the enum derives only Debug/Clone/Eq, no Serialize; the Debug
+        // form is a stable canonical projection of the inputs). Per
+        // `development.md` § "Persist inputs, not derived state".
+        //
+        // STABILITY — K4 replay-equivalence (load-bearing once Layer-3
+        // digest comparison lands, #214): this digest is deterministic only
+        // while `Action`'s Debug form is. Every collection-bearing `Action`
+        // variant uses `BTreeMap`/`BTreeSet`, whose Debug iterates in `Ord`
+        // order — never `HashMap`/`HashSet`, whose Debug order is
+        // per-process-random and would make the same inputs hash differently
+        // across runs. This precondition is mechanically enforced, not merely
+        // convention: `Action` lives in `overdrive-core` (crate_class =
+        // "core"), so a future variant introducing a `HashMap`/`HashSet`
+        // fails the dst-lint gate at PR time (development.md §
+        // "Ordered-collection choice") unless it carries a
+        // `// dst-lint: hashmap-ok` waiver. The sharp hazard is therefore a
+        // `hashmap-ok` waiver on an `Action` variant: it would pass the gate
+        // while silently breaking this digest's cross-run stability. Do not
+        // add one without first making the digest input canonical (e.g. an
+        // explicit sorted projection of the variant's fields).
+        let action_digest = ContentHash::of(format!("{action:?}").as_bytes());
+        // Send the typed Action on the Action channel (→ Raft) — the
+        // channel the production `spawn_workflow_emit_drain` task forwards
+        // into the SAME `action_shim` dispatch path a reconciler-emitted
+        // Action takes, NEVER a direct
+        // IntentStore write. The send is BEFORE the durable record so the
+        // ActionEmitted entry implies the Action reached the channel.
+        //
+        // SEND-BEFORE-RECORD ⇒ AT-LEAST-ONCE (deliberate). If the
+        // `append_then_advance` below fails (or the process crashes) AFTER
+        // this send but BEFORE ActionEmitted is durable, no ActionEmitted is
+        // journaled at this cursor: a resume re-runs the live path and
+        // re-sends. Exactly-once holds only on the replay path (`replay_emit`
+        // returns true once ActionEmitted is recorded). This is the SAME
+        // at-least-once window `WorkflowCtx::run` documents; safety against
+        // the duplicate rests on the downstream `action_shim` dispatch being
+        // idempotent. Do NOT "fix" this by recording before sending —
+        // record-before-send loses the mutation SILENTLY on a crash between
+        // the record and the send (strictly worse for a cluster mutation).
+        //
+        // A handle with no channel wired (the 3-arg DST-harness `new`) drops
+        // the emit — degenerate always-live behaviour, never reached by an
+        // emitting workflow under the engine.
+        if let Some(sender) = &self.action_emit {
+            sender
+                .send(action)
+                .map_err(|err| WorkflowCtxError::ActionChannel { message: err.to_string() })?;
+        }
+        // Record ActionEmitted durably before returning (ADR-0066 §4): a
+        // resumed run sees this command and does NOT re-send the Action.
+        // No in-entry `step` — identity is positional (D5).
+        let entry = LoadedEntry::Command(JournalCommand::ActionEmitted { action_digest });
+        self.append_then_advance(&mut cursor, &entry).await?;
+        drop(cursor);
+        Ok(())
+    }
+}
+
+// Unit tests for the replay cursor live in
+// `tests/acceptance/workflow_engine_replay_cursor.rs` rather than an
+// in-`src/` `#[cfg(test)] mod tests`. They exercise the cursor through
+// real `Sim*` adapters from `overdrive-sim` (a dev-dependency); a
+// `src/`-side unit test cannot use those, because `overdrive-sim`
+// depends on `overdrive-control-plane` and the lib-test build would see
+// `SimJournalStore` implementing a *separately-compiled*
+// `JournalStore` (the dev-dep cycle), so `Arc<SimJournalStore> as
+// Arc<dyn JournalStore>` fails to unify. The `tests/` target compiles
+// against the published lib + dev-deps, where the trait identities match.
+//
+// The PURE retry-decision helpers below (`attempts_from_journal`,
+// `redrive_decision`, `retry_window_start`) need NO `Sim*` adapter — they
+// operate on hand-built `LoadedEntry` vecs / kinds / counters — so their
+// unit tests CAN live here (D4 retry-re-drive loop, step 04-01).
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{
+        DriveOutcome, RedriveDecision, WORKFLOW_RETRY_BUDGET, attempts_from_journal,
+        redrive_decision, retry_window_start,
+    };
+    use crate::journal::{JournalCommand, LoadedEntry};
+    use overdrive_core::id::ContentHash;
+    use overdrive_core::workflow::{
+        RunRetryPolicy, TerminalError, TerminalErrorKind, WorkflowStatus,
+    };
+
+    /// A `RetryAttempted` command for the count fixtures (no recorded window
+    /// start — the non-first-attempt shape).
+    fn retry_attempted() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::RetryAttempted {
+            attempt_digest: ContentHash::of(b"attempt"),
+            started_at_unix: None,
+        })
+    }
+
+    /// A `Transient` outcome under the DEFAULT policy — the pre-Gap-2 shape the
+    /// existing budget assertions exercise.
+    fn transient_default() -> DriveOutcome {
+        DriveOutcome::Transient {
+            detail: "transient".to_string(),
+            policy: RunRetryPolicy::default(),
+        }
+    }
+
+    /// A non-`RetryAttempted` command (a `Started`) — must NOT be counted.
+    fn started() -> LoadedEntry {
+        LoadedEntry::Command(JournalCommand::Started {
+            spec_digest: ContentHash::of(b"spec"),
+            input_digest: ContentHash::of(b"input"),
+        })
+    }
+
+    /// `attempts_from_journal` counts ONLY `RetryAttempted` commands — the
+    /// attempt INPUTS are derived from the journal, never a separate store
+    /// (D4 / `development.md` "Persist inputs, not derived state"). Other
+    /// commands (`Started`, `Terminal`, …) interleaved in the run must not
+    /// inflate the count.
+    #[test]
+    fn attempts_from_journal_counts_only_retry_attempted_commands() {
+        // Empty run — no attempts yet.
+        assert_eq!(attempts_from_journal(&[]), 0);
+        // A run with Started + 2 RetryAttempted + a non-retry command: only
+        // the 2 RetryAttempted are counted.
+        let run = vec![started(), retry_attempted(), retry_attempted(), started()];
+        assert_eq!(
+            attempts_from_journal(&run),
+            2,
+            "only RetryAttempted commands count toward the attempt total"
+        );
+    }
+
+    /// `redrive_decision` is the engine's transient classifier + retry gate.
+    /// A `DriveOutcome::Transient` (a `ctx.run` step failure) re-drives WHILE
+    /// the FAILING step's policy permits, and MINTS `BudgetExhausted` once the
+    /// budget is consumed. A `DriveOutcome::Terminal` (an explicit / malformed
+    /// / output-encode / panic terminal) is NEVER re-driven — the transient
+    /// channel is unreachable from a `TerminalError` (ADR-0065 §2). A
+    /// `DriveOutcome::Completed` is terminal-success.
+    ///
+    /// This test uses the DEFAULT policy and an inert duration gate
+    /// (`window_started_at = None`, so elapsed is zero), so the attempt-count
+    /// gate is the sole gate — preserving the pre-Gap-2 budget semantics
+    /// exactly (the per-step `max_duration` gate has its own coverage in the
+    /// `WorkflowPerStepRetryPolicyGovernsRedrive` DST invariant + the dedicated
+    /// gate tests below).
+    #[test]
+    fn redrive_decision_classifies_transient_and_gates_on_budget() {
+        // No retry window has opened (window_started_at = None) so the duration
+        // gate is inert; `now` is irrelevant under the default's unbounded
+        // max_duration.
+        let none_started = None;
+        let now = Duration::ZERO;
+
+        // Transient with budget remaining → re-drive (now carrying a backoff).
+        assert!(matches!(
+            redrive_decision(transient_default(), 0, none_started, now),
+            RedriveDecision::Redrive { .. }
+        ));
+        assert!(
+            matches!(
+                redrive_decision(transient_default(), WORKFLOW_RETRY_BUDGET - 1, none_started, now),
+                RedriveDecision::Redrive { .. }
+            ),
+            "the last in-budget attempt still re-drives"
+        );
+
+        // Transient with budget EXHAUSTED → mint BudgetExhausted (engine-minted;
+        // the body never authored it — a transient is not a TerminalError).
+        match redrive_decision(transient_default(), WORKFLOW_RETRY_BUDGET, none_started, now) {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
+                assert_eq!(
+                    terminal.kind(),
+                    TerminalErrorKind::BudgetExhausted,
+                    "exhaustion mints BudgetExhausted"
+                );
+            }
+            other => {
+                panic!("exhausted transient must mint Failed{{BudgetExhausted}}, got {other:?}")
+            }
+        }
+
+        // Explicit terminal → terminal as-is, NEVER re-driven (body authored a
+        // real terminal), even with budget remaining.
+        let explicit = DriveOutcome::Terminal(TerminalError::explicit("boom"));
+        match redrive_decision(explicit, 0, none_started, now) {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
+                assert_eq!(terminal.kind(), TerminalErrorKind::Explicit);
+            }
+            other => panic!("an explicit terminal must NOT be re-driven, got {other:?}"),
+        }
+
+        // Completed → terminal-success, never re-driven.
+        assert!(matches!(
+            redrive_decision(DriveOutcome::Completed(Vec::new()), 0, none_started, now),
+            RedriveDecision::Terminal(WorkflowStatus::Completed { .. })
+        ));
+    }
+
+    /// `RunRetryPolicy::default()` reproduces the engine's pre-Gap-2 behaviour
+    /// bit-for-bit (ADR-0065 Gap 2 — the observable-equivalence requirement,
+    /// the Part-C regression guard). `RunRetryPolicy::default()` is the sole
+    /// default-policy SSOT; this test pins its `max_attempts` against
+    /// `WORKFLOW_RETRY_BUDGET` and its backoff window against the fixed
+    /// 50/100/200ms schedule as concrete literals. If a future maintainer
+    /// changes the default, this breaks — the structural guard that "no policy
+    /// set == today".
+    #[test]
+    fn default_policy_reproduces_engine_constants() {
+        let default = RunRetryPolicy::default();
+
+        // max_attempts == the engine budget.
+        assert_eq!(
+            default.max_attempts, WORKFLOW_RETRY_BUDGET,
+            "the default policy's max_attempts must equal WORKFLOW_RETRY_BUDGET"
+        );
+
+        // The default's backoff window reproduces the engine's prior fixed
+        // schedule (50 / 100 / 200ms, clamped past the table) for every attempt
+        // index — pinned as concrete literals. `RunRetryPolicy::default()` is now
+        // the sole backoff SSOT (the standalone schedule fn was deleted as dead
+        // production code per the deletion-discipline rule). Pinning to a literal
+        // is itself the determinism guard.
+        for n in 0..(WORKFLOW_RETRY_BUDGET + 4) {
+            let expected = Duration::from_millis(match n {
+                0 => 50,
+                1 => 100,
+                _ => 200,
+            });
+            assert_eq!(
+                default.backoff_window(n),
+                expected,
+                "default policy backoff at attempt {n} must reproduce the 50/100/200ms schedule"
+            );
+        }
+
+        // max_duration is effectively unbounded so the duration gate never
+        // fires under the default (today has no duration bound).
+        assert_eq!(
+            default.max_duration,
+            Duration::MAX,
+            "the default max_duration must be unbounded (pre-Gap-2 had no duration gate)"
+        );
+    }
+
+    /// `retry_window_start` recovers the FIRST recorded `started_at_unix`
+    /// (ADR-0065 Gap 2 sub-decision 1): `None` before any attempt is recorded
+    /// or when no attempt carries a start (older journal); the first
+    /// `Some(start)` once stamped. This is the input the `max_duration` gate
+    /// recomputes elapsed against — never a persisted deadline.
+    #[test]
+    fn retry_window_start_recovers_first_stamped_instant() {
+        // No attempts → no window.
+        assert_eq!(retry_window_start(&[]), None);
+
+        // Attempts present but none carry a start (the older-journal /
+        // non-first shape) → None.
+        let run_no_start = vec![retry_attempted(), retry_attempted()];
+        assert_eq!(retry_window_start(&run_no_start), None);
+
+        // The first `Some(start)` is recovered, ignoring later `None`s.
+        let start = Duration::from_secs(1234);
+        let run_with_start = vec![
+            LoadedEntry::Command(JournalCommand::RetryAttempted {
+                attempt_digest: ContentHash::of(b"a0"),
+                started_at_unix: Some(start),
+            }),
+            retry_attempted(),
+        ];
+        assert_eq!(retry_window_start(&run_with_start), Some(start));
+    }
+
+    /// The per-step `max_duration` gate mints `BudgetExhausted` on an elapsed
+    /// window that reaches the policy's `max_duration` EVEN when attempts
+    /// remain (ADR-0065 Gap 2 sub-decision 1, the duration-gate companion).
+    #[test]
+    fn redrive_decision_gates_on_max_duration_before_max_attempts() {
+        // A generous attempt budget but a tight duration window.
+        let policy = RunRetryPolicy {
+            max_attempts: 100,
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        };
+        let transient = || DriveOutcome::Transient { detail: "slow".to_string(), policy };
+
+        let started = Duration::from_secs(1000);
+
+        // Within the window (elapsed 5s < 10s) and attempts remain → re-drive.
+        assert!(matches!(
+            redrive_decision(transient(), 1, Some(started), started + Duration::from_secs(5)),
+            RedriveDecision::Redrive { .. }
+        ));
+
+        // Window elapsed (elapsed 10s == max_duration) → mint BudgetExhausted,
+        // even though attempts (1) << max_attempts (100).
+        match redrive_decision(transient(), 1, Some(started), started + Duration::from_secs(10)) {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
+                assert_eq!(
+                    terminal.kind(),
+                    TerminalErrorKind::BudgetExhausted,
+                    "an elapsed window mints BudgetExhausted before the attempt budget is hit"
+                );
+            }
+            other => {
+                panic!("an elapsed max_duration window must mint BudgetExhausted, got {other:?}")
+            }
+        }
+    }
+}

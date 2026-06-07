@@ -114,6 +114,30 @@ mod integration {
     /// `veth_provisioner::provision`: creates-when-absent +
     /// adopts-pre-existing-without-recreating.
     mod veth_provision_idempotent;
+    /// workflow-primitive DISTILL (GH #39, J-PLAT-005) — `@real-io`
+    /// journal-persistence scenario S-WP-01-04 (US-WP-2 AC1/AC2, K5/O6).
+    /// Exercises a REAL `RedbJournalStore` (real redb file) per
+    /// `.claude/rules/testing.md` § "Integration vs unit gating".
+    /// `#[should_panic(expected = "RED scaffold")]` until DELIVER slice 01
+    /// lands `RedbJournalStore` + the `JournalStore` port (ADR-0066).
+    pub mod workflow_journal {
+        mod journal_writes_to_redb;
+    }
+    /// workflow-primitive slice 01 — step 01-08 — end-to-end production
+    /// composition proof (ADR-0064 §5). A fixture trigger reconciler emits
+    /// `Action::StartWorkflow` → the real `WorkflowEngine` composed into
+    /// `AppState` drives `ProvisionRecord` to terminal → the
+    /// `WorkflowTerminal` observation row appears → the workflow-lifecycle
+    /// reconciler converges to terminated; the `ctx.call` effect fired
+    /// exactly once. Real redb (journal + obs + intent) + real engine.
+    pub mod workflow_e2e {
+        mod reconciler_emit_drives_workflow_to_terminal;
+        // step 03-03 — a fixture trigger reconciler emits StartWorkflow for
+        // an EmittingWorkflow whose ctx.emit_action flows through the
+        // PRODUCTION emit-drain task into action_shim::dispatch, driving a
+        // second workflow to a terminal observation row.
+        mod workflow_emit_action_drives_through_production_composition;
+    }
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads

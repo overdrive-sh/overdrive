@@ -183,6 +183,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         &writer_node,
         allocator,
         &test_broker,
+        None,
     )
     .await
     .expect("dispatch must succeed");

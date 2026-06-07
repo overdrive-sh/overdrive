@@ -50,4 +50,28 @@ mod acceptance {
     // SeededEntropy serials -> bit-identical issuance from a seed. Layer 2,
     // example-only per Mandate 9 (DST determinism is same-seed-same-bytes).
     mod sim_ca_deterministic;
+    // workflow-primitive DISTILL (GH #39, J-PLAT-005) — the DST-invariant
+    // home for the durable-workflow scenarios per
+    // `docs/feature/workflow-primitive/distill/test-scenarios.md`. All
+    // `#[should_panic(expected = "RED scaffold")]`; the engine,
+    // `SimJournalStore`, and the graduated `ReplayEquivalenceProvision
+    // Record` / `WorkflowJournalWriteOrdering` / `WorkflowExactlyOnce
+    // EffectOnResume` invariants (ADR-0064 §6) land in DELIVER slices
+    // 01–03.  Slice 01:
+    mod journal_records_inputs_not_derived; // S-WP-01-05
+    mod replay_equivalence_provision_record_invariant; // S-WP-01-09 (K4)
+    mod workflow_committed_step_survives_crash; // S-WP-01-07
+    mod workflow_crash_resume_exactly_once; // S-WP-01-06 WALKING SKELETON
+    mod workflow_journal_write_ordering; // S-WP-01-10
+    // Slice 02 (ctx.sleep):
+    mod replay_equivalence_holds_across_sleep; // S-WP-02-04
+    mod workflow_sleep_crash_pre_sleep_step_not_repeated; // S-WP-02-01
+    mod workflow_sleep_records_deadline_not_remaining; // S-WP-02-03
+    mod workflow_sleep_resumes_to_original_deadline; // S-WP-02-02
+    // Slice 03 (signals + emit):
+    mod replay_equivalence_holds_across_signal_and_emit; // S-WP-03-05
+    mod workflow_emit_action_at_least_once_on_failed_record; // emit_action at-least-once (live-path)
+    mod workflow_emit_action_not_re_emitted_after_crash; // S-WP-03-04
+    mod workflow_signal_already_seen_not_rewaited; // S-WP-03-02
+    mod workflow_signal_wait_reblocks_after_crash; // S-WP-03-01
 }

@@ -1,0 +1,233 @@
+schema_version: 1
+
+# Product-level journey for the workflow-primitive feature (GH #39).
+# Pairs with trust-the-sim.yaml (DST foundation) and submit-a-job.yaml
+# (operator control surface): this journey proves the DURABLE-EXECUTION
+# foundation — a finite side-effecting sequence that survives a crash
+# exactly-once.
+#
+# Persona: Devon (workflow author, primary) + Ana (operator, secondary) —
+# see docs/product/personas/devon-platform-engineer.yaml.
+# Job: J-PLAT-005. ODI outcomes O1-O6 mapped per step.
+#
+# IMPORTANT house-style note matching trust-the-sim: the observable
+# surface for a platform-internal primitive is NOT a CLI verb (none
+# exists — cli.rs has no `workflow` subcommand). It is (a) the redb
+# journal row, (b) the ObservationStore terminal-result row + structured
+# lifecycle event, and (c) the `replay_equivalence_*` DST invariant as
+# executable evidence — exactly as `replay_equivalence_empty_workflow`
+# already appears in trust-the-sim.yaml step 1.
+
+journey:
+  name: "Author a durable workflow that resumes exactly-once after a crash"
+  goal: >
+    A Overdrive platform engineer (Devon) writes a finite, ordered,
+    side-effecting sequence as an ordinary `async fn run(&self, ctx)`,
+    has the platform journal each await-point in redb, kills the process
+    mid-run under DST, restarts, and observes that the completed step is
+    NOT repeated and the terminal result matches the uninterrupted run —
+    proven by a `replay_equivalence_*` DST invariant from a seed before
+    she ships.
+  persona: >
+    Devon, Overdrive platform engineer authoring first-party durable
+    sequences (primary). Ana, operator observing a running/terminal
+    instance via ObservationStore rows + structured events (secondary —
+    no CLI verb exists yet).
+
+  emotional_arc:
+    start: "Wary — 'durable execution is a famous bug swamp; I have hand-rolled crash-resume before and it was awful.'"
+    middle: "Focused then reassured — one ordinary `async fn run(ctx)`; the journal row appears in redb; the kill-and-restart skips the completed step."
+    end: "Trusting — 'replay-equivalence is proven from a seed on the CI critical path, and it reuses the redb substrate I already operate.'"
+
+steps:
+  - id: 1
+    name: "Express the sequence as ordinary control flow"
+    command: "# author: impl Workflow for ProvisionRecord { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult { ... } }"
+    summary: >
+      Devon writes a `Workflow` trait impl with `async fn run(&self, ctx:
+      &WorkflowCtx) -> WorkflowResult`. The sequence is ordinary control
+      flow — no hand-written step enum, no transition match. The ONE
+      durable operation in the walking skeleton goes through `ctx` (the
+      only non-determinism source), e.g. `ctx.call(...).await` against the
+      injected Transport. All non-determinism flows through `ctx`
+      (injected Clock/Transport/Entropy, DST-controllable).
+    shared_artifacts:
+      - name: workflow_start
+        source: "WorkflowStart — the typed descriptor carried in Action::StartWorkflow { start, correlation } (mod.rs:373, placeholder today)"
+        displayed_as: "${workflow_start}"
+        consumers: ["the reconciler emitting StartWorkflow", "the workflow-lifecycle reconciler that brings the instance up", "the journal key namespace"]
+      - name: correlation_key
+        source: "CorrelationKey — derived (reconciliation_target, spec_hash, purpose) per development.md Reconciler I/O rule 2"
+        displayed_as: "${correlation_key}"
+        consumers: ["Action::StartWorkflow", "ObservationStore terminal-result row", "journal instance id linkage"]
+    emotional_state:
+      entry: "Wary — 'how much state-machine boilerplate is this going to cost me?'"
+      exit: "Focused — 'it is one async fn; the durability is the platform's job, not mine.' (O3)"
+    odi_outcomes: [O3]
+    integration_checkpoint: |
+      The author MUST NOT touch a journal, a redb handle, or a step
+      cursor directly. All non-determinism MUST flow through `ctx`
+      (per whitepaper §18 + development.md Workflow contract rule 1).
+      No `Instant::now()` / `reqwest::get()` / `tokio::time::sleep` /
+      `rand::random()` in the workflow body. WorkflowStart must be the
+      typed descriptor the existing Action::StartWorkflow placeholder
+      already names — not a new ad-hoc shape.
+    failure_modes:
+      - "Author has to write a step enum + transition match (O3 unserved — wrong primitive shape)"
+      - "A non-determinism source bypasses `ctx` (breaks replay-equivalence — caught by DST)"
+
+  - id: 2
+    name: "The platform journals the await-point in redb"
+    command: "# (internal — observable as a redb journal row at the await point)"
+    summary: >
+      When `run` reaches its durable await-point, the runtime writes a
+      checkpoint to the per-instance append-only journal in redb BEFORE
+      suspending — a distinct layout from the reconciler View store but on
+      the same backend (whitepaper §17/§18). The fsync-then-acknowledge
+      ordering is load-bearing (mirrors the reconciler write-through
+      ordering: persist, then proceed).
+    shared_artifacts:
+      - name: journal_checkpoint
+        source: "the redb per-instance append-only journal, keyed by (workflow_instance_id, await_seq)"
+        displayed_as: "${journal_checkpoint}"
+        consumers: ["the suspend path (write before suspend)", "the resume path (read recorded result, skip completed await)", "the replay-equivalence DST invariant"]
+    emotional_state:
+      entry: "Focused — 'did the completed step actually get persisted?'"
+      exit: "Confident — 'the journal row is in redb, on the substrate I already run for reconcilers.' (O6)"
+    odi_outcomes: [O1, O6]
+    integration_checkpoint: |
+      The journal MUST live in the runtime-owned redb substrate, a
+      per-instance append-only layout distinct from the reconciler `View`
+      store but on the SAME backend (O6 — one mechanism). Each await
+      checkpoint MUST be written before the await suspends (durability
+      ordering). No second persistence engine (no libSQL journal).
+    failure_modes:
+      - "A completed step's result is not persisted before suspend → lost on crash (O2 failure)"
+      - "Journal lands in a second store (libSQL) → O6 violated, two recovery mechanisms"
+
+  - id: 3
+    name: "Crash mid-run, restart, resume from the first incomplete step"
+    command: "# DST: kill the workflow process after the recorded step; restart; assert the step is NOT repeated"
+    summary: >
+      Under the DST harness the instance is killed AFTER its durable step
+      records but BEFORE terminal. On restart, the workflow-lifecycle
+      reconciler re-hydrates the instance; the runtime replays the journal
+      — already-completed awaits return their recorded results — and picks
+      up at the first unrecorded await. The completed external effect is
+      NOT re-executed (O1); the committed result is NOT lost (O2, within
+      single-node scope — see note); the run drives to terminal.
+    tui_mockup: |
+      $ cargo dst --only replay_equivalence_provision_record
+          Running DST harness (turmoil, single-node control plane)
+
+          seed: 9418273640552189043
+          scenario: workflow crash-resume (kill after step 0 records)
+
+          [1/1] replay_equivalence_provision_record           ok
+                · step 0 executed once (not repeated on resume)
+                · terminal result == uninterrupted-run terminal
+                · journal replayed bit-identical
+
+          1 scenario  ·  0 failures
+    shared_artifacts:
+      - name: dst_seed
+        source: "generated by xtask; printed on every run (same convention as trust-the-sim)"
+        displayed_as: "${dst_seed}"
+        consumers: ["DST harness output", "failure reproduction command", "CI artifact on failure"]
+      - name: journal_checkpoint
+        source: "step 2 — read back on resume to skip the completed await"
+        displayed_as: "${journal_checkpoint}"
+        consumers: ["the resume path", "the replay-equivalence assertion"]
+    emotional_state:
+      entry: "Anxious — 'this is the moment a hand-rolled state machine corrupts: does the kill double-execute my step?'"
+      exit: "Reassured — 'the completed step did not repeat; the run reached the same terminal. The kill was survivable.' (O1)"
+    odi_outcomes: [O1, O2, O4]
+    integration_checkpoint: |
+      O2 SCOPE CAVEAT (HARD): the codebase is Phase-1 SINGLE-NODE (no node
+      registration, no multi-region — feedback memory "Phase 1 is
+      single-node"). "Resume on a DIFFERENT node" (full O2) is a
+      multi-node property that lands with HA. The IN-SCOPE core is
+      single-node crash-resume: kill the PROCESS, restart, resume from the
+      redb journal. No Phase-1 acceptance criterion may promise cross-node
+      resume. The redb-journal design must not PRECLUDE cross-node resume
+      (the journal is on the durable substrate) — it simply is not
+      DEMONSTRATED across nodes here.
+    failure_modes:
+      - "Resume re-executes the recorded external effect (O1 failure — the headline bug)"
+      - "Resume reaches a different terminal than the uninterrupted run (O4 failure)"
+      - "An AC silently claims cross-node resume the single-node codebase cannot honour"
+
+  - id: 4
+    name: "Prove replay-equivalence from a seed before shipping"
+    command: "cargo dst --only replay_equivalence_provision_record"
+    summary: >
+      The correctness property is deterministic replay + bounded progress
+      (whitepaper §21): replay the journal twice under DST → bit-identical
+      trajectory; reach terminal within a declared step budget. This is a
+      `assert_replay_equivalent!` + `assert_eventually!(is_terminal)`
+      pair, named and run on the CI critical path — the same shape
+      `replay_equivalence_empty_workflow` already takes in trust-the-sim
+      step 1. Evidence is a green seeded run, reproducible bit-for-bit.
+    shared_artifacts:
+      - name: replay_equivalence_invariant
+        source: "crates/overdrive-sim/src/invariants.rs — a named SimInvariant variant (house convention: no inline string literals)"
+        displayed_as: "${replay_equivalence_invariant}"
+        consumers: ["DST output lines", "CI gate", "this journey's executable evidence"]
+      - name: dst_seed
+        source: "printed on every run; reproduces bit-for-bit"
+        displayed_as: "${dst_seed}"
+        consumers: ["reproduction command", "CI failure artifact"]
+    emotional_state:
+      entry: "Skeptical — 'every project claims durable execution; almost none prove it.'"
+      exit: "Trusting — 'replay-equivalence is a named invariant on the critical path, reproducible from a seed. This is real.' (O5)"
+    odi_outcomes: [O4, O5]
+    integration_checkpoint: |
+      The replay-equivalence property MUST be a named SimInvariant
+      exported from overdrive-sim (no inline string literal), run on the
+      CI critical path, reproducible bit-for-bit from the printed seed —
+      identical discipline to trust-the-sim. Bounded progress
+      (terminal within declared step budget) MUST be a paired
+      assert_eventually!.
+    failure_modes:
+      - "Replay-equivalence asserted only in a hand-written test, not a named DST invariant (loses the house-style evidence + grep-ability)"
+      - "Same seed produces different trajectory on two runs (a non-determinism source escaped `ctx`)"
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: journal_checkpoint
+      must_match_across: [2, 3]
+      failure_message: "The bytes written before suspend (step 2) MUST be exactly the bytes read on resume (step 3). Any drift means a completed step is either lost or re-derived — the O1/O2 core fails."
+    - artifact: dst_seed
+      must_match_across: [3, 4]
+      failure_message: "The seed convention MUST match trust-the-sim: printed on every run, embedded in the reproduction command, reproduces bit-for-bit. Drift breaks the platform's single reproduction discipline."
+    - artifact: correlation_key
+      must_match_across: [1]
+      failure_message: "The CorrelationKey on Action::StartWorkflow MUST be the same key the ObservationStore terminal-result row is filed under, so the emitting reconciler can find the result deterministically (development.md Reconciler I/O rule 2)."
+
+related_features:
+  - id: workflow-primitive
+    role: "Ships the walking-skeleton implementation of this journey (durable-async engine + redb journal + crash-resume under DST + observable terminal)."
+
+deferred_steps:
+  - name: "Operator inspects a running/terminal instance via the CLI"
+    reason: >
+      cli.rs ships NO `workflow` subcommand. An `overdrive workflow`
+      operator verb is a surfaced forward concern, NOT in scope. Ana's
+      observable surface in THIS feature is the ObservationStore terminal
+      row + structured lifecycle event. Do not invent a CLI verb.
+  - name: "Resume on a DIFFERENT control-plane node (full O2)"
+    reason: >
+      Multi-node property; the codebase is Phase-1 single-node. Lands with
+      HA/multi-node. The redb-journal design does not preclude it; it is
+      simply not demonstrated across nodes here.
+  - name: "ctx.wait_for_signal / ctx.activity / parent-child workflow composition"
+    reason: >
+      The full await surface (signals via ObservationStore, sub-activities,
+      parent-child) is the post-skeleton execution surface. The walking
+      skeleton ships ONE durable operation; signals + composition are
+      later slices, not the skeleton.
+
+changelog:
+  - date: 2026-06-05
+    feature: workflow-primitive
+    change: Initial product-level journey for the durable-workflow crash-resume walking skeleton (J-PLAT-005, O1-O6).

@@ -44,6 +44,11 @@ pub mod aggregate;
 // dst-lint-clean: speaks project newtypes / enums, never `rcgen`. The `Ca`
 // port trait + host/sim adapters + root-key envelope land in later slices.
 pub mod ca;
+/// `ClaimSet<K>` — atomic claim primitive that makes the check-and-act
+/// (TOCTOU) split unrepresentable. Reusable concurrency helper; peer of
+/// [`race_once_cell`]. See `.claude/rules/development.md` § "Check-and-act
+/// must be atomic (no TOCTOU)".
+pub mod claim_set;
 // `api::submit` — wire-shape `SubmitSpecInput` enum + per-kind payloads
 // per ADR-0051 (Accepted 2026-05-15). The wire-side member of the
 // three-layer Rust type universe (parser-side `WorkloadSpec` / wire-side
@@ -82,6 +87,11 @@ pub mod maglev;
 // `ProbeResultRow` observation row + envelope per ADR-0054 §5.
 // Lands GREEN in slice 01.
 pub mod observation;
+/// `RaceOnceCell<T>` — write-once cell that surfaces the lost-race verdict
+/// instead of discarding it. Reusable concurrency helper; peer of
+/// [`claim_set`]. See `.claude/rules/development.md` § "Check-and-act must
+/// be atomic (no TOCTOU)".
+pub mod race_once_cell;
 pub mod reconcilers;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ServiceFailureReason`, `ProbeWitness`, `ServiceLifecycleState`,
@@ -89,6 +99,13 @@ pub mod reconcilers;
 // 01 / 04 / 05 / 08.
 pub mod service_lifecycle;
 pub mod traits;
+// `Workflow` trait + `WorkflowCtx` + `WorkflowStatus` + `WorkflowStart` —
+// the durable-async §18 peer primitive to `Reconciler`. Trait-only in
+// core (no tokio); the async signature uses `async_trait`, all
+// non-determinism flows through `WorkflowCtx`'s injected ports. The
+// async engine lives in `overdrive-control-plane` (later slices). Per
+// ADR-0064 §1.
+pub mod workflow;
 // `UnixInstant` — portable wall-clock instant for persistable
 // deadlines. See `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`
 // for the design rationale; subsequent steps under issue #141 wire it
@@ -136,3 +153,15 @@ pub use wall_clock::UnixInstant;
 // boundary between reconciler-private View state and downstream
 // consumers.
 pub use transition_reason::{TerminalCondition, TransitionReason};
+// `workflow-result-error-model` (ADR-0065 §1/§2/§3) — the typed workflow
+// terminal model. `TerminalError` (the body's terminal-failure channel) +
+// `TerminalErrorKind` (its structured cause) + `WorkflowStatus` (the
+// engine-owned control-plane projection of the body's `Result<Output,
+// TerminalError>` plus the engine-authored cancel/timeout terminals). Step
+// 01-03 reshaped `Workflow::run` to `-> Result<Output, TerminalError>`,
+// added the object-safe `ErasedWorkflow` + `ErasedWorkflowAdapter` erasure,
+// and DELETED the old contentless terminal enum (the contentless success
+// is now `WorkflowStatus::Completed { output }` carrying the erased CBOR).
+pub use workflow::{
+    ErasedWorkflow, ErasedWorkflowAdapter, TerminalError, TerminalErrorKind, WorkflowStatus,
+};

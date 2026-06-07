@@ -1,0 +1,104 @@
+---
+title: Reconcilers and workflows
+description: How Overdrive's two control-plane primitives combine — reconcilers converge forever, workflows run once, and both speak one action vocabulary. A reconciler starts a workflow; the workflow emits actions back; a reconciler converges on its result.
+---
+
+Overdrive's control plane has exactly two primitives, and they are built to work
+together. A [reconciler](/docs/concepts/reconcilers) converges declared intent
+toward observed reality and runs forever. A [workflow](/docs/concepts/workflows)
+runs a terminating sequence once and survives crashes by replaying a journal. They
+are not rivals competing to own a problem — they share one vocabulary, `Action`s,
+and form a loop: reconcilers start workflows, and workflows emit actions back.
+
+## Choose by the ending
+
+The question that picks the primitive is whether the work ends.
+
+- If it is "the cluster should always look like X," it is a **reconciler**.
+  Keeping N replicas running, holding the BPF map equal to policy, keeping a
+  service at its declared health — none of these terminate, so each is a standing
+  invariant a reconciler maintains.
+- If it is "run these steps, once, to a result," it is a **workflow**. Rolling a
+  certificate through request → wait → validate → publish, or migrating an
+  allocation from one node to another — each finishes with an `Ok(result)`.
+
+When a single feature has both halves, split it along that line. "Keep this
+service holding a valid certificate" is a standing invariant — a reconciler — and
+the rotation it triggers when the certificate nears expiry is a terminating
+sequence — a workflow. The reconciler decides *when*; the workflow performs the
+*steps*.
+
+## One vocabulary: actions
+
+Both primitives change the cluster the same way: by emitting `Action`s, which a
+single [action shim](/docs/concepts/reconcilers#actions-are-data-the-shim-runs-them)
+executes behind one I/O boundary. A reconciler returns `Vec<Action>` from its pure
+`reconcile`; a workflow calls `ctx.emit_action(action)` from its body. It is the
+same `Action` enum and the same committed path in both cases, and neither writes
+the IntentStore directly.
+
+That shared vocabulary is what lets the two compose without a special bridge. A
+workflow's effects are ordinary actions whose results a reconciler will observe,
+and starting a workflow is itself just an action a reconciler emits. Neither
+primitive needs to know the other's internals — they meet at the action boundary.
+
+## The loop
+
+<Mermaid chart={`
+flowchart LR
+  rec["Reconciler"]
+  eng["Workflow engine"]
+  wf["Workflow body"]
+  shim["Action shim"]
+  obs[("ObservationStore")]
+
+  rec -- "Action::StartWorkflow" --> eng
+  eng -- "drive / replay" --> wf
+  wf -- "ctx.emit_action → Action" --> shim
+  shim -- "effects" --> obs
+  eng -- "terminal WorkflowStatus" --> obs
+  obs -- "observe" --> rec
+`} />
+
+A multi-step operation flows around a loop:
+
+1. A reconciler decides the operation should run and emits
+   `Action::StartWorkflow { start, correlation }`. The `correlation` is the stable
+   key that identifies this instance across restarts.
+2. The workflow engine starts the instance, builds a journaled `ctx`, and runs the
+   body. (See [workflows](/docs/concepts/workflows) for the durability model.)
+3. The workflow drives the cluster as it goes by emitting actions through
+   `ctx.emit_action` — the same actions a reconciler emits, so reconcilers
+   converge on their effects.
+4. When the body returns, the engine writes the terminal `WorkflowStatus` to the
+   observation store.
+5. A reconciler observes that terminal row and converges the instance — marking it
+   done and stopping any re-trigger.
+
+The bridge reconciler that ships today is **WorkflowLifecycle**. It watches
+workflow instances in observed state and re-emits `StartWorkflow` for any that
+should be running but have no live engine task — the signature of a crash. The
+engine's journal load then decides cold start versus resume. So a workflow's
+durability is not a separate recovery system: it is the convergence loop noticing a
+gap, exactly as it would for a crashed allocation. The reconciler keeps the
+workflow alive; the journal keeps it correct.
+
+## Why two primitives, not one
+
+It is tempting to collapse these into one — to model a workflow as a reconciler
+whose View is a step counter, or to let a reconciler block on a long external
+sequence. Both lose what the other primitive is good at. A reconciler carrying a
+step machine in its View re-derives the entire sequence every tick and has nowhere
+to park while it waits on an external event; a workflow that loops forever has no
+terminal result and defeats the journal that makes it durable. Keeping the two
+separate keeps each one simple — converge forever, or run once — and the shared
+action vocabulary is what lets them hand off cleanly at the boundary between them.
+
+## Where to go next
+
+- The first primitive: [reconcilers](/docs/concepts/reconcilers) · author one:
+  [write a reconciler](/docs/how-to/write-a-reconciler).
+- The second primitive: [workflows](/docs/concepts/workflows) · author one:
+  [write a workflow](/docs/how-to/write-a-workflow).
+- The loop at the system level:
+  [the architecture overview](/docs/concepts/architecture#the-convergence-loop).

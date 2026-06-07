@@ -24,6 +24,14 @@ serde_json.workspace = true
 rkyv.workspace       = true
 bytecheck.workspace  = true
 
+# CBOR codec for the `WorkflowCtx::run` durable-step await-surface
+# (ADR-0064): a `ctx.run` step's result is CBOR-encoded before the
+# journal records it and CBOR-decoded on the replay path. `ciborium` is
+# a pure-Rust serde codec (no runtime I/O) and is NOT on the dst-lint
+# banned-API list — the same codec the runtime-owned journal/ViewStore
+# use in `overdrive-control-plane`.
+ciborium.workspace = true
+
 # OpenAPI schema derivation — `JobSpecInput` carries `ToSchema` so
 # `overdrive-control-plane::api` can reuse it as the typed spec field in
 # `SubmitJobRequest` / `JobDescription` per ADR-0014 (shared types
@@ -68,6 +76,15 @@ tracing.workspace = true
 # parser and is NOT on the dst-lint banned-API list.
 toml.workspace = true
 
+# Sync primitive backing the reusable `ClaimSet<K>` concurrency helper
+# (`crate::claim_set`). `parking_lot::Mutex` is a pure, deterministic
+# in-process lock — no clock, entropy, network, or async runtime — so it
+# is NOT on the dst-lint banned-API list, and its uncontended-fast /
+# no-poison shape is the project default (`.claude/rules/development.md`
+# § "Concurrency & async"). `RaceOnceCell` (`crate::race_once_cell`) is
+# pure `std::sync::OnceLock` and needs no extra dep.
+parking_lot.workspace = true
+
 [features]
 # `test-utils` — TEST-ONLY feature. Exposes
 # `overdrive_core::testing::observation_store::run_lww_conformance`, the
@@ -91,6 +108,15 @@ test-utils = []
 integration-tests = []
 
 [dev-dependencies]
+# Self dev-dep enabling `test-utils` so this crate's OWN integration
+# tests under `tests/` (a separate compilation that does not inherit the
+# lib's `cfg(test)`) can reach the `#[cfg(feature = "test-utils")]`
+# `overdrive_core::testing` module. Step 01-03 promoted the shared
+# `ProvisionRecord` workflow fixture into `testing::workflow`, which
+# `tests/acceptance/workflow_trait_drives_to_terminal.rs` now imports;
+# without this feature the integration test sees `testing` gated out.
+# Production builds NEVER enable `test-utils` (see [features] above).
+overdrive-core = { path = ".", features = ["test-utils"] }
 proptest.workspace = true
 rstest.workspace   = true
 # Static scan of `src/**/*.rs` for the §2.3 API-shape invariant. Used only
@@ -108,12 +134,10 @@ trybuild.workspace = true
 # do not propagate to downstream consumers.
 overdrive-sim.path = "../overdrive-sim"
 tokio              = { workspace = true }
-# `tests/backend_discovery_bridge_types.rs` round-trips
-# `BackendDiscoveryBridgeView` through the same CBOR codec the
-# runtime-owned `ViewStore` uses (per ADR-0035 § 3 — CBOR via
-# `ciborium`). Dev-dep only — production runtime persistence lives
-# in `overdrive-control-plane`, which carries the regular dep.
-ciborium           = { workspace = true }
+# `ciborium` is now a regular dep — see [dependencies] above for the
+# ADR-0064 `WorkflowCtx::run` rationale. Tests
+# (`tests/backend_discovery_bridge_types.rs` and the workflow suite)
+# inherit the regular dep, so a separate dev-dep entry would duplicate.
 # `toml` is now a regular dep — see [dependencies] above for the
 # Slice 01 / ADR-0047 §2 rationale. Tests inherit the regular dep,
 # so a separate dev-dep entry would be a duplicate.

@@ -73,7 +73,21 @@ pub enum IdParseError {
 //
 // Case-insensitive FromStr; Display emits the lowercased canonical form.
 
-const LABEL_MAX: usize = 253;
+/// The shared length ceiling for every label-shaped identifier in
+/// Overdrive — the DNS-name maximum (RFC 1035). Every DNS-1123-label-like
+/// newtype below (`SpiffeId`, `JobId`, `NodeId`, `Region`, …) and
+/// [`CorrelationKey`] is bounded by this single const.
+///
+/// It is `pub` so that *derived* identifiers in downstream crates can size
+/// their own ceilings against it rather than inventing a second, smaller
+/// magic number. `WorkflowId` (in `overdrive-control-plane`) is the
+/// canonical case: it is derived from a [`CorrelationKey`] and MUST be
+/// able to hold the full mapped key without truncation — see
+/// `.claude/rules/development.md` § "One shared length ceiling for
+/// label-shaped ids". A bespoke smaller ceiling there silently
+/// re-introduced a journal-key collision (two distinct correlation keys
+/// sharing a truncated prefix collapsed to one id).
+pub const LABEL_MAX: usize = 253;
 
 fn validate_label(kind: &'static str, raw: &str) -> Result<String, IdParseError> {
     if raw.is_empty() {

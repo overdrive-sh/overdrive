@@ -1,0 +1,70 @@
+review_result:
+  artifact_path: "docs/feature/workflow-primitive/diverge/"
+  review_date: "2026-06-05"
+  reviewer: "Prism (nw-diverger-reviewer)"
+  independent_review_performed: true
+
+  jtbd_rigor:
+    status: "PASSED"
+    summary: "Job extracted at strategic/physical level (drive a finite side-effecting sequence to a terminal result exactly-once, crash-resumable on any node). 5-Whys chain documented; no feature references in functional job statement; 6 ODI outcomes in proper format (Minimize + metric + object); disruption check performed (reconciler-as-workflow examined and retained as option C, not disruptor)."
+    issues: []
+    notes: "Opportunity assessment is qualitative (no survey data), consistent with whitepaper-derived greenfield JTBD precedent per jobs.yaml."
+
+  research_quality:
+    status: "PASSED"
+    summary: "7 real systems cited with specific behaviors (Temporal, Restate, DBOS, Cloudflare Workflows, AWS Step Functions, Flawless/Golem/Obelisk, Argo). Non-obvious alternative present: reconciler-as-step-machine with Argo prior art (primary source argoproj/argo-workflows operator.go). Two critical dispatch hypotheses corrected by evidence and consistently applied: (1) Restate is journal-replay like Temporal, not mechanically distinct; (2) DBOS requires deterministic code and re-enters from top, inheriting version-skew. No generic market claims."
+    issues: []
+    notes: "Research conducted by Flux directly (WebSearch/WebFetch, Task tool unavailable in subagent context). Medium-confidence items (Cloudflare proprietary, Flawless/Golem alpha) do not change option-level conclusions. Restate and DBOS corrections verified against primary documentation and applied consistently through taste-evaluation.md and recommendation.md."
+
+  option_diversity:
+    status: "PASSED"
+    summary: "6 options (A-F) all pass 3-point diversity test: all differ in mechanism, authoring assumption, AND cost profile. HMW question carries no embedded solution. Separation principle honored: zero evaluative language in options-raw.md; evaluation deferred to taste-evaluation.md."
+    issues: []
+    notes: "Option M (hand-written explicit-state) folded into F to avoid three explicit-state-family options (M, E, R) crowding six-slot set. Fold is documented with rationale; F's no-macro fallback preserves the M option space structurally."
+
+  taste_application:
+    status: "PASSED"
+    summary: "All 6 options scored on all 5 criteria (DVF + T1 Subtraction, T2 Concept Count, T3 Progressive Disclosure, T4 Speed-as-Trust). Weights LOCKED before any scoring began (Phase 2): DVF 30%, T1 15%, T2 25%, T3 10%, T4 20% (= 100%). Weight adjustments documented: +5 to DVF for deferred version-skew viability concern; +5 to T2 for O6 (minimize mechanisms) emphasis; -5 each from T3 (experts need less disclosure) and T4 (reinterpreted as recovery cost, not UI latency). All scores grounded in rubric with per-cell justifications. Recommendation (C: 4.50) follows matrix highest score with no override. Anti-pattern audit clean: no cherry-pick, no retroactive justification, no weight manipulation, no 'feels right' language."
+    issues: []
+    notes: "T2 (Concept Count) at 25% is the decision criterion that makes C beat F (C adds zero new concepts, F adds one). The +5 adjustment is defensible (O6 is a primary outcome) but a reviewer who weights O3 (authoring ergonomics) higher would reweight and flip C<->F. This exact tension is the documented dissent, so not hidden."
+
+  recommendation_coherence:
+    status: "PASSED"
+    summary: "Recommendation fully traceable (job -> research findings -> scores -> recommendation). Dissent documented at two distinct levels: (1) Marginal taste dissent — F (4.05) almost beats C (4.50); a single defensible reweight toward O3 flips them. (2) Scope-level dissent — if deferred version-skew mitigation re-enters scope, Option B (3.51) becomes competitive; this is a scope decision, not a taste decision, for DISCUSS. Explicit decision statement: 'Proceed with Option C (reconciler-as-step-machine), contingent on DISCUSS ratifying the two-primitive doctrine amendment.' Two scope questions named that can flip the recommendation (doctrinal load-bearing-ness, version-skew scope)."
+    issues: []
+    notes: "Recommendation is contingent (on doctrinal amendment), not evasive. This is integrity: C is the call, with explicit conditions and named fallback (F). The recommendation does NOT avoid choosing; it chooses clearly and names what it depends on."
+
+  approval_status: "approved_for_handoff"
+
+  blocking_issues: []
+
+  non_blocking_observations:
+    - observation: "Qualitative opportunity assessment for ODI outcomes"
+      detail: "Job-analysis.md marks O3/O6 as 'Under-served' based on whitepaper assertion, not survey data. Consistent with whitepaper-derived greenfield JTBD precedent (jobs.yaml intro: 'JTBD analysis is skipped for this feature because motivation is already explicit in whitepaper §21'). The outcomes themselves are well-formed."
+    - observation: "Option M (hand-written explicit-state) folded into F"
+      detail: "Curation choice to avoid three explicit-state-family options crowding six-slot set. Documented with rationale. Option space not lost: F's no-macro fallback = M. Defensible but a reviewer could argue M deserved standalone slot."
+    - observation: "Research conducted by Flux directly (WebSearch/WebFetch)"
+      detail: "Task tool unavailable in subagent context; nw-researcher not dispatchable. Restate and DBOS claims verified against primary docs (restate.dev, DBOS docs.dbos.dev) and quoted directly. Argo precedent cited from primary source. Accuracy spot-check: confirmed."
+
+  recommendations_for_discuss:
+    - "Journal-store decision (libSQL vs redb vs append-only log): C answers it for free (existing redb ViewStore); B/A/F should each justify rather than inherit libSQL default per whitepaper. ADR-0035 context: reconciler primitive was deliberately moved OFF libSQL to redb for O6 reasons."
+    - "Doctrinal amendment required: whitepaper §18 and reconcilers.md currently assert 'Reconcilers converge; workflows orchestrate. Neither is expressible as the other.' C (reconciler-as-step-machine) requires amending this claim. Research shows the mechanism claim is overstatable (Argo runs terminal sequences on a reconcile loop in production), but the ergonomics/extension-story reasons may be load-bearing. DISCUSS must decide."
+    - "Scope re-check on version-skew mitigation: #39 defers code-graph-hash version-skew rejection. If that deferral is lifted, Option B (DBOS-style, whitepaper-faithful, 'durable like restate') re-enters as competitive (currently 3.51, would rise when viability penalty lifts). This is a scope decision that can flip the entire recommendation."
+
+  handoff_readiness: "READY FOR DISCUSS WAVE"
+
+  self_review_note: >
+    Flux's pre-review self-assessment (G1-G4 self-reported PASS, approved_for_handoff:false
+    pending independent review) was confirmed accurate by this independent review. This file
+    overwrites that self-review with Prism's independent verdict.
+
+  summary: >
+    Flux's DIVERGE wave is submission-ready. All 5 dimensions PASSED.
+    Job at strategic/physical level with 6 ODI outcomes.
+    Research names 7 systems, corrects two dispatch hypotheses with evidence (Restate = journal-replay; DBOS inherits version-skew), includes non-obvious alternative (Argo reconciler-as-step-machine).
+    6 options all pass structural diversity test (3-point: mechanism/assumption/cost).
+    All options scored on all criteria; weights locked with rationale; recommendation follows matrix (C: 4.50 primary, F: 4.05 fallback, B: 3.51 if scope changes).
+    Dissent documented honestly at taste and scope levels.
+    Two scope questions explicitly named for DISCUSS.
+    No blocking issues.
+    Contingency on doctrinal amendment is integrity, not evasion.

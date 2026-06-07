@@ -1963,6 +1963,8 @@ At process boot, the runtime bulk-loads every persisted view for each reconciler
 
 This collapses the previous per-reconciler libSQL design. libSQL is retained elsewhere — it remains the right tool where SQL queries are genuinely the workload (incident-memory similarity search; the DuckLake catalog) — but reconciler memory has no SQL access pattern, so paying SQL machinery for it was always overhead. See ADR-0035 for the full design.
 
+The workflow primitive (§18) shares this redb substrate for its own durable memory — its `await`-point journal — keeping one durable-memory story across both primitives (ADR-0035, O6). The two memory shapes differ: reconciler memory is a single typed `View` blob per `(reconciler, target)`; the workflow journal is an append-only step/await record per instance, point-accessed by `(workflow_id, step)`. They are therefore distinct redb table layouts, not the same key space — a crash-resume journal is append-mostly small-record point-access, exactly redb's wheelhouse and the same reason the reconciler `View` store lives here.
+
 ---
 
 ## 18. Reconciler and Workflow Primitives
@@ -1974,7 +1976,7 @@ Overdrive factors control-plane logic into two orthogonal primitives, both desce
 - **Reconcilers** — pure functions that converge cluster state toward a declared spec. Infinite lifecycle; no terminal state.
 - **Workflows** — durable async functions that orchestrate defined sequences to completion. Finite lifecycle; terminal result.
 
-Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have private memory for stateful reasoning across cycles — reconcilers via a typed `View` blob the runtime persists in redb, workflows via their `await`-point journal in libSQL. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
+Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have private memory for stateful reasoning across cycles — reconcilers via a typed `View` blob the runtime persists in redb, workflows via their `await`-point journal, also in redb (a distinct per-instance append-only layout). Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
 
 This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK. No "platform workflow" / "user workflow" divergence.
 
@@ -2008,7 +2010,7 @@ trait Reconciler: Send + Sync {
 
 One method. Sync. No `.await`. No I/O. No DB handle. Reconciler authors never write SQL, never declare a schema, never call `migrate` / `hydrate` / `persist`. They derive four serde bounds on the `View` struct and write `reconcile`. The runtime owns persistence end-to-end.
 
-The runtime's contract is symmetric across all three of `desired`, `actual`, and `view`: every input is pre-computed by the runtime before `reconcile` is called. At register time (once per reconciler at process boot) the runtime calls `ViewStore::bulk_load` against redb and materialises every persisted `(reconciler_name, target) → View` blob into a per-reconciler `BTreeMap<TargetResource, View>` held in RAM. From that moment on the in-memory map is the read SSOT. At each tick the runtime hydrates `desired` from the IntentStore, `actual` from the ObservationStore, looks up `view = views.get(target).cloned().unwrap_or_default()` from the in-memory map, snapshots `Clock::now()` into a `TickContext`, and calls `reconcile`. After `reconcile` returns `(actions, next_view)` the runtime writes `next_view` to redb with fsync, then updates the in-memory map; on crash between the two, the next boot's bulk-load sees the persisted view and convergence resumes. The runtime stores erased CBOR blobs and re-decodes on bulk-load against the per-reconciler `View` type — the schema is the `View` struct, owned by the reconciler, evolved via `#[serde(default)]` on additive fields. There is exactly one redb table layout in the entire system: a generic `(reconciler_name, target) → blob` key space the runtime owns. See ADR-0035 for the full mechanics.
+The runtime's contract is symmetric across all three of `desired`, `actual`, and `view`: every input is pre-computed by the runtime before `reconcile` is called. At register time (once per reconciler at process boot) the runtime calls `ViewStore::bulk_load` against redb and materialises every persisted `(reconciler_name, target) → View` blob into a per-reconciler `BTreeMap<TargetResource, View>` held in RAM. From that moment on the in-memory map is the read SSOT. At each tick the runtime hydrates `desired` from the IntentStore, `actual` from the ObservationStore, looks up `view = views.get(target).cloned().unwrap_or_default()` from the in-memory map, snapshots `Clock::now()` into a `TickContext`, and calls `reconcile`. After `reconcile` returns `(actions, next_view)` the runtime writes `next_view` to redb with fsync, then updates the in-memory map; on crash between the two, the next boot's bulk-load sees the persisted view and convergence resumes. The runtime stores erased CBOR blobs and re-decodes on bulk-load against the per-reconciler `View` type — the schema is the `View` struct, owned by the reconciler, evolved via `#[serde(default)]` on additive fields. Reconciler memory has exactly one redb table layout: a generic `(reconciler_name, target) → blob` key space the runtime owns. (The workflow journal, §18, is a second redb table layout — a per-instance append-only step/await record keyed by `(workflow_id, step)` — sharing the redb substrate but not this key space.) See ADR-0035 for the full mechanics.
 
 The per-reconciler `State` typing established by ADR-0021 survives across this collapse: `JobLifecycleState` and its peers remain typed, the `AnyState` enum-dispatch shape is unchanged, only the persistence surface is generic. ADR-0036 is the recordkeeping amendment that captures the consequence — under the collapsed trait the reconciler owns no async surface at all, so the runtime owns hydration of all three of intent, observation, and view.
 
@@ -2062,9 +2064,9 @@ Workflows may perform I/O directly — `ctx.call(...).await`, `ctx.sleep(...).aw
 - **Reconciler correctness** = ESR: progress (converges toward desired state) and stability (remains at desired state absent external change). A pure function is the natural expression.
 - **Workflow correctness** = *deterministic replay from journal*: given the same journal, a workflow replays to bit-identical state. A crashed workflow resumes on any control-plane node by reading its journal. Version skew between journal and code is a named failure mode the SDK catches at load time.
 
-Workflows have finite lifecycle. They terminate with a `WorkflowResult` — succeeding, failing, or being cancelled. Completed workflow journals are retained in libSQL for audit, then compacted on a declared retention policy.
+Workflows have finite lifecycle. They terminate with a `WorkflowResult` — succeeding, failing, or being cancelled. Completed workflow journals are retained in redb for audit, then compacted on a declared retention policy.
 
-Workflow journals live in per-primitive libSQL (§4, §17). Each `await` point writes a checkpoint before suspending; resume reads the journal, replays already-completed awaits from their recorded results, and picks up at the first unrecorded await. Cross-workflow coordination uses typed signals — a first-class primitive in the ObservationStore — not ad-hoc IntentStore writes.
+Workflow journals live in the runtime-owned redb substrate (§4, §17), a per-instance append-only layout distinct from the reconciler `View` store but on the same backend. Each `await` point writes a checkpoint before suspending; resume reads the journal, replays already-completed awaits from their recorded results, and picks up at the first unrecorded await. Cross-workflow coordination uses typed signals — a first-class primitive in the ObservationStore — not ad-hoc IntentStore writes.
 
 **First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
 
@@ -2072,7 +2074,7 @@ Workflow journals live in per-primitive libSQL (§4, §17). Each `await` point w
 
 The two primitives compose through the Action channel and the ObservationStore:
 
-- **Reconciler → Workflow** — reconciler emits `Action::StartWorkflow { spec, correlation }`; the workflow lifecycle reconciler brings the workflow up. Subsequent `reconcile` iterations read the workflow's state from the ObservationStore and branch on its result.
+- **Reconciler → Workflow** — reconciler emits `Action::StartWorkflow { start, correlation }`; the workflow lifecycle reconciler brings the workflow up. Subsequent `reconcile` iterations read the workflow's state from the ObservationStore and branch on its result.
 - **Workflow → Reconciler** — a workflow that needs to mutate cluster intent emits a typed Action descriptor through the same Action channel the reconciler runtime consumes. The action lands in Raft; the target reconciler picks it up on commit. Workflows do not bypass Raft.
 - **Workflow → external service** — direct `ctx.call(...).await` through injected `Transport`. Crash-safe via journal; replayable under DST.
 - **Workflow → workflow** — typed signals via ObservationStore. Parent workflows may `await` child results; sibling workflows may `await` signals from any other workflow.
@@ -2123,9 +2125,9 @@ Overdrive draws a hard boundary between three state layers, each with different 
 |---|---|---|---|---|
 | Intent — what should be | yes | only via Raft actions | IntentStore (redb / openraft+redb) | Linearizable |
 | Observation — what is | yes | never directly | ObservationStore (Corrosion / CRDT) | Eventually consistent |
-| Memory — what happened | yes | yes, runtime-mediated | redb (reconciler views) / libSQL (workflow journals) | Private to the primitive |
+| Memory — what happened | yes | yes, runtime-mediated | redb (reconciler `View` blobs / workflow journals — distinct layouts, one substrate) | Private to the primitive |
 
-This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Each primitive gets persistent memory matched to its access pattern: reconcilers persist a typed `View` value per target through the runtime-owned redb `ViewStore` (no SQL access pattern, so no SQL machinery — see §17); workflows persist their `await`-point journal in libSQL where the SQL surface is genuinely useful for replay queries. Reconciler authors never write to the memory layer directly; they return `NextView` and the runtime persists it. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
+This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Each primitive gets persistent memory matched to its access pattern, both on the runtime-owned redb substrate (one durable-memory story for both primitives — ADR-0035, O6). Reconcilers persist a typed `View` value per target through the redb `ViewStore` (no SQL access pattern, so no SQL machinery — see §17). Workflows persist their `await`-point journal in redb too, in a distinct per-instance append-only layout: replay is append-mostly point-access by `(workflow_id, step)`, which is redb's wheelhouse, not a SQL workload. (An ad-hoc query surface over journals is a deferrable read-only observability view, not a replay requirement — so it earns no SQL machinery on the critical path.) Reconciler authors never write to the memory layer directly; they return `NextView` and the runtime persists it. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
 
 ### Correctness Guarantees
 
@@ -2399,7 +2401,7 @@ assert_eventually!("desired == actual",
 // Run the workflow once; capture its journal. Replay from the journal;
 // assert bit-identical trajectory. Catches smuggled non-determinism.
 assert_replay_equivalent!("cert_rotation workflow replays deterministically",
-    WorkflowSpec::cert_rotation(domain));
+    WorkflowStart::cert_rotation(domain));
 
 // Bounded progress — workflows must terminate within declared step budget.
 assert_eventually!("workflow terminates",

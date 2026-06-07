@@ -34,4 +34,12 @@ mod schema_evolution {
     // envelopes (ADR-0063 D2/D6, ADR-0048 golden-bytes obligation).
     mod issued_certificate_row;
     mod root_ca_key;
+
+    // workflow-result-error-model (ADR-0065 § 5 / D5; resolves #217) — the
+    // mandatory golden-bytes fixture for the `WorkflowStartEnvelope` (V1).
+    // The fixture FILE (`tests/schema_evolution/workflow_start.rs`) pins the
+    // V1 archived layout of the durable `Action::StartWorkflow` start intent
+    // (`WorkflowStartEnvelope` / `WorkflowStartV1`), created in
+    // `overdrive-core::workflow` in DELIVER Slice 01 (step 01-02).
+    mod workflow_start; // NEW-3 / D5 / #217 — wired in DELIVER Slice 01 (step 01-02)
 }

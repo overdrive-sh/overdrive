@@ -998,6 +998,123 @@ stream must be deterministic across seeds.
 
 ---
 
+## Check-and-act must be atomic (no TOCTOU)
+
+**A presence/identity check and the mutation it gates MUST be a single
+atomic operation. The mutating call's own return value IS the check at
+the moment of mutation — use it; never re-check separately, and never
+discard it.** Splitting "is this slot taken?" from "take it" — whether
+across two calls (`contains()` then `insert()`) or by dropping the
+return that already encodes the outcome (`let _ = set.insert(k)`) —
+opens a time-of-check-to-time-of-use (TOCTOU) window where a second
+actor slips between the check and the act. This is a recurring defect
+class in this codebase, not a one-off.
+
+### The shape
+
+Every instance is the same silhouette: a primitive whose mutation
+returns the race outcome, and code that throws the outcome away and
+proceeds as if a stale earlier check still held.
+
+| Primitive | The return that IS the check | Discarding it re-opens |
+|---|---|---|
+| `BTreeSet`/`HashSet::insert` | `bool` — `false` iff already present | a second claimant proceeds |
+| `OnceLock`/`OnceCell::set` | `Result` — `Err` iff a racer won | the lost-race value is silently absorbed |
+| `*::remove` | `Option`/`bool` — was it there? | a double-free / double-fire |
+| `AtomicT::compare_exchange` | `Result<prev, prev>` | the CAS loop's whole point |
+| `fs::OpenOptions::create_new` | `Err(AlreadyExists)` | a TOCTOU file race (`exists()` then `create()`) |
+| SQL `INSERT … ON CONFLICT` / upsert | conflict outcome | a SELECT-then-INSERT race |
+
+The recheck-at-the-moment-of-mutation is free and correct; a *separate*
+earlier check is a stale snapshot by the time you act on it.
+
+### The fix, strongest first
+
+1. **Type the racy surface away (preferred).** When a "claim a slot"
+   pattern recurs, wrap the shared cell so the *only* reachable
+   operation is the atomic claim-and-act, and the split is
+   unrepresentable — the bug cannot be written. This is the
+   `make-invalid-states-unrepresentable` lever (§ "Type-driven
+   design"). Two reusable primitives live in `overdrive-core` for this:
+   - **`ClaimSet<K>`** (`crates/overdrive-core/src/claim_set.rs`)
+     exposes only `try_claim(k) -> Option<ClaimGuard>` (RAII release)
+     and `snapshot()` — no `contains`, no bare `insert`, no `remove`.
+     Its `try_claim` return is `#[must_use]`, so the *next* misuse
+     (dropping the guard, which instantly releases the claim) is itself
+     a compile-time lint.
+   - **`RaceOnceCell<T>`** (`crates/overdrive-core/src/race_once_cell.rs`)
+     wraps a `OnceLock` so the lost-race verdict is consumed, not
+     discarded: `set_or_read_winner` (any winner is read back — the one
+     sanctioned discard, behind a named contract) and `set_or_verify`
+     (a divergent winner returns `SetOutcome::Conflict`). The built-in-ca
+     lost-race fix's `set_or_verify_winner` helper was promoted into it;
+     `RcgenCa` now holds its root/intermediate anchors in `RaceOnceCell`s.
+2. **Use the atomic return in place.** Where a typed primitive is
+   overkill, branch on the mutation's own return: `if !set.insert(k) {
+   return … }`, `match cell.set(v) { Err(_) => verify_winner(…) }`,
+   `create_new()?`, `ON CONFLICT`. One locked op, no second check.
+3. **Never `let _ =` / `.ok()` / statement-drop a return that encodes
+   a race outcome.** This is the § "Errors" discipline ("never silently
+   absorb a fallible boundary read into a default") applied to
+   concurrency: a discarded `insert`/`set`/`compare_exchange` return is
+   a discarded race verdict.
+
+### Symptoms during review
+
+- `if x.contains(k) { … } … x.insert(k)` — the canonical split. The
+  two calls are a TOCTOU even under one lock if the lock is released
+  between them, and always so across two lock acquisitions.
+- `let _ = set.insert(k);` / `cell.set(v); Ok(())` / `set.insert(k);`
+  as a bare statement on a *claim-shaped* set or cell — the return was
+  the verdict. (A `BTreeMap::insert` discarding its `Option<V>` on a
+  value-write is fine — this rule is about membership/identity claims,
+  not value overwrites.)
+- Two `.lock()` acquisitions of the same field within one function
+  where the first reads and the second mutates — the gap between them
+  is the window.
+- `path.exists()` then `File::create(path)` — the filesystem TOCTOU;
+  use `create_new`. (`reconcilers.md`'s "adopt-and-skip" symptom — `if
+  resource.exists() { return Ok(()) }` — is the kernel/OS sibling of
+  this rule; that doc owns the converge-on-boot remedy.)
+
+### Precedent
+
+- **`6b9bafde`** — `WorkflowEngine::start` discarded `live_instances.
+  insert(correlation)`'s `bool` and spawned unconditionally; a second
+  `StartWorkflow` for a live instance drove the same journal twice,
+  interleaving appends the positional cursor cannot replay. Fixed
+  with an atomic claim, then hardened by retiring the raw
+  `Mutex<BTreeSet>` for `ClaimSet`.
+- **`ade22762`** (built-in-ca) — `adopt_persisted_root` discarded
+  `OnceLock::set`'s `Err` on a lost race; the lock ended up holding an
+  ephemeral anchor and every subsequent issuance signed under the wrong
+  key, orphaning pinned certs. Fixed with `set_or_verify_winner`, since
+  promoted into the `RaceOnceCell<T>` primitive above.
+- **`31265d4b` / ADR-0061** (veth) — `if exists() { adopt-and-skip }`,
+  the filesystem/kernel TOCTOU; remedy lives in `reconcilers.md`
+  (converge-on-boot).
+
+### When NOT to apply
+
+A value *overwrite* where the prior value is irrelevant
+(`map.insert(k, v)` as a write-through, the reconciler `ViewStore`
+update) is not a claim — discarding its `Option<V>` return is correct.
+The rule fires only when the return encodes a *membership / identity /
+race* verdict that a downstream branch depends on.
+
+### Cross-references
+
+- § "Type-driven design" — make-invalid-states-unrepresentable, the
+  lever behind `ClaimSet`.
+- § "Errors" — "never silently absorb a fallible boundary read"; this
+  rule is the concurrency instance.
+- § "Concurrency & async" — "Never hold a lock across `.await`"; the
+  lock-acquisition discipline a TOCTOU re-check violates.
+- `.claude/rules/reconcilers.md` — "adopt-and-skip" / converge-on-boot,
+  the filesystem/kernel sibling of this in-memory rule.
+
+---
+
 ## Reconciler I/O
 
 **The `Reconciler` trait collapses to a single sync method.** Per
@@ -2178,6 +2295,74 @@ or paste — SPIFFE IDs, region codes, schematic IDs — must be
 case-insensitive. The canonical form emitted by `Display` is lowercase.
 SHA-256-style content hashes stay case-sensitive (they are not
 human-typed).
+
+### One shared length ceiling for label-shaped ids
+
+**Every label-shaped identifier shares ONE length ceiling
+(`overdrive_core::id::LABEL_MAX`, 253 — the DNS-name maximum). A
+*derived* id MUST size its own ceiling off that shared const, never a
+bespoke smaller magic number.** When id B is produced by mapping id A
+into B's grammar, B's ceiling must be large enough to hold the *entire*
+mapped A. If B's ceiling is smaller than A's, the mapping truncates —
+and truncation of a content-addressed id is an **identity collision**:
+two distinct A values that share a truncated prefix collapse onto one B.
+
+The lossy-truncation collision is the same defect class as § "Check-and-act
+must be atomic" (two distinct things silently treated as one), reached
+through a different door: there, a discarded race verdict; here, a
+discarded suffix. The fix shape is also the same — make the collision
+*unrepresentable* (size the ceiling so truncation cannot happen) rather
+than detect-and-recover after the fact.
+
+#### Why a content-addressed suffix makes this acute
+
+The canonical correlation form is `target:purpose/<hex>` — the
+discriminating, content-addressed `<hex>` sits at the **end** of the
+string. End-of-string is exactly the region truncation drops. So the
+*one part of the key that guarantees distinctness* is the first casualty.
+Any id whose entropy is concentrated in a suffix (hashes, ULIDs, content
+addresses) is maximally vulnerable to prefix-preserving truncation.
+
+#### The rule
+
+- **Derive the ceiling, don't invent one.**
+  `const B_MAX: usize = overdrive_core::id::LABEL_MAX + PREFIX.len();` —
+  account for any fixed prefix the mapping prepends (a `wf-`-style
+  leading-char guarantee consumes from the budget). Do NOT write
+  `const B_MAX: usize = 127;` and hope the inputs stay short.
+- **A truncation guard in a mapping loop is a smell.** If
+  `if out.len() >= MAX { break; }` can fire for a valid input, the
+  ceiling is too small. Size it so the guard is *structurally
+  unreachable* for every in-range input, and say so in a comment — keep
+  the guard only as a defensive invariant against future grammar drift,
+  never as a routine path.
+- **"Inputs are short in practice" is not a sizing argument.** It is the
+  exact hand-wave that ships the latent collision. Size for the input
+  type's declared maximum, not its typical value.
+
+#### Symptoms during review
+
+- A second, smaller length const for an id that is *derived from* another
+  id (`WORKFLOW_ID_MAX = 127` while `CorrelationKey` is `LABEL_MAX = 253`).
+- A doc comment calling truncation "defensive" or "correlation keys are
+  already short" — that is the latent-collision tell, not a safety margin.
+- A mapping/sanitising loop with a `break` on a length ceiling, where the
+  source type's max exceeds the destination ceiling.
+
+#### Precedent
+
+`WorkflowId::for_correlation` (`crates/overdrive-control-plane/src/journal/mod.rs`)
+truncated the mapped `CorrelationKey` to a bespoke 127-char ceiling while
+correlation keys may be 253. Two keys sharing their first 124 mapped chars
+but differing only in the dropped suffix derived the **same**
+`WorkflowId`; the second instance's `start()` opened the first's journal
+(silent no-op on a `Terminal` row, or wrong-sequence replay). Fixed by
+sizing `WORKFLOW_ID_MAX = overdrive_core::id::LABEL_MAX + WF_PREFIX.len()`
+so the full key always maps without truncation. (Note: the char-fold step
+`:`/`/` → `-` is *independently* lossy, but only collides hand-built
+`CorrelationKey::new()` keys carrying those chars; every `derive()`-built
+key keeps its full hash suffix once truncation is gone, so all in-tree
+usage is collision-free.)
 
 ### Documentation
 

@@ -34,7 +34,7 @@ use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
+use crate::id::{AllocationId, CorrelationKey, NodeId, Region, ServiceId, WorkloadId};
 use crate::observation::ProbeResultRow;
 use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
@@ -544,6 +544,48 @@ pub enum ObservationRow {
     /// [`IssuedCertificateRow::from_store_bytes`]) are reused as-is per
     /// ADR-0048.
     IssuedCertificate(IssuedCertificateRow),
+    /// `workflow_terminal` row — the durable terminal surface for a
+    /// workflow instance per ADR-0064 §2. Written by the
+    /// [`WorkflowEngine`](../../../overdrive_control_plane/workflow_runtime/struct.WorkflowEngine.html)
+    /// via the sanctioned [`ObservationStore::write`] path when the
+    /// author's `async fn run` returns its terminal — the engine projects
+    /// the body's `Result<Output, TerminalError>` to a
+    /// [`WorkflowStatus`](crate::workflow::WorkflowStatus) (ADR-0065 §3) —
+    /// NOT a direct engine write bypassing the channels (slice-01 AC5).
+    ///
+    /// Keyed by `correlation` (the instance [`CorrelationKey`]) so the
+    /// emitting workflow-lifecycle reconciler finds the status
+    /// deterministically on the next tick and converges the instance to
+    /// terminated. The `Action::StartWorkflow { start, correlation }` the
+    /// reconciler emits carries the SAME key the terminal row is filed
+    /// under (`development.md` Reconciler I/O rule 2 — correlation, not
+    /// request ID, links cause to response).
+    WorkflowTerminal {
+        /// Cause-to-response linkage — the instance correlation key.
+        correlation: CorrelationKey,
+        /// The workflow instance's terminal status (the engine-owned
+        /// projection of the body's `Result<Output, TerminalError>`).
+        status: crate::workflow::WorkflowStatus,
+    },
+    /// `workflow_signal` row — the typed cross-workflow signal surface a
+    /// `ctx.wait_for_signal(key)` blocks on per ADR-0064 §4. A producer
+    /// satisfies a blocked wait by writing this row keyed by the same
+    /// [`SignalKey`](crate::workflow::SignalKey); the engine's live
+    /// `ctx.wait_for_signal` path reads it via
+    /// [`ObservationStore::workflow_signal`].
+    ///
+    /// In-process single-node delivery (#207 cross-node-under-partition
+    /// is OUT). Keyed by `key` alone — one current value per key; a
+    /// re-write replaces it (the value is opaque to the primitive). This
+    /// is the absent-vs-present surface that makes the blocking honest:
+    /// before this row exists, `ctx.wait_for_signal(key)` stays pending.
+    Signal {
+        /// The signal key the row satisfies — the same key a
+        /// `ctx.wait_for_signal(key)` blocks on.
+        key: crate::workflow::SignalKey,
+        /// The opaque payload the blocked wait receives verbatim.
+        value: crate::workflow::SignalValue,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1358,4 +1400,72 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         alloc_id: &AllocationId,
     ) -> Result<Vec<ProbeResultRow>, ObservationStoreError>;
+
+    /// List every observed `workflow_terminal` row — the durable
+    /// terminal surface for workflow instances per ADR-0064 §2. Each row
+    /// is keyed by the instance [`CorrelationKey`] the
+    /// [`WorkflowEngine`](../../../overdrive_control_plane/workflow_runtime/struct.WorkflowEngine.html)
+    /// wrote it under on `run` terminal; the workflow-lifecycle
+    /// reconciler's `hydrate_actual` reads this to mark an instance
+    /// converged (terminated).
+    ///
+    /// # Preconditions
+    /// - None. An instance that has not yet reached terminal contributes
+    ///   no row; the result simply omits it.
+    ///
+    /// # Postconditions
+    /// - One `(correlation, result)` pair per distinct instance
+    ///   correlation that has reached terminal. The terminal write is
+    ///   idempotent on the stable correlation key (a crash-resume
+    ///   re-write of the same instance re-files under the same key), so
+    ///   at most one row per correlation is observable.
+    /// - Iteration order is deterministic across runs — the underlying
+    ///   store iterates by a stable key ordering
+    ///   (`.claude/rules/development.md` § "Ordered-collection choice").
+    ///
+    /// # Edge cases
+    /// - No terminal rows observed: returns `Ok(vec![])`, not an error.
+    ///
+    /// # Observable invariants
+    /// - Calling this method has no side effects.
+    /// - The result reflects every `WorkflowTerminal` write that
+    ///   happens-before this call (single-node read-after-write is
+    ///   strict).
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> Result<Vec<(CorrelationKey, crate::workflow::WorkflowStatus)>, ObservationStoreError>;
+
+    /// Read the current typed signal value for `key`, if present — the
+    /// surface a `ctx.wait_for_signal(key)` blocks on per ADR-0064 §4.
+    /// In-process single-node delivery (#207 cross-node-under-partition
+    /// is OUT).
+    ///
+    /// # Preconditions
+    /// - None. A key that has never been signalled simply returns
+    ///   `Ok(None)` — that ABSENCE is the load-bearing signal the live
+    ///   `ctx.wait_for_signal` path parks on (it re-reads via the
+    ///   injected [`Clock`](crate::traits::clock::Clock) until the row
+    ///   appears).
+    ///
+    /// # Postconditions
+    /// - Returns `Ok(Some(value))` IFF an `ObservationRow::Signal { key,
+    ///   value }` for this exact `key` has been written (single-node
+    ///   read-after-write is strict). Returns `Ok(None)` otherwise.
+    /// - One current value per key — a re-write of the same key replaces
+    ///   the prior value (the value is opaque; last write wins on log
+    ///   order).
+    ///
+    /// # Edge cases
+    /// - No signal written for `key`: returns `Ok(None)`, not an error —
+    ///   absence is the normal "still blocked" condition, not a failure.
+    ///
+    /// # Observable invariants
+    /// - Calling this method has no side effects (it is a pure read).
+    /// - `workflow_signal(key)` transitions monotonically from
+    ///   `Ok(None)` to `Ok(Some(_))` for a given `key` (a written signal
+    ///   is not un-written within an instance's lifetime).
+    async fn workflow_signal(
+        &self,
+        key: &crate::workflow::SignalKey,
+    ) -> Result<Option<crate::workflow::SignalValue>, ObservationStoreError>;
 }

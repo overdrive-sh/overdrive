@@ -48,7 +48,8 @@ use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridg
 use overdrive_core::reconcilers::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName,
     ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
-    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+    WorkflowLifecycleState, WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView,
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -81,6 +82,18 @@ enum AnyViewMap {
     /// `WorkloadLifecycle` carries `View = WorkloadLifecycleView`; the map
     /// holds per-target persisted views.
     WorkloadLifecycle(BTreeMap<TargetResource, WorkloadLifecycleView>),
+    /// `WorkflowLifecycle` carries `View = WorkflowLifecycleView` (Phase 1
+    /// empty); the map holds per-target persisted views per ADR-0035 §5 /
+    /// ADR-0064 §5.
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "WorkflowLifecycleView is intentionally Phase-1-empty (ADR-0064 §5 — the \
+                  re-emit decision is pure over `actual`; there is no input to persist yet). \
+                  The per-target map shape mirrors every other reconciler kind so the runtime \
+                  dispatch stays uniform; the View gains a field (and this expect self-removes) \
+                  when a retry/budget policy lands per `development.md` Persist-inputs rule."
+    )]
+    WorkflowLifecycle(BTreeMap<TargetResource, WorkflowLifecycleView>),
     /// `ServiceMapHydrator` carries `View = ServiceMapHydratorView`;
     /// the map holds per-target persisted views per ADR-0035 §5.
     /// Phase 2 (Slice 08; ASR-2.2-04).
@@ -255,6 +268,21 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::WorkloadLifecycle(loaded)
             }
+            AnyReconciler::WorkflowLifecycle(_) => {
+                #[expect(
+                    clippy::zero_sized_map_values,
+                    reason = "WorkflowLifecycleView is intentionally Phase-1-empty (ADR-0064 §5); \
+                              self-removes when the View gains a field. See AnyViewMap::WorkflowLifecycle."
+                )]
+                let loaded: BTreeMap<TargetResource, WorkflowLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::WorkflowLifecycle(loaded)
+            }
             AnyReconciler::ServiceMapHydrator(_) => {
                 let loaded: BTreeMap<TargetResource, ServiceMapHydratorView> =
                     self.view_store.bulk_load(static_name).await.map_err(|e| {
@@ -373,6 +401,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::WorkloadLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
@@ -418,6 +447,9 @@ impl ReconcilerRuntime {
             AnyViewMap::Unit => AnyReconcilerView::Unit,
             AnyViewMap::WorkloadLifecycle(map) => {
                 AnyReconcilerView::WorkloadLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+            AnyViewMap::WorkflowLifecycle(map) => {
+                AnyReconcilerView::WorkflowLifecycle(map.get(target).cloned().unwrap_or_default())
             }
             AnyViewMap::ServiceMapHydrator(map) => {
                 AnyReconcilerView::ServiceMapHydrator(map.get(target).cloned().unwrap_or_default())
@@ -515,6 +547,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
@@ -551,6 +584,51 @@ impl ReconcilerRuntime {
                 }
                 Ok(())
             }
+            AnyReconcilerView::WorkflowLifecycle(view) => {
+                // Eq-diff skip — same shape as the WorkloadLifecycle arm.
+                // The Phase 1 `WorkflowLifecycleView` is empty, so the
+                // current-vs-next comparison is always equal and this arm
+                // elides the fsync on every tick. The arm is kept full
+                // (not collapsed to `Ok(())`) so a future non-empty view
+                // persists through the same fsync-then-memory ordering.
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::WorkflowLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => WorkflowLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::WorkflowLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
             AnyReconcilerView::ServiceMapHydrator(view) => {
                 // Eq-diff skip — same shape as WorkloadLifecycle arm above.
                 let current = {
@@ -560,6 +638,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_) => ServiceMapHydratorView::default(),
@@ -603,6 +682,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_) => BackendDiscoveryBridgeView::default(),
@@ -644,6 +724,7 @@ impl ReconcilerRuntime {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_) => ServiceLifecycleView::default(),
@@ -723,6 +804,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::WorkloadLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_) => None,
@@ -798,6 +880,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_) => None,
@@ -852,6 +935,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::BackendDiscoveryBridge(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_) => None,
@@ -909,6 +993,7 @@ impl ReconcilerRuntime {
         match &*entry.views.lock() {
             AnyViewMap::ServiceLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_) => None,
@@ -1227,19 +1312,18 @@ pub async fn run_convergence_tick(
         // is permitted. Per-action error isolation lives in the shim.
         // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
         // after every successful `obs.write` per architecture.md §10.
-        action_shim::dispatch(
-            actions,
-            state.driver.as_ref(),
-            state.obs.as_ref(),
-            state.dataplane.as_ref(),
-            state.lifecycle_events.as_ref(),
-            &tick,
-            &state.node_id,
-            std::sync::Arc::clone(&state.allocator),
-            state.runtime.broker_mutex(),
-        )
-        .await
-        .map_err(ConvergenceError::Shim)?;
+        //
+        // ADR-0064 §5 — the WorkflowEngine is now composed into AppState
+        // (step 01-08), so the shim receives the REAL engine, replacing
+        // the 01-05/01-06 `None` placeholder. `dispatch_with_workflow_intent`
+        // is the AppState-aware path that ALSO persists workflow-instance
+        // desired-intent for every `Action::StartWorkflow` BEFORE handing
+        // the actions to the engine off the shim — so the workflow-lifecycle
+        // reconciler's `hydrate_desired` can read the instance back on the
+        // next tick (and re-emit on restart).
+        action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+            .await
+            .map_err(ConvergenceError::Shim)?;
     }
 
     // Cooperative yield — every action_shim::dispatch path on the
@@ -1313,7 +1397,12 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // ADR-0035 / Persist inputs); it does not carry a
         // backoff-pending signal, so this arm returns false. A future
         // bridge-side retry policy would extend this match.
-        | AnyReconcilerView::BackendDiscoveryBridge(_) => false,
+        | AnyReconcilerView::BackendDiscoveryBridge(_)
+        // The workflow-lifecycle view is Phase-1 empty (ADR-0064 §5) and
+        // carries no backoff-pending signal; the §18 re-enqueue for a
+        // running-no-task instance is driven by the action-emitted gate
+        // (the reconciler returns a `StartWorkflow`), not this predicate.
+        | AnyReconcilerView::WorkflowLifecycle(_) => false,
         // GAP-9 Shape B — keep the service-lifecycle reconciler alive
         // across cadences while any observed alloc is mid-startup-window.
         //
@@ -1393,6 +1482,20 @@ async fn hydrate_desired(
                 probe_descriptors,
             };
             Ok(AnyState::WorkloadLifecycle(s))
+        }
+        // ADR-0064 §5 — the workflow-lifecycle reconciler's hydrate-desired.
+        // `WorkflowLifecycle::reconcile` reads ONLY `actual` (the merged
+        // desired+actual projection); its `desired` parameter is unused.
+        // `hydrate_actual` → `hydrate_workflow_actual_instances` already
+        // begins from the `workflows/` intent SSOT scan
+        // (`hydrate_workflow_desired_instances`) and overlays the
+        // engine/obs-derived fields. Scanning the same prefix here too would
+        // be a second read whose result `reconcile(_desired, actual, ...)`
+        // discards on its first line — so the desired side returns an empty
+        // `WorkflowLifecycleState`. The regression guard is
+        // `tests::workflow_lifecycle_hydrate::hydrate_desired_does_not_rescan_workflow_intent`.
+        AnyReconciler::WorkflowLifecycle(_) => {
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -1941,6 +2044,147 @@ async fn stop_intent_present(
     Ok(stop_bytes.is_some())
 }
 
+/// Read every persisted workflow-instance desired-intent from the
+/// `workflows/` prefix and project it into a per-instance state map keyed
+/// by [`CorrelationKey`] (ADR-0064 §5). Each row's value is the workflow
+/// spec's kind name (the input the engine resolves to a factory); the
+/// returned `WorkflowInstanceState` carries the reconstructed
+/// `WorkflowStart` and `running_in_intent = true`. The engine/obs-derived
+/// fields (`has_live_task`, `terminal`) are left at their defaults — the
+/// desired side does not know them; `hydrate_workflow_actual_instances`
+/// joins them.
+///
+/// Per `.claude/rules/development.md` § "Persist inputs, not derived
+/// state": the persisted value is the FULL `WorkflowStart` spec (name +
+/// opaque CBOR input) archived via the action-shim's `archive_for_store`
+/// codec; this reads it back via `WorkflowStart::from_store_bytes`. A
+/// malformed/undecodable intent REFUSES (intent is SSOT, ADR-0048 §3) — it
+/// is NOT log-and-skipped like an observation row.
+async fn hydrate_workflow_desired_instances(
+    state: &AppState,
+) -> Result<
+    std::collections::BTreeMap<
+        overdrive_core::id::CorrelationKey,
+        overdrive_core::reconcilers::WorkflowInstanceState,
+    >,
+    ConvergenceError,
+> {
+    use std::str::FromStr;
+
+    use overdrive_core::id::CorrelationKey;
+    use overdrive_core::reconcilers::WorkflowInstanceState;
+    use overdrive_core::workflow::WorkflowStart;
+
+    let rows = state
+        .store
+        .scan_prefix(IntentKey::workflow_instance_prefix())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+
+    let mut instances = std::collections::BTreeMap::new();
+    for (key, value) in rows {
+        // The key is `workflows/<correlation>`; recover the correlation
+        // half. A malformed key (non-UTF8 or missing prefix) is skipped
+        // with a structured warning — convergence proceeds on surviving
+        // rows (the observation-layer log+skip posture, ADR-0048 § 3).
+        let Ok(key_str) = std::str::from_utf8(key.as_ref()) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.non_utf8_key",
+                "skipping workflow-instance intent row with non-UTF8 key"
+            );
+            continue;
+        };
+        let Some(correlation_str) = key_str.strip_prefix("workflows/") else {
+            continue;
+        };
+        let Ok(correlation) = CorrelationKey::from_str(correlation_str) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.bad_correlation",
+                key = %key_str,
+                "skipping workflow-instance intent row with unparseable correlation"
+            );
+            continue;
+        };
+        // The value is the FULL `WorkflowStart` spec (name + opaque CBOR
+        // input), persisted via the action-shim's `archive_for_store` codec
+        // (#217 engine discharge — Slice 03). Decode it back through the
+        // co-located `from_store_bytes` codec.
+        //
+        // Intent is the load-bearing SSOT (ADR-0048 §3 asymmetry): an
+        // undecodable intent REFUSES — it does NOT log-and-skip like an
+        // observation row. We emit the `health.startup.refused`-class event
+        // and return a typed `ConvergenceError::IntentDecode` so the runtime
+        // escalates (refuse-to-start), rather than silently dropping the
+        // instance from the desired set (which would make a malformed intent
+        // look like "no such workflow" and converge it away — the silent-skip
+        // bug ADR-0065 §5 closes).
+        let spec = WorkflowStart::from_store_bytes(value.as_ref()).map_err(|err| {
+            tracing::error!(
+                name: "health.startup.refused",
+                reason = "workflow_lifecycle.intent_decode",
+                correlation = %correlation,
+                error = %err,
+                "workflow-instance intent failed to decode through the WorkflowStart \
+                 envelope codec; refusing (intent is SSOT, ADR-0048 §3)"
+            );
+            ConvergenceError::IntentDecode(err.to_string())
+        })?;
+        instances.insert(
+            correlation,
+            WorkflowInstanceState {
+                spec,
+                running_in_intent: true,
+                has_live_task: false,
+                terminal: None,
+            },
+        );
+    }
+    Ok(instances)
+}
+
+/// Build the FULL merged per-instance `actual` state the workflow-lifecycle
+/// reconcile body consumes (ADR-0064 §5): start from the desired-intent
+/// projection (spec + `running_in_intent`), then join the engine's
+/// live-task set (`has_live_task`) and the observed `WorkflowTerminal`
+/// rows (`terminal`).
+async fn hydrate_workflow_actual_instances(
+    state: &AppState,
+) -> Result<
+    std::collections::BTreeMap<
+        overdrive_core::id::CorrelationKey,
+        overdrive_core::reconcilers::WorkflowInstanceState,
+    >,
+    ConvergenceError,
+> {
+    // Base: the desired-intent projection (spec + running_in_intent). The
+    // engine/obs joins below overwrite only the actual-side fields.
+    let mut instances = hydrate_workflow_desired_instances(state).await?;
+
+    // Join the engine's live-task set → `has_live_task`.
+    let live = state.workflow_engine.live_instances();
+    for correlation in &live {
+        if let Some(instance) = instances.get_mut(correlation) {
+            instance.has_live_task = true;
+        }
+    }
+
+    // Join the observed `WorkflowTerminal` rows → `terminal`.
+    let terminals = state
+        .obs
+        .workflow_terminal_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    for (correlation, result) in terminals {
+        if let Some(instance) = instances.get_mut(&correlation) {
+            instance.terminal = Some(result);
+        }
+    }
+
+    Ok(instances)
+}
+
 /// Hydrate the `actual` cluster-state projection for `reconciler`
 /// against the `AppState`'s `ObservationStore`.
 async fn hydrate_actual(
@@ -1950,6 +2194,19 @@ async fn hydrate_actual(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
+        // ADR-0064 §5 — workflow-lifecycle hydrate-actual. The reconcile
+        // body reads `actual.instances`, so this arm produces the FULL
+        // merged per-instance state: spec + `running_in_intent` from the
+        // `workflows/` intent scan, `has_live_task` from the engine's
+        // live-task set ([`WorkflowEngine::live_instances`]), `terminal`
+        // from the observed `WorkflowTerminal` rows. An instance that is
+        // running-in-intent with no live task and no terminal is the
+        // re-emit trigger (crash-resume); a terminal-observed instance is
+        // converged.
+        AnyReconciler::WorkflowLifecycle(_) => {
+            let instances = hydrate_workflow_actual_instances(state).await?;
+            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
+        }
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
             let rows = state
@@ -2382,6 +2639,14 @@ pub enum ConvergenceError {
     /// `ObservationStore` read failed.
     #[error("observation read failed: {0}")]
     ObservationRead(String),
+    /// A persisted workflow-instance intent failed to decode through the
+    /// `WorkflowStart` rkyv-envelope codec. Intent is the load-bearing SSOT
+    /// (ADR-0048 §3 asymmetry): an undecodable intent REFUSES — it is NOT
+    /// log-and-skipped like an observation row. The reconcile tick surfaces
+    /// this and the runtime escalates it to `health.startup.refused` +
+    /// non-zero exit (ADR-0065 §5).
+    #[error("workflow-instance intent decode failed: {0}")]
+    IntentDecode(String),
     /// Target resource did not match the expected `job/<id>` shape.
     #[error("invalid target resource: {0}")]
     TargetShape(String),
@@ -2980,6 +3245,273 @@ mod tests {
                  later Startup/idx-1 Fail row must be excluded because BOTH role AND probe_idx \
                  must match (kills && → || mutant at reconciler_runtime.rs:1937); got {:?}",
                 fact.latest_startup_probe
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // workflow-lifecycle hydrate boundary — regression guard against
+    // the redundant double-scan of the `workflows/` intent prefix.
+    //
+    // `WorkflowLifecycle::reconcile` reads ONLY `actual` (the merged
+    // desired+actual projection); its `desired` parameter is `_desired`
+    // (unused). Meanwhile `hydrate_actual` → `hydrate_workflow_actual_
+    // instances` already starts from the intent SSOT scan as its base.
+    // The `hydrate_desired` arm must therefore NOT scan a second time —
+    // it returns an empty `WorkflowLifecycleState`. This module pins
+    // that contract so the discarded second scan cannot be reintroduced.
+    // -----------------------------------------------------------------
+    mod workflow_lifecycle_hydrate {
+        use std::sync::Arc;
+
+        use overdrive_core::aggregate::IntentKey;
+        use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
+        use overdrive_core::reconcilers::{AnyState, TargetResource};
+        use overdrive_core::traits::driver::{Driver, DriverType};
+        use overdrive_core::traits::intent_store::IntentStore;
+        use overdrive_core::traits::observation_store::ObservationStore;
+        use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+        use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::adapters::dataplane::SimDataplane;
+        use overdrive_sim::adapters::driver::SimDriver;
+        use overdrive_sim::adapters::observation_store::SimObservationStore;
+        use overdrive_store_local::LocalIntentStore;
+        use tempfile::TempDir;
+
+        use crate::AppState;
+        use crate::reconciler_runtime::{
+            ReconcilerRuntime, hydrate_actual_for_test, hydrate_desired_for_test,
+        };
+
+        fn writer_node() -> NodeId {
+            NodeId::new("writer-1").expect("valid NodeId")
+        }
+
+        fn wf_target() -> TargetResource {
+            TargetResource::new("workflow/all").expect("valid target")
+        }
+
+        fn provision_spec() -> WorkflowStart {
+            WorkflowStart {
+                name: WorkflowName::new("provision-record").expect("valid workflow name"),
+                input: Vec::new(),
+            }
+        }
+
+        fn correlation_for(spec: &WorkflowStart) -> CorrelationKey {
+            CorrelationKey::derive(
+                "wf-provision-0001",
+                &ContentHash::of(spec.name.as_str().as_bytes()),
+                "start-workflow",
+            )
+        }
+
+        /// Build an `AppState` over a real (tempdir) `LocalIntentStore`
+        /// and persist one workflow-instance desired-intent row at
+        /// `workflows/<correlation>` — the exact key/value shape the
+        /// production `persist_workflow_intents` writes for a committed
+        /// `Action::StartWorkflow`.
+        async fn build_state_with_workflow_intent(
+            tmp: &TempDir,
+            spec: &WorkflowStart,
+            correlation: &CorrelationKey,
+        ) -> AppState {
+            let runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
+                .expect("runtime new");
+            let store_path = tmp.path().join("intent.redb");
+            let store =
+                Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+            let obs: Arc<dyn ObservationStore> =
+                Arc::new(SimObservationStore::single_peer(writer_node(), 0));
+
+            // Mirror `persist_workflow_intents`: key =
+            // `IntentKey::for_workflow_instance(correlation)`, value =
+            // the FULL `WorkflowStart` spec via the co-located codec.
+            let key = IntentKey::for_workflow_instance(correlation);
+            let archived = spec.archive_for_store().expect("archive WorkflowStart");
+            store.put(key.as_bytes(), archived.as_ref()).await.expect("put workflow intent");
+
+            let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+            let allocator =
+                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            AppState::new(
+                store,
+                store_path,
+                obs,
+                Arc::new(runtime),
+                driver,
+                Arc::new(SimClock::new()),
+                Arc::new(SimDataplane::new()),
+                writer_node(),
+                allocator,
+                crate::test_empty_listener_facts(),
+                std::net::Ipv4Addr::LOCALHOST,
+            )
+        }
+
+        /// Regression: `hydrate_desired` for the workflow-lifecycle
+        /// reconciler must NOT scan the `workflows/` prefix — it returns
+        /// an empty `WorkflowLifecycleState`. The same prefix is scanned
+        /// by `hydrate_actual` (whose `WorkflowInstanceState` the pure
+        /// reconcile body actually reads), so a desired-side scan is a
+        /// redundant second read whose result is discarded by
+        /// `reconcile(_desired, actual, ...)`.
+        ///
+        /// The companion `hydrate_actual` assertion makes this
+        /// non-vacuous: it proves the intent row IS persisted and IS
+        /// readable, so "desired is empty" reflects the new contract, not
+        /// a missing fixture.
+        #[tokio::test]
+        async fn hydrate_desired_does_not_rescan_workflow_intent() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let spec = provision_spec();
+            let correlation = correlation_for(&spec);
+            let state = build_state_with_workflow_intent(&tmp, &spec, &correlation).await;
+            let reconciler = crate::workflow_lifecycle();
+
+            // hydrate_actual scans the intent prefix as its base and
+            // surfaces the persisted instance — running-in-intent with no
+            // live engine task and no terminal row (the empty-registry
+            // default engine holds no live tasks).
+            let actual = hydrate_actual_for_test(&reconciler, &wf_target(), &state)
+                .await
+                .expect("hydrate_actual ok");
+            let AnyState::WorkflowLifecycle(actual_state) = actual else {
+                panic!("expected WorkflowLifecycle actual state");
+            };
+            let instance = actual_state
+                .instances
+                .get(&correlation)
+                .expect("hydrate_actual must surface the persisted workflow instance");
+            assert!(
+                instance.running_in_intent,
+                "the persisted workflow intent marks the instance running-in-intent"
+            );
+
+            // hydrate_desired must NOT scan again — the desired side is
+            // empty by design (the merged projection lives in `actual`).
+            let desired = hydrate_desired_for_test(&reconciler, &wf_target(), &state)
+                .await
+                .expect("hydrate_desired ok");
+            let AnyState::WorkflowLifecycle(desired_state) = desired else {
+                panic!("expected WorkflowLifecycle desired state");
+            };
+            assert!(
+                desired_state.instances.is_empty(),
+                "hydrate_desired for the workflow-lifecycle reconciler must NOT re-scan the \
+                 `workflows/` intent prefix — reconcile reads only `actual`, so the desired side \
+                 returns an empty WorkflowLifecycleState; got {} instance(s)",
+                desired_state.instances.len()
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // persist_view eq-diff skip — the WorkflowLifecycle arm elides the
+    // fsync `write_through` when the next view equals the current one.
+    // The Phase 1 `WorkflowLifecycleView` is an empty struct, so the
+    // comparison is ALWAYS equal and existing tests cannot distinguish
+    // the `==` guard from its `!=` mutant (both leave the empty view
+    // observably identical). The only behavioural effect the guard
+    // controls is whether the durable fsync fires — observed here via a
+    // call-counting spy `ViewStore`.
+    // -----------------------------------------------------------------
+    mod workflow_view_persist_elision {
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use async_trait::async_trait;
+        use overdrive_core::reconcilers::{
+            AnyReconcilerView, ReconcilerName, TargetResource, WorkflowLifecycleView,
+        };
+        use tempfile::TempDir;
+
+        use crate::reconciler_runtime::ReconcilerRuntime;
+        use crate::view_store::{ProbeError, Result as ViewStoreResult, ViewStore};
+
+        /// Spy `ViewStore` that counts `write_through_bytes` (fsync) calls.
+        /// Storage is a no-op — the test observes only whether the durable
+        /// write fired, which is the sole behavioural effect the eq-diff
+        /// skip in `persist_view`'s WorkflowLifecycle arm controls.
+        #[derive(Default)]
+        struct CountingViewStore {
+            write_through_calls: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ViewStore for CountingViewStore {
+            async fn bulk_load_bytes(
+                &self,
+                _reconciler: &'static str,
+            ) -> ViewStoreResult<BTreeMap<TargetResource, Vec<u8>>> {
+                Ok(BTreeMap::new())
+            }
+
+            async fn write_through_bytes(
+                &self,
+                _reconciler: &'static str,
+                _target: &TargetResource,
+                _cbor: &[u8],
+            ) -> ViewStoreResult<()> {
+                self.write_through_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            async fn delete(
+                &self,
+                _reconciler: &'static str,
+                _target: &TargetResource,
+            ) -> ViewStoreResult<()> {
+                Ok(())
+            }
+
+            async fn probe(&self) -> std::result::Result<(), ProbeError> {
+                Ok(())
+            }
+        }
+
+        /// Kills `reconciler_runtime.rs:607 == → !=` in `persist_view`'s
+        /// WorkflowLifecycle arm. The Phase 1 `WorkflowLifecycleView` is an
+        /// empty struct, so a freshly-hydrated `current` (default) always
+        /// equals the `next_view` the runtime persists — the eq-diff skip
+        /// MUST fire and elide the fsync `write_through` on every tick (the
+        /// optimization the arm's doc-comment promises). Under the correct
+        /// `==` the spy records ZERO write_through calls; the `!=` mutant
+        /// inverts the guard so the early return never fires and the fsync
+        /// runs (count == 1), failing this assertion.
+        #[tokio::test]
+        async fn persist_view_elides_fsync_for_unchanged_workflow_view() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let spy = Arc::new(CountingViewStore::default());
+            let mut runtime =
+                ReconcilerRuntime::new(tmp.path(), Arc::clone(&spy) as Arc<dyn ViewStore>)
+                    .expect("runtime::new");
+            runtime
+                .register(crate::workflow_lifecycle())
+                .await
+                .expect("register workflow-lifecycle");
+
+            let name = ReconcilerName::new("workflow-lifecycle").expect("valid reconciler name");
+            let target = TargetResource::new("workflow/all").expect("valid target");
+
+            // The persisted view equals the freshly-hydrated default (empty
+            // struct) — the eq-diff skip must fire and elide the fsync.
+            runtime
+                .persist_view(
+                    &name,
+                    &target,
+                    AnyReconcilerView::WorkflowLifecycle(WorkflowLifecycleView::default()),
+                )
+                .await
+                .expect("persist_view ok");
+
+            assert_eq!(
+                spy.write_through_calls.load(Ordering::SeqCst),
+                0,
+                "persisting an unchanged (empty) WorkflowLifecycleView must elide the fsync \
+                 write_through (eq-diff skip at persist_view's WorkflowLifecycle arm); a non-zero \
+                 count means the `current == view` guard was inverted (kills the == → != mutant)"
             );
         }
     }

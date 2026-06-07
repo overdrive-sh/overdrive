@@ -588,6 +588,122 @@ Four properties the diagram makes explicit:
 
 ---
 
+## Phase 1 — Workflow Primitive (Mermaid)
+
+**Source:** `docs/feature/workflow-primitive/` DESIGN-wave artifacts.
+**ADR:** ADR-0066 (journal), ADR-0064 (trait+ctx+engine). Extends ADR-0035
+(reconciler memory / `ViewStore`) + ADR-0023 (action-shim).
+**Date:** 2026-06-05. **GH:** #39 (roadmap [3.2]). Architecture locked to B′.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+  title System Context — Overdrive (Workflow primitive, GH #39)
+
+  Person(devon, "Platform Engineer (Devon)", "Authors a durable sequence as `impl Workflow { async fn run(ctx) }`; runs `cargo dst --only replay_equivalence_provision_record`")
+  Person(ana, "Operator (Ana)", "Observes a running/terminal instance via ObservationStore rows + lifecycle events. NO `overdrive workflow` CLI verb (#206)")
+  System(overdrive, "Overdrive node", "Single binary — control plane hosts the workflow engine + redb journal; runs durable-async sequences to a terminal WorkflowResult, crash-resumable on the same node")
+  System_Ext(fs, "Local filesystem (redb)", "ONE redb file `<data_dir>/reconcilers/memory.redb` — reconciler View tables + the `__wf_journal__` append-only journal table (second layout, same substrate)")
+  System_Ext(ci, "CI", "Runs `cargo dst` incl. the K4 `replay_equivalence_provision_record` SimInvariant on the critical path, seed-reproducible")
+
+  Rel(devon, overdrive, "Authors `impl Workflow`; the workflow-lifecycle reconciler brings the instance up via Action::StartWorkflow")
+  Rel(ana, overdrive, "Reads ObservationStore terminal-result row (keyed by CorrelationKey) + structured lifecycle events")
+  Rel(overdrive, fs, "Appends journal checkpoints (fsync-before-suspend); replays on resume")
+  Rel(ci, overdrive, "Gates replay-equivalence + bounded-progress (K4)")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+  title Container Diagram — Workflow primitive
+
+  Person(devon, "Platform Engineer (Devon)")
+
+  Container_Boundary(workspace, "Overdrive workspace") {
+    Container(core, "overdrive-core", "Rust crate (class: core)", "NEW `workflow` module: Workflow trait, WorkflowCtx type, WorkflowResult, concrete WorkflowStart. NO tokio (injected ports + async_trait). EXTENDED: Action::StartWorkflow made live.")
+    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "NEW WorkflowEngine (workflow_runtime) + JournalStore port + RedbJournalStore (journal). EXTENDED: action-shim StartWorkflow arm → engine.start; workflow-lifecycle reconciler (pure-sync).")
+    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "NEW SimJournalStore. GRADUATED: replay_equivalence_provision_record (was ReplayEquivalentEmptyWorkflow placeholder) + WorkflowJournalWriteOrdering + WorkflowExactlyOnceEffectOnResume invariants.")
+    Container(cli, "overdrive-cli", "Rust binary (class: binary)", "Unchanged — NO `overdrive workflow` verb (#206); engine composed in `serve` boot.")
+  }
+
+  ContainerDb(redb_file, "redb file `memory.redb`", "On-disk ACID KV", "Shared substrate: reconciler View tables + `__wf_journal__` append-only journal table. ONE Arc<Database> handle.")
+  ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "Terminal-result rows (keyed by CorrelationKey) + typed signal rows (slice 03)")
+
+  Rel(devon, core, "impl Workflow for ProvisionRecord")
+  Rel(ctrl, core, "Drives Workflow::run; reads WorkflowStart from Action::StartWorkflow")
+  Rel(ctrl, redb_file, "JournalStore::append (fsync) / load_journal; ViewStore on the same file")
+  Rel(ctrl, obs, "Engine writes terminal-result row; reconciler observes it; signals (slice 03)")
+  Rel(sim, ctrl, "DST drives the engine with SimJournalStore + Sim* ports")
+```
+
+### C4 Level 3 — Workflow engine + journal + replay subsystem
+
+```mermaid
+C4Component
+  title Component Diagram — Workflow engine, journal, and replay
+
+  Container_Boundary(core, "overdrive-core (class: core)") {
+    Component(wf_trait, "Workflow trait + WorkflowCtx (NEW)", "workflow/ — async_trait", "async fn run(&self, ctx) -> WorkflowResult. WorkflowCtx bundles Arc<dyn Clock/Transport/Entropy> + journal cursor. The workflow analogue of TickContext. No tokio.")
+    Component(wf_result, "WorkflowResult + WorkflowStart (NEW)", "workflow/", "WorkflowResult = Success | Failed{reason} | Cancelled (#[non_exhaustive], distinct from TerminalCondition). WorkflowStart replaces the reconcilers/mod.rs:562 placeholder.")
+    Component(action_sw, "Action::StartWorkflow (EXTENDED)", "reconcilers/mod.rs:373", "spec + correlation — already the locked shape; the reconciler→workflow lifecycle trigger.")
+    Component(corr, "CorrelationKey (REUSE)", "id.rs:538", "derive(target, spec_hash, purpose); keys the terminal-result observation row.")
+  }
+
+  Container_Boundary(ctrl, "overdrive-control-plane (class: adapter-host)") {
+    Component(wf_lifecycle, "workflow-lifecycle reconciler (NEW, pure-sync)", "reconcilers + runtime registration", "ADR-0035 pure reconcile: desired = spec(s) that should run; actual = instance states; emits Action::StartWorkflow, observes terminal rows. NEVER .await.")
+    Component(shim, "action-shim StartWorkflow arm (EXTENDED)", "action_shim/mod.rs:446", "Was no-op Ok(()). Now: hands the workflow-start to WorkflowEngine::start — the async boundary (ADR-0023), exactly as StartAllocation→Driver::start.")
+    Component(engine, "WorkflowEngine (NEW, async)", "workflow_runtime", "Drives run() as a tracked tokio::task; owns the per-instance journal cursor; performs check-then-record replay; on terminal writes the ObservationStore terminal-result row.")
+    Component(journal_port, "JournalStore port (NEW)", "journal/mod.rs", "append(id, entry) [fsync] / load_journal(id) -> Vec<JournalEntry> / probe(). Distinct from ViewStore — append-only-ordered, NOT single-blob-overwrite.")
+    Component(redb_journal, "RedbJournalStore (NEW)", "journal/redb.rs", "Table `__wf_journal__` key (WorkflowId, u32 step), CBOR JournalEntry. Shares the RedbViewStore Arc<Database>. fsync-then-suspend; Earned-Trust probe.")
+  }
+
+  Container_Boundary(sim, "overdrive-sim (class: adapter-sim)") {
+    Component(sim_journal, "SimJournalStore (NEW)", "adapters/journal", "In-memory BTreeMap<(WorkflowId,u32),Vec<u8>> + injectable fsync-failure. Mirrors SimViewStore.")
+    Component(inv, "replay_equivalence_provision_record (GRADUATED)", "invariants/", "Uninterrupted vs crash-resumed trajectory byte-equality + assert_eventually!(is_terminal). K4, CI critical path. Replaces the ReplayEquivalentEmptyWorkflow two-SimEntropy placeholder.")
+  }
+
+  ContainerDb(redb_file, "redb file (shared substrate)", "ACID KV", "ViewStore tables + __wf_journal__ table, one Database handle")
+
+  Rel(wf_lifecycle, action_sw, "Emits StartWorkflow{start, correlation}")
+  Rel(action_sw, shim, "Committed Action dispatched")
+  Rel(shim, engine, "WorkflowEngine::start(spec, correlation)")
+  Rel(engine, wf_trait, "Calls run(&ctx).await; ctx.* are check-then-record points")
+  Rel(engine, journal_port, "append (live: fsync before suspend) / load_journal (resume: replay)")
+  Rel(journal_port, redb_journal, "production binding")
+  Rel(journal_port, sim_journal, "test/DST binding")
+  Rel(redb_journal, redb_file, "Writes __wf_journal__ table; shares Arc<Database> with ViewStore")
+  Rel(engine, corr, "Keys terminal-result row by CorrelationKey")
+  Rel(inv, engine, "Drives uninterrupted + crash-resumed runs; asserts replay-equivalence + bounded progress")
+```
+
+Five properties the diagram makes explicit:
+
+1. **`reconcile` stays pure.** The workflow-lifecycle reconciler only emits
+   `StartWorkflow` and observes terminal rows; all `.await` lives in the
+   engine off the shim (ADR-0023's sanctioned async boundary). The
+   `ReconcilerIsPure` invariant is untouched.
+2. **The journal is a *second table layout on the same redb file*.** The
+   `RedbJournalStore` shares the `RedbViewStore`'s `Arc<Database>`; the
+   `__wf_journal__` append-only table coexists with the reconciler-`View`
+   tables. One durable-memory story (O6/K5); no libSQL.
+3. **Replay is structural.** Every `ctx.*` await is check-then-record: on
+   replay it returns the recorded result without re-firing the effect
+   (exactly-once, K1); live it performs the effect, appends with fsync
+   before suspend, advances the cursor. All non-determinism through `ctx` ⇒
+   bit-identical replay (K4).
+4. **The K4 invariant graduates the placeholder.** The existing
+   `ReplayEquivalentEmptyWorkflow` two-SimEntropy stand-in becomes a real
+   journal replay against the engine + `SimJournalStore`, renamed
+   `replay_equivalence_provision_record`.
+5. **Cross-node resume is not precluded.** The journal is `WorkflowId`-keyed
+   node-independent CBOR behind a `JournalStore` trait — a Phase-2 HA
+   adapter slots in where `RedbJournalStore` is, exactly as `ViewStore`
+   leaves room for a `RaftStore`-shaped successor (#205).
+
+---
+
 ## Unconnected-UDP sendmsg4 + recvmsg4 (GH #200, ADR-0053 rev 2026-06-05)
 
 **Source:** `docs/feature/unconnected-udp-sendmsg4/`. **ADR:** ADR-0053

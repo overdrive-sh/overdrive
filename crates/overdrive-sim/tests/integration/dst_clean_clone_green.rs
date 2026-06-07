@@ -72,7 +72,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "intent-never-crosses-into-observation",
     "snapshot-roundtrip-bit-identical",
     "sim-observation-lww-converges",
-    "replay-equivalent-empty-workflow",
+    // workflow-primitive step 01-07 — graduated from
+    // `replay-equivalent-empty-workflow`.
+    "replay-equivalence-provision-record",
     "entropy-determinism-under-reseed",
     "at-least-one-reconciler-registered",
     "duplicate-evaluations-collapse",
@@ -155,6 +157,44 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // Tier-2 backstop for cgroup_sock_addr). Blessed here so the catalogue
     // length + named-set checks track `Invariant::ALL` exactly.
     "reply-source-rewrite-lockstep",
+    // workflow-primitive step 01-07 — sibling workflow durability
+    // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
+    "workflow-journal-write-ordering",
+    "workflow-exactly-once-effect-on-resume",
+    // workflow-result-error-model step 02-01 (ADR-0065 §3, D3) — the
+    // body-`Result` → `WorkflowStatus` projection invariant added to
+    // `Invariant::ALL` by step 02-01 (`crate::invariants::evaluators::
+    // evaluate_workflow_terminal_status_projection`). Drives an always-failing
+    // workflow and pins `Err(TerminalError::explicit)` → `Failed { terminal }`
+    // plus the byte-equal terminal round-trip through the journal `Terminal`
+    // command and the `WorkflowTerminal` obs row (D3 lossless projection).
+    // Blessed here so the catalogue length + named-set checks track
+    // `Invariant::ALL` exactly.
+    "workflow-terminal-status-projection",
+    // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+    // counterpart to NEW-5 (`crate::invariants::evaluators::
+    // evaluate_workflow_budget_exhaustion_mints_terminal`). Drives an
+    // always-transient workflow and pins the engine re-driving up to
+    // `WORKFLOW_RETRY_BUDGET` then minting `Failed { terminal:
+    // BudgetExhausted }` (the body authored no failure — D4). Added to
+    // `Invariant::ALL` by step 04-02; blessed here so the catalogue length +
+    // named-set checks track `Invariant::ALL` exactly.
+    "workflow-budget-exhaustion-mints-terminal",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 — the
+    // DST counterpart to the step-terminal short-circuit acceptance. Asserts a
+    // `ctx.run` step that resolves to `Err(StepError::Terminal)` projects
+    // `Failed { Explicit }` with ZERO `RetryAttempted` (never re-driven) — the
+    // structural contrast with the budget invariant above. Added to
+    // `Invariant::ALL` with the `StepError` union; blessed here so the
+    // catalogue length + named-set checks track `Invariant::ALL` exactly.
+    "workflow-step-terminal-short-circuits",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 — the
+    // DST counterpart to the per-step-policy acceptance. Asserts the FAILING
+    // step's `RunRetryPolicy` (not the global `WORKFLOW_RETRY_BUDGET`) governs
+    // the re-drive count, plus the `max_duration` elapsed-window gate. Added to
+    // `Invariant::ALL` with the per-step policy + `RunStep` builder; blessed
+    // here so the catalogue length + named-set checks track `Invariant::ALL`.
+    "workflow-per-step-retry-policy-governs-redrive",
 ];
 
 // -----------------------------------------------------------------------------

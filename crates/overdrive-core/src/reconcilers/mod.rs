@@ -169,6 +169,7 @@ use crate::wall_clock::UnixInstant;
 pub mod backend_discovery_bridge;
 pub mod noop_heartbeat;
 pub mod service_map_hydrator;
+pub mod workflow_lifecycle;
 pub mod workload_lifecycle;
 
 pub use backend_discovery_bridge::{
@@ -178,6 +179,9 @@ pub use noop_heartbeat::NoopHeartbeat;
 pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, classify_backend_address,
+};
+pub use workflow_lifecycle::{
+    WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
 };
 pub use workload_lifecycle::{
     RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle, WorkloadLifecycleState,
@@ -330,6 +334,9 @@ pub enum AnyState {
     /// `WorkloadLifecycle` reconciler's typed projection — see
     /// [`WorkloadLifecycleState`].
     WorkloadLifecycle(WorkloadLifecycleState),
+    /// `WorkflowLifecycle` reconciler's typed projection — see
+    /// [`WorkflowLifecycleState`] (ADR-0064 §5).
+    WorkflowLifecycle(WorkflowLifecycleState),
     /// `ServiceMapHydrator` reconciler's typed projection — see
     /// [`ServiceMapHydratorState`].
     ServiceMapHydrator(ServiceMapHydratorState),
@@ -369,10 +376,10 @@ pub enum Action {
         idempotency_key: Option<String>,
     },
 
-    /// Start a workflow. `WorkflowSpec` is a placeholder in Phase 1.
+    /// Start a workflow. Carries the durable [`WorkflowStart`] intent.
     StartWorkflow {
-        /// The workflow to start.
-        spec: WorkflowSpec,
+        /// The durable workflow START intent (identity + opaque input).
+        start: WorkflowStart,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },
@@ -562,9 +569,12 @@ pub enum RestartReason {
     },
 }
 
-/// Placeholder for the workflow spec. Phase 3 replaces with real shape.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowSpec;
+// `WorkflowStart` is the concrete shape defined in `crate::workflow`
+// (ADR-0064 §1, replacing the former unit placeholder). It is
+// re-exported here so `Action::StartWorkflow` (above) and existing
+// `reconcilers::WorkflowStart` references keep resolving against this
+// path.
+pub use crate::workflow::WorkflowStart;
 
 // ---------------------------------------------------------------------------
 // ReconcilerName newtype
@@ -659,7 +669,14 @@ pub enum ReconcilerNameError {
 // ---------------------------------------------------------------------------
 
 /// Canonical shapes accepted by `TargetResource::new`.
-const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/", "service/"];
+///
+/// `workflow/` is the workflow-lifecycle reconciler's target shape
+/// (ADR-0064 §5). Unlike the per-resource reconcilers, the
+/// workflow-lifecycle reconciler converges ALL instances each tick (its
+/// hydrate scans the `workflows/` intent prefix), so the conventional
+/// target is `workflow/all`; the `/all` id-part is non-empty and so
+/// satisfies the shape rule.
+const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/", "service/", "workflow/"];
 
 /// Target-resource component of the evaluation broker's key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -729,6 +746,9 @@ pub enum AnyReconciler {
     NoopHeartbeat(NoopHeartbeat),
     /// First real (non-proof-of-life) reconciler.
     WorkloadLifecycle(WorkloadLifecycle),
+    /// The workflow-lifecycle reconciler — manages WHICH workflow
+    /// instances exist; re-emits `StartWorkflow` on restart (ADR-0064 §5).
+    WorkflowLifecycle(WorkflowLifecycle),
     /// Phase 2 — `service-map-hydrator`.
     ServiceMapHydrator(ServiceMapHydrator),
     /// Phase 2.2 — `backend-discovery-bridge`.
@@ -745,6 +765,7 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
             Self::WorkloadLifecycle(r) => r.name(),
+            Self::WorkflowLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
             Self::BackendDiscoveryBridge(r) => r.name(),
             Self::ServiceLifecycle(r) => r.name(),
@@ -758,6 +779,7 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
             Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
+            Self::WorkflowLifecycle(_) => <WorkflowLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
             Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
@@ -787,6 +809,15 @@ impl AnyReconciler {
             ) => {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::WorkloadLifecycle(next_view))
+            }
+            (
+                Self::WorkflowLifecycle(r),
+                AnyState::WorkflowLifecycle(desired),
+                AnyState::WorkflowLifecycle(actual),
+                AnyReconcilerView::WorkflowLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::WorkflowLifecycle(next_view))
             }
             (
                 Self::ServiceMapHydrator(r),
@@ -833,6 +864,9 @@ pub enum AnyReconcilerView {
     Unit,
     /// `WorkloadLifecycle` reconciler's view.
     WorkloadLifecycle(WorkloadLifecycleView),
+    /// `WorkflowLifecycle` reconciler's view (Phase 1: empty — the
+    /// re-emit decision is pure over `actual`). ADR-0064 §5.
+    WorkflowLifecycle(WorkflowLifecycleView),
     /// `ServiceMapHydrator` reconciler's view.
     ServiceMapHydrator(ServiceMapHydratorView),
     /// `BackendDiscoveryBridge` reconciler's view.

@@ -75,6 +75,41 @@ jobs:
     served_by_phase: 2
     status: active
 
+  - id: J-PLAT-005
+    title: "Drive a finite multi-step side-effecting platform sequence to a terminal result exactly-once, crash-resumable on any node, without hand-rolling a state machine per sequence"
+    situation: >
+      When I, an Overdrive platform engineer, must perform a finite,
+      ordered, multi-step operation whose steps take externally-visible
+      side effects that are unsafe to repeat (issue a cert to an ACME
+      server, quiesce a source region, snapshot a microVM, ratify a
+      staged rollout),
+    motivation: >
+      I want to express the sequence as ordinary control flow and have
+      the platform persist its progress, resume it on any control-plane
+      node after a crash from the first incomplete step, and drive it to
+      a single terminal result — without re-issuing completed steps,
+      losing committed ones, or hand-rolling a state machine, a step
+      cursor, a crash-resume path, and a correctness proof for each
+      sequence,
+    outcome: >
+      so the platform's own lifecycle operations (certificate rotation,
+      multi-stage deployment, cross-region migration, staged rollout,
+      persistent microVM snapshot/restore) are as mechanically-trustworthy
+      under crash and partition as the reconciler convergence engine
+      (J-PLAT-004), the resumed execution provably reaches the same
+      terminal result the uninterrupted execution would have, and the
+      platform operates the fewest distinct persistence/recovery
+      mechanisms it can to support its terminal sequences. ODI outcomes:
+      O1 (no repeated side effect on resume), O2 (no lost committed step
+      on cross-node resume), O3 (fast to author a new crash-resumable
+      sequence), O4 (resumed terminal == uninterrupted terminal), O5
+      (provable resume-equivalence before ship), O6 (minimize # of
+      distinct persistence/recovery mechanisms). See
+      docs/feature/workflow-primitive/diverge/job-analysis.md.
+    source: whitepaper §18 (Workflow Primitive); GH #39; DIVERGE wave (2026-06-05)
+    served_by_phase: 3
+    status: active
+
   - id: J-OPS-001
     title: "Bill a tenant for exactly what they used, with kernel evidence"
     situation: >
@@ -392,3 +427,36 @@ changelog:
       + recvmsg4 bidirectional rewrite); recvmsg4 found load-bearing for
       source-validating clients via kernel commit 983695fa6765. See
       docs/feature/unconnected-udp-sendmsg4/.
+  - date: 2026-06-05
+    change: >
+      Added J-PLAT-005 for the workflow-primitive feature (GH #39),
+      bootstrapped by the DIVERGE wave. The strategic/physical-level job
+      behind "Workflow trait + durable journal + typed signals +
+      workflow-lifecycle reconciler": drive a finite, ordered,
+      side-effecting platform sequence to a terminal result exactly-once,
+      crash-resumable on any node, without hand-rolling a state machine
+      per sequence. Peer to J-PLAT-004 (reconciler ESR) — workflows
+      orchestrate terminal sequences, reconcilers converge. Six ODI
+      outcomes (O1-O6); O1/O2/O4 are the exactly-once core, O5 ties to
+      the DST replay-equivalence obligation, O6 surfaces the
+      journal-store tension (libSQL vs redb, given ADR-0035 moved the
+      reconciler primitive off libSQL). served_by_phase: 3. Existing
+      entries unmodified.
+  - date: 2026-06-05
+    change: >
+      workflow-primitive DISCUSS wave (J-PLAT-005, no re-derivation of the
+      job — JTBD validated in DIVERGE). JTBD-to-Story bridge: the six ODI
+      outcomes O1-O6 are mapped onto the user stories US-WP-1..US-WP-5 (see
+      docs/feature/workflow-primitive/feature-delta.md). Created the
+      platform-engineer persona docs/product/personas/devon-platform-engineer.yaml
+      (NEW persona kind — platform-internal author + operator, distinct from
+      the app-developer/evaluator J-DOCS personas) and the journey
+      docs/product/journeys/author-a-durable-workflow.yaml. SCOPE
+      back-propagation: J-PLAT-005 outcome O2 ("no lost committed step on
+      cross-node resume") is a multi-node property; the codebase is Phase-1
+      single-node, so DISCUSS scopes the IN-SCOPE core to single-node
+      crash-resume (kill the process, restart, resume from the redb
+      journal) and surfaces cross-node resume as a sequencing dependency on
+      HA/multi-node (tracked in GH #205) — NOT promised in any Phase-1
+      acceptance criterion. The job statement itself (served_by_phase: 3) is
+      unchanged. Existing entries unmodified.

@@ -358,7 +358,7 @@ pub enum Action {
         idempotency_key: Option<String>,
     },
     StartWorkflow {
-        spec:        WorkflowSpec,        // placeholder type; workflow
+        start:       WorkflowStart,       // durable start intent; workflow
         correlation: CorrelationKey,      // runtime lands Phase 3
     },
 }

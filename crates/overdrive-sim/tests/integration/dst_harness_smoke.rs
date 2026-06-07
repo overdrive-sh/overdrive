@@ -73,7 +73,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "intent-never-crosses-into-observation",
     "snapshot-roundtrip-bit-identical",
     "sim-observation-lww-converges",
-    "replay-equivalent-empty-workflow",
+    // workflow-primitive step 01-07 — graduated from
+    // `replay-equivalent-empty-workflow`.
+    "replay-equivalence-provision-record",
     "entropy-determinism-under-reseed",
     "at-least-one-reconciler-registered",
     "duplicate-evaluations-collapse",
@@ -139,6 +141,31 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
     // `dst_clean_clone_green.rs`.
     "reply-source-rewrite-lockstep",
+    // workflow-primitive step 01-07 — sibling workflow durability
+    // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
+    "workflow-journal-write-ordering",
+    "workflow-exactly-once-effect-on-resume",
+    // workflow-result-error-model step 02-01 (ADR-0065 §3, D3) — the
+    // body-`Result` → `WorkflowStatus` projection invariant added to
+    // `Invariant::ALL` by step 02-01; blessed here so both catalogues track
+    // `Invariant::ALL` exactly. Mirrors `dst_clean_clone_green.rs`.
+    "workflow-terminal-status-projection",
+    // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
+    // counterpart to NEW-5, added to `Invariant::ALL` by step 04-02; blessed
+    // here so both catalogues track `Invariant::ALL` exactly. Mirrors
+    // `dst_clean_clone_green.rs`.
+    "workflow-budget-exhaustion-mints-terminal",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 — the
+    // DST counterpart to the step-terminal short-circuit acceptance. Added to
+    // `Invariant::ALL` with the `StepError` union; blessed here so both
+    // catalogues track `Invariant::ALL` exactly. Mirrors `dst_clean_clone_green.rs`.
+    "workflow-step-terminal-short-circuits",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 — the
+    // DST counterpart to the per-step-policy acceptance. Added to
+    // `Invariant::ALL` with the per-step `RunRetryPolicy` + `RunStep` builder;
+    // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
+    // `dst_clean_clone_green.rs`.
+    "workflow-per-step-retry-policy-governs-redrive",
 ];
 
 // -----------------------------------------------------------------------------

@@ -248,4 +248,72 @@ mod acceptance {
     // `reconciler.output.invariant_violation` tracing event, skip
     // dispatch, persist the View, and NOT stop (surface-then-continue).
     mod reconcile_conflict_observation;
+
+    // workflow-primitive DISTILL (GH #39, J-PLAT-005) — control-plane-side
+    // (engine↔reconciler boundary + emit) RED scaffolds per
+    // `docs/feature/workflow-primitive/distill/test-scenarios.md`. Both
+    // `#[should_panic(expected = "RED scaffold")]`; the workflow-lifecycle
+    // reconciler (ADR-0064 §5) + `ctx.emit_action` action-channel handoff
+    // (ADR-0064 §4) land in DELIVER slices 01 / 03. Default lane (Sim*
+    // in-process); the real-redb journal-persistence scenario (S-WP-01-04)
+    // lives under `tests/integration/workflow_journal/`.
+    mod action_shim_dispatches_start_workflow_to_engine; // S-WP-01-11
+    mod lifecycle_reconciler_rehydrates_on_restart; // S-WP-01-08
+    mod workflow_emit_action_lands_in_raft_channel;
+    mod workflow_engine_replay_cursor; // S-WP-01-05 replay-cursor unit tests // S-WP-03-03
+    // ADR-0064 §5 — start registers a running instance in the live set
+    // (preserved from the deleted terminal-labels test; the live-set surface
+    // it pinned survives the workflow_result_label deletion).
+    mod workflow_engine_live_instance_registration;
+    // Bug fix (fix-workflow-concurrent-start-guard) — a second `start` for an
+    // already-live instance must be a no-op; without the atomic
+    // live_instances claim it spawned a second drive against the same journal,
+    // interleaving appends the positional cursor cannot replay (ADR-0064 §5).
+    mod workflow_engine_concurrent_start_guard;
+    mod workflow_engine_writes_terminal_row; // slice-01 AC5 — engine writes terminal obs row
+    // Bug fix (fix-workflow-terminal-redrive) — start must short-circuit on a
+    // durable Terminal: a restart over an already-terminal journal must not
+    // append a second Terminal nor re-run the author body (RCA Option 1).
+    mod workflow_engine_terminal_short_circuit;
+    // Bug fix — a panicked `async fn run` must converge to a Failed
+    // terminal + unconditional live-instance teardown (catch_unwind + RAII
+    // drop guard), not strand the instance.
+    mod workflow_panic_converges_to_failed_terminal;
+
+    // workflow-result-error-model DISTILL (ADR-0065; resolves #217) — NEW
+    // control-plane RED scaffolds for the genuinely-new engine-side
+    // behaviour the reshape introduces. All `#[should_panic(expected =
+    // "RED scaffold")]`; import no unbuilt type. The existing engine /
+    // action-shim / lifecycle workflow tests above were MIGRATED in step
+    // 01-03 (Terminal/obs `result` → `status: WorkflowStatus`; body
+    // contentless success/failure → `Ok(())` / `Err(TerminalError)`;
+    // `input_digest` assertion target → `ContentHash::of(&spec.input)` is
+    // DEFERRED to step 03-01 per the roadmap).
+    //
+    //   - NEW-2  (Slice 03)  input_digest divergence — the executable #217
+    //     acceptance: two distinct inputs of one kind ⇒ distinct digests.
+    //   - NEW-4  (Slice 03)  MalformedInput terminal — undecodable start
+    //     input ⇒ engine-minted WorkflowStatus::Failed{MalformedInput},
+    //     body never entered.
+    //   - NEW-5  (Slice 04)  budget-exhaustion mints BudgetExhausted — STAYS
+    //     RED until Slice 04 (the retry-re-drive loop). DELIVER Slices 01-03
+    //     do NOT activate it.
+    mod workflow_budget_exhaustion_mints_terminal; // NEW-5 / D4 (Slice 04)
+    mod workflow_input_digest_divergence; // NEW-2 / D5 / #217
+    mod workflow_malformed_input_terminal; // NEW-4 / D2 / D3
+
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 — a
+    // `ctx.run` step that resolves to `Err(StepError::Terminal)` fails the
+    // workflow TERMINALLY (propagated, never re-driven), the new behaviour the
+    // `retryable | terminal` step-error union adds. DST sibling:
+    // `WorkflowStepTerminalShortCircuits`.
+    mod workflow_step_terminal_short_circuits;
+
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 — a
+    // per-`ctx.run` `RunRetryPolicy` (set on the `RunStep` builder) governs the
+    // engine's whole-workflow re-drive count: a step with `max_attempts = 1`
+    // exhausts after ONE re-drive (not the global `WORKFLOW_RETRY_BUDGET`),
+    // minting `BudgetExhausted`. DST sibling:
+    // `WorkflowPerStepRetryPolicyGovernsRedrive`.
+    mod workflow_per_step_retry_policy_governs_redrive;
 }

@@ -158,6 +158,11 @@ libc.workspace = true
 # DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
 # `overdrive-store-local` above + ADR-0012 revision 2026-04-24).
 overdrive-sim.path       = "../overdrive-sim"
+# `test-utils` exposes the shared `overdrive_core::testing::workflow`
+# fixtures (`ProvisionRecord`) used by the slice-01 workflow-engine
+# acceptance test (S-WP-01-11). Dev-only; mirrors the same override in
+# `overdrive-sim`'s journal test.
+overdrive-core = { workspace = true, features = ["test-utils"] }
 tempfile.workspace       = true
 reqwest.workspace        = true
 proptest.workspace       = true

@@ -1,0 +1,149 @@
+---
+title: Identity
+description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root. Implemented as a platform primitive; production does not use it yet, pending wiring into the control plane.
+---
+
+Overdrive is its own certificate authority. Every workload gets a cryptographic
+identity — a SPIFFE SVID — minted by a built-in CA the platform runs itself, with
+no external PKI to stand up: no SPIRE, no Vault, no cert-manager. This page
+describes the built-in CA and how it works.
+
+<Callout title="Implemented, not yet wired into serve">
+	The built-in CA is implemented and tested as a primitive — the port trait, both
+	adapters, the persistent encrypted root, the intermediate, and SVID issuance —
+	but it is **not yet wired into `overdrive serve`**, so production does not use it
+	yet. In a running control plane today, workloads do not receive SVIDs, and the
+	operator-facing TLS still uses the boot-time
+	[ephemeral CA](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
+	Wiring it into `serve` is the next step; see [Where it stands](#where-it-stands)
+	for the exact boundary.
+</Callout>
+
+## Two TLS stories, two CAs
+
+Overdrive has two distinct uses of TLS, with two separate trust roots, and it is
+worth keeping them apart:
+
+- **Operator ↔ control plane (shipped today).** `overdrive serve` mints a
+  boot-time ephemeral CA, issues itself a server leaf and you a client leaf, and
+  writes the trust triple to `~/.overdrive/config`. This is the mutual TLS the CLI
+  uses, described in the
+  [architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
+  It runs now.
+- **Workload ↔ workload (this page).** The built-in CA issues
+  identities to the *workloads themselves* — SPIFFE SVIDs that let one workload
+  authenticate another. A separate subsystem with its own persistent trust root;
+  it does not replace the operator-mTLS path.
+
+Everything below is the second story.
+
+## Every workload gets a SPIFFE identity
+
+A workload's identity is a **SPIFFE SVID**: an X.509 leaf certificate carrying
+exactly one SPIFFE URI as its subject alternative name, like
+`spiffe://overdrive.local/job/payments/alloc/a1b2c3`. The identity names the
+workload — its job and allocation — not a hostname or an IP, so it travels with
+the workload wherever it runs.
+
+SVIDs are **short-lived** — a leaf is valid for about an hour — and **re-issued,
+not renewed**: as an identity nears expiry the platform mints a fresh certificate
+with a new serial and a new validity window rather than extending the old one.
+Short lifetimes shrink the blast radius of a leaked key and make revocation mostly
+a matter of waiting one out. Because Overdrive is sidecarless, the **node agent
+holds the leaf private key** and runs the TLS handshake on the workload's behalf —
+there is no in-pod agent to hold it.
+
+## The trust hierarchy
+
+Identities chain through three tiers:
+
+<Mermaid chart={`
+flowchart TB
+  root["Root CA<br/>self-signed P-256 · CA:TRUE · persistent"]
+  inter["Node intermediate<br/>signed by root · pathLen=0 · one per node"]
+  svid["Workload SVID<br/>leaf · CA:FALSE · one spiffe:// SAN · ~1h"]
+  root --> inter --> svid
+`} />
+
+- The **root** is a self-signed P-256 certificate, the trust anchor every relying
+  party pins. Its subject is the trust domain alone.
+- Each **node intermediate** is signed by the root with `pathLen=0` — it may sign
+  leaves but not further intermediates, so a compromised node's signing key cannot
+  mint a rogue CA beneath it.
+- Each **SVID** is a leaf signed by the node intermediate, `CA:FALSE`, carrying the
+  single workload identity.
+
+A relying party verifies a leaf against a **trust bundle** — the root as the
+anchor, the intermediate as chain material. (`openssl verify -CAfile bundle.pem
+leaf.pem` builds `root → intermediate → leaf` from one file.)
+
+## The root persists, encrypted at rest
+
+This is the heart of what the built-in CA adds over the ephemeral operator CA: the
+root **survives restarts**. An ephemeral CA mints a fresh root on every boot, so
+every identity it signed becomes invalid the moment the process restarts. The
+built-in CA's root is generated once and persisted, so issued identities stay valid
+across restarts.
+
+The root signing key never sits in plaintext on disk. It is
+**envelope-encrypted** — HKDF-SHA256 derives a subkey from an operator
+key-encryption key (KEK), and AES-256-GCM seals the root key under it, with the
+KEK's identity bound in as additional authenticated data. The KEK itself lives in
+the Linux kernel keyring (via systemd-creds), not in a file beside the ciphertext.
+
+On boot the control plane decrypts the persisted root under the KEK and adopts it
+*before* issuing anything. If the envelope fails to open — a wrong KEK, or a
+tampered ciphertext — the control plane **refuses to start** rather than silently
+mint a new root. A silent re-mint would orphan every identity already issued;
+"earned trust" means proving the root is recoverable at boot instead of
+discovering it is not at the first handshake.
+
+## Issuance is internal, and audited
+
+There is no `overdrive` command that issues a certificate. Issuance is a platform
+mechanism: when the control plane runs a workload, it mints that workload's SVID.
+
+Every issuance writes an **append-only audit row** recording the certificate's
+serial, the SPIFFE identity, the issuer, and the validity window. The audit write
+is not optional — if it fails, **issuance fails**; the platform never hands out a
+certificate it did not record. Because each issuance is a fresh certificate rather
+than a renewal, the audit trail is a complete history of every identity the
+platform has minted.
+
+Re-issuing on a schedule is exactly the bounded, ordered sequence a
+[workflow](/docs/concepts/workflows) is for: certificate rotation is the canonical
+first workflow ([#40](https://github.com/overdrive-sh/overdrive/issues/40)), and it
+drives the re-issue this CA exposes.
+
+## Built on the same swappable seam
+
+Like every other source of nondeterminism, the CA sits behind a port trait. The
+production adapter owns the real crypto; a simulation adapter draws serials from
+the seeded `Entropy` port, so under
+[deterministic simulation testing](/docs/concepts/deterministic-simulation-testing)
+the same seed produces byte-identical certificates and issuance replays exactly.
+The core crate defines only the trait — no crypto backend sits on the core compile
+path.
+
+## Where it stands
+
+The built-in CA is implemented and tested as a primitive, but it is not yet part of
+a running deploy:
+
+- **Implemented:** the `Ca` port trait and both adapters, the persistent
+  envelope-encrypted root, the per-node intermediate, SVID issuance with the
+  single-SAN leaf profile, trust-bundle composition, the issuance audit binding,
+  and the DST equivalence tests that pin host/sim parity.
+- **Not yet wired:** `overdrive serve` does not construct the CA or call its boot
+  path, so no workload receives an SVID in a running control plane today, and the
+  operator-facing TLS continues to use the boot-time ephemeral CA. Wiring the CA
+  into `serve` is the next step that puts it on the production path.
+
+## Where to go next
+
+- The mutual TLS that ships today:
+  [the architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
+- The primitive that will drive certificate rotation:
+  [workflows](/docs/concepts/workflows).
+- Why issuance is replayable under simulation:
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

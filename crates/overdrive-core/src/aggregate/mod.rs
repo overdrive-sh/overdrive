@@ -22,7 +22,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
-use crate::id::{AllocationId, ContentHash, InvestigationId, NodeId, PolicyId, Region, WorkloadId};
+use crate::id::{
+    AllocationId, ContentHash, CorrelationKey, InvestigationId, NodeId, PolicyId, Region,
+    WorkloadId,
+};
 use crate::traits::driver::Resources;
 use crate::traits::intent_store::IntentStoreError;
 
@@ -1213,6 +1216,33 @@ impl IntentKey {
     /// Derive the intent key for a Node.
     pub fn for_node(id: &NodeId) -> Self {
         Self(format!("nodes/{id}").into_bytes())
+    }
+
+    /// Derive the intent key for a workflow *instance* —
+    /// `workflows/<correlation>`. Per ADR-0064 §5: a committed
+    /// `Action::StartWorkflow` persists a workflow-instance desired-intent
+    /// keyed by the instance [`CorrelationKey`], mirroring how
+    /// `StartAllocation` persists workload intent. The
+    /// `WorkflowLifecycle` reconciler's `hydrate_desired` scans the
+    /// `workflows/` prefix to read every desired instance back; the value
+    /// at this key is the workflow spec's inputs (the kind name), NOT a
+    /// derived status (`development.md` § "Persist inputs, not derived
+    /// state").
+    ///
+    /// The `<correlation>` half flows through the `CorrelationKey`'s
+    /// canonical string form, which is valid UTF-8 by construction, so the
+    /// wrapped bytes stay UTF-8 (the struct-level invariant).
+    pub fn for_workflow_instance(correlation: &CorrelationKey) -> Self {
+        Self(format!("workflows/{correlation}").into_bytes())
+    }
+
+    /// The `workflows/` key prefix — the scan root the
+    /// `WorkflowLifecycle` reconciler's `hydrate_desired` uses to read
+    /// every persisted workflow-instance intent (paired with
+    /// [`Self::for_workflow_instance`]).
+    #[must_use]
+    pub const fn workflow_instance_prefix() -> &'static [u8] {
+        b"workflows/"
     }
 
     /// Derive the intent key for an Allocation.
