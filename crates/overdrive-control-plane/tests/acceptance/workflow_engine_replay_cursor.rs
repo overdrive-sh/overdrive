@@ -394,6 +394,96 @@ async fn cursor_walks_commands_only_and_resolves_signal_seen_by_key_not_position
     assert!(entries.is_empty(), "a pure replay appends nothing; got {entries:?}");
 }
 
+/// Regression — two `ctx.wait_for_signal(x)` calls on the SAME `SignalKey`
+/// in one instance must replay the two recorded `SignalSeen` values in
+/// RECORDED ORDER (FIFO), not collapse to last-write-wins.
+///
+/// This is the `fix-duplicate-signal-key-replay` defect: the
+/// `workflow-journal-command-notification-split` feature moved `SignalSeen`
+/// off the positional command walk into a key-only
+/// `BTreeMap<SignalKey, JournalNotification>` lookup, which silently dropped
+/// the same-key disambiguation the retired `*cursor += 2` positional walk
+/// provided. The command walk still disambiguates two `SignalAwaited{x}`
+/// correctly (advance-by-1); only the notification side collapsed:
+/// `BTreeMap::insert` overwrote `SignalSeen{x,v1}` with `SignalSeen{x,v2}`,
+/// so a live run that produced `(v1, v2)` replays `(v2, v2)` — a silent
+/// live-vs-replay divergence Layers 1/2 cannot detect (both
+/// `SignalAwaited{x}` commands are byte-identical; the wrong datum is the
+/// off-walk notification VALUE).
+///
+/// Loaded run (interleaved) and the partition it must produce:
+///
+/// ```text
+/// Loaded Vec<LoadedEntry>:
+///   [0] Command(SignalAwaited K)
+///   [1] Notification(SignalSeen K = "v1")
+///   [2] Command(SignalAwaited K)
+///   [3] Notification(SignalSeen K = "v2")
+///
+/// Partitioned at the cursor (after Fix B — per-key FIFO):
+///   replay_commands      = [SignalAwaited K, SignalAwaited K]
+///   signal_notifications = { K -> [SignalSeen("v1"), SignalSeen("v2")] }
+/// ```
+///
+/// The first wait pops `v1`, the second pops `v2`. Against current HEAD the
+/// first wait returns `v2` (the last-write-wins bug).
+///
+/// Port-to-port: the driving port is `WorkflowCtx::wait_for_signal`; the
+/// driven port is the `SimJournalStore` behind the cursor (observed via
+/// `load_journal` — a pure replay appends nothing). Pure replay → 3-arg
+/// `new` (obs = None); both waits are replay hits, no live path.
+#[tokio::test]
+async fn duplicate_signal_key_waits_replay_in_recorded_order() {
+    let key = SignalKey::new("cert-ready").expect("valid signal key");
+    let v1 = SignalValue::new("v1");
+    let v2 = SignalValue::new("v2");
+
+    let buffer = vec![
+        // [0] command — the first armed wait.
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: key.clone() }),
+        // [1] notification — resolves the FIRST wait (FIFO position 0).
+        LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key: key.clone(),
+            value_digest: ContentHash::of(v1.as_str().as_bytes()),
+            value: v1.clone(),
+        }),
+        // [2] command — the second armed wait, SAME key.
+        LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: key.clone() }),
+        // [3] notification — resolves the SECOND wait (FIFO position 1).
+        LoadedEntry::Notification(JournalNotification::SignalSeen {
+            signal_key: key.clone(),
+            value_digest: ContentHash::of(v2.as_str().as_bytes()),
+            value: v2.clone(),
+        }),
+    ];
+
+    let (ctx, journal, workflow_id) = ctx_only(buffer);
+
+    // Command-index 0 — the first wait resolves to the FIRST recorded
+    // SignalSeen by FIFO order. Against HEAD this returns v2 (the bug).
+    let first = ctx
+        .wait_for_signal(key.clone())
+        .await
+        .expect("first wait resolves from recorded notification");
+    assert_eq!(first, v1, "the FIRST wait resolves to the FIRST recorded SignalSeen value (FIFO)");
+
+    // Command-index 1 — the second wait resolves to the SECOND recorded
+    // SignalSeen. This only holds if the first wait POPPED v1 off the key's
+    // FIFO queue, leaving v2 for the second.
+    let second = ctx
+        .wait_for_signal(key.clone())
+        .await
+        .expect("second wait resolves from recorded notification");
+    assert_eq!(
+        second, v2,
+        "the SECOND wait resolves to the SECOND recorded SignalSeen value (FIFO)"
+    );
+
+    // The whole run was a replay — the cursor appended NOTHING.
+    let entries = journal.load_journal(&workflow_id).await.expect("load");
+    assert!(entries.is_empty(), "a pure replay appends nothing; got {entries:?}");
+}
+
 /// ADR-0064 §3 fail-closed determinism gate (D4), Layers 1 + 2.
 ///
 /// **Layer 1 (type-at-index, Restate RT0016 shape).** Every command-replay
@@ -674,7 +764,7 @@ async fn replay_sleep_returns_recorded_deadline_and_advances_so_next_command_rep
 
 /// ADR-0064 §3 sleep branch, live path. With an empty replay buffer
 /// `ctx.sleep` arms a fresh sleep: it records a `SleepArmed { deadline_unix }`
-/// (append + fsync, ADR-0063 §4) carrying the ABSOLUTE wall-clock deadline
+/// (append + fsync, ADR-0066 §4) carrying the ABSOLUTE wall-clock deadline
 /// (an input), then parks on the Clock. Pins `record_sleep_armed` against the
 /// `-> Ok(())` no-op mutation (which would append nothing).
 ///

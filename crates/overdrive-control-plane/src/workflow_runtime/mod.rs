@@ -33,13 +33,15 @@
 //! - **Live (command-cursor == command-walk length):** the handle returns
 //!   `Ok(None)`; the ctx polls the step's future, then the handle appends a
 //!   [`JournalCommand::RunResult`] (wrapped as a [`LoadedEntry::Command`])
-//!   with fsync BEFORE returning (ADR-0063 §4 fsync-then-suspend) and
+//!   with fsync BEFORE returning (ADR-0066 §4 fsync-then-suspend) and
 //!   advances the command-cursor by 1.
 //!
-//! A `ctx.wait_for_signal` resolves its `SignalSeen` by
-//! `signal_notifications.get(signal_key)` — never by position; a
-//! `SignalAwaited` command with no matching `SignalSeen` notification
-//! re-blocks (the "crashed while blocked" shape, now structural).
+//! A `ctx.wait_for_signal` resolves its `SignalSeen` by `pop_front`ing the
+//! key's per-key FIFO queue in `signal_notifications` — never by position; the
+//! Nth `wait_for_signal(x)` consumes the Nth recorded `SignalSeen{x}`. A
+//! `SignalAwaited` command with no remaining `SignalSeen` notification for the
+//! key (absent key OR drained queue) re-blocks (the "crashed while blocked"
+//! shape, now structural).
 //!
 //! The engine drives the object-safe [`ErasedWorkflow::run_erased`] over
 //! the start intent's opaque `input` bytes (the typed `Workflow` is
@@ -56,7 +58,7 @@
 //! appends a [`JournalCommand::Terminal`] recording the projected
 //! [`WorkflowStatus`].
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
@@ -401,7 +403,7 @@ impl WorkflowEngine {
         };
 
         // CA-4 — write `Started` at command-index 0 on FIRST start; idempotent
-        // on resume (ADR-0063 §2 / ADR-0064 §5). The instance has already
+        // on resume (ADR-0066 §2 / ADR-0064 §5). The instance has already
         // started iff its loaded run holds any command (on a genuine first
         // start the run is empty; on resume it already carries the `Started`
         // the first start wrote). We must NOT append a second `Started` (the
@@ -414,7 +416,7 @@ impl WorkflowEngine {
             let started =
                 LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest });
             // Append + fsync BEFORE building the cursor + spawning the author
-            // body (ADR-0063 §4 fsync-then-suspend): a crash after this append
+            // body (ADR-0066 §4 fsync-then-suspend): a crash after this append
             // but before the spawn re-loads a run that already begins with
             // `Started` and resumes cleanly (the idempotent-resume path above).
             self.journal.append(workflow_id, &started).await?;
@@ -581,7 +583,7 @@ impl Drop for LiveInstanceGuard {
 
 /// Compute the input-derived `Started` digests (`spec_digest`,
 /// `input_digest`) for `spec` — the INPUTS the command-index-0 `Started`
-/// entry records on first start (ADR-0063 §2; CA-4). Per
+/// entry records on first start (ADR-0066 §2; CA-4). Per
 /// `.claude/rules/development.md` § "Persist inputs, not derived state":
 /// these are content hashes over the workflow-kind identity and the start
 /// input, NOT a pre-computed cache.
@@ -1109,20 +1111,25 @@ fn retry_window_start(loaded: &[LoadedEntry]) -> Option<Duration> {
 /// Every [`LoadedEntry::Command`] lands in the returned `Vec<JournalCommand>`
 /// in append order (its index there is its replay command-index, D3); every
 /// [`LoadedEntry::Notification`]'s `SignalSeen` lands in the returned
-/// `BTreeMap` keyed by its `SignalKey`. The store never classifies — this is
-/// the cursor's job (D2). `BTreeMap`, not `HashMap`, per
+/// `BTreeMap`, keyed by its `SignalKey`, appended to a per-key
+/// [`VecDeque`] in append order. The store never classifies — this is the
+/// cursor's job (D2). `BTreeMap`, not `HashMap`, per
 /// `.claude/rules/development.md` § "Ordered-collection choice" (DST
 /// determinism).
 ///
-/// A duplicate `SignalSeen` for the same key (not expected for the
-/// single-node Phase-1 one-notification model — D6) keeps the LAST observed
-/// value via `BTreeMap::insert`'s overwrite semantics; the append-order
-/// last write is the most recent observation.
+/// Multiple `SignalSeen` for the same key — produced when one instance issues
+/// two `ctx.wait_for_signal` calls on the SAME `SignalKey` — are preserved as
+/// a per-key FIFO queue (`push_back`). Append-order == resolution-order: the
+/// Nth `wait_for_signal(x)` on replay `pop_front`s the Nth recorded
+/// `SignalSeen{x}` (D6's `SignalKey`-keyed model, multi-occurrence). This
+/// restores the positional fidelity the retired `*cursor += 2` walk had;
+/// `BTreeMap::insert`'s last-write-wins (the pre-fix shape) collapsed two
+/// same-key waits to `(v_last, v_last)`.
 fn partition_loaded_run(
     loaded: Vec<LoadedEntry>,
-) -> (Vec<JournalCommand>, BTreeMap<SignalKey, JournalNotification>) {
+) -> (Vec<JournalCommand>, BTreeMap<SignalKey, VecDeque<JournalNotification>>) {
     let mut commands = Vec::new();
-    let mut notifications = BTreeMap::new();
+    let mut notifications: BTreeMap<SignalKey, VecDeque<JournalNotification>> = BTreeMap::new();
     for entry in loaded {
         match entry {
             // `RetryAttempted` is engine retry-bookkeeping (ADR-0065 §4), NOT
@@ -1139,7 +1146,9 @@ fn partition_loaded_run(
             LoadedEntry::Command(command) => commands.push(command),
             LoadedEntry::Notification(notification) => {
                 let JournalNotification::SignalSeen { ref signal_key, .. } = notification;
-                notifications.insert(signal_key.clone(), notification);
+                // Per-key FIFO: append-order == resolution-order. The Nth
+                // wait_for_signal(x) pop_front's the Nth recorded SignalSeen{x}.
+                notifications.entry(signal_key.clone()).or_default().push_back(notification);
             }
         }
     }
@@ -1192,16 +1201,28 @@ pub struct JournalCursorHandle {
     /// The `SignalKey`-correlated notifications of the loaded run — the
     /// off-the-walk lookup map (D2 / D6 / ADR-0064 §4, CA-5). Partitioned
     /// ONCE at construction: every `LoadedEntry::Notification`'s
-    /// `SignalSeen` lands here keyed by its `SignalKey`. `replay_signal`
-    /// resolves a satisfied wait by `signal_notifications.get(signal_key)`
-    /// — never by position; the retired `*cursor += 2` positional signal
-    /// walk is gone.
+    /// `SignalSeen` lands here, keyed by its `SignalKey`, appended to a
+    /// per-key FIFO [`VecDeque`] in append order. `replay_signal` resolves
+    /// a satisfied wait by `pop_front`ing the key's deque — never by
+    /// position; the retired `*cursor += 2` positional signal walk is gone.
+    ///
+    /// Per-key FIFO (not one-value-per-key): two `ctx.wait_for_signal(x)`
+    /// calls on the SAME key in one instance resolve to the two recorded
+    /// `SignalSeen{x}` values in RECORDED ORDER — the Nth wait pops the Nth
+    /// notification. The pre-fix `BTreeMap<SignalKey, JournalNotification>`
+    /// (last-write-wins) collapsed those to `(v_last, v_last)`, a silent
+    /// live-vs-replay divergence (fix-duplicate-signal-key-replay).
+    ///
+    /// Wrapped in a `Mutex` because `replay_signal` `pop_front`s under
+    /// `&self`. Lock order is fixed: acquire `cursor` FIRST, then
+    /// `signal_notifications` (`replay_signal` holds `cursor` for its whole
+    /// body and only takes this lock inside it).
     ///
     /// `BTreeMap`, not `HashMap`, per `.claude/rules/development.md`
     /// § "Ordered-collection choice" — the map is observed by the DST
     /// `replay_equivalence_provision_record` invariant (step 01-06) and
     /// must iterate deterministically across seeds.
-    signal_notifications: BTreeMap<SignalKey, JournalNotification>,
+    signal_notifications: Mutex<BTreeMap<SignalKey, VecDeque<JournalNotification>>>,
     /// The current **command**-cursor index into [`replay_commands`] —
     /// advanced on every command replay hit and every live command record,
     /// by exactly 1. A notification record (`record_signal_seen`) does NOT
@@ -1255,7 +1276,7 @@ impl JournalCursorHandle {
             journal,
             workflow_id,
             replay_commands,
-            signal_notifications,
+            signal_notifications: Mutex::new(signal_notifications),
             cursor: Mutex::new(initial),
             action_emit: None,
             obs: None,
@@ -1282,7 +1303,7 @@ impl JournalCursorHandle {
             journal,
             workflow_id,
             replay_commands,
-            signal_notifications,
+            signal_notifications: Mutex::new(signal_notifications),
             cursor: Mutex::new(initial),
             action_emit: Some(action_emit),
             obs: Some(obs),
@@ -1291,7 +1312,7 @@ impl JournalCursorHandle {
 
     /// Durably append a live-path await-point `entry` and advance the held
     /// cursor — the append + fsync + advance tail every `record_*` live
-    /// path shares (ADR-0063 §4 fsync-then-suspend). On a durable-append
+    /// path shares (ADR-0066 §4 fsync-then-suspend). On a durable-append
     /// failure the cursor does NOT advance (the engine must not continue
     /// against an unjournaled effect) and the error surfaces as
     /// [`WorkflowCtxError::JournalRecord`]. The caller holds `cursor` (the
@@ -1395,7 +1416,7 @@ impl JournalCursor for JournalCursorHandle {
             result_digest,
             result_bytes: result_bytes.to_vec(),
         });
-        // Append + fsync BEFORE returning (ADR-0063 §4). On failure the
+        // Append + fsync BEFORE returning (ADR-0066 §4). On failure the
         // cursor does NOT advance — the engine must not continue against
         // an unjournaled effect.
         self.append_then_advance(&mut cursor, &entry).await?;
@@ -1441,7 +1462,7 @@ impl JournalCursor for JournalCursorHandle {
         // cache (`development.md` § "Persist inputs, not derived state").
         // No in-entry `step` — identity is positional (D5).
         let entry = LoadedEntry::Command(JournalCommand::SleepArmed { deadline_unix });
-        // Append + fsync BEFORE returning (ADR-0063 §4, fsync-then-park).
+        // Append + fsync BEFORE returning (ADR-0066 §4, fsync-then-park).
         // On failure the cursor does NOT advance — the engine must not
         // park against an unjournaled sleep.
         self.append_then_advance(&mut cursor, &entry).await?;
@@ -1518,18 +1539,25 @@ impl JournalCursor for JournalCursorHandle {
                 actual: signal_key.to_string(),
             });
         }
-        // Correlated lookup — find the SignalSeen by its key, wherever it
-        // landed in the interleaved on-disk stream (NOT at SignalAwaited+1).
+        // Correlated FIFO lookup — pop the NEXT unconsumed SignalSeen for
+        // this key off the per-key queue, wherever it landed in the
+        // interleaved on-disk stream (NOT at SignalAwaited+1). FIFO order
+        // matches the command-walk order of same-key `SignalAwaited`s, so the
+        // Nth wait_for_signal(x) consumes the Nth recorded SignalSeen{x}.
+        // Lock order: cursor (already held) THEN notifications.
+        let mut notifications = self.signal_notifications.lock().await;
         let Some(JournalNotification::SignalSeen { value, .. }) =
-            self.signal_notifications.get(signal_key)
+            notifications.get_mut(signal_key).and_then(VecDeque::pop_front)
         else {
-            // SignalAwaited command with no matching SignalSeen notification
-            // — crashed while blocked. NOT a replay hit; re-block on the live
-            // path. This is NOT a Layer-1 divergence (the variant matched).
+            // SignalAwaited command with no remaining SignalSeen notification
+            // for this key (absent key OR drained deque) — crashed while
+            // blocked. NOT a replay hit; re-block on the live path. This is
+            // NOT a Layer-1 divergence (the variant matched).
+            drop(notifications);
             drop(cursor);
             return Ok(None);
         };
-        let value = value.clone();
+        drop(notifications);
         // Advance past the SignalAwaited COMMAND by exactly 1 — the
         // notification is off the walk (it never advances the cursor).
         *cursor += 1;
@@ -1572,7 +1600,7 @@ impl JournalCursor for JournalCursorHandle {
         }
         // Live path — record the SignalAwaited armed command (an input: the
         // key the body blocked on) durably before the ctx begins blocking
-        // (ADR-0063 §4 fsync-then-suspend). No in-entry `step` — identity
+        // (ADR-0066 §4 fsync-then-suspend). No in-entry `step` — identity
         // is positional (D5).
         let awaited =
             LoadedEntry::Command(JournalCommand::SignalAwaited { signal_key: signal_key.clone() });
@@ -1608,7 +1636,7 @@ impl JournalCursor for JournalCursorHandle {
         signal_key: &SignalKey,
         value: &SignalValue,
     ) -> Result<(), WorkflowCtxError> {
-        // Record SignalSeen { value } durably (ADR-0063 §4): the
+        // Record SignalSeen { value } durably (ADR-0066 §4): the
         // value_digest is the content digest of the observed value's bytes
         // (an input); the value itself is carried so a resumed run replays it
         // by `SignalKey` lookup without re-reading the surface.
@@ -1723,7 +1751,7 @@ impl JournalCursor for JournalCursorHandle {
                 .send(action)
                 .map_err(|err| WorkflowCtxError::ActionChannel { message: err.to_string() })?;
         }
-        // Record ActionEmitted durably before returning (ADR-0063 §4): a
+        // Record ActionEmitted durably before returning (ADR-0066 §4): a
         // resumed run sees this command and does NOT re-send the Action.
         // No in-entry `step` — identity is positional (D5).
         let entry = LoadedEntry::Command(JournalCommand::ActionEmitted { action_digest });
