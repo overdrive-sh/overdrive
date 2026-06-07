@@ -285,8 +285,15 @@ mod tests {
                 .prop_map(|signal_key| JournalCommand::SignalAwaited { signal_key }),
             content_hash_strategy()
                 .prop_map(|action_digest| JournalCommand::ActionEmitted { action_digest }),
-            content_hash_strategy()
-                .prop_map(|attempt_digest| JournalCommand::RetryAttempted { attempt_digest }),
+            // `RetryAttempted` carries an additive `started_at_unix:
+            // Option<Duration>` (ADR-0065 Gap 2); generate BOTH arms so the
+            // CBOR round-trip exercises the field's presence and absence.
+            (content_hash_strategy(), proptest::option::of(0u64..u64::from(u32::MAX))).prop_map(
+                |(attempt_digest, secs)| JournalCommand::RetryAttempted {
+                    attempt_digest,
+                    started_at_unix: secs.map(std::time::Duration::from_secs),
+                }
+            ),
             workflow_status_strategy().prop_map(|status| JournalCommand::Terminal { status }),
         ]
         .prop_map(LoadedEntry::Command);

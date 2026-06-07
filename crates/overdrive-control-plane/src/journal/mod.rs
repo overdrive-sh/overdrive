@@ -332,10 +332,35 @@ pub enum JournalCommand {
     /// the additive-variant tolerance the codec provides). NOT cursor
     /// identity — like every other command it advances the positional walk
     /// by exactly 1 on replay; no in-entry `step` (D5).
+    ///
+    /// # Gap 2 — the retry window's start instant (`started_at_unix`)
+    ///
+    /// The per-step [`RunRetryPolicy`](overdrive_core::workflow::RunRetryPolicy)
+    /// `max_duration` gate (ADR-0065 Gap 2) needs the wall-clock instant the
+    /// retry window OPENED, so elapsed can be recomputed against the live clock
+    /// on every drive (and across crash-resume). The FIRST `RetryAttempted` for
+    /// an instance carries `started_at_unix: Some(clock.unix_now())`; every
+    /// subsequent one carries `None`. The engine recovers the window start by
+    /// scanning the loaded run for the first `RetryAttempted` carrying `Some`,
+    /// then gates a re-drive on BOTH `attempts < max_attempts` AND
+    /// `elapsed < max_duration`. Per `.claude/rules/development.md` § "Persist
+    /// inputs, not derived state" the START instant is journaled (an input);
+    /// the elapsed window and the deadline are RECOMPUTED each drive, never
+    /// persisted. The field is `Option` + additive `#[serde(default)]` so an
+    /// older journal (or a non-first attempt) decodes to `None` cleanly,
+    /// mirroring `SleepArmed.deadline_unix`'s absolute-wall-clock shape.
     RetryAttempted {
         /// SHA-256 digest of the retry attempt's canonical inputs — an
         /// input, not a derived attempt-count cache.
         attempt_digest: overdrive_core::id::ContentHash,
+        /// The absolute wall-clock instant (duration since the UNIX epoch) the
+        /// retry window OPENED — `Some` on the FIRST `RetryAttempted` for the
+        /// instance, `None` thereafter (ADR-0065 Gap 2). An input the engine
+        /// recovers to recompute `elapsed` for the `max_duration` gate; never a
+        /// derived deadline cache. Additive `#[serde(default)]` → an older
+        /// journal lacking the field decodes to `None`.
+        #[serde(default)]
+        started_at_unix: Option<std::time::Duration>,
     },
 
     /// The workflow ran to a terminal value (slice 01) — the last command.

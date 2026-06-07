@@ -155,6 +155,17 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // here so both catalogues track `Invariant::ALL` exactly. Mirrors
     // `dst_clean_clone_green.rs`.
     "workflow-budget-exhaustion-mints-terminal",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 — the
+    // DST counterpart to the step-terminal short-circuit acceptance. Added to
+    // `Invariant::ALL` with the `StepError` union; blessed here so both
+    // catalogues track `Invariant::ALL` exactly. Mirrors `dst_clean_clone_green.rs`.
+    "workflow-step-terminal-short-circuits",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 — the
+    // DST counterpart to the per-step-policy acceptance. Added to
+    // `Invariant::ALL` with the per-step `RunRetryPolicy` + `RunStep` builder;
+    // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
+    // `dst_clean_clone_green.rs`.
+    "workflow-per-step-retry-policy-governs-redrive",
 ];
 
 // -----------------------------------------------------------------------------

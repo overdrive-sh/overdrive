@@ -27,7 +27,7 @@ use bytes::Bytes;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    JournalCursor, SignalKey, SignalValue, WorkflowCtx, WorkflowCtxError,
+    JournalCursor, SignalKey, SignalValue, TerminalErrorKind, WorkflowCtx, WorkflowCtxError,
 };
 
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -234,8 +234,11 @@ async fn run_replay_returns_recorded_result_without_polling() {
     assert!(cursor.recorded_runs.lock().expect("lock").is_empty(), "replay records nothing");
 }
 
-/// Replay `ctx.run` with a step-name divergence fails closed with
-/// `NonDeterministic` — the replay-determinism guard.
+/// Replay `ctx.run` with a step-name divergence fails closed — the
+/// replay-determinism guard. Under Model Z (ADR-0065 §4) the cursor's
+/// `NonDeterministic` infra failure is PROJECTED to `TerminalError::explicit`
+/// at the ctx-op boundary; the deterministic expected/actual names survive in
+/// the projected detail.
 #[tokio::test]
 async fn run_replay_with_name_mismatch_fails_non_deterministic() {
     let cursor =
@@ -247,13 +250,20 @@ async fn run_replay_with_name_mismatch_fails_non_deterministic() {
         .await
         .expect_err("name mismatch must fail closed");
 
-    match err {
-        WorkflowCtxError::NonDeterministic { expected, actual } => {
-            assert_eq!(expected, "recorded-step", "the recorded step name is reported as expected");
-            assert_eq!(actual, "different-step", "the replaying body's name is reported as actual");
-        }
-        other => panic!("expected NonDeterministic, got {other:?}"),
-    }
+    assert_eq!(
+        err.kind(),
+        TerminalErrorKind::Explicit,
+        "a name divergence projects to an Explicit terminal at the ctx-op boundary"
+    );
+    let detail = err.detail();
+    assert!(
+        detail.contains("recorded-step"),
+        "the recorded step name is reported in the projected detail: {detail:?}"
+    );
+    assert!(
+        detail.contains("different-step"),
+        "the replaying body's name is reported in the projected detail: {detail:?}"
+    );
 }
 
 /// Live `ctx.sleep`: records the ABSOLUTE deadline (`now + duration`, an

@@ -296,4 +296,19 @@ mod acceptance {
     mod workflow_budget_exhaustion_mints_terminal; // NEW-5 / D4 (Slice 04)
     mod workflow_input_digest_divergence; // NEW-2 / D5 / #217
     mod workflow_malformed_input_terminal; // NEW-4 / D2 / D3
+
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 — a
+    // `ctx.run` step that resolves to `Err(StepError::Terminal)` fails the
+    // workflow TERMINALLY (propagated, never re-driven), the new behaviour the
+    // `retryable | terminal` step-error union adds. DST sibling:
+    // `WorkflowStepTerminalShortCircuits`.
+    mod workflow_step_terminal_short_circuits;
+
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 — a
+    // per-`ctx.run` `RunRetryPolicy` (set on the `RunStep` builder) governs the
+    // engine's whole-workflow re-drive count: a step with `max_attempts = 1`
+    // exhausts after ONE re-drive (not the global `WORKFLOW_RETRY_BUDGET`),
+    // minting `BudgetExhausted`. DST sibling:
+    // `WorkflowPerStepRetryPolicyGovernsRedrive`.
+    mod workflow_per_step_retry_policy_governs_redrive;
 }

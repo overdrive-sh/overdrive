@@ -50,8 +50,8 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{
-    JournalCursor, RetryableStepError, SignalValue, TerminalError, TerminalErrorKind, Workflow,
-    WorkflowCtx, WorkflowName, WorkflowStart, WorkflowStatus,
+    JournalCursor, RunRetryPolicy, SignalValue, StepError, TerminalError, TerminalErrorKind,
+    Workflow, WorkflowCtx, WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
 use overdrive_control_plane::journal::{
@@ -777,15 +777,19 @@ async fn run_until_crash(seed: u64, journal: &Arc<dyn JournalStore>) -> (Vec<Loa
 /// Perform the canonical `provision-write` durable step through `ctx.run`
 /// — the same step the `ProvisionRecord` reference workflow runs. Mirrors
 /// its body so the evaluators driving a raw ctx exercise the identical
-/// recorded-step shape.
-async fn provision_write_step(ctx: &WorkflowCtx, target: SocketAddr) -> Result<usize, String> {
+/// recorded-step shape. Under Model Z (ADR-0065 §4) the step's `T` is the
+/// transport's `usize` byte-count (the transport error folds into the
+/// engine-absorbed transient via the blanket `From`), and `ctx.run` yields
+/// `Result<usize, TerminalError>` — byte-identical recorded-step bytes to the
+/// `ProvisionRecord` fixture so replay-equivalence (K4) holds.
+async fn provision_write_step(
+    ctx: &WorkflowCtx,
+    target: SocketAddr,
+) -> Result<usize, TerminalError> {
     let transport = Arc::clone(ctx.transport());
     let payload = bytes::Bytes::from_static(ProvisionRecord::PAYLOAD);
-    ctx.run("provision-write", async move {
-        Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
-    })
-    .await
-    .unwrap_or_else(|err| Err(err.to_string()))
+    ctx.run("provision-write", async move { Ok(transport.send_datagram(target, payload).await?) })
+        .await
 }
 
 /// Evaluate `ReplayEquivalenceProvisionRecord` (K4).
@@ -1362,14 +1366,16 @@ async fn run_until_crash_in_sleep(
             cursor,
         );
         // Pre-sleep durable step — the same `ctx.run` the author body runs.
+        // Model Z shape: `T = usize` (the transport byte-count), so the
+        // recorded `RunResult` bytes are byte-identical to the migrated
+        // `ProvisionRecordWithSleep` fixture (replay-equivalence, K4).
         let pre_transport = Arc::clone(ctx.transport());
         let pre_payload = bytes::Bytes::from_static(ProvisionRecordWithSleep::FIRST_PAYLOAD);
         let _ = ctx
             .run("provision-write-pre-sleep", async move {
-                Ok(pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string()))
+                Ok(pre_transport.send_datagram(pre, pre_payload).await?)
             })
-            .await
-            .unwrap_or_else(|err| Err(err.to_string()));
+            .await;
         // Arm the sleep + park, then "crash" mid-park: the sleep appends
         // `SleepArmed` and parks (logical time NOT advanced), then the
         // ctx + future are dropped at the end of this block.
@@ -2197,7 +2203,7 @@ pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> Invarian
 // regardless of HOW the transient is signalled — so when the Phase-4 review
 // (Option A, ADR-0065 §2 fidelity) moved the transient channel from a
 // since-deleted body-return retryable kind to a `ctx.run` step whose closure
-// resolves to `Err(RetryableStepError)`, this invariant stayed green: the
+// resolves to `Err(StepError::Retryable)`, this invariant stayed green: the
 // engine-minted-terminal contract is unchanged.
 
 /// The instance address bound for the always-transient workflow's engine.
@@ -2207,7 +2213,7 @@ pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> Invarian
 const WF_BUDGET_TARGET: &str = "127.0.0.1:9021";
 
 /// The detail the always-transient reference workflow's `ctx.run`
-/// step signals via `RetryableStepError`. A fixed, deterministic string so the
+/// step signals via `StepError::retryable`. A fixed, deterministic string so the
 /// run replays bit-identically across seeds. NOTE: this is the STEP's
 /// transient signal — the engine absorbs it and never surfaces it on the
 /// terminal; the minted `BudgetExhausted` terminal carries the engine's own
@@ -2217,7 +2223,7 @@ const WF_BUDGET_TRANSIENT_DETAIL: &str = "transient: provision call failed (step
 /// A reference workflow whose `ctx.run` STEP always fails
 /// transiently: each drive bumps a shared `AtomicUsize` (so the evaluator can
 /// count how many times the engine re-drove the body) and the step closure
-/// returns `Err(RetryableStepError)` — the engine-absorbed TRANSIENT channel
+/// returns `Err(StepError::Retryable)` — the engine-absorbed TRANSIENT channel
 /// (ADR-0065 §4), NEVER a terminal the body authors. The body's
 /// `Result<(), TerminalError>` return type carries NO failure. The engine
 /// re-drives up to `WORKFLOW_RETRY_BUDGET`, then mints `BudgetExhausted`.
@@ -2261,7 +2267,7 @@ impl Workflow for AlwaysTransientFailure {
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The transient failure is signalled at the STEP level: the
         // `ctx.run` closure bumps the drive counter and returns
-        // `Err(RetryableStepError)`. The engine ABSORBS it (the step is not
+        // `Err(StepError::Retryable)`. The engine ABSORBS it (the step is not
         // journaled; the ctx records a TransientStep; `run_erased` surfaces
         // WorkflowDriveError::Transient) and re-drives. The body authors NO
         // terminal — a step transient cannot become a `TerminalError`; the
@@ -2270,7 +2276,7 @@ impl Workflow for AlwaysTransientFailure {
         let _step: Result<(), _> = ctx
             .run("provision", async move {
                 attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Err::<(), RetryableStepError>(RetryableStepError::new(WF_BUDGET_TRANSIENT_DETAIL))
+                Err::<(), StepError>(StepError::retryable(WF_BUDGET_TRANSIENT_DETAIL))
             })
             .await;
         // Unreachable in practice — the engine re-drives off the recorded ctx
@@ -2315,7 +2321,7 @@ fn spawn_budget_clock_ticker(
 /// Evaluate `WorkflowBudgetExhaustionMintsTerminal` (ADR-0065 §D4).
 ///
 /// Drives an `AlwaysTransientFailure` workflow (a `ctx.run` step
-/// that returns `Err(RetryableStepError)` on every drive) through the real
+/// that returns `Err(StepError::Retryable)` on every drive) through the real
 /// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past each
 /// backoff window via a concurrent ticker so the parked re-drives fire, then
 /// asserts:
@@ -2459,6 +2465,456 @@ pub async fn evaluate_workflow_budget_exhaustion_mints_terminal(seed: u64) -> In
              terminal — its step failed transiently, which the engine absorbed), got {:?}",
             terminal.kind()
         ));
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowStepTerminalShortCircuits (ADR-0065 Amendment 2026-06-07, Gap 1)
+// ---------------------------------------------------------------------------
+//
+// The DST sibling of the example-based acceptance at
+// `crates/overdrive-control-plane/tests/acceptance/workflow_step_terminal_short_circuits.rs`,
+// and the structural CONTRAST to `WorkflowBudgetExhaustionMintsTerminal`. Pins
+// the `retryable | terminal` step-error union's TERMINAL arm (Gap 1) as a
+// forever property over the harness trajectory: a workflow whose `ctx.run`
+// step resolves to `Err(StepError::Terminal)` fails the workflow TERMINALLY —
+// `ctx.run(...).await` yields `Err(TerminalError)` (no transient slot, no body
+// park, no re-drive), the body returns it, and the engine projects
+// `WorkflowStatus::Failed { terminal: Explicit }`. Where the budget sibling
+// asserts `budget`-many `RetryAttempted` + an engine-minted `BudgetExhausted`,
+// this asserts ZERO `RetryAttempted` + a body-authored `Explicit` — the two
+// invariants together pin the union's two arms.
+
+/// The detail the failing step's terminal carries — asserted on the projected
+/// terminal row so the invariant pins the step-AUTHORED terminal (Explicit),
+/// not an engine-minted one. A fixed, deterministic string so the run replays
+/// bit-identically across seeds.
+const WF_STEP_TERMINAL_DETAIL: &str = "permanent: provision rejected (Gap 1 step-terminal D-STEP)";
+
+/// A reference workflow whose FIRST `ctx.run` step resolves to
+/// `Err(StepError::Terminal)` — a PERMANENT step failure (ADR-0065 Gap 1). A
+/// SECOND `ctx.run` step follows and bumps `second_step_runs`; it must NEVER
+/// run, because the terminal from the first `ctx.run(...).await` propagates via
+/// `?` and short-circuits the body. The body's `Result<(), TerminalError>`
+/// return carries the step's terminal directly (no engine re-drive).
+///
+/// Mirrors the acceptance fixture's `StepFailsTerminallyWorkflow` so both tiers
+/// drive the identical shape.
+struct StepFailsTerminally {
+    /// Bumped iff the SECOND step's closure runs. Stays `0` on the
+    /// terminal-short-circuit path — the observable proof the terminal
+    /// short-circuited the body before the second `ctx.run`.
+    second_step_runs: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl StepFailsTerminally {
+    /// The workflow name this fixture registers under. Kebab-case, matching
+    /// the `WorkflowName` grammar.
+    const WORKFLOW_NAME: &'static str = "step-fails-terminally";
+
+    /// The concrete [`WorkflowStart`] this fixture corresponds to — a unit
+    /// `Input` (the 1-byte CBOR encoding of `()`).
+    fn spec() -> WorkflowStart {
+        let mut input: Vec<u8> = Vec::new();
+        ciborium::into_writer(&(), &mut input)
+            .unwrap_or_else(|_| unreachable!("CBOR-encoding the unit type is total"));
+        WorkflowStart {
+            name: WorkflowName::new(Self::WORKFLOW_NAME)
+                .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            input,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Workflow for StepFailsTerminally {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
+        // The first step resolves to `Err(StepError::Terminal(..))` — a
+        // PERMANENT step failure (Gap 1). `ctx.run(...).await` returns
+        // `Err(TerminalError)` directly (no transient-slot record, no body
+        // park, no re-drive); the `?` propagates it and the body returns the
+        // terminal.
+        ctx.run("provision", async move {
+            Err::<(), StepError>(StepError::terminal(TerminalError::explicit(
+                WF_STEP_TERMINAL_DETAIL,
+            )))
+        })
+        .await?;
+
+        // The second step must NEVER run — the first `ctx.run` short-circuited
+        // the body with the terminal. Bumping the counter here would mean the
+        // engine (incorrectly) re-drove or swallowed the terminal.
+        let second_step_runs = Arc::clone(&self.second_step_runs);
+        ctx.run("after-terminal", async move {
+            second_step_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok::<(), StepError>(())
+        })
+        .await?;
+        Ok(())
+    }
+}
+
+/// Evaluate `WorkflowStepTerminalShortCircuits` (ADR-0065 Amendment Gap 1).
+///
+/// Drives a `StepFailsTerminally` workflow (a `ctx.run` step that resolves to
+/// `Err(StepError::Terminal)`) through the real `WorkflowEngine` +
+/// `SimJournalStore`, then asserts:
+///   1. the engine projected `WorkflowStatus::Failed { terminal }` with
+///      `terminal.kind() == Explicit` and the step's detail (the step-authored
+///      terminal, propagated verbatim — NOT engine-minted);
+///   2. the journal carries ZERO `RetryAttempted` commands — a terminal is
+///      NEVER re-driven (the structural contrast with the budget sibling);
+///   3. a `ctx.run` step AFTER the terminal one never ran (a shared
+///      `AtomicUsize` stays `0`) — the terminal short-circuited the body.
+///
+/// No clock ticker is needed: a terminal short-circuits on the FIRST drive
+/// with no backoff park (contrast the budget evaluator).
+#[must_use]
+pub async fn evaluate_workflow_step_terminal_short_circuits(seed: u64) -> InvariantResult {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let name = "workflow-step-terminal-short-circuits";
+    // The seed is echoed in the cause so a `cargo dst --seed <N>` reproduction
+    // is self-describing from the failure line alone.
+    let fail = |cause: String| {
+        result(name, InvariantStatus::Fail, "host-0", Some(format!("[seed={seed}] {cause}")))
+    };
+
+    let spec = StepFailsTerminally::spec();
+    let correlation = CorrelationKey::derive(
+        "wf-step-terminal-0001",
+        &ContentHash::of(StepFailsTerminally::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id = WorkflowId::new("wf-step-terminal-0001")
+        .unwrap_or_else(|_| unreachable!("wf-step-terminal-0001 is a valid instance id"));
+
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+
+    let second_step_runs = Arc::new(AtomicUsize::new(0));
+    let second_step_runs_for_factory = Arc::clone(&second_step_runs);
+
+    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+    let transport: Arc<dyn TransportTrait> = Arc::new(SimTransport::new());
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(StepFailsTerminally::spec().name, move || StepFailsTerminally {
+        second_step_runs: Arc::clone(&second_step_runs_for_factory),
+    });
+
+    let engine =
+        WorkflowEngine::new(journal.clone(), clock, transport, entropy, registry, obs.clone());
+
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+
+    // AC3 — the second step never ran: the first step's terminal
+    // short-circuited the body before the second `ctx.run`.
+    let second_runs = second_step_runs.load(Ordering::SeqCst);
+    if second_runs != 0 {
+        return fail(format!(
+            "a step after the terminal one ran {second_runs} times; expected 0 — the terminal must \
+             short-circuit the body"
+        ));
+    }
+
+    // AC2 — ZERO RetryAttempted: a terminal is never re-driven (the structural
+    // contrast with the budget sibling's `budget`-many).
+    let run = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let retries = retry_attempted_count(&run);
+    if retries != 0 {
+        return fail(format!(
+            "journal carries {retries} RetryAttempted commands; expected 0 — a terminal step is \
+             never re-driven: {run:?}"
+        ));
+    }
+
+    // AC1 — the observable WorkflowTerminal row carries `Failed { terminal }`
+    // with `kind() == Explicit` and the step's detail (step-authored,
+    // propagated verbatim — NOT engine-minted).
+    let terminals = match obs.workflow_terminal_rows().await {
+        Ok(rows) => rows,
+        Err(err) => return fail(format!("workflow_terminal_rows read failed: {err}")),
+    };
+    let Some((_, status)) = terminals.iter().find(|(corr, _)| *corr == correlation) else {
+        return fail(
+            "engine wrote no WorkflowTerminal observation row for the step-terminal run".to_owned(),
+        );
+    };
+
+    let WorkflowStatus::Failed { terminal } = status else {
+        return fail(format!("expected WorkflowStatus::Failed on a step terminal, got {status:?}"));
+    };
+
+    if terminal.kind() != TerminalErrorKind::Explicit {
+        return fail(format!(
+            "expected the step-authored TerminalErrorKind::Explicit (propagated verbatim, NOT \
+             engine-minted), got {:?}",
+            terminal.kind()
+        ));
+    }
+    if terminal.detail() != WF_STEP_TERMINAL_DETAIL {
+        return fail(format!(
+            "expected the step's detail {WF_STEP_TERMINAL_DETAIL:?} propagated verbatim, got {:?}",
+            terminal.detail()
+        ));
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowPerStepRetryPolicyGovernsRedrive (ADR-0065 Amendment 2026-06-07, Gap 2)
+// ---------------------------------------------------------------------------
+//
+// The DST sibling of the example-based acceptance at
+// `crates/overdrive-control-plane/tests/acceptance/workflow_per_step_retry_policy_governs_redrive.rs`.
+// Pins the per-`ctx.run` `RunRetryPolicy` (Gap 2) as a forever property over the
+// harness trajectory: the FAILING step's policy — NOT the engine-global
+// `WORKFLOW_RETRY_BUDGET` — gates the engine's whole-workflow re-drive decision.
+// Two sub-drives:
+//   (1) attempt-count gate — a step with `max_attempts = N` (N ≠ budget)
+//       re-drives exactly N times before minting `BudgetExhausted`;
+//   (2) duration gate — a step with a tight `max_duration` (generous
+//       `max_attempts`) exhausts on the elapsed window, recomputed from the
+//       journaled first-attempt `started_at_unix`, BEFORE the attempt budget.
+
+/// The per-step `max_attempts` the attempt-gate sub-drive sets — `1`,
+/// deliberately distinct from `WORKFLOW_RETRY_BUDGET` (3) so the sub-drive
+/// proves the PER-STEP policy governs, not the global constant.
+const WF_PERSTEP_MAX_ATTEMPTS: u32 = 1;
+
+/// A reference workflow whose `ctx.run` step always fails transiently and
+/// carries a CONFIGURABLE per-step [`RunRetryPolicy`] (set on the `RunStep`
+/// builder; ADR-0065 Gap 2). Each drive bumps a shared `AtomicUsize`; the
+/// engine re-drives per THIS step's policy. Used for BOTH the attempt-gate and
+/// the duration-gate sub-drives by varying the injected policy.
+struct PerStepPolicyTransient {
+    /// Bumped once per drive (inside the `ctx.run` step).
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+    /// The per-step policy this fixture's step sets via `.retry_policy(..)`.
+    policy: RunRetryPolicy,
+}
+
+impl PerStepPolicyTransient {
+    /// The workflow name this fixture registers under. Kebab-case.
+    const WORKFLOW_NAME: &'static str = "per-step-policy-transient";
+
+    /// The concrete [`WorkflowStart`] — a unit `Input`.
+    fn spec() -> WorkflowStart {
+        let mut input: Vec<u8> = Vec::new();
+        ciborium::into_writer(&(), &mut input)
+            .unwrap_or_else(|_| unreachable!("CBOR-encoding the unit type is total"));
+        WorkflowStart {
+            name: WorkflowName::new(Self::WORKFLOW_NAME)
+                .unwrap_or_else(|_| unreachable!("WORKFLOW_NAME is a valid kebab constant")),
+            input,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Workflow for PerStepPolicyTransient {
+    type Output = ();
+    type Input = ();
+
+    async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
+        let attempts = Arc::clone(&self.attempts);
+        let policy = self.policy;
+        // The `.retry_policy(policy)` builder sets the FAILING step's policy;
+        // the transient parks the body and the engine re-drives per IT, not the
+        // global `WORKFLOW_RETRY_BUDGET`.
+        ctx.run("provision", async move {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err::<(), StepError>(StepError::retryable("transient: provision call failed (Gap 2)"))
+        })
+        .retry_policy(policy)
+        .await?;
+        Ok(())
+    }
+}
+
+/// The observable outcome of one per-step-policy drive through the real
+/// `WorkflowEngine` — the inputs the two gate assertions consult.
+struct PerStepDriveOutcome {
+    /// Number of times the body's `ctx.run` step ran (initial + re-drives).
+    drives: usize,
+    /// Number of `RetryAttempted` commands the engine durably recorded.
+    retries: usize,
+    /// The terminal status the engine projected (`None` if no row was written).
+    status: Option<WorkflowStatus>,
+}
+
+/// Drive a `PerStepPolicyTransient` workflow carrying `policy` through the real
+/// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past each backoff
+/// window via a concurrent ticker so the parked re-drives fire, and collect the
+/// observable outcome. Shared by both Gap-2 gate sub-drives.
+async fn run_per_step_policy_drive(
+    seed: u64,
+    policy: RunRetryPolicy,
+    instance: &str,
+) -> PerStepDriveOutcome {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_factory = Arc::clone(&attempts);
+
+    let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").unwrap_or_else(|_| unreachable!("local is a valid node id")),
+        0,
+    ));
+    let sim_clock = Arc::new(SimClock::new());
+    let clock: Arc<dyn Clock> = Arc::clone(&sim_clock) as Arc<dyn Clock>;
+    let transport: Arc<dyn TransportTrait> = Arc::new(SimTransport::new());
+    let entropy: Arc<dyn Entropy> = Arc::new(SimEntropy::new(seed));
+
+    let mut registry = WorkflowRegistry::new();
+    registry.register(PerStepPolicyTransient::spec().name, move || PerStepPolicyTransient {
+        attempts: Arc::clone(&attempts_for_factory),
+        policy,
+    });
+    let engine =
+        WorkflowEngine::new(journal.clone(), clock, transport, entropy, registry, obs.clone());
+
+    let spec = PerStepPolicyTransient::spec();
+    let correlation = CorrelationKey::derive(
+        instance,
+        &ContentHash::of(PerStepPolicyTransient::WORKFLOW_NAME.as_bytes()),
+        "start-workflow",
+    );
+    let workflow_id =
+        WorkflowId::new(instance).unwrap_or_else(|_| unreachable!("valid instance id"));
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let ticker = spawn_budget_clock_ticker(Arc::clone(&sim_clock), Arc::clone(&stop));
+    let _ = engine.start(&spec, &correlation, &workflow_id).await;
+    engine.join_all().await;
+    stop.store(true, Ordering::SeqCst);
+    let _ = ticker.await;
+
+    let run = journal.load_journal(&workflow_id).await.unwrap_or_default();
+    let status = obs
+        .workflow_terminal_rows()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .find(|(corr, _)| *corr == correlation)
+        .map(|(_, status)| status);
+
+    PerStepDriveOutcome {
+        drives: attempts.load(Ordering::SeqCst),
+        retries: retry_attempted_count(&run),
+        status,
+    }
+}
+
+/// Evaluate `WorkflowPerStepRetryPolicyGovernsRedrive` (ADR-0065 Gap 2).
+///
+/// Sub-drive (1) — attempt-count gate: a step with `max_attempts =
+/// WF_PERSTEP_MAX_ATTEMPTS` (1, ≠ `WORKFLOW_RETRY_BUDGET`) re-drives exactly
+/// `WF_PERSTEP_MAX_ATTEMPTS` times (the journal holds that many
+/// `RetryAttempted`) before the engine mints `BudgetExhausted` — proving the
+/// PER-STEP policy, not the global constant, gates the count.
+///
+/// Sub-drive (2) — duration gate: a step with a tight `max_duration` and a
+/// generous `max_attempts` exhausts on the elapsed retry window (recomputed
+/// from the journaled first-attempt `started_at_unix`) BEFORE the attempt
+/// budget — the journal holds strictly FEWER `RetryAttempted` than
+/// `max_attempts`, and the terminal is `BudgetExhausted`.
+#[must_use]
+pub async fn evaluate_workflow_per_step_retry_policy_governs_redrive(seed: u64) -> InvariantResult {
+    let name = "workflow-per-step-retry-policy-governs-redrive";
+    let fail = |cause: String| {
+        result(name, InvariantStatus::Fail, "host-0", Some(format!("[seed={seed}] {cause}")))
+    };
+
+    // The premise: the per-step attempt budget must DIFFER from the global one
+    // for sub-drive (1) to prove per-step governance.
+    if WF_PERSTEP_MAX_ATTEMPTS == WORKFLOW_RETRY_BUDGET {
+        return fail(format!(
+            "WF_PERSTEP_MAX_ATTEMPTS ({WF_PERSTEP_MAX_ATTEMPTS}) must differ from \
+             WORKFLOW_RETRY_BUDGET ({WORKFLOW_RETRY_BUDGET}) to prove per-step governance"
+        ));
+    }
+
+    // ----- Sub-drive (1): attempt-count gate -----
+    let policy = RunRetryPolicy { max_attempts: WF_PERSTEP_MAX_ATTEMPTS, ..Default::default() };
+    let attempt_gate = run_per_step_policy_drive(seed, policy, "wf-perstep-attempts-0001").await;
+
+    // The body ran `max_attempts + 1` times (initial + N re-drives), NOT
+    // `WORKFLOW_RETRY_BUDGET + 1` — the per-step policy governed.
+    let expected = WF_PERSTEP_MAX_ATTEMPTS as usize + 1;
+    if attempt_gate.drives != expected {
+        return fail(format!(
+            "attempt-gate: body ran {} times; expected the per-step max_attempts \
+             ({WF_PERSTEP_MAX_ATTEMPTS}) + 1 = {expected}, NOT the global WORKFLOW_RETRY_BUDGET \
+             ({WORKFLOW_RETRY_BUDGET}) + 1",
+            attempt_gate.drives
+        ));
+    }
+    if attempt_gate.retries != WF_PERSTEP_MAX_ATTEMPTS as usize {
+        return fail(format!(
+            "attempt-gate: journal carries {} RetryAttempted; expected the per-step max_attempts \
+             ({WF_PERSTEP_MAX_ATTEMPTS})",
+            attempt_gate.retries
+        ));
+    }
+    match attempt_gate.status {
+        Some(WorkflowStatus::Failed { terminal })
+            if terminal.kind() == TerminalErrorKind::BudgetExhausted => {}
+        other => {
+            return fail(format!(
+                "attempt-gate: expected engine-minted Failed{{BudgetExhausted}}, got {other:?}"
+            ));
+        }
+    }
+
+    // ----- Sub-drive (2): duration gate -----
+    // A generous attempt budget but a tight duration window: the 1s/tick ticker
+    // advances the clock past `max_duration` after the first re-drive, so
+    // exhaustion fires on the ELAPSED-WINDOW gate (recomputed from the journaled
+    // first `started_at_unix`) before the attempt budget.
+    let big_attempts: u32 = 100;
+    let duration_policy = RunRetryPolicy {
+        max_attempts: big_attempts,
+        max_duration: Duration::from_millis(1),
+        ..Default::default()
+    };
+    let duration_gate =
+        run_per_step_policy_drive(seed, duration_policy, "wf-perstep-duration-0001").await;
+
+    // The journal holds STRICTLY FEWER RetryAttempted than `max_attempts` —
+    // proving the DURATION gate (the elapsed window), not the attempt gate,
+    // fired. (With the 1s ticker and a 1ms window, the second drive's elapsed
+    // exceeds max_duration, so exactly 1 RetryAttempted is recorded — well
+    // under 100.)
+    if duration_gate.retries >= big_attempts as usize {
+        return fail(format!(
+            "duration-gate: journal carries {} RetryAttempted; expected strictly fewer than \
+             max_attempts ({big_attempts}) — the duration gate must fire first",
+            duration_gate.retries
+        ));
+    }
+    match duration_gate.status {
+        Some(WorkflowStatus::Failed { terminal })
+            if terminal.kind() == TerminalErrorKind::BudgetExhausted => {}
+        other => {
+            return fail(format!(
+                "duration-gate: expected engine-minted Failed{{BudgetExhausted}} on the elapsed \
+                 window, got {other:?}"
+            ));
+        }
     }
 
     result(name, InvariantStatus::Pass, "host-0", None)

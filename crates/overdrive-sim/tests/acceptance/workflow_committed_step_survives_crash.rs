@@ -28,7 +28,7 @@ use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::traits::Transport;
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowCtxError};
+use overdrive_core::workflow::{JournalCursor, TerminalError, WorkflowCtx};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -45,7 +45,7 @@ const STEP_NAME: &str = "provision-write";
 async fn run_step(
     ctx: &WorkflowCtx,
     target: SocketAddr,
-) -> Result<Result<usize, String>, WorkflowCtxError> {
+) -> Result<Result<usize, String>, TerminalError> {
     let transport = Arc::clone(ctx.transport());
     let payload = Bytes::from_static(PAYLOAD);
     ctx.run(STEP_NAME, async move {

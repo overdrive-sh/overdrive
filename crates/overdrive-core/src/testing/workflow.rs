@@ -107,25 +107,15 @@ impl Workflow for ProvisionRecord {
     type Input = ();
 
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
-        // The provision-write effect runs INSIDE a `ctx.run` durable step:
-        // the transport send fires once on the live path, its result is
-        // journaled, and a resumed run replays the recorded result without
-        // re-firing (exactly-once on the replay path). `T` is the
-        // serializable `Result<usize, String>` — the transport error folds
-        // into the success type so the whole result round-trips through CBOR.
         let transport = Arc::clone(ctx.transport());
         let target = self.target;
         let payload = Bytes::from_static(Self::PAYLOAD);
-        let sent: Result<usize, String> = ctx
-            .run("provision-write", async move {
-                Ok(transport.send_datagram(target, payload).await.map_err(|e| e.to_string()))
-            })
-            .await
-            .unwrap_or_else(|err| Err(err.to_string()));
-        match sent {
-            Ok(_bytes) => Ok(()),
-            Err(_reason) => Err(TerminalError::explicit("provision call failed")),
-        }
+        ctx.run(
+            "provision-write",
+            async move { Ok(transport.send_datagram(target, payload).await?) },
+        )
+        .await?;
+        Ok(())
     }
 }
 
@@ -265,18 +255,8 @@ impl Workflow for ProvisionRecordWithSignalEmit {
     type Input = ();
 
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
-        // Block on the typed signal until it is present in the
-        // ObservationStore (genuine blocking on an absent signal — the
-        // honest shape step 03-02 proves crash-safe). On resume after a
-        // crash WHILE blocked, this re-blocks on the SAME signal.
-        if ctx.wait_for_signal(self.signal.clone()).await.is_err() {
-            return Err(TerminalError::explicit("signal wait failed"));
-        }
-        // Emit one typed Action (idempotent across a crash — a recorded
-        // `ActionEmitted` makes a resumed run NOT re-emit).
-        if ctx.emit_action(self.action.clone()).await.is_err() {
-            return Err(TerminalError::explicit("emit_action failed"));
-        }
+        ctx.wait_for_signal(self.signal.clone()).await?;
+        ctx.emit_action(self.action.clone()).await?;
         Ok(())
     }
 }
@@ -287,41 +267,23 @@ impl Workflow for ProvisionRecordWithSleep {
     type Input = ();
 
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
-        // Pre-sleep provision-write effect, inside a durable `ctx.run` step.
         let first_transport = Arc::clone(ctx.transport());
         let first_target = self.first_target;
         let first_payload = Bytes::from_static(Self::FIRST_PAYLOAD);
-        let first: Result<usize, String> = ctx
-            .run("provision-write-pre-sleep", async move {
-                Ok(first_transport
-                    .send_datagram(first_target, first_payload)
-                    .await
-                    .map_err(|e| e.to_string()))
-            })
-            .await
-            .unwrap_or_else(|err| Err(err.to_string()));
-        if first.is_err() {
-            return Err(TerminalError::explicit("pre-sleep call failed"));
-        }
-        if ctx.sleep(self.sleep).await.is_err() {
-            return Err(TerminalError::explicit("sleep failed"));
-        }
-        // Post-sleep provision-write effect, inside a durable `ctx.run` step.
+        ctx.run("provision-write-pre-sleep", async move {
+            Ok(first_transport.send_datagram(first_target, first_payload).await?)
+        })
+        .await?;
+
+        ctx.sleep(self.sleep).await?;
+
         let second_transport = Arc::clone(ctx.transport());
         let second_target = self.second_target;
         let second_payload = Bytes::from_static(Self::SECOND_PAYLOAD);
-        let second: Result<usize, String> = ctx
-            .run("provision-write-post-sleep", async move {
-                Ok(second_transport
-                    .send_datagram(second_target, second_payload)
-                    .await
-                    .map_err(|e| e.to_string()))
-            })
-            .await
-            .unwrap_or_else(|err| Err(err.to_string()));
-        match second {
-            Ok(_bytes) => Ok(()),
-            Err(_reason) => Err(TerminalError::explicit("post-sleep call failed")),
-        }
+        ctx.run("provision-write-post-sleep", async move {
+            Ok(second_transport.send_datagram(second_target, second_payload).await?)
+        })
+        .await?;
+        Ok(())
     }
 }

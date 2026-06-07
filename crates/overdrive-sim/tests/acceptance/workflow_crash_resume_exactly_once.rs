@@ -167,17 +167,16 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
             Arc::new(SimEntropy::new(0x5eed)),
             cursor,
         );
-        // The same provision-write `ctx.run` durable step ProvisionRecord
-        // performs (records step 0).
+        // The provision-write `ctx.run` durable step ProvisionRecord performs (step 0).
         let transport = Arc::clone(ctx.transport());
         let payload = Bytes::from_static(ProvisionRecord::PAYLOAD);
-        let recorded: Result<usize, String> = ctx
+        let recorded: usize = ctx
             .run("provision-write", async move {
-                Ok(transport.send_datagram(crash_target, payload).await.map_err(|e| e.to_string()))
+                Ok(transport.send_datagram(crash_target, payload).await?)
             })
             .await
             .expect("crash-run records step 0");
-        assert!(recorded.is_ok(), "the crash-run step's effect succeeded before the crash");
+        assert_eq!(recorded, ProvisionRecord::PAYLOAD.len(), "crash-run effect succeeded");
         // <-- "crash": ctx + future dropped here, BEFORE the workflow
         //     would have returned terminal. No Terminal entry written.
     }

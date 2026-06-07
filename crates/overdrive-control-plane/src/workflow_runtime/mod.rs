@@ -73,9 +73,9 @@ use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, SignalKey, SignalValue, TerminalError,
-    Workflow, WorkflowCtx, WorkflowCtxError, WorkflowDriveError, WorkflowName, WorkflowStart,
-    WorkflowStatus,
+    ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, RunRetryPolicy, SignalKey, SignalValue,
+    TerminalError, Workflow, WorkflowCtx, WorkflowCtxError, WorkflowDriveError, WorkflowName,
+    WorkflowStart, WorkflowStatus,
 };
 
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
@@ -686,6 +686,10 @@ async fn drive_to_terminal(
             },
         };
         let attempts = attempts_from_journal(&drive_buffer);
+        // Recover the retry-window START instant (ADR-0065 Gap 2) BEFORE the
+        // buffer is moved into the cursor — the `max_duration` gate recomputes
+        // elapsed against it on this drive.
+        let window_started_at = retry_window_start(&drive_buffer);
         let cursor: Arc<dyn JournalCursor> = Arc::new(JournalCursorHandle::new_with_channels(
             Arc::clone(journal),
             workflow_id.clone(),
@@ -730,8 +734,16 @@ async fn drive_to_terminal(
             Ok(Err(WorkflowDriveError::Transient(transient))) => {
                 // The last transient cause is carried forward so a minted
                 // `BudgetExhausted` (on exhaustion) can surface the operator-
-                // facing reason of the final transient.
-                DriveOutcome::Transient { detail: transient_detail(&transient) }
+                // facing reason of the final transient. The FAILING step's
+                // `RunRetryPolicy` (ADR-0065 Gap 2) rides the transient signal —
+                // extract it so `redrive_decision` consults THIS step's policy
+                // (`max_attempts` / `max_duration` / backoff) rather than the
+                // global constant. A non-`TransientStep` transient (the forward
+                // infra channel) falls back to the default policy.
+                DriveOutcome::Transient {
+                    detail: transient_detail(&transient),
+                    policy: transient_policy(&transient),
+                }
             }
             Err(panic) => {
                 let detail = panic
@@ -750,21 +762,36 @@ async fn drive_to_terminal(
             }
         };
 
-        // (4) Classify: re-drive the transient (budget permitting) or return
-        // the projected status as the durable terminal.
-        match redrive_decision(outcome, attempts, WORKFLOW_RETRY_BUDGET) {
+        // (4) Classify: re-drive the transient (per the FAILING step's
+        // `RunRetryPolicy` — ADR-0065 Gap 2) or return the projected status as
+        // the durable terminal. The decision consults the journal-derived
+        // attempt count, the recovered retry-window START instant (for the
+        // `max_duration` gate; recovered above before the buffer moved into the
+        // cursor), and the live `now` — all INPUTS; the elapsed window and
+        // backoff are RECOMPUTED, never persisted ("Persist inputs, not derived
+        // state").
+        let now = clock.unix_now();
+        match redrive_decision(outcome, attempts, window_started_at, now) {
             RedriveDecision::Terminal(status) => return status,
-            RedriveDecision::Redrive => {
+            RedriveDecision::Redrive { backoff } => {
                 // Record the attempt INPUT (D4) — a `RetryAttempted` command
                 // (off the cursor walk; engine bookkeeping). The attempt count
                 // is recomputed from the journal on the next iteration, never a
                 // persisted counter. The digest is over the attempt's inputs
                 // (the instance id + attempt index) per "Persist inputs, not
-                // derived state".
+                // derived state". The FIRST `RetryAttempted` for the instance
+                // stamps `started_at_unix = Some(now)` — the retry window's
+                // start (an input the `max_duration` gate recovers on later
+                // drives); every subsequent attempt carries `None` (ADR-0065
+                // Gap 2 sub-decision 1).
                 let attempt_digest = ContentHash::of(
                     format!("{}:retry:{attempts}", workflow_id.as_str()).as_bytes(),
                 );
-                let entry = LoadedEntry::Command(JournalCommand::RetryAttempted { attempt_digest });
+                let started_at_unix = if attempts == 0 { Some(now) } else { None };
+                let entry = LoadedEntry::Command(JournalCommand::RetryAttempted {
+                    attempt_digest,
+                    started_at_unix,
+                });
                 if let Err(err) = journal.append(workflow_id, &entry).await {
                     // A failure to durably record the attempt ends the instance
                     // (the engine must not re-drive against an unjournaled
@@ -780,12 +807,14 @@ async fn drive_to_terminal(
                         terminal: TerminalError::explicit("retry bookkeeping append failed"),
                     };
                 }
-                // Park on the injected Clock for the backoff window (recomputed
-                // from the journal-derived attempt count against the live
-                // policy — never a persisted deadline). Under SimClock this
-                // parks until the harness advances logical time; under
-                // SystemClock it is a real timer. Loop: reload + re-drive.
-                clock.sleep(backoff_for_attempt(attempts)).await;
+                // Park on the injected Clock for the policy-driven backoff
+                // window (`initial_delay * exponentiation_factor^attempts`,
+                // clamped to `max_delay` — computed by `redrive_decision` from
+                // the FAILING step's policy, never the global
+                // `backoff_for_attempt`). Under SimClock this parks until the
+                // harness advances logical time; under SystemClock it is a real
+                // timer. Loop: reload + re-drive.
+                clock.sleep(backoff).await;
             }
         }
     }
@@ -818,45 +847,35 @@ const fn command_kind(command: &JournalCommand) -> &'static str {
     }
 }
 
-/// The engine's retry budget — the MAXIMUM number of transient re-drives an
-/// instance gets before the engine mints
+/// The engine's DEFAULT retry budget — the maximum number of transient
+/// re-drives an instance gets when its failing `ctx.run` step set no explicit
+/// [`RunRetryPolicy`](overdrive_core::workflow::RunRetryPolicy), before the
+/// engine mints
 /// [`TerminalError::budget_exhausted`](overdrive_core::workflow::TerminalError::budget_exhausted)
-/// (ADR-0065 §4, D4).
+/// (ADR-0065 §4 D4, Gap 2).
 ///
-/// This is the budget POLICY: an engine constant analogous to the
-/// reconciler [`RETRY_BACKOFFS`](crate::worker) table, consulted by the
-/// engine and NEVER persisted (per `.claude/rules/development.md` § "Persist
-/// inputs, not derived state" — the policy is a function; the INPUTS, the
+/// This is the DEFAULT budget POLICY: an engine constant analogous to the
+/// reconciler [`RETRY_BACKOFFS`](crate::worker) table, consulted by the engine
+/// and NEVER persisted (per `.claude/rules/development.md` § "Persist inputs,
+/// not derived state" — the policy is a function; the INPUTS, the
 /// `RetryAttempted` journal commands, are what persist). The budget lives in
 /// the ENGINE, contrasting the reconciler `RetryMemory` View precedent: a
-/// reconciler has no engine, so ADR-0035 puts its retry memory in the View;
-/// a workflow HAS an engine, so the budget belongs here (D4).
+/// reconciler has no engine, so ADR-0035 puts its retry memory in the View; a
+/// workflow HAS an engine, so the budget belongs here (D4).
+///
+/// **Gap 2 (ADR-0065 Amendment 2026-06-07):** a per-`ctx.run` `RunRetryPolicy`
+/// now governs the re-drive count, and [`RunRetryPolicy::default`] reproduces
+/// THIS constant exactly (`max_attempts == WORKFLOW_RETRY_BUDGET`). This
+/// constant + [`backoff_for_attempt`] are RETAINED as the default-policy SSOT:
+/// the equivalence is pinned by the `default_policy_reproduces_engine_constants`
+/// unit test (since `overdrive-core` cannot reference this engine-crate constant
+/// directly). They are not deleted.
 ///
 /// `3` re-drives is the Phase-1 value: enough to ride out a brief transient
-/// without unbounded churn. Once the journal's `RetryAttempted` count
-/// reaches this, the engine stops re-driving and mints `BudgetExhausted`.
+/// without unbounded churn. Once the journal's `RetryAttempted` count reaches
+/// the failing step's `max_attempts` (defaulting to this), the engine stops
+/// re-driving and mints `BudgetExhausted`.
 pub const WORKFLOW_RETRY_BUDGET: u32 = 3;
-
-/// The Phase-1 backoff schedule consulted before each transient re-drive
-/// (ADR-0065 §4). `attempt` is the number of re-drives ALREADY recorded
-/// (the `RetryAttempted` count) — i.e. the 0-indexed window before the
-/// `attempt+1`-th drive.
-///
-/// Total over every index (saturating, no panic past the schedule), and
-/// deterministic — the engine parks on the injected `Clock` for the
-/// returned duration, recomputed from the journal-derived attempt count on
-/// each re-drive (never a persisted deadline cache). The values mirror the
-/// reconciler `RETRY_BACKOFFS` shape (50ms / 100ms / 200ms), clamped to the
-/// last entry for any index past the table — modest, since under `SimClock`
-/// the harness drives logical time and the absolute value is immaterial to
-/// the re-drive count.
-#[must_use]
-fn backoff_for_attempt(attempt: u32) -> Duration {
-    const SCHEDULE: [Duration; 3] =
-        [Duration::from_millis(50), Duration::from_millis(100), Duration::from_millis(200)];
-    let idx = (attempt as usize).min(SCHEDULE.len() - 1);
-    SCHEDULE[idx]
-}
 
 /// Count the `RetryAttempted` commands in a loaded run — the engine's
 /// journal-derived attempt total (ADR-0065 §4, D4). The journal is the
@@ -887,7 +906,11 @@ fn attempts_from_journal(loaded: &[LoadedEntry]) -> u32 {
 /// [`Self::Completed`] / [`Self::Terminal`] only). This is the type-level
 /// guarantee that a body cannot author a retry: there is no path from a
 /// `TerminalError` to [`Self::Transient`].
-#[derive(Debug, PartialEq, Eq)]
+///
+/// `PartialEq` only (not `Eq`): the `Transient` arm carries a
+/// [`RunRetryPolicy`] whose `exponentiation_factor: f64` field is `PartialEq`
+/// but not `Eq` (ADR-0065 Gap 2).
+#[derive(Debug, PartialEq)]
 enum DriveOutcome {
     /// The body returned `Ok(Output)` — the CBOR-encoded output bytes.
     Completed(Vec<u8>),
@@ -896,54 +919,98 @@ enum DriveOutcome {
     /// never re-driven.
     Terminal(TerminalError),
     /// A `ctx.run` step failed transiently — the engine absorbs
-    /// and re-drives (budget-gated). Carries the last transient detail so a
-    /// minted `BudgetExhausted` can surface the operator-facing cause.
+    /// and re-drives (gated by the FAILING step's policy). Carries the last
+    /// transient detail so a minted `BudgetExhausted` can surface the
+    /// operator-facing cause, plus the failing step's [`RunRetryPolicy`]
+    /// (ADR-0065 Gap 2) so `redrive_decision` consults THIS step's
+    /// `max_attempts` / `max_duration` / backoff rather than the global
+    /// constant.
     Transient {
         /// The transient step's detail (carried into a minted
         /// `BudgetExhausted` on exhaustion).
         detail: String,
+        /// The failing step's per-step retry policy (ADR-0065 Gap 2). Rides the
+        /// transient signal from `WorkflowCtxError::TransientStep`; defaults to
+        /// [`RunRetryPolicy::default`] for the forward infra-transient channel.
+        policy: RunRetryPolicy,
     },
 }
 
-/// The engine's transient-classification + budget-gate decision over a
-/// drive's [`DriveOutcome`] (ADR-0065 §4, D4).
+/// The engine's transient-classification + retry-gate decision over a
+/// drive's [`DriveOutcome`] (ADR-0065 §4, D4 + Gap 2).
 ///
 /// A [`DriveOutcome::Transient`] is the transient channel — a
-/// `ctx.run` step failure the engine RE-DRIVES while attempts
-/// remain under the budget, MINTING `Failed { BudgetExhausted }` once
-/// `attempts >= budget`. Every other outcome — a `Completed`, or an
+/// `ctx.run` step failure the engine RE-DRIVES while the FAILING step's
+/// [`RunRetryPolicy`] permits, MINTING `Failed { BudgetExhausted }` once
+/// `attempts >= policy.max_attempts` OR the elapsed retry window reaches
+/// `policy.max_duration`. Every other outcome — a `Completed`, or an
 /// explicit / malformed / output-encode / panic `Terminal` — is a real
 /// terminal the engine records as-is (a body-authored terminal is NEVER
 /// re-driven; the body has no transient channel through its return type).
 #[derive(Debug, PartialEq, Eq)]
 enum RedriveDecision {
-    /// Absorb the transient and re-drive the body from the journal.
-    Redrive,
+    /// Absorb the transient and re-drive the body from the journal after
+    /// parking for `backoff` (the policy-driven window —
+    /// [`RunRetryPolicy::backoff_window`], ADR-0065 Gap 2).
+    Redrive {
+        /// The backoff window to park on the injected `Clock` before the
+        /// re-drive (`initial_delay * exponentiation_factor^attempts`, clamped
+        /// to `max_delay`).
+        backoff: Duration,
+    },
     /// Record this status as the instance's durable terminal (no re-drive).
     Terminal(WorkflowStatus),
 }
 
 /// Classify a drive's [`DriveOutcome`] against the journal-derived
-/// `attempts` and the `budget` policy. Pure — no I/O, deterministic — so it
-/// is unit-tested directly (the re-drive loop in [`drive_to_terminal`]
-/// consults it per drive). See [`RedriveDecision`].
+/// `attempts`, the recovered retry-window start instant `window_started_at`,
+/// and the live `now` — consulting the FAILING step's [`RunRetryPolicy`]
+/// (carried inside the `Transient` arm; ADR-0065 Gap 2). Pure — no I/O,
+/// deterministic — so it is unit-tested directly (the re-drive loop in
+/// [`drive_to_terminal`] consults it per drive). See [`RedriveDecision`].
+///
+/// A transient re-drives iff BOTH gates pass:
+/// - **attempt-count gate:** `attempts < policy.max_attempts`;
+/// - **duration gate:** the elapsed retry window
+///   (`now − window_started_at`, or zero before the first attempt is
+///   recorded) is `< policy.max_duration`.
+///
+/// On EITHER gate failing the engine MINTS `Failed { BudgetExhausted }` — the
+/// body never authors it (the per-step policy, not the global constant, gates
+/// the decision). On a re-drive the returned `backoff` is the policy's window
+/// for the NEXT attempt (`policy.backoff_window(attempts)`).
 ///
 /// Only [`DriveOutcome::Transient`] can re-drive; it is unreachable from a
 /// `TerminalError` (the body's terminal channel is purely terminal —
-/// ADR-0065 §2).
+/// ADR-0065 §2). `window_started_at` is `None` on the very first transient
+/// (no `RetryAttempted` recorded yet) — the window opens with that first
+/// attempt, so elapsed is treated as zero and the duration gate passes.
 #[must_use]
-fn redrive_decision(outcome: DriveOutcome, attempts: u32, budget: u32) -> RedriveDecision {
+fn redrive_decision(
+    outcome: DriveOutcome,
+    attempts: u32,
+    window_started_at: Option<Duration>,
+    now: Duration,
+) -> RedriveDecision {
     match outcome {
-        DriveOutcome::Transient { detail } => {
-            if attempts >= budget {
-                // Budget exhausted — the engine MINTS BudgetExhausted (the
+        DriveOutcome::Transient { detail, policy } => {
+            // Elapsed retry window: recomputed each drive from the recovered
+            // start instant (an input) against the live `now` — never a
+            // persisted deadline. Before the first attempt is recorded the
+            // window has not opened, so elapsed is zero.
+            let elapsed =
+                window_started_at.map_or(Duration::ZERO, |start| now.saturating_sub(start));
+            let attempts_remain = attempts < policy.max_attempts;
+            let within_window = elapsed < policy.max_duration;
+            if attempts_remain && within_window {
+                RedriveDecision::Redrive { backoff: policy.backoff_window(attempts) }
+            } else {
+                // Either gate exhausted — the engine MINTS BudgetExhausted (the
                 // body never authors it). The last transient detail is carried
                 // forward so the operator sees the final transient cause.
                 RedriveDecision::Terminal(WorkflowStatus::Failed {
                     terminal: TerminalError::budget_exhausted(&detail),
                 })
-            } else {
-                RedriveDecision::Redrive
             }
         }
         // A real terminal — recorded as-is, never re-driven.
@@ -968,6 +1035,41 @@ fn transient_detail(transient: &WorkflowCtxError) -> String {
         WorkflowCtxError::TransientStep { detail, .. } => detail.clone(),
         other => other.to_string(),
     }
+}
+
+/// The FAILING step's [`RunRetryPolicy`] carried on a transient
+/// [`WorkflowCtxError`](overdrive_core::workflow::WorkflowCtxError) (ADR-0065
+/// Gap 2). A `TransientStep` rides its own per-step policy (set on the
+/// `RunStep` builder, defaulting when the step set none); any OTHER
+/// `WorkflowCtxError` the engine treats as transient (the forward infra
+/// channel #2) has no per-step policy and falls back to
+/// [`RunRetryPolicy::default`] — observably the pre-Gap-2 behaviour.
+fn transient_policy(transient: &WorkflowCtxError) -> RunRetryPolicy {
+    match transient {
+        WorkflowCtxError::TransientStep { policy, .. } => *policy,
+        _ => RunRetryPolicy::default(),
+    }
+}
+
+/// Recover the retry window's START instant from a loaded run — the absolute
+/// wall-clock instant the FIRST `RetryAttempted` for the instance was recorded
+/// (ADR-0065 Gap 2). Scans for the first `RetryAttempted` carrying
+/// `Some(started_at_unix)` (the engine stamps `Some` on the first attempt,
+/// `None` thereafter; sub-decision 1). `None` when no attempt has been recorded
+/// yet (the window has not opened) or the recorded attempts all predate the
+/// additive field (an older journal — decodes to `None`). The
+/// `max_duration` gate recomputes `elapsed = now − start` from this input on
+/// every drive, never a persisted deadline ("Persist inputs, not derived
+/// state").
+#[must_use]
+fn retry_window_start(loaded: &[LoadedEntry]) -> Option<Duration> {
+    loaded.iter().find_map(|e| match e {
+        LoadedEntry::Command(JournalCommand::RetryAttempted {
+            started_at_unix: Some(start),
+            ..
+        }) => Some(*start),
+        _ => None,
+    })
 }
 
 /// Partition the flat loaded run (the dumb-store ordered
@@ -1600,19 +1702,34 @@ impl JournalCursor for JournalCursorHandle {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::{
         DriveOutcome, RedriveDecision, WORKFLOW_RETRY_BUDGET, attempts_from_journal,
-        backoff_for_attempt, redrive_decision,
+        redrive_decision, retry_window_start,
     };
     use crate::journal::{JournalCommand, LoadedEntry};
     use overdrive_core::id::ContentHash;
-    use overdrive_core::workflow::{TerminalError, TerminalErrorKind, WorkflowStatus};
+    use overdrive_core::workflow::{
+        RunRetryPolicy, TerminalError, TerminalErrorKind, WorkflowStatus,
+    };
 
-    /// A `RetryAttempted` command for the count fixtures.
+    /// A `RetryAttempted` command for the count fixtures (no recorded window
+    /// start — the non-first-attempt shape).
     fn retry_attempted() -> LoadedEntry {
         LoadedEntry::Command(JournalCommand::RetryAttempted {
             attempt_digest: ContentHash::of(b"attempt"),
+            started_at_unix: None,
         })
+    }
+
+    /// A `Transient` outcome under the DEFAULT policy — the pre-Gap-2 shape the
+    /// existing budget assertions exercise.
+    fn transient_default() -> DriveOutcome {
+        DriveOutcome::Transient {
+            detail: "transient".to_string(),
+            policy: RunRetryPolicy::default(),
+        }
     }
 
     /// A non-`RetryAttempted` command (a `Started`) — must NOT be counted.
@@ -1642,31 +1759,44 @@ mod tests {
         );
     }
 
-    /// `redrive_decision` is the engine's transient classifier + budget
-    /// gate. A `DriveOutcome::Transient` (a `ctx.run` step failure)
-    /// re-drives WHILE attempts remain, and MINTS `BudgetExhausted` once the
-    /// budget is consumed. A `DriveOutcome::Terminal` (an explicit /
-    /// malformed / output-encode / panic terminal) is NEVER re-driven — the
-    /// transient channel is unreachable from a `TerminalError` (ADR-0065 §2).
-    /// A `DriveOutcome::Completed` is terminal-success.
+    /// `redrive_decision` is the engine's transient classifier + retry gate.
+    /// A `DriveOutcome::Transient` (a `ctx.run` step failure) re-drives WHILE
+    /// the FAILING step's policy permits, and MINTS `BudgetExhausted` once the
+    /// budget is consumed. A `DriveOutcome::Terminal` (an explicit / malformed
+    /// / output-encode / panic terminal) is NEVER re-driven — the transient
+    /// channel is unreachable from a `TerminalError` (ADR-0065 §2). A
+    /// `DriveOutcome::Completed` is terminal-success.
+    ///
+    /// This test uses the DEFAULT policy and an inert duration gate
+    /// (`window_started_at = None`, so elapsed is zero), so the attempt-count
+    /// gate is the sole gate — preserving the pre-Gap-2 budget semantics
+    /// exactly (the per-step `max_duration` gate has its own coverage in the
+    /// `WorkflowPerStepRetryPolicyGovernsRedrive` DST invariant + the dedicated
+    /// gate tests below).
     #[test]
     fn redrive_decision_classifies_transient_and_gates_on_budget() {
-        let transient = || DriveOutcome::Transient { detail: "transient".to_string() };
+        // No retry window has opened (window_started_at = None) so the duration
+        // gate is inert; `now` is irrelevant under the default's unbounded
+        // max_duration.
+        let none_started = None;
+        let now = Duration::ZERO;
 
-        // Transient with budget remaining → re-drive.
-        assert_eq!(
-            redrive_decision(transient(), 0, WORKFLOW_RETRY_BUDGET),
-            RedriveDecision::Redrive
-        );
-        assert_eq!(
-            redrive_decision(transient(), WORKFLOW_RETRY_BUDGET - 1, WORKFLOW_RETRY_BUDGET),
-            RedriveDecision::Redrive,
+        // Transient with budget remaining → re-drive (now carrying a backoff).
+        assert!(matches!(
+            redrive_decision(transient_default(), 0, none_started, now),
+            RedriveDecision::Redrive { .. }
+        ));
+        assert!(
+            matches!(
+                redrive_decision(transient_default(), WORKFLOW_RETRY_BUDGET - 1, none_started, now),
+                RedriveDecision::Redrive { .. }
+            ),
             "the last in-budget attempt still re-drives"
         );
 
         // Transient with budget EXHAUSTED → mint BudgetExhausted (engine-minted;
         // the body never authored it — a transient is not a TerminalError).
-        match redrive_decision(transient(), WORKFLOW_RETRY_BUDGET, WORKFLOW_RETRY_BUDGET) {
+        match redrive_decision(transient_default(), WORKFLOW_RETRY_BUDGET, none_started, now) {
             RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
                 assert_eq!(
                     terminal.kind(),
@@ -1682,7 +1812,7 @@ mod tests {
         // Explicit terminal → terminal as-is, NEVER re-driven (body authored a
         // real terminal), even with budget remaining.
         let explicit = DriveOutcome::Terminal(TerminalError::explicit("boom"));
-        match redrive_decision(explicit, 0, WORKFLOW_RETRY_BUDGET) {
+        match redrive_decision(explicit, 0, none_started, now) {
             RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
                 assert_eq!(terminal.kind(), TerminalErrorKind::Explicit);
             }
@@ -1691,19 +1821,118 @@ mod tests {
 
         // Completed → terminal-success, never re-driven.
         assert!(matches!(
-            redrive_decision(DriveOutcome::Completed(Vec::new()), 0, WORKFLOW_RETRY_BUDGET),
+            redrive_decision(DriveOutcome::Completed(Vec::new()), 0, none_started, now),
             RedriveDecision::Terminal(WorkflowStatus::Completed { .. })
         ));
     }
 
-    /// The backoff schedule is total over every attempt index (no panic /
-    /// underflow past the budget) and deterministic.
+    /// `RunRetryPolicy::default()` reproduces the engine's pre-Gap-2 behaviour
+    /// bit-for-bit (ADR-0065 Gap 2 — the observable-equivalence requirement,
+    /// the Part-C regression guard). `RunRetryPolicy::default()` is the sole
+    /// default-policy SSOT; this test pins its `max_attempts` against
+    /// `WORKFLOW_RETRY_BUDGET` and its backoff window against the fixed
+    /// 50/100/200ms schedule as concrete literals. If a future maintainer
+    /// changes the default, this breaks — the structural guard that "no policy
+    /// set == today".
     #[test]
-    fn backoff_for_attempt_is_total_and_deterministic() {
+    fn default_policy_reproduces_engine_constants() {
+        let default = RunRetryPolicy::default();
+
+        // max_attempts == the engine budget.
+        assert_eq!(
+            default.max_attempts, WORKFLOW_RETRY_BUDGET,
+            "the default policy's max_attempts must equal WORKFLOW_RETRY_BUDGET"
+        );
+
+        // The default's backoff window reproduces the engine's prior fixed
+        // schedule (50 / 100 / 200ms, clamped past the table) for every attempt
+        // index — pinned as concrete literals. `RunRetryPolicy::default()` is now
+        // the sole backoff SSOT (the standalone schedule fn was deleted as dead
+        // production code per the deletion-discipline rule). Pinning to a literal
+        // is itself the determinism guard.
         for n in 0..(WORKFLOW_RETRY_BUDGET + 4) {
-            let a = backoff_for_attempt(n);
-            let b = backoff_for_attempt(n);
-            assert_eq!(a, b, "backoff is deterministic for attempt {n}");
+            let expected = Duration::from_millis(match n {
+                0 => 50,
+                1 => 100,
+                _ => 200,
+            });
+            assert_eq!(
+                default.backoff_window(n),
+                expected,
+                "default policy backoff at attempt {n} must reproduce the 50/100/200ms schedule"
+            );
+        }
+
+        // max_duration is effectively unbounded so the duration gate never
+        // fires under the default (today has no duration bound).
+        assert_eq!(
+            default.max_duration,
+            Duration::MAX,
+            "the default max_duration must be unbounded (pre-Gap-2 had no duration gate)"
+        );
+    }
+
+    /// `retry_window_start` recovers the FIRST recorded `started_at_unix`
+    /// (ADR-0065 Gap 2 sub-decision 1): `None` before any attempt is recorded
+    /// or when no attempt carries a start (older journal); the first
+    /// `Some(start)` once stamped. This is the input the `max_duration` gate
+    /// recomputes elapsed against — never a persisted deadline.
+    #[test]
+    fn retry_window_start_recovers_first_stamped_instant() {
+        // No attempts → no window.
+        assert_eq!(retry_window_start(&[]), None);
+
+        // Attempts present but none carry a start (the older-journal /
+        // non-first shape) → None.
+        let run_no_start = vec![retry_attempted(), retry_attempted()];
+        assert_eq!(retry_window_start(&run_no_start), None);
+
+        // The first `Some(start)` is recovered, ignoring later `None`s.
+        let start = Duration::from_secs(1234);
+        let run_with_start = vec![
+            LoadedEntry::Command(JournalCommand::RetryAttempted {
+                attempt_digest: ContentHash::of(b"a0"),
+                started_at_unix: Some(start),
+            }),
+            retry_attempted(),
+        ];
+        assert_eq!(retry_window_start(&run_with_start), Some(start));
+    }
+
+    /// The per-step `max_duration` gate mints `BudgetExhausted` on an elapsed
+    /// window that reaches the policy's `max_duration` EVEN when attempts
+    /// remain (ADR-0065 Gap 2 sub-decision 1, the duration-gate companion).
+    #[test]
+    fn redrive_decision_gates_on_max_duration_before_max_attempts() {
+        // A generous attempt budget but a tight duration window.
+        let policy = RunRetryPolicy {
+            max_attempts: 100,
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        };
+        let transient = || DriveOutcome::Transient { detail: "slow".to_string(), policy };
+
+        let started = Duration::from_secs(1000);
+
+        // Within the window (elapsed 5s < 10s) and attempts remain → re-drive.
+        assert!(matches!(
+            redrive_decision(transient(), 1, Some(started), started + Duration::from_secs(5)),
+            RedriveDecision::Redrive { .. }
+        ));
+
+        // Window elapsed (elapsed 10s == max_duration) → mint BudgetExhausted,
+        // even though attempts (1) << max_attempts (100).
+        match redrive_decision(transient(), 1, Some(started), started + Duration::from_secs(10)) {
+            RedriveDecision::Terminal(WorkflowStatus::Failed { terminal }) => {
+                assert_eq!(
+                    terminal.kind(),
+                    TerminalErrorKind::BudgetExhausted,
+                    "an elapsed window mints BudgetExhausted before the attempt budget is hit"
+                );
+            }
+            other => {
+                panic!("an elapsed max_duration window must mint BudgetExhausted, got {other:?}")
+            }
         }
     }
 }

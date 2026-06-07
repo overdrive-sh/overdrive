@@ -141,13 +141,20 @@ async fn crash_during_sleep(
         // (records step 0, fires the pre effect once).
         let pre_transport = Arc::clone(ctx.transport());
         let pre_payload = Bytes::from_static(ProvisionRecordWithSleep::FIRST_PAYLOAD);
-        let recorded: Result<usize, String> = ctx
+        // Model Z shape: `T = usize` (the transport byte-count), byte-identical
+        // to the migrated `ProvisionRecordWithSleep` fixture the resume replays
+        // through — so the recorded pre-sleep `RunResult` decodes on resume.
+        let recorded: usize = ctx
             .run("provision-write-pre-sleep", async move {
-                Ok(pre_transport.send_datagram(pre, pre_payload).await.map_err(|e| e.to_string()))
+                Ok(pre_transport.send_datagram(pre, pre_payload).await?)
             })
             .await
             .expect("crash-run records pre-sleep step");
-        assert!(recorded.is_ok(), "the pre-sleep effect succeeded before the crash");
+        assert_eq!(
+            recorded,
+            ProvisionRecordWithSleep::FIRST_PAYLOAD.len(),
+            "the pre-sleep effect succeeded before the crash"
+        );
 
         // Arm the sleep + park, then "crash" mid-park: spawn the sleep so it
         // appends `SleepArmed` and parks (logical time NOT advanced), then

@@ -669,7 +669,7 @@ impl Harness {
             // workflow-result-error-model step 04-02 (ADR-0065 §D4) — the DST
             // counterpart to NEW-5 (`workflow_budget_exhaustion_mints_terminal`).
             // Drives an always-transient workflow (a `ctx.run` step
-            // returns `Err(RetryableStepError)`) through the real
+            // returns `Err(StepError::Retryable)`) through the real
             // `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
             // each backoff window via a concurrent ticker so the parked
             // re-drives fire, and asserts the engine re-drove up to
@@ -678,6 +678,28 @@ impl Harness {
             // (D4). Authored GREEN directly (the retry loop landed in 04-01).
             Invariant::WorkflowBudgetExhaustionMintsTerminal => {
                 evaluators::evaluate_workflow_budget_exhaustion_mints_terminal(seed).await
+            }
+            // workflow-result-error-model ADR-0065 Amendment (2026-06-07)
+            // Gap 1 — the DST counterpart to the step-terminal short-circuit
+            // acceptance. Drives a workflow whose `ctx.run` step resolves to
+            // `Err(StepError::Terminal)` through the real `WorkflowEngine` +
+            // `SimJournalStore` and asserts the engine projects `Failed {
+            // Explicit }` with NO `RetryAttempted` (terminal is never
+            // re-driven). Authored GREEN directly (the `StepError` union's
+            // terminal arm landed in the same diff).
+            Invariant::WorkflowStepTerminalShortCircuits => {
+                evaluators::evaluate_workflow_step_terminal_short_circuits(seed).await
+            }
+            // workflow-result-error-model ADR-0065 Amendment (2026-06-07)
+            // Gap 2 — the DST counterpart to the per-step-policy acceptance.
+            // Drives a workflow whose `ctx.run` step carries a non-default
+            // `RunRetryPolicy` (max_attempts = N ≠ WORKFLOW_RETRY_BUDGET)
+            // through the real `WorkflowEngine` + `SimJournalStore` and asserts
+            // the engine re-drives exactly N times before minting
+            // `BudgetExhausted` (the per-step policy governs), plus a companion
+            // `max_duration` elapsed-window gate. Authored GREEN directly.
+            Invariant::WorkflowPerStepRetryPolicyGovernsRedrive => {
+                evaluators::evaluate_workflow_per_step_retry_policy_governs_redrive(seed).await
             }
         }
     }

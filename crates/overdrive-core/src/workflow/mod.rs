@@ -24,6 +24,9 @@
 //! `rand::*` / `tokio::time::sleep` — the type definitions below contain
 //! none; the ctx methods delegate to the injected traits.
 
+use std::future::{Future, IntoFuture};
+use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -138,17 +141,22 @@ pub trait Workflow: Send + Sync {
 ///   encode failure ([`TerminalError::output_encode`]) (projected to
 ///   [`WorkflowStatus::Failed`]). An `Err` of [`WorkflowDriveError::Transient`]
 ///   is a [`WorkflowCtx::run`] step whose closure resolved to
-///   `Err(RetryableStepError)` — the engine ABSORBS and re-drives it
+///   `Err(StepError::Retryable)` — the engine ABSORBS and re-drives it
 ///   (ADR-0065 §4), and it NEVER becomes a durable terminal.
 /// - **Edge cases:** undecodable `input_bytes` ⇒ `Terminal(malformed_input)`
 ///   and the typed body is NEVER entered; an `Output` whose serde impl fails
 ///   to encode ⇒ `Terminal(output_encode)`; a `ctx.run` step whose closure
-///   resolved to `Err(RetryableStepError)` ⇒ `Transient`.
+///   resolved to `Err(StepError::Retryable)` ⇒ `Transient`.
 /// - **Invariants:** `run_erased` is the only engine entry point; the
 ///   typed edge (decode in / encode out) is owned by the adapter, so the
 ///   engine stays type-agnostic. A transient is surfaced as
 ///   [`WorkflowDriveError::Transient`] HERE — never through the body's
-///   `Result<Output, TerminalError>` (ADR-0065 §2).
+///   `Result<Output, TerminalError>` (ADR-0065 §2/§4 Model Z). The body
+///   cannot swallow-and-continue past a transient: a `ctx.run` transient
+///   PARKS the body (its await never returns), and `run_erased` polls the
+///   body, detects the recorded transient, and DROPS the parked body
+///   (cancellation) — so a transient structurally pre-empts whatever the
+///   body would have returned.
 #[async_trait]
 pub trait ErasedWorkflow: Send + Sync {
     /// Decode `input_bytes` into the workflow's typed `Input`, drive the
@@ -182,40 +190,71 @@ impl<W: Workflow> ErasedWorkflow for ErasedWorkflowAdapter<W> {
         ctx: &WorkflowCtx,
         input_bytes: &[u8],
     ) -> Result<Vec<u8>, WorkflowDriveError> {
-        // Typed-edge IN: decode the opaque start input into W::Input. An
-        // undecodable input is a malformed-input TERMINAL — the body is
-        // NEVER entered (the bytes will not change on re-drive, so it is
-        // not retryable; ADR-0065 §2/§4).
-        let input: W::Input = ciborium::from_reader(input_bytes)
-            .map_err(|e| TerminalError::malformed_input(&e.to_string()))?;
-        // Drive the typed body. Its `Err(TerminalError)` is a `Terminal`
-        // drive outcome (via `WorkflowDriveError: From<TerminalError>`).
-        let body_result = self.0.run(ctx, input).await;
-
-        // TRANSIENT takes precedence over the body's own return value
-        // (ADR-0065 §4). A `ctx.run` step whose closure resolved to
-        // `Err(RetryableStepError)` recorded a
-        // `WorkflowCtxError::TransientStep` in the ctx; the body
-        // could not propagate it through its `Result<Output, TerminalError>`
-        // return type, so the ctx is the authoritative carrier. If a
-        // transient fired this drive, surface it as `Transient` — the engine
-        // re-drives — REGARDLESS of what the body returned afterward (a body
-        // that swallowed the step `Err` and returned `Ok`/`Err(terminal)`
-        // cannot override the engine's re-drive of an unjournaled step).
-        if let Some(transient) = ctx.take_transient_step() {
-            return Err(WorkflowDriveError::Transient(transient));
+        // One poll's outcome of driving the body (ADR-0065 §4 Model Z): either
+        // the body resolved (`Body`) or a `ctx.run` transient was recorded this
+        // poll (`Transient`). Declared at the top of the scope to satisfy
+        // `clippy::items_after_statements`.
+        enum DriveStep<O> {
+            Body(Result<O, TerminalError>),
+            Transient,
         }
 
-        // No transient — the body's typed result is the outcome.
-        let output = body_result?;
-        // Typed-edge OUT: encode W::Output to CBOR for the engine. An
-        // encode failure is a programming error in the Output type's serde
-        // impl (output_encode) — a TERMINAL, surfaced rather than recording
-        // garbage.
-        let mut output_bytes: Vec<u8> = Vec::new();
-        ciborium::into_writer(&output, &mut output_bytes)
-            .map_err(|e| TerminalError::output_encode(&e.to_string()))?;
-        Ok(output_bytes)
+        // Typed-edge IN: decode the opaque start input into W::Input. An
+        // undecodable input is a malformed-input TERMINAL — the body is NEVER
+        // entered (the bytes will not change on re-drive; ADR-0065 §2/§4).
+        let input: W::Input = ciborium::from_reader(input_bytes)
+            .map_err(|e| TerminalError::malformed_input(&e.to_string()))?;
+
+        // Drive the typed body, watching for a PARKED TRANSIENT (ADR-0065 §4
+        // Model Z). A `ctx.run` step whose closure resolved to
+        // `Err(StepError::Retryable)` records a transient in the ctx and PARKS the
+        // body (its await never returns on the transient path). We poll the body
+        // and, the moment a transient is recorded — whether the body is Pending
+        // (parked) or Ready — surface `Transient` and DROP the parked body
+        // (cancellation); the engine re-drives. A genuine park (`ctx.sleep` /
+        // `wait_for_signal` with no transient) stays Pending. The transient takes
+        // precedence over a body that completed in the same poll, preserving the
+        // prior "ctx transient overrides the body return" guarantee.
+        let mut body = self.0.run(ctx, input);
+        let step: DriveStep<W::Output> = std::future::poll_fn(|cx| {
+            use std::task::Poll;
+            match body.as_mut().poll(cx) {
+                Poll::Ready(result) => {
+                    if ctx.has_transient_step() {
+                        Poll::Ready(DriveStep::Transient)
+                    } else {
+                        Poll::Ready(DriveStep::Body(result))
+                    }
+                }
+                Poll::Pending => {
+                    if ctx.has_transient_step() {
+                        Poll::Ready(DriveStep::Transient)
+                    } else {
+                        Poll::Pending
+                    }
+                }
+            }
+        })
+        .await;
+
+        match step {
+            DriveStep::Transient => {
+                let transient = ctx
+                    .take_transient_step()
+                    .unwrap_or_else(|| unreachable!("has_transient_step() was true this poll"));
+                Err(WorkflowDriveError::Transient(transient))
+            }
+            DriveStep::Body(body_result) => {
+                // Body's `Err(TerminalError)` → `WorkflowDriveError::Terminal` (#[from]).
+                let output = body_result?;
+                // Typed-edge OUT: encode W::Output to CBOR. An encode failure is a
+                // programming error in the Output type's serde impl (output_encode).
+                let mut output_bytes: Vec<u8> = Vec::new();
+                ciborium::into_writer(&output, &mut output_bytes)
+                    .map_err(|e| TerminalError::output_encode(&e.to_string()))?;
+                Ok(output_bytes)
+            }
+        }
     }
 }
 
@@ -248,7 +287,7 @@ pub const TERMINAL_ERROR_DETAIL_MAX: usize = 1024;
 /// **RETRYABLE failures never construct this — the body cannot express
 /// "retry me" through its return type.** A transient is signalled at the
 /// STEP level: a [`WorkflowCtx::run`] step whose closure resolves
-/// to an `Err` of [`RetryableStepError`] surfaces a
+/// to an `Err` of [`StepError::Retryable`] surfaces a
 /// [`WorkflowCtxError::TransientStep`] the engine ABSORBS and re-drives
 /// (the [`WorkflowDriveError::Transient`] drive outcome; ADR-0065 §4
 /// channel — "a `ctx.run` step whose `Err` is re-driven by the engine").
@@ -262,10 +301,14 @@ pub const TERMINAL_ERROR_DETAIL_MAX: usize = 1024;
 /// record failed, non-deterministic replay); `TerminalError` is the
 /// *body's authored terminal-failure outcome*. It is `Serialize` /
 /// `Deserialize` because it rides in the durable journal `Terminal` command
-/// and the terminal observation row as an input, and it derives
-/// [`thiserror::Error`] (its `Display` renders the structured kind plus the
-/// bounded detail) so it composes into the typed-error discipline the rest
-/// of core uses (`.claude/rules/development.md` § Errors).
+/// and the terminal observation row as an input. It deliberately does NOT
+/// implement [`std::error::Error`] (its `Display` is hand-written, rendering
+/// the structured kind plus the bounded detail) — the anyhow/eyre `!Error`
+/// coherence trick (ADR-0065 Gap 1) that lets [`StepError`] carry both a
+/// blanket `From<E: std::error::Error>` and a `From<TerminalError>` without
+/// the two colliding. The hand-written `Display` keeps it composable with the
+/// typed-error discipline the rest of core uses
+/// (`.claude/rules/development.md` § Errors).
 ///
 /// # Construction contract
 ///
@@ -282,8 +325,7 @@ pub const TERMINAL_ERROR_DETAIL_MAX: usize = 1024;
 /// TerminalError>`; the [`ErasedWorkflowAdapter`] mints `MalformedInput` /
 /// `OutputEncode` at the CBOR erasure boundary, and the engine projects an
 /// `Err(TerminalError)` to [`WorkflowStatus::Failed`] (ADR-0065 §1/§3).
-#[derive(Debug, Clone, PartialEq, Eq, Error, serde::Serialize, serde::Deserialize)]
-#[error("workflow terminal failure ({kind:?}): {detail}")]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TerminalError {
     /// The bounded, structured cause — NOT free-text. The replay-determinism
     /// hazard of a free-`String` reason (ADR-0064 §3) is closed by making
@@ -379,6 +421,19 @@ impl TerminalError {
     }
 }
 
+/// Hand-written `Display` (ADR-0065 Gap 1). `TerminalError` deliberately does
+/// NOT derive [`thiserror::Error`] / implement [`std::error::Error`]: it is the
+/// anyhow/eyre `!Error` coherence trick that lets [`StepError`] carry BOTH a
+/// blanket `From<E: std::error::Error>` (→ `Retryable`) AND a
+/// `From<TerminalError>` (→ `Terminal`) without the two `From` impls colliding.
+/// The structured cause is [`TerminalErrorKind`]; this renders it plus the
+/// bounded detail (the same shape the prior `#[error(..)]` derive produced).
+impl std::fmt::Display for TerminalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "workflow terminal failure ({:?}): {}", self.kind, self.detail)
+    }
+}
+
 /// The structured cause of a [`TerminalError`] (ADR-0065 §2).
 ///
 /// `#[non_exhaustive]` — the well-known variants are stable; a new cause is
@@ -406,6 +461,133 @@ pub enum TerminalErrorKind {
     /// `Output` type's serde impl. Constructed via
     /// [`TerminalError::output_encode`].
     OutputEncode,
+}
+
+/// A per-[`WorkflowCtx::run`] retry policy — the analogue of Restate's
+/// `RunRetryPolicy` (ADR-0065 Amendment 2026-06-07, Gap 2).
+///
+/// Set on a step via the [`RunStep`] builder
+/// (`ctx.run(name, fut).retry_policy(p).await?`); the FAILING step's policy
+/// governs the engine's whole-workflow re-drive decision (the
+/// re-drive-from-journal model of ADR-0064 is KEPT — the policy controls only
+/// HOW MANY times and HOW LONG the engine re-drives, never WHETHER a transient
+/// reaches the body, which it never does). The five fields mirror Restate's
+/// `RunRetryPolicy` exactly.
+///
+/// # Not persisted — derived from the workflow CODE each drive
+///
+/// `RunRetryPolicy` is **NOT journaled** (per `.claude/rules/development.md`
+/// § "Persist inputs, not derived state"). The policy is a function of the
+/// body's builder call, so it is re-derived identically on every re-drive when
+/// the body re-executes the failing step (the replay-equivalence contract
+/// forbids a body that changes its `.retry_policy(..)` across drives). The
+/// journal persists only the attempt INPUTS — the `RetryAttempted` command
+/// count and the first attempt's `started_at_unix` — from which the engine
+/// recomputes `attempts` and the elapsed window each drive. The engine learns
+/// the failing step's policy because it RIDES the transient signal
+/// (`WorkflowCtxError::TransientStep { .. policy }`), never read from a store.
+///
+/// # `Default` reproduces today's engine behaviour bit-for-bit
+///
+/// [`Self::default`] equals the pre-Gap-2 engine constants exactly:
+/// `max_attempts == WORKFLOW_RETRY_BUDGET` (3) and an
+/// `(initial_delay, exponentiation_factor, max_delay)` of `(50ms, 2.0, 200ms)`
+/// whose computed per-attempt backoff
+/// (`initial_delay * exponentiation_factor^attempts`, clamped to `max_delay`)
+/// reproduces the engine's prior `backoff_for_attempt` schedule (`50 / 100 /
+/// 200`ms, clamped) for every attempt index. `max_duration` defaults to
+/// [`Duration::MAX`] so the elapsed-window gate NEVER fires under the default
+/// (today has no duration bound; the attempt-count gate is what fires first).
+/// The `WORKFLOW_RETRY_BUDGET` + `backoff_for_attempt` constants in
+/// `overdrive-control-plane` are RETAINED as the default-policy SSOT (this
+/// `Default` is observably equivalent to them; a control-plane unit test pins
+/// the equivalence, since `overdrive-core` cannot reference the engine crate's
+/// constant directly).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RunRetryPolicy {
+    /// The backoff window before the FIRST re-drive (attempt 0). The window
+    /// before the `attempts`-th re-drive is
+    /// `initial_delay * exponentiation_factor^attempts`, clamped to
+    /// [`Self::max_delay`].
+    pub initial_delay: Duration,
+    /// The geometric growth factor applied to [`Self::initial_delay`] per
+    /// attempt. `2.0` doubles the window each re-drive (the default).
+    pub exponentiation_factor: f64,
+    /// The ceiling the computed backoff window is clamped to — no re-drive
+    /// parks longer than this regardless of attempt index.
+    pub max_delay: Duration,
+    /// The maximum number of transient RE-DRIVES before the engine mints
+    /// [`TerminalError::budget_exhausted`]. The default is the engine's
+    /// `WORKFLOW_RETRY_BUDGET` (3).
+    pub max_attempts: u32,
+    /// The maximum wall-clock duration the retry window may span (measured
+    /// from the first attempt's journaled `started_at_unix`). Exhaustion on
+    /// EITHER `max_attempts` OR `max_duration` mints `BudgetExhausted`. The
+    /// default is [`Duration::MAX`] — effectively unbounded, so the
+    /// attempt-count gate fires first (matching pre-Gap-2 behaviour, which had
+    /// no duration bound).
+    pub max_duration: Duration,
+}
+
+impl Default for RunRetryPolicy {
+    /// The default policy reproduces the pre-Gap-2 engine behaviour exactly
+    /// (the observable-equivalence requirement, ADR-0065 Gap 2): `max_attempts`
+    /// == the engine's `WORKFLOW_RETRY_BUDGET` (3), and an `(initial_delay,
+    /// exponentiation_factor, max_delay)` whose computed backoff reproduces the
+    /// engine's prior `backoff_for_attempt` (`50 / 100 / 200`ms, clamped) for
+    /// every attempt index. `max_duration` is unbounded so the duration gate
+    /// never fires under the default.
+    fn default() -> Self {
+        Self {
+            initial_delay: Duration::from_millis(50),
+            exponentiation_factor: 2.0,
+            max_delay: Duration::from_millis(200),
+            max_attempts: 3,
+            max_duration: Duration::MAX,
+        }
+    }
+}
+
+impl RunRetryPolicy {
+    /// The backoff window to park before the re-drive AFTER `attempts`
+    /// re-drives have already been recorded — `initial_delay *
+    /// exponentiation_factor^attempts`, clamped to [`Self::max_delay`]
+    /// (ADR-0065 Gap 2). `attempts` is the journal-derived `RetryAttempted`
+    /// count (0-indexed: the window before the first re-drive is `attempts ==
+    /// 0`).
+    ///
+    /// Deterministic and total: the geometric product is computed via
+    /// [`Duration`]'s own `f64` helpers (no manual numeric casts), then clamped
+    /// to `max_delay` in the `f64` domain BEFORE rebuilding the `Duration`, so a
+    /// non-finite / overflowing product (huge `attempts` or
+    /// `exponentiation_factor`) collapses to `max_delay` via the fallible
+    /// [`Duration::try_from_secs_f64`] rather than panicking. With the
+    /// [`Self::default`] policy this reproduces the engine's prior
+    /// `backoff_for_attempt` schedule bit-for-bit (`50 / 100 / 200 / 200 / …`ms;
+    /// pinned by the engine-side `default_policy_reproduces_engine_constants`
+    /// test).
+    #[must_use]
+    pub fn backoff_window(&self, attempts: u32) -> Duration {
+        // `powi` wants an `i32` exponent; a `u32` attempt count past `i32::MAX`
+        // is absurd (and would only make the factor larger), so saturate.
+        let exponent = i32::try_from(attempts).unwrap_or(i32::MAX);
+        let factor = self.exponentiation_factor.powi(exponent);
+        // A non-finite or negative factor (degenerate policy) collapses to the
+        // ceiling — total, no panic.
+        if !factor.is_finite() || factor < 0.0 {
+            return self.max_delay;
+        }
+        let scaled_secs = self.initial_delay.as_secs_f64() * factor;
+        let max_secs = self.max_delay.as_secs_f64();
+        // Clamp in the f64 domain FIRST so `try_from_secs_f64` is always within
+        // range (a huge/non-finite product collapses to `max_secs`); `min`
+        // propagates NaN's right operand on most paths, so re-guard after.
+        let clamped = scaled_secs.min(max_secs);
+        if !clamped.is_finite() || clamped < 0.0 {
+            return self.max_delay;
+        }
+        Duration::try_from_secs_f64(clamped).unwrap_or(self.max_delay)
+    }
 }
 
 /// The externally-observable terminal status of a workflow INSTANCE — the
@@ -472,7 +654,28 @@ pub enum WorkflowStatus {
     TimedOut,
 }
 
-/// Errors surfaced from [`WorkflowCtx`] await-ops.
+/// Engine-internal workflow errors, RETAINED in two roles after the
+/// Model Z amendment (ADR-0065 §4) — but **no longer a [`WorkflowCtx`]
+/// await-op return type.**
+///
+/// The `WorkflowCtx` await-ops (`run` / `sleep` / `wait_for_signal` /
+/// `emit_action`) now return `Result<_, TerminalError>`: an infra
+/// `WorkflowCtxError` raised inside a ctx op is **projected** to
+/// [`TerminalError::explicit`] at the ctx-op boundary (via
+/// [`WorkflowCtx::infra_terminal`]) so a workflow body composes the ops with a
+/// clean `?` against its own `Result<Output, TerminalError>` return. This type
+/// therefore survives only as:
+///
+/// - (a) the **transient-slot carrier** —
+///   <code>[WorkflowDriveError::Transient]([WorkflowCtxError::TransientStep])</code>,
+///   the channel that keeps a retryable step OFF the body's return type; and
+/// - (b) the **internal infra-error type** the [`JournalCursor`] surface
+///   returns, produced *inside* a ctx op and projected to [`TerminalError`]
+///   before the body ever sees it.
+///
+/// It remains **non-substitutable** with [`TerminalError`] (corrected ADR-0065
+/// §2): the infra projection is a deliberate one-way classification, not a
+/// bidirectional `From`.
 #[derive(Debug, Error)]
 pub enum WorkflowCtxError {
     /// A `ctx.run` step's result could not be CBOR-serialised before
@@ -511,9 +714,12 @@ pub enum WorkflowCtxError {
     },
 
     /// A [`WorkflowCtx::run`] step's closure resolved to an `Err` of
-    /// [`RetryableStepError`] — a TRANSIENT step failure the engine
+    /// [`StepError::Retryable`] — a TRANSIENT step failure the engine
     /// ABSORBS and re-drives (ADR-0065 §4: "a `ctx.run` step whose `Err` is
-    /// re-driven by the engine"). This is the body's ONLY transient channel,
+    /// re-driven by the engine"). The author rarely names [`StepError`]:
+    /// any [`std::error::Error`] propagated with `?` inside the closure is
+    /// auto-absorbed into the retryable transient (anyhow-style — see
+    /// [`StepError`]). This is the body's ONLY transient channel,
     /// and it is engine-internal: the engine projects it to
     /// [`WorkflowDriveError::Transient`] at the [`ErasedWorkflow::run_erased`]
     /// boundary and re-drives the body from the journal (the step's result
@@ -524,16 +730,28 @@ pub enum WorkflowCtxError {
     /// It is a [`WorkflowCtxError`], NOT a [`TerminalError`]: the body cannot
     /// express "retry me" through its `Result<Output, TerminalError>` return
     /// type (ADR-0065 §2). Carries the step `name` and the closure's `detail`
-    /// for diagnostics; neither rides the durable terminal (a transient never
-    /// becomes a terminal — the engine's minted `BudgetExhausted` does, with
-    /// its own detail).
+    /// for diagnostics, plus the failing step's [`RunRetryPolicy`] (Gap 2) so
+    /// the engine's re-drive decision consults the PER-STEP policy rather than a
+    /// global constant. Neither `name` nor `detail` rides the durable terminal
+    /// (a transient never becomes a terminal — the engine's minted
+    /// `BudgetExhausted` does, with its own detail), and the `policy` is NOT
+    /// persisted either (it is re-derived from the body each drive; ADR-0065
+    /// Gap 2 sub-decision 3).
     #[error("workflow ctx.run step {name:?} failed transiently: {detail}")]
     TransientStep {
         /// The transient step's name (the `ctx.run` name argument).
         name: String,
         /// The closure-supplied transient detail
-        /// ([`RetryableStepError::detail`]).
+        /// ([`StepError::detail`] of the `Retryable` arm).
         detail: String,
+        /// The failing step's per-step retry policy (ADR-0065 Gap 2). Rides
+        /// the transient signal so the engine's re-drive decision
+        /// (`redrive_decision`) consults THIS step's `max_attempts` /
+        /// `max_duration` / backoff schedule rather than the global
+        /// `WORKFLOW_RETRY_BUDGET` constant. The default
+        /// ([`RunRetryPolicy::default`]) reproduces the pre-Gap-2 behaviour
+        /// when the step set no explicit policy.
+        policy: RunRetryPolicy,
     },
 
     /// The engine's journal-cursor handle failed to durably record a
@@ -568,44 +786,79 @@ pub enum WorkflowCtxError {
     },
 }
 
-/// The closure-side TRANSIENT signal of a [`WorkflowCtx::run`]
-/// step (ADR-0065 §4) — the body's ONLY way to say "this attempt failed
-/// transiently; re-drive me."
+/// The error a `ctx.run` step closure may resolve to — a `retryable | terminal`
+/// union (the analogue of Restate's `HandlerError`; ADR-0065 Gap 1). Named
+/// `StepError` (not `HandlerError`) because in our system it is specifically the
+/// `ctx.run` step-closure error, not a whole-handler error.
 ///
-/// A `ctx.run` closure resolves to `Result<T, RetryableStepError>`:
-/// `Ok(T)` is the durable step result (journaled, replayed exactly-once on
-/// resume), `Err(RetryableStepError)` is a transient the engine ABSORBS.
-/// The ctx turns the closure `Err` into a [`WorkflowCtxError::TransientStep`]
-/// the engine projects to [`WorkflowDriveError::Transient`] and re-drives —
-/// it NEVER becomes a [`TerminalError`] (the body cannot author a retry
-/// through its `Result<Output, TerminalError>` return type; ADR-0065 §2).
-///
-/// This is the typed analogue of the ADR's "caller-defined error folded into
-/// the step's own `T`" (the `Result<usize, String>` pattern): a dedicated
-/// transient type rather than a bare `String`, so a step's transient is
-/// unambiguous and length-capped. `detail` is bounded at construction
-/// ([`TERMINAL_ERROR_DETAIL_MAX`]) for the same replay-determinism reason
-/// `TerminalError`'s detail is (it rides through the diagnostic
-/// `WorkflowCtxError::TransientStep`).
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("retryable step failure: {detail}")]
-pub struct RetryableStepError {
-    detail: String,
+/// A step author rarely names it: any `std::error::Error` propagated with `?`
+/// inside the closure folds into [`StepError::Retryable`] via the blanket
+/// `From` below, so the natural shape is `Ok(op().await?)`. To fail a step
+/// PERMANENTLY, return `Err(TerminalError::explicit(..).into())` (or
+/// `StepError::terminal(..)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepError {
+    /// Transient — the engine re-drives the workflow. NEVER reaches the body's
+    /// `Result<Output, TerminalError>` return type.
+    Retryable {
+        /// Operator-facing transient detail (carried into the engine-minted
+        /// `BudgetExhausted` terminal on exhaustion).
+        detail: String,
+    },
+    /// Permanent — surfaces as `Err(TerminalError)` from `ctx.run(...).await`
+    /// with NO retry and NO re-drive.
+    Terminal(TerminalError),
 }
 
-impl RetryableStepError {
-    /// Construct a transient step failure. `detail` is length-capped at
-    /// construction (deterministic, UTF-8-safe — same discipline as
-    /// [`TerminalError::explicit`]).
+impl StepError {
+    /// Construct a retryable transient (replaces `RetryableStepError::new`).
     #[must_use]
-    pub fn new(detail: &str) -> Self {
-        Self { detail: TerminalError::cap_detail(detail) }
+    pub fn retryable(detail: &str) -> Self {
+        Self::Retryable { detail: detail.to_string() }
     }
 
-    /// The (length-capped) transient detail.
+    /// Construct a terminal step failure (or use `TerminalError`'s `.into()`).
+    #[must_use]
+    pub const fn terminal(terminal: TerminalError) -> Self {
+        Self::Terminal(terminal)
+    }
+
+    /// The human detail of either arm.
     #[must_use]
     pub fn detail(&self) -> &str {
-        &self.detail
+        match self {
+            Self::Retryable { detail } => detail,
+            Self::Terminal(terminal) => terminal.detail(),
+        }
+    }
+}
+
+impl std::fmt::Display for StepError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Retryable { detail } => write!(f, "retryable step failure: {detail}"),
+            Self::Terminal(terminal) => write!(f, "terminal step failure: {terminal}"),
+        }
+    }
+}
+
+/// Anyhow-style blanket: any [`std::error::Error`] propagated with `?` inside a
+/// `ctx.run` closure folds into a RETRYABLE transient. Coherent ONLY because
+/// both `StepError` and `TerminalError` are `!std::error::Error` (the
+/// anyhow/eyre trick) — so this blanket neither collides with the reflexive
+/// `From<StepError>` nor with `From<TerminalError>` below.
+impl<E: std::error::Error> From<E> for StepError {
+    fn from(err: E) -> Self {
+        Self::Retryable { detail: err.to_string() }
+    }
+}
+
+/// A `TerminalError` returned / `?`-propagated inside a `ctx.run` closure makes
+/// the step TERMINAL (no retry). Coherent with the blanket above because
+/// `TerminalError` is `!std::error::Error`.
+impl From<TerminalError> for StepError {
+    fn from(terminal: TerminalError) -> Self {
+        Self::Terminal(terminal)
     }
 }
 
@@ -621,7 +874,7 @@ impl RetryableStepError {
 ///   [`WorkflowStatus::Failed`] (a body-authored terminal is NEVER
 ///   re-driven).
 /// - an `Err` of [`Self::Transient`] — a [`WorkflowCtx::run`] step whose
-///   closure resolved to `Err(RetryableStepError)`; the engine ABSORBS it
+///   closure resolved to `Err(StepError::Retryable)`; the engine ABSORBS it
 ///   and re-drives the body from
 ///   the journal (budget-gated), minting `BudgetExhausted` on exhaustion.
 ///
@@ -631,16 +884,29 @@ impl RetryableStepError {
 /// author's typed `Result<Output, TerminalError>`.
 #[derive(Debug, Error)]
 pub enum WorkflowDriveError {
-    /// A real terminal — the body's authored `Err(TerminalError)` or an
-    /// adapter-minted decode/encode terminal. Projected to
-    /// [`WorkflowStatus::Failed`]; never re-driven.
-    #[error(transparent)]
-    Terminal(#[from] TerminalError),
-
-    /// A transient step failure the engine absorbs and re-drives (ADR-0065
-    /// §4). Carries the originating [`WorkflowCtxError::TransientStep`].
+    /// A real terminal — projected to `WorkflowStatus::Failed`; never re-driven.
+    ///
+    /// Renders via [`TerminalError`]'s hand-written [`Display`](std::fmt::Display)
+    /// (`#[error("{0}")]`, not `transparent`): `transparent` would require
+    /// `TerminalError: std::error::Error`, which it deliberately is NOT under
+    /// ADR-0065 Gap 1 (the `!Error` coherence trick for [`StepError`]). The
+    /// `#[from]` is likewise replaced by the manual `From` impl below — a
+    /// derived `#[from]` needs the source field to be an `Error`.
+    #[error("{0}")]
+    Terminal(TerminalError),
+    /// A transient step the engine absorbs and re-drives (ADR-0065 §4).
     #[error(transparent)]
     Transient(#[from] WorkflowCtxError),
+}
+
+/// Manual `From<TerminalError>` (ADR-0065 Gap 1) — replaces the derived
+/// `#[from]` on the `Terminal` arm, which `thiserror` cannot generate now that
+/// `TerminalError` is `!std::error::Error`. Keeps the `?`-into-`WorkflowDriveError`
+/// ergonomic in [`ErasedWorkflowAdapter::run_erased`].
+impl From<TerminalError> for WorkflowDriveError {
+    fn from(terminal: TerminalError) -> Self {
+        Self::Terminal(terminal)
+    }
 }
 
 /// The engine-owned **journal-cursor handle** the [`WorkflowCtx`] consults
@@ -1128,7 +1394,7 @@ pub struct WorkflowCtx {
     journal: Arc<dyn JournalCursor>,
     /// The TRANSIENT-step carrier (ADR-0065 §4). A
     /// [`Self::run`] step whose closure resolved to an `Err` of
-    /// [`RetryableStepError`] records the resulting
+    /// [`StepError::Retryable`] records the resulting
     /// [`WorkflowCtxError::TransientStep`] here; the
     /// [`ErasedWorkflowAdapter`] reads it back via
     /// [`Self::take_transient_step`] AFTER the body returns and surfaces it
@@ -1184,29 +1450,121 @@ impl WorkflowCtx {
         self.transient_step.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
     }
 
-    /// Run one durable step `f`, named `name`, and return its result —
-    /// the general durable-step await-surface (the Restate `ctx.run`
-    /// model). This is the ONE journaled-step primitive; a workflow body
-    /// performs every effect (transport sends, future external calls)
-    /// INSIDE a `ctx.run` closure so the result is journaled and replayed.
+    /// Project an engine-internal ctx infra failure to a terminal (ADR-0065 §4
+    /// "Model Z" amendment). A `WorkflowCtxError` from the journal cursor
+    /// (non-deterministic replay, journal-record failure, signal-surface read,
+    /// action-channel send) is a PERMANENT failure — re-driving against the same
+    /// journal will not fix it — so it ends the workflow as `TerminalError::
+    /// explicit`, the same observable terminal the body's prior hand-folding
+    /// produced and consistent with the panic → `Failed { Explicit }` path.
+    /// `WorkflowCtxError::TransientStep` is routed via the transient slot + body
+    /// park, never through this projection.
     ///
-    /// The closure resolves to <code>Result&lt;T, [RetryableStepError]&gt;</code>
-    /// — the journaled step IS the retry unit (the Restate/Temporal shape):
+    /// Takes `err` by value so it is usable point-free as
+    /// `.map_err(Self::infra_terminal)` at every ctx-op boundary (the closure
+    /// `map_err` expects receives `E` by value); the body only needs its
+    /// `Display`, hence the `#[expect]`.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "by-value signature is required for point-free `.map_err(Self::infra_terminal)`"
+    )]
+    fn infra_terminal(err: WorkflowCtxError) -> TerminalError {
+        TerminalError::explicit(&err.to_string())
+    }
+
+    /// True if a transient step was recorded this drive (peek without clearing).
+    /// `ErasedWorkflowAdapter::run_erased` consults this after each body poll to
+    /// detect a parked transient and cancel the body (ADR-0065 §4 Model Z).
+    fn has_transient_step(&self) -> bool {
+        self.transient_step.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
+    }
+
+    /// Begin one durable step `f`, named `name` — the general durable-step
+    /// await-surface (the Restate `ctx.run` model). Returns a [`RunStep`]
+    /// BUILDER (ADR-0065 Gap 2, the analogue of Restate's `RunFuture`) that
+    /// implements [`IntoFuture`], so `ctx.run(name, fut).await?` works
+    /// unchanged AND `ctx.run(name, fut).retry_policy(p).await?` sets a
+    /// per-step [`RunRetryPolicy`].
+    ///
+    /// This is the ONE journaled-step primitive; a workflow body performs every
+    /// effect (transport sends, future external calls) INSIDE a `ctx.run`
+    /// closure so the result is journaled and replayed. The builder defaults to
+    /// [`RunRetryPolicy::default`] (today's `WORKFLOW_RETRY_BUDGET` + backoff
+    /// schedule) when [`RunStep::retry_policy`] is not called, so existing call
+    /// sites behave identically.
+    ///
+    /// ```ignore
+    /// // default policy (today's behaviour) — unchanged call site:
+    /// let id = ctx.run("charge", fut).await?;
+    /// // explicit per-step policy:
+    /// let id = ctx.run("charge", fut)
+    ///     .retry_policy(RunRetryPolicy { max_attempts: 10, ..Default::default() })
+    ///     .await?;
+    /// ```
+    ///
+    /// `name` stays POSITIONAL — the cosmetic `.name()` builder is out of scope
+    /// (ADR-0065 Gap 2). The full step semantics (replay / journal-after-effect
+    /// / the `retryable | terminal` union's two arms) are documented on the
+    /// private [`Self::run_step`] the builder drives.
+    pub fn run<'a, T, F>(&'a self, name: &str, f: F) -> RunStep<'a, T, F>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + Send,
+        F: Future<Output = Result<T, StepError>> + Send,
+    {
+        RunStep {
+            ctx: self,
+            name: name.to_string(),
+            f,
+            policy: RunRetryPolicy::default(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Run one durable step `f`, named `name`, under `policy`, and return its
+    /// result — the body the [`RunStep`] builder drives via [`IntoFuture`]
+    /// (ADR-0065 Gap 1 + Gap 2). This is the ONE journaled-step primitive; a
+    /// workflow body performs every effect (transport sends, future external
+    /// calls) INSIDE a `ctx.run` closure so the result is journaled and
+    /// replayed.
+    ///
+    /// The closure resolves to <code>Result&lt;T, [StepError]&gt;</code> — a
+    /// `retryable | terminal` union (ADR-0065 Gap 1); the journaled step IS the
+    /// retry unit (the Restate/Temporal shape). The author rarely names
+    /// [`StepError`]: the natural shape is the anyhow `?` idiom — wrap the
+    /// effect, propagate any inner error with `?` (folds to
+    /// [`StepError::Retryable`]), return the success value; an explicit
+    /// permanent failure is `Err(TerminalError::explicit(..).into())` (folds to
+    /// [`StepError::Terminal`]):
+    ///
+    /// ```ignore
+    /// let bytes = ctx.run("provision-write", async move {
+    ///     Ok(transport.send_datagram(target, payload).await?)
+    /// }).await?;
+    /// ```
+    ///
+    /// The inner `?` works because [`StepError`] has a blanket
+    /// `From<E: std::error::Error>`, so ANY [`std::error::Error`] is absorbed
+    /// into a [`StepError::Retryable`] transient. The closure outcomes:
     /// - **`Ok(value)`** — the step succeeded. Its `value` is CBOR-journaled
     ///   (append + fsync per ADR-0063 §4) and returned; a resumed run replays
     ///   it WITHOUT re-polling `f` (exactly-once on the replay path).
-    /// - **`Err(RetryableStepError)`** — the step failed TRANSIENTLY, the
+    /// - **`Err(StepError::Retryable { .. })`** — the step failed TRANSIENTLY
+    ///   (any [`std::error::Error`] propagated with `?` auto-folds here), the
     ///   ADR-0065 §4 retry channel. This is the body's ONLY way to request a
     ///   re-drive; a transient NEVER reaches the body's `Result<Output,
     ///   TerminalError>` return type (ADR-0065 §2). The result is NOT
     ///   journaled (the step did not durably complete, so on re-drive it
     ///   re-fires), the ctx RECORDS a [`WorkflowCtxError::TransientStep`]
     ///   (read back by the [`ErasedWorkflowAdapter`] and surfaced to the
-    ///   engine as [`WorkflowDriveError::Transient`]), and the method returns
-    ///   that same `Err(WorkflowCtxError::TransientStep)`. The engine
-    ///   re-drives the body from the journal (completed steps replay
+    ///   engine as [`WorkflowDriveError::Transient`]), and the body PARKS. The
+    ///   engine re-drives the body from the journal (completed steps replay
     ///   byte-equal; this step re-fires) up to [`WORKFLOW_RETRY_BUDGET`] —
     ///   then mints `BudgetExhausted`.
+    /// - **`Err(StepError::Terminal(t))`** — the step failed PERMANENTLY
+    ///   (ADR-0065 Gap 1; a `?`'d [`TerminalError`] folds here). `ctx.run(..).await`
+    ///   returns `Err(t)` directly — NO transient-slot record, NO body-park, NO
+    ///   re-drive — so the body's `?` observes the terminal and returns
+    ///   `Err(TerminalError)`, projected to `WorkflowStatus::Failed`.
     ///
     /// [`WORKFLOW_RETRY_BUDGET`]: <https://docs.rs/overdrive-control-plane>
     ///
@@ -1222,7 +1580,8 @@ impl WorkflowCtx {
     /// - **Live:** otherwise `f` is awaited; an `Ok` result is CBOR-encoded
     ///   and durably recorded (append + fsync per ADR-0063 §4) via the
     ///   cursor BEFORE returning, and the cursor advances. An
-    ///   `Err(RetryableStepError)` short-circuits BEFORE any journaling.
+    ///   `Err(StepError::Retryable { .. })` parks BEFORE any journaling; an
+    ///   `Err(StepError::Terminal(t))` returns `Err(t)` BEFORE any journaling.
     ///
     /// **Honest semantics:** the effect inside `f` is *at-least-once* (a
     /// crash after `f.await` but before the record is durable re-fires the
@@ -1232,17 +1591,19 @@ impl WorkflowCtx {
     /// makes the replay path exactly-once — it is NOT an unconditional
     /// exactly-once guarantee for the effect itself.
     ///
-    /// # Why the closure error is a dedicated type, not `Result<T, E>` folded
+    /// # Why the closure error is the `StepError` union
     ///
-    /// The ADR sanctions "a caller-defined error folded into the step's own
-    /// `T`" (the `Result<usize, String>` pattern); [`RetryableStepError`] is
-    /// the typed form of that — a step transient is unambiguous (an
-    /// `Err(RetryableStepError)`), not conflated with a domain `Result` the
-    /// body wants to inspect. A body that wants the step's success value AND
-    /// to treat a domain error as terminal returns a `Result<T, DomainErr>`
-    /// as the step's own `T` (wrapped `Ok(Ok(..))` / `Ok(Err(..))`); a body
-    /// that wants the engine to re-drive on failure resolves the closure to
-    /// `Err(RetryableStepError)`.
+    /// [`StepError`] is a `retryable | terminal` union (ADR-0065 Gap 1; the
+    /// analogue of Restate's `HandlerError`) so a step's outcome is
+    /// unambiguous: a transient ([`StepError::Retryable`], engine-absorbed +
+    /// re-driven) and a permanent failure ([`StepError::Terminal`], surfaced as
+    /// `Err(TerminalError)` from `ctx.run`, never re-driven) are disjoint arms,
+    /// not conflated with a domain `Result` the body wants to inspect. A body
+    /// that wants the step's success value AND to inspect a domain error itself
+    /// returns a `Result<T, DomainErr>` as the step's own `T` (wrapped
+    /// `Ok(Ok(..))` / `Ok(Err(..))`); a body that wants the engine to re-drive
+    /// resolves to `StepError::Retryable`; a body that wants to fail the whole
+    /// workflow resolves to `StepError::Terminal`.
     ///
     /// `name` is recorded for diagnostics and a replay-determinism check
     /// (a recorded step whose name diverges from the replaying body's
@@ -1251,59 +1612,86 @@ impl WorkflowCtx {
     ///
     /// # Errors
     ///
-    /// - [`WorkflowCtxError::TransientStep`] — the closure resolved to
-    ///   `Err(RetryableStepError)` (the engine re-drives).
-    /// - [`WorkflowCtxError::Serialize`] — the live result could not be
-    ///   CBOR-encoded.
-    /// - [`WorkflowCtxError::Deserialize`] — a recorded result could not
-    ///   be CBOR-decoded into `T` on replay.
-    /// - [`WorkflowCtxError::NonDeterministic`] — a recorded step's name
-    ///   diverges from `name` at this cursor position.
-    /// - [`WorkflowCtxError::JournalRecord`] — the live-path durable
-    ///   record failed.
-    pub async fn run<T, F>(&self, name: &str, f: F) -> Result<T, WorkflowCtxError>
+    /// Returns a [`TerminalError`] when (a) the step's closure resolves to
+    /// `Err(StepError::Terminal(t))` — the step's own permanent failure,
+    /// returned verbatim (ADR-0065 Gap 1); or (b) an engine-internal infra
+    /// failure occurs inside the journal cursor (non-deterministic replay,
+    /// journal-record failure, deserialise failure) — projected to kind
+    /// [`Explicit`](TerminalErrorKind::Explicit) at the ctx-op boundary via
+    /// [`Self::infra_terminal`] (ADR-0065 §4 Model Z); a CBOR
+    /// serialise/deserialise failure on the step's own value is likewise
+    /// projected. A `StepError::Retryable` TRANSIENT step is NOT an error the
+    /// body observes — it PARKS the body and is surfaced by the engine as
+    /// [`WorkflowDriveError::Transient`] (structurally invisible to the `?`).
+    ///
+    /// `policy` is the failing step's [`RunRetryPolicy`] (ADR-0065 Gap 2). It is
+    /// NOT consulted on the success / replay / terminal paths; on the
+    /// `Retryable` arm it RIDES the recorded `WorkflowCtxError::TransientStep`
+    /// signal so the engine's re-drive decision consults THIS step's policy. It
+    /// is not journaled (re-derived from the body each drive; Gap 2
+    /// sub-decision 3).
+    async fn run_step<T, F>(
+        &self,
+        name: &str,
+        f: F,
+        policy: RunRetryPolicy,
+    ) -> Result<T, TerminalError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Send,
-        F: std::future::Future<Output = Result<T, RetryableStepError>> + Send,
+        F: Future<Output = Result<T, StepError>> + Send,
     {
-        // Replay path — decode the recorded SUCCESS, never poll `f`. Only an
-        // `Ok` value is ever journaled (a transient is not recorded), so a
-        // replay hit always decodes the cleared-step success (the effect
-        // inside `f` never re-fires on the replay path).
-        if let Some(recorded_bytes) = self.journal.replay_run(name).await? {
-            let value: T = ciborium::from_reader(recorded_bytes.as_slice())
-                .map_err(|e| WorkflowCtxError::Deserialize { message: e.to_string() })?;
+        // Replay path — decode the recorded SUCCESS, never poll `f`. A foreign
+        // command kind at the cursor is a non-deterministic-replay INFRA failure
+        // projected to a terminal (ADR-0065 §4 Model Z).
+        if let Some(recorded_bytes) =
+            self.journal.replay_run(name).await.map_err(Self::infra_terminal)?
+        {
+            let value: T = ciborium::from_reader(recorded_bytes.as_slice()).map_err(|e| {
+                TerminalError::explicit(&format!("workflow ctx.run deserialize failed: {e}"))
+            })?;
             return Ok(value);
         }
 
-        // Live path — poll `f`. A transient short-circuits BEFORE any
-        // journaling (the step did not complete; it must re-fire on re-drive).
+        // Live path — poll `f`.
         match f.await {
             Ok(value) => {
-                // Success — durably record before returning (journal-after-
-                // effect, ADR-0063 §4). The effect is at-least-once; the record
-                // makes the replay path exactly-once.
+                // Success — durably record before returning (journal-after-effect).
                 let mut bytes: Vec<u8> = Vec::new();
-                ciborium::into_writer(&value, &mut bytes)
-                    .map_err(|e| WorkflowCtxError::Serialize { message: e.to_string() })?;
-                self.journal.record_run(name, &bytes).await?;
+                ciborium::into_writer(&value, &mut bytes).map_err(|e| {
+                    TerminalError::explicit(&format!("workflow ctx.run serialize failed: {e}"))
+                })?;
+                self.journal.record_run(name, &bytes).await.map_err(Self::infra_terminal)?;
                 Ok(value)
             }
-            Err(step_err) => {
-                // Transient — record the signal in the ctx (the engine reads
-                // it via `take_transient_step` and re-drives) AND return it.
-                // NOT journaled: the step re-fires on the next drive. The
-                // signal is built twice (two cheap `String` clones) rather
-                // than deriving `Clone` on the whole `WorkflowCtxError` enum
-                // (whose other variants need no clone).
+            Err(StepError::Terminal(terminal)) => {
+                // Permanent step failure (ADR-0065 Gap 1) — propagate the terminal
+                // directly. No transient-slot record, no body-park, no re-drive:
+                // the body's `?` observes it and the body returns
+                // `Err(TerminalError)`, projected to `WorkflowStatus::Failed`.
+                Err(terminal)
+            }
+            Err(StepError::Retryable { detail }) => {
+                // Transient — record the signal in the ctx and PARK the body (the
+                // Model Z mechanism, unchanged). The engine (via
+                // `ErasedWorkflowAdapter::run_erased`) observes the recorded
+                // transient, cancels this parked body by dropping it, and
+                // re-drives from the journal (ADR-0065 §4). The body's `?` NEVER
+                // observes the transient — it is structurally invisible.
                 self.record_transient_step(WorkflowCtxError::TransientStep {
                     name: name.to_string(),
-                    detail: step_err.detail().to_string(),
+                    detail,
+                    // The failing step's policy rides the transient signal so
+                    // the engine's re-drive decision consults THIS step's
+                    // `max_attempts` / `max_duration` / backoff (ADR-0065 Gap 2),
+                    // not the global `WORKFLOW_RETRY_BUDGET` constant.
+                    policy,
                 });
-                Err(WorkflowCtxError::TransientStep {
-                    name: name.to_string(),
-                    detail: step_err.detail().to_string(),
-                })
+                // Park forever: never resolves, registers no waker. The engine
+                // drops this future once the transient slot is observed.
+                std::future::pending::<()>().await;
+                unreachable!(
+                    "ctx.run parked on a retryable step; the engine cancels the parked body and re-drives"
+                )
             }
         }
     }
@@ -1345,26 +1733,24 @@ impl WorkflowCtx {
     ///
     /// # Errors
     ///
-    /// Returns [`WorkflowCtxError::JournalRecord`] when the live-path
-    /// durable record of the armed deadline fails.
-    pub async fn sleep(&self, duration: Duration) -> Result<(), WorkflowCtxError> {
-        // Replay path — recompute remaining wait from the recorded
-        // absolute deadline (an input), never a persisted remaining cache. A
-        // foreign command kind at the cursor fails closed via `?`
-        // (NonDeterministic, Layer-1 D4).
-        if let Some(deadline_unix) = self.journal.replay_sleep().await? {
+    /// Returns a [`TerminalError`] (kind [`Explicit`](TerminalErrorKind::Explicit))
+    /// when an engine-internal infra failure occurs inside the journal cursor
+    /// (a non-deterministic replay at this cursor, or the live-path durable
+    /// record of the armed deadline failing) — projected at the ctx-op boundary
+    /// via [`Self::infra_terminal`] (ADR-0065 §4 Model Z). It no longer returns
+    /// a `WorkflowCtxError`.
+    pub async fn sleep(&self, duration: Duration) -> Result<(), TerminalError> {
+        if let Some(deadline_unix) =
+            self.journal.replay_sleep().await.map_err(Self::infra_terminal)?
+        {
             let now = self.clock.unix_now();
             if let Some(remaining) = deadline_unix.checked_sub(now) {
                 self.clock.sleep(remaining).await;
             }
-            // deadline already passed → return immediately (no re-park).
             return Ok(());
         }
-
-        // Live path — compute the absolute deadline, durably record it
-        // (fsync-then-park, ADR-0063 §4), then park on the Clock deadline.
         let deadline_unix = self.clock.unix_now() + duration;
-        self.journal.record_sleep_armed(deadline_unix).await?;
+        self.journal.record_sleep_armed(deadline_unix).await.map_err(Self::infra_terminal)?;
         self.clock.sleep(duration).await;
         Ok(())
     }
@@ -1402,45 +1788,31 @@ impl WorkflowCtx {
     ///
     /// # Errors
     ///
-    /// - [`WorkflowCtxError::Signal`] — the signal surface read failed.
-    /// - [`WorkflowCtxError::JournalRecord`] — a durable record failed.
+    /// Returns a [`TerminalError`] (kind [`Explicit`](TerminalErrorKind::Explicit))
+    /// when an engine-internal infra failure occurs inside the journal cursor
+    /// (the signal-surface read failing, a non-deterministic replay, or a
+    /// durable record failing) — projected at the ctx-op boundary via
+    /// [`Self::infra_terminal`] (ADR-0065 §4 Model Z). It no longer returns a
+    /// `WorkflowCtxError`.
     pub async fn wait_for_signal(
         &self,
         signal_key: SignalKey,
-    ) -> Result<SignalValue, WorkflowCtxError> {
-        // Replay path — return the recorded SignalSeen value, never
-        // re-read the signal surface. A SignalAwaited with no following
-        // SignalSeen is NOT a replay hit (replay_signal returns None), so
-        // the live block below re-enters on the SAME signal.
-        // A foreign command kind at the cursor fails closed via `?`
-        // (NonDeterministic, Layer-1 D4); a SignalAwaited with no matching
-        // SignalSeen is `Ok(None)` (re-block on the live path below).
-        if let Some(value) = self.journal.replay_signal(&signal_key).await? {
+    ) -> Result<SignalValue, TerminalError> {
+        if let Some(value) =
+            self.journal.replay_signal(&signal_key).await.map_err(Self::infra_terminal)?
+        {
             return Ok(value);
         }
-        // Live path, first half — record SignalAwaited durably (fsync per
-        // ADR-0063 §4) and advance the cursor. On a crash-while-blocked
-        // resume the SignalAwaited is already at the cursor: this advances
-        // past it WITHOUT appending a duplicate (see
-        // `record_signal_awaited`).
-        self.journal.record_signal_awaited(&signal_key).await?;
-
-        // Live path, block — poll the signal surface; while ABSENT, park on
-        // the injected Clock and re-poll. This is a genuine block on an
-        // absent signal (the run future stays pending), not an immediate
-        // resolve. Under SimClock the harness advances logical time and
-        // writes the signal row; under SystemClock the park is a real
-        // timer. No busy-spin: each absent poll parks for SIGNAL_POLL.
+        self.journal.record_signal_awaited(&signal_key).await.map_err(Self::infra_terminal)?;
         let value = loop {
-            if let Some(value) = self.journal.poll_signal(&signal_key).await? {
+            if let Some(value) =
+                self.journal.poll_signal(&signal_key).await.map_err(Self::infra_terminal)?
+            {
                 break value;
             }
             self.clock.sleep(SIGNAL_POLL).await;
         };
-
-        // Live path, second half — record SignalSeen { value } durably at
-        // the NEXT cursor position and return the value.
-        self.journal.record_signal_seen(&signal_key, &value).await?;
+        self.journal.record_signal_seen(&signal_key, &value).await.map_err(Self::infra_terminal)?;
         Ok(value)
     }
 
@@ -1474,21 +1846,17 @@ impl WorkflowCtx {
     ///
     /// # Errors
     ///
-    /// - [`WorkflowCtxError::ActionChannel`] — the Action channel send
-    ///   failed (channel closed / full).
-    /// - [`WorkflowCtxError::JournalRecord`] — the durable record failed.
-    pub async fn emit_action(&self, action: Action) -> Result<(), WorkflowCtxError> {
-        // Replay path — the Action was already emitted on a prior run; do
-        // NOT re-send it (exactly-once on the replay path; the live path
-        // below is at-least-once — see the rustdoc "Honest semantics").
-        // A foreign command kind at the cursor fails closed via `?`
-        // (NonDeterministic, Layer-1 D4).
-        if self.journal.replay_emit().await? {
+    /// Returns a [`TerminalError`] (kind [`Explicit`](TerminalErrorKind::Explicit))
+    /// when an engine-internal infra failure occurs inside the journal cursor
+    /// (the Action channel send failing — channel closed / full — a
+    /// non-deterministic replay, or the durable record failing) — projected at
+    /// the ctx-op boundary via [`Self::infra_terminal`] (ADR-0065 §4 Model Z).
+    /// It no longer returns a `WorkflowCtxError`.
+    pub async fn emit_action(&self, action: Action) -> Result<(), TerminalError> {
+        if self.journal.replay_emit().await.map_err(Self::infra_terminal)? {
             return Ok(());
         }
-        // Live path — the engine sends on the Action channel then records
-        // ActionEmitted durably before returning.
-        self.journal.emit_action(action).await
+        self.journal.emit_action(action).await.map_err(Self::infra_terminal)
     }
 
     /// The injected clock. Workflow bodies read time only through this
@@ -1513,6 +1881,66 @@ impl WorkflowCtx {
     #[must_use]
     pub fn entropy(&self) -> &Arc<dyn Entropy> {
         &self.entropy
+    }
+}
+
+/// The builder [`WorkflowCtx::run`] returns — the analogue of Restate's
+/// `RunFuture` (ADR-0065 Amendment 2026-06-07, Gap 2).
+///
+/// Holds the durable step (`name` + closure `f`) plus its [`RunRetryPolicy`].
+/// It implements [`IntoFuture`] resolving to `Result<T, TerminalError>`, so the
+/// default-policy call site `ctx.run(name, fut).await?` is unchanged, while
+/// `ctx.run(name, fut).retry_policy(p).await?` overrides the per-step policy
+/// before awaiting. `name` is positional (the cosmetic `.name()` builder is out
+/// of scope, Gap 2).
+///
+/// The builder is the ONLY public surface that constructs a step; the actual
+/// step body lives in the private [`WorkflowCtx::run_step`] the [`IntoFuture`]
+/// impl drives. The lifetime `'a` borrows the [`WorkflowCtx`] for the duration
+/// of the step future (the body always awaits the step inline, so the borrow
+/// never outlives the body).
+pub struct RunStep<'a, T, F> {
+    /// The ctx the step runs against (its journal cursor + injected ports).
+    ctx: &'a WorkflowCtx,
+    /// The `ctx.run` step name — diagnostics + the replay-determinism check.
+    name: String,
+    /// The step's closure future, resolving to `Result<T, StepError>`.
+    f: F,
+    /// The per-step retry policy (defaults to [`RunRetryPolicy::default`] —
+    /// today's behaviour — unless [`Self::retry_policy`] overrides it).
+    policy: RunRetryPolicy,
+    /// `T` appears only in `F`'s `Output`; bind it so the struct is generic
+    /// over the step's result type without an unused-parameter error.
+    _marker: PhantomData<T>,
+}
+
+impl<T, F> RunStep<'_, T, F> {
+    /// Override the per-step [`RunRetryPolicy`] (ADR-0065 Gap 2). Without this
+    /// call the step uses [`RunRetryPolicy::default`] (today's
+    /// `WORKFLOW_RETRY_BUDGET` + backoff schedule). Consumes and returns `self`
+    /// so it chains before `.await`:
+    /// `ctx.run(name, fut).retry_policy(p).await?`.
+    #[must_use]
+    pub const fn retry_policy(mut self, policy: RunRetryPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+}
+
+impl<'a, T, F> IntoFuture for RunStep<'a, T, F>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'a,
+    F: Future<Output = Result<T, StepError>> + Send + 'a,
+{
+    type Output = Result<T, TerminalError>;
+    // TAIT (`type_alias_impl_trait`) is unstable on stable Rust, so the
+    // associated future is a boxed trait object rather than a named opaque
+    // type. The `'a` bound keeps the borrowed `ctx` alive for the future's
+    // lifetime.
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<T, TerminalError>> + Send + 'a>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move { self.ctx.run_step(&self.name, self.f, self.policy).await })
     }
 }
 

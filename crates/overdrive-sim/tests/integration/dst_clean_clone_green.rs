@@ -180,6 +180,21 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `Invariant::ALL` by step 04-02; blessed here so the catalogue length +
     // named-set checks track `Invariant::ALL` exactly.
     "workflow-budget-exhaustion-mints-terminal",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 — the
+    // DST counterpart to the step-terminal short-circuit acceptance. Asserts a
+    // `ctx.run` step that resolves to `Err(StepError::Terminal)` projects
+    // `Failed { Explicit }` with ZERO `RetryAttempted` (never re-driven) — the
+    // structural contrast with the budget invariant above. Added to
+    // `Invariant::ALL` with the `StepError` union; blessed here so the
+    // catalogue length + named-set checks track `Invariant::ALL` exactly.
+    "workflow-step-terminal-short-circuits",
+    // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 — the
+    // DST counterpart to the per-step-policy acceptance. Asserts the FAILING
+    // step's `RunRetryPolicy` (not the global `WORKFLOW_RETRY_BUDGET`) governs
+    // the re-drive count, plus the `max_duration` elapsed-window gate. Added to
+    // `Invariant::ALL` with the per-step policy + `RunStep` builder; blessed
+    // here so the catalogue length + named-set checks track `Invariant::ALL`.
+    "workflow-per-step-retry-policy-governs-redrive",
 ];
 
 // -----------------------------------------------------------------------------

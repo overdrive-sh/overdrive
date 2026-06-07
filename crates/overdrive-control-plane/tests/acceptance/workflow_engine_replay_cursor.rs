@@ -35,7 +35,7 @@ use overdrive_core::id::ContentHash;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    JournalCursor, SignalKey, SignalValue, WorkflowCtx, WorkflowCtxError,
+    JournalCursor, SignalKey, SignalValue, TerminalError, TerminalErrorKind, WorkflowCtx,
 };
 
 use overdrive_sim::adapters::clock::SimClock;
@@ -59,11 +59,15 @@ fn encode_run_result(value: &Result<usize, String>) -> Vec<u8> {
 
 /// Perform the provision-write durable step through `ctx.run` — the same
 /// `Result<usize, String>` step the `ProvisionRecord` workflow body runs.
-/// Returns the raw ctx result so a record failure is observable.
+/// Returns the raw ctx result so a record failure is observable. Under Model Z
+/// (ADR-0065 §4) the ctx-op error channel is `TerminalError` (an infra failure
+/// inside the cursor is projected to `TerminalError::explicit` at the ctx-op
+/// boundary); the step's domain `Result<usize, String>` remains the success
+/// type `T`.
 async fn run_provision_step(
     ctx: &WorkflowCtx,
     target: SocketAddr,
-) -> Result<Result<usize, String>, WorkflowCtxError> {
+) -> Result<Result<usize, String>, TerminalError> {
     let transport = StdArc::clone(ctx.transport());
     let payload = Bytes::from_static(PAYLOAD);
     ctx.run(STEP_NAME, async move {
@@ -434,34 +438,43 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
         })
         .await;
 
+    // Under Model Z (ADR-0065 §4) the cursor's `NonDeterministic` infra
+    // failure is PROJECTED to `TerminalError::explicit` at the ctx-op boundary;
+    // the body's `?` observes a terminal, never a `WorkflowCtxError`. The
+    // deterministic `expected`/`actual` labels survive inside the projected
+    // detail (the `NonDeterministic` Display the projection renders).
     match layer1 {
-        Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
+        Err(terminal) => {
+            assert_eq!(
+                terminal.kind(),
+                TerminalErrorKind::Explicit,
+                "a divergent journal projects to an Explicit terminal at the ctx-op boundary"
+            );
+            let detail = terminal.detail();
             // `expected` is the deterministic kind-label of the recorded
             // command at the cursor (a stable as_str()-style label), NOT an
             // address-bearing Debug of the whole entry.
-            assert_eq!(
-                expected, "SleepArmed",
-                "expected names the recorded command KIND at the cursor (deterministic label)"
+            assert!(
+                detail.contains("SleepArmed"),
+                "detail names the recorded command KIND at the cursor (deterministic label): {detail:?}"
             );
-            // `actual` names the await-op the body issued at this cursor —
-            // here the `ctx.run` step name, equally deterministic.
-            assert_eq!(
-                actual, STEP_NAME,
-                "actual names the await-op the body replayed (the ctx.run step name)"
+            // The await-op the body issued at this cursor — the `ctx.run` step
+            // name — is equally deterministic and present in the detail.
+            assert!(
+                detail.contains(STEP_NAME),
+                "detail names the await-op the body replayed (the ctx.run step name): {detail:?}"
             );
-            // Neither value carries an address-bearing whole-entry Debug:
-            // assert the stable labels do not contain Rust pointer/struct
-            // syntax that a `{:?}` of the entry would (DST trajectories must
-            // stay byte-identical across seeds).
-            for value in [&expected, &actual] {
-                assert!(
-                    !value.contains("0x") && !value.contains('{') && !value.contains("deadline"),
-                    "expected/actual must be a stable kind-label, not a whole-entry Debug: {value:?}"
-                );
-            }
+            // The projected detail carries no address-bearing whole-entry Debug:
+            // the deterministic labels do not contain Rust pointer/struct syntax
+            // that a `{:?}` of the entry would (DST trajectories must stay
+            // byte-identical across seeds).
+            assert!(
+                !detail.contains("0x") && !detail.contains('{') && !detail.contains("deadline"),
+                "detail must carry stable kind-labels, not a whole-entry Debug: {detail:?}"
+            );
         }
         other => panic!(
-            "Layer 1 type-at-index mismatch must fail closed with NonDeterministic, got {other:?}"
+            "Layer 1 type-at-index mismatch must fail closed with an Explicit terminal, got {other:?}"
         ),
     }
 
@@ -488,19 +501,25 @@ async fn type_at_index_mismatch_and_name_mismatch_both_fail_closed_nondeterminis
     let layer2 = ctx2.run("body-name", async move { Ok(Ok::<usize, String>(1)) }).await;
 
     match layer2 {
-        Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
+        Err(terminal) => {
             assert_eq!(
-                expected, "recorded-name",
-                "Layer 2 expected is the recorded RunResult name (deterministic)"
+                terminal.kind(),
+                TerminalErrorKind::Explicit,
+                "Layer 2 name divergence projects to an Explicit terminal at the ctx-op boundary"
             );
-            assert_eq!(
-                actual, "body-name",
-                "Layer 2 actual is the replaying body's ctx.run name (deterministic)"
+            let detail = terminal.detail();
+            assert!(
+                detail.contains("recorded-name"),
+                "Layer 2 detail names the recorded RunResult name (deterministic): {detail:?}"
+            );
+            assert!(
+                detail.contains("body-name"),
+                "Layer 2 detail names the replaying body's ctx.run name (deterministic): {detail:?}"
             );
         }
-        other => {
-            panic!("Layer 2 name mismatch must fail closed with NonDeterministic, got {other:?}")
-        }
+        other => panic!(
+            "Layer 2 name mismatch must fail closed with an Explicit terminal, got {other:?}"
+        ),
     }
 
     let layer2_entries = journal2.load_journal(&workflow_id2).await.expect("load");
@@ -558,19 +577,25 @@ async fn signal_key_mismatch_in_crash_while_blocked_fails_closed_nondeterministi
     let result = ctx.wait_for_signal(body_key).await;
 
     match result {
-        Err(WorkflowCtxError::NonDeterministic { expected, actual }) => {
+        Err(terminal) => {
             assert_eq!(
-                expected, "key-a",
-                "expected names the recorded SignalAwaited key (deterministic, Display form)"
+                terminal.kind(),
+                TerminalErrorKind::Explicit,
+                "a signal-key divergence projects to an Explicit terminal at the ctx-op boundary"
             );
-            assert_eq!(
-                actual, "key-b",
-                "actual names the key the replaying body re-blocked on (deterministic)"
+            let detail = terminal.detail();
+            assert!(
+                detail.contains("key-a"),
+                "detail names the recorded SignalAwaited key (deterministic, Display form): {detail:?}"
+            );
+            assert!(
+                detail.contains("key-b"),
+                "detail names the key the replaying body re-blocked on (deterministic): {detail:?}"
             );
         }
         other => panic!(
             "signal-key mismatch on crash-while-blocked resume must fail closed with \
-             NonDeterministic, got {other:?}"
+             an Explicit terminal, got {other:?}"
         ),
     }
 

@@ -35,7 +35,7 @@ use overdrive_control_plane::journal::{JournalStore, WorkflowId};
 use overdrive_control_plane::workflow_runtime::JournalCursorHandle;
 
 use overdrive_core::traits::Transport;
-use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowCtxError};
+use overdrive_core::workflow::{JournalCursor, TerminalError, TerminalErrorKind, WorkflowCtx};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::entropy::SimEntropy;
@@ -49,14 +49,15 @@ const PAYLOAD: &[u8] = b"provision-record";
 const STEP_NAME: &str = "provision-write";
 
 /// Run the provision-write durable step through `ctx.run`; returns the raw
-/// ctx result so a record failure surfaces as `WorkflowCtxError`. `T` is
-/// `Result<usize, String>` (the transport error folds into the success
-/// type), so a `JournalRecord` error is distinguishable from an effect
-/// failure.
+/// ctx result so a record failure surfaces. Under Model Z (ADR-0065 §4) a
+/// journal-record infra failure is projected to `TerminalError::explicit` at
+/// the ctx-op boundary. `T` is `Result<usize, String>` (the transport error
+/// folds into the success type), so an infra record failure is distinguishable
+/// from an effect failure.
 async fn run_step(
     ctx: &WorkflowCtx,
     target: SocketAddr,
-) -> Result<Result<usize, String>, WorkflowCtxError> {
+) -> Result<Result<usize, String>, TerminalError> {
     let transport = Arc::clone(ctx.transport());
     let payload = Bytes::from_static(PAYLOAD);
     ctx.run(STEP_NAME, async move {
@@ -136,9 +137,18 @@ async fn fsync_failure_on_append_does_not_advance_cursor_or_suspend_with_unrecor
     store.inject_fsync_failure();
 
     let err = run_step(&ctx, target).await.expect_err("live record must fail under injected fsync");
+    // Under Model Z (ADR-0065 §4) the cursor's JournalRecord infra failure is
+    // PROJECTED to TerminalError::explicit at the ctx-op boundary; the
+    // journal-record cause survives in the projected detail.
+    assert_eq!(
+        err.kind(),
+        TerminalErrorKind::Explicit,
+        "a journal-record infra failure projects to an Explicit terminal, got {err:?}"
+    );
     assert!(
-        matches!(err, WorkflowCtxError::JournalRecord { .. }),
-        "the failed record surfaces as JournalRecord, got {err:?}"
+        err.detail().contains("journal record failed"),
+        "the failed record surfaces as a journal-record terminal: {:?}",
+        err.detail()
     );
 
     // The entry is UNOBSERVABLE — no phantom half-written entry persisted.

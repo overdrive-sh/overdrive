@@ -498,7 +498,7 @@ pub enum Invariant {
     /// workflow_budget_exhaustion_mints_terminal.rs`) and the Slice-04
     /// sibling of `WorkflowTerminalStatusProjection`. Drives a workflow
     /// whose `ctx.run` step ALWAYS fails transiently
-    /// (`Err(RetryableStepError)`) through the real
+    /// (`Err(StepError::Retryable)`) through the real
     /// `WorkflowEngine` + `SimJournalStore`, advancing `SimClock` past
     /// each backoff window so the parked re-drives fire, and asserts the
     /// engine re-drives up to `WORKFLOW_RETRY_BUDGET` (observed as
@@ -514,6 +514,39 @@ pub enum Invariant {
     /// `todo!` scaffold phase needed). The evaluator body lives in
     /// `crate::invariants::evaluators`.
     WorkflowBudgetExhaustionMintsTerminal,
+
+    /// workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 —
+    /// always invariant. The DST counterpart to the example-based acceptance
+    /// at `crates/overdrive-control-plane/tests/acceptance/
+    /// workflow_step_terminal_short_circuits.rs`. Drives a workflow whose
+    /// `ctx.run` step resolves to `Err(StepError::Terminal)` through the real
+    /// `WorkflowEngine` + `SimJournalStore` and asserts the engine projects
+    /// `WorkflowStatus::Failed { terminal: Explicit }`, records ZERO
+    /// `RetryAttempted` commands (the terminal is NEVER re-driven — the
+    /// structural contrast with `WorkflowBudgetExhaustionMintsTerminal`'s
+    /// `budget`-many), and a step AFTER the terminal one never runs. Pins the
+    /// `retryable | terminal` step-error union's terminal arm (Gap 1) as a
+    /// forever property. Authored GREEN directly (the terminal arm landed with
+    /// the `StepError` union in the same diff). The evaluator body lives in
+    /// `crate::invariants::evaluators`.
+    WorkflowStepTerminalShortCircuits,
+
+    /// workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 —
+    /// always invariant. The DST counterpart to the example-based acceptance at
+    /// `crates/overdrive-control-plane/tests/acceptance/
+    /// workflow_per_step_retry_policy_governs_redrive.rs`. Drives a workflow
+    /// whose `ctx.run` step carries a non-default `RunRetryPolicy`
+    /// (`max_attempts = N`, N ≠ `WORKFLOW_RETRY_BUDGET`) through the real
+    /// `WorkflowEngine` + `SimJournalStore` and asserts the engine re-drives
+    /// exactly `N` times (the journal holds `N` `RetryAttempted` commands)
+    /// before minting `BudgetExhausted` — the PER-STEP policy, not the global
+    /// constant, gates the re-drive count. A companion sub-drive carries a
+    /// `max_duration`-bounded policy and asserts exhaustion on the elapsed-window
+    /// gate (recomputed from the journaled first-attempt `started_at_unix`) even
+    /// when `attempts < max_attempts`. Authored GREEN directly (the per-step
+    /// policy + `RunStep` builder + journal `started_at_unix` landed in the same
+    /// diff). The evaluator body lives in `crate::invariants::evaluators`.
+    WorkflowPerStepRetryPolicyGovernsRedrive,
 }
 
 impl Invariant {
@@ -637,6 +670,21 @@ impl Invariant {
         // body-owns-only-terminal split (D4) as a forever property,
         // complementing NEW-5's example-based acceptance.
         Self::WorkflowBudgetExhaustionMintsTerminal,
+        // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1 —
+        // the DST counterpart to the step-terminal short-circuit acceptance.
+        // Authored GREEN directly (the `StepError` union's terminal arm landed
+        // in the same diff); the evaluator body lives in
+        // `crate::invariants::evaluators`. Pins the engine propagating a step's
+        // `StepError::Terminal` as `Failed { Explicit }` with NO re-drive.
+        Self::WorkflowStepTerminalShortCircuits,
+        // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2 —
+        // the DST counterpart to the per-step-policy acceptance. Authored GREEN
+        // directly (the per-step `RunRetryPolicy` + `RunStep` builder + journal
+        // `started_at_unix` landed in the same diff); the evaluator body lives
+        // in `crate::invariants::evaluators`. Pins the FAILING step's policy
+        // (not the global `WORKFLOW_RETRY_BUDGET`) governing the re-drive count,
+        // plus the `max_duration` elapsed-window gate.
+        Self::WorkflowPerStepRetryPolicyGovernsRedrive,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -694,6 +742,12 @@ impl Invariant {
             // workflow-result-error-model step 04-02 (ADR-0065 §D4).
             Self::WorkflowBudgetExhaustionMintsTerminal => {
                 "workflow-budget-exhaustion-mints-terminal"
+            }
+            // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 1.
+            Self::WorkflowStepTerminalShortCircuits => "workflow-step-terminal-short-circuits",
+            // workflow-result-error-model ADR-0065 Amendment (2026-06-07) Gap 2.
+            Self::WorkflowPerStepRetryPolicyGovernsRedrive => {
+                "workflow-per-step-retry-policy-governs-redrive"
             }
         }
     }

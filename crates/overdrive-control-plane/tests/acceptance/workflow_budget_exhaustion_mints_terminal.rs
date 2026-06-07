@@ -72,7 +72,7 @@ use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
-    RetryableStepError, TerminalError, TerminalErrorKind, Workflow, WorkflowCtx, WorkflowName,
+    StepError, TerminalError, TerminalErrorKind, Workflow, WorkflowCtx, WorkflowName,
     WorkflowStart, WorkflowStatus,
 };
 
@@ -92,7 +92,7 @@ fn cbor_unit() -> Vec<u8> {
 /// A workflow whose STEP always fails transiently: each drive bumps a
 /// shared `AtomicUsize` (so the test can count how many times the engine
 /// re-drove the body) and the `ctx.run` step's closure returns
-/// `Err(RetryableStepError)` — the engine-absorbed TRANSIENT channel
+/// `Err(StepError::Retryable)` — the engine-absorbed TRANSIENT channel
 /// (ADR-0065 §4), NEVER a terminal the body authors. The body's
 /// `Result<(), TerminalError>` return type carries NO failure; the transient
 /// lives in the step + the ctx. The engine re-drives up to
@@ -123,25 +123,19 @@ impl Workflow for AlwaysTransientWorkflow {
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The transient failure is signalled at the STEP level: the
         // `ctx.run` closure bumps the drive counter and returns
-        // `Err(RetryableStepError)`. The engine ABSORBS it (the step is not
-        // journaled, the ctx records a TransientStep, `run_erased` surfaces
-        // WorkflowDriveError::Transient) and re-drives. The body authors NO
-        // terminal — `_step` is `Err(WorkflowCtxError::TransientStep)`, which
-        // cannot become a `TerminalError`; the engine mints `BudgetExhausted`
-        // once the budget is consumed.
+        // `Err(StepError::Retryable)`. Under Model Z the transient PARKS the body
+        // (the `ctx.run` await never returns) — the engine observes the
+        // recorded transient, cancels this parked body, and re-drives from the
+        // journal, minting `BudgetExhausted` once the budget is consumed.
         let attempts = Arc::clone(&self.attempts);
-        let _step: Result<(), _> = ctx
-            .run("provision", async move {
-                attempts.fetch_add(1, Ordering::SeqCst);
-                Err::<(), RetryableStepError>(RetryableStepError::new(
-                    "transient: provision call failed",
-                ))
-            })
-            .await;
-        // Unreachable in practice — the engine re-drives off the recorded
-        // transient before the body's return value is consulted (the ctx
-        // transient takes precedence in `run_erased`). Returning Ok keeps the
-        // body's terminal channel empty, proving the body authored no failure.
+        ctx.run("provision", async move {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            Err::<(), StepError>(StepError::retryable("transient: provision call failed"))
+        })
+        .await?;
+        // Unreachable on the always-transient path — `ctx.run` parks above and
+        // the engine cancels the body before this returns. Present only so the
+        // body type-checks as `Result<(), TerminalError>`.
         Ok(())
     }
 }
@@ -181,25 +175,25 @@ impl Workflow for ClearsWithinBudgetWorkflow {
     async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
         // The step fails transiently for the first `clear_after` drives, then
         // succeeds. On a transient drive the closure returns
-        // `Err(RetryableStepError)` (engine absorbs + re-drives); on the
-        // clearing drive it returns `Ok(())` and the step result is journaled.
+        // `Err(StepError::Retryable)` — under Model Z this PARKS the body and the
+        // engine re-drives; on the clearing drive it returns `Ok(())` and the
+        // step result is journaled, so `ctx.run` resolves and the body returns
+        // the terminal success.
         let attempts = Arc::clone(&self.attempts);
         let clear_after = self.clear_after;
-        let _step: Result<(), _> = ctx
-            .run("provision", async move {
-                // 1-indexed drive number after this bump.
-                let drive = attempts.fetch_add(1, Ordering::SeqCst) + 1;
-                if drive <= clear_after {
-                    Err(RetryableStepError::new("transient: not cleared yet"))
-                } else {
-                    Ok(())
-                }
-            })
-            .await;
-        // On a transient drive `run_erased` re-drives off the recorded ctx
-        // transient before reaching here; on the clearing drive the step
-        // returned Ok and the body returns the terminal success `Ok(())`. The
-        // retries were invisible to the body's terminal channel.
+        ctx.run("provision", async move {
+            // 1-indexed drive number after this bump.
+            let drive = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+            if drive <= clear_after {
+                Err(StepError::retryable("transient: not cleared yet"))
+            } else {
+                Ok(())
+            }
+        })
+        .await?;
+        // Reached only on the clearing drive (the step returned Ok and `ctx.run`
+        // resolved). On a transient drive `ctx.run` parks above and the engine
+        // re-drives — the retries are invisible to the body's terminal channel.
         Ok(())
     }
 }
