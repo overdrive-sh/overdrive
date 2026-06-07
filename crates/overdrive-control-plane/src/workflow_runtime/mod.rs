@@ -65,7 +65,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use parking_lot::Mutex as PlMutex;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -80,6 +79,7 @@ use overdrive_core::workflow::{
     WorkflowName, WorkflowStart, WorkflowStatus,
 };
 
+use crate::claim_set::ClaimSet;
 use crate::journal::{JournalCommand, JournalNotification, JournalStore, LoadedEntry, WorkflowId};
 
 /// The sender half of the engine's **Action channel** — the channel whose
@@ -215,16 +215,17 @@ pub struct WorkflowEngine {
     /// running-in-intent instance with no live task and no terminal row
     /// is the re-emit trigger on restart.
     ///
-    /// `Arc<PlMutex<BTreeSet<..>>>` so the spawned task can drop its own
-    /// entry on terminal without holding `&self`. A `parking_lot::Mutex`
-    /// (not `tokio::sync::Mutex`) because the teardown is driven by a
-    /// SYNC RAII drop guard ([`LiveInstanceGuard`]) whose `Drop` cannot
-    /// `.await`; the set is point-accessed (insert / remove / clone) and
-    /// never held across an `.await`, so a sync mutex is the correct fit
-    /// (`development.md` § "Never hold a lock across `.await`"). `BTreeSet`
-    /// for deterministic iteration per `.claude/rules/development.md`
-    /// § "Ordered-collection choice".
-    live_instances: Arc<PlMutex<BTreeSet<CorrelationKey>>>,
+    /// A [`ClaimSet`] so the only reachable operation is an ATOMIC
+    /// claim-and-release: [`start`](Self::start) takes a claim via
+    /// `try_claim` (which returns `None` iff the instance is already live —
+    /// the concurrent-start guard), holds the returned [`ClaimGuard`] for the
+    /// drive, and the guard's `Drop` releases on terminal or unwind. There is
+    /// no `contains` / bare `insert` surface to split into a TOCTOU. The
+    /// guard type is [`ClaimGuard`](crate::claim_set::ClaimGuard). The
+    /// snapshot the reconciler reads for `has_live_task` comes from
+    /// [`live_instances`](Self::live_instances), which delegates to
+    /// `ClaimSet::snapshot`.
+    live_instances: ClaimSet<CorrelationKey>,
     /// The receiver half of the Action channel, parked here until a
     /// consumer takes it via [`Self::take_action_emit_receiver`]. The
     /// engine owns BOTH halves so [`Self::new`]'s signature stays
@@ -268,7 +269,7 @@ impl WorkflowEngine {
             action_emit,
             registry: Arc::new(registry),
             tasks: Mutex::new(JoinSet::new()),
-            live_instances: Arc::new(PlMutex::new(BTreeSet::new())),
+            live_instances: ClaimSet::new(),
             action_emit_rx: Mutex::new(Some(action_emit_rx)),
         }
     }
@@ -297,10 +298,10 @@ impl WorkflowEngine {
     /// needs to crash-resume a running-in-intent instance.
     #[must_use]
     pub fn live_instances(&self) -> BTreeSet<CorrelationKey> {
-        // `parking_lot::Mutex` — sync lock, no `.await`, so this is a plain
-        // sync getter (it was `async` while the field was a
-        // `tokio::sync::Mutex`).
-        self.live_instances.lock().clone()
+        // Delegates to `ClaimSet::snapshot` — a point-in-time clone of the
+        // held claim keys; no lock is held across an `.await` (the snapshot
+        // is sync and the `ClaimSet` interior is a `parking_lot::Mutex`).
+        self.live_instances.snapshot()
     }
 
     /// Start (or resume) the workflow instance `workflow_id` for `spec`,
@@ -369,36 +370,32 @@ impl WorkflowEngine {
             return Ok(());
         }
 
-        // CONCURRENT-START GUARD (ADR-0064 §5). Claim this instance in
-        // `live_instances` ATOMICALLY, BEFORE any journal-mutating work or the
-        // spawn. `BTreeSet::insert` returns `false` iff the correlation is
-        // ALREADY present — i.e. a task is already driving this instance's
-        // journal. A second drive built from a different snapshot of the same
-        // journal would interleave its `append`s with the live drive's,
-        // producing a command sequence the positional check-then-record cursor
-        // cannot replay deterministically on the next boot. The reconciler's
-        // `has_live_task` gate normally suppresses the re-emit, but it is
-        // ADVISORY — derived from a `hydrate_actual` snapshot of this very set
-        // — so a `ctx.emit_action` `StartWorkflow` (or a re-emit racing the
-        // snapshot) can still reach `start` for a live instance and bypass it.
+        // CONCURRENT-START GUARD (ADR-0064 §5). Claim this instance ATOMICALLY,
+        // BEFORE any journal-mutating work or the spawn. `try_claim` returns
+        // `None` iff a task is ALREADY driving this instance's journal — and
+        // because `ClaimSet` exposes no separate `contains` / `insert`, the
+        // check-and-claim is a single atomic step with no TOCTOU window for two
+        // concurrent starts to slip through. A second drive built from a
+        // different snapshot of the same journal would interleave its `append`s
+        // with the live drive's, producing a command sequence the positional
+        // check-then-record cursor cannot replay deterministically on the next
+        // boot. The reconciler's `has_live_task` gate normally suppresses the
+        // re-emit, but it is ADVISORY — derived from a `hydrate_actual`
+        // snapshot of this very set — so a `ctx.emit_action` `StartWorkflow`
+        // (or a re-emit racing the snapshot) can still reach `start` for a live
+        // instance and bypass it.
         //
-        // The check-and-claim is a SINGLE locked operation: a
-        // `contains()`-then-`insert()` would reintroduce a TOCTOU window where
-        // two concurrent starts both observe "absent" and both spawn. Claiming
-        // BEFORE the `Started` append below also closes the duplicate
+        // Claiming BEFORE the `Started` append below also closes the duplicate
         // command-index-0 "trap" for two racing FIRST starts (both would
         // otherwise load an empty run and each append a `Started`).
         //
-        // On a successful claim we build the RAII `LiveInstanceGuard` HERE so
-        // the one fallible `?` that follows (the `Started` append) removes the
-        // entry on its error path; on the success path the guard is moved into
-        // the spawned task and drops AFTER the terminal write (the load-bearing
-        // terminal-then-remove ordering). On a failed claim the instance is
-        // already live and this `start` is a no-op.
-        let live_instances = Arc::clone(&self.live_instances);
-        let teardown = if live_instances.lock().insert(correlation.clone()) {
-            LiveInstanceGuard { set: Arc::clone(&live_instances), key: correlation.clone() }
-        } else {
+        // The returned `ClaimGuard` (`teardown`) releases the claim on `Drop`.
+        // Held HERE so the one fallible `?` that follows (the `Started` append)
+        // releases the claim on its error path; on the success path the guard
+        // is moved into the spawned task and drops AFTER the terminal write
+        // (the load-bearing terminal-then-remove ordering). On a failed claim
+        // the instance is already live and this `start` is a no-op.
+        let Some(teardown) = self.live_instances.try_claim(correlation.clone()) else {
             return Ok(());
         };
 
@@ -549,35 +546,6 @@ impl WorkflowEngine {
     pub async fn join_all(&self) {
         let mut tasks = self.tasks.lock().await;
         while tasks.join_next().await.is_some() {}
-    }
-}
-
-/// RAII teardown guard for a live workflow instance. Its `Drop` removes
-/// the instance's [`CorrelationKey`] from the engine's `live_instances`
-/// set UNCONDITIONALLY — on the normal terminal path AND on an unwind
-/// through the spawned task body (e.g. a panic in the terminal-write code
-/// that the `catch_unwind` around `run` does not cover).
-///
-/// This is the defense-in-depth half of the panic-containment fix: the
-/// `catch_unwind` around the author `run` future converts a `run` panic to
-/// a `Failed` terminal so the existing terminal-write path runs; this guard
-/// guarantees the live-instance entry is torn down even if THAT path
-/// panics. A stranded live entry is the bug this closes — it makes the
-/// workflow-lifecycle reconciler's `hydrate_actual` derive
-/// `has_live_task = true` forever, suppressing re-emit.
-///
-/// `Drop` is sync and acquires the `parking_lot::Mutex` directly (no
-/// `.await`), which is why `live_instances` is a `parking_lot::Mutex`. A
-/// double-remove (guard fires after some other removal) is a harmless
-/// `BTreeSet` no-op.
-struct LiveInstanceGuard {
-    set: Arc<PlMutex<BTreeSet<CorrelationKey>>>,
-    key: CorrelationKey,
-}
-
-impl Drop for LiveInstanceGuard {
-    fn drop(&mut self) {
-        self.set.lock().remove(&self.key);
     }
 }
 
