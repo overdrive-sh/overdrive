@@ -265,6 +265,11 @@ mod acceptance {
     // (preserved from the deleted terminal-labels test; the live-set surface
     // it pinned survives the workflow_result_label deletion).
     mod workflow_engine_live_instance_registration;
+    // Bug fix (fix-workflow-concurrent-start-guard) — a second `start` for an
+    // already-live instance must be a no-op; without the atomic
+    // live_instances claim it spawned a second drive against the same journal,
+    // interleaving appends the positional cursor cannot replay (ADR-0064 §5).
+    mod workflow_engine_concurrent_start_guard;
     mod workflow_engine_writes_terminal_row; // slice-01 AC5 — engine writes terminal obs row
     // Bug fix (fix-workflow-terminal-redrive) — start must short-circuit on a
     // durable Terminal: a restart over an already-terminal journal must not

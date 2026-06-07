@@ -367,6 +367,39 @@ impl WorkflowEngine {
             return Ok(());
         }
 
+        // CONCURRENT-START GUARD (ADR-0064 §5). Claim this instance in
+        // `live_instances` ATOMICALLY, BEFORE any journal-mutating work or the
+        // spawn. `BTreeSet::insert` returns `false` iff the correlation is
+        // ALREADY present — i.e. a task is already driving this instance's
+        // journal. A second drive built from a different snapshot of the same
+        // journal would interleave its `append`s with the live drive's,
+        // producing a command sequence the positional check-then-record cursor
+        // cannot replay deterministically on the next boot. The reconciler's
+        // `has_live_task` gate normally suppresses the re-emit, but it is
+        // ADVISORY — derived from a `hydrate_actual` snapshot of this very set
+        // — so a `ctx.emit_action` `StartWorkflow` (or a re-emit racing the
+        // snapshot) can still reach `start` for a live instance and bypass it.
+        //
+        // The check-and-claim is a SINGLE locked operation: a
+        // `contains()`-then-`insert()` would reintroduce a TOCTOU window where
+        // two concurrent starts both observe "absent" and both spawn. Claiming
+        // BEFORE the `Started` append below also closes the duplicate
+        // command-index-0 "trap" for two racing FIRST starts (both would
+        // otherwise load an empty run and each append a `Started`).
+        //
+        // On a successful claim we build the RAII `LiveInstanceGuard` HERE so
+        // the one fallible `?` that follows (the `Started` append) removes the
+        // entry on its error path; on the success path the guard is moved into
+        // the spawned task and drops AFTER the terminal write (the load-bearing
+        // terminal-then-remove ordering). On a failed claim the instance is
+        // already live and this `start` is a no-op.
+        let live_instances = Arc::clone(&self.live_instances);
+        let teardown = if live_instances.lock().insert(correlation.clone()) {
+            LiveInstanceGuard { set: Arc::clone(&live_instances), key: correlation.clone() }
+        } else {
+            return Ok(());
+        };
+
         // CA-4 — write `Started` at command-index 0 on FIRST start; idempotent
         // on resume (ADR-0063 §2 / ADR-0064 §5). The instance has already
         // started iff its loaded run holds any command (on a genuine first
@@ -416,23 +449,18 @@ impl WorkflowEngine {
         // entered (mapped to `Failed` like any other terminal failure).
         let input_bytes = spec.input.clone();
 
-        // Mark this instance live BEFORE spawning so a hydrate_actual that
-        // races the spawn sees the instance as running (has_live_task =
-        // true) — the reconciler must NOT re-emit StartWorkflow for an
-        // instance the engine is already driving (ADR-0064 §5).
-        let live_instances = Arc::clone(&self.live_instances);
-        live_instances.lock().insert(correlation.clone());
-
-        // The RAII teardown guard. Its `Drop` removes the correlation from
+        // The live-instance claim + RAII `teardown` guard were established
+        // above (the CONCURRENT-START GUARD), BEFORE the `Started` append, so a
+        // hydrate_actual that races the spawn already sees the instance as
+        // running (has_live_task = true) and the reconciler does NOT re-emit
+        // StartWorkflow for an instance the engine is already driving
+        // (ADR-0064 §5). The guard's `Drop` removes the correlation from
         // `live_instances` UNCONDITIONALLY — even if the terminal-write code
-        // below panics (a panic in `journal.append` / `obs.write`) the guard
-        // still fires on unwind, closing the leak that stranded a panicked
-        // instance. The guard is MOVED into the async block and drops at the
-        // end of it, AFTER the terminal write, preserving the load-bearing
-        // terminal-then-remove ordering (see the comment at the tail of the
-        // spawned block).
-        let teardown =
-            LiveInstanceGuard { set: Arc::clone(&live_instances), key: correlation.clone() };
+        // below panics (a panic in `journal.append` / `obs.write`) it still
+        // fires on unwind, closing the leak that stranded a panicked instance.
+        // It is MOVED into the async block and drops at the end of it, AFTER
+        // the terminal write, preserving the load-bearing terminal-then-remove
+        // ordering (see the comment at the tail of the spawned block).
 
         // Spawn the author's async body as a tracked task (ADR-0064 §5 —
         // the engine owns a tokio task set, the same way the reconciler
