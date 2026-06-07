@@ -1,0 +1,186 @@
+---
+title: Reconcilers
+description: The control plane's first primitive — a pure function that converges declared intent toward observed reality, run on a loop. The runtime owns all I/O, time, and persistence; the reconciler only computes the next actions.
+---
+
+Overdrive's control plane is built from two primitives, and a **reconciler** is
+the first: a pure function that looks at what should be true and what is true, and
+returns the actions that close the gap. The runtime runs it on a loop, forever.
+Its peer, the [workflow](/docs/concepts/workflows), runs a terminating sequence
+once; [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows)
+explains how the two combine.
+
+The [architecture overview](/docs/concepts/architecture#the-convergence-loop)
+introduces the convergence loop at the system level. This page is the contract:
+what a reconciler is, why it is a pure function, and what the runtime does around
+it.
+
+<Mermaid chart={`
+flowchart TB
+  intent[("IntentStore")]
+  obs[("ObservationStore")]
+  views[("ViewStore<br/>redb")]
+  tick["TickContext<br/>now · deadline"]
+  reconcile["reconcile()<br/>pure · synchronous"]
+  shim["Action shim"]
+  world["Driver · Dataplane · Observation"]
+
+  intent -- "desired" --> reconcile
+  obs -- "actual" --> reconcile
+  views -- "view" --> reconcile
+  tick --> reconcile
+  reconcile -- "next view · fsync" --> views
+  reconcile -- "Vec&lt;Action&gt;" --> shim
+  shim -- "effects" --> world
+  world -- "becomes actual" --> obs
+`} />
+
+## A reconciler is a pure function
+
+A reconciler implements one trait, and the shape of that trait is the whole idea:
+
+```rust
+pub trait Reconciler: Send + Sync {
+    const NAME: &'static str;
+    type State: Send + Sync;
+    type View: Serialize + DeserializeOwned + Default + Clone + Eq + Send + Sync;
+
+    fn name(&self) -> &ReconcilerName;
+
+    fn reconcile(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        view: &Self::View,
+        tick: &TickContext,
+    ) -> (Vec<Action>, Self::View);
+}
+```
+
+`reconcile` takes the desired state (hydrated from intent), the actual state
+(hydrated from observation), the reconciler's own prior memory, and a time
+snapshot — and returns a list of actions plus its next memory. It is
+**synchronous**: no `async`, no `.await`. It does no I/O, opens no socket, touches
+no database, and reads no clock except through `tick`. The same inputs produce a
+byte-identical result every time.
+
+That purity is the design, not an accident of it. A function with no hidden inputs
+can be replayed: feed it the same desired, actual, view, and tick under
+[simulation](/docs/concepts/deterministic-simulation-testing) and it produces the
+same actions, every run, from a seed. The control plane is testable as a function
+instead of against a live cluster. The runtime hands the reconciler everything and
+takes back only data — a list of actions to perform and the next memory to
+persist. The reconciler performs nothing and writes nothing itself.
+
+## Observe, diff, converge
+
+The loop calls `reconcile` every tick with freshly hydrated desired and actual.
+The reconciler recomputes the gap each time; it never assumes a past action took
+effect. A half-finished operation is just a gap the next pass closes — a crashed
+allocation is started again, a drifted dataplane map is rewritten, a
+half-provisioned interface is completed rather than adopted as-is. The control
+plane converges toward the declared state or keeps trying; it does not strand
+half-applied state for someone to fix by hand.
+
+This is why reconcilers are level-triggered, not edge-triggered: they react to the
+current state of the world, not to a stream of events. A missed event cannot
+desync a reconciler, because there are no events to miss — only the next
+observation of what is actually true.
+
+## The View is typed memory
+
+A reconciler's only persistent state is its **View** — a typed struct it returns
+at the end of each tick and receives at the start of the next. The author derives
+the bounds the trait demands
+(`Serialize + DeserializeOwned + Default + Clone + Eq + Send + Sync`) and writes
+nothing else for persistence. The runtime owns the rest end to end: it
+CBOR-encodes the View into a redb-backed store at `reconcilers/memory.redb`,
+bulk-loads every View once at startup, and serves them from memory on every tick
+thereafter. A reconciler author never writes SQL, never
+opens a database handle, never declares a schema.
+
+Two properties make this durable across a crash:
+
+- **Write-through, flushed before dispatch.** After `reconcile` returns, the
+  runtime persists the next View and flushes it to disk *before* it dispatches the
+  tick's actions. On a crash between the flush and the dispatch, the next boot
+  reloads the View and convergence resumes — the acknowledged memory is never
+  lost.
+- **Persist inputs, not derived state.** The View holds the inputs a decision
+  depends on, not the decision's output. A retry reconciler stores `attempts` and
+  `last_failure_seen_at` and recomputes the next-attempt deadline every tick
+  against the live backoff policy — rather than a `next_attempt_at` field, which
+  would freeze today's policy into the stored value and silently ignore a policy
+  change until the row aged out.
+
+## Time is an input
+
+A reconciler cannot call `Instant::now()`. Reading the clock directly is exactly
+the non-determinism the replay harness cannot control, so time arrives as data, in
+the `TickContext` the runtime passes to every `reconcile`:
+
+- `now` — a monotonic snapshot for in-process deadline arithmetic.
+- `now_unix` — a persistable wall-clock snapshot, for deadlines that must survive
+  a restart.
+- `deadline` — this tick's budget.
+- `tick` — a monotonic counter, useful as a deterministic tie-breaker.
+
+The snapshot is taken once per tick, so every `reconcile` sees a single consistent
+"now." That single consistency is part of what makes the function pure over its
+inputs.
+
+## Actions are data; the shim runs them
+
+`reconcile` returns `Vec<Action>` — typed descriptions of what should happen, not
+the happening itself. A separate **action shim** executes them: `StartAllocation`
+launches a process, `DataplaneUpdateService` programs an eBPF map,
+`WriteServiceBackendRow` records observation, `StartWorkflow` launches a durable
+sequence. This boundary is load-bearing. It keeps `reconcile` pure and puts every
+side effect behind one gate the runtime drives, which is what lets the loop be
+replayed. A reconciler can even wake another by emitting `EnqueueEvaluation`, so
+one reconciler's output becomes another's trigger.
+
+## The reconcilers that ship today
+
+Six reconcilers run in `overdrive serve`:
+
+- **WorkloadLifecycle** — drives allocations toward the declared replica count;
+  emits `StartAllocation` / `StopAllocation` and backs off restarts on repeated
+  failure.
+- **ServiceLifecycle** — drives a service through its health gates from probe
+  results: not `Stable` until startup passes, not sent traffic until readiness
+  passes, restarted once liveness failures exhaust the budget.
+- **BackendDiscoveryBridge** — turns live allocations into `service_backends`
+  observation rows.
+- **ServiceMapHydrator** — programs the eBPF service map when the backend set
+  drifts, emitting `DataplaneUpdateService`.
+- **WorkflowLifecycle** — the bridge to the workflow engine: re-emits
+  `StartWorkflow` for a workflow instance that should be running but has no live
+  task. See [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
+- **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick; it
+  anchors the "reconcilers are pure" invariant the test suite checks.
+
+Adding a behaviour to the control plane means adding a reconciler, not threading
+logic through the loop. The loop does not know what the reconcilers do.
+
+## Working with workflows
+
+A reconciler runs forever; some operations instead need a terminating, durable
+sequence — rolling a certificate through four steps, migrating an allocation
+between nodes. For those a reconciler starts a
+[workflow](/docs/concepts/workflows) by emitting `Action::StartWorkflow`, and
+later observes the workflow's terminal status to converge the instance.
+`WorkflowLifecycle` is the reconciler that ships for exactly this. The full loop —
+including how a workflow emits actions back into the same pipeline — is in
+[reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
+
+## Where to go next
+
+- Author one: [Write a reconciler](/docs/how-to/write-a-reconciler).
+- The peer primitive: [workflows](/docs/concepts/workflows).
+- How the two combine:
+  [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
+- The loop at the system level:
+  [the architecture overview](/docs/concepts/architecture#the-convergence-loop).
+- Why purity is worth the constraint:
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

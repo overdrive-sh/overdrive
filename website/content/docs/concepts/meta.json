@@ -1,4 +1,4 @@
 {
 	"title": "Concepts",
-	"pages": ["architecture", "intent-observation", "deterministic-simulation-testing"]
+	"pages": ["architecture", "intent-observation", "reconcilers", "workflows", "reconcilers-and-workflows", "deterministic-simulation-testing"]
 }

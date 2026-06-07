@@ -1,0 +1,208 @@
+---
+title: Write a workflow
+description: Author an internal Overdrive workflow in Rust — implement the Workflow trait, drive every effect through ctx, model retryable and terminal failures, and register it so a reconciler can start it.
+---
+
+This guide shows how to author a workflow: a durable async function the control
+plane drives to a terminal result. It is written for engineers extending Overdrive
+itself. For the model behind the steps — the journal, replay, and the error
+types — read [Workflows](/docs/concepts/workflows) first; this guide assumes it.
+
+<Callout title="Workflows are internal">
+	You author a workflow in Rust inside the control-plane crates. There is no
+	`overdrive` command that runs one and no spec field that declares one — a
+	reconciler starts it. This guide is platform-engineering, not operator
+	workflow.
+</Callout>
+
+## Implement the Workflow trait
+
+A workflow is a type that implements `Workflow`: an associated input type, an
+associated output type, and one `async fn run`.
+
+```rust
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use bytes::Bytes;
+use overdrive_core::workflow::{TerminalError, Workflow, WorkflowCtx};
+
+pub struct RegisterDeployment {
+	target: SocketAddr,
+}
+
+#[async_trait]
+impl Workflow for RegisterDeployment {
+	type Input = ();
+	type Output = ();
+
+	async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
+		let transport = Arc::clone(ctx.transport());
+		let target = self.target;
+		ctx.run("register-write", async move {
+			Ok(transport.send_datagram(target, Bytes::from_static(b"register")).await?)
+		})
+		.await?;
+		Ok(())
+	}
+}
+```
+
+Write `run` as one ordinary async function. Do not build a step enum or a state
+machine — the journal *is* the state machine, and you get it for free. `Input` and
+`Output` must be `serde`-serialisable; the engine CBOR-encodes them at its
+boundary, so a malformed input becomes a terminal failure before `run` is ever
+called. An `Output` of `()` is the contentless terminal; return a real type when
+the workflow produces a value. This example mirrors the `ProvisionRecord`
+reference workflow in `overdrive-core::testing` — the smallest workflow that
+performs one external effect and stops.
+
+## Drive every effect through ctx
+
+The body must read nothing non-deterministic on its own. Four `ctx` methods cover
+the surface:
+
+- `ctx.run(name, future).await?` — run a durable step. The future does the work;
+  its result is journaled under `name` and replayed verbatim on resume. **Every
+  side effect goes here.**
+- `ctx.sleep(duration).await?` — wait durably. The deadline is journaled, so a
+  resume after the sleep elapsed returns at once instead of waiting again.
+- `ctx.wait_for_signal(key).await?` — block until another part of the system
+  writes a signal under `key`. A crash while blocked re-blocks on the same key.
+- `ctx.emit_action(action).await?` — emit a typed cluster mutation, committed
+  through the same path a reconciler's actions take. A workflow never writes the
+  IntentStore directly.
+
+For the clock, network, and randomness a step needs, reach for the injected
+ports — `ctx.clock()`, `ctx.transport()`, `ctx.entropy()`. Never `Instant::now()`,
+`tokio::time::sleep`, or `rand::*` directly: those break replay, and the lint gate
+rejects them.
+
+A body that waits for a signal and then mutates the cluster reads as plainly as
+the sequence it describes:
+
+```rust
+async fn run(&self, ctx: &WorkflowCtx, _input: ()) -> Result<(), TerminalError> {
+	ctx.wait_for_signal(self.signal.clone()).await?;
+	ctx.emit_action(self.action.clone()).await?;
+	Ok(())
+}
+```
+
+## Model failure: retryable vs. terminal
+
+Inside a `ctx.run` step, the error you return decides whether the engine retries.
+The closure's result type is `Result<T, StepError>`:
+
+- **Retryable is the default.** Any error propagated with `?` folds into
+  `StepError::Retryable`, so the natural `Ok(do_it().await?)` shape marks the step
+  retryable for free. The engine re-drives the workflow after a backoff.
+- **Terminal is explicit.** Return a `TerminalError` to fail permanently, with no
+  retry.
+
+```rust
+ctx.run("validate-and-call", async move {
+	if !spec.is_valid() {
+		// permanent: retrying the same bad spec cannot help
+		return Err(TerminalError::explicit("spec failed validation").into());
+	}
+	// any error from the call below is retryable by default
+	Ok(admin_api.register(&spec).await?)
+})
+.await?; // a TerminalError here propagates as the workflow's terminal failure
+```
+
+The `?` on `ctx.run(...).await` propagates a terminal failure straight out of the
+body — whose return type is `Result<Output, TerminalError>`. A retryable failure
+never reaches that `?`; the engine handles it out of band.
+
+To tune the backoff, attach a policy before awaiting:
+
+```rust
+use overdrive_core::workflow::RunRetryPolicy;
+
+ctx.run("call-admin-api", fut)
+	.retry_policy(RunRetryPolicy { max_attempts: 5, ..Default::default() })
+	.await?;
+```
+
+The default budget is three re-drives with exponential backoff (50ms, 100ms,
+200ms). When it is exhausted the engine mints a terminal `BudgetExhausted` and the
+workflow fails — exhaustion is terminal, not an infinite retry.
+
+## Register it and start it
+
+A workflow runs only once it is registered in the engine's registry and a
+reconciler asks for it.
+
+<Steps>
+	<Step>
+		**Register the type at composition**, under a `WorkflowName`. You hand a
+		factory (`Fn() -> W`); the engine wraps each instance to drive it.
+
+		```rust
+		use overdrive_core::workflow::WorkflowName;
+		use overdrive_control_plane::workflow_runtime::WorkflowRegistry;
+
+		let mut registry = WorkflowRegistry::new();
+		registry.register::<RegisterDeployment, _>(
+			WorkflowName::new("register-deployment")?,
+			move || RegisterDeployment { target },
+		);
+		```
+
+		The shipped `overdrive serve` builds an empty registry today — registering
+		a first-party workflow here is the step that makes one runnable.
+	</Step>
+	<Step>
+		**Start an instance** by emitting the action from a reconciler. `start`
+		carries the workflow name plus its CBOR-encoded input; `correlation` is the
+		stable key that identifies the instance across restarts.
+
+		```rust
+		use overdrive_core::reconcilers::Action;
+		use overdrive_core::workflow::WorkflowStart;
+
+		Action::StartWorkflow {
+			start: WorkflowStart {
+				name: WorkflowName::new("register-deployment")?,
+				input: cbor_input, // the workflow's Input, CBOR-encoded
+			},
+			correlation,
+		}
+		```
+	</Step>
+	<Step>
+		**Let the control plane drive it.** The engine runs the body and writes a
+		terminal `WorkflowStatus` to the observation store. The WorkflowLifecycle
+		reconciler observes that row to mark the instance done — and re-emits
+		`StartWorkflow` if it finds an instance that should be running but has no
+		live task, which is how a workflow resumes after a crash. You write the
+		workflow and the trigger; the runtime owns retry, resume, and completion.
+	</Step>
+</Steps>
+
+## Keep it replayable
+
+Two rules keep a workflow durable, and the engine enforces both:
+
+- **All non-determinism through `ctx`.** No direct clock, socket, RNG, or timer in
+  the body. Work that needs one goes inside a `ctx.run` step, through an injected
+  port.
+- **A bounded number of steps.** A workflow terminates; it does not loop forever.
+  If you reach for an unbounded loop, you want a
+  [reconciler](/docs/concepts/architecture#the-convergence-loop), not a workflow.
+
+<Callout type="warn" title="Reshaping a live workflow is a breaking change">
+	Replay compares the running body against the recorded journal and stops with a
+	`NonDeterministic` error on divergence. Changing a workflow's step sequence
+	breaks any instance mid-flight. Add a new workflow rather than reshaping one
+	that has in-flight instances.
+</Callout>
+
+## Where to go next
+
+- The model behind all of this: [Workflows](/docs/concepts/workflows).
+- The primitive workflows complement:
+  [reconcilers and the convergence loop](/docs/concepts/architecture#the-convergence-loop).

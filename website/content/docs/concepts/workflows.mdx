@@ -1,0 +1,202 @@
+---
+title: Workflows
+description: The control plane's second primitive — a durable async function that runs a terminating sequence once and survives crashes by replaying a journal. Internal today, authored in Rust and driven by reconcilers.
+---
+
+Overdrive has two control-plane primitives. A
+[reconciler](/docs/concepts/architecture#the-convergence-loop) converges declared
+intent toward observed reality and runs forever; a **workflow** runs a sequence
+of steps once, returns a typed result, and stops. The hard problem a workflow
+solves is durability across a crash: a workflow can die halfway through a
+four-step certificate rotation, restart on a fresh process, and continue from
+where it stopped — without repeating the steps that already ran. It does this by
+journaling every non-deterministic decision and replaying the journal on resume.
+
+Workflows are internal today. No `overdrive` command starts one and no spec field
+declares one — the primitive is authored in Rust by platform engineers and driven
+by the control plane itself.
+
+<Mermaid chart={`
+flowchart TB
+  subgraph cp["Control plane"]
+    rec["WorkflowLifecycle<br/>reconciler"]
+    shim["Action shim"]
+    eng["Workflow engine"]
+    reg["Registry<br/>name → workflow"]
+  end
+  intent[("IntentStore")]
+  obs[("ObservationStore")]
+  journal[("Journal<br/>workflow-journal.redb")]
+  body["async fn run<br/>ctx.run · sleep · wait_for_signal · emit_action"]
+
+  rec -- "emit StartWorkflow" --> shim
+  shim -- "persist start intent · fsync" --> intent
+  shim -- "start" --> eng
+  eng -- "resolve name" --> reg
+  eng -- "load + append · fsync" --> journal
+  eng -- "drive / replay" --> body
+  body -- "emit_action" --> shim
+  eng -- "terminal WorkflowStatus" --> obs
+  obs -- "observe terminal · crash gap" --> rec
+`} />
+
+## Reconcilers converge; workflows terminate
+
+The two primitives answer different questions, and picking the wrong one shows up
+later as a fight against the runtime. A reconciler answers "what should always be
+true?" A workflow answers "what sequence should run, once?"
+
+| | Reconciler | Workflow |
+| --- | --- | --- |
+| Shape | pure synchronous function, runs every tick | async function, runs once |
+| Lifetime | forever — converges desired vs. actual | terminates with a typed `Result` |
+| State | a typed view, recomputed each tick | a journal of each step, replayed on resume |
+| Good for | "keep N replicas running", "keep the BPF map matching policy" | "roll the certificate through four steps", "migrate this allocation to another node" |
+| On failure | recompute the gap next tick | retry the step, or fail the whole workflow terminally |
+
+The dividing line is the ending. If the operation has a natural `Ok(result)`, it
+is a workflow. If it is "the cluster should always look like X," it is a
+reconciler. "Keep three replicas running" never ends, so it is a reconciler; "move
+this allocation to another node" finishes, so it is a workflow.
+
+The two are not isolated, though. A reconciler *starts* a workflow, and a workflow
+*emits actions* back into the same pipeline a reconciler drives — they speak one
+action vocabulary. [Reconcilers and workflows](/docs/concepts/reconcilers-and-workflows)
+traces that loop in full.
+
+## The journal makes an async function durable
+
+A workflow body is one ordinary `async fn run`:
+
+```rust
+async fn run(&self, ctx: &WorkflowCtx, input: Self::Input)
+    -> Result<Self::Output, TerminalError>;
+```
+
+An ordinary async function is not crash-safe — kill the process and it starts
+over. Overdrive makes it durable by routing every non-deterministic action
+through the `ctx` argument and journaling the outcome of each one. The body never
+reads the clock, opens a socket, draws randomness, or waits on an event directly.
+It calls `ctx.run`, `ctx.sleep`, `ctx.wait_for_signal`, and `ctx.emit_action`
+instead. Each call appends its result to a per-instance journal — a dedicated redb
+store at `workflow-journal.redb` — and flushes it to disk before the workflow
+proceeds.
+
+On resume the engine **replays**. It runs the same `async fn` from the top, but
+each `ctx` call returns its journaled result instead of doing the work again: a
+`ctx.run` step that already sent its request returns the recorded outcome without
+re-sending; a `ctx.sleep` whose deadline already passed returns immediately. The
+body cannot tell the difference between a first run and a replay — and that is the
+point. Replay reaches the next unfinished step having repeated none of the
+finished ones.
+
+This only works if replay is deterministic, so determinism is enforced rather than
+hoped for. If a replaying body asks for a different step than the journal recorded
+next — because someone edited the workflow in a way incompatible with an in-flight
+instance — the engine stops with a `NonDeterministic` error naming the diverging
+operation, rather than silently running the wrong branch. It is the same
+seed-to-trajectory property
+[deterministic simulation testing](/docs/concepts/deterministic-simulation-testing)
+rests on, turned toward durable execution: the body reads all of its
+non-determinism through injected ports, so the engine can substitute journaled
+values and get an identical run.
+
+## A step fails one of two ways
+
+Inside a `ctx.run` step, a failure is either transient or terminal, and the whole
+error model turns on that distinction.
+
+- **Transient** — the step hit something that might succeed next time: a refused
+  connection, a timeout. The engine re-drives the workflow from its journal after
+  a backoff, up to a budget. A transient failure never reaches the workflow's
+  return type; the body never even observes it.
+- **Terminal** — the step failed permanently: malformed input, a violated
+  invariant. Retrying cannot help. The failure propagates out of `ctx.run` as the
+  workflow's terminal failure.
+
+The types make the split structural. A step closure returns
+`Result<T, StepError>`, where `StepError` is either `Retryable { detail }` or
+`Terminal(TerminalError)`. Any ordinary error propagated with `?` folds into
+`Retryable` by default — the common case, "this might work next time," needs no
+ceremony. To fail permanently, the author returns a `TerminalError` on purpose.
+The workflow body's own return type is `Result<Output, TerminalError>`: a
+transient *cannot* appear there, because the engine absorbs it before it gets that
+far. The retryable case is invisible to the body by construction, not by
+convention.
+
+When a workflow ends, the engine projects the outcome to a `WorkflowStatus` —
+`Completed { output }` or `Failed { terminal }` — and writes it to the
+observation store. Two further variants, `Cancelled` and `TimedOut`, are reserved
+for engine-driven cancellation and deadlines a later slice will add; the body can
+never produce them. The status is observation, not intent: a lifecycle reconciler
+reads it to decide the instance is done, the same
+[intent / observation discipline](/docs/concepts/intent-observation) the rest of
+the platform follows.
+
+One separation is worth stating plainly, because collapsing it is the tempting
+mistake: the value a workflow *returns* and the status the control plane *records*
+are two different types. The body returns `Result<Output, TerminalError>`; the
+cluster observes a `WorkflowStatus`. Tying the author's success type to the
+engine's bookkeeping would couple every workflow's output to the runtime's
+lifecycle vocabulary.
+
+## How a workflow gets driven
+
+A workflow does not start itself. A reconciler decides one should run and emits a
+typed action — `Action::StartWorkflow { start, correlation }` — where `start`
+names the workflow and carries its input as opaque CBOR bytes, and `correlation`
+is the stable key that identifies this instance across restarts. From there the
+control plane takes over:
+
+1. The **action shim** persists the start intent to the IntentStore and flushes it
+   *before* the engine runs, so a crash between "decided to start" and "started"
+   is recoverable.
+2. The **workflow engine** resolves the name against its registry, loads the
+   instance's journal (empty on a first start, populated on a resume), builds a
+   `ctx` over that journal, and spawns `run` as a tracked task.
+3. When `run` returns, the engine writes the terminal `WorkflowStatus` to the
+   observation store.
+4. The **WorkflowLifecycle reconciler** observes that row and converges the
+   instance. If it sees an instance that should be running but has no live task —
+   the signature of a crash — it re-emits `StartWorkflow`, and the engine's
+   journal load decides cold start versus resume.
+
+That last step is why a workflow survives a control-plane crash: recovery is the
+convergence loop noticing a gap, the same mechanism that restarts a crashed
+allocation. The workflow author writes the body and the trigger; durability,
+retry, and resume belong to the runtime.
+
+The relationship runs both ways, in one vocabulary. A reconciler starts a workflow
+by emitting `Action::StartWorkflow`; a workflow drives the cluster back by emitting
+actions of its own through `ctx.emit_action` — the *same* `Action` type a
+reconciler emits, committed through the same action shim and Raft path. A workflow
+never writes intent directly; it emits an action, exactly as a reconciler does. So
+the two primitives form a loop rather than living in separate worlds: a reconciler
+starts a workflow, the workflow emits actions that change cluster state mid-run,
+reconcilers converge on the result, and the workflow's terminal status is itself a
+row a reconciler observes to close the instance out.
+
+## What workflows are for
+
+The operations that want a workflow rather than a reconciler share a profile: a
+fixed, ordered sequence with a natural end, where each step has an external effect
+that must not be repeated on a retry. Two are on the roadmap:
+
+- **Certificate rotation** — request a certificate, wait for the DNS challenge to
+  propagate, validate it, then signal readiness. Four ordered steps, each with an
+  effect; a crash mid-rotation must resume, not restart from the first request.
+- **Allocation migration** — start a replacement allocation on another node, wait
+  for it to pass health checks, drain the original, stop it. A sequence that
+  terminates once the move is complete.
+
+Neither is "keep N replicas running" — that never ends, so it is a reconciler.
+
+## Where to go next
+
+- Author one: [Write a workflow](/docs/how-to/write-a-workflow).
+- The peer primitive, and how the two combine: [reconcilers](/docs/concepts/reconcilers)
+  and [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
+- Why replay can be trusted:
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
+- The consistency split a workflow's terminal status flows through:
+  [the intent / observation boundary](/docs/concepts/intent-observation).

@@ -1,0 +1,141 @@
+---
+title: Write a reconciler
+description: Add a behaviour to the Overdrive control plane by writing a reconciler — implement the trait as a pure function, keep its memory in a typed View, emit actions instead of doing I/O, and register it.
+---
+
+This guide shows how to add a behaviour to the control plane by writing a
+reconciler: a pure function the runtime drives on a loop. It is written for
+engineers extending Overdrive itself — reconcilers are authored in Rust, and
+adding a control-plane behaviour means adding one. For the model behind the steps —
+purity, the View, the action boundary — read [Reconcilers](/docs/concepts/reconcilers)
+first; this guide assumes it.
+
+<Callout title="Reconcilers are internal">
+	You author a reconciler in Rust inside the control-plane crates and register it
+	at boot. There is no `overdrive` command that adds one at runtime.
+</Callout>
+
+## Implement the Reconciler trait
+
+A reconciler is a type that implements `Reconciler`: a name, a `State` projection,
+a `View` for its memory, and one pure `reconcile`. The smallest possible one emits
+a no-op every tick:
+
+```rust
+use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+
+impl Reconciler for NoopHeartbeat {
+	const NAME: &'static str = "noop-heartbeat";
+
+	type State = ();
+	type View = ();
+
+	fn name(&self) -> &ReconcilerName {
+		&self.name
+	}
+
+	fn reconcile(
+		&self,
+		_desired: &Self::State,
+		_actual: &Self::State,
+		_view: &Self::View,
+		_tick: &TickContext,
+	) -> (Vec<Action>, Self::View) {
+		(vec![Action::Noop], ())
+	}
+}
+```
+
+`const NAME` is the kebab-case anchor; the type's constructor builds a
+`ReconcilerName` from it once. `State` and `View` are your own typed projections —
+both `()` here, because a heartbeat observes nothing and remembers nothing.
+
+## Compute the gap — and nothing else
+
+A real `reconcile` observes the gap between desired and actual, emits actions to
+close it, and returns its next memory:
+
+```rust
+fn reconcile(
+	&self,
+	desired: &Self::State,
+	actual: &Self::State,
+	view: &Self::View,
+	tick: &TickContext,
+) -> (Vec<Action>, Self::View) {
+	let mut actions = Vec::new();
+	if actual.running < desired.replicas {
+		actions.push(Action::StartAllocation { /* … */ });
+	}
+	(actions, view.clone())
+}
+```
+
+Three rules the runtime enforces:
+
+- **No I/O, no `async`.** `reconcile` is synchronous and returns data. It never
+  awaits, opens a socket, or writes a store — side effects are actions, covered
+  below.
+- **No clock but `tick`.** Read time from `tick.now` / `tick.now_unix`, never
+  `Instant::now()`. The direct call breaks deterministic replay, and the lint gate
+  rejects it.
+- **Deterministic.** The same `(desired, actual, view, tick)` must produce a
+  byte-identical `(actions, next_view)`. That is what lets the whole control plane
+  be replayed under simulation.
+
+## Keep memory in the View — store inputs, not outputs
+
+A reconciler's only persistent state is its `View`. Derive the bounds the trait
+demands and let the runtime persist it:
+
+```rust
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
+pub struct RetryMemory {
+	pub attempts: u32,
+	pub last_failure_seen_at: UnixInstant,
+}
+```
+
+Store the inputs a decision depends on, not the decision. A retry reconciler keeps
+`attempts` and `last_failure_seen_at` and recomputes the next-attempt deadline each
+tick from the live backoff policy — never a persisted `next_attempt_at`, which
+would freeze today's policy into the stored value and ignore a later change to it.
+The runtime CBOR-encodes the View, flushes it to disk before dispatching the tick's
+actions, and reloads it on the next boot. You never touch a database.
+
+## Emit actions for every effect
+
+`reconcile` returns `Vec<Action>`; the action shim runs them behind its single I/O
+boundary. To start a process, return `Action::StartAllocation`; to program the
+dataplane, `Action::DataplaneUpdateService`; to wake another reconciler,
+`Action::EnqueueEvaluation`; to launch a durable sequence,
+`Action::StartWorkflow` (see
+[reconcilers and workflows](/docs/concepts/reconcilers-and-workflows)). Never
+perform the effect inside `reconcile` — return the action and let the shim execute
+it.
+
+## Register it
+
+A reconciler runs once it is registered in the control-plane runtime at boot —
+the same place the six first-party reconcilers are registered in `overdrive serve`:
+
+```rust
+runtime.register(my_reconciler()).await?;
+```
+
+Registration bulk-loads the reconciler's persisted Views into memory; from there
+the runtime evaluates it every tick.
+
+<Callout type="warn" title="Purity is the contract">
+	A reconciler that reads the clock, does I/O, or returns different actions for
+	the same inputs cannot be replayed — and replay is how the control plane is
+	tested. If you reach for `Instant::now()` or an `.await` inside `reconcile`, the
+	work belongs in an `Action` the shim runs, or in a time value the runtime hands
+	you through `tick`.
+</Callout>
+
+## Where to go next
+
+- The model: [Reconcilers](/docs/concepts/reconcilers).
+- Coordinating a terminating sequence instead of a standing invariant:
+  [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).

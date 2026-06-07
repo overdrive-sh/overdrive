@@ -133,7 +133,7 @@ the rest: it persists the reconciler's memory to a redb-backed view store
 (writing and flushing to disk *before* it treats the action as done, so a crash
 mid-tick resumes cleanly), then dispatches the actions.
 
-Five reconcilers run today:
+Six reconcilers run today:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
   and emits `StartAllocation`, `StopAllocation`, or `ReleaseServiceVip`. It
@@ -149,11 +149,17 @@ Five reconcilers run today:
 - **BackendDiscoveryBridge** and **ServiceMapHydrator** — together they turn live
   allocations into dataplane state, feeding the service map the eBPF programs
   read.
+- **WorkflowLifecycle** — the bridge to the [workflow](/docs/concepts/workflows)
+  engine: it watches workflow instances and re-emits `StartWorkflow` for one that
+  should be running but has no live task, so a workflow resumes after a crash the
+  same way a crashed allocation does.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick;
   it exists to anchor the "reconcilers are pure" invariant the test suite checks.
 
 Adding a behavior to the control plane means adding a reconciler, not threading
-logic through the loop. The loop does not know what the reconcilers do.
+logic through the loop. The loop does not know what the reconcilers do. For the
+reconciler contract itself — the pure function, its typed memory, and how to write
+one — see [reconcilers](/docs/concepts/reconcilers).
 
 The same shape makes the loop self-heal. A reconciler recomputes the gap between
 desired and actual every time it runs, so it never assumes a past action took
