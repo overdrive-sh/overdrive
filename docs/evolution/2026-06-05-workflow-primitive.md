@@ -3,7 +3,7 @@
 **Finalized:** 2026-06-06 (work delivered 2026-06-05)
 **Wave arc:** DIVERGE → DISCUSS → DISTILL → DESIGN → DELIVER (13 steps / 3 slices) → FINALIZE
 **Anchor:** GH #39; whitepaper §18; roadmap [3.2]; job J-PLAT-005
-**Authoritative design records:** [ADR-0063](../product/architecture/adr-0063-workflow-journal-redb-second-table-layout.md),
+**Authoritative design records:** [ADR-0066](../product/architecture/adr-0066-workflow-journal-redb-second-table-layout.md),
 [ADR-0064](../product/architecture/adr-0064-workflow-trait-ctx-and-engine-reconciler-boundary.md)
 **Feature workspace (preserved):** `docs/feature/workflow-primitive/`
 
@@ -66,8 +66,8 @@ serving O6.
 
 | ID | Decision | Record |
 |---|---|---|
-| **D1** | Journal store = a **second redb table layout** behind a distinct `JournalStore` port — NOT an extension of `RedbViewStore`. Shares the redb file, `Arc<Database>`, codec, fsync-ordering, and Earned-Trust probe; differs in trait surface + table layout (append-only-ordered vs single-blob-overwrite). The central reuse call. | ADR-0063 §1 |
-| **D2** | Journal codec = **CBOR (`ciborium`)**, not the ADR-0048 rkyv envelope. It is mutable runtime memory, not content-addressed; replay needs deterministic decode, and additive per-slice entry variants ride `#[serde(default)]`. | ADR-0063 §2 |
+| **D1** | Journal store = a **second redb table layout** behind a distinct `JournalStore` port — NOT an extension of `RedbViewStore`. Shares the redb file, `Arc<Database>`, codec, fsync-ordering, and Earned-Trust probe; differs in trait surface + table layout (append-only-ordered vs single-blob-overwrite). The central reuse call. | ADR-0066 §1 |
+| **D2** | Journal codec = **CBOR (`ciborium`)**, not the ADR-0048 rkyv envelope. It is mutable runtime memory, not content-addressed; replay needs deterministic decode, and additive per-slice entry variants ride `#[serde(default)]`. | ADR-0066 §2 |
 | **D3** | Engine ↔ lifecycle-reconciler boundary: the **reconciler stays pure-sync; the engine runs the async body off the action-shim.** The workflow-lifecycle reconciler emits `Action::StartWorkflow` and observes terminal rows (never `.await`); the engine is to workflows what `Driver` is to allocations. The subtlest boundary. | ADR-0064 §5 |
 | **D4** | Replay = engine cursor + `ctx.*` check-then-record. Re-execute `run` from the top; replay returns recorded results without re-firing effects (exactly-once on replay, K1); live performs + appends (fsync-before-suspend). Step identity is positional; `name` is a diagnostic label + a fail-closed replay-determinism check. Honest semantics: **at-least-once effect, exactly-once on replay**. | ADR-0064 §3 |
 | **D4a** | `ctx.run<T>(name, f)` (Restate `ctx.run` model — wrap any side-effecting future, journal its `T`, replay without re-running `f`) **replaces** the slice-01 `ctx.call(CallRequest) -> CallResponse` surface, which was hardcoded to a single transport datagram and could not return a value. `Transport` stays reachable via a `ctx.transport()` accessor. Greenfield single-cut — no shim, no migration. (User-pinned 2026-06-05.) | ADR-0064 §3 |
@@ -173,7 +173,7 @@ mitigation was reframed as SDK-era, not architectural).
 
 ## Migrated / permanent artifacts
 
-- **ADR-0063** (journal redb second-table layout) and **ADR-0064**
+- **ADR-0066** (journal redb second-table layout) and **ADR-0064**
   (Workflow trait/ctx + engine↔reconciler boundary) — authored through
   the architect agent; already in `docs/product/architecture/`, not
   migrated here.

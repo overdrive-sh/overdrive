@@ -166,7 +166,7 @@ async fn a_send_whose_action_emitted_record_fails_re_emits_on_resume() {
          ActionEmitted record failed (a record-before-send ordering would be 0)"
     );
 
-    // The failed append left NO ActionEmitted observable (ADR-0063 §4): the
+    // The failed append left NO ActionEmitted observable (ADR-0066 §4): the
     // journal is still just the two seeded signal entries.
     let after_injection = journal.load_journal(&workflow_id).await.unwrap_or_default();
     assert!(

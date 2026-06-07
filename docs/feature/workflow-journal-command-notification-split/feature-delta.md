@@ -4,7 +4,7 @@
 Wave: DESIGN (Morgan / nw-solution-architect) · Date: 2026-06-06 · Mode:
 **GUIDE** (Q&A complete, decisions Q1–Q6 LOCKED by the user) · Density:
 lean + `[REF]`. Parent primitive: `Workflow` durable-execution (GH #39,
-roadmap [3.2]; ADR-0063 / ADR-0064). This feature is a **typed
+roadmap [3.2]; ADR-0066 / ADR-0064). This feature is a **typed
 Command/Notification journal split** that closes a latent
 replay-corruption trap; it is designed OVER the locked B′ direction, not
 a re-litigation of it.
@@ -37,7 +37,7 @@ rationale). All LOCKED — encoded, not re-weighed.
   interleave in one ordered table). **No `#[serde(tag="v")]` envelope
   bump** — greenfield single-cut. *Rationale:* "make invalid states
   unrepresentable" — a notification cannot enter the command walk by type.
-  ADR-0063 §2 / CA-1.
+  ADR-0066 §2 / CA-1.
 - **[D2 = Q2] Partition AT THE CURSOR; store stays a dumb ordered log.**
   `JournalStore::load_journal` returns the flat ordered `Vec<LoadedEntry>`;
   `JournalCursorHandle::new`/`new_with_channels` partitions ONCE at
@@ -55,7 +55,7 @@ rationale). All LOCKED — encoded, not re-weighed.
   0. Storage-step ≠ command-index by design (storage =
   ordering/observability; command-index = replay identity). *Rationale:*
   conflating append-position with cursor-consumption-position IS the trap.
-  ADR-0063 §3 / CA-3.
+  ADR-0066 §3 / CA-3.
 - **[D4 = Q4] Determinism gate = Layers 1+2, fail-closed.** Layer 1
   (type-at-index, Restate RT0016 shape): recorded `JournalCommand` variant
   at command-index N must match the resumed body's await-op; mismatch →
@@ -72,7 +72,7 @@ rationale). All LOCKED — encoded, not re-weighed.
   "persist inputs, not derived state" — `step` is a cache of "my own
   position." **DELIVER must verify no consumer reads it** (the store
   counts for `next_step`; the cursor derives the command-index) and move
-  any position reader to position-derived. ADR-0063 §2 / CA-2.
+  any position reader to position-derived. ADR-0066 §2 / CA-2.
 - **[D6 = Q6] Minimal notification model; DROP the forward-pointer; new
   DST guard IN SCOPE.** Build ONLY `BTreeMap<SignalKey, JournalNotification>`
   — no general Restate-style `NotificationId` correlation model, no issue,

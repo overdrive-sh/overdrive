@@ -1,8 +1,8 @@
-//! `RedbJournalStore` — production `JournalStore` adapter per ADR-0063 §1.
+//! `RedbJournalStore` — production `JournalStore` adapter per ADR-0066 §1.
 //!
 //! The workflow journal rides the SAME runtime-owned redb substrate as
 //! [`RedbViewStore`](crate::view_store::redb::RedbViewStore): one redb
-//! file per node, one shared `Arc<Database>` (ADR-0063 §1
+//! file per node, one shared `Arc<Database>` (ADR-0066 §1
 //! one-file-two-layouts). `redb::Database::begin_read` / `begin_write`
 //! both take `&self`, so the same `Arc<Database>` is safe to share across
 //! the ViewStore and the JournalStore without further locking.
@@ -10,14 +10,14 @@
 //! The journal's table layout is DISTINCT from the ViewStore's
 //! single-blob-overwrite-per-target shape: ONE append-only table
 //! `__wf_journal__` keyed `(WorkflowId-bytes, u32)` with CBOR-encoded
-//! [`LoadedEntry`] blobs as values (ADR-0063 §3). The reserved
+//! [`LoadedEntry`] blobs as values (ADR-0066 §3). The reserved
 //! `__wf_journal__` name uses the double-underscore prefix outside the
 //! `ReconcilerName` validator grammar so it cannot collide with a
 //! per-reconciler ViewStore table sharing the same file.
 //!
 //! # Durability
 //!
-//! Per ADR-0063 §4 (reusing ADR-0035 §6 `WriteThroughOrdering`), every
+//! Per ADR-0066 §4 (reusing ADR-0035 §6 `WriteThroughOrdering`), every
 //! [`append`](RedbJournalStore::append) performs ONE redb write
 //! transaction with `Durability::Immediate` — the commit fsyncs before
 //! returning, so a crash after `Ok(())` preserves the entry across the
@@ -25,7 +25,7 @@
 //!
 //! # Earned Trust
 //!
-//! [`probe`](RedbJournalStore::probe) per ADR-0063 §4 writes a sentinel
+//! [`probe`](RedbJournalStore::probe) per ADR-0066 §4 writes a sentinel
 //! entry under a reserved probe key, fsyncs, reads it back byte-equal,
 //! and deletes it — leaving no residue on success. Any failure
 //! short-circuits boot via the composition root's
@@ -34,7 +34,7 @@
 //! # Codec
 //!
 //! CBOR (`ciborium`), NOT rkyv — the journal is mutable, runtime-owned,
-//! additively-evolving memory (ADR-0063 §2), the same codec
+//! additively-evolving memory (ADR-0066 §2), the same codec
 //! [`SimJournalStore`](../../../overdrive_sim/adapters/journal/index.html)
 //! uses, so the two adapters observe one contract.
 
@@ -50,14 +50,14 @@ use super::{
 /// Reserved append-only table for the workflow journal. The
 /// double-underscore prefix is outside the `ReconcilerName` validator's
 /// `^[a-z][a-z0-9-]{0,62}$` grammar, so no per-reconciler `ViewStore`
-/// table sharing this redb file can collide with it (ADR-0063 §1).
+/// table sharing this redb file can collide with it (ADR-0066 §1).
 const JOURNAL_TABLE_NAME: &str = "__wf_journal__";
 
 /// The journal table definition: key is `(WorkflowId-as-str, step)`,
 /// value is the CBOR-encoded [`LoadedEntry`] blob. The string key
 /// component is the `WorkflowId`'s canonical form; the `u32` is the
 /// monotonic await-point step index — the tuple gives the ascending
-/// `(id, step)` range-scan ordering for free (ADR-0063 §3), mirroring
+/// `(id, step)` range-scan ordering for free (ADR-0066 §3), mirroring
 /// the `SimJournalStore` `BTreeMap<(WorkflowId, u32), _>` key shape.
 const JOURNAL_TABLE: TableDefinition<(&str, u32), &[u8]> = TableDefinition::new(JOURNAL_TABLE_NAME);
 
@@ -72,7 +72,7 @@ const PROBE_WORKFLOW_ID: &str = "probe-wf-earned-trust";
 const PROBE_PAYLOAD: &[u8] = b"redb-journal-store-probe-v1";
 
 /// Production `JournalStore` adapter backed by the shared per-node redb
-/// file (ADR-0063 §1).
+/// file (ADR-0066 §1).
 ///
 /// Cheap to clone via `Arc<Database>`; safe to share across tasks and
 /// alongside [`RedbViewStore`](crate::view_store::redb::RedbViewStore) —
@@ -84,7 +84,7 @@ pub struct RedbJournalStore {
 
 impl RedbJournalStore {
     /// Construct over the shared `Arc<Database>` — the SAME handle /
-    /// redb file the `RedbViewStore` uses (ADR-0063 §1). The composition
+    /// redb file the `RedbViewStore` uses (ADR-0066 §1). The composition
     /// root (step 01-05) opens the database once and hands an
     /// `Arc::clone` to each store.
     #[must_use]
@@ -148,7 +148,7 @@ impl JournalStore for RedbJournalStore {
         // `spawn_blocking` would add an `.await` round-trip per append
         // that throws off DST-style yield-counting tests.
         let mut write = self.db.begin_write().map_err(map_transaction_error)?;
-        // `Durability::Immediate` forces fsync on commit per ADR-0063 §4
+        // `Durability::Immediate` forces fsync on commit per ADR-0066 §4
         // — the entry is on disk before this returns Ok.
         write.set_durability(Durability::Immediate);
         {
@@ -177,7 +177,7 @@ impl JournalStore for RedbJournalStore {
         let id = workflow_id.as_str();
         // Range scan `(id, 0)..=(id, u32::MAX)` yields keys in ascending
         // `(id, step)` order; filtered to this instance, that IS ascending
-        // step order (ADR-0063 §3).
+        // step order (ADR-0066 §3).
         let iter = table.range((id, 0u32)..=(id, u32::MAX)).map_err(map_storage_error)?;
         let mut out = Vec::new();
         for entry in iter {
@@ -260,7 +260,7 @@ impl JournalStore for RedbJournalStore {
 
 // -----------------------------------------------------------------------------
 // Error mapping — collapse redb's error hierarchy onto the
-// `JournalStoreError::Io` variant, mirroring `RedbViewStore`. ADR-0063
+// `JournalStoreError::Io` variant, mirroring `RedbViewStore`. ADR-0066
 // reuses ADR-0035's "acceptable in Phase 1" stance; reconcilers/engines
 // that branch on a specific redb class can split these later.
 // -----------------------------------------------------------------------------

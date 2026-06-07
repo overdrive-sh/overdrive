@@ -47,7 +47,7 @@ verdict. Trade-off content is under [WHY] below.
   terminal = explicit `Err(TerminalError)` or engine-minted `BudgetExhausted`.
   Budget POLICY is an engine constant (not persisted); budget INPUTS
   (attempts, last-failure) derive from journal `RetryAttempted` entries
-  (additive command, ADR-0063 §2) recomputed against the live policy. The
+  (additive command, ADR-0066 §2) recomputed against the live policy. The
   full re-drive loop is Slice 04 (types + success/explicit-terminal paths
   land Slices 01–03; body contract stable from Slice 01).
 - **[D5] Typed `WorkflowStart.input` crossing Raft with rkyv-envelope
@@ -100,7 +100,7 @@ verdict. Trade-off content is under [WHY] below.
 
 | Choice | Tech | Rationale | License |
 |---|---|---|---|
-| Body output/input erasure codec | `ciborium` (CBOR) | Already the journal step-result + `ctx.run<T>` codec (ADR-0063 §2); homogeneous durable surface; runtime-memory class | Apache-2.0/MIT (workspace dep) |
+| Body output/input erasure codec | `ciborium` (CBOR) | Already the journal step-result + `ctx.run<T>` codec (ADR-0066 §2); homogeneous durable surface; runtime-memory class | Apache-2.0/MIT (workspace dep) |
 | Durable `WorkflowStart` intent codec | `rkyv` versioned envelope (ADR-0048) | Intent-class durable aggregate read across restarts — the `Job` precedent, NOT CBOR (the two codecs stay separate per `development.md`) | MIT (workspace dep) |
 | `TerminalError`/`WorkflowStatus` derive | `serde` + `thiserror` (errors) | typed-error discipline (core libraries never eyre); serde for journal/obs carriage | workspace deps |
 | Async author trait | `async_trait` | already a core dep; no tokio in core (ADR-0064 §1 carried forward) | MIT/Apache-2.0 |
@@ -126,7 +126,7 @@ No new dependencies. No proprietary tech.
 | `WorkflowStart` placeholder (`name` only) | `overdrive-core/src/workflow/mod.rs:1160` | The spec the trigger carries | **EXTEND** | Add `input: Vec<u8>` + envelope/codec; already core because `Action` is core. |
 | `Action::StartWorkflow { start, correlation }` | `overdrive-core/src/reconcilers/mod.rs:380` | The reconciler→engine trigger | **REUSE (unchanged variant)** | `spec` reshapes; the variant shape is exactly D-INH-3. No new Action. |
 | `JournalCommand::Terminal { result }` | `overdrive-control-plane/src/journal/mod.rs:326` | The durable terminal | **EXTEND** (`result: WorkflowResult` → `status: WorkflowStatus`) | The lossless-terminal short-circuit already depends on this carrying the full terminal; swap the carried type. |
-| `JournalCommand` (additive variants) | `overdrive-control-plane/src/journal/mod.rs:236` | Retry bookkeeping (D4) | **EXTEND** | `RetryAttempted` is an additive `#[serde(default)]` command per ADR-0063 §2 — the established additive-variant pattern. |
+| `JournalCommand` (additive variants) | `overdrive-control-plane/src/journal/mod.rs:236` | Retry bookkeeping (D4) | **EXTEND** | `RetryAttempted` is an additive `#[serde(default)]` command per ADR-0066 §2 — the established additive-variant pattern. |
 | `ObservationRow::WorkflowTerminal { result }` | `overdrive-core/src/traits/observation_store.rs:561` | The observable terminal | **EXTEND** (`result` → `status`) | Same plumbing; swap the carried type to the projection. |
 | `WorkflowInstanceState.terminal: Option<WorkflowResult>` | `overdrive-core/src/reconcilers/workflow_lifecycle.rs:66` | Reconciler convergence signal | **EXTEND** (`Option<WorkflowStatus>`) | The `terminal.is_some()` convergence check is unchanged; only the carried type. |
 | `WorkflowEngine::started_digests` `TODO(#217)` | `overdrive-control-plane/src/workflow_runtime/mod.rs:542` | `input_digest` derivation | **MODIFY** (discharge #217) | `input_digest = ContentHash::of(&spec.input)`; the marker exists precisely for this. |

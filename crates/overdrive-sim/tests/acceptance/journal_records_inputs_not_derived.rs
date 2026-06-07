@@ -4,9 +4,9 @@
 //! Scenario S-WP-01-05. O6. Per `development.md` "Persist inputs, not
 //! derived state": the recorded `LoadedEntry` carries the step's
 //! inputs/result digest and no derived-deadline / "remaining" field —
-//! and, post the command/notification split (ADR-0063 §2 / ADR-0064 §3,
+//! and, post the command/notification split (ADR-0066 §2 / ADR-0064 §3,
 //! D5), no in-entry `step` either (position is structural, not a
-//! persisted cache of "my own position"). ADR-0063 §2
+//! persisted cache of "my own position"). ADR-0066 §2
 //! (`RunResult { name, result_digest, result_bytes }`,
 //! `Started { spec_digest, input_digest }`).
 //!
@@ -29,7 +29,7 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 
 /// Build the `Started` entry's `spec_digest` from the fixture's spec —
 /// the INPUT the journal records, not a derived cache. Mirrors what the
-/// engine will do (ADR-0063 §2): hash the spec's canonical identity.
+/// engine will do (ADR-0066 §2): hash the spec's canonical identity.
 fn spec_digest_of(spec_name: &str) -> ContentHash {
     ContentHash::of(spec_name.as_bytes())
 }
@@ -40,7 +40,7 @@ async fn provision_record_journal_entry_records_inputs_not_a_derived_cache() {
     let workflow_id = WorkflowId::new("wf-provision-0001").expect("valid workflow id");
 
     // The journal's first entry records the workflow's INPUTS: the spec
-    // digest + the input digest (ADR-0063 §2 `Started`). Derived from
+    // digest + the input digest (ADR-0066 §2 `Started`). Derived from
     // the shared `ProvisionRecord` fixture's spec — no pre-computed
     // deadline/remaining cache is involved. Post-#217 the `input_digest`
     // hashes the start-INPUT bytes (`spec.input` — the opaque CBOR of the

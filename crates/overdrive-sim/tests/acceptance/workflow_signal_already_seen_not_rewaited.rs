@@ -5,7 +5,7 @@
 //! that recorded `SignalSeen` for `key` before the crash is killed and
 //! restarted on the same node; on resume it does NOT re-block on `key` —
 //! it reads the recorded signal value and proceeds (check-then-record on
-//! replay), EVEN AFTER the signal row is removed from the surface. ADR-0063
+//! replay), EVEN AFTER the signal row is removed from the surface. ADR-0066
 //! §2 (`SignalSeen { value }`), ADR-0064 §3.
 //!
 //! # Port-to-port

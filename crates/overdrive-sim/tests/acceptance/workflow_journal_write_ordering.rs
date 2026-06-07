@@ -7,7 +7,7 @@
 //! the engine does NOT advance the journal cursor and does NOT suspend
 //! with an unrecorded step acknowledged; on the next boot the journal
 //! carries no phantom half-written entry. fsync-then-suspend is
-//! load-bearing (ADR-0063 §4).
+//! load-bearing (ADR-0066 §4).
 //!
 //! Two surfaces are asserted:
 //!

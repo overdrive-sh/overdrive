@@ -464,7 +464,7 @@ pub enum Invariant {
     /// journal cursor does NOT advance: a subsequent retry is still a LIVE
     /// call (not a replay), the journal carries no phantom half-written
     /// entry, and the engine does not suspend acknowledging an unrecorded
-    /// step. fsync-then-suspend is load-bearing (ADR-0063 §4). The
+    /// step. fsync-then-suspend is load-bearing (ADR-0066 §4). The
     /// evaluator body lives in `crate::invariants::evaluators`.
     WorkflowJournalWriteOrdering,
 

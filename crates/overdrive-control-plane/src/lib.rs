@@ -70,7 +70,7 @@ pub mod handlers;
 pub mod iface;
 // workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
 // CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +
-// `WorkflowId` for the §18 workflow await-point journal (ADR-0063). A
+// `WorkflowId` for the §18 workflow await-point journal (ADR-0066). A
 // second redb table layout on the shared runtime substrate, distinct from
 // `view_store`. Real `RedbJournalStore` adapter lands 01-04; engine wiring
 // 01-05.

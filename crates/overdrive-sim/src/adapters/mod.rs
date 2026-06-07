@@ -29,7 +29,7 @@ pub mod transport;
 // `overdrive_control_plane::view_store::ViewStore` per ADR-0035 §2.
 pub mod view_store;
 // workflow-primitive step 01-03 — `SimJournalStore` impl of
-// `overdrive_control_plane::journal::JournalStore` per ADR-0063. In-memory
+// `overdrive_control_plane::journal::JournalStore` per ADR-0066. In-memory
 // `BTreeMap<(WorkflowId, u32), Vec<u8>>` with injectable fsync-failure.
 pub mod journal;
 // SCAFFOLD: true — service-health-check-probes feature.

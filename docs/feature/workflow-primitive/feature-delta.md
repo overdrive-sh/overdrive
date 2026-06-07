@@ -347,7 +347,7 @@ recommended call is recorded here, the 3 warranting user ratification flagged.
   + codec + fsync-ordering + probe discipline**, with a distinct table layout.
   Rationale: append-only-ordered-per-instance ≠ single-blob-overwrite; one
   trait must not carry two contracts. Substrate reuse (O6/K5) is identical to
-  the "extend" option, without the trait coupling. ADR-0063 §1. **(RATIFY — the
+  the "extend" option, without the trait coupling. ADR-0066 §1. **(RATIFY — the
   central reuse call.)**
 - **[DDD-2] Journal codec = CBOR (`ciborium`, ADR-0035 §3 discipline), NOT the
   ADR-0048 rkyv envelope.** The journal is mutable runtime memory (ADR-0035's
@@ -355,7 +355,7 @@ recommended call is recorded here, the 3 warranting user ratification flagged.
   deterministic *decode* (CBOR gives it), not zero-copy archived-byte
   canonicality (buys nothing — never hashed). Additive entry-variants per
   await-surface slice ride `#[serde(default)]`; rkyv would force a per-slice
-  version-bump + golden-fixture. ADR-0063 §2. **(RATIFY — codec choice.)**
+  version-bump + golden-fixture. ADR-0066 §2. **(RATIFY — codec choice.)**
 - **[DDD-3] Replay = engine-owned journal cursor; `ctx.*` check-then-record.**
   The general durable-step primitive is `ctx.run<T>(name, f)` (Restate `ctx.run`
   model — wrap any side-effecting future, journal its `T`, replay the journaled
@@ -453,7 +453,7 @@ recommended call is recorded here, the 3 warranting user ratification flagged.
 | `Action::StartWorkflow` placeholder | `reconcilers/mod.rs:373` | lifecycle trigger | **EXTEND** | Already the exact D-INH-3 shape; engine consumes it off the shim |
 | `WorkflowSpec` placeholder | `reconcilers/mod.rs:562` | the spec | **EXTEND** (make concrete) | Already in core (Action is core); replace empty struct |
 | `ReplayEquivalentEmptyWorkflow` invariant + evaluator | `overdrive-sim/.../mod.rs:136`,`evaluators.rs:584` | replay DST invariant | **EXTEND** (graduate) | Placeholder says "Phase 2 replaces with actual journal replay"; K4 is that |
-| `RedbViewStore`/`ViewStore`/`SimViewStore` | `view_store/{mod,redb}.rs` | redb durable memory; fsync ordering; bulk-load; probe; CBOR | **REUSE substrate+discipline; CREATE NEW port** | THE central call (ADR-0063 §1). Substrate shared; trait+layout differ — distinct `JournalStore` avoids two-contracts-on-one-trait, zero reuse loss |
+| `RedbViewStore`/`ViewStore`/`SimViewStore` | `view_store/{mod,redb}.rs` | redb durable memory; fsync ordering; bulk-load; probe; CBOR | **REUSE substrate+discipline; CREATE NEW port** | THE central call (ADR-0066 §1). Substrate shared; trait+layout differ — distinct `JournalStore` avoids two-contracts-on-one-trait, zero reuse loss |
 | action-shim `dispatch` + reconciler runtime | `action_shim/mod.rs:446`, `reconciler_runtime` | per-tick async-effect pipeline | **EXTEND** | Engine driven off the same shim; `StartWorkflow` no-op arm → `engine.start` |
 | `Clock`/`Transport`/`Entropy` port traits | `traits/` | injected non-determinism | **REUSE** | `WorkflowCtx` is a new wrapper over existing ports; no new port |
 | `CorrelationKey`/`HttpCall` machinery | `id.rs:538`, `reconcilers/mod.rs:357` | instance correlation + remote idempotency-key precedent | **REUSE** | instance-level `CorrelationKey` keys the terminal row; `HttpCall`'s idempotency-key shape is the precedent for making a `ctx.run` closure's remote effect exactly-once |
@@ -594,7 +594,7 @@ workflow_journal { … } }` subtree). RED-classification: `distill/red-classific
 DESIGN driving/driven ports + the brownfield substrate the scenarios depend on:
 
 - **Driving:** `Workflow` trait + `WorkflowCtx` (core, NEW — DELIVER), `Action::StartWorkflow` (core, EXTEND placeholder `reconcilers/mod.rs:373`).
-- **Driven (NEW):** `JournalStore` port + `RedbJournalStore` (control-plane) + `SimJournalStore` (sim) — ADR-0063.
+- **Driven (NEW):** `JournalStore` port + `RedbJournalStore` (control-plane) + `SimJournalStore` (sim) — ADR-0066.
 - **Driven (REUSE, brownfield-verified):** reconciler runtime, redb ViewStore (shared `Arc<Database>`), Action channel → Raft, `ObservationStore`, `Clock`/`Transport`/`Entropy` port traits, `CorrelationKey`/`HttpCall` machinery, the DST harness.
 - **Graduated:** the `ReplayEquivalentEmptyWorkflow` placeholder invariant (`overdrive-sim/src/invariants/mod.rs:136`) becomes `ReplayEquivalenceProvisionRecord` (K4) — DELIVER slice 01.
 - **No external dependency outside the workspace.** No DEVOPS env-matrix (DST-internal). No new external/non-deterministic driven port (no clock/email/SMS/payment/LLM/API fake needed).
@@ -602,7 +602,7 @@ DESIGN driving/driven ports + the brownfield substrate the scenarios depend on:
 ## Wave: DISTILL / [REF] DST invariant catalogue delta
 
 Three `overdrive-sim::invariants::Invariant` variants the DISTILL scaffolds
-NAME; they LAND (graduate) in DELIVER (ADR-0064 §6, ADR-0063 §6):
+NAME; they LAND (graduate) in DELIVER (ADR-0064 §6, ADR-0066 §6):
 
 1. **`ReplayEquivalenceProvisionRecord`** — graduates the placeholder `ReplayEquivalentEmptyWorkflow` (`mod.rs:136`); replaces the `evaluate_replay_equivalent_empty_workflow` two-SimEntropy-transcript stub with a real journal replay against the engine + `SimJournalStore`. Uninterrupted-vs-crash-resumed trajectory byte-equality + `assert_eventually!(is_terminal)` bounded progress. **K4, on the CI critical path.** (S-WP-01-09; extended for S-WP-02-04 / S-WP-03-05.)
 2. **`WorkflowJournalWriteOrdering`** — under `SimJournalStore` with injected fsync-failure on the next append, the engine does not advance the cursor / suspend (mirrors ADR-0035 `WriteThroughOrdering`). (S-WP-01-10.)

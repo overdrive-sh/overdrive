@@ -9,7 +9,7 @@
 //! asserting the resumed trajectory is byte-identical to the
 //! uninterrupted one (`assert_replay_equivalent!`) AND
 //! `assert_eventually!(is_terminal)` within the declared step budget
-//! (bounded progress). ADR-0063 §6, ADR-0064 §3/§6.
+//! (bounded progress). ADR-0066 §6, ADR-0064 §3/§6.
 //!
 //! Cross-scenario consistency (journey steps 3↔4): the run prints a seed
 //! and reproduces bit-for-bit on a second run — the `trust-the-sim`

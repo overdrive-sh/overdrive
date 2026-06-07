@@ -4,7 +4,7 @@
 //! Scenario S-WP-02-03. O3/O6. Per `development.md` "Persist inputs, not
 //! derived state": the `SleepArmed` entry carries `deadline_unix` (an
 //! input) and no persisted "remaining duration" field — resume recomputes
-//! `recorded_deadline − clock.now()`. ADR-0063 §2.
+//! `recorded_deadline − clock.now()`. ADR-0066 §2.
 //!
 //! # Port-to-port
 //!

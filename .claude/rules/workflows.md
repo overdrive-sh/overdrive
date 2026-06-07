@@ -10,7 +10,7 @@ trait shape (`async fn run(ctx, input) → Result<Output, TerminalError>`),
 the `ctx` await-surface (`run` / `sleep` / `wait_for_signal` /
 `emit_action`), journal-and-replay mechanics, and the result/error model
 (terminal vs. transient) — lives in `.claude/rules/development.md` §
-"Workflow contract" (and ADR-0063/0064/0065) and is the SSOT for *how* to
+"Workflow contract" (and ADR-0066/0064/0065) and is the SSOT for *how* to
 write one. This file is the SSOT for *when* and *whether*. The
 reconciler-vs-workflow split lives in `development.md` § "Workflow
 contract" (the decision table) and `.claude/rules/reconcilers.md`; this
@@ -169,7 +169,7 @@ The shapes that signal the boundary is being violated:
 - **The primitive (Bar 2 destination):** the `Workflow` trait +
   `WorkflowCtx` (`crates/overdrive-core/src/workflow/mod.rs`); the engine
   (`crates/overdrive-control-plane/src/workflow_runtime/`); the durable
-  journal (`crates/overdrive-control-plane/src/journal/`, ADR-0063,
+  journal (`crates/overdrive-control-plane/src/journal/`, ADR-0066,
   `workflow-journal.redb`); the result/error model (`StepError` /
   `TerminalError` / `WorkflowStatus`, ADR-0065). Driven by
   `Action::StartWorkflow` through the action-shim; resumed by the
@@ -217,7 +217,7 @@ The shapes that signal the boundary is being violated:
 - `.claude/rules/testing.md` § "Tier 1 — Deterministic Simulation
   Testing" — `assert_replay_equivalent!` is the canonical workflow target;
   workflow `run` bodies are a mandatory mutation-testing surface.
-- ADR-0063 (workflow journal, redb), ADR-0064 (Workflow trait + ctx +
+- ADR-0066 (workflow journal, redb), ADR-0064 (Workflow trait + ctx +
   engine↔reconciler boundary), ADR-0065 (result/error model: typed output
   + terminal error).
 - Whitepaper §18 (workflows as the peer primitive to reconcilers), §21

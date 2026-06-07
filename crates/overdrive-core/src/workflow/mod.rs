@@ -662,7 +662,7 @@ pub enum WorkflowStatus {
 }
 
 /// The [`WorkflowCtx`] await-op surface a replay-path divergence was
-/// detected on (ADR-0063 §2 journaled await-ops). Carried by
+/// detected on (ADR-0066 §2 journaled await-ops). Carried by
 /// [`WorkflowCtxError::NonDeterministic`] so the rendered message names
 /// the surface that actually diverged — `replay_sleep` /
 /// `replay_signal` / `replay_emit` mismatches must NOT be reported with
@@ -811,7 +811,7 @@ pub enum WorkflowCtxError {
     },
 
     /// The engine's journal-cursor handle failed to durably record a
-    /// live `ctx` await-point (append + fsync + advance). Per ADR-0063
+    /// live `ctx` await-point (append + fsync + advance). Per ADR-0066
     /// §4 (fsync-then-suspend) the engine MUST surface this rather than
     /// continue against an unjournaled effect — a resume would re-fire
     /// the effect, breaking exactly-once.
@@ -995,7 +995,7 @@ impl From<TerminalError> for WorkflowDriveError {
 ///
 /// **Post:** a replay hit at command-index N returns the recorded
 /// [`JournalCommand`]'s result and advances the command-cursor by exactly
-/// 1. A live op appends the command durably (append + fsync, ADR-0063 §4)
+/// 1. A live op appends the command durably (append + fsync, ADR-0066 §4)
 /// and advances by exactly 1.
 ///
 /// **Invariant:** the cursor advances over `JournalCommand`s ONLY —
@@ -1113,7 +1113,7 @@ pub trait JournalCursor: Send + Sync {
     /// # Postconditions
     ///
     /// On `Ok(())` the result bytes are durably journaled (append + fsync
-    /// per ADR-0063 §4) and the cursor has advanced past this step, so a
+    /// per ADR-0066 §4) and the cursor has advanced past this step, so a
     /// subsequent resume replays them via [`replay_run`](Self::replay_run)
     /// without re-polling the step's future.
     ///
@@ -1162,7 +1162,7 @@ pub trait JournalCursor: Send + Sync {
     /// # Postconditions
     ///
     /// On `Ok(())` the `SleepArmed { deadline_unix }` entry is durably
-    /// journaled (append + fsync per ADR-0063 §4) and the cursor has
+    /// journaled (append + fsync per ADR-0066 §4) and the cursor has
     /// advanced past this step, so a subsequent resume replays it via
     /// [`replay_sleep`](Self::replay_sleep) without re-arming.
     ///
@@ -1226,7 +1226,7 @@ pub trait JournalCursor: Send + Sync {
     ) -> Result<Option<SignalValue>, WorkflowCtxError>;
 
     /// Durably record the `SignalAwaited` armed entry for `signal_key`
-    /// (ADR-0063 §4 fsync-then-suspend) and advance the cursor — the FIRST
+    /// (ADR-0066 §4 fsync-then-suspend) and advance the cursor — the FIRST
     /// half of the live `ctx.wait_for_signal` path, BEFORE the engine
     /// begins blocking.
     ///
@@ -1269,7 +1269,7 @@ pub trait JournalCursor: Send + Sync {
     ) -> Result<Option<SignalValue>, WorkflowCtxError>;
 
     /// Durably record the `SignalSeen { value }` NOTIFICATION for
-    /// `signal_key` (ADR-0063 §4) — the SECOND half of the live
+    /// `signal_key` (ADR-0066 §4) — the SECOND half of the live
     /// `ctx.wait_for_signal` path, AFTER the engine observed the signal
     /// present. Records the observed `value` as an input so a resumed run
     /// replays it via [`replay_signal`](Self::replay_signal) without
@@ -1330,7 +1330,7 @@ pub trait JournalCursor: Send + Sync {
     ///
     /// On `Ok(())` the typed Action has been handed to the Action channel
     /// AND the `ActionEmitted` entry is durably journaled (append + fsync
-    /// per ADR-0063 §4), so a subsequent resume replays it via
+    /// per ADR-0066 §4), so a subsequent resume replays it via
     /// [`replay_emit`](Self::replay_emit) without re-sending the Action.
     ///
     /// **At-least-once on the live path.** The send is BEFORE the durable
@@ -1602,7 +1602,7 @@ impl WorkflowCtx {
     /// `From<E: std::error::Error>`, so ANY [`std::error::Error`] is absorbed
     /// into a [`StepError::Retryable`] transient. The closure outcomes:
     /// - **`Ok(value)`** — the step succeeded. Its `value` is CBOR-journaled
-    ///   (append + fsync per ADR-0063 §4) and returned; a resumed run replays
+    ///   (append + fsync per ADR-0066 §4) and returned; a resumed run replays
     ///   it WITHOUT re-polling `f` (exactly-once on the replay path).
     /// - **`Err(StepError::Retryable { .. })`** — the step failed TRANSIENTLY
     ///   (any [`std::error::Error`] propagated with `?` auto-folds here), the
@@ -1634,7 +1634,7 @@ impl WorkflowCtx {
     ///   so a replay hit always decodes the cleared-step success: a transient
     ///   step that SUCCEEDED on a prior re-drive replays bit-identically.
     /// - **Live:** otherwise `f` is awaited; an `Ok` result is CBOR-encoded
-    ///   and durably recorded (append + fsync per ADR-0063 §4) via the
+    ///   and durably recorded (append + fsync per ADR-0066 §4) via the
     ///   cursor BEFORE returning, and the cursor advances. An
     ///   `Err(StepError::Retryable { .. })` parks BEFORE any journaling; an
     ///   `Err(StepError::Terminal(t))` returns `Err(t)` BEFORE any journaling.
@@ -1768,12 +1768,12 @@ impl WorkflowCtx {
     /// Suspend the workflow for `duration` through the injected
     /// [`Clock`] — the slice-02 await-surface (ADR-0064 §3 sleep branch).
     ///
-    /// **Check-then-record, deadline-as-input (ADR-0063 §2,
+    /// **Check-then-record, deadline-as-input (ADR-0066 §2,
     /// `development.md` § "Persist inputs, not derived state").**
     ///
     /// - **Live:** the absolute deadline is computed as
     ///   `clock.unix_now() + duration`, durably recorded as a `SleepArmed
-    ///   { deadline_unix }` entry (append + fsync per ADR-0063 §4) BEFORE
+    ///   { deadline_unix }` entry (append + fsync per ADR-0066 §4) BEFORE
     ///   parking, and the ctx then parks on the Clock deadline. The
     ///   journal records the DEADLINE (an input), never a "remaining"
     ///   cache.
@@ -1831,7 +1831,7 @@ impl WorkflowCtx {
     ///   `SimClock` the harness advances logical time and writes the signal
     ///   row, waking the park; under `SystemClock` the park is a Tokio
     ///   timer). When the signal is PRESENT it records `SignalSeen { value }`
-    ///   durably (fsync per ADR-0063 §4) and returns the value. The
+    ///   durably (fsync per ADR-0066 §4) and returns the value. The
     ///   `SignalAwaited` and `SignalSeen` records are at DISTINCT cursor
     ///   positions, so a crash WHILE blocked leaves `SignalAwaited` with no
     ///   following `SignalSeen` — the re-block-on-resume shape
@@ -1885,7 +1885,7 @@ impl WorkflowCtx {
     ///   Action is NOT re-sent — exactly-once *on the replay path* (once
     ///   `ActionEmitted` is journaled, resume replays it without re-sending).
     /// - **Live:** the engine sends the Action on the Action channel, then
-    ///   records `ActionEmitted` durably (fsync per ADR-0063 §4) before
+    ///   records `ActionEmitted` durably (fsync per ADR-0066 §4) before
     ///   returning, and advances the cursor.
     ///
     /// **Honest semantics:** the emit is *at-least-once* — a crash after the
@@ -2655,7 +2655,7 @@ mod tests {
     /// `FromStr` exactly (`development.md` § "Newtype completeness"): both
     /// CBOR-round-trip bit-equal, the property the `SignalSeen` journal
     /// variant depends on (it carries a `SignalValue` and is CBOR-encoded
-    /// per ADR-0063 §2). `SignalValue` is opaque — any payload round-trips.
+    /// per ADR-0066 §2). `SignalValue` is opaque — any payload round-trips.
     #[test]
     fn signal_key_and_value_cbor_round_trip_bit_equal() {
         let key = SignalKey::new("provision-done").expect("valid signal key");

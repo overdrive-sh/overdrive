@@ -5,7 +5,7 @@
 //! a recorded deadline is crashed at an arbitrary point in the sleep
 //! window and resumed (`SimClock` advances logical time); the post-sleep
 //! `ctx.run` fires only at/after the ORIGINAL deadline, never earlier,
-//! and the terminal result is unchanged by the crash timing. ADR-0063 §2
+//! and the terminal result is unchanged by the crash timing. ADR-0066 §2
 //! (`SleepArmed { deadline_unix }`), ADR-0064 §3.
 //!
 //! # Port-to-port
@@ -16,7 +16,7 @@
 //! driven-port boundary: the post-sleep `SimInbox` receives ZERO datagrams
 //! while the resume clock is held BEFORE the recorded deadline, and exactly
 //! one once logical time reaches the original deadline. The recorded
-//! `SleepArmed { deadline_unix }` is an INPUT (ADR-0063 §2); the resume
+//! `SleepArmed { deadline_unix }` is an INPUT (ADR-0066 §2); the resume
 //! recomputes the remaining wait from `recorded_deadline − clock.now()`,
 //! never from when the crash occurred.
 

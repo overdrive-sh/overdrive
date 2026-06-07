@@ -22,7 +22,7 @@ the §3 cursor/replay partition (CA-5), the §3 determinism gate Layers 1+2
 (CA-6), the §4 `ctx` await-surface mechanics, and the §5 reconciler
 purity boundary are **unchanged and carried forward verbatim**.
 
-**Companion**: ADR-0063 (the redb journal — `Terminal` command + `Started`
+**Companion**: ADR-0066 (the redb journal — `Terminal` command + `Started`
 digests are touched here). **Composes with**: ADR-0035 (`Reconciler`
 retry-budget-in-`View` precedent the engine's retry-location contrasts
 with), ADR-0037 (`TerminalCondition` — the control-plane terminal-status
@@ -79,7 +79,7 @@ which is exactly what `WorkflowResult` does today.
 Two project-specific facts sharpen this:
 
 - **The `reason: String` is itself a replay-determinism hazard.** ADR-0064
-  §3 / ADR-0063 require bit-identical replay; the panic-containment path
+  §3 / ADR-0066 require bit-identical replay; the panic-containment path
   in the engine already had to derive a body-`Failed`'s `reason` from a
   *deterministic* downcast (never the address-bearing panic box) to keep
   the `Terminal` command's bytes stable. A free-text body-authored `reason`
@@ -423,7 +423,7 @@ Concretely:
   recomputed-from-inputs (the journal is the input; the attempt count and
   next-retry deadline are recomputed against the live policy on each re-drive).
   A dedicated retry-bookkeeping journal entry (a `RetryAttempted` command,
-  additive per ADR-0063 §2) records the attempt input; the engine recomputes
+  additive per ADR-0066 §2) records the attempt input; the engine recomputes
   `attempts` and the backoff deadline from the count of these entries + the
   policy on each re-drive.
 
@@ -486,7 +486,7 @@ pub struct WorkflowStart {
    is **intent-class durable state** read back across restarts — the
    ADR-0048 envelope case, the same class as the `Job` aggregate. (Contrast:
    the journal `input`/`Output`/`Terminal` bytes are runtime-memory CBOR per
-   ADR-0063 §2 — they are NOT re-aliased through rkyv. The two codecs stay
+   ADR-0066 §2 — they are NOT re-aliased through rkyv. The two codecs stay
    separate per the `development.md` rule; do not conflate.) The
    `input: Vec<u8>` inside `WorkflowStart` is itself opaque CBOR (the erased
    `W::Input`); the rkyv envelope wraps the OUTER `WorkflowStart`, not the
@@ -870,7 +870,7 @@ internal mechanism.)
    retry window's START timestamp is an input that must survive crash-resume (so
    elapsed can be recomputed against `clock.unix_now()` each drive). It is
    journaled on the FIRST `RetryAttempted` for the step: the `RetryAttempted`
-   command (ADR-0063 §2; additive `#[serde(default)]`) gains a
+   command (ADR-0066 §2; additive `#[serde(default)]`) gains a
    `started_at_unix: Option<std::time::Duration>` field — `Some(clock.unix_now())`
    on the first attempt, `None` thereafter — exactly mirroring the
    `SleepArmed { deadline_unix: Duration }` absolute-wall-clock shape. The engine
@@ -881,7 +881,7 @@ internal mechanism.)
    policy.max_duration`. No derived "deadline" field is persisted — only the
    start instant (an input) and the attempt count (recomputed from the
    `RetryAttempted` count). This addition is additive-`#[serde(default)]` per
-   ADR-0063 §2 and is engine-side only; the body contract is untouched.
+   ADR-0066 §2 and is engine-side only; the body contract is untouched.
 2. **Multi-step policy resolution — the FAILING step's policy governs.** When a
    workflow has several `ctx.run`s with different policies, the policy of the
    step that FAILED on the current drive governs the re-drive decision.
@@ -914,13 +914,13 @@ crafter decision: **`max_duration` requires the additive
 schema change. The journal (`JournalCommand`) is **CBOR (`ciborium`) `#[serde]`
 with additive `#[serde(default)]` evolution — NO golden-bytes fixture and NO
 `#[serde(tag="v")]` version envelope** (per the journal module's own codec doc,
-`crates/overdrive-control-plane/src/journal/mod.rs` header, and ADR-0063 §2;
+`crates/overdrive-control-plane/src/journal/mod.rs` header, and ADR-0066 §2;
 greenfield single-cut, no surviving on-disk journals). The golden-bytes /
 versioned-envelope schema-evolution ceremony (testing.md "Archive
 schema-evolution roundtrip") applies to **rkyv** envelopes (ADR-0048:
 observation rows, intent aggregates, `WorkflowStart`), NOT the CBOR journal.
 `started_at_unix: Option<Duration>` is added under `#[serde(default)]`
-(additive, ADR-0063 §2); the sim CBOR round-trip generator exercises both
+(additive, ADR-0066 §2); the sim CBOR round-trip generator exercises both
 `Some`/`None` arms — no fixture. This is **not a deferral** (no scope is being
 pushed to a future slice; the field is specified here and lands with the Gap-2
 implementation) and therefore needs no GitHub issue. It is flagged so the
@@ -1063,7 +1063,7 @@ Alternative D rejects for the budget *location*.)
 - **One additive journal-schema field (`RetryAttempted.started_at_unix`).**
   Gap 2's `max_duration` needs the retry window's start instant journaled (an
   input). The journal is CBOR (`ciborium`); the field is additive
-  (`#[serde(default)]`, ADR-0063 §2) and needs **no golden-bytes fixture and no
+  (`#[serde(default)]`, ADR-0066 §2) and needs **no golden-bytes fixture and no
   version envelope** — the sim CBOR round-trip exercising both `Some`/`None`
   arms is the coverage. (The golden-bytes ceremony is rkyv-only — ADR-0048;
   it applies to `WorkflowStart`, not the CBOR journal.) One more durable field
@@ -1132,7 +1132,7 @@ Alternative D rejects for the budget *location*.)
 
 - ADR-0064 — the amended base (§2/§3/§5/§6); §1/§3-cursor/§4/§5-boundary
   carried forward.
-- ADR-0063 — the journal (`Terminal` command's `status` field; `Started`
+- ADR-0066 — the journal (`Terminal` command's `status` field; `Started`
   digests; the additive `RetryAttempted` command for D4).
 - ADR-0048 — rkyv versioned-envelope + typed-codec discipline `WorkflowStart`
   input adopts (the `Job` aggregate precedent).
@@ -1207,7 +1207,7 @@ Alternative D rejects for the budget *location*.)
   (`WorkflowCtxError::TransientStep` gains `policy`) and
   `drive_to_terminal`/`redrive_decision` consult it instead of the global
   constant. `max_duration`'s start instant is journaled as an additive
-  `RetryAttempted.started_at_unix: Option<Duration>` input (ADR-0063 §2; first
+  `RetryAttempted.started_at_unix: Option<Duration>` input (ADR-0066 §2; first
   attempt only). Step-local in-place retry is the considered-and-rejected
   alternative (would re-architect the durable re-drive model). Both core
   invariants restated as still-true under Gap 1 + Gap 2. Greenfield single-cut.

@@ -145,7 +145,7 @@ fn started_facts(
 /// `input_digest`), and is idempotent on resume: driving `start` a second
 /// time over the persisted journal does NOT append a duplicate `Started`.
 ///
-/// ADR-0063 §2 / ADR-0064 §5.
+/// ADR-0066 §2 / ADR-0064 §5.
 ///
 /// # Port-to-port
 ///
@@ -190,7 +190,7 @@ async fn start_writes_started_at_command_index_0_idempotent_on_resume() {
     );
     let workflow_id = WorkflowId::new("wf-provision-0002").expect("valid instance id");
 
-    // The input-derived digests the engine must record (ADR-0063 §2): the
+    // The input-derived digests the engine must record (ADR-0066 §2): the
     // spec's canonical identity (`spec_digest`) and the START INPUT bytes
     // (`input_digest`). Per `development.md` § "Persist inputs, not derived
     // state" — INPUTS, not a pre-computed cache. Post-#217 the input digest
@@ -226,7 +226,7 @@ async fn start_writes_started_at_command_index_0_idempotent_on_resume() {
     assert_eq!(
         first_started,
         Some((expected_spec_digest, expected_input_digest)),
-        "Started records the input-derived spec_digest / input_digest (ADR-0063 §2), \
+        "Started records the input-derived spec_digest / input_digest (ADR-0066 §2), \
          not a derived cache"
     );
 

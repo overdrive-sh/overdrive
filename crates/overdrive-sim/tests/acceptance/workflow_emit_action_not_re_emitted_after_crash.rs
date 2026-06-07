@@ -6,7 +6,7 @@
 //! terminal is killed after the emit records but before terminal, and
 //! restarted on the same node; the Action is NOT re-emitted on resume (the
 //! `ActionEmitted` journal entry makes the emit idempotent) — exactly one
-//! cluster mutation across the crash. ADR-0063 §2 (`ActionEmitted`),
+//! cluster mutation across the crash. ADR-0066 §2 (`ActionEmitted`),
 //! ADR-0064 §4.
 //!
 //! SINGLE-NODE SCOPE (D3 / #205): process-local kill/restart on one node.

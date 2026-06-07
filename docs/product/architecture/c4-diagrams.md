@@ -591,7 +591,7 @@ Four properties the diagram makes explicit:
 ## Phase 1 — Workflow Primitive (Mermaid)
 
 **Source:** `docs/feature/workflow-primitive/` DESIGN-wave artifacts.
-**ADR:** ADR-0063 (journal), ADR-0064 (trait+ctx+engine). Extends ADR-0035
+**ADR:** ADR-0066 (journal), ADR-0064 (trait+ctx+engine). Extends ADR-0035
 (reconciler memory / `ViewStore`) + ADR-0023 (action-shim).
 **Date:** 2026-06-05. **GH:** #39 (roadmap [3.2]). Architecture locked to B′.
 

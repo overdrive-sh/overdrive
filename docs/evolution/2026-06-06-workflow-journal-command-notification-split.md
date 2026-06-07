@@ -3,7 +3,7 @@
 **Finalized:** 2026-06-06
 **Wave arc:** DESIGN (GUIDE) → DELIVER (6 steps) → FINALIZE
 **Parent primitive:** `Workflow` durable-execution (GH #39, roadmap [3.2])
-**Authoritative design records:** [ADR-0063](../product/architecture/adr-0063-workflow-journal-redb-second-table-layout.md),
+**Authoritative design records:** [ADR-0066](../product/architecture/adr-0066-workflow-journal-redb-second-table-layout.md),
 [ADR-0064](../product/architecture/adr-0064-workflow-trait-ctx-and-engine-reconciler-boundary.md)
 **Feature delta (preserved):** `docs/feature/workflow-journal-command-notification-split/feature-delta.md`
 
@@ -63,13 +63,13 @@ off the walk.
 
 | ID | Decision | Record |
 |---|---|---|
-| **D1** | Taxonomy = two typed enums (`JournalCommand` / `JournalNotification`) + boundary sum `LoadedEntry`; no envelope bump. "Make invalid states unrepresentable" — a notification cannot enter the command walk by type. | ADR-0063 §2 / CA-1 |
+| **D1** | Taxonomy = two typed enums (`JournalCommand` / `JournalNotification`) + boundary sum `LoadedEntry`; no envelope bump. "Make invalid states unrepresentable" — a notification cannot enter the command walk by type. | ADR-0066 §2 / CA-1 |
 | **D2** | Partition **at the cursor**; the store stays a dumb ordered log. `load_journal` returns flat `Vec<LoadedEntry>`; `JournalCursorHandle` partitions once at construction. Retires `*cursor += 2`. | ADR-0064 §3 / CA-5 |
-| **D3** | Derived command-index. redb key stays `(WorkflowId, u32)` = storage append-position over **all** entries; `next_step` count-all UNCHANGED; command-index derived at the cursor. `Started` = command-index 0. Conflating append-position with cursor-consumption-position **is** the trap. | ADR-0063 §3 / CA-3 |
+| **D3** | Derived command-index. redb key stays `(WorkflowId, u32)` = storage append-position over **all** entries; `next_step` count-all UNCHANGED; command-index derived at the cursor. `Started` = command-index 0. Conflating append-position with cursor-consumption-position **is** the trap. | ADR-0066 §3 / CA-3 |
 | **D4** | Determinism gate Layers 1+2, fail-closed. Layer 1 (type-at-index, Restate RT0016 shape) + Layer 2 (name within `RunResult`) → `WorkflowCtxError::NonDeterministic { expected, actual }`, no advance, no fall-through. Layer 3 (content/digest) deferred → #214. | ADR-0064 §3 / CA-6 |
-| **D5** | Drop the in-entry `step: u32`. Identity is structural (position in `Vec<JournalCommand>`; `SignalKey` for notifications); a persisted `step` is a cache of "my own position" (`development.md` § "Persist inputs, not derived state"). DELIVER verified zero per-entry `step` readers. | ADR-0063 §2 / CA-2 |
+| **D5** | Drop the in-entry `step: u32`. Identity is structural (position in `Vec<JournalCommand>`; `SignalKey` for notifications); a persisted `step` is a cache of "my own position" (`development.md` § "Persist inputs, not derived state"). DELIVER verified zero per-entry `step` readers. | ADR-0066 §2 / CA-2 |
 | **D6** | Minimal notification model — **only** `BTreeMap<SignalKey, JournalNotification>`, no general `NotificationId` correlation model (rejected, not deferred). Extend `replay_equivalence_provision_record` (verbatim name) with the `Started`-at-0 + notification-not-as-command cursor-advance guard. | ADR-0064 §6 / CA-7 |
-| **CA-4** | `Started` becomes a real engine-written command-index-0 entry — the trap itself. | ADR-0063 §2 / ADR-0064 §5 |
+| **CA-4** | `Started` becomes a real engine-written command-index-0 entry — the trap itself. | ADR-0066 §2 / ADR-0064 §5 |
 
 ## Steps completed
 
@@ -147,7 +147,7 @@ one notification shape).
 
 ## Migrated / permanent artifacts
 
-- **ADR-0063** (`docs/product/architecture/adr-0063-workflow-journal-redb-second-table-layout.md`)
+- **ADR-0066** (`docs/product/architecture/adr-0066-workflow-journal-redb-second-table-layout.md`)
   and **ADR-0064**
   (`docs/product/architecture/adr-0064-workflow-trait-ctx-and-engine-reconciler-boundary.md`)
   — already in their permanent location; authored/amended through the

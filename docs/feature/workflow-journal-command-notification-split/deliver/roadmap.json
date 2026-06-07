@@ -4,10 +4,10 @@
     "created_at": "2026-06-06T00:00:00Z",
     "total_steps": 6,
     "scope": "redesign",
-    "adr_reference": "docs/product/architecture/adr-0063-workflow-journal-store.md",
+    "adr_reference": "docs/product/architecture/adr-0066-workflow-journal-store.md",
     "design_reference": "docs/feature/workflow-journal-command-notification-split/feature-delta.md",
     "wave_decisions_reference": "docs/feature/workflow-journal-command-notification-split/feature-delta.md",
-    "rationale": "Typed Command/Notification journal split for the Workflow durable-execution primitive (GH #39; ADR-0063 / ADR-0064), closing a latent replay-corruption trap: `Started` is documented as the journal's first entry but `WorkflowEngine::start` never writes it, and the positional replay cursor cannot consume a non-`await` entry at a walked position, so a variant mismatch at the cursor silently falls through to the live path. The fix types the journal stream (D1: `JournalEntry`->`JournalCommand`{Started,RunResult,SleepArmed,SignalAwaited,ActionEmitted,Terminal} + `JournalNotification`{SignalSeen} + boundary sum `LoadedEntry`), drops the derived in-entry `step:u32` (D5), partitions at the cursor into a `Vec<JournalCommand>` positional walk + a `BTreeMap<SignalKey,JournalNotification>` correlated lookup and retires `*cursor += 2` (D2), keeps the dumb-store redb key and count-all `next_step` unchanged with the command-index derived at the cursor (D3), enforces a fail-closed determinism gate Layers 1+2 (D4), makes `Started` a real engine-written command-index-0 entry (CA-4), and extends the `replay_equivalence_provision_record` DST invariant with the Started-at-0 + notification-not-as-command cursor-advance guard (D6) on the CI critical path. Greenfield single-cut: no `#[serde(tag=\"v\")]` envelope bump (slices 01/02/03 unlanded, no surviving on-disk journals). EXTEND-dominant per the Reuse Analysis: 8 EXTEND, 1 CREATE NEW (`LoadedEntry`, a thin boundary sum), zero new components. Deferrals carry verified GH numbers only: HA cross-node resume #205, determinism Layer 3 (content/digest) #214. Create nothing; add no new forward pointers."
+    "rationale": "Typed Command/Notification journal split for the Workflow durable-execution primitive (GH #39; ADR-0066 / ADR-0064), closing a latent replay-corruption trap: `Started` is documented as the journal's first entry but `WorkflowEngine::start` never writes it, and the positional replay cursor cannot consume a non-`await` entry at a walked position, so a variant mismatch at the cursor silently falls through to the live path. The fix types the journal stream (D1: `JournalEntry`->`JournalCommand`{Started,RunResult,SleepArmed,SignalAwaited,ActionEmitted,Terminal} + `JournalNotification`{SignalSeen} + boundary sum `LoadedEntry`), drops the derived in-entry `step:u32` (D5), partitions at the cursor into a `Vec<JournalCommand>` positional walk + a `BTreeMap<SignalKey,JournalNotification>` correlated lookup and retires `*cursor += 2` (D2), keeps the dumb-store redb key and count-all `next_step` unchanged with the command-index derived at the cursor (D3), enforces a fail-closed determinism gate Layers 1+2 (D4), makes `Started` a real engine-written command-index-0 entry (CA-4), and extends the `replay_equivalence_provision_record` DST invariant with the Started-at-0 + notification-not-as-command cursor-advance guard (D6) on the CI critical path. Greenfield single-cut: no `#[serde(tag=\"v\")]` envelope bump (slices 01/02/03 unlanded, no surviving on-disk journals). EXTEND-dominant per the Reuse Analysis: 8 EXTEND, 1 CREATE NEW (`LoadedEntry`, a thin boundary sum), zero new components. Deferrals carry verified GH numbers only: HA cross-node resume #205, determinism Layer 3 (content/digest) #214. Create nothing; add no new forward pointers."
   },
   "validation": {
     "status": "pending",
@@ -32,7 +32,7 @@
             "`crates/overdrive-sim/src/adapters/journal.rs` — the proptest strategy emits `LoadedEntry` values (a `loaded_entry_strategy` producing both `Command(...)` and `Notification(...)`), no `step` generator; the existing roundtrip property `append_then_load_round_trips_losslessly_and_in_order` is updated to assert on `Vec<LoadedEntry>` and stays GREEN.",
             "`crates/overdrive-sim/src/invariants/evaluators.rs` — the `entry_kinds` classifier matches on `LoadedEntry` (mapping `Command(JournalCommand::Started)` -> \"Started\", ... `Notification(JournalNotification::SignalSeen)` -> \"SignalSeen\"); `entry_kinds_match` unchanged in shape.",
             "`cargo xtask lima run -- cargo check -p overdrive-control-plane --lib` is GREEN for the journal module + codec; downstream call sites in `workflow_runtime` / `redb` updated in 01-02..01-05 may still be RED on this step (intentional, per `.claude/rules/testing.md` § 'RED scaffolds and intentionally-failing commits' — RED scaffolds use `#[should_panic(expected = \"RED scaffold\")]`; call-site compile breakage is resolved by the following steps).",
-            "Commit-message shape: `feat!(workflow-journal): split JournalEntry into typed Command/Notification + LoadedEntry, drop in-entry step (D1/D5)`. Body cites ADR-0063 §2 / ADR-0064 §3 and `Step-ID: 01-01`."
+            "Commit-message shape: `feat!(workflow-journal): split JournalEntry into typed Command/Notification + LoadedEntry, drop in-entry step (D1/D5)`. Body cites ADR-0066 §2 / ADR-0064 §3 and `Step-ID: 01-01`."
           ],
           "test_file": "crates/overdrive-sim/src/adapters/journal.rs",
           "scenario_name": "append_then_load_round_trips_losslessly_and_in_order",
@@ -48,7 +48,7 @@
             "no step:u32 field on any JournalCommand/JournalNotification variant",
             "no #[serde(tag = \"v\")] envelope bump",
             "single commit",
-            "ADR-0063 + ADR-0064 cited in body"
+            "ADR-0066 + ADR-0064 cited in body"
           ],
           "estimated_hours": 2.5,
           "deliverables": [
@@ -70,7 +70,7 @@
             "`crates/overdrive-sim/src/adapters/journal.rs` — `SimJournalStore` mirrors `RedbJournalStore`: in-memory `BTreeMap<(WorkflowId, u32), Vec<u8>>` of CBOR `LoadedEntry`; `next_step` count-all parity with the redb adapter; the probe sentinel is a `LoadedEntry`.",
             "`crates/overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs` — asserts an appended-then-loaded run round-trips `LoadedEntry` byte-equal, interleaving a `Command` and a `Notification`, and that `next_step` counts both; GREEN.",
             "`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane -p overdrive-sim --lib` is GREEN for the store layer (cursor/engine call sites updated in 01-03..01-05 may still be RED — intentional per `.claude/rules/testing.md`).",
-            "Commit-message shape: `refactor(workflow-journal): store deals in LoadedEntry; next_step count-all unchanged (D2/D3)`. Body cites ADR-0063 §3 / ADR-0064 §3 and `Step-ID: 01-02`."
+            "Commit-message shape: `refactor(workflow-journal): store deals in LoadedEntry; next_step count-all unchanged (D2/D3)`. Body cites ADR-0066 §3 / ADR-0064 §3 and `Step-ID: 01-02`."
           ],
           "test_file": "crates/overdrive-sim/tests/acceptance/journal_records_inputs_not_derived.rs",
           "scenario_name": "loaded_entry_run_round_trips_with_interleaved_command_and_notification",
@@ -87,7 +87,7 @@
             "redb key (WorkflowId, u32) unchanged",
             "trait docstrings pin the dumb-store contract (pre/post/edge/invariant)",
             "single commit",
-            "ADR-0063 cited in body"
+            "ADR-0066 cited in body"
           ],
           "estimated_hours": 2.5,
           "deliverables": [
@@ -179,27 +179,27 @@
           "name": "WorkflowEngine::start writes Started at command-index 0 on first start, idempotent on resume",
           "description": "CA-4 (the trap itself). Make `WorkflowEngine::start` in `crates/overdrive-control-plane/src/workflow_runtime/mod.rs` write a `Started` command (a `LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest })`) at command-index 0 on FIRST start, and be IDEMPOTENT on resume (a loaded run whose first command is already `Started` is NOT re-written). Today `Started` is documented as the journal's first entry but `start` never writes it — that is the trap. After this step the engine appends `Started` before spawning the author body on first start; on resume the loaded `Vec<JournalCommand>` already begins with `Started`, the cursor walks it as command-index 0, and the first `await`-point reads command-index 1. The `spec_digest` / `input_digest` are the workflow-kind + start-input identities (inputs, per `development.md` § 'Persist inputs, not derived state'). The append goes through the sanctioned `journal.append` path (fsync-before-spawn). The engine test asserts `Started` is present at command-index 0 after first start AND is not duplicated after a resume. Implements CA-4 (D6 engine half).",
           "criteria": [
-            "`crates/overdrive-control-plane/src/workflow_runtime/mod.rs` — `WorkflowEngine::start`, on FIRST start (loaded run empty), appends `LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest })` via `journal.append` BEFORE spawning the author body; the append is fsync'd before the spawn (ADR-0063 §4 fsync-then-suspend ordering).",
+            "`crates/overdrive-control-plane/src/workflow_runtime/mod.rs` — `WorkflowEngine::start`, on FIRST start (loaded run empty), appends `LoadedEntry::Command(JournalCommand::Started { spec_digest, input_digest })` via `journal.append` BEFORE spawning the author body; the append is fsync'd before the spawn (ADR-0066 §4 fsync-then-suspend ordering).",
             "Idempotent on resume: when the loaded run's first command is already `Started`, `start` does NOT append a second `Started` (the check is structural — first element of the partitioned `Vec<JournalCommand>` is `Started`).",
             "After first start, `load_journal` returns a run whose first `LoadedEntry` is `Command(Started{..})` and the cursor treats it as command-index 0; the first author `await`-point records at command-index 1.",
             "`spec_digest` and `input_digest` are derived from the `WorkflowSpec` + start input (inputs), not from any post-hoc/derived state.",
             "`crates/overdrive-control-plane/tests/acceptance/workflow_engine_writes_terminal_row.rs` (or a sibling engine acceptance test) — a scenario asserts `Started` at command-index 0 after first start AND no duplicate `Started` after a resume drives `start` a second time over the persisted journal; GREEN.",
             "`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib` is GREEN; `cargo xtask lima run -- cargo check --workspace` is GREEN (the full reshape now compiles end-to-end).",
-            "Commit-message shape: `feat(workflow-engine): write Started at command-index 0 on first start, idempotent on resume (CA-4)`. Body cites ADR-0063 §2 / ADR-0064 §5 and `Step-ID: 01-05`."
+            "Commit-message shape: `feat(workflow-engine): write Started at command-index 0 on first start, idempotent on resume (CA-4)`. Body cites ADR-0066 §2 / ADR-0064 §5 and `Step-ID: 01-05`."
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/workflow_engine_writes_terminal_row.rs",
           "scenario_name": "start_writes_started_at_command_index_0_idempotent_on_resume",
           "files_to_modify": [
             "crates/overdrive-control-plane/src/workflow_runtime/mod.rs"
           ],
-          "implementation_notes": "CA-4 closes the trap: `Started` becomes a REAL engine-written command-index-0 entry instead of an aspirational-but-never-written first entry. The append happens in `WorkflowEngine::start` (currently `workflow_runtime/mod.rs:279`), AFTER `load_journal` and BEFORE building the cursor handle + spawning the body — so the cursor partitions a run that already begins with `Started`. Idempotency on resume is structural: inspect the loaded `Vec<JournalCommand>` (or the flat `Vec<LoadedEntry>` before partition) — if its first command is `Started`, skip the append; the SAME instance always re-derives the SAME `WorkflowId` (via `WorkflowId::for_correlation`, unchanged) so resume targets the same run. fsync-before-spawn preserves the durability ordering (ADR-0063 §4): a crash after the `Started` append but before the spawn re-loads a run beginning with `Started` and resumes cleanly. `spec_digest`/`input_digest` are inputs per `development.md` § 'Persist inputs, not derived state' (the existing `Started` variant already carries them). Do NOT introduce a `step` field (gone in 01-01). This step makes `cargo check --workspace` green end-to-end — it is the last call-site update in the Outside-In chain (the enum split's downstream breakage from 01-01 is fully resolved here). Per `feedback_dont_pause_between_steps`, proceed directly to 01-06 after commit.",
+          "implementation_notes": "CA-4 closes the trap: `Started` becomes a REAL engine-written command-index-0 entry instead of an aspirational-but-never-written first entry. The append happens in `WorkflowEngine::start` (currently `workflow_runtime/mod.rs:279`), AFTER `load_journal` and BEFORE building the cursor handle + spawning the body — so the cursor partitions a run that already begins with `Started`. Idempotency on resume is structural: inspect the loaded `Vec<JournalCommand>` (or the flat `Vec<LoadedEntry>` before partition) — if its first command is `Started`, skip the append; the SAME instance always re-derives the SAME `WorkflowId` (via `WorkflowId::for_correlation`, unchanged) so resume targets the same run. fsync-before-spawn preserves the durability ordering (ADR-0066 §4): a crash after the `Started` append but before the spawn re-loads a run beginning with `Started` and resumes cleanly. `spec_digest`/`input_digest` are inputs per `development.md` § 'Persist inputs, not derived state' (the existing `Started` variant already carries them). Do NOT introduce a `step` field (gone in 01-01). This step makes `cargo check --workspace` green end-to-end — it is the last call-site update in the Outside-In chain (the enum split's downstream breakage from 01-01 is fully resolved here). Per `feedback_dont_pause_between_steps`, proceed directly to 01-06 after commit.",
           "quality_gates": [
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib passes",
             "cargo xtask lima run -- cargo check --workspace passes (end-to-end compile)",
             "Started written at command-index 0 on first start, fsync-before-spawn",
             "idempotent on resume (no duplicate Started)",
             "single commit",
-            "ADR-0063 + ADR-0064 cited in body"
+            "ADR-0066 + ADR-0064 cited in body"
           ],
           "estimated_hours": 2.0,
           "deliverables": [

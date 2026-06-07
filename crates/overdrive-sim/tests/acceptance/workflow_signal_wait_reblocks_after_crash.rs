@@ -6,7 +6,7 @@
 //! in the `ObservationStore`) is killed while blocked and restarted on the
 //! same node; on resume it blocks on the SAME signal (neither lost nor
 //! satisfied prematurely), then proceeds only once the signal arrives —
-//! and no duplicate downstream effect occurs. ADR-0063 §2
+//! and no duplicate downstream effect occurs. ADR-0066 §2
 //! (`SignalAwaited`), ADR-0064 §3/§4.
 //!
 //! SINGLE-NODE SCOPE (D3 / #205): process-local kill/restart; in-process

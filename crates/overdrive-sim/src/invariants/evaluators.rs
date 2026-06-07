@@ -623,7 +623,7 @@ fn provision_instance() -> (CorrelationKey, WorkflowId, WorkflowStart) {
 }
 
 /// The command-index-0 `Started` entry the real `WorkflowEngine::start`
-/// uninterrupted path now writes for `spec` (CA-4, ADR-0063 §2 / ADR-0064
+/// uninterrupted path now writes for `spec` (CA-4, ADR-0066 §2 / ADR-0064
 /// §5). The crash-run constructors below drive a raw `ctx` via
 /// [`JournalCursorHandle::new`] — bypassing `engine.start`, so they never
 /// see the engine's `Started` write. Their hand-built crash journals must
@@ -925,7 +925,7 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
 // records `SignalSeen`, emits exactly once, and reaches terminal. The
 // resumed trajectory is byte-identical (entry kinds) to an uninterrupted
 // run, and the downstream effect fires exactly once across the crash (K1).
-// ADR-0063 §2, ADR-0064 §4/§6.
+// ADR-0066 §2, ADR-0064 §4/§6.
 
 /// The signal value the signal+emit reference workflow's producer writes.
 const WF_SIGNAL_VALUE: &str = "provision-signal-ready";
@@ -1245,7 +1245,7 @@ fn assert_signal_replay_equivalence(
 // recorded `deadline_unix` (an input, never a "remaining" cache; the
 // post-sleep `ctx.run` fires only at/after the ORIGINAL deadline, K3), and
 // the resumed trajectory is byte-identical to the uninterrupted one (K4).
-// ADR-0063 §2, ADR-0064 §3/§6.
+// ADR-0066 §2, ADR-0064 §3/§6.
 
 /// Two fixed addresses the `ProvisionRecordWithSleep` reference workflow's
 /// pre-sleep / post-sleep `ctx.run` effects are addressed at. Distinct from

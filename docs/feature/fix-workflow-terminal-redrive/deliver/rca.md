@@ -64,7 +64,7 @@ Tests:
 ## Risk
 
 - **`live_instances` semantics**: the skip-path must NOT insert into `live_instances` (the instance is terminal, not live). `reconcile` checks `terminal.is_some()` first, so convergence does not depend on `has_live_task`. No live-entry leak (nothing inserted).
-- **Ordering invariants**: terminal-then-remove (ADR-0064 §5) and fsync-then-suspend (ADR-0063 §4) both concern the *spawn* path; the skip-path has no live entry and no journal append, so neither hazard arises. Its only durable interaction is the idempotent obs write, carrying the same non-fatal discipline.
+- **Ordering invariants**: terminal-then-remove (ADR-0064 §5) and fsync-then-suspend (ADR-0066 §4) both concern the *spawn* path; the skip-path has no live entry and no journal append, so neither hazard arises. Its only durable interaction is the idempotent obs write, carrying the same non-fatal discipline.
 - **Determinism gate**: skip-path builds no cursor → replay layers not exercised (correct; no replay).
 - **Schema change**: `Terminal { result: WorkflowResult }` needs serde on `WorkflowResult`; greenfield single-cut, no migration. A CBOR round-trip test for `Failed { reason }` covers the new payload.
 - **`start` contract**: already returns `Ok(())` once *spawned*, not completed; returning `Ok(())` on the skip-path (no task) is consistent — `join_all` sees no task.

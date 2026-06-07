@@ -1,4 +1,4 @@
-# ADR-0063 — Workflow `await`-point journal: a second redb table layout on the runtime-owned substrate (distinct from the reconciler `View` store), CBOR-encoded append-only entries keyed `(workflow_id, step)`
+# ADR-0066 — Workflow `await`-point journal: a second redb table layout on the runtime-owned substrate (distinct from the reconciler `View` store), CBOR-encoded append-only entries keyed `(workflow_id, step)`
 
 ## Status
 
@@ -521,7 +521,7 @@ changed and why*.
 
 ### CA-1 — single `JournalEntry` enum → two typed enums + `LoadedEntry` boundary sum (Q1)
 
-**Original (ADR-0063 §2 "Entry shape", as accepted 2026-06-05):**
+**Original (ADR-0066 §2 "Entry shape", as accepted 2026-06-05):**
 
 > `JournalEntry = | Started { spec_digest, input_digest } | RunResult {
 > step, name, result_digest, result_bytes } | SleepArmed { step,
@@ -552,7 +552,7 @@ general `NotificationId` correlation model is built).
 
 ### CA-2 — in-entry `step: u32` field DROPPED from every variant (Q5)
 
-**Original (ADR-0063 §2, as accepted 2026-06-05):**
+**Original (ADR-0066 §2, as accepted 2026-06-05):**
 
 > The `step` field is the monotonic `await`-point index (the journal
 > cursor — see ADR-0064 §3); **step identity is positional**, the cursor
@@ -577,7 +577,7 @@ move any position reader to position-derived.
 
 ### CA-3 — storage append-position distinguished from replay command-index (Q3)
 
-**Original (ADR-0063 §3 "Table layout", as accepted 2026-06-05):**
+**Original (ADR-0066 §3 "Table layout", as accepted 2026-06-05):**
 
 > A single redb table `__wf_journal__` with key `(WorkflowId, u32)`
 > (workflow instance + step index) and value = CBOR-encoded
@@ -603,7 +603,7 @@ semantics.
 
 ### CA-4 — `Started` is now actually engine-written (the trap closed)
 
-**Original (ADR-0063 §2, as accepted 2026-06-05):** `Started` was listed
+**Original (ADR-0066 §2, as accepted 2026-06-05):** `Started` was listed
 as the first `JournalEntry` variant and the entry shape implied it was
 "the journal's first entry," but no ADR clause obligated
 `WorkflowEngine::start` to write it, and the engine code never did — the

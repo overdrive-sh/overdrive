@@ -1,5 +1,5 @@
 //! `JournalStore` — runtime-owned durable journal for the `Workflow`
-//! primitive's `await`-point record, per ADR-0063.
+//! primitive's `await`-point record, per ADR-0066.
 //!
 //! The journal is the §18 workflow analogue of the reconciler `View`
 //! store (ADR-0035): a *second redb table layout* on the SAME
@@ -7,12 +7,12 @@
 //! two stores share one redb file / one `Arc<Database>` / one fsync
 //! ordering discipline / one Earned-Trust probe, but the access patterns
 //! differ — `ViewStore` is single-blob-overwrite-per-target; the journal
-//! is an append-only ordered run per `WorkflowId`. ADR-0063 §1 records
+//! is an append-only ordered run per `WorkflowId`. ADR-0066 §1 records
 //! why this is a distinct port rather than a method on `ViewStore`.
 //!
 //! # Codec — CBOR (`ciborium`), NOT rkyv
 //!
-//! Per ADR-0063 §2 the journal is mutable, evolving, runtime-owned
+//! Per ADR-0066 §2 the journal is mutable, evolving, runtime-owned
 //! memory — ADR-0035's codec case, not ADR-0048's content-addressed
 //! case. [`LoadedEntry`] (and its two leaf enums [`JournalCommand`] /
 //! [`JournalNotification`]) are CBOR (`ciborium`) `#[serde]` types with
@@ -25,7 +25,7 @@
 //! durable-step result), never a derived deadline/remaining cache
 //! (`.claude/rules/development.md` § "Persist inputs, not derived state").
 //!
-//! # The typed command/notification split (ADR-0063 §2 / ADR-0064 §3)
+//! # The typed command/notification split (ADR-0066 §2 / ADR-0064 §3)
 //!
 //! The journal stream is **typed by replay role**, closing the latent
 //! replay-corruption trap where `Started`/`Terminal` were second-class
@@ -66,7 +66,7 @@ pub type Result<T, E = JournalStoreError> = std::result::Result<T, E>;
 
 /// Identity of a single workflow *instance*. The journal is keyed by
 /// `(WorkflowId, step)`; the `WorkflowId` isolates one instance's
-/// append-only run within the single shared journal table (ADR-0063 §3).
+/// append-only run within the single shared journal table (ADR-0066 §3).
 ///
 /// Distinct from `WorkflowName` (the workflow *kind*'s identity in
 /// `overdrive-core::workflow`): a `WorkflowName` names a class of
@@ -77,7 +77,7 @@ pub type Result<T, E = JournalStoreError> = std::result::Result<T, E>;
 /// cap is allowed for embedded ULIDs / hashes).
 ///
 /// Node-independent by construction (no embedded node id), leaving room
-/// for the Phase-2 cross-node resume / HA adapter (#205, ADR-0063 §5).
+/// for the Phase-2 cross-node resume / HA adapter (#205, ADR-0066 §5).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorkflowId(String);
 
@@ -196,7 +196,7 @@ pub enum WorkflowIdError {
     BadShape,
 }
 
-/// A replayable, **cursor-advancing** journal command (ADR-0063 §2 /
+/// A replayable, **cursor-advancing** journal command (ADR-0066 §2 /
 /// ADR-0064 §3, D1).
 ///
 /// A command advances the cursor; identity is positional — a command's
@@ -275,7 +275,7 @@ pub enum JournalCommand {
     /// state"; a remaining cache would silently desync from the live clock
     /// on resume).
     ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2.
+    /// Additive `#[serde(default)]` per ADR-0066 §2.
     SleepArmed {
         /// Absolute wall-clock deadline (duration since the UNIX epoch)
         /// computed at arm time — an input, not a derived remaining cache.
@@ -289,7 +289,7 @@ pub enum JournalCommand {
     /// while still blocked" shape: resume re-blocks on the SAME key (the
     /// crash-safety contract proven by step 03-02).
     ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2.
+    /// Additive `#[serde(default)]` per ADR-0066 §2.
     SignalAwaited {
         /// The signal key the workflow body blocked on — an input.
         signal_key: overdrive_core::workflow::SignalKey,
@@ -308,7 +308,7 @@ pub enum JournalCommand {
     /// (at-least-once; safety rests on downstream idempotency). See
     /// `WorkflowCtx::emit_action` "Honest semantics". ADR-0064 §4.
     ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2.
+    /// Additive `#[serde(default)]` per ADR-0066 §2.
     ActionEmitted {
         /// SHA-256 digest of the emitted Action's canonical inputs.
         action_digest: overdrive_core::id::ContentHash,
@@ -327,7 +327,7 @@ pub enum JournalCommand {
     /// [`TerminalError::budget_exhausted`](overdrive_core::workflow::TerminalError::budget_exhausted)
     /// → [`WorkflowStatus::Failed`](overdrive_core::workflow::WorkflowStatus).
     ///
-    /// Additive `#[serde(default)]` per ADR-0063 §2 — an older journal
+    /// Additive `#[serde(default)]` per ADR-0066 §2 — an older journal
     /// without this variant decodes cleanly (the variant is simply absent;
     /// the additive-variant tolerance the codec provides). NOT cursor
     /// identity — like every other command it advances the positional walk
@@ -380,7 +380,7 @@ pub enum JournalCommand {
     },
 }
 
-/// A `SignalKey`-correlated journal notification (ADR-0063 §2 /
+/// A `SignalKey`-correlated journal notification (ADR-0066 §2 /
 /// ADR-0064 §4, D1).
 ///
 /// A notification is resolved by `SignalKey` lookup and **never advances
@@ -398,7 +398,7 @@ pub enum JournalCommand {
 /// not deferred.
 ///
 /// CBOR-encoded (`ciborium`); additive `#[serde(default)]` evolution per
-/// ADR-0063 §2. No in-entry `step` field — identity is the `SignalKey`,
+/// ADR-0066 §2. No in-entry `step` field — identity is the `SignalKey`,
 /// never a position (D5).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum JournalNotification {
@@ -426,7 +426,7 @@ pub enum JournalNotification {
 }
 
 /// The on-disk/append/load boundary representation — the dumb-store
-/// ordered-table shape (ADR-0063 §2 / ADR-0064 §3, D1).
+/// ordered-table shape (ADR-0066 §2 / ADR-0064 §3, D1).
 ///
 /// Commands and notifications **interleave in one ordered table**; the
 /// store ([`JournalStore`]) is a dumb ordered log and never classifies.
@@ -468,7 +468,7 @@ pub enum JournalStoreError {
     Decode(String),
 
     /// The underlying durable append completed the write but the fsync
-    /// syscall failed. Per ADR-0063 §4 (reusing ADR-0035 §6
+    /// syscall failed. Per ADR-0066 §4 (reusing ADR-0035 §6
     /// `WriteThroughOrdering`): when this fires the entry MUST NOT be
     /// observable — neither persisted on disk nor visible to a
     /// subsequent `load_journal`.
@@ -483,7 +483,7 @@ pub enum JournalStoreError {
     Io(#[from] std::io::Error),
 }
 
-/// Errors from the Earned-Trust startup probe per ADR-0063 §4 (reused
+/// Errors from the Earned-Trust startup probe per ADR-0066 §4 (reused
 /// verbatim from ADR-0035). Mirrors [`crate::view_store::ProbeError`].
 ///
 /// The probe writes a sentinel entry, fsyncs, reads it back byte-equal,
@@ -557,7 +557,7 @@ pub enum ProbeError {
 /// **Append-only ordered run per instance** — entries are never
 /// overwritten; `(workflow_id, step)` is unique per append. This is the
 /// structural difference from `ViewStore`'s single-blob-overwrite
-/// contract that makes the journal a distinct port (ADR-0063 §1).
+/// contract that makes the journal a distinct port (ADR-0066 §1).
 ///
 /// Encodes/decodes [`LoadedEntry`] via `ciborium` internally — the trait
 /// surface takes/returns typed `LoadedEntry`, not raw bytes, because
@@ -584,7 +584,7 @@ pub trait JournalStore: Send + Sync {
     /// returns it appended at the END of the ordered run (append
     /// order == load order). A notification and a command append
     /// identically — the store assigns the `u32` by append position over
-    /// ALL entries, never by class. Per ADR-0063 §4 (fsync-then-memory):
+    /// ALL entries, never by class. Per ADR-0066 §4 (fsync-then-memory):
     /// the fsync completes before this returns, so a crash after `Ok(())`
     /// preserves the entry across the next boot's `load_journal`.
     ///
@@ -621,7 +621,7 @@ pub trait JournalStore: Send + Sync {
     /// # Errors
     ///
     /// - [`JournalStoreError::FsyncFailed`] — sim injection or real
-    ///   fsync error. Per ADR-0063 §4 the entry MUST NOT be observable
+    ///   fsync error. Per ADR-0066 §4 the entry MUST NOT be observable
     ///   when this fires (not persisted, not returned by a later
     ///   `load_journal`).
     /// - [`JournalStoreError::Encode`] — the entry could not be
@@ -631,7 +631,7 @@ pub trait JournalStore: Send + Sync {
 
     /// Load the full ordered run for `workflow_id` — a range scan
     /// `(id, 0)..=(id, u32::MAX)` decoded into a flat `Vec<LoadedEntry>`
-    /// in append order (ADR-0063 §3).
+    /// in append order (ADR-0066 §3).
     ///
     /// # Postconditions
     ///
@@ -671,7 +671,7 @@ pub trait JournalStore: Send + Sync {
     /// - [`JournalStoreError::Io`] — underlying engine I/O failure.
     async fn load_journal(&self, workflow_id: &WorkflowId) -> Result<Vec<LoadedEntry>>;
 
-    /// Earned-Trust startup probe per ADR-0063 §4 (reused from
+    /// Earned-Trust startup probe per ADR-0066 §4 (reused from
     /// ADR-0035 § Earned Trust).
     ///
     /// Composition root invariant: write a sentinel entry → fsync →

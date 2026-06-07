@@ -164,5 +164,5 @@ no longer choosing between C and B′.
   effects (transport errors fold into the user's `T`, e.g.
   `T = Result<usize, String>`). Greenfield single-cut — slice-01 has no
   breaking journal history, so no deprecation shim and no journal
-  version-bump/migration; the upgrade path is "delete the redb file." ADR-0063
+  version-bump/migration; the upgrade path is "delete the redb file." ADR-0066
   (`RunResult` entry) + ADR-0064 §2/§3/§4/§6 amended. **User-pinned 2026-06-05.**

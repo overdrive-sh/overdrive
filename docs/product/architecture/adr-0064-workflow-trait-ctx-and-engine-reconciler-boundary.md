@@ -8,7 +8,7 @@ engine↔reconciler boundary and the ctx-surface granularity are
 surfaced for ratification in the DESIGN return summary). Tags: phase-1,
 workflow-primitive, application-arch, durable-execution, dst.
 
-**Companion**: ADR-0063 (the redb journal — the engine's durable
+**Companion**: ADR-0066 (the redb journal — the engine's durable
 backing). **Composes with**: ADR-0035 (`Reconciler` trait shape — the
 peer primitive the `Workflow` trait mirrors in *placement* but not in
 *purity*), ADR-0023 (action-shim — the engine's driving seam), ADR-0037
@@ -32,7 +32,7 @@ trait Workflow: Send + Sync {
 ```
 
 Three design questions inside the locked direction are this ADR's remit
-(the journal store + codec are ADR-0063):
+(the journal store + codec are ADR-0066):
 
 1. **Crate placement** — where do the `Workflow` trait + `WorkflowCtx`
    live, given `overdrive-core` is forbidden `tokio` / async-runtime
@@ -92,9 +92,9 @@ executes it is not, and lives in control-plane).
 |---|---|---|---|
 | `Workflow` trait, `WorkflowCtx` type, `WorkflowResult`, `WorkflowStart` | `overdrive-core::workflow` | core | Author-facing trait surface; no runtime; injected ports only |
 | `WorkflowEngine` (drives `run`, journal cursor, suspend/resume) | `overdrive-control-plane::workflow_runtime` | adapter-host | Genuinely async; holds tokio; does journal I/O |
-| `JournalStore` port + `RedbJournalStore` | `overdrive-control-plane::journal` | adapter-host | ADR-0063 |
+| `JournalStore` port + `RedbJournalStore` | `overdrive-control-plane::journal` | adapter-host | ADR-0066 |
 | `workflow-lifecycle` reconciler | `overdrive-core::reconcilers` (state) + runtime registration | core (reconcile) / control-plane (registration) | Pure-sync `reconcile`, ADR-0035 shape |
-| `SimJournalStore`, `replay_equivalence_*` invariant | `overdrive-sim` | adapter-sim | DST surface (ADR-0063 §6, §3 below) |
+| `SimJournalStore`, `replay_equivalence_*` invariant | `overdrive-sim` | adapter-sim | DST surface (ADR-0066 §6, §3 below) |
 
 ### 2. `WorkflowResult` is a new core enum; relates to but does not reuse `TerminalCondition`
 
@@ -135,7 +135,7 @@ The engine drives replay with a **per-instance journal cursor**. On
 
 1. `journal.load_journal(workflow_id)` → the flat ordered
    `Vec<LoadedEntry>` (commands + notifications interleaved in append
-   order — ADR-0063 §3; the store is a dumb ordered log).
+   order — ADR-0066 §3; the store is a dumb ordered log).
 2. Constructs a `WorkflowCtx` carrying (a) the injected ports, (b) a
    `JournalCursorHandle` built via `JournalCursorHandle::new` /
    `new_with_channels`, which **partitions the loaded run ONCE at
@@ -196,7 +196,7 @@ where
 - **Live (cursor == journal length):** the op performs the real effect
   through the injected port. For `ctx.run<T>`, it `f.await`s, CBOR-serializes
   the `T`, and **durably appends + fsyncs the journal entry BEFORE returning**
-  (ADR-0063 §4 fsync-then-suspend), advances the cursor, and returns `T`.
+  (ADR-0066 §4 fsync-then-suspend), advances the cursor, and returns `T`.
   For `ctx.sleep` / `ctx.wait_for_signal`, the "live" step writes the
   await-armed entry (deadline / signal-key) then **suspends** the future
   (parks on the injected `Clock` deadline / the ObservationStore signal
@@ -206,8 +206,8 @@ where
 **Identity is positional, not content-correlated.** The command identity
 is the monotonic command-index (= the cursor's position in
 `Vec<JournalCommand>`), NOT a content correlation and NOT the storage
-append-position (ADR-0063 §3). The in-entry `step` field is gone (Q5,
-ADR-0063 § "Changed Assumptions" CA-2); position in the partitioned
+append-position (ADR-0066 §3). The in-entry `step` field is gone (Q5,
+ADR-0066 § "Changed Assumptions" CA-2); position in the partitioned
 command vector IS the identity.
 
 **Determinism gate — Layers 1+2, fail-closed (Q4, amended 2026-06-06).**
@@ -261,7 +261,7 @@ replayed from the journal rather than re-performed, two replays of the same
 journal produce a bit-identical trajectory (D-INH-5).
 
 **How K4's `assert_replay_equivalent!` hooks in:** the
-`replay_equivalence_provision_record` `SimInvariant` (ADR-0063 §6,
+`replay_equivalence_provision_record` `SimInvariant` (ADR-0066 §6,
 exported from `overdrive-sim::invariants::Invariant` — extending the
 existing `ReplayEquivalentEmptyWorkflow` placeholder variant) drives the
 engine through: (1) an uninterrupted run capturing the terminal trajectory;
@@ -277,7 +277,7 @@ replay against the engine + `SimJournalStore`.
 
 The `WorkflowCtx` surface grows one method per await-surface slice; the
 *type* and the journal-cursor machinery (§3) are established whole in
-slice 01, and each later method is an additive entry-variant (ADR-0063 §2)
+slice 01, and each later method is an additive entry-variant (ADR-0066 §2)
 + an additive `ctx` method:
 
 | Method | Slice | Journal entry (class) | Port consumed |
@@ -349,7 +349,7 @@ reconciler emits Action::StartWorkflow { start, correlation }
        journal.load_journal(id)  (empty on first start; populated on resume)
        IF the loaded run is empty (first start, not a resume):
          journal.append(Started { spec_digest, input_digest })  [fsync]
-         — the command-index-0 entry (ADR-0063 §2 CA-4); the cursor's
+         — the command-index-0 entry (ADR-0066 §2 CA-4); the cursor's
            positional walk begins at this command. On resume the loaded
            run already contains Started at command-index 0, so it is
            NOT re-appended (idempotent first-entry write).
@@ -392,7 +392,7 @@ doctrine (R3).
 
 ### 6. DST invariants (extending the catalogue)
 
-Added to `overdrive-sim::invariants::Invariant` (ADR-0063 §6 enumerates
+Added to `overdrive-sim::invariants::Invariant` (ADR-0066 §6 enumerates
 them; this ADR pins their meaning):
 
 - **`replay_equivalence_provision_record`** (replaces / supersedes the
@@ -486,7 +486,7 @@ Ship every `ctx` method in the first slice.
 slice 01 is already the one heavy slice (engine + journal + replay). The
 journal-cursor + suspend/resume *machinery* must ship whole in slice 01
 (every later method needs it), but the *methods* beyond `ctx.run<T>` are
-additive entry-variants (ADR-0063 §2) that each carry their own slice's
+additive entry-variants (ADR-0066 §2) that each carry their own slice's
 learning hypothesis (sleep parks correctly under DST; signals/emit are
 crash-safe). Shipping them all in slice 01 would bundle three learning
 hypotheses into one slice and lose the de-risking the slicing buys.
@@ -550,7 +550,7 @@ hypotheses into one slice and lose the de-risking the slicing buys.
 
 Amendment **2026-06-06 — workflow-journal command/notification split**
 (feature `workflow-journal-command-notification-split`; GUIDE-mode
-decisions Q1–Q6, all user-ratified). Companion to ADR-0063's amendment
+decisions Q1–Q6, all user-ratified). Companion to ADR-0066's amendment
 of the same date. This block quotes the superseded original ADR-0064
 text verbatim (with its location in this file) and pins the replacement
 + rationale (the back-propagation contract). The §3 / §4 / §5 / §6 text
@@ -588,7 +588,7 @@ typed split removes the notification from the positional walk entirely
 (`SignalKey`-keyed), so the cursor advances over commands only and a
 notification can never be consumed as a command. The partition lives at
 the cursor (not the store) to keep `JournalStore` a dumb ordered log
-(ADR-0063 §3) — a future HA adapter (#205) re-implements the log without
+(ADR-0066 §3) — a future HA adapter (#205) re-implements the log without
 re-deriving replay semantics.
 
 ### CA-6 — determinism gate: silent fall-to-live on variant mismatch → Layers 1+2 fail-closed (Q4)
@@ -620,7 +620,7 @@ is tracked, not built.
 **Original (ADR-0064 §5 "composition path", as accepted 2026-06-05):**
 `WorkflowEngine::start` was specified as `load_journal(id)` → `spawn
 run(&ctx)`; **no clause obligated writing `Started`**, and the engine
-code never did (ADR-0063 § "Changed Assumptions" CA-4 — the trap).
+code never did (ADR-0066 § "Changed Assumptions" CA-4 — the trap).
 
 **Replacement:** §5's composition path now obligates
 `WorkflowEngine::start` to `journal.append(Started { spec_digest,
@@ -646,7 +646,7 @@ notification shape).
 
 ## References
 
-- ADR-0063 — workflow journal (the engine's durable backing; codec;
+- ADR-0066 — workflow journal (the engine's durable backing; codec;
   fsync ordering; `JournalStore` port). **Companion amendment
   2026-06-06** (the entry taxonomy CA-1..CA-4 this ADR's cursor +
   determinism + DST amendments CA-5..CA-7 pair with).
@@ -680,7 +680,7 @@ notification shape).
 
 ## Changelog
 
-- 2026-06-05 — Initial accepted version. Companion to ADR-0063.
+- 2026-06-05 — Initial accepted version. Companion to ADR-0066.
 - 2026-06-05 — Replaced the slice-01 `ctx.call(CallRequest) -> CallResponse`
   await-surface with the general `ctx.run<T: Serialize + DeserializeOwned>(name,
   impl Future<Output = T>) -> T` durable-step primitive (Restate `ctx.run`
@@ -695,7 +695,7 @@ notification shape).
 - 2026-06-06 — **Command/Notification split — cursor + determinism + DST**
   (see § "Changed Assumptions" CA-5..CA-7; feature
   `workflow-journal-command-notification-split`; GUIDE-mode Q1–Q6,
-  user-ratified; companion to ADR-0063's same-date amendment). §3:
+  user-ratified; companion to ADR-0066's same-date amendment). §3:
   cursor partitions the loaded `Vec<LoadedEntry>` once at construction
   into `Vec<JournalCommand>` (positional walk) + `BTreeMap<SignalKey,
   JournalNotification>` (correlated lookup); retired the `*cursor += 2`

@@ -119,7 +119,7 @@ mod integration {
     /// Exercises a REAL `RedbJournalStore` (real redb file) per
     /// `.claude/rules/testing.md` § "Integration vs unit gating".
     /// `#[should_panic(expected = "RED scaffold")]` until DELIVER slice 01
-    /// lands `RedbJournalStore` + the `JournalStore` port (ADR-0063).
+    /// lands `RedbJournalStore` + the `JournalStore` port (ADR-0066).
     pub mod workflow_journal {
         mod journal_writes_to_redb;
     }

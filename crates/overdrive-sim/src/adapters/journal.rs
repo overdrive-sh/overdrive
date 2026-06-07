@@ -3,7 +3,7 @@
 //! Sibling to `RedbJournalStore` (production, step 01-04). Stores
 //! pre-encoded CBOR `Vec<u8>` blobs keyed on `(WorkflowId, u32)` so the
 //! sim has byte-for-byte storage parity with the production redb adapter
-//! (ADR-0063 §3) — append round-trips through the same `ciborium` codec
+//! (ADR-0066 §3) — append round-trips through the same `ciborium` codec
 //! the production path uses, catching any codec skew at the sim layer.
 //!
 //! Ordering: the storage map is `BTreeMap`, not `HashMap`. `load_journal`
@@ -15,7 +15,7 @@
 //!
 //! # Failure injection
 //!
-//! The `WorkflowJournalWriteOrdering` invariant (ADR-0063 §4 / step
+//! The `WorkflowJournalWriteOrdering` invariant (ADR-0066 §4 / step
 //! 01-06) asserts that a failed `append` leaves the journal unobservable
 //! — the entry is neither persisted nor returned by a later
 //! `load_journal`. The sim exposes
@@ -149,7 +149,7 @@ impl JournalStore for SimJournalStore {
         // failure surfaces cleanly without mutating any state.
         let bytes = Self::encode(entry)?;
 
-        // Injection: fail the append WITHOUT persisting. Per ADR-0063 §4
+        // Injection: fail the append WITHOUT persisting. Per ADR-0066 §4
         // the entry must not become observable when fsync fails.
         if self.inject_fsync_failure_flag.load(Ordering::SeqCst) {
             return Err(JournalStoreError::FsyncFailed {
@@ -315,7 +315,7 @@ mod tests {
     }
 
     proptest! {
-        /// Round-trip property (ADR-0063 §3): an arbitrary INTERLEAVED run
+        /// Round-trip property (ADR-0066 §3): an arbitrary INTERLEAVED run
         /// of commands and notifications appended to a fresh instance
         /// loads back byte-equal and in append order. The
         /// `Symmetric`/`Roundtrip` Hebert-ch.3 pattern over the
@@ -399,7 +399,7 @@ mod tests {
             "injection surfaces as FsyncFailed, got {err:?}"
         );
 
-        // Per ADR-0063 §4: the failed append left NO observable entry.
+        // Per ADR-0066 §4: the failed append left NO observable entry.
         let loaded = store.load_journal(&id).await.expect("load after failed append");
         assert!(loaded.is_empty(), "a failed append must not be observable in the journal");
 

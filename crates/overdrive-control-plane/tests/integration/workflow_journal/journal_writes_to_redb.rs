@@ -11,7 +11,7 @@
 //! recorded `RunResult` entry is present in the redb journal when read
 //! back through the journal handle (the bytes written are the bytes read
 //! — `journal_checkpoint` consistency, journey steps 2↔3), and a
-//! grep/dep-graph check confirms no libSQL journal table. ADR-0063 §1/§3.
+//! grep/dep-graph check confirms no libSQL journal table. ADR-0066 §1/§3.
 //!
 //! Per Mandate 11, this layer-3 sad path / persistence scenario is
 //! example-based (one representative real-redb roundtrip), NOT PBT-
@@ -32,7 +32,7 @@ use overdrive_core::id::ContentHash;
 /// step's `files_to_modify` scope — pulling the `test-utils`-gated
 /// `overdrive_core::testing` module into the integration binary would require
 /// a `Cargo.toml` dev-dependency edit outside this step. The digests are
-/// derived from these INPUTS exactly as the engine will (ADR-0063 §2).
+/// derived from these INPUTS exactly as the engine will (ADR-0066 §2).
 const PROVISION_RECORD_WORKFLOW_NAME: &str = "provision-record";
 /// The opaque CBOR start-input bytes — `ciborium::into_writer(&())` yields a
 /// single-byte CBOR `null` (`0xf6`). Post-#217 the `Started { input_digest }`
@@ -43,7 +43,7 @@ const PROVISION_RECORD_START_INPUT: &[u8] = &[0xf6];
 
 /// Build the `Started` entry's `spec_digest` from the fixture's spec —
 /// the INPUT the journal records, mirroring what the engine derives
-/// (ADR-0063 §2: hash the spec's canonical identity).
+/// (ADR-0066 §2: hash the spec's canonical identity).
 fn spec_digest_of(spec_name: &str) -> ContentHash {
     ContentHash::of(spec_name.as_bytes())
 }
@@ -51,7 +51,7 @@ fn spec_digest_of(spec_name: &str) -> ContentHash {
 /// S-WP-01-04 / K5 (O6) / US-WP-2 AC1 + AC2.
 ///
 /// Drive the production `RedbJournalStore` over a REAL redb file (the
-/// SAME `Arc<Database>` shape `RedbViewStore` shares — ADR-0063 §1
+/// SAME `Arc<Database>` shape `RedbViewStore` shares — ADR-0066 §1
 /// one-file-two-layouts): append a `ProvisionRecord`-derived
 /// `RunResult`, read it back byte-equal via `load_journal`, and confirm
 /// the persisted run is ordered + survives a close/reopen of the real
@@ -65,7 +65,7 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
 
     let workflow_id = WorkflowId::new("wf-provision-0001").expect("valid workflow id");
 
-    // The journal's first entry records the workflow's INPUTS (ADR-0063
+    // The journal's first entry records the workflow's INPUTS (ADR-0066
     // §2 `Started`), derived from the shared `ProvisionRecord` fixture.
     let started = LoadedEntry::Command(JournalCommand::Started {
         spec_digest: spec_digest_of(PROVISION_RECORD_WORKFLOW_NAME),
@@ -85,14 +85,14 @@ async fn call_result_is_present_in_the_real_redb_journal_and_no_libsql_table_exi
     {
         // Share an `Arc<Database>` exactly as the boot composition root
         // will (one redb file backs both ViewStore + JournalStore —
-        // ADR-0063 §1). `Database::create` here proves the shared-handle
+        // ADR-0066 §1). `Database::create` here proves the shared-handle
         // construction path; `begin_read`/`begin_write` both take `&self`
         // so the same `Arc` is safe across both stores.
         let db = Arc::new(Database::create(&db_path).expect("create real redb"));
         let journal = RedbJournalStore::new(Arc::clone(&db));
 
         // Earned-Trust probe must succeed on a healthy fs and leave no
-        // residue (ADR-0063 §4) before the run starts.
+        // residue (ADR-0066 §4) before the run starts.
         journal.probe().await.expect("probe ok on healthy redb");
 
         journal.append(&workflow_id, &started).await.expect("append Started durably");

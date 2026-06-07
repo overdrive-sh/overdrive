@@ -9,7 +9,7 @@
 //! from the kind identity. The two digests DIVERGE as intended — the #217
 //! obligation is discharged: two instances of the SAME kind with
 //! DIFFERENT `input` get DIFFERENT `input_digest`s, and the same input
-//! yields the same digest (ADR-0065 § 5, ADR-0063 § 2).
+//! yields the same digest (ADR-0065 § 5, ADR-0066 § 2).
 //!
 //! # Why NEW (not migrated)
 //!

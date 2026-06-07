@@ -78,7 +78,7 @@ impl ProvisionRecord {
     }
 
     /// The concrete [`WorkflowStart`] this fixture corresponds to. The
-    /// journal's `Started { spec_digest }` entry (ADR-0063 §2) is
+    /// journal's `Started { spec_digest }` entry (ADR-0066 §2) is
     /// derived from this spec's CBOR/canonical encoding by the engine
     /// (or, in the slice-01 journal test, by the test itself) — the
     /// fixture exposes the spec, not a pre-computed digest, per

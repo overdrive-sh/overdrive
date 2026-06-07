@@ -10,13 +10,13 @@ designed OVER it. GH #39, roadmap [3.2]. Job: J-PLAT-005.
   port, NOT an extension of `RedbViewStore`.** Shares the `RedbViewStore` redb
   file + `Arc<Database>` + codec + fsync-ordering + Earned-Trust probe; differs
   in trait surface + table layout (append-only-ordered vs single-blob-overwrite).
-  THE central reuse call. (see: ADR-0063 §1; the §17 "second table layout"
+  THE central reuse call. (see: ADR-0066 §1; the §17 "second table layout"
   reconciliation.) **RATIFY.**
 - [D2] **Journal codec = CBOR (`ciborium`, ADR-0035 §3 discipline), NOT the
   ADR-0048 rkyv envelope.** Mutable runtime memory, not content-addressed;
   replay needs deterministic decode (CBOR), not zero-copy archived-byte
   canonicality; additive per-slice entry-variants ride `#[serde(default)]`.
-  (see: ADR-0063 §2.) **RATIFY.**
+  (see: ADR-0066 §2.) **RATIFY.**
 - [D3] **Engine↔lifecycle-reconciler boundary: the reconciler stays pure-sync;
   the engine runs the async body off the action-shim.** The workflow-lifecycle
   reconciler emits `Action::StartWorkflow` + observes terminal rows (never
@@ -39,7 +39,7 @@ designed OVER it. GH #39, roadmap [3.2]. Job: J-PLAT-005.
   on `ctx` via a `ctx.transport()` accessor so closures can perform transport
   effects; `CallRequest`/`CallResponse`/`CALL_PURPOSE`/`WorkflowCtxError::Transport`
   deleted; journal entry `CallResult` → `RunResult { step, name, result_digest,
-  result_bytes }` (ADR-0063). Greenfield single-cut — no deprecation shim, no
+  result_bytes }` (ADR-0066). Greenfield single-cut — no deprecation shim, no
   journal migration. **User-pinned 2026-06-05.**
 - [D5] **Crate placement: trait+ctx in `overdrive-core` (no tokio), engine +
   journal in `overdrive-control-plane`, sim journal + replay invariant in
@@ -67,7 +67,7 @@ designed OVER it. GH #39, roadmap [3.2]. Job: J-PLAT-005.
 | `Action::StartWorkflow` placeholder | `reconcilers/mod.rs:373` | lifecycle trigger | EXTEND | Already the locked D-INH-3 shape |
 | `WorkflowSpec` placeholder | `reconcilers/mod.rs:562` | the spec | EXTEND (concrete) | Already in core; replace empty struct |
 | `ReplayEquivalentEmptyWorkflow` | `overdrive-sim` invariants | replay invariant | EXTEND (graduate) | Placeholder explicitly says Phase 2 replaces it |
-| `RedbViewStore`/`ViewStore` | `view_store/` | redb durable memory + discipline | REUSE substrate; CREATE NEW port | Substrate shared; trait+layout differ (ADR-0063 §1) |
+| `RedbViewStore`/`ViewStore` | `view_store/` | redb durable memory + discipline | REUSE substrate; CREATE NEW port | Substrate shared; trait+layout differ (ADR-0066 §1) |
 | action-shim + reconciler runtime | `action_shim/mod.rs:446` | async-effect pipeline | EXTEND | Engine off the same shim |
 | `Clock`/`Transport`/`Entropy` | `traits/` | injected non-determinism | REUSE | `WorkflowCtx` wraps existing ports |
 | `CorrelationKey`/`HttpCall` | `id.rs:538` | instance correlation + idempotency-key precedent | REUSE | instance `CorrelationKey` keys the terminal row; `HttpCall`'s idempotency-key shape is the precedent for an exactly-once `ctx.run` closure effect |
@@ -103,9 +103,9 @@ designed OVER it. GH #39, roadmap [3.2]. Job: J-PLAT-005.
 None to DISCUSS/DIVERGE artifacts (architecture locked from DIVERGE). The
 pre-DIVERGE whitepaper "per-primitive libSQL" journal phrasing is superseded
 by the redb decision (R2) — already reconciled in the *current* whitepaper
-§17/§18 text (the "second redb table layout" wording is present); ADR-0063
+§17/§18 text (the "second redb table layout" wording is present); ADR-0066
 records the decision formally. No ADR's existing content modified; ADR-0013
-not further superseded (it is already Superseded by 0035). ADR-0063 and
+not further superseded (it is already Superseded by 0035). ADR-0066 and
 ADR-0064 are additive.
 
 ## Outcome Collision Check
