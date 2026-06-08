@@ -5,8 +5,13 @@
 Accepted (2026-06-08). **Revised rev 2 (2026-06-08)** — see § Revision (rev 2)
 at the end for the DESIGN-review findings this revision addresses (restart model,
 held-set-as-`actual`, retry-memory View, the enqueue/handoff trigger, the
-`SpiffeId` consolidation, and the O4/K3 reframe). Builds on **ADR-0063** (built-in
-CA — the `Ca` port, `SvidMaterial`, `TrustBundle`, `ca_issuance::issue_and_audit`)
+`SpiffeId` consolidation, and the O4/K3 reframe). **Revised rev 3 (2026-06-08)** —
+see § Revision (rev 3): the D4 `HeldSvidFacts.not_after` / `held_snapshot` text is
+made TRUE against the code (`SvidMaterial` gains a real `not_after` field via the
+ADR-0063 rev 2 amendment) and the D8 near-expiry seam is confirmed sound and
+DST-deterministic; a PINNED SURFACE SPEC for the crafter is appended. Builds on
+**ADR-0063** (built-in CA — the `Ca` port, `SvidMaterial`, `TrustBundle`,
+`ca_issuance::issue_and_audit`)
 and the reconciler / action-shim machinery of **ADR-0013 / ADR-0023 / ADR-0035 /
 ADR-0036**. Governs the workload **identity holder/reader/dropper** — the loop
 that binds a live, chain-verifiable SVID to the exact set of currently-running
@@ -273,12 +278,27 @@ struct IdentityState {
   the `actual`-projection reader). A sync read-lock → `.iter().map(…).collect()`
   → drop-guard read that materialises, per held alloc, the *facts the reconciler's
   pure convergence needs*: the `AllocationId` (presence = "held"), the
-  `SpiffeId`, and the cert's real **`not_after`** (`SvidMaterial`'s validity end —
-  used by the near-expiry branch, D8). It returns a *projection*, NOT the
-  `SvidMaterial` itself (the leaf key never leaves `IdentityMgr` except through
-  the `IdentityRead` getter the dataplane consumer holds — keeping the
+  `SpiffeId` (via `svid.spiffe_id()`), and the cert's real **`not_after`** read
+  **directly off the held material via `svid.not_after()`** (`SvidMaterial`'s
+  validity end — used by the near-expiry branch, D8). It returns a *projection*,
+  NOT the `SvidMaterial` itself (the leaf key never leaves `IdentityMgr` except
+  through the `IdentityRead` getter the dataplane consumer holds — keeping the
   `core`-class reconciler's `actual` key-free). `HeldSvidFacts { spiffe_id:
   SpiffeId, not_after: UnixInstant }` is a small `core` type the snapshot yields.
+
+  **`SvidMaterial::not_after()` is a real accessor** as of the ADR-0063 rev 2
+  amendment (2026-06-08): `SvidMaterial` gains a `not_after: UnixInstant` field
+  populated at mint from the validity window `ca_issuance::issue_and_audit`
+  threads through `SvidRequest` from its single injected-`Clock` read — the SAME
+  window written to `issued_certificates.not_after`, so `svid.not_after() ==
+  issued_certificates.not_after` for the same issuance, by construction, and the
+  value is DST-deterministic under `SimClock`. (Rev 1/rev 2 of THIS ADR asserted
+  `not_after` was "the cert's real validity end" before that field existed — the
+  contradiction the ADR-0063 amendment resolves; see that ADR's Changelog entry
+  "rev 2 amendment: `SvidMaterial` gains `not_after`".) Because the held
+  `not_after` and the reconciler's `tick.now_unix` now derive from one clock, the
+  near-expiry comparison in D8 is sound and replayable, not a comparison against
+  a wall-clock/fixture value.
 
 **How `actual` is hydrated (the runtime wiring — grounded).** `IdentityMgr` is an
 `Arc<IdentityMgr>` field on `AppState` (D3), exactly as `workflow_engine:
@@ -553,9 +573,18 @@ pub struct IssueRetry {
 **Near-expiry keys off the HELD cert's real `not_after` (from `actual`), NOT a
 View field.** The gated #40 branch (`running ∧ held(near-expiry)`) reads the
 `not_after` the `held_snapshot` projected into `actual` (D4 — `HeldSvidFacts.
-not_after`, the cert's true validity end) and compares it against `tick.now_unix`
-+ the live near-expiry threshold. There is no `expires_at` anywhere — `not_after`
-is an observed fact of the held material, not a derived View value.
+not_after`, sourced from `SvidMaterial::not_after()`, the cert's true validity
+end) and compares it against `tick.now_unix` + the live near-expiry threshold.
+There is no `expires_at` anywhere — `not_after` is an observed fact of the held
+material, not a derived View value. **As of the ADR-0063 rev 2 amendment
+(2026-06-08) this `not_after` is a real `SvidMaterial` field** (it was a design
+placeholder before), and — load-bearing for this branch — it derives from the
+SAME injected `Clock` as `tick.now_unix`, so the comparison is between two values
+off one clock and is replayable bit-for-bit under a DST seed. Before the
+amendment, `held.not_after` would have been a host wall-clock read (sub-second
+skew from `tick`) or a `SimCa` frozen-fixture value (unrelated to `SimClock`,
+non-deterministic) — the gated branch would have tested against garbage. The
+amendment is what makes this branch sound.
 
 **The #40 rotation seam is structurally pre-wired but EMIT-GATED.** The
 near-expiry branch is present in `reconcile()` and *would* target
@@ -895,3 +924,156 @@ new `AnyReconciler::SvidLifecycle(_)` arm reading `state.identity.held_snapshot(
 (sync, in-process — D4) is the identical shape, with no runtime-mechanism change
 (one new `match` arm). The held-set-as-`actual` is implementable against the
 runtime as written.
+
+## Revision (rev 3, 2026-06-08) — `SvidMaterial.not_after` made real
+
+This revision fixes a **design/code contradiction** caught while reviewing this
+ADR against the shipped CA code, and pins the exact surface the #35 crafter
+implements. It touches D4 and D8 only; D1/D2/D5/D5b/D6/D7/D9 are unchanged.
+
+| Finding | Defect | Resolution | Where |
+|---|---|---|---|
+| **D4 `not_after` asserted a non-existent field** | D4/D8 (rev 1/2) described `HeldSvidFacts.not_after` as "the cert's real `not_after` (`SvidMaterial`'s validity end)", but `SvidMaterial` (`crates/overdrive-core/src/traits/ca.rs:298-357`) has NO `not_after` field — its fields are `cert_pem, cert_der, serial, spiffe_id, leaf_key`. The validity window was an adapter-internal value (`RcgenCa` read `SystemTime::now()`; `SimCa` returned a frozen-fixture window) that never crossed the trait boundary. | **ADR-0063 rev 2 amendment** (2026-06-08): `SvidMaterial` gains `not_after: UnixInstant` (+ accessor), populated at mint from the validity window `ca_issuance::issue_and_audit` computes ONCE from its injected `Clock` and threads through `SvidRequest`. `held_snapshot` reads `svid.not_after()` directly; D4 is now literally true. | D4; ADR-0063 Changelog "rev 2 amendment" |
+| **D8 near-expiry seam was comparing against garbage** | The gated #40 branch compares `actual.not_after` vs `tick.now_unix`. With `held.not_after` a host wall-clock read (sub-second skew) or a `SimCa` fixture value (unrelated to `SimClock`, non-deterministic), the comparison was unsound and DST-non-deterministic. | The threaded window derives from the SAME injected `Clock` as `tick.now_unix`. `svid.not_after() == issued_certificates.not_after` by construction (one clock read, one value, used for both cert and audit row). The branch is now sound and replayable under a seed. | D8 |
+
+**Consistency mechanism (why `svid.not_after == row.not_after` by construction).**
+`issue_and_audit` (`overdrive-control-plane/src/ca_issuance.rs:142-198`) already
+computes the audit window from its injected `clock` (`issued_at =
+UnixInstant::from_clock(clock); not_before = issued_at − SKEW_TOLERANCE; not_after
+= not_before + WORKLOAD_SVID_TTL`, `:171-184`). Under this amendment it computes
+that window **once, before minting**, builds the windowed `SvidRequest`, passes it
+to `ca.issue_svid(...)`, and **reuses the exact same `not_before`/`not_after`
+`UnixInstant` values** for the `IssuedCertificateRow`. There is no second clock
+read on either path — the cert window and the row window are *the same two
+variables*. DST-determinism follows because the one read is
+`UnixInstant::from_clock(clock)` over the injected `SimClock`.
+
+**Not a persist-derived-state violation.** `not_after` on `SvidMaterial` /
+`HeldSvidFacts` / the held set is an **observed fact of the minted credential**
+(the leaf is non-reconstructable and its window is fixed at mint and embedded in
+the signed bytes), the same shape as `issued_certificates.not_after` (D6 records
+it as an audit *input*). It is NOT a `next_attempt_at`-style recompute-from-policy
+deadline — a reviewer must not flag it as one. The recompute-from-inputs deadline
+in this feature is D8's `IssueRetry` backoff, which is unchanged.
+
+### PINNED SURFACE SPEC (the exact shapes the #35 crafter implements)
+
+Production `.rs` is the crafter's; this pins the contract so no surface is
+invented. Every shape below is grounded against HEAD (`file:line` cited).
+
+**1. `SvidMaterial` — gains `not_after` (`overdrive-core/src/traits/ca.rs`,
+amending the struct at `:298-357`).**
+
+```rust
+pub struct SvidMaterial {
+    cert_pem:  CaCertPem,
+    cert_der:  CaCertDer,
+    serial:    CertSerial,
+    spiffe_id: SpiffeId,
+    leaf_key:  CaKeyPem,
+    not_after: UnixInstant,   // NEW (rev 2 ADR-0063) — the leaf's validity end
+}
+
+impl SvidMaterial {
+    // trailing param appended; existing 5 params unchanged
+    pub const fn new(
+        cert_pem:  CaCertPem,
+        cert_der:  CaCertDer,
+        serial:    CertSerial,
+        spiffe_id: SpiffeId,
+        leaf_key:  CaKeyPem,
+        not_after: UnixInstant,   // NEW
+    ) -> Self { /* ... */ }
+
+    pub const fn not_after(&self) -> UnixInstant { self.not_after }   // NEW accessor
+}
+```
+Add `use overdrive_core::wall_clock::UnixInstant;` (or the in-crate path) to
+`ca.rs` imports (`:28-29` currently import only `KekId` + `{CertSerial,
+CertSpecError, NodeId, SpiffeId}`). `not_after` participates in derived
+`PartialEq`/`Eq`/`Clone`/`Debug` (`UnixInstant` derives all four). The leaf key
+stays redacted in `Debug`; `not_after` is non-secret and prints plainly.
+
+**2. `SvidRequest` — carries the validity window (`ca.rs:263-279`).**
+
+```rust
+pub struct SvidRequest {
+    spiffe_id:  SpiffeId,
+    not_before: UnixInstant,   // NEW
+    not_after:  UnixInstant,   // NEW
+}
+
+impl SvidRequest {
+    pub const fn new(
+        spiffe_id:  SpiffeId,
+        not_before: UnixInstant,   // NEW
+        not_after:  UnixInstant,   // NEW
+    ) -> Self { /* ... */ }
+
+    pub const fn spiffe_id(&self)  -> &SpiffeId   { &self.spiffe_id }
+    pub const fn not_before(&self) -> UnixInstant { self.not_before }   // NEW
+    pub const fn not_after(&self)  -> UnixInstant { self.not_after }    // NEW
+}
+```
+`Ca::issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial>` — **signature
+unchanged** (`ca.rs:673`); the window rides on the request.
+
+**3. `RcgenCa::issue_svid` (`overdrive-host/src/ca/rcgen_ca.rs:388-503`).**
+- DELETE the `SystemTime::now()` read: remove the `now = date_time_ymd(1970,1,1)
+  + Duration::from_secs(Self::seconds_since_epoch())` line (`:478`) and the
+  `seconds_since_epoch` helper (`:300-316`).
+- STAMP the threaded window: convert `req.not_before()` / `req.not_after()`
+  (`UnixInstant`) to rcgen `OffsetDateTime` via the same idiom —
+  `params.not_before = date_time_ymd(1970,1,1) +
+  req.not_before().as_unix_duration(); params.not_after = date_time_ymd(1970,1,1)
+  + req.not_after().as_unix_duration();` (replacing `:479-480`).
+- CARRY it on the result: append `req.not_after()` to the `SvidMaterial::new(...)`
+  call (`:496-502`).
+
+**4. `SimCa::issue_svid` (`overdrive-sim/src/adapters/ca.rs:329-372`).**
+- CARRY the threaded window: append `req.not_after()` to the
+  `SvidMaterial::new(...)` call (`:365-371`). **Fixture cert bytes
+  (`FIXTURE_SVID_CERT_PEM/DER`) unchanged** — consistent with the documented
+  fixed-identity limitation (`:348-364`: structured fields track the request,
+  opaque bytes are fixed). `SimCa` needs NO clock (its `new` takes only
+  `Entropy`, `:18-22`).
+
+**5. `ca_issuance::issue_and_audit`
+(`overdrive-control-plane/src/ca_issuance.rs:142-198`).**
+- COMPUTE the window FIRST (move the `issued_at`/`not_before`/`not_after` block
+  from `:171-175` to BEFORE the mint), then build the windowed request and mint:
+  ```rust
+  let issued_at  = UnixInstant::from_clock(clock);
+  let not_before = UnixInstant::from_unix_duration(
+      issued_at.as_unix_duration().saturating_sub(SKEW_TOLERANCE));
+  let not_after  = not_before + WORKLOAD_SVID_TTL;
+  let windowed   = SvidRequest::new(request.spiffe_id().clone(), not_before, not_after);
+  let svid = ca.issue_svid(&windowed).map_err(CaIssuanceError::ca)?;
+  ```
+  Build `IssuedCertificateRow { not_before, not_after, .. }` from the SAME two
+  values (`:177-185` unchanged). Result: `svid.not_after() == row.not_after`.
+- **Parameter choice:** `issue_and_audit` keeps taking `request: &SvidRequest`
+  and reads only `request.spiffe_id()` (it already passes nothing else from the
+  request — `:161`); it IGNORES any window on the passed request and builds its
+  own windowed copy, because the clock is the single window SSOT. (Equivalent and
+  also acceptable: change the param to `spiffe_id: &SpiffeId`. The crafter picks
+  one; do NOT compute the window in the executor.) **STOP-and-surface if the
+  reviewer wants the param narrowed to `&SpiffeId`** — that is a signature change
+  beyond the minimum; default is to keep `&SvidRequest`.
+
+**6. Call sites the crafter updates** (all verified against HEAD):
+`SvidMaterial::new` — `rcgen_ca.rs:496`, `sim/adapters/ca.rs:365`,
+`core/traits/ca.rs:875` (Debug-redaction test). `SvidRequest::new` /
+`ca.issue_svid` — `rcgen_ca_chain_verify.rs:277/343/416`,
+`sim_ca_fixture_cert_key_match.rs:46`, `sim_ca_deterministic.rs:197/291/361`,
+`ca_equivalence.rs:358/475`, `ca_boot_and_audit.rs:729` (`workload_request()`
+helper) + `:618` (sad-path mock `issue_svid`, ignores `_req` — unchanged).
+`issue_and_audit` — `ca_boot_and_audit.rs:755/808/867/905/908` + the #35 executor
+(roadmap 01-06, not yet built). Tests pass a fixed
+`UnixInstant::from_unix_duration(..)` window; this is the same mechanical sweep
+D9's `leaf_key` addition required.
+
+**`HeldSvidFacts` / `held_snapshot` (D4) — now backed by the real field.**
+`HeldSvidFacts { spiffe_id: SpiffeId, not_after: UnixInstant }` is built per held
+alloc from `svid.spiffe_id().clone()` + `svid.not_after()`. No surface beyond D4's
+already-named shape is added.

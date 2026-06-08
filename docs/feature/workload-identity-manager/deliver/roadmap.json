@@ -71,20 +71,25 @@
           "criteria": [
             "IdentityMgr (overdrive-control-plane/src/identity_mgr.rs, adapter-host class) holds parking_lot::RwLock<IdentityState> where IdentityState { held: BTreeMap<AllocationId, SvidMaterial>, bundle: Option<TrustBundle> }; new(bundle: Option<TrustBundle>) constructs it with the boot trust bundle.",
             "Mutators hold(&self, alloc, svid) / drop_svid(&self, alloc) / set_bundle(&self, bundle) take the write-lock, mutate, and drop the guard within the call -- NEVER across an .await.",
-            "held_snapshot(&self) -> BTreeMap<AllocationId, HeldSvidFacts> is the sync actual-projection reader: read-lock -> iter().map(..).collect() -> drop-guard, materialising per held alloc the facts the pure convergence needs -- the AllocationId (presence = held), the SpiffeId, and the cert's real not_after (SvidMaterial's validity end); it returns the projection, NOT the SvidMaterial itself (the leaf key never leaves IdentityMgr except through the IdentityRead getter), keeping the core reconciler's actual key-free. HeldSvidFacts { spiffe_id: SpiffeId, not_after: UnixInstant } is a small core type.",
+            "held_snapshot(&self) -> BTreeMap<AllocationId, HeldSvidFacts> is the sync actual-projection reader: read-lock -> iter().map(..).collect() -> drop-guard, materialising per held alloc the facts the pure convergence needs -- the AllocationId (presence = held), the SpiffeId (svid.spiffe_id()), and the cert's real not_after read DIRECTLY off the held material via svid.not_after() (SvidMaterial's validity end); it returns the projection, NOT the SvidMaterial itself (the leaf key never leaves IdentityMgr except through the IdentityRead getter), keeping the core reconciler's actual key-free. HeldSvidFacts { spiffe_id: SpiffeId, not_after: UnixInstant } is a small core type.",
+            "PREREQUISITE (ADR-0063 rev 2 amendment, 2026-06-08): SvidMaterial gains not_after: UnixInstant + a const fn not_after(&self) accessor (one trailing SvidMaterial::new(..) param), populated at mint from the validity window ca_issuance::issue_and_audit computes ONCE from its injected Clock and threads through SvidRequest (gains not_before/not_after + a windowed new(..)); RcgenCa::issue_svid stamps that window on the leaf and DELETES its SystemTime::now() read; SimCa::issue_svid carries the window onto SvidMaterial (fixture cert bytes unchanged). This makes svid.not_after() == issued_certificates.not_after by construction (one clock read, one value, used for both cert and audit row) and DST-deterministic under SimClock -- so held_snapshot can read a REAL not_after and the D8 near-expiry seam compares against a clock-consistent value, not a wall-clock/fixture garbage value. Ca::issue_svid signature is UNCHANGED (window rides on SvidRequest). Update the SvidMaterial::new / SvidRequest::new call sites the change touches (rcgen_ca.rs:496, sim/adapters/ca.rs:365, core/traits/ca.rs:875; the test call sites in rcgen_ca_chain_verify.rs / sim_ca_fixture_cert_key_match.rs / sim_ca_deterministic.rs / ca_equivalence.rs / ca_boot_and_audit.rs incl. workload_request():729). See ADR-0067 rev 3 PINNED SURFACE SPEC for exact shapes -- implement to it, do NOT invent surface beyond not_after + the window threading.",
             "drop_svid removes the entry so SvidMaterial::leaf_key is no longer reachable in the held set (K2 secret-hygiene-on-drop). The held map is BTreeMap, not HashMap (iterated by the invariant + held_snapshot)."
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs",
           "scenario_name": "issue_svid_executor_audits_before_hold",
           "scenario_ids": "enabling for S-WIM-02 / S-WIM-05 / S-WIM-WS (the held store the executor writes and the read port reads); held/drop behaviour asserted via the executor in 01-06 and the read port in 02-01",
           "files_to_modify": [
+            "crates/overdrive-core/src/traits/ca.rs",
+            "crates/overdrive-host/src/ca/rcgen_ca.rs",
+            "crates/overdrive-sim/src/adapters/ca.rs",
+            "crates/overdrive-control-plane/src/ca_issuance.rs",
             "crates/overdrive-control-plane/src/identity_mgr.rs",
             "crates/overdrive-control-plane/src/lib.rs",
             "crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs"
           ],
           "deps": ["01-01"],
           "agent": "nw-software-crafter",
-          "implementation_notes": "L1/L2, default lane (pure in-process map; no real I/O). ADR-0067 D4: IdentityMgr is the in-process holder of the SVID set + the trust bundle -- state-layer hygiene (whitepaper §4): the held SvidMaterial (incl. the node-held leaf private key) is NEITHER intent NOR observation; ephemeral runtime state bounded to the running set, intentionally NEVER persisted (the leaf key is not an audit fact and must not reach disk). parking_lot::RwLock NOT tokio::sync (A7): the critical section is a synchronous map mutation / clone-out that does not and must NOT cross an .await; parking_lot is the project default for sync critical sections (faster uncontended, no poisoning) and the read/mutate/clone-and-drop shape keeps the guard off every await point (development.md § Concurrency & async). BTreeMap is MANDATORY (A8): the held map is iterated by the assert_eventually! North-Star invariant AND by held_snapshot (whose output the runtime folds into actual, itself iterated by the convergence), so iteration order must be deterministic across DST seeds (K5). held_snapshot is sync precisely so the hydrate_actual arm (01-04) reads it without an .await, mirroring WorkflowLifecycle's live_instances(). held_snapshot returns the HeldSvidFacts PROJECTION (spiffe_id + not_after), never SvidMaterial -- the leaf key stays inside IdentityMgr and out of the core reconciler's actual. Do NOT add a mutator/reader the ADR does not name (hold / drop_svid / set_bundle / held_snapshot + the IdentityRead impl in 02-01 are the whole surface). REUSE SvidMaterial / TrustBundle as-is (ADR-0063)."
+          "implementation_notes": "L1/L2, default lane (pure in-process map; no real I/O) PLUS the ADR-0063 rev 2 amendment (SvidMaterial.not_after + the validity-window threading) -- this step lands the prerequisite that makes held_snapshot's not_after a REAL field. AMENDMENT SCOPE (ADR-0063 rev 2 / ADR-0067 rev 3 PINNED SURFACE SPEC, implement to it exactly): (1) overdrive-core/src/traits/ca.rs -- SvidMaterial gains not_after: UnixInstant + accessor, new(..) gains a trailing param; SvidRequest gains not_before/not_after + a windowed new(..); Ca::issue_svid SIGNATURE UNCHANGED (window rides on SvidRequest); update the in-file Debug-redaction test SvidMaterial::new at ca.rs:875. (2) overdrive-host/src/ca/rcgen_ca.rs -- stamp req.not_before()/req.not_after() on rcgen params via date_time_ymd(1970,1,1)+as_unix_duration(); DELETE the SystemTime::now() read (seconds_since_epoch, :311-316) and the :478 now-read; append req.not_after() to SvidMaterial::new (:496). (3) overdrive-sim/src/adapters/ca.rs -- append req.not_after() to SvidMaterial::new (:365); fixture cert bytes UNCHANGED (SimCa needs no clock). (4) overdrive-control-plane/src/ca_issuance.rs -- compute the window once from clock BEFORE minting, build the windowed SvidRequest from request.spiffe_id() + that window, pass to ca.issue_svid, reuse the SAME not_before/not_after for IssuedCertificateRow (svid.not_after() == row.not_after by construction). Keep the &SvidRequest param (reads only spiffe_id()); do NOT compute the window in the executor; STOP-and-surface if a reviewer wants the param narrowed to &SpiffeId. Also update the test call sites the signature changes touch (rcgen_ca_chain_verify.rs, sim_ca_fixture_cert_key_match.rs, sim_ca_deterministic.rs, ca_equivalence.rs, ca_boot_and_audit.rs incl. workload_request():729 + the sad-path mock issue_svid:618 which ignores _req). not_after is an OBSERVED FACT of the minted credential (non-reconstructable leaf, window fixed at mint), NOT a derived-state smell -- do not flag it as a persist-derived violation; the recompute-from-inputs deadline is D8's IssueRetry, not this. Now the IdentityMgr core: ADR-0067 D4: IdentityMgr is the in-process holder of the SVID set + the trust bundle -- state-layer hygiene (whitepaper §4): the held SvidMaterial (incl. the node-held leaf private key) is NEITHER intent NOR observation; ephemeral runtime state bounded to the running set, intentionally NEVER persisted (the leaf key is not an audit fact and must not reach disk). parking_lot::RwLock NOT tokio::sync (A7): the critical section is a synchronous map mutation / clone-out that does not and must NOT cross an .await; parking_lot is the project default for sync critical sections (faster uncontended, no poisoning) and the read/mutate/clone-and-drop shape keeps the guard off every await point (development.md § Concurrency & async). BTreeMap is MANDATORY (A8): the held map is iterated by the assert_eventually! North-Star invariant AND by held_snapshot (whose output the runtime folds into actual, itself iterated by the convergence), so iteration order must be deterministic across DST seeds (K5). held_snapshot is sync precisely so the hydrate_actual arm (01-04) reads it without an .await, mirroring WorkflowLifecycle's live_instances(). held_snapshot returns the HeldSvidFacts PROJECTION (spiffe_id + not_after read via svid.not_after()), never SvidMaterial -- the leaf key stays inside IdentityMgr and out of the core reconciler's actual. Do NOT add a mutator/reader the ADR does not name (hold / drop_svid / set_bundle / held_snapshot + the IdentityRead impl in 02-01 are the whole surface). REUSE TrustBundle as-is (ADR-0063); SvidMaterial is AMENDED (not_after added) per the ADR-0063 rev 2 / ADR-0067 rev 3 spec above -- do NOT invent SvidMaterial/SvidRequest/Ca surface beyond the not_after field + the window threading the spec names."
         },
         {
           "id": "01-04",
@@ -133,7 +138,8 @@
           "id": "01-06",
           "name": "action_shim/issue_svid.rs executor: mint via issue_and_audit, hold; drop on DropSvid",
           "criteria": [
-            "A new executor action_shim/issue_svid.rs (mirroring action_shim/dataplane_update_service.rs) handles the two new arms in dispatch_single: on Action::IssueSvid it calls the shipped ca_issuance::issue_and_audit(ca, observation, clock, node, request) (REUSED wholesale, NOT re-implemented -- it mints the leaf, writes the issued_certificates row, and refuses issuance on audit-write failure), then identity.hold(alloc_id, svid), then opportunistically identity.set_bundle(ca.trust_bundle()?).",
+            "A new executor action_shim/issue_svid.rs (mirroring action_shim/dataplane_update_service.rs) handles the two new arms in dispatch_single: on Action::IssueSvid it calls the shipped ca_issuance::issue_and_audit(ca, observation, clock, node, request) (REUSED wholesale aside from the ADR-0063 rev 2 window-threading landed in 01-03, NOT re-implemented -- it mints the leaf, writes the issued_certificates row, and refuses issuance on audit-write failure), then identity.hold(alloc_id, svid), then opportunistically identity.set_bundle(ca.trust_bundle()?).",
+            "not_after SOURCING (ADR-0063 rev 2): the executor does NOT compute or pass a validity window -- it passes the un-windowed SvidRequest (identity only, built from the SpiffeId in Action::IssueSvid); ca_issuance::issue_and_audit owns the SINGLE window computation from its injected clock and threads it into Ca::issue_svid + the audit row. The executor must NEVER read a clock to build a window (that would re-create the drift the amendment closes); the held SvidMaterial it receives back already carries the correct not_after for held_snapshot to project.",
             "On Action::DropSvid the executor calls identity.drop_svid(alloc_id), removing the entry so the node-held leaf private key is no longer reachable in the held set.",
             "Audit-before-hold is honored: an issue_and_audit audit-write failure refuses the hold -- dispatch reports the failure, IdentityMgr does NOT hold SvidMaterial for the allocation, and no unaudited SVID is handed to a consumer (K4 no silent issuance).",
             "AppState gains ca: Arc<dyn Ca> and identity: Arc<IdentityMgr>; ca / clock / identity are threaded into dispatch / dispatch_single for the two new arms; production composes Arc<dyn Ca> from the existing ca_boot path (lib.rs)."
@@ -280,8 +286,10 @@
       "crates/overdrive-core/src/id.rs",
       "crates/overdrive-control-plane/src/identity_mgr.rs",
       "crates/overdrive-control-plane/src/action_shim/",
+      "crates/overdrive-control-plane/src/ca_issuance.rs",
       "crates/overdrive-control-plane/src/reconciler_runtime.rs",
       "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+      "crates/overdrive-host/src/ca/",
       "crates/overdrive-sim/src/adapters/"
     ],
     "test_directories": [
@@ -291,16 +299,24 @@
       "crates/overdrive-control-plane/tests/integration/workload_identity_manager/"
     ],
     "excluded_patterns": [
-      "crates/overdrive-control-plane/src/ca_issuance.rs",
-      "crates/overdrive-control-plane/src/tls_bootstrap.rs",
-      "crates/overdrive-core/src/traits/ca.rs"
-    ]
+      "crates/overdrive-control-plane/src/tls_bootstrap.rs"
+    ],
+    "in_scope_via_amendment": {
+      "note": "ADR-0063 rev 2 amendment (2026-06-08, Option A): the following CA-path files were previously REUSE-AS-IS / excluded but are now in-scope for #35 step 01-03 -- they must change to add SvidMaterial.not_after and thread the validity window through SvidRequest from a single injected-clock read so held_snapshot's not_after is a real field and svid.not_after() == issued_certificates.not_after by construction (DST-deterministic). See ADR-0067 rev 3 PINNED SURFACE SPEC. Minting/audit-binding LOGIC is still reused wholesale -- only the window sourcing + the SvidMaterial/SvidRequest shape change. tls_bootstrap.rs (ADR-0010 ephemeral CA for control-plane HTTPS) remains genuinely untouched and excluded.",
+      "files": [
+        "crates/overdrive-core/src/traits/ca.rs",
+        "crates/overdrive-host/src/ca/rcgen_ca.rs",
+        "crates/overdrive-sim/src/adapters/ca.rs",
+        "crates/overdrive-control-plane/src/ca_issuance.rs"
+      ]
+    }
   },
   "validation": {
     "status": "reviewed",
     "reviewer": "nw-solution-architect-reviewer (Atlas)",
     "approved_at": "2026-06-08",
     "verdict": "APPROVED",
+    "amendment_note": "This APPROVED verdict predates the ADR-0063 rev 2 / ADR-0067 rev 3 amendment (2026-06-08, Option A) that adds SvidMaterial.not_after + the validity-window threading and expands step 01-03's scope onto the CA-path files in in_scope_via_amendment. The amendment is a surgical, minimal change to make the D4 held_snapshot/not_after text true against the code (SvidMaterial had no not_after field); it does not alter D1/D2/D4(shape)/D5/D5b/D6/D7/D8(branch)/D9 decisions, only the not_after sourcing. Re-review of the amended slice is recommended but the design contract (ADR-0067 rev 3 PINNED SURFACE SPEC) is the authority the crafter implements to.",
     "review_type": "cross-wave coherence / design-faithfulness (ADR-0067 rev 2 as contract)",
     "critical_issues_count": 0,
     "high_issues_count": 0,

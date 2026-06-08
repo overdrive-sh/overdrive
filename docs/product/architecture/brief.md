@@ -4321,7 +4321,14 @@ relying-party verifier (#26 sockops/kTLS), not the issuer. (Research:
 SPIFFE §2/§5.2 + SPIRE reference impl + "parse, don't validate".) The rustdoc
 also pins re-issue idempotency (fresh serial, new validity window, same
 SpiffeId) and what `issue_intermediate` guarantees about pathLen (=0, enforced
-not merely set). The **enforcement** is
+not merely set). **Validity window (ADR-0063 rev 2 amendment, 2026-06-08):**
+`SvidMaterial` carries a `not_after: UnixInstant` (+ accessor); the window
+(`not_before`/`not_after`) is supplied by the caller on `SvidRequest` from a
+single injected-`Clock` read in `ca_issuance::issue_and_audit`, so the adapter
+stamps that exact window on the leaf (host) or carries it on `SvidMaterial`
+(sim fixture) rather than reading its own clock — guaranteeing `svid.not_after()
+== issued_certificates.not_after` by construction and DST-determinism under
+`SimClock`. The **enforcement** is
 `crates/<crate>/tests/integration/ca_equivalence.rs` — a DST equivalence test
 driving `RcgenCa` and `SimCa` through the same call sequence asserting
 observable equivalence.
@@ -4808,8 +4815,8 @@ held. Fault-injection (audit-write failure, broken hold/drop) flagged for DISTIL
 
 | Candidate | Verdict | Evidence |
 |---|---|---|
-| `Ca` port + `ca_issuance::issue_and_audit` | **REUSE AS-IS** | The executor *calls* `issue_and_audit(ca, observation, clock, node, request)` wholesale — it mints the leaf via `Ca::issue_svid`, writes the `issued_certificates` row, and refuses issuance on audit-write failure (ADR-0063 D6). O5 served by reuse, not re-implementation. No `Ca`/`issue_and_audit` signature change. |
-| `SvidMaterial` / `TrustBundle` / `IssuedCertificateRow` | **REUSE AS-IS** | The held map holds `SvidMaterial` (cert + node-held `leaf_key`, redacted Debug — ADR-0063 D9); `IdentityRead` returns `SvidMaterial` + `TrustBundle`; the audit row is `IssuedCertificateRow`. All three exist (ADR-0063). No change. |
+| `Ca` port + `ca_issuance::issue_and_audit` | **REUSE (logic) + small amendment (ADR-0063 rev 2)** | The executor *calls* `issue_and_audit(ca, observation, clock, node, request)` wholesale — it mints the leaf via `Ca::issue_svid`, writes the `issued_certificates` row, and refuses issuance on audit-write failure (ADR-0063 D6). O5 served by reuse, not re-implementation. **Amendment (2026-06-08):** `issue_and_audit` computes the validity window once from `clock` and threads it through `SvidRequest` into `Ca::issue_svid`, reusing the same window for the audit row; `Ca::issue_svid`'s signature is unchanged (window rides on `SvidRequest`). Minting + audit-binding logic untouched. |
+| `SvidMaterial` / `TrustBundle` / `IssuedCertificateRow` | **REUSE + `SvidMaterial` amendment (ADR-0063 rev 2)** | The held map holds `SvidMaterial` (cert + node-held `leaf_key`, redacted Debug — ADR-0063 D9); `IdentityRead` returns `SvidMaterial` + `TrustBundle`; the audit row is `IssuedCertificateRow`. All three exist (ADR-0063). **Amendment (2026-06-08):** `SvidMaterial` gains a `not_after: UnixInstant` field + accessor (one trailing `new(...)` param) so `held_snapshot` reads the leaf's real validity end (D4); `TrustBundle` / `IssuedCertificateRow` unchanged. |
 | Reconciler runtime (pure `reconcile()` + ViewStore bulk-load/write-through) | **REUSE AS-IS** | `SvidLifecycle` is one more `Reconciler` on the shipped runtime (ADR-0035/0036); the runtime owns View persistence end-to-end. No runtime change. |
 | Action-shim executor pattern (`ServiceMapHydrator` → `Action::DataplaneUpdateService` → executor) | **REUSE (pattern), new executor** | `action_shim/issue_svid.rs` mirrors `dataplane_update_service.rs` exactly — a new executor on the existing shim. No shim *mechanism* change (the dispatch grows additively). |
 | `Action` enum | **EXTEND (additive)** | +2 plain-enum variants (`IssueSvid`/`DropSvid`) + 2 `dispatch_single` arms + the 3 dispatch-enum variants (`AnyState`/`AnyReconciler`/`AnyReconcilerView`) — the same additive shape `DataplaneUpdateService`/`StartWorkflow` were added. No existing variant changes. |
