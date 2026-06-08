@@ -109,18 +109,10 @@ enum AnyViewMap {
     /// wiring); the runtime-registration call site lands in a
     /// later slice.
     ServiceLifecycle(BTreeMap<TargetResource, ServiceLifecycleView>),
-    /// `SvidLifecycle` carries `View = SvidLifecycleView` (Slice-01
-    /// empty — the issue/drop decision is pure over `desired`/`actual`;
-    /// retry memory lands in 03-01). The map holds per-target persisted
-    /// views per ADR-0035 §5 / ADR-0067 D8.
-    #[expect(
-        clippy::zero_sized_map_values,
-        reason = "SvidLifecycleView is intentionally Slice-01-empty (ADR-0067 D8 — the \
-                  issue/drop decision is pure over `desired`/`actual`; there is no input to \
-                  persist yet). The per-target map shape mirrors every other reconciler kind so \
-                  the runtime dispatch stays uniform; the View gains the retry-memory field (and \
-                  this expect self-removes) in step 03-01 per `development.md` Persist-inputs rule."
-    )]
+    /// `SvidLifecycle` carries `View = SvidLifecycleView` — retry memory
+    /// (`retry: BTreeMap<AllocationId, IssueRetry>`) per ADR-0067 D8, so a
+    /// failed `IssueSvid` backs off instead of re-firing every tick. The map
+    /// holds per-target persisted views per ADR-0035 §5.
     SvidLifecycle(BTreeMap<TargetResource, SvidLifecycleView>),
 }
 
@@ -334,16 +326,10 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::ServiceLifecycle(loaded)
             }
-            // workload-identity-manager step 01-04 — bulk-load the persisted
-            // `SvidLifecycleView` map. Slice-01 view is empty (ADR-0067 D8);
-            // shape mirrors `WorkflowLifecycle` exactly.
+            // workload-identity-manager — bulk-load the persisted
+            // `SvidLifecycleView` retry-memory map (ADR-0067 D8); shape mirrors
+            // `WorkflowLifecycle` exactly.
             AnyReconciler::SvidLifecycle(_) => {
-                #[expect(
-                    clippy::zero_sized_map_values,
-                    reason = "SvidLifecycleView is intentionally Slice-01-empty (ADR-0067 D8); \
-                              self-removes when the View gains the retry-memory field in 03-01. \
-                              See AnyViewMap::SvidLifecycle."
-                )]
                 let loaded: BTreeMap<TargetResource, SvidLifecycleView> =
                     self.view_store.bulk_load(static_name).await.map_err(|e| {
                         ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {

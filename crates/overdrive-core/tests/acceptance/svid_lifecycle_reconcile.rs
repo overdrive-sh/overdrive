@@ -17,7 +17,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
@@ -26,11 +26,11 @@ use overdrive_core::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, Region, SpiffeId, WorkloadId,
 };
 use overdrive_core::reconcilers::svid_lifecycle::{
-    RunningAlloc, SvidLifecycle, SvidLifecycleState,
+    IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
 };
 use overdrive_core::reconcilers::{
     Action, HeldSvidFacts, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext,
-    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, backoff_for_attempt,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -73,6 +73,11 @@ fn node() -> NodeId {
 
 fn running_alloc() -> RunningAlloc {
     RunningAlloc { workload_id: workload(), node_id: node() }
+}
+
+/// Count the `Action::IssueSvid` entries in an emitted action vector.
+fn issue_count(actions: &[Action]) -> usize {
+    actions.iter().filter(|a| matches!(a, Action::IssueSvid { .. })).count()
 }
 
 fn held_facts(alloc: &AllocationId, not_after_secs: u64) -> HeldSvidFacts {
@@ -187,12 +192,17 @@ proptest! {
             );
         }
 
-        // Universe slot 2: the next_view is the minimal Slice-01 view
-        // (retry memory lands in 03-01) — unchanged default.
+        // Universe slot 2: the next_view records ONE failed-issue attempt per
+        // re-issued (running ∧ ¬held) alloc — the retry memory (03-01). Each
+        // issued alloc has `attempts == 1`; no other alloc has a retry entry.
+        let recorded: BTreeMap<AllocationId, u32> =
+            next_view.retry.iter().map(|(k, v)| (k.clone(), v.attempts)).collect();
+        let expected: BTreeMap<AllocationId, u32> =
+            desired.keys().map(|alloc| (alloc.clone(), 1)).collect();
         prop_assert_eq!(
-            next_view,
-            <SvidLifecycle as Reconciler>::View::default(),
-            "Slice-01 View is minimal: reconcile returns the default unchanged"
+            recorded,
+            expected,
+            "each running ∧ ¬held alloc records exactly one issue attempt in next_view.retry"
         );
     }
 }
@@ -261,13 +271,226 @@ fn stopped_alloc_with_held_svid_emits_drop_svid() {
     }
 }
 
+/// `@in-memory` `@S-WIM-08` (restart recovery) -- on a control-plane restart the
+/// in-memory held set is empty (the leaf key is never persisted), so `actual = ∅`
+/// and EVERY still-Running allocation matches `running ∧ ¬held` and is re-issued
+/// — one `IssueSvid` per running alloc, bounded (ADR-0067 D1, RECOVERY). The
+/// returned `next_view` records ONE failed-issue attempt per re-issued alloc
+/// (`attempts == 1`, `last_failure_seen_at == tick.now_unix`) so a re-issue that
+/// then FAILS backs off rather than hammering every tick (D8 — the
+/// `bump_if_dispatched` shape).
+#[test]
+fn restart_recovery_reissues_every_running_alloc_and_records_one_attempt() {
+    let reconciler = SvidLifecycle::canonical();
+
+    let a0 = AllocationId::new("payments-r0").expect("valid AllocationId");
+    let a1 = AllocationId::new("payments-r1").expect("valid AllocationId");
+
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    desired.insert(a0.clone(), running_alloc());
+    desired.insert(a1.clone(), running_alloc());
+
+    // actual = ∅ — the post-restart empty held set.
+    let actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+
+    let state = SvidLifecycleState { desired: desired.clone(), actual };
+    let view = SvidLifecycleView::default();
+    let now = 1_700_000_000;
+    let tick = make_tick(now);
+
+    let (actions, next_view) = reconciler.reconcile(&state, &state, &view, &tick);
+
+    // One IssueSvid per running alloc — bounded recovery.
+    let issued: BTreeSet<AllocationId> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::IssueSvid { alloc_id, .. } => Some(alloc_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        issued,
+        BTreeSet::from([a0.clone(), a1.clone()]),
+        "restart recovery re-issues every running ∧ ¬held alloc exactly once"
+    );
+
+    // next_view records exactly one attempt per re-issued alloc, stamped now.
+    let now_unix = UnixInstant::from_unix_duration(Duration::from_secs(now));
+    for alloc in [&a0, &a1] {
+        let retry = next_view.retry.get(alloc).expect("re-issued alloc has a retry entry");
+        assert_eq!(retry.attempts, 1, "first re-issue records attempts == 1");
+        assert_eq!(
+            retry.last_failure_seen_at, now_unix,
+            "re-issue stamps last_failure_seen_at with tick.now_unix (the input, not a deadline)"
+        );
+    }
+}
+
+/// `@in-memory` `@S-WIM-08` (backoff gate) -- once a `running ∧ ¬held` alloc has a
+/// recorded `IssueRetry`, the next tick does NOT re-emit `IssueSvid` until the
+/// backoff window has elapsed (`tick.now_unix >= last_failure_seen_at +
+/// backoff_for_attempt(attempts)`), and DOES re-emit once it has. The deadline is
+/// recomputed each tick from the persisted inputs + the live policy — never
+/// persisted (ADR-0067 D8; the `development.md` Reconciler-I/O worked-example
+/// shape). Universe: the emitted IssueSvid set across two ticks.
+#[test]
+fn backoff_gate_suppresses_reissue_until_window_elapses() {
+    let reconciler = SvidLifecycle::canonical();
+    let alloc = AllocationId::new("payments-b0").expect("valid AllocationId");
+
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    desired.insert(alloc.clone(), running_alloc());
+    let actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+    let state = SvidLifecycleState { desired, actual };
+
+    // A View with a prior failed attempt at t=1000 (attempts==1).
+    let seen_at_secs = 1000;
+    let mut retry: BTreeMap<AllocationId, IssueRetry> = BTreeMap::new();
+    retry.insert(
+        alloc.clone(),
+        IssueRetry {
+            attempts: 1,
+            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(
+                seen_at_secs,
+            )),
+        },
+    );
+    let view = SvidLifecycleView { retry };
+
+    let deadline_secs = seen_at_secs + backoff_for_attempt(1).as_secs();
+
+    // Tick INSIDE the backoff window — suppressed.
+    let inside = reconciler.reconcile(&state, &state, &view, &make_tick(deadline_secs - 1));
+    assert_eq!(issue_count(&inside.0), 0, "inside the backoff window: no IssueSvid re-emitted");
+
+    // Tick AT the deadline — re-emitted, and the attempt count bumps.
+    let elapsed = reconciler.reconcile(&state, &state, &view, &make_tick(deadline_secs));
+    assert_eq!(issue_count(&elapsed.0), 1, "at the backoff deadline: IssueSvid re-emitted");
+    let bumped = elapsed.1.retry.get(&alloc).expect("re-issued alloc keeps a retry entry");
+    assert_eq!(bumped.attempts, 2, "a re-emitted attempt bumps attempts (1 → 2)");
+}
+
+/// `@in-memory` `@S-WIM-08` (clear-on-held + GC) -- when an alloc is
+/// `running ∧ held` (the issue succeeded — it is now in `actual`), its
+/// `IssueRetry` entry is cleared from `next_view`; and when an alloc is no longer
+/// Running at all, its stale `IssueRetry` entry is garbage-collected. Universe:
+/// the `next_view.retry` map (mirrors `WorkloadLifecycle`'s clear-on-success +
+/// `ServiceMapHydrator`'s GC `retain`).
+#[test]
+fn clear_on_held_and_gc_on_non_running_prune_retry_memory() {
+    let reconciler = SvidLifecycle::canonical();
+
+    let held_running = AllocationId::new("payments-held").expect("valid AllocationId");
+    let gone = AllocationId::new("payments-gone").expect("valid AllocationId");
+
+    // desired = only the held-running alloc is still Running.
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    desired.insert(held_running.clone(), running_alloc());
+
+    // actual = the held-running alloc is held (issue succeeded).
+    let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+    actual.insert(held_running.clone(), held_facts(&held_running, 1_700_000_000));
+
+    let state = SvidLifecycleState { desired, actual };
+
+    // The View still carries stale retry entries for BOTH allocs (a prior
+    // failed attempt for each).
+    let stale_entry = || IssueRetry {
+        attempts: 2,
+        last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(500)),
+    };
+    let mut retry: BTreeMap<AllocationId, IssueRetry> = BTreeMap::new();
+    retry.insert(held_running.clone(), stale_entry());
+    retry.insert(gone.clone(), stale_entry());
+    let view = SvidLifecycleView { retry };
+
+    let (_actions, next_view) = reconciler.reconcile(&state, &state, &view, &make_tick(1_000_000));
+
+    assert!(
+        !next_view.retry.contains_key(&held_running),
+        "clear-on-held: a now-held (issue-succeeded) alloc has its retry entry cleared"
+    );
+    assert!(
+        !next_view.retry.contains_key(&gone),
+        "GC: a no-longer-Running alloc has its stale retry entry garbage-collected"
+    );
+    assert!(
+        next_view.retry.is_empty(),
+        "retry memory is pruned to exactly the still-failing running set (here: empty)"
+    );
+}
+
 /// `@in-memory` `@property` `@S-WIM-08` -- the View is retry memory only:
 /// `IssueRetry { attempts, last_failure_seen_at }`, with no serial,
 /// `issued_at`, `spiffe_id`, `expires_at`, or `next_renewal_at` success fact.
+///
+/// Universe: the public `SvidLifecycleView` type shape via a serde round-trip.
+/// ADR-0067 D8 — the View's ONLY job is retry-policy memory for a FAILED
+/// request; persisting a success fact (a `serial` the pure reconciler cannot
+/// know, written BEFORE dispatch) or a derived future-event field
+/// (`expires_at` / `next_renewal_at`) is a review-rejection smell. We assert
+/// the serde JSON keys are EXACTLY `{retry → {<alloc> → {attempts,
+/// last_failure_seen_at}}}` and NONE of the forbidden success/derived keys
+/// appear anywhere in the serialized form, and that the round-trip is
+/// value-preserving (so the asserted shape IS the persisted shape).
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn svid_lifecycle_view_is_retry_memory_only() {
-    red_scaffold("S-WIM-08 View is retry memory only");
+    let alloc = AllocationId::new("payments-a1b2").expect("valid AllocationId");
+    let mut retry: BTreeMap<AllocationId, IssueRetry> = BTreeMap::new();
+    retry.insert(
+        alloc,
+        IssueRetry {
+            attempts: 3,
+            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(
+                1_700_000_500,
+            )),
+        },
+    );
+    let view = SvidLifecycleView { retry };
+
+    let json = serde_json::to_value(&view).expect("View serializes");
+
+    // The top-level object carries EXACTLY one key — `retry`.
+    let obj = json.as_object().expect("View serializes to a JSON object");
+    let top_keys: BTreeSet<&str> = obj.keys().map(String::as_str).collect();
+    assert_eq!(
+        top_keys,
+        BTreeSet::from(["retry"]),
+        "S-WIM-08: the View has EXACTLY one field `retry` (retry memory only); got {top_keys:?}"
+    );
+
+    // The per-allocation `IssueRetry` carries EXACTLY the two input fields.
+    let entry = obj
+        .get("retry")
+        .and_then(|r| r.as_object())
+        .and_then(|m| m.values().next())
+        .and_then(|e| e.as_object())
+        .expect("retry holds a per-allocation IssueRetry object");
+    let entry_keys: BTreeSet<&str> = entry.keys().map(String::as_str).collect();
+    assert_eq!(
+        entry_keys,
+        BTreeSet::from(["attempts", "last_failure_seen_at"]),
+        "S-WIM-08: IssueRetry carries EXACTLY {{attempts, last_failure_seen_at}} \
+         (persist inputs, not derived state); got {entry_keys:?}"
+    );
+
+    // No success fact (`serial` / `issued_at` / `spiffe_id`) and no derived
+    // future-event field (`expires_at` / `next_renewal_at`) anywhere in the
+    // serialized form — these are the ADR-0067 D8 review-rejection smells.
+    let serialized = serde_json::to_string(&view).expect("View serializes to a string");
+    for forbidden in ["serial", "issued_at", "spiffe_id", "expires_at", "next_renewal_at"] {
+        assert!(
+            !serialized.contains(forbidden),
+            "S-WIM-08: the View MUST NOT carry the `{forbidden}` success/derived field; \
+             found it in {serialized}"
+        );
+    }
+
+    // The round-trip is value-preserving, so the shape asserted above IS the
+    // shape the runtime persists and reloads.
+    let restored: SvidLifecycleView =
+        serde_json::from_value(json).expect("View round-trips through serde");
+    assert_eq!(restored, view, "S-WIM-08: the View round-trips losslessly");
 }
 
 /// `@in-memory` `@error` `@S-WIM-09` -- the #40 near-expiry branch is

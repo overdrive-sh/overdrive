@@ -26,6 +26,7 @@
 //! injected clock, so the comparison is sound and DST-deterministic.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +34,7 @@ use crate::SpiffeId;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use crate::wall_clock::UnixInstant;
 
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
 
 /// The per-allocation projection of a held workload SVID — the `actual` the
 /// `SvidLifecycle` reconciler (01-04) reads via `IdentityMgr::held_snapshot`.
@@ -108,17 +109,69 @@ pub struct SvidLifecycleState {
     pub actual: BTreeMap<AllocationId, HeldSvidFacts>,
 }
 
-/// Typed memory for the `SvidLifecycle` reconciler.
+/// Per-allocation issue-retry memory — the INPUTS the backoff schedule consumes
+/// (ADR-0067 D8; the `development.md` § "Reconciler I/O" `RetryMemory` shape).
 ///
-/// Slice 01 carries NO memory — the issue/drop decision is a pure function of
-/// `desired` vs `actual` (running vs held). The struct exists for the
-/// [`Reconciler::View`] associated-type contract and grows additively to the
-/// retry-memory shape (`IssueRetry { attempts, last_failure_seen_at }`) in step
-/// 03-01 per `development.md` § "Persist inputs, not derived state". The six
-/// derives (incl. `Eq`) satisfy the trait bound and the runtime's NextView
-/// Eq-diff.
+/// This is retry-policy memory for a FAILED `IssueSvid`, NOT an issuance success
+/// fact: there is deliberately NO `serial` (a post-dispatch executor output the
+/// pure reconciler cannot know — and the runtime persists `next_view` BEFORE
+/// dispatch, so a "success" View could be durably written when the CA / audit
+/// write then fails), NO `issued_at`-as-proof, NO `spiffe_id`, and NO derived
+/// `expires_at` / `next_renewal_at` deadline. The success fact lives in the
+/// `issued_certificates` observation row; "is this alloc held?" is answered by
+/// `actual` (the held set), never by the View.
+///
+/// The backoff DEADLINE is recomputed every tick from these two inputs +
+/// [`backoff_for_attempt`] (`last_failure_seen_at + backoff_for_attempt(attempts)`)
+/// — never persisted, so a future operator-tunable backoff policy lands without a
+/// schema migration (`.claude/rules/development.md` § "Persist inputs, not
+/// derived state").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueRetry {
+    /// Failed-issue attempt count (input to the backoff schedule).
+    #[serde(default)]
+    pub attempts: u32,
+    /// When the last failed issue was observed (input; the backoff DEADLINE is
+    /// recomputed each tick from this + the policy, never persisted).
+    #[serde(default = "epoch_zero")]
+    pub last_failure_seen_at: UnixInstant,
+}
+
+/// Default `last_failure_seen_at` for serde — [`UnixInstant`] does not implement
+/// `Default`, so we provide an epoch-zero value for new rows where no failure has
+/// been observed yet (the `ServiceMapHydrator::RetryMemory` precedent).
+const fn epoch_zero() -> UnixInstant {
+    UnixInstant::from_unix_duration(Duration::ZERO)
+}
+
+impl Default for IssueRetry {
+    fn default() -> Self {
+        Self { attempts: 0, last_failure_seen_at: epoch_zero() }
+    }
+}
+
+/// Typed memory for the `SvidLifecycle` reconciler — RETRY MEMORY ONLY
+/// (ADR-0067 D8).
+///
+/// The View's only job is to let a *failed* `IssueSvid` back off instead of
+/// re-firing every tick: it persists, per allocation, the retry inputs
+/// ([`IssueRetry`]). It carries NO issuance success fact (no `serial` /
+/// `issued_at` / `spiffe_id`) and NO derived future-event field (no `expires_at`
+/// / `next_renewal_at`) — those are review-rejection smells per ADR-0067 D8 (the
+/// success fact lives in the `issued_certificates` observation row; held-ness is
+/// `actual`; the near-expiry deadline is recomputed from the held cert's real
+/// `not_after`, read off `actual`).
+///
+/// SIX derives (incl. `Eq`) — NOT the usual four: the runtime's NextView **diff**
+/// compares the returned `next_view` against the prior to decide whether to write
+/// through, so `Eq` is required (`reconciler_runtime`'s persist-on-change path).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct SvidLifecycleView {}
+pub struct SvidLifecycleView {
+    /// Per-allocation issue-retry memory. An absent entry ⇒ no failed issue
+    /// attempt recorded; the next `running ∧ ¬held` tick issues immediately.
+    #[serde(default)]
+    pub retry: BTreeMap<AllocationId, IssueRetry>,
+}
 
 /// The workload-SVID lifecycle reconciler (ADR-0067 D1).
 pub struct SvidLifecycle {
@@ -168,40 +221,75 @@ impl Reconciler for SvidLifecycle {
         &self.name
     }
 
-    /// Pure-sync `reconcile` (ADR-0035 / ADR-0067 D1). Converges
+    /// Pure-sync `reconcile` (ADR-0035 / ADR-0067 D1/D8). Converges
     /// `desired = Running allocs` (`desired.desired`) against
-    /// `actual = held set` (`actual.actual`):
+    /// `actual = held set` (`actual.actual`) and maintains the retry-memory View:
     ///
     /// - **`running ∧ ¬held`** → emit [`Action::IssueSvid`] carrying the
     ///   pure-derived [`SpiffeId::for_allocation`] identity, the issuing
-    ///   `node_id`, and the derived `issue-svid` correlation. On a control-plane
-    ///   restart the held set is empty, so every Running alloc takes this branch
-    ///   — restart recovery falls out for free (ADR-0067 D1, RECOVERY).
+    ///   `node_id`, and the derived `issue-svid` correlation — BUT only when no
+    ///   [`IssueRetry`] entry exists for the alloc OR the backoff window has
+    ///   elapsed (`tick.now_unix >= last_failure_seen_at +
+    ///   backoff_for_attempt(attempts)`; the deadline is recomputed each tick
+    ///   from the persisted inputs + the live policy, NEVER persisted). On a
+    ///   control-plane restart the held set is empty, so every Running alloc
+    ///   takes this branch — restart recovery falls out for free (ADR-0067 D1,
+    ///   RECOVERY; this is the ordinary first-issue branch running again because
+    ///   the holder was reset, NOT the gated #40 rotation path). Each emitted
+    ///   `IssueSvid` bumps the alloc's `IssueRetry` in `next_view` (`attempts +=
+    ///   1`, `last_failure_seen_at = tick.now_unix`) — the `bump_if_dispatched`
+    ///   shape, so a re-issue that then FAILS backs off (the pure reconciler
+    ///   infers "still failing" from the alloc remaining `¬held` next tick with a
+    ///   retry entry).
     /// - **`¬running ∧ held`** → emit [`Action::DropSvid`] so the executor drops
     ///   the held leaf key (ADR-0067 O2 — leak resistance on stop).
-    /// - **`running ∧ held`** → no-op (the alloc is held and still desired;
-    ///   near-expiry rotation is the gated #40 branch, step 03-02 — NOT here).
+    /// - **`running ∧ held`** → no-op AND clear the alloc's `IssueRetry` entry
+    ///   (the issue succeeded — it is now in `actual`; near-expiry rotation is
+    ///   the gated #40 branch, step 03-02 — NOT here).
+    /// - **GC** — `IssueRetry` entries for allocations no longer Running are
+    ///   dropped from `next_view` (mirror `ServiceMapHydrator`'s `retain`).
     ///
-    /// The body holds no `.await`, reads no wall-clock (the issue/drop decision
-    /// is time-independent in Slice 01 — `_tick` is unused), consults no RNG,
-    /// and holds no CA / ObservationStore handle — it builds the `SpiffeId`
-    /// purely and passes it in the action; CA I/O is the executor's (D3).
-    /// dst-lint holds.
+    /// The body holds no `.await`, reads wall-clock only via `tick.now_unix`,
+    /// consults no RNG, and holds no CA / ObservationStore handle — it builds the
+    /// `SpiffeId` purely and passes it in the action; CA I/O is the executor's
+    /// (D3). dst-lint holds.
     fn reconcile(
         &self,
         desired: &Self::State,
         actual: &Self::State,
-        _view: &Self::View,
-        _tick: &TickContext,
+        view: &Self::View,
+        tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         let mut actions: Vec<Action> = Vec::new();
+        let mut next_view = view.clone();
 
-        // running ∧ ¬held → IssueSvid.
+        // running ∧ ¬held → IssueSvid (backoff-gated), recording the attempt.
         for (alloc_id, running) in &desired.desired {
             if actual.actual.contains_key(alloc_id) {
-                // running ∧ held → no-op (gated near-expiry rotation is #40).
+                // running ∧ held → no-op; the issue succeeded, so clear any
+                // recorded retry memory (clear-on-success). Gated near-expiry
+                // rotation is the #40 branch (step 03-02), NOT here.
+                next_view.retry.remove(alloc_id);
                 continue;
             }
+
+            // Backoff gate: emit only when no prior failed attempt is recorded
+            // OR the backoff window has elapsed. The DEADLINE is recomputed here
+            // from the persisted inputs (`attempts` + `last_failure_seen_at`) +
+            // the live `backoff_for_attempt` policy — never persisted (a
+            // `next_attempt_at` field would be a persist-derived-state smell;
+            // `.claude/rules/development.md` § "Persist inputs, not derived
+            // state").
+            if let Some(retry) = next_view.retry.get(alloc_id) {
+                let deadline = retry.last_failure_seen_at + backoff_for_attempt(retry.attempts);
+                if tick.now_unix < deadline {
+                    // Inside the backoff window — suppress the re-issue this
+                    // tick; the retry entry is preserved (NOT cleared, NOT
+                    // bumped) so the deadline recomputes identically next tick.
+                    continue;
+                }
+            }
+
             let spiffe_id = SpiffeId::for_allocation(&running.workload_id, alloc_id);
             let correlation = identity_correlation(alloc_id, &spiffe_id, "issue-svid");
             actions.push(Action::IssueSvid {
@@ -210,6 +298,15 @@ impl Reconciler for SvidLifecycle {
                 node_id: running.node_id.clone(),
                 correlation,
             });
+
+            // Record the attempt: bump the retry memory so a re-issue that then
+            // FAILS backs off (the alloc remains `¬held` next tick with a
+            // recorded entry). Persist INPUTS — `attempts` (count) and
+            // `last_failure_seen_at` (`tick.now_unix`, the observation
+            // timestamp), never the deadline.
+            let entry = next_view.retry.entry(alloc_id.clone()).or_default();
+            entry.attempts = entry.attempts.saturating_add(1);
+            entry.last_failure_seen_at = tick.now_unix;
         }
 
         // ¬running ∧ held → DropSvid.
@@ -221,6 +318,12 @@ impl Reconciler for SvidLifecycle {
             actions.push(Action::DropSvid { alloc_id: alloc_id.clone(), correlation });
         }
 
+        // GC: drop retry memory for allocations no longer in the Running set
+        // (mirror `ServiceMapHydrator`'s `retain`). The clear-on-success path
+        // above already removed entries for now-held running allocs; this prunes
+        // entries for allocs that have left the running set entirely.
+        next_view.retry.retain(|alloc_id, _| desired.desired.contains_key(alloc_id));
+
         // The §18 self-re-enqueue gate treats an all-Noop vector as "converged
         // this tick"; emit a single Noop when nothing needed doing so the gate
         // reads the converged shape (mirrors `WorkflowLifecycle::reconcile`).
@@ -228,7 +331,7 @@ impl Reconciler for SvidLifecycle {
             actions.push(Action::Noop);
         }
 
-        (actions, SvidLifecycleView::default())
+        (actions, next_view)
     }
 }
 
