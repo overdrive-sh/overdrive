@@ -79,6 +79,10 @@ fn build_app_state(tmp: &TempDir) -> AppState {
         driver,
         Arc::new(SimClock::new()),
         Arc::new(SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         NodeId::new("writer-1").expect("NodeId"),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

@@ -106,6 +106,10 @@ async fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppSt
         driver,
         Arc::new(SimClock::new()),
         Arc::new(SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         node_id("writer-1"),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

@@ -24,6 +24,8 @@ use overdrive_core::TransitionReason;
 use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
+use overdrive_core::traits::ca::Ca;
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError, DriverType};
 use overdrive_core::traits::observation_store::{
@@ -35,6 +37,7 @@ use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServic
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
+use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
 use crate::workflow_runtime::WorkflowEngine;
 
@@ -78,6 +81,14 @@ pub mod register_local_backend;
 /// LOCAL_BACKEND_MAP entry. Idempotent per the ADR-0053 § 2
 /// trait contract.
 pub mod deregister_local_backend;
+
+/// Per-arm dispatch for `Action::IssueSvid` / `Action::DropSvid` per
+/// ADR-0067 D3 — the ONE place workload-CA I/O happens. `IssueSvid`
+/// mints the leaf + writes the `issued_certificates` audit row + holds
+/// the material in `IdentityMgr` (audit-before-hold, K4 fail-closed);
+/// `DropSvid` removes the held entry (O2/K2). See the module docstring
+/// on [`issue_svid::dispatch_issue`] for the audit-before-hold contract.
+pub mod issue_svid;
 
 /// Reconcile-output invariant validator — rejects post-`reconcile`
 /// `Vec<Action>` returns that contain two or more write-actions
@@ -390,6 +401,9 @@ pub async fn dispatch(
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
     dataplane: &dyn Dataplane,
+    ca: &dyn Ca,
+    clock: &dyn Clock,
+    identity: &IdentityMgr,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -405,6 +419,9 @@ pub async fn dispatch(
             driver,
             obs,
             dataplane,
+            ca,
+            clock,
+            identity,
             bus,
             tick,
             writer_node,
@@ -559,6 +576,9 @@ pub async fn dispatch_with_workflow_intent(
         state.driver.as_ref(),
         state.obs.as_ref(),
         state.dataplane.as_ref(),
+        state.ca.as_ref(),
+        state.clock.as_ref(),
+        state.identity.as_ref(),
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
@@ -586,6 +606,9 @@ async fn dispatch_single(
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
     dataplane: &dyn Dataplane,
+    ca: &dyn Ca,
+    clock: &dyn Clock,
+    identity: &IdentityMgr,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -1149,19 +1172,26 @@ async fn dispatch_single(
                 .map_err(ShimError::from)?;
             Ok(())
         }
-        // RED scaffold: the real IssueSvid/DropSvid executor lands GREEN in
-        // step 01-06 (ADR-0067 D3 — `issue_and_audit` + `IdentityMgr::hold`
-        // / `drop_svid`). This arm is UNREACHABLE before 01-06: nothing
-        // dispatches these variants until the `SvidLifecycle` reconciler
-        // (01-04) emits them, and 01-04/01-05 assert on the emitted action
-        // LIST, not on dispatch. 01-06 REPLACES this scaffold with the real
-        // executor call.
-        #[expect(
-            clippy::todo,
-            reason = "RED scaffold; IssueSvid/DropSvid executor lands GREEN in step 01-06"
-        )]
-        Action::IssueSvid { .. } | Action::DropSvid { .. } => {
-            todo!("RED scaffold: IssueSvid/DropSvid executor lands in step 01-06")
+        // workload-identity-manager step 01-06 (ADR-0067 D3) — the
+        // `issue_svid` executor is the ONE place workload-CA I/O happens.
+        // `IssueSvid` mints the leaf + writes the `issued_certificates` audit
+        // row + binds the two via `ca_issuance::issue_and_audit` (reused
+        // wholesale), then holds the returned `SvidMaterial` in `IdentityMgr`
+        // and refreshes the trust bundle (D6). On an audit-write failure the
+        // executor returns `Err` and holds NOTHING — no unaudited SVID escapes
+        // (K4 fail-closed). `DropSvid` removes the held entry so the node-held
+        // leaf key is no longer reachable (O2/K2). The validity window is
+        // `issue_and_audit`'s sole concern (single clock read); the executor
+        // never reads a clock to build one.
+        action @ Action::IssueSvid { .. } => {
+            issue_svid::dispatch_issue(&action, ca, obs, clock, identity)
+                .await
+                .map_err(ShimError::from)?;
+            Ok(())
+        }
+        action @ Action::DropSvid { .. } => {
+            issue_svid::dispatch_drop(&action, identity);
+            Ok(())
         }
     }
 }
@@ -1224,6 +1254,14 @@ pub enum ShimError {
     /// `deregister_local_backend` shim dispatch failed (ADR-0053 § 3).
     #[error("deregister_local_backend dispatch failed")]
     DeregisterLocalBackend(#[from] deregister_local_backend::DeregisterLocalBackendDispatchError),
+    /// `issue_svid` executor dispatch failed (ADR-0067 D3) — CA signing OR an
+    /// audit-write failure. Pass-through `#[from]` preserves the typed
+    /// `IssueSvidDispatchError` (which itself embeds the typed
+    /// `CaIssuanceError`), so callers can `matches!` on `Audit` vs `Ca`
+    /// without `Display`-grepping. On either, the held map is left untouched
+    /// (K4 fail-closed — no unaudited SVID held).
+    #[error("issue_svid dispatch failed")]
+    IssueSvid(#[from] issue_svid::IssueSvidDispatchError),
     /// The `WorkflowEngine::start` dispatch failed (ADR-0064 §5) — the
     /// engine could not resolve the workflow kind or load its journal.
     /// The shim surfaces this as a typed `ShimError` rather than swallow

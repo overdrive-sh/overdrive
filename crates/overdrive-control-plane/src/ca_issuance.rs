@@ -39,7 +39,6 @@
 //! restart. This is the mechanism the #40 rotation workflow will later drive on
 //! a schedule; this module provides only the mechanism, not the trigger.
 
-use overdrive_core::NodeId;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
@@ -48,6 +47,7 @@ use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ObservationStoreError,
 };
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_core::{NodeId, SpiffeId};
 
 // The validity window is computed ONCE here from the injected [`Clock`] and the
 // SAME two `overdrive_core::ca` constants the leaf is signed with —
@@ -127,8 +127,11 @@ impl CaIssuanceError {
 ///    WORKLOAD_SVID_TTL`), then mint the leaf with a windowed
 ///    [`SvidRequest`] carrying those values — a fresh certificate each call
 ///    (distinct serial, new validity), the re-issue mechanism (S-05-05). The
-///    clock is the single window SSOT: the passed `request` contributes only
-///    its `spiffe_id()` (any window on it is ignored — ADR-0067 rev 3).
+///    clock is the single window SSOT: the workload identity is the
+///    caller-supplied [`SpiffeId`] (ADR-0067 rev 3 spec item 5 / option b —
+///    an un-windowed `SvidRequest` can't be built now that the window is
+///    REQUIRED on the type, so the seam takes the identity directly and
+///    builds its own windowed request internally).
 /// 3. Build the [`IssuedCertificateRow`] from the FAITHFUL observed facts —
 ///    `serial` / `spiffe_id` from [`SvidMaterial`]'s per-call accessors,
 ///    `issuer_serial` from the [`IntermediateHandle`](overdrive_core::traits::ca::IntermediateHandle),
@@ -153,7 +156,7 @@ pub async fn issue_and_audit(
     observation: &dyn ObservationStore,
     clock: &dyn Clock,
     node: &NodeId,
-    request: &SvidRequest,
+    spiffe_id: &SpiffeId,
 ) -> Result<SvidMaterial, CaIssuanceError> {
     // The node intermediate is the issuer of the leaf; its serial is the audit
     // row's `issuer_serial` (the chain link an auditor walks). Single-node: the
@@ -184,11 +187,11 @@ pub async fn issue_and_audit(
     // Mint the leaf — a FRESH certificate each call (distinct serial, new
     // validity window). This is the re-issue mechanism (S-05-05): calling
     // `issue_and_audit` again for the same `SpiffeId` produces a distinct leaf.
-    // The clock is the single window SSOT, so we build our OWN windowed request
-    // from `request.spiffe_id()` + the window just computed — ANY window on the
-    // passed `request` is ignored (the executor never computes the window;
-    // ADR-0067 rev 3 PINNED SURFACE SPEC item 5).
-    let windowed = SvidRequest::new(request.spiffe_id().clone(), not_before, not_after);
+    // The clock is the single window SSOT, so we build the windowed request
+    // from the caller-supplied `spiffe_id` + the window just computed — the
+    // executor never computes the window (ADR-0067 rev 3 PINNED SURFACE SPEC
+    // item 5 / option b: the seam takes the identity directly).
+    let windowed = SvidRequest::new(spiffe_id.clone(), not_before, not_after);
     let svid = ca.issue_svid(&windowed).map_err(CaIssuanceError::ca)?;
 
     let row = IssuedCertificateRow {

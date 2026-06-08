@@ -24,6 +24,11 @@ use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
+// `too_many_lines`: the 01-06 required-field AppState change (adds `ca` +
+// `identity`) tipped this walking-skeleton fn from 100 → 102 lines via two
+// mechanical wiring args; the body is a single linear submit→converge→stop
+// scenario with no decomposition to extract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn job_stop_drives_running_to_terminated() {
     let tmp = TempDir::new().expect("tempdir");
@@ -59,6 +64,10 @@ async fn job_stop_drives_running_to_terminated() {
         driver,
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

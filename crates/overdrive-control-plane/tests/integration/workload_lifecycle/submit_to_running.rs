@@ -56,6 +56,10 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
         driver,
         sim_clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

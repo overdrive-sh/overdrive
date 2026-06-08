@@ -264,6 +264,10 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
         driver,
         Arc::clone(&clock),
         Arc::new(SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         NodeId::new("local").expect("node id"),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

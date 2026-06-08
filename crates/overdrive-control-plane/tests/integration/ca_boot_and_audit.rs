@@ -764,9 +764,10 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
 
     // WHEN the workload-start path issues the SVID through the issuance seam,
     // which writes the audit row through the `ObservationStore` port.
-    let svid = ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
-        .await
-        .expect("issuance + audit write succeeds");
+    let svid =
+        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
+            .await
+            .expect("issuance + audit write succeeds");
 
     // AND the issuer serial the audit row should carry is the node
     // intermediate's serial (the chain link recorded on the row).
@@ -830,7 +831,7 @@ async fn audit_window_mirrors_the_issued_leaf_window_with_skew_backoff() {
     let request = workload_request();
 
     // WHEN the workload-start path issues the SVID through the issuance seam.
-    ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
+    ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
         .await
         .expect("issuance + audit write succeeds");
 
@@ -889,7 +890,7 @@ async fn issuance_that_cannot_write_audit_row_surfaces_an_error() {
     let request = workload_request();
 
     // WHEN issuance is attempted.
-    let result = ca_issuance::issue_and_audit(&ca, &obs, &clock, &node, &request).await;
+    let result = ca_issuance::issue_and_audit(&ca, &obs, &clock, &node, request.spiffe_id()).await;
 
     // THEN the issuance is REFUSED with a typed audit error — NO SvidMaterial is
     // returned, so no unaudited certificate escapes (issuance is never silent).
@@ -927,12 +928,14 @@ async fn svid_is_reissued_on_demand_without_control_plane_restart() {
     let request = workload_request();
 
     // WHEN the SAME identity is issued twice against the SAME running composition.
-    let first = ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
-        .await
-        .expect("first issuance succeeds");
-    let second = ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, &request)
-        .await
-        .expect("re-issue on the running control plane succeeds (no restart)");
+    let first =
+        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
+            .await
+            .expect("first issuance succeeds");
+    let second =
+        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
+            .await
+            .expect("re-issue on the running control plane succeeds (no restart)");
 
     // THEN both leaves carry the SAME identity but the re-issue is a FRESH leaf:
     // a distinct serial (re-issue is not cached — Ca::issue_svid mints anew).

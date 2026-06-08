@@ -19,7 +19,12 @@
 //! the `tests/acceptance.rs` entrypoint header — this crate's acceptance
 //! suite is in-process serde + sim-adapter only.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+// `too_many_lines` on `run_one_tick_with_seeded_view`: the 01-06
+// required-field AppState change (adds `ca` + `identity`) tipped this
+// fixture-builder fn from 100 → 102 lines via two mechanical wiring
+// args; the body is a single linear fixture-assembly with no decomposition
+// to extract. Allow it at file scope for the fixture surface.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,6 +75,10 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         driver,
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -262,6 +271,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         driver,
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -468,6 +481,10 @@ async fn stop_after_failed_alloc_drains_broker() {
         driver,
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -746,6 +763,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         driver,
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -1036,6 +1057,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         driver,
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

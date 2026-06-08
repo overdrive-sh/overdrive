@@ -110,6 +110,10 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
         driver,
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

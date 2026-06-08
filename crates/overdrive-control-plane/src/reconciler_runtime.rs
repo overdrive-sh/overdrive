@@ -2871,6 +2871,10 @@ mod tests {
                 driver,
                 Arc::new(SimClock::new()),
                 Arc::new(SimDataplane::new()),
+                Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
+                ))),
+                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
                 writer_node(),
                 allocator,
                 listener_facts,
@@ -3342,6 +3346,10 @@ mod tests {
                 driver,
                 Arc::new(SimClock::new()),
                 Arc::new(SimDataplane::new()),
+                Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
+                ))),
+                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
                 writer_node(),
                 allocator,
                 crate::test_empty_listener_facts(),
