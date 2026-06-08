@@ -1125,11 +1125,15 @@ ADR-0067 (D-points) + brief.md.
   `UnknownWorkflow` every tick. Near-expiry reads the held cert's `not_after`
   from `actual` when #40 flips the gate — the View is **retry memory** and does
   NOT carry `issued_at`. NO throwaway sync-rotate path. (ADR-0067 D8; A5.)
-- **[DDD-11]** **`AppState` is extended** with `ca: Arc<dyn Ca>` + `identity:
-  Arc<IdentityMgr>` (the found wiring), threaded into `dispatch`/`dispatch_single`;
-  production composes `Arc<dyn Ca>` from `ca_boot` (lib.rs:50). *Rationale*: the
-  executor needs both to do CA I/O + hold; additive, existing consumers
-  untouched. (ADR-0067 D3.)
+- **[DDD-11]** **`AppState` is extended** with `ca: Arc<dyn Ca>` (required) +
+  `identity: Arc<IdentityMgr>` (the found wiring), threaded into
+  `dispatch`/`dispatch_single`; production composes `Arc<dyn Ca>` as an
+  **ephemeral workload `RcgenCa`** built directly in `run_server` (ADR-0067 D3
+  rev 4) — NOT `ca_boot` (`lib.rs:50` is a bare `pub mod ca_boot;`;
+  `boot_ca`/`RcgenCa` are never called in `lib.rs`). Fresh in-memory root each
+  boot, NO KEK / NO persistence; the persistent KEK-backed root (ADR-0063
+  D2/D8) + operator surface are **#215**. *Rationale*: the executor needs both
+  to do CA I/O + hold; additive, existing consumers untouched. (ADR-0067 D3.)
 - **[DDD-12]** **`SvidLifecycle` is level-triggered via `Action::EnqueueEvaluation`**
   (rev 2 — the missing trigger). `WorkloadLifecycle::reconcile`
   (`workload_lifecycle.rs:181` alloc-mutating block) emits a third

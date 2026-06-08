@@ -672,6 +672,28 @@ for DISTILL.
 
 ## Changelog
 
+- 2026-06-08 — **Phase-2 production wires an *ephemeral* workload CA, not the
+  persistent KEK-backed root (note, no decision change).** Recorded while
+  correcting a false claim in ADR-0067 D3 (which had asserted production already
+  composes `Arc<dyn Ca>` from `ca_boot`). Ground truth: the workload-CA boot
+  *functions* this ADR ships (`boot_ca` + `SystemdCredsKeyring`, D2/D8) are
+  **never called in `overdrive-control-plane/src/lib.rs`** — `lib.rs:50` is a
+  bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa` appear only in tests. Phase 2
+  (#35, ADR-0067) instead composes an **ephemeral workload `RcgenCa` directly in
+  `run_server`** — `RcgenCa::new(Arc::new(OsEntropy), SpiffeId
+  "spiffe://overdrive.local/overdrive/ca")` → `root()` → `issue_intermediate(&node_id)`
+  → `trust_bundle()` → `IdentityMgr::new(Some(bundle))`, with a fresh in-memory
+  P-256 root each boot and **NO KEK / NO persistence**. This **does not contradict**
+  this ADR's persistent design: the ephemeral `RcgenCa` and the persistent
+  KEK-backed root implement the same `Ca` trait, so this ADR's D2/D8 persistent
+  root is the **production upgrade target** for #215 ("Compose built-in CA into
+  operator surface + satisfy EDD expectations", blocked on #35), not yet wired.
+  Swapping the `run_server` composition root from ephemeral `RcgenCa` to
+  `boot_ca` + `SystemdCredsKeyring` is the change #215 makes; no decision in
+  D1–D9 changes. (The *operator/control-plane HTTPS* ephemeral CA,
+  `tls_bootstrap::mint_ephemeral_ca` → `CaMaterial` at `lib.rs:1208`, ADR-0010,
+  is a different CA — it is not a `Ca` and cannot issue workload SVIDs.)
+
 - 2026-06-08 — **rev 2 amendment: `SvidMaterial` gains `not_after`; the SVID
   validity window is threaded through `SvidRequest` from a single injected-clock
   read (the "held cert's real `not_after`" becomes a real observable field). D1

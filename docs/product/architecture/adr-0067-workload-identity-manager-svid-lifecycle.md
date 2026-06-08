@@ -9,7 +9,14 @@ held-set-as-`actual`, retry-memory View, the enqueue/handoff trigger, the
 see § Revision (rev 3): the D4 `HeldSvidFacts.not_after` / `held_snapshot` text is
 made TRUE against the code (`SvidMaterial` gains a real `not_after` field via the
 ADR-0063 rev 2 amendment) and the D8 near-expiry seam is confirmed sound and
-DST-deterministic; a PINNED SURFACE SPEC for the crafter is appended. Builds on
+DST-deterministic; a PINNED SURFACE SPEC for the crafter is appended.
+**Revised rev 4 (2026-06-08)** — see § D3 rev-4 correction: the D3 production-CA
+composition claim ("composes `Arc<dyn Ca>` from the existing `ca_boot` path …
+the same adapter the boot path already builds") was **false** — `lib.rs:50` is a
+bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa` are never called in `lib.rs`.
+Corrected to the ratified plan: Phase 2 composes an **ephemeral workload
+`RcgenCa` directly in `run_server`** (no KEK, no persistence); the persistent
+KEK-backed root (ADR-0063 D2/D8) + operator surface are **#215**. Builds on
 **ADR-0063** (built-in CA — the `Ca` port, `SvidMaterial`, `TrustBundle`,
 `ca_issuance::issue_and_audit`)
 and the reconciler / action-shim machinery of **ADR-0013 / ADR-0023 / ADR-0035 /
@@ -241,9 +248,56 @@ is the "found wiring" — an ADR consequence, recorded explicitly):
 - `AppState` gains `ca: Arc<dyn Ca>` and `identity: Arc<IdentityMgr>`.
 - `ca` / `clock` / `identity` are threaded into `dispatch` / `dispatch_single`
   for the two new arms.
-- Production composes `Arc<dyn Ca>` from the existing `ca_boot` path
-  (`overdrive-control-plane/src/lib.rs:50`) — the same `Ca` adapter the boot
-  path already builds for ADR-0063.
+- Production composes `Arc<dyn Ca>` by constructing an **ephemeral workload
+  `RcgenCa` directly in `run_server`** (see rev 4 correction below). `AppState.ca`
+  stays a **required `Arc<dyn Ca>`**.
+
+> **rev 4 correction (2026-06-08).** Rev 1–3 of this section asserted that
+> production "composes `Arc<dyn Ca>` from the existing `ca_boot` path
+> (`overdrive-control-plane/src/lib.rs:50`) — the same `Ca` adapter the boot
+> path already builds for ADR-0063." **That was false.** `lib.rs:50` is
+> `pub mod ca_boot;` — a bare module declaration. `boot_ca` / `RcgenCa` are
+> **never called in `lib.rs`**; ADR-0063 shipped the workload-CA boot
+> *functions* but never wired them into `run_server`. They exist only in tests
+> (`rcgen_ca_chain_verify.rs`, `ca_equivalence.rs`, `ca_boot_and_audit.rs`).
+> The only CA constructed in `lib.rs` today is `tls_bootstrap::mint_ephemeral_ca()`
+> (`lib.rs:1208`) — the **operator/control-plane HTTPS** ephemeral CA (ADR-0010),
+> which is NOT a `Ca` and CANNOT issue workload SVIDs. Do not conflate the two.
+>
+> **What Phase 2 actually composes (the ratified plan).** `run_server`
+> constructs an **EPHEMERAL workload `RcgenCa` in process** — fresh in-memory
+> P-256 root each boot, **NO KEK, NO persistence** (this is NOT `boot_ca`). The
+> composition mirrors the shipped test precedent
+> (`crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs:74-79,132-142`):
+>
+> ```rust
+> let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")?;
+> let ca: Arc<dyn Ca> = Arc::new(RcgenCa::new(Arc::new(OsEntropy), subject));
+> ca.root()?;                        // ephemeral P-256 root (cached via RaceOnceCell)
+> ca.issue_intermediate(&node_id)?;  // node intermediate signed by root (cached)
+> let bundle = ca.trust_bundle()?;   // root anchor + intermediate
+> let identity = Arc::new(IdentityMgr::new(Some(bundle)));
+> ```
+>
+> The wiring inputs already exist in `run_server`: `node_id` =
+> `NodeId::new("local")` (`lib.rs:1415`), `OsEntropy` (`lib.rs:359, 1539`), and
+> `AppState` is constructed at `lib.rs:1544`
+> (`AppState::new_with_workflow_engine`). `RcgenCa::new(entropy: Arc<dyn Entropy>,
+> subject: SpiffeId)` (`crates/overdrive-host/src/ca/rcgen_ca.rs:119`) caches its
+> root/intermediate internally via `RaceOnceCell`. All `Ca` methods are sync,
+> `Result`-returning (`crates/overdrive-core/src/traits/ca.rs`): `root()` (:649),
+> `issue_intermediate(&NodeId)` (:672), `issue_svid(&SvidRequest)` (:729),
+> `trust_bundle()` (:757).
+>
+> **What is deferred — #215** ("Compose built-in CA into operator surface +
+> satisfy EDD expectations", blocked on #35). The **persistent KEK-backed root**
+> (`boot_ca` + `SystemdCredsKeyring`, ADR-0063 D2/D8) and the operator surface
+> (`alloc status` SVID render, deployed-SVID operator-verify) are #215's scope,
+> not yet wired. ADR-0063's persistent design is the **upgrade target** for #215;
+> it is not contradicted by the ephemeral Phase-2 composition — the ephemeral
+> `RcgenCa` and the persistent KEK-backed root implement the **same `Ca` trait**,
+> so swapping the composition root in `run_server` is the only change #215 makes
+> to this seam. `AppState.ca` remains a required `Arc<dyn Ca>` across both.
 
 The executor is the async boundary (ADR-0023's sanctioned shim boundary) — the
 pure reconciler drives it through typed Actions and observes its effect through

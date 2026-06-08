@@ -1039,7 +1039,7 @@ C4Component
   Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
     Component(mgr, "IdentityMgr (NEW)", "identity_mgr.rs", "parking_lot::RwLock<IdentityState{held: BTreeMap<AllocationId, SvidMaterial>, bundle: Option<TrustBundle>}>. new(bundle); hold/drop_svid/set_bundle; impl IdentityRead; held_snapshot()→BTreeMap<AllocationId, HeldSvidFacts{spiffe_id, not_after}> (sync actual-projection, mirrors WorkflowEngine::live_instances()). All reads/writes read-or-write-lock→clone/mutate→drop, NEVER across .await. BTreeMap MANDATORY")
     Component(exec, "action_shim/issue_svid.rs executor (NEW)", "action_shim/issue_svid.rs", "IssueSvid → issue_and_audit → identity.hold → identity.set_bundle(ca.trust_bundle()?). DropSvid → identity.drop_svid. The ONE CA-I/O site (mirrors dataplane_update_service.rs)")
-    Component(appstate, "AppState + shim signature (EXTEND)", "lib.rs", "Gains ca: Arc<dyn Ca> + identity: Arc<IdentityMgr>; threads ca/clock/identity into dispatch/dispatch_single. Prod composes Arc<dyn Ca> from ca_boot (lib.rs:50)")
+    Component(appstate, "AppState + shim signature (EXTEND)", "lib.rs", "Gains ca: Arc<dyn Ca> (required) + identity: Arc<IdentityMgr>; threads ca/clock/identity into dispatch/dispatch_single. Prod composes Arc<dyn Ca> as an EPHEMERAL workload RcgenCa built in run_server (ADR-0067 D3 rev 4) -- NOT ca_boot (lib.rs:50 is a bare module decl). Persistent KEK-backed root + operator surface = #215")
   }
 
   Container_Boundary(sim, "overdrive-sim (adapter-sim)") {

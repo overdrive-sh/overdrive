@@ -4520,7 +4520,7 @@ convergence invariant) — built-in-ca's `rcgen_ca_chain_verify` shape.
 | `IdentityRead` port trait | `overdrive-core` (core) | Sync read surface — `svid_for(&AllocationId) -> Option<SvidMaterial>` + `current_bundle() -> Option<TrustBundle>`; owned clones; 5 behaviour-pinning rustdoc clauses. | CREATE NEW |
 | `IdentityMgr` | `overdrive-control-plane` (adapter-host) | `RwLock<IdentityState{ held: BTreeMap<AllocationId, SvidMaterial>, bundle: Option<TrustBundle> }>`; `new(bundle)`; mutators `hold`/`drop_svid`/`set_bundle`; `impl IdentityRead`; **`held_snapshot() -> BTreeMap<AllocationId, HeldSvidFacts{spiffe_id, not_after}>`** (the sync `actual`-projection reader the runtime folds into `SvidLifecycle`'s `actual` — mirrors `WorkflowEngine::live_instances()`). `parking_lot::RwLock` (sync), `BTreeMap` mandatory. | CREATE NEW |
 | `action_shim/issue_svid.rs` executor | `overdrive-control-plane` (adapter-host) | The 2 `dispatch_single` arms: `IssueSvid` → `ca_issuance::issue_and_audit` → `identity.hold` → `identity.set_bundle(ca.trust_bundle()?)`; `DropSvid` → `identity.drop_svid`. The one place CA I/O happens. | CREATE NEW |
-| `AppState` + shim signature | `overdrive-control-plane` (adapter-host) | Gain `ca: Arc<dyn Ca>` + `identity: Arc<IdentityMgr>`; thread `ca`/`clock`/`identity` into `dispatch`/`dispatch_single`. Production composes `Arc<dyn Ca>` from `ca_boot` (`lib.rs:50`). | EXTEND |
+| `AppState` + shim signature | `overdrive-control-plane` (adapter-host) | Gain `ca: Arc<dyn Ca>` (required) + `identity: Arc<IdentityMgr>`; thread `ca`/`clock`/`identity` into `dispatch`/`dispatch_single`. Production composes `Arc<dyn Ca>` as an **ephemeral workload `RcgenCa`** built directly in `run_server` (ADR-0067 D3 rev 4) — NOT `ca_boot` (`lib.rs:50` is a bare `pub mod ca_boot;`; `boot_ca`/`RcgenCa` are never called in `lib.rs`). No KEK / no persistence; the persistent KEK-backed root (ADR-0063 D2/D8) + operator surface are **#215**. | EXTEND |
 | `SimIdentityRead` | `overdrive-sim` (adapter-sim) | Implements `IdentityRead` over a preloaded `BTreeMap` + `Option<TrustBundle>`. | CREATE NEW |
 
 ### Driving ports (inbound) and driven ports (outbound)
@@ -4596,8 +4596,16 @@ opportunistic bundle refresh, D6); **`DropSvid`** → `identity.drop_svid(alloc_
 (removes the entry so the node-held leaf key is no longer reachable — O2). To
 wire it, **`AppState` is extended** (the "found wiring" — recorded as an ADR-0067
 consequence): it gains `ca: Arc<dyn Ca>` + `identity: Arc<IdentityMgr>`, threaded
-into `dispatch`/`dispatch_single`; production composes `Arc<dyn Ca>` from the
-existing `ca_boot` path (`lib.rs:50`).
+into `dispatch`/`dispatch_single` (`AppState.ca` stays a required `Arc<dyn Ca>`);
+production composes `Arc<dyn Ca>` as an **ephemeral workload `RcgenCa`** built
+directly in `run_server` (ADR-0067 D3 rev 4) — `RcgenCa::new(Arc::new(OsEntropy),
+SpiffeId "spiffe://overdrive.local/overdrive/ca")` → `root()` →
+`issue_intermediate(&node_id)` → `trust_bundle()` → `IdentityMgr::new(Some(bundle))`,
+fresh in-memory root each boot, NO KEK / NO persistence. This is **NOT** the
+`ca_boot` path: `lib.rs:50` is a bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa`
+are never called in `lib.rs`. The persistent KEK-backed root (`boot_ca` +
+`SystemdCredsKeyring`, ADR-0063 D2/D8) + the operator surface are **#215**
+(blocked on #35).
 
 ### Held-set-as-`actual` — the convergence model (rev 2)
 
@@ -4820,7 +4828,7 @@ held. Fault-injection (audit-write failure, broken hold/drop) flagged for DISTIL
 | Reconciler runtime (pure `reconcile()` + ViewStore bulk-load/write-through) | **REUSE AS-IS** | `SvidLifecycle` is one more `Reconciler` on the shipped runtime (ADR-0035/0036); the runtime owns View persistence end-to-end. No runtime change. |
 | Action-shim executor pattern (`ServiceMapHydrator` → `Action::DataplaneUpdateService` → executor) | **REUSE (pattern), new executor** | `action_shim/issue_svid.rs` mirrors `dataplane_update_service.rs` exactly — a new executor on the existing shim. No shim *mechanism* change (the dispatch grows additively). |
 | `Action` enum | **EXTEND (additive)** | +2 plain-enum variants (`IssueSvid`/`DropSvid`) + 2 `dispatch_single` arms + the 3 dispatch-enum variants (`AnyState`/`AnyReconciler`/`AnyReconcilerView`) — the same additive shape `DataplaneUpdateService`/`StartWorkflow` were added. No existing variant changes. |
-| `AppState` + shim signature | **EXTEND** | Gain `ca: Arc<dyn Ca>` + `identity: Arc<IdentityMgr>`; thread `ca`/`clock`/`identity` into the 2 new arms. Additive — existing `AppState` consumers untouched; production `Arc<dyn Ca>` is the *same* adapter `ca_boot` already builds (lib.rs:50). |
+| `AppState` + shim signature | **EXTEND** | Gain `ca: Arc<dyn Ca>` (required) + `identity: Arc<IdentityMgr>`; thread `ca`/`clock`/`identity` into the 2 new arms. Additive — existing `AppState` consumers untouched. Production `Arc<dyn Ca>` is an **ephemeral workload `RcgenCa`** built in `run_server` (ADR-0067 D3 rev 4) — NOT `ca_boot` (`lib.rs:50` is a bare module decl; `boot_ca`/`RcgenCa` are never called in `lib.rs`). Persistent KEK-backed root (ADR-0063 D2/D8) + operator surface = **#215**. |
 | `SpiffeId` | **EXTEND (impl) — CONSOLIDATION** | Add infallible `SpiffeId::for_allocation(&WorkloadId, &AllocationId) -> Self` — the **canonical extraction** of two existing private helpers that already derive the identical `spiffe://overdrive.local/job/<wl>/alloc/<id>` string: `mint_alloc_identity` (`backend_discovery_bridge.rs:424`) + `mint_identity` (`workload_lifecycle.rs:808`). Validates via the existing `new` with `unwrap_or_else(\|\| unreachable!(…))`; type / `new` / `Display`/`FromStr`/serde unchanged. **DELIVER migrates both call sites** to it (single-cut — prevents a third implementation). |
 | `CorrelationKey::derive` | **REUSE AS-IS** | `derive(target, spec_hash, purpose)` already exists (ADR-0035 reconciler-I/O / `id.rs`); the actions reuse it (`target = "svid-lifecycle/<alloc>"`, `"issue-svid"`). No change. |
 | `AllocationId` / `NodeId` / `WorkloadId` / `CertSerial` / `UnixInstant` | **REUSE AS-IS** | All exist in `id.rs` / the time types; used directly in the actions / View / `for_allocation`. No change. |
