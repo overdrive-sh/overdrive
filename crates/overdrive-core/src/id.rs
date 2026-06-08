@@ -280,6 +280,39 @@ impl SpiffeId {
     pub fn path(&self) -> &str {
         &self.canonical[self.path_start..]
     }
+
+    /// Derive the SVID identity for a workload allocation:
+    /// `spiffe://overdrive.local/job/<workload>/alloc/<alloc>`.
+    ///
+    /// The canonical allocation-shaped constructor (ADR-0067 D5) — the single
+    /// derivation the reconcilers route through, replacing the formerly
+    /// duplicated private `mint_alloc_identity` / `mint_identity` helpers.
+    ///
+    /// Infallible by construction: [`WorkloadId`] and [`AllocationId`] are
+    /// already-validated DNS-1123-label-like newtypes whose canonical form is
+    /// lowercase ASCII alphanumerics plus `-` / `_` / `.`, leading and trailing
+    /// alphanumeric. Interpolated into the fixed `spiffe://overdrive.local/job/
+    /// .../alloc/...` shape, the result always has the `spiffe://` scheme, the
+    /// non-empty trust domain `overdrive.local`, and a non-empty path — so
+    /// [`SpiffeId::new`] cannot reject it. The logically-unreachable
+    /// [`unreachable!`] idiom (per `.claude/rules/development.md` § "Logically
+    /// unreachable `None` / `Err`") states that invariant; `?` would imply a
+    /// valid early-return path and `.expect()` is banned in production library
+    /// code.
+    #[must_use]
+    pub fn for_allocation(workload: &WorkloadId, alloc: &AllocationId) -> Self {
+        let raw =
+            format!("spiffe://overdrive.local/job/{}/alloc/{}", workload.as_str(), alloc.as_str());
+        Self::new(&raw).unwrap_or_else(|_| {
+            unreachable!(
+                "for_allocation derives a SpiffeId from already-validated \
+                 WorkloadId/AllocationId newtypes interpolated into the fixed \
+                 spiffe://overdrive.local/job/.../alloc/... shape; SpiffeId::new \
+                 cannot reject a valid scheme + non-empty trust domain + \
+                 non-empty path"
+            )
+        })
+    }
 }
 
 impl Display for SpiffeId {

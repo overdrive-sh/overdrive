@@ -615,7 +615,7 @@ impl WorkloadLifecycle {
                     // .clone() calls + identity derivation), and
                     // preserves the shim's stateless-dispatcher
                     // contract per ADR-0023.
-                    let identity = mint_identity(&job.id, &failed.alloc_id);
+                    let identity = SpiffeId::for_allocation(&job.id, &failed.alloc_id);
                     // Per ADR-0031 Amendment 1: destructure the
                     // tagged-enum `WorkloadDriver` to project to the
                     // flat `AllocationSpec` (which stays flat per
@@ -698,7 +698,7 @@ impl WorkloadLifecycle {
                         // promise.
                         let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
                         let alloc_id = mint_alloc_id(&job.id, attempt);
-                        let identity = mint_identity(&job.id, &alloc_id);
+                        let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
                         // Per ADR-0031 §5 + Amendment 1: the Start
                         // action carries the operator-declared command
                         // + args projected from the tagged-enum
@@ -802,17 +802,6 @@ fn mint_alloc_id(workload_id: &WorkloadId, attempt: u32) -> AllocationId {
     let raw = format!("alloc-{}-{}", workload_id.as_str(), attempt);
     #[allow(clippy::expect_used)]
     AllocationId::new(&raw).expect("derived alloc id format is valid")
-}
-
-/// Mint a deterministic [`SpiffeId`] for an allocation.
-fn mint_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId {
-    let raw = format!(
-        "spiffe://overdrive.local/job/{}/alloc/{}",
-        workload_id.as_str(),
-        alloc_id.as_str()
-    );
-    #[allow(clippy::expect_used)]
-    SpiffeId::new(&raw).expect("derived SpiffeId is valid")
 }
 
 /// service-vip-allocator step 03-01 — pure helper for the Service-arm
