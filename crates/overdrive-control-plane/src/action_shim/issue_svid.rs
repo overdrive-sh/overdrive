@@ -24,10 +24,9 @@
 //! amendment closed). [`ca_issuance::issue_and_audit`] owns the single window
 //! computation from its injected `clock`; the returned [`SvidMaterial`]
 //! already carries the correct `not_after`. The executor passes only the
-//! action's [`SpiffeId`] (ADR-0067 rev 3 PINNED SURFACE SPEC item 5 / option
-//! b) — there is no throwaway window anywhere.
+//! action's [`SpiffeId`](overdrive_core::id::SpiffeId) (ADR-0067 rev 3 PINNED
+//! SURFACE SPEC item 5 / option b) — there is no throwaway window anywhere.
 
-use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
@@ -97,8 +96,9 @@ pub async fn dispatch_issue(
     // window is `issue_and_audit`'s sole concern; we pass only the identity
     // (ADR-0067 rev 3 spec item 5 / option b). On an audit-write failure this
     // returns `CaIssuanceError::Audit` and NO SvidMaterial — so the hold below
-    // never runs (K4 fail-closed).
-    let svid = issue_and_audit_for(ca, observation, clock, node_id, spiffe_id).await?;
+    // never runs (K4 fail-closed). The `?` converts the typed `CaIssuanceError`
+    // into `IssueSvidDispatchError::Issuance` via the `#[from]` embedding.
+    let svid = ca_issuance::issue_and_audit(ca, observation, clock, node_id, spiffe_id).await?;
 
     // Hold the minted material (re-issue overwrites; ADR-0067 D2). The leaf key
     // stays inside IdentityMgr (K2).
@@ -114,18 +114,6 @@ pub async fn dispatch_issue(
     }
 
     Ok(())
-}
-
-/// Narrow shim over [`ca_issuance::issue_and_audit`] threading the action's
-/// [`SpiffeId`] through as the workload identity (option b / ADR-0067 rev 3).
-async fn issue_and_audit_for(
-    ca: &dyn Ca,
-    observation: &dyn ObservationStore,
-    clock: &dyn Clock,
-    node: &NodeId,
-    spiffe_id: &SpiffeId,
-) -> Result<overdrive_core::traits::ca::SvidMaterial, IssueSvidDispatchError> {
-    Ok(ca_issuance::issue_and_audit(ca, observation, clock, node, spiffe_id).await?)
 }
 
 /// Dispatch one `Action::DropSvid`. Removes the held entry for `alloc_id` so the
@@ -144,11 +132,7 @@ pub fn dispatch_drop(action: &Action, identity: &IdentityMgr) {
              expected caller"
         );
     };
-    drop_held(identity, alloc_id);
-}
-
-/// The held-set removal. Kept as a named helper so the `DropSvid` arm reads as
-/// a single intention-revealing call.
-fn drop_held(identity: &IdentityMgr, alloc_id: &AllocationId) {
+    // Remove the held entry so the node-held leaf private key is no longer
+    // reachable (O2/K2). Idempotent — `drop_svid` is a no-op when not held.
     identity.drop_svid(alloc_id);
 }
