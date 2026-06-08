@@ -37,6 +37,7 @@ use std::collections::BTreeMap;
 use overdrive_core::AllocationId;
 use overdrive_core::reconcilers::HeldSvidFacts;
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
+use overdrive_core::traits::identity_read::IdentityRead;
 use parking_lot::RwLock;
 
 /// The in-process held-SVID set + boot trust bundle (ADR-0067 D4).
@@ -122,6 +123,30 @@ impl IdentityMgr {
                 )
             })
             .collect()
+    }
+}
+
+/// The in-process held-identity read surface (ADR-0067 D7).
+///
+/// Both getters take a read-lock, clone the value out, and drop the guard
+/// WITHIN the read expression — the caller holds no lock after the read returns
+/// (D7 clause 4; § "Concurrency & async"). Neither getter touches the `Ca` (D7
+/// clause 1 — the O3 read-latency promise): `svid_for` reads the held map and
+/// `current_bundle` reads the HYDRATED bundle (D6), never `Ca::issue_svid` /
+/// `Ca::trust_bundle`. Neither mutates (clause 2); `None` is explicit absence
+/// (clause 3); and a dropped alloc reads back `None` (clause 5 / K2).
+impl IdentityRead for IdentityMgr {
+    fn svid_for(&self, alloc: &AllocationId) -> Option<SvidMaterial> {
+        // Read-lock → clone the held material out → drop the guard as the
+        // temporary `state` falls out of the expression. No re-issue: the SVID
+        // is served from the held map, never minted (D7 clause 1).
+        self.state.read().held.get(alloc).cloned()
+    }
+
+    fn current_bundle(&self) -> Option<TrustBundle> {
+        // Read-lock → clone the hydrated bundle out → drop the guard. Zero CA
+        // I/O on the read path (D6 / D7 clause 1).
+        self.state.read().bundle.clone()
     }
 }
 
