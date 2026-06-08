@@ -50,14 +50,31 @@
 
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use overdrive_core::traits::ca::{Ca, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest};
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
 use overdrive_sim::adapters::SimCa;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use x509_parser::prelude::FromDer;
+
+/// A validity window straddling the current wall-clock for the SVID requests in
+/// these equivalence tests. The window rides on the `SvidRequest` (ADR-0063
+/// rev 2 amendment); the profile-comparison tests don't read the validity bytes
+/// (`not_after` is in neither adapter's profile Universe — it differs from the
+/// fixture cert bytes by construction, like serial/key), but one equivalence
+/// test runs `openssl verify` on the host leaf, which requires the leaf be valid
+/// *now* — so the window must straddle the current wall-clock, not a fixed past
+/// instant. `not_before` 60 s in the past, `not_after` ~1 h in the future.
+fn fixed_window() -> (UnixInstant, UnixInstant) {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("wall-clock after epoch");
+    let not_before = UnixInstant::from_unix_duration(now.saturating_sub(Duration::from_secs(60)));
+    let not_after = not_before + Duration::from_secs(3600);
+    (not_before, not_after)
+}
 
 /// The contract-observable root profile, parsed from a [`RootCaHandle`]'s real
 /// cert DER via the trait accessor (`cert_der`). This is the equivalence
@@ -355,7 +372,8 @@ fn ca_equivalence_svid_profile_matches_across_host_and_sim() {
     let node = NodeId::new("node-a").expect("NodeId parses");
     let workload = SpiffeId::new("spiffe://overdrive.local/workload/sim-svid")
         .expect("workload SpiffeId parses");
-    let req = SvidRequest::new(workload.clone());
+    let (not_before, not_after) = fixed_window();
+    let req = SvidRequest::new(workload.clone(), not_before, not_after);
 
     // WHEN each produces its intermediate + workload SVID (driving port). The
     // intermediate is captured so the leaf's chains-to-issuer linkage is
@@ -472,7 +490,8 @@ fn ca_equivalence_trust_bundle_shape_matches_across_host_and_sim() {
     // mints a genuine leaf for the same identity so both leaves share the SAN.
     let workload = SpiffeId::new("spiffe://overdrive.local/workload/sim-svid")
         .expect("workload SpiffeId parses");
-    let req = SvidRequest::new(workload);
+    let (not_before, not_after) = fixed_window();
+    let req = SvidRequest::new(workload, not_before, not_after);
 
     // WHEN each adapter produces its root, node intermediate, workload leaf, and
     // trust bundle through the `Ca` driving port. The intermediate is minted so

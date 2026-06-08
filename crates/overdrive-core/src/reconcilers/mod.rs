@@ -169,6 +169,7 @@ use crate::wall_clock::UnixInstant;
 pub mod backend_discovery_bridge;
 pub mod noop_heartbeat;
 pub mod service_map_hydrator;
+pub mod svid_lifecycle;
 pub mod workflow_lifecycle;
 pub mod workload_lifecycle;
 
@@ -180,6 +181,7 @@ pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, classify_backend_address,
 };
+pub use svid_lifecycle::HeldSvidFacts;
 pub use workflow_lifecycle::{
     WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
 };

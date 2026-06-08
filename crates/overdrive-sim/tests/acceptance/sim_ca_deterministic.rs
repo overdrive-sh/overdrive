@@ -23,6 +23,19 @@
 //! `SimCa`. DELIVER replaces with a `SeededEntropy`-driven twin-run
 //! identity assertion (mirror `tests/acceptance/sim_adapters_deterministic.rs`).
 
+/// A fixed validity window (`not_before`, `not_after`) for the SVID requests
+/// these determinism tests build. The window rides on the `SvidRequest`
+/// (ADR-0063 rev 2 amendment); a `const` window keeps issuance bit-identical
+/// across seeds (the `SimCa` carries `not_after` but its fixture bytes and
+/// serial — the determinism surface — are window-independent).
+fn fixed_window()
+-> (overdrive_core::wall_clock::UnixInstant, overdrive_core::wall_clock::UnixInstant) {
+    use overdrive_core::wall_clock::UnixInstant;
+    let not_before = UnixInstant::from_unix_duration(std::time::Duration::from_secs(1_700_000_000));
+    let not_after = not_before + std::time::Duration::from_secs(3600);
+    (not_before, not_after)
+}
+
 /// `@in-memory` `@S-01` — KPI K5: `SimCa::root()` at seed `0x5EED` (fixture
 /// P-256 key) produces bit-identical root material across two independent
 /// runs.
@@ -194,7 +207,8 @@ fn sim_ca_svid_serial_is_deterministic_and_at_least_64_bits() {
     const SEED: u64 = 0x5EED;
 
     let spiffe = SpiffeId::new(FIXTURE_SVID_SPIFFE).expect("fixture SVID SPIFFE id is valid");
-    let req = SvidRequest::new(spiffe);
+    let (not_before, not_after) = fixed_window();
+    let req = SvidRequest::new(spiffe, not_before, not_after);
 
     let ca_a = SimCa::new(Arc::new(SimEntropy::new(SEED)));
     let ca_b = SimCa::new(Arc::new(SimEntropy::new(SEED)));
@@ -288,7 +302,8 @@ fn sim_ca_svid_carries_single_uri_san_and_is_not_a_ca() {
     }
 
     let spiffe = SpiffeId::new(FIXTURE_SVID_SPIFFE).expect("fixture SVID SPIFFE id is valid");
-    let req = SvidRequest::new(spiffe.clone());
+    let (not_before, not_after) = fixed_window();
+    let req = SvidRequest::new(spiffe.clone(), not_before, not_after);
 
     let ca = SimCa::new(Arc::new(SimEntropy::new(SEED)));
     let svid = ca.issue_svid(&req).expect("sim SVID issuance succeeds for the fixture leaf");
@@ -358,7 +373,8 @@ fn sim_ca_reissue_for_same_spiffe_id_yields_a_fresh_distinct_leaf() {
     const SEED: u64 = 0x5EED;
 
     let spiffe = SpiffeId::new(FIXTURE_SVID_SPIFFE).expect("fixture SVID SPIFFE id is valid");
-    let req = SvidRequest::new(spiffe.clone());
+    let (not_before, not_after) = fixed_window();
+    let req = SvidRequest::new(spiffe.clone(), not_before, not_after);
 
     // A SINGLE SimCa instance — the same adapter re-issues for the same identity
     // twice in sequence. A per-SpiffeId cache would key on `req` and hand back

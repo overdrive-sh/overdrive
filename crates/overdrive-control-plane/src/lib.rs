@@ -62,6 +62,12 @@ pub mod cgroup_preflight;
 pub mod dataplane_config;
 pub mod error;
 pub mod handlers;
+// workload-identity-manager step 01-03 (ADR-0067 D4) — `IdentityMgr`, the
+// in-process held-SVID store + boot trust bundle. Ephemeral runtime state
+// (neither intent nor observation); `held_snapshot` yields the `HeldSvidFacts`
+// projection the `SvidLifecycle` reconciler reads as `actual`. The
+// `IdentityRead` impl lands 02-01; the reconciler wiring 01-04.
+pub mod identity_mgr;
 // backend-discovery-bridge-service-reachability step 02-01 — host
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved

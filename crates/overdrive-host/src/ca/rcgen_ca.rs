@@ -19,9 +19,6 @@
 
 use std::sync::Arc;
 
-use std::time::Duration;
-
-use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::race_once_cell::{RaceOnceCell, SetOutcome};
 use overdrive_core::traits::ca::{Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, RootCaHandle};
 use overdrive_core::traits::ca::{IntermediateHandle, SvidMaterial, SvidRequest, TrustBundle};
@@ -38,12 +35,13 @@ use rcgen::{
 /// draw width so the entropy contract is identical across adapters.
 const SERIAL_BYTES: usize = 16;
 
-// `WORKLOAD_SVID_TTL` (leaf validity width) and `SKEW_TOLERANCE` (the
-// `not_before` back-off) are the SINGLE source of truth in
-// `overdrive_core::ca` — see imports above. The control-plane `ca_issuance`
-// auditor records the audit window from the SAME two constants, so the window
-// the leaf is SIGNED with and the window the `issued_certificates` audit row
-// RECORDS cannot drift (ADR-0063 D6).
+// Validity-window SSOT (ADR-0063 rev 2 amendment): the leaf's `not_before` /
+// `not_after` are computed ONCE by the control-plane `ca_issuance::issue_and_audit`
+// (`not_before = now − SKEW_TOLERANCE`, width `WORKLOAD_SVID_TTL`) from its
+// injected `Clock` and threaded onto the `SvidRequest`. This adapter STAMPS that
+// window onto the cert (it reads no wall-clock), so the window the leaf is SIGNED
+// with and the window the `issued_certificates` audit row RECORDS are the SAME
+// two values — no drift, DST-deterministic (ADR-0067 rev 3 D8).
 
 /// The canonical node identity whose intermediate signs workload SVIDs when no
 /// intermediate has been explicitly issued yet. Single-node (Phase 2.6) has
@@ -297,24 +295,6 @@ impl RcgenCa {
         vec![req.spiffe_id().clone()]
     }
 
-    /// Seconds of wall-clock elapsed since the Unix epoch, read at the signing
-    /// boundary.
-    ///
-    /// The host adapter injects no `Clock`, so wall-clock is read here (the
-    /// production I/O boundary — an `adapter-host` crate, not core). The caller
-    /// composes `date_time_ymd(1970, 1, 1) + Duration::from_secs(elapsed)` —
-    /// using the only `OffsetDateTime` constructor rcgen re-exports plus
-    /// `std::time::Duration` — so no direct dependency on the `time` crate's
-    /// own constructors is needed. A pre-1970 system clock is structurally
-    /// impossible on the platform; `duration_since` only errors before the
-    /// epoch, hence the `unreachable!`.
-    fn seconds_since_epoch() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_else(|_| unreachable!("system clock is at or after the Unix epoch"))
-            .as_secs()
-    }
-
     /// Draw `SERIAL_BYTES` random bytes from the injected entropy source.
     ///
     /// Returns the raw bytes (for the rcgen `SerialNumber`) paired with their
@@ -466,18 +446,19 @@ impl Ca for RcgenCa {
             dn
         };
 
-        // Validity: a ~1h window straddling now (research Finding 6). The host
-        // adapter injects no `Clock`, so wall-clock `now` is read at the
-        // signing boundary via `SystemTime::now()` (this IS the production I/O
-        // boundary — an adapter, not core). `not_before` is backed off by
-        // `SKEW_TOLERANCE` so the freshly-minted leaf verifies under a verifier
-        // whose clock is marginally behind; `not_after = not_before +
-        // WORKLOAD_SVID_TTL` keeps the window width exactly the TTL (S-04-08
-        // asserts the width; S-04-07's `openssl verify` requires the leaf be
-        // valid *now*).
-        let now = date_time_ymd(1970, 1, 1) + Duration::from_secs(Self::seconds_since_epoch());
-        params.not_before = now - SKEW_TOLERANCE;
-        params.not_after = params.not_before + WORKLOAD_SVID_TTL;
+        // Validity: the host adapter STAMPS the window threaded on the request
+        // (ADR-0063 rev 2 amendment) — it no longer reads wall-clock here. The
+        // window is computed ONCE by `ca_issuance::issue_and_audit` from its
+        // injected `Clock` (`not_before = now − SKEW_TOLERANCE`, `not_after =
+        // not_before + WORKLOAD_SVID_TTL`) and threaded through `SvidRequest`,
+        // so the minted leaf's `not_after` and the `issued_certificates` audit
+        // row's `not_after` derive from the SAME two values — one clock read,
+        // no drift, DST-deterministic under `SimClock` (ADR-0067 rev 3 D8). The
+        // `UnixInstant → OffsetDateTime` conversion reuses rcgen's only
+        // `OffsetDateTime` constructor (`date_time_ymd(1970,1,1)` = the epoch)
+        // plus the `Duration` the window carries.
+        params.not_before = date_time_ymd(1970, 1, 1) + req.not_before().as_unix_duration();
+        params.not_after = date_time_ymd(1970, 1, 1) + req.not_after().as_unix_duration();
 
         // Serial: drawn via the injected Entropy port (CSPRNG, >=64 bits) and
         // stamped on the leaf — genuinely entropy-sourced, not rcgen-default.
@@ -499,6 +480,7 @@ impl Ca for RcgenCa {
             serial,
             spec.subject().clone(),
             CaKeyPem::new(leaf_key.serialize_pem()),
+            req.not_after(),
         ))
     }
 

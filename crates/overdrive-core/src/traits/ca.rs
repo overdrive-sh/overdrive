@@ -26,6 +26,7 @@
 //! binding (`.claude/rules/development.md` § "Port-trait dependencies").
 
 use crate::ca::root_key_envelope::KekId;
+use crate::wall_clock::UnixInstant;
 use crate::{CertSerial, CertSpecError, NodeId, SpiffeId};
 
 /// Result alias used throughout the CA port surface.
@@ -257,24 +258,56 @@ impl IntermediateHandle {
 /// A request to mint a workload SVID leaf.
 ///
 /// Carries the workload's [`SpiffeId`] — the single URI SAN the minted
-/// certificate must carry. The single-URI-SAN invariant ([`Ca::issue_svid`])
-/// is enforced against this identity before any certificate is produced.
+/// certificate must carry — plus the **validity window** (`not_before` /
+/// `not_after`) the leaf is signed with (ADR-0063 rev 2 amendment). The
+/// single-URI-SAN invariant ([`Ca::issue_svid`]) is enforced against this
+/// identity before any certificate is produced.
+///
+/// The window is computed ONCE by [`ca_issuance::issue_and_audit`] from its
+/// injected [`Clock`](crate::traits::clock::Clock) and threaded here so the
+/// minted leaf's `not_after` and the `issued_certificates` audit row's
+/// `not_after` derive from the *same two values* — one clock read, no drift
+/// (ADR-0067 rev 3). The host adapter stamps this window onto the cert; the
+/// sim adapter carries `not_after` onto the returned material (its fixture
+/// cert bytes are fixed and DO NOT track the window).
+///
+/// [`ca_issuance::issue_and_audit`]: https://docs.rs/overdrive-control-plane
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SvidRequest {
     spiffe_id: SpiffeId,
+    not_before: UnixInstant,
+    not_after: UnixInstant,
 }
 
 impl SvidRequest {
-    /// Build an SVID request for a workload identity.
+    /// Build an SVID request for a workload identity over a validity window.
+    ///
+    /// `not_before` / `not_after` are the window the minted leaf is signed
+    /// with — caller-supplied (the issuance seam computes them from its
+    /// injected clock), never read from wall-clock inside the adapter.
     #[must_use]
-    pub const fn new(spiffe_id: SpiffeId) -> Self {
-        Self { spiffe_id }
+    pub const fn new(spiffe_id: SpiffeId, not_before: UnixInstant, not_after: UnixInstant) -> Self {
+        Self { spiffe_id, not_before, not_after }
     }
 
     /// The workload identity this SVID is requested for.
     #[must_use]
     pub const fn spiffe_id(&self) -> &SpiffeId {
         &self.spiffe_id
+    }
+
+    /// The validity-window start the leaf must be signed with.
+    #[must_use]
+    pub const fn not_before(&self) -> UnixInstant {
+        self.not_before
+    }
+
+    /// The validity-window end the leaf must be signed with — the value
+    /// carried onto [`SvidMaterial::not_after`] and the
+    /// `issued_certificates` audit row.
+    #[must_use]
+    pub const fn not_after(&self) -> UnixInstant {
+        self.not_after
     }
 }
 
@@ -301,11 +334,13 @@ pub struct SvidMaterial {
     serial: CertSerial,
     spiffe_id: SpiffeId,
     leaf_key: CaKeyPem,
+    not_after: UnixInstant,
 }
 
 impl SvidMaterial {
     /// Assemble SVID material from its observable parts, including the matching
-    /// node-held leaf private key (PKCS#8 PEM, ADR-0063 D9).
+    /// node-held leaf private key (PKCS#8 PEM, ADR-0063 D9) and the leaf's
+    /// validity-window end (`not_after`, ADR-0063 rev 2 amendment).
     #[must_use]
     pub const fn new(
         cert_pem: CaCertPem,
@@ -313,8 +348,9 @@ impl SvidMaterial {
         serial: CertSerial,
         spiffe_id: SpiffeId,
         leaf_key: CaKeyPem,
+        not_after: UnixInstant,
     ) -> Self {
-        Self { cert_pem, cert_der, serial, spiffe_id, leaf_key }
+        Self { cert_pem, cert_der, serial, spiffe_id, leaf_key, not_after }
     }
 
     /// The SVID leaf certificate in PEM form.
@@ -353,6 +389,26 @@ impl SvidMaterial {
     #[must_use]
     pub const fn leaf_key(&self) -> &CaKeyPem {
         &self.leaf_key
+    }
+
+    /// The leaf's **validity-window end** (`not_after`) — the value the cert is
+    /// signed with (ADR-0063 rev 2 amendment).
+    ///
+    /// An OBSERVED FACT of the minted credential: the window is fixed at mint,
+    /// embedded in the signed bytes, and non-reconstructable. It equals the
+    /// `issued_certificates` audit row's `not_after` by construction (both
+    /// derive from the single window [`ca_issuance::issue_and_audit`] computes
+    /// from its injected clock and threads through [`SvidRequest::not_after`]),
+    /// which is what makes the
+    /// [`SvidLifecycle`](crate::reconcilers::svid_lifecycle) near-expiry
+    /// comparison sound and DST-deterministic (ADR-0067 rev 3 D8). This is NOT a
+    /// recompute-from-policy deadline — it is non-secret and prints plainly in
+    /// `Debug` (only [`leaf_key`](SvidMaterial::leaf_key) stays redacted).
+    ///
+    /// [`ca_issuance::issue_and_audit`]: https://docs.rs/overdrive-control-plane
+    #[must_use]
+    pub const fn not_after(&self) -> UnixInstant {
+        self.not_after
     }
 }
 
@@ -825,8 +881,9 @@ pub trait Ca: Send + Sync {
 mod tests {
     use super::{
         CaCertDer, CaCertPem, CaKeyPem, CertSerial, IntermediateHandle, RootCaHandle, SpiffeId,
-        SvidMaterial, TrustBundle, TrustBundlePem,
+        SvidMaterial, TrustBundle, TrustBundlePem, UnixInstant,
     };
+    use std::time::Duration;
 
     /// `CaKeyPem`'s `Debug` is REDACTED — it never renders the private-key body.
     ///
@@ -872,7 +929,8 @@ mod tests {
             serial.clone(),
             key.clone(),
         );
-        let svid = SvidMaterial::new(cert_pem, cert_der, serial, spiffe, key);
+        let not_after = UnixInstant::from_unix_duration(Duration::from_secs(1_700_003_600));
+        let svid = SvidMaterial::new(cert_pem, cert_der, serial, spiffe, key, not_after);
 
         for rendered in [format!("{root:?}"), format!("{inter:?}"), format!("{svid:?}")] {
             assert!(rendered.contains("CaKeyPem(<redacted>)"), "handle Debug must redact the key");

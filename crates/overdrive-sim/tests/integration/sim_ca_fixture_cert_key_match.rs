@@ -23,9 +23,11 @@
 //! genuine matched pair.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use overdrive_core::SpiffeId;
 use overdrive_core::traits::ca::{Ca, SvidRequest};
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::SimCa;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use rcgen::{KeyPair, PublicKeyData};
@@ -43,7 +45,12 @@ fn sim_ca_fixture_leaf_cert_and_key_are_a_matched_pair() {
     let ca = SimCa::new(Arc::new(SimEntropy::new(0x5EED)));
     let workload = SpiffeId::new("spiffe://overdrive.local/workload/sim-svid")
         .expect("workload SpiffeId parses");
-    let req = SvidRequest::new(workload);
+    // The validity window rides on the request (ADR-0063 rev 2 amendment); the
+    // sim carries `not_after` onto the material but its fixture cert bytes are
+    // fixed, so any fixed window exercises the same matched pair.
+    let not_before = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    let not_after = not_before + Duration::from_secs(3600);
+    let req = SvidRequest::new(workload, not_before, not_after);
 
     // WHEN the SVID is minted through the driving port (returns cert + node-held
     // leaf key per ADR-0063 D9).

@@ -34,8 +34,10 @@
 
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use overdrive_core::traits::ca::{Ca, CaError, SvidRequest};
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{NodeId, SpiffeId};
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
@@ -44,6 +46,19 @@ use rcgen::{
     KeyUsagePurpose,
 };
 use x509_parser::prelude::FromDer;
+
+/// A validity window straddling the current wall-clock: `not_before` 60 s in
+/// the past, `not_after` ~1 h in the future. The window now rides on the
+/// `SvidRequest` (ADR-0063 rev 2 amendment) — production threads it from
+/// `ca_issuance`'s injected clock; these real-`openssl verify` tests build it
+/// from wall-clock so the minted leaf is valid *now* (S-04-07 requires the
+/// `openssl verify` to accept the leaf at run time).
+fn now_window() -> (UnixInstant, UnixInstant) {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("wall-clock after epoch");
+    let not_before = UnixInstant::from_unix_duration(now.saturating_sub(Duration::from_secs(60)));
+    let not_after = not_before + Duration::from_secs(3600);
+    (not_before, not_after)
+}
 
 // ---------------------------------------------------------------------------
 // S-01 — Root CA self-verifies (US-CA-01)
@@ -274,7 +289,8 @@ fn rcgen_full_svid_chain_verifies_root_intermediate_svid() {
     let node = NodeId::new("node-a").expect("NodeId parses");
     let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
         .expect("workload SpiffeId parses");
-    let req = SvidRequest::new(workload);
+    let (not_before, not_after) = now_window();
+    let req = SvidRequest::new(workload, not_before, not_after);
 
     // WHEN the persistent root, the node intermediate, and the workload SVID are
     // produced through the `Ca` driving port. The intermediate is cached, so the
@@ -340,7 +356,8 @@ fn rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile() {
     let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
     let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
         .expect("workload SpiffeId parses");
-    let req = SvidRequest::new(workload.clone());
+    let (not_before, not_after) = now_window();
+    let req = SvidRequest::new(workload.clone(), not_before, not_after);
 
     // WHEN the leaf is minted through the driving port (the root + intermediate
     // are minted lazily inside `issue_svid`).
@@ -413,7 +430,8 @@ fn rcgen_svid_returns_matching_leaf_private_key_for_node_custody() {
     let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
     let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
         .expect("workload SpiffeId parses");
-    let req = SvidRequest::new(workload);
+    let (not_before, not_after) = now_window();
+    let req = SvidRequest::new(workload, not_before, not_after);
 
     // WHEN the leaf is minted through the driving port (D9 returns cert + key).
     let svid = ca.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf + returns its key");
