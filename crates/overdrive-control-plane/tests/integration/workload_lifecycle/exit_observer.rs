@@ -34,7 +34,8 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconcilers::TargetResource;
+use overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle;
+use overdrive_core::reconcilers::{Reconciler, TargetResource};
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
@@ -561,4 +562,184 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
          (regression guard for build_lifecycle_event from==to bug)"
     );
     assert_eq!(ev.to, AllocStateWire::Failed);
+}
+
+// -----------------------------------------------------------------------
+// S-WIM-10 / ADR-0067 D5b producer 2 — the exit observer submits a
+// `SvidLifecycle` evaluation for `job/<workload_id>` to the broker on an
+// observed alloc-exit, WITH NO manual broker poke. This is the sibling of
+// the existing `workload_lifecycle` / `backend_discovery_bridge` /
+// `service_lifecycle` exit-observer submits (`exit_observer.rs:233-296`):
+// a Running → Failed transition that the observer writes outside the main
+// workload-lifecycle action vector must still tick `SvidLifecycle` so the
+// `¬running ∧ held → DropSvid` branch fires (O2 — the leaf key is dropped
+// on stop even when the stop is an EXIT, not an operator `StopAllocation`).
+//
+// Unlike the other harness tests in this file (which use `spawn` =
+// runtime: None), this test wires the runtime into the observer via
+// `spawn_with_runtime` so the broker-submit path is exercised, then
+// inspects the broker's pending set directly.
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // self-contained harness (runtime wired into the
+// observer for the broker-submit path) + drive-to-Running + inject-exit + broker
+// inspection in one cohesive body; splitting it would obscure the producer-2 contract.
+async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    let runtime = Arc::new(runtime);
+
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
+    let node_id = NodeId::new("local").expect("node id");
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
+    let sim_clock = Arc::new(SimClock::new());
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let driver: Arc<dyn Driver> = sim_driver.clone();
+
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+    );
+    let state = AppState::new(
+        store,
+        store_path,
+        obs,
+        Arc::clone(&runtime),
+        driver,
+        sim_clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
+        NodeId::new("writer-1").unwrap(),
+        allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
+        std::net::Ipv4Addr::LOCALHOST,
+    );
+
+    // Wire the runtime into the observer so the broker-submit path
+    // (`exit_observer.rs`'s `if let Some(runtime)` block) is exercised.
+    exit_observer::spawn_with_runtime(
+        state.obs.clone(),
+        state.driver.clone(),
+        state.lifecycle_events.clone(),
+        sim_clock.clone(),
+        Some(Arc::clone(&runtime)),
+        tokio_util::sync::CancellationToken::new(),
+    );
+
+    let job = Job::from_submit(JobSpecInput {
+        id: "exitobs".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/bin/sleep".to_string(),
+            args: vec!["3600".to_string()],
+        }),
+    })
+    .expect("valid job spec");
+    let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
+        .archive_for_store()
+        .expect("rkyv archive");
+    let key = IntentKey::for_workload(&job.id);
+    state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
+
+    let target = TargetResource::new("job/exitobs").expect("valid target");
+    let alloc_id = AllocationId::new("alloc-exitobs-0").expect("alloc id");
+    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
+
+    // Background ticker so any `SimClock::sleep` parked inside
+    // `inject_exit_after` wakes promptly.
+    let ticker_clock = sim_clock.clone();
+    let _ticker = tokio::spawn(async move {
+        loop {
+            ticker_clock.tick(Duration::from_millis(50));
+            tokio::task::yield_now().await;
+        }
+    });
+
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(120);
+
+    // Drive to Running.
+    let mut tick_n = 0_u64;
+    let mut running = false;
+    while tick_n < 30 && !running {
+        run_convergence_tick(
+            &state,
+            &workload_lifecycle_name,
+            &target,
+            start + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("tick");
+        let rows = state.obs.alloc_status_rows().await.expect("read rows");
+        running = rows.iter().any(|r| r.state == AllocState::Running);
+        tick_n += 1;
+    }
+    assert!(running, "alloc must reach Running before the injected exit");
+
+    // Drain any pending evals from the broker so the post-exit assertion
+    // observes ONLY the observer's exit-driven submits (no manual poke).
+    {
+        let mut broker = runtime.broker();
+        let _ = broker.drain_pending();
+    }
+
+    // Inject a crash — the observer classifies it as Failed and submits
+    // the re-enqueues (workload_lifecycle + bridge + service_lifecycle +
+    // svid_lifecycle) for `job/exitobs`.
+    sim_driver.inject_exit_after(
+        &alloc_id,
+        Duration::from_millis(500),
+        ExitKind::Crashed { exit_code: Some(1), signal: None },
+    );
+
+    // Let the observer task observe the exit, write Failed, and submit —
+    // WITHOUT calling run_convergence_tick (no manual broker poke). Drive
+    // logical time via the ticker and yield repeatedly so the spawned
+    // inject task and the observer task both run.
+    let svid_name = SvidLifecycle::NAME;
+    let mut svid_submitted = false;
+    'outer: for _ in 0..200 {
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        // Non-consuming inspection: drain, check, and re-submit the
+        // drained evals so we do not lose the producer's submit.
+        let drained = {
+            let mut broker = runtime.broker();
+            broker.drain_pending()
+        };
+        for eval in &drained {
+            if eval.reconciler.as_str() == svid_name && eval.target == target {
+                svid_submitted = true;
+            }
+        }
+        {
+            let mut broker = runtime.broker();
+            for eval in drained {
+                broker.submit(eval);
+            }
+        }
+        if svid_submitted {
+            break 'outer;
+        }
+    }
+
+    assert!(
+        svid_submitted,
+        "ADR-0067 D5b producer 2: the exit observer MUST submit a 'svid-lifecycle' \
+         Evaluation for 'job/exitobs' on an observed alloc-exit, with no manual broker poke"
+    );
 }

@@ -174,9 +174,10 @@ fn placement_returns_node_when_capacity_fits() {
 
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "expected StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
+         EnqueueEvaluation(service-lifecycle) per GAP-9 + \
+         EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {
@@ -209,8 +210,8 @@ fn placement_succeeds_at_exact_cpu_fit_with_memory_excess() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "exact-fit on cpu must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9); got {actions:?}",
+        4,
+        "exact-fit on cpu must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
     );
     assert!(matches!(
         actions[0],
@@ -241,8 +242,8 @@ fn placement_succeeds_at_exact_memory_fit_with_cpu_excess() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "exact-fit on memory must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9); got {actions:?}",
+        4,
+        "exact-fit on memory must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
     );
     assert!(matches!(
         actions[0],
@@ -351,8 +352,8 @@ fn node_free_capacity_excludes_non_running_allocs_on_same_node() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9); got {actions:?}",
+        4,
+        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {

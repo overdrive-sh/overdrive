@@ -184,8 +184,8 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
 
     assert_eq!(
         actions.len(),
-        2,
-        "at-ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "at-ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::FinalizeFailed { terminal, alloc_id } => {
@@ -241,8 +241,8 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "stop branch with one Running alloc emits StopAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "stop branch with one Running alloc emits StopAllocation + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::StopAllocation { alloc_id, terminal } => {
@@ -290,8 +290,8 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "fresh schedule (Service kind) must emit StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
+        4,
+        "fresh schedule (Service kind) must emit StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         // StartAllocation is non-terminal by construction — it does
@@ -352,8 +352,8 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
+        4,
+        "Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}

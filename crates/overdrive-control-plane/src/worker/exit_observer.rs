@@ -291,9 +291,32 @@ pub fn spawn_with_runtime(
                         // dual-emit (Shape C in workload_lifecycle.rs)
                         // is the precise first-tick path; this site is
                         // the on-exit nudge.
+                        runtime.broker().submit(Evaluation {
+                            reconciler: service_lifecycle_name(),
+                            target: target.clone(),
+                        });
+                        // ADR-0067 D5b (producer 2) — also re-enqueue the
+                        // svid-lifecycle reconciler for the same
+                        // workload-scoped target so an observed exit ticks
+                        // it and the `¬running ∧ held → DropSvid` branch
+                        // fires (O2 — the node-held leaf private key is
+                        // dropped on stop even when the stop is an EXIT,
+                        // not an operator-driven `StopAllocation`).
+                        //
+                        // UNCONDITIONAL (not kind-gated), for the same
+                        // reason the GAP-9 service-lifecycle enqueue above
+                        // is: the exit observer holds no `IntentStore`, so
+                        // the workload-kind discriminator is not cheaply
+                        // readable here. Identity is needed by every running
+                        // alloc regardless of kind, so unconditional is also
+                        // semantically correct — and a spurious enqueue for
+                        // an already-dropped / never-held alloc runs exactly
+                        // one empty reconcile (the held snapshot has no entry
+                        // → `desired ⊇ actual` already → `Noop`) and drains;
+                        // it cannot busy-loop.
                         runtime
                             .broker()
-                            .submit(Evaluation { reconciler: service_lifecycle_name(), target });
+                            .submit(Evaluation { reconciler: svid_lifecycle_name(), target });
                     }
                 }
                 RetryOutcome::NoPriorRow => {
@@ -651,6 +674,23 @@ fn service_lifecycle_name() -> ReconcilerName {
         <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
     )
     .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
+}
+
+/// ADR-0067 D5b (producer 2) — canonical `ReconcilerName` for the
+/// `svid-lifecycle` reconciler, sourced from the trait const per the
+/// same `refactor-reconciler-static-name` RCA pattern as
+/// [`workload_lifecycle_name`] / [`backend_discovery_bridge_name`] /
+/// [`service_lifecycle_name`].
+///
+/// Used by the exit observer's on-exit re-enqueue site to nudge the
+/// SVID reconciler against the `AllocStatusRow` transition the observer
+/// just wrote, so an observed exit drops the held leaf key (O2).
+fn svid_lifecycle_name() -> ReconcilerName {
+    #[allow(clippy::expect_used)]
+    ReconcilerName::new(
+        <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
+    )
+    .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.

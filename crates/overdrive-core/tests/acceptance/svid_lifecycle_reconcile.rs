@@ -15,20 +15,35 @@
 //! the `TickContext.now` snapshot the reconcile signature requires forces
 //! the `Instant` read into the test fixture here.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use overdrive_core::id::{
+    AllocationId, ContentHash, CorrelationKey, NodeId, Region, SpiffeId, WorkloadId,
+};
 use overdrive_core::reconcilers::svid_lifecycle::{
     RunningAlloc, SvidLifecycle, SvidLifecycleState,
 };
-use overdrive_core::reconcilers::{Action, HeldSvidFacts, Reconciler, TickContext};
+use overdrive_core::reconcilers::{
+    Action, HeldSvidFacts, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext,
+    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+};
+use overdrive_core::traits::driver::Resources;
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::wall_clock::UnixInstant;
 use proptest::prelude::*;
 
 const NODE_RAW: &str = "local";
+
+/// Canonical kebab-case name of the `SvidLifecycle` reconciler — sourced
+/// from the trait const so a rename is a compile error here, not a silent
+/// assertion drift (mirrors the anti-drift const the producer uses).
+const SVID_LIFECYCLE_NAME: &str = <SvidLifecycle as Reconciler>::NAME;
 
 /// RED scaffold marker for the Slice-03 / Slice-01-enqueue scenarios
 /// (S-WIM-08 retry-memory View, S-WIM-09 emit-gated rotation seam, S-WIM-10
@@ -264,11 +279,337 @@ fn near_expiry_rotation_seam_is_emit_gated_until_cert_rotation_registered() {
     red_scaffold("S-WIM-09 rotation seam is emit-gated");
 }
 
-/// `@in-memory` `@S-WIM-10` -- `WorkloadLifecycle` and the exit observer enqueue
-/// `SvidLifecycle` evaluation on alloc Running/Stopped transitions. Without this,
-/// the pure reconciler can be correct but unreachable.
+// ---------------------------------------------------------------------------
+// S-WIM-10 — `WorkloadLifecycle::reconcile` enqueues `SvidLifecycle` (ADR-0067
+// D5b, producer 1). The pure reconciler is its own driving port (calling
+// `reconcile` directly IS port-to-port at the domain layer); the observable
+// universe is the emitted action list. These fixtures mirror the UI-06 / GAP-9
+// shape in `workload_lifecycle_enqueues_bridge_on_alloc_transitions.rs`.
+// ---------------------------------------------------------------------------
+
+fn wl_workload(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
+}
+fn wl_node_id(s: &str) -> NodeId {
+    NodeId::new(s).expect("valid NodeId")
+}
+fn wl_alloc(s: &str) -> AllocationId {
+    AllocationId::new(s).expect("valid AllocationId")
+}
+fn wl_region() -> Region {
+    Region::new("local").expect("valid Region")
+}
+fn wl_make_node(id: &str) -> Node {
+    Node {
+        id: wl_node_id(id),
+        region: wl_region(),
+        capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+    }
+}
+fn wl_make_job(id: &str) -> Job {
+    Job {
+        id: wl_workload(id),
+        replicas: NonZeroU32::new(1).expect("1 is non-zero"),
+        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+    }
+}
+fn wl_one_node_map(node_id: &str) -> BTreeMap<NodeId, Node> {
+    let n = wl_make_node(node_id);
+    let mut m = BTreeMap::new();
+    m.insert(n.id.clone(), n);
+    m
+}
+fn wl_alloc_running(
+    alloc_id: &str,
+    workload_id: &str,
+    node_id: &str,
+    state: AllocState,
+) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: wl_alloc(alloc_id),
+        workload_id: wl_workload(workload_id),
+        node_id: wl_node_id(node_id),
+        state,
+        updated_at: LogicalTimestamp { counter: 1, writer: wl_node_id(node_id) },
+        reason: None,
+        detail: None,
+        terminal: None,
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: match state {
+            AllocState::Pending => None,
+            _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        },
+    }
+}
+fn wl_tick() -> TickContext {
+    let now = Instant::now();
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
+}
+
+/// Assert `actions` contains exactly one `Action::EnqueueEvaluation` routed at
+/// `svid-lifecycle` for `job/<workload_id>`. The SvidLifecycle enqueue is
+/// UNGATED by workload kind — identity is needed by every running alloc.
+fn assert_single_svid_enqueue(actions: &[Action], workload_id: &WorkloadId) {
+    let mut count = 0;
+    let mut found_target: Option<&TargetResource> = None;
+    for action in actions {
+        if let Action::EnqueueEvaluation { reconciler, target } = action
+            && reconciler.as_str() == SVID_LIFECYCLE_NAME
+        {
+            count += 1;
+            found_target = Some(target);
+        }
+    }
+    assert_eq!(
+        count, 1,
+        "S-WIM-10 (ADR-0067 D5b): an alloc-mutating tick MUST emit exactly one \
+         EnqueueEvaluation routed at 'svid-lifecycle'; got {count} in {actions:?}",
+    );
+    let target = found_target.expect("count==1 checked above");
+    assert_eq!(
+        target.as_str(),
+        &format!("job/{workload_id}"),
+        "S-WIM-10: svid-lifecycle enqueue target MUST be 'job/<workload_id>' (workload grain)"
+    );
+}
+
+/// `@in-memory` `@S-WIM-10` -- `WorkloadLifecycle::reconcile` enqueues
+/// `SvidLifecycle` evaluation for `job/<workload_id>` on a RUNNING-transition
+/// class (`StartAllocation`). ADR-0067 D5b producer 1. Without this, the pure
+/// reconciler can be correct but unreachable.
 #[test]
-#[should_panic(expected = "RED scaffold")]
-fn workload_lifecycle_transitions_enqueue_svid_lifecycle() {
-    red_scaffold("S-WIM-10 lifecycle transitions enqueue SvidLifecycle");
+fn start_allocation_transition_enqueues_svid_lifecycle() {
+    let workload_id = wl_workload("payments");
+    let nodes = wl_one_node_map("local");
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = wl_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
+        "expected StartAllocation (Running transition); got {actions:?}"
+    );
+    assert_single_svid_enqueue(&actions, &workload_id);
+}
+
+/// `@in-memory` `@S-WIM-10` -- a STOPPED-transition class (`StopAllocation`)
+/// also enqueues `SvidLifecycle` for `job/<workload_id>` so the
+/// `¬running ∧ held → DropSvid` branch fires (ADR-0067 O2). Producer 1.
+#[test]
+fn stop_allocation_transition_enqueues_svid_lifecycle() {
+    let workload_id = wl_workload("payments");
+    let nodes = wl_one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        wl_alloc("alloc-payments-0"),
+        wl_alloc_running("alloc-payments-0", "payments", "local", AllocState::Running),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: true,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = wl_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "expected StopAllocation (Stopped transition); got {actions:?}"
+    );
+    assert_single_svid_enqueue(&actions, &workload_id);
+}
+
+/// `@in-memory` `@S-WIM-10` -- a `FinalizeFailed` (backoff-exhausted) terminal
+/// transition also enqueues `SvidLifecycle`, completing the Stopped-transition
+/// class coverage. Producer 1.
+#[test]
+fn finalize_failed_transition_enqueues_svid_lifecycle() {
+    let workload_id = wl_workload("payments");
+    let nodes = wl_one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        wl_alloc("alloc-payments-0"),
+        wl_alloc_running("alloc-payments-0", "payments", "local", AllocState::Failed),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let mut view = WorkloadLifecycleView::default();
+    view.restart_counts.insert(wl_alloc("alloc-payments-0"), RESTART_BACKOFF_CEILING);
+    let tick = wl_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.iter().any(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                ..
+            }
+        )),
+        "expected FinalizeFailed (Stopped transition); got {actions:?}"
+    );
+    assert_single_svid_enqueue(&actions, &workload_id);
+}
+
+/// `@in-memory` `@S-WIM-10` -- the SvidLifecycle enqueue is UNGATED by workload
+/// kind: a Job-kind StartAllocation enqueues svid-lifecycle just like Service
+/// (unlike the Service-gated service-lifecycle enqueue). Identity is needed by
+/// every running alloc. ADR-0067 D5b "ungated by kind".
+#[test]
+fn job_kind_transition_still_enqueues_svid_lifecycle() {
+    let workload_id = wl_workload("batch");
+    let nodes = wl_one_node_map("local");
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("batch")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("batch")),
+        desired_to_stop: false,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = wl_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
+        "expected StartAllocation; got {actions:?}"
+    );
+    assert_single_svid_enqueue(&actions, &workload_id);
+}
+
+/// `@in-memory` `@S-WIM-10` -- a converged (no-op) tick emits ZERO
+/// svid-lifecycle enqueues: the enqueue is paired ONLY with alloc-mutating
+/// actions, so the broker is never churned on a quiet tick.
+#[test]
+fn converged_tick_emits_no_svid_enqueue() {
+    let workload_id = wl_workload("payments");
+    let nodes = wl_one_node_map("local");
+    let mut allocations = BTreeMap::new();
+    allocations.insert(
+        wl_alloc("alloc-payments-0"),
+        wl_alloc_running("alloc-payments-0", "payments", "local", AllocState::Running),
+    );
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id,
+        job: Some(wl_make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = wl_tick();
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    let svid_enqueues = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::EnqueueEvaluation { reconciler, .. }
+                    if reconciler.as_str() == SVID_LIFECYCLE_NAME
+            )
+        })
+        .count();
+    assert_eq!(
+        svid_enqueues, 0,
+        "converged tick must emit ZERO svid-lifecycle enqueues; got {svid_enqueues} in {actions:?}"
+    );
 }

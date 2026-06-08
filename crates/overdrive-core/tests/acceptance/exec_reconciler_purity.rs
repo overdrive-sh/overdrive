@@ -187,9 +187,10 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     // (NOT /bin/sleep + ["60"]).
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
+         EnqueueEvaluation(service-lifecycle) per GAP-9 + \
+         EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { spec, .. } => {
@@ -264,8 +265,9 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     // resources.
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "must emit RestartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
+         EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b + \
          EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
     );
     match &actions[0] {
@@ -352,12 +354,14 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     // function is deterministic but produces wrong output. Per UI-06
     // WorkloadLifecycle dual-emits StartAllocation + EnqueueEvaluation
     // (bridge); per GAP-9 a Service-kind start ALSO dual-emits
-    // EnqueueEvaluation(service-lifecycle), so the vec length is 3.
+    // EnqueueEvaluation(service-lifecycle); per ADR-0067 D5b it ALSO
+    // emits EnqueueEvaluation(svid-lifecycle), so the vec length is 4.
     assert_eq!(
         actions_a.len(),
-        3,
+        4,
         "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions_a:?}",
+         EnqueueEvaluation(service-lifecycle) per GAP-9 + \
+         EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions_a:?}",
     );
     match &actions_a[0] {
         Action::StartAllocation { spec, .. } => {

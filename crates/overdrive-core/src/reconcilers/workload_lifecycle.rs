@@ -244,6 +244,33 @@ impl Reconciler for WorkloadLifecycle {
                     });
                 }
             }
+
+            // ADR-0067 D5b (producer 1) — enqueue `svid-lifecycle` for the
+            // same workload-scoped target so the SVID reconciler re-converges
+            // its held set against the running set. UNGATED by workload kind:
+            // identity is needed by EVERY running allocation, not only Service
+            // (unlike the service-lifecycle dual-emit above). Every one of the
+            // four alloc-mutating variants ADDs or REMOVEs a Running alloc —
+            // exactly when the held set must re-converge (Start/Restart →
+            // `running ∧ ¬held → IssueSvid`; Stop/Finalize →
+            // `¬running ∧ held → DropSvid`).
+            //
+            // Single emission per tick (not per action): the broker is LWW at
+            // `(ReconcilerName, TargetResource)`, so a duplicate enqueue across
+            // this site and the exit observer's `job/<workload_id>` submit
+            // collapses to one dispatch per drain cycle.
+            #[allow(clippy::expect_used)]
+            {
+                let svid_name = ReconcilerName::new(SVID_LIFECYCLE_NAME)
+                    .expect("'svid-lifecycle' is a valid ReconcilerName by construction");
+                let svid_target = TargetResource::new(&format!("job/{}", desired.workload_id))
+                    .expect(
+                        "'job/<workload_id>' is a valid TargetResource by construction \
+                         (WorkloadId is constructor-validated, prefix is canonical)",
+                    );
+                actions
+                    .push(Action::EnqueueEvaluation { reconciler: svid_name, target: svid_target });
+            }
         }
 
         (actions, next_view)
@@ -266,6 +293,15 @@ const BACKEND_DISCOVERY_BRIDGE_NAME: &str = <BackendDiscoveryBridge as Reconcile
 /// compile error, not a silent GAP-9-style dead handoff.
 const SERVICE_LIFECYCLE_NAME: &str =
     <crate::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME;
+
+/// ADR-0067 D5b — name of the `SvidLifecycle` reconciler.
+///
+/// Compile-time alias to `<SvidLifecycle as Reconciler>::NAME` — same
+/// anti-drift discipline as [`BACKEND_DISCOVERY_BRIDGE_NAME`] /
+/// [`SERVICE_LIFECYCLE_NAME`]: renaming the reconciler's `NAME` const
+/// without updating this reference is a compile error, not a silent
+/// dead handoff (the failure mode D5b exists to prevent).
+const SVID_LIFECYCLE_NAME: &str = <super::svid_lifecycle::SvidLifecycle as Reconciler>::NAME;
 
 /// UI-06 — predicate: is `action` one of the four alloc-mutating
 /// variants the `BackendDiscoveryBridge` cares about?

@@ -651,25 +651,33 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     self-re-enqueues until `restart_counts` reaches the
     //     ceiling — observable as ≥5 extra dispatches.
     //
-    //     GAP-9 raises the bound from 2 to 3: the warm-up's last
+    //     GAP-9 raised the bound from 2 to 3: the warm-up's last
     //     Service-kind RestartAllocation dual-emits a `service-lifecycle`
     //     EnqueueEvaluation (Shape C) that is still pending when the
     //     stop snapshot is taken; the post-stop ticks drain it exactly
     //     once (the intent is a `WorkloadIntent::Job`, so the
     //     service-lifecycle hydrate is an empty Service state → 0 actions
-    //     → no re-enqueue). That is one bounded extra dispatch, NOT a
-    //     busy-loop — assertion 1 above (`queued == 0`) is the
+    //     → no re-enqueue). ADR-0067 D5b raises it again from 3 to 4: the
+    //     same alloc-mutating tick now ALSO emits a `svid-lifecycle`
+    //     EnqueueEvaluation (ungated by kind), pending at the stop
+    //     snapshot, drained exactly once post-stop. `svid-lifecycle` is
+    //     not registered in this test's runtime, so its drain is a
+    //     bounded single no-op dispatch (`run_convergence_tick` treats an
+    //     unregistered reconciler as a no-op, same as the unregistered
+    //     `service-lifecycle` above). Both are one bounded extra dispatch
+    //     EACH, NOT a busy-loop — assertion 1 above (`queued == 0`) is the
     //     busy-loop guard and still holds. The pre-fix ≥5 signal stays
-    //     well above the new bound.
+    //     at/above the new bound, so this still kills the always-true /
+    //     inverted-predicate mutation (a busy-loop would blow past 4).
     let dispatched_during_stop = counters.dispatched - dispatched_at_stop_submit;
     assert!(
-        dispatched_during_stop <= 3,
-        "post-stop dispatch traffic must be bounded; expected <= 3 \
+        dispatched_during_stop <= 4,
+        "post-stop dispatch traffic must be bounded; expected <= 4 \
          dispatches between stop submit and broker drain (≤2 job-lifecycle \
-         + ≤1 bounded GAP-9 service-lifecycle drain), got \
-         {dispatched_during_stop} (pre-fix value: ≥5 — the broker \
-         self-re-enqueues until restart_counts reaches \
-         RESTART_BACKOFF_CEILING)",
+         + ≤1 bounded GAP-9 service-lifecycle drain + ≤1 bounded ADR-0067 \
+         D5b svid-lifecycle drain), got {dispatched_during_stop} (pre-fix \
+         value: ≥5 — the broker self-re-enqueues until restart_counts \
+         reaches RESTART_BACKOFF_CEILING)",
     );
 }
 
