@@ -181,7 +181,9 @@ pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, classify_backend_address,
 };
-pub use svid_lifecycle::HeldSvidFacts;
+pub use svid_lifecycle::{
+    HeldSvidFacts, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
+};
 pub use workflow_lifecycle::{
     WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
 };
@@ -349,6 +351,10 @@ pub enum AnyState {
     /// [`crate::service_lifecycle::ServiceLifecycleState`]. Per
     /// ADR-0055; landed by the `service-health-check-probes` feature.
     ServiceLifecycle(ServiceLifecycleState),
+    /// `SvidLifecycle` reconciler's typed projection — see
+    /// [`SvidLifecycleState`] (ADR-0067 D1: `desired = running allocs`,
+    /// `actual = the IdentityMgr held set`).
+    SvidLifecycle(SvidLifecycleState),
 }
 
 // ---------------------------------------------------------------------------
@@ -798,6 +804,10 @@ pub enum AnyReconciler {
     /// Service-health-check-probes — `service-lifecycle` per
     /// ADR-0055. See [`crate::service_lifecycle::ServiceLifecycleReconciler`].
     ServiceLifecycle(ServiceLifecycleReconciler),
+    /// Workload-identity-manager — `svid-lifecycle` per ADR-0067 D1.
+    /// Converges `desired = running allocs` against `actual = held set`,
+    /// emitting `IssueSvid` / `DropSvid`. See [`SvidLifecycle`].
+    SvidLifecycle(SvidLifecycle),
 }
 
 impl AnyReconciler {
@@ -811,6 +821,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(r) => r.name(),
             Self::BackendDiscoveryBridge(r) => r.name(),
             Self::ServiceLifecycle(r) => r.name(),
+            Self::SvidLifecycle(r) => r.name(),
         }
     }
 
@@ -825,6 +836,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
             Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
+            Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
         }
     }
 
@@ -888,6 +900,15 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::ServiceLifecycle(next_view))
             }
+            (
+                Self::SvidLifecycle(r),
+                AnyState::SvidLifecycle(desired),
+                AnyState::SvidLifecycle(actual),
+                AnyReconcilerView::SvidLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::SvidLifecycle(next_view))
+            }
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
@@ -918,4 +939,8 @@ pub enum AnyReconcilerView {
     /// set) — derived state (`Stable` predicate, deadlines) is
     /// recomputed every tick.
     ServiceLifecycle(ServiceLifecycleView),
+    /// `SvidLifecycle` reconciler's view (Slice 01: empty — the issue/drop
+    /// decision is pure over `desired`/`actual`; retry memory lands in
+    /// 03-01). ADR-0067 D8.
+    SvidLifecycle(SvidLifecycleView),
 }

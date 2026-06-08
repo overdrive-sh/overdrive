@@ -1280,6 +1280,13 @@ pub async fn run_server_with_obs_and_driver(
     // drives `run` off the shim. `ReconcilerIsPure` holds with it
     // registered (the reconcile body holds no `.await`).
     runtime.register(workflow_lifecycle()).await?;
+    // ADR-0067 D1 — the pure-sync svid-lifecycle reconciler. Converges
+    // `desired = running allocs` against `actual = the IdentityMgr held set`
+    // and emits `Action::IssueSvid` / `Action::DropSvid`; the action-shim
+    // executor (01-06) drives the CA I/O off the shim. `ReconcilerIsPure`
+    // holds with it registered (the reconcile body holds no `.await`, reaches
+    // for no CA / ObservationStore handle, and reads no wall-clock).
+    runtime.register(svid_lifecycle()).await?;
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -1944,6 +1951,25 @@ pub fn workflow_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
     use overdrive_core::reconcilers::{AnyReconciler, WorkflowLifecycle};
 
     AnyReconciler::WorkflowLifecycle(WorkflowLifecycle::canonical())
+}
+
+/// Construct the `svid-lifecycle` reconciler per ADR-0067 D1.
+///
+/// The pure-sync workload-identity reconciler: it converges
+/// `desired = the Running allocations for a workload` against
+/// `actual = the in-process `IdentityMgr` held set`, emitting
+/// [`Action::IssueSvid`](overdrive_core::reconcilers::Action::IssueSvid) for a
+/// Running-but-unheld alloc and
+/// [`Action::DropSvid`](overdrive_core::reconcilers::Action::DropSvid) for a
+/// held-but-stopped alloc. CA I/O lives entirely in the action-shim executor
+/// (01-06); the reconciler builds the `SpiffeId` purely and NEVER `.await`s or
+/// reaches for the CA (`ReconcilerIsPure` holds). Registered at boot alongside
+/// the other first-party reconcilers.
+#[must_use]
+pub fn svid_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, SvidLifecycle};
+
+    AnyReconciler::SvidLifecycle(SvidLifecycle::canonical())
 }
 
 /// Construct the `backend-discovery-bridge` reconciler per
