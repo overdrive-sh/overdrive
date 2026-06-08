@@ -701,6 +701,21 @@ impl Harness {
             Invariant::WorkflowPerStepRetryPolicyGovernsRedrive => {
                 evaluators::evaluate_workflow_per_step_retry_policy_governs_redrive(seed).await
             }
+            // workload-identity-manager step 01-07 (Slice 01 CAPSTONE;
+            // ADR-0067 D9, O1 / K1) — the North-Star held-SVID convergence
+            // invariant. Drives the REAL svid-lifecycle convergence loop (the
+            // pure `SvidLifecycle` reconciler + the `issue_svid` / `drop_svid`
+            // action-shim executors over `SimCa` + `SimObservationStore` +
+            // `IdentityMgr`) through allocations churning Running↔Stopped and
+            // asserts the held `BTreeMap` converges against the running set.
+            // The evaluator body lives in
+            // `crate::invariants::svid_running_set`; its teeth (a broken
+            // executor fails the relation) + twin-run determinism are
+            // exercised by the acceptance test at
+            // `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs`.
+            Invariant::SvidRunningSetHoldsValidSvid => {
+                crate::invariants::svid_running_set::evaluate_running_set_holds_valid_svid().await
+            }
         }
     }
 }
