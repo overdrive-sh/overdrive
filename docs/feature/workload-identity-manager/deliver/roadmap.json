@@ -1,0 +1,321 @@
+{
+  "roadmap": {
+    "project_id": "workload-identity-manager",
+    "created_at": "2026-06-08T10:20:37Z",
+    "total_steps": 11,
+    "goal": "Build the workload identity manager (GH #35, J-SEC-002) per ADR-0067 rev 2: a standalone pure-sync SvidLifecycle reconciler that converges desired = running allocations vs actual = the IdentityMgr held set, emitting Action::IssueSvid / Action::DropSvid; an action-shim executor that mints via the shipped ca_issuance::issue_and_audit (REUSED) and holds the returned SvidMaterial in a shared Arc<IdentityMgr>; an IdentityRead port + SimIdentityRead double for the dataplane consumers; restart recovery via a retry-memory View (re-issue every still-Running alloc on an empty held set); and a pre-wired-but-emit-gated #40 rotation seam. The 13 RED scaffolds (S-WIM-01..12 + S-WIM-WS) are the executable acceptance SSOT; turn them GREEN in dependency order. Phases map 1:1 to slices.",
+    "notes": [
+      "TDD: every step turns one or more of the 13 authored RED scaffolds GREEN. The scaffolds (#[should_panic(expected = \"RED scaffold\")]) are the executable acceptance SSOT; distill/test-scenarios.md is the GIVEN/WHEN/THEN companion. GREEN replaces each panic! body with real assertions (L1/L2 default-lane) or real CA/store/openssl-verify calls (L3 integration-tests, Lima). All four scaffold entrypoints already exist on disk (overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs, overdrive-control-plane/tests/acceptance/{issue_svid_action_shim,identity_mgr_read_contract}.rs, overdrive-sim/tests/acceptance/identity_read_equivalence.rs, overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs).",
+      "AUTHORITY: ADR-0067 rev 2 is the design contract (decisions D1-D9). Implement to its EXACT pinned surface; do NOT invent API. The two Action variants and their fields (D2), the IdentityRead signatures (D7), the IdentityMgr shape (D4), the SvidLifecycleView/IssueRetry retry-memory shape (D8), SpiffeId::for_allocation (D5), the EnqueueEvaluation handoff (D5b), and the HYDRATED trust bundle (D6) are the contract. A genuine ADR gap is surfaced as a blocker, never improvised past (CLAUDE.md 'Implement to the design').",
+      "REUSE (HARD GATE): REUSE-AS-IS the shipped Ca port + ca_issuance::issue_and_audit (overdrive-core/src/traits/ca.rs, overdrive-control-plane/src/ca_issuance.rs), SvidMaterial / TrustBundle / IssuedCertificateRow (ADR-0063), the reconciler runtime + ViewStore + action-shim, CorrelationKey / AllocationId / NodeId / WorkloadId / CertSerial / UnixInstant / Entropy, SimObservationStore. CREATE-NEW: the SvidLifecycle reconciler, Action::IssueSvid/DropSvid (+2 plain-enum variants), the issue_svid action-shim executor, IdentityMgr, the IdentityRead port + SimIdentityRead double, SpiffeId::for_allocation, the SvidLifecycleView/IssueRetry retry-memory View. issue_and_audit is mint+audit wholesale -- NEVER re-implement minting or the audit-write-refuses-issuance binding.",
+      "DECISIONS honored (ADR-0067 D1-D9): D1 standalone pure SvidLifecycle reconciler, desired = running allocs vs actual = held set (held-set-as-actual, mirroring WorkflowLifecycle/live_instances); D2 two additive plain-enum Action variants (IssueSvid{alloc_id,spiffe_id,node_id,correlation} / DropSvid{alloc_id,correlation}); D3 CA I/O in the action-shim executor only, AppState gains ca + identity fields; D4 IdentityMgr = parking_lot::RwLock<BTreeMap<AllocationId,SvidMaterial>> + Option<TrustBundle>, held_snapshot() sync actual-projection reader; D5 SpiffeId::for_allocation canonical extraction + migrate the two private helpers; D5b EnqueueEvaluation handoff keyed job/<workload_id> from WorkloadLifecycle::reconcile + the exit observer; D6 trust bundle HYDRATED (zero CA I/O on read); D7 IdentityRead port (sync owned-clone getters, 5 pinned clauses) + SimIdentityRead + equivalence; D8 View = retry memory only (IssueRetry{attempts,last_failure_seen_at}), emit-gated #40 rotation seam; D9 dst-lint + equivalence test + assert_eventually! North-Star + Earned-Trust probes.",
+      "SYSTEM CONSTRAINTS (DISCUSS feature-delta + project rules): reconciler purity is a CORRECTNESS constraint (CA I/O NEVER in reconcile(); no .await, no Ca/ObservationStore handle, wall-clock via tick.now only; dst-lint enforces at the crate boundary); persist INPUTS not derived state (the View carries retry inputs ONLY -- no serial/issued_at/spiffe_id success fact, no derived expires_at/next_renewal_at -- a future-event field or success fact in the View is a review-rejection smell); BTreeMap NOT HashMap (the held map + the View map are iterated by the North-Star invariant + held_snapshot, so iteration order must be deterministic across DST seeds, K5); secret-hygiene-on-drop (the node-held leaf private key lives in-process only, never persisted; drop-on-stop removes the held entry so the leaf key is no longer reachable, K2); fail-closed (no silent issuance -- issue_and_audit refuses on audit-write failure, K4); single-node Phase 2 (one node's running allocs; multi-node held sets / gossiped audit rows / node attestation are #36).",
+      "FOUNDATION FEATURE (no new CLI verb): #35 ships NO operator-facing command. Its proof is at the TEST tier -- the issued_certificates row read back via the ObservationStore + openssl verify on the minted leaf. The operator `alloc status` render of issued cert rows + the deployed-SVID operator-verify flow are #215's O05/E03 (blocked on #35), NOT this feature's. No verification/expectations/ entry is created; #35's walking skeleton unblocks the existing E03 + O05 catalogue expectations.",
+      "TEST DISCIPLINE: L1 (overdrive-core: pure reconciler convergence + View-shape contracts + SpiffeId::for_allocation roundtrip) and L2 (overdrive-sim: SimIdentityRead + the assert_eventually! DST invariant + twin-run determinism) run in the DEFAULT lane (no integration-tests feature). L1/L2 control-plane action-shim + read-contract acceptance tests run in the default lane against sim stores/fakes. L3 (overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs: real CA chain + real ObservationStore + openssl verify) is gated behind the integration-tests feature and runs via Lima (cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests). The macOS --no-run compile gate is necessary but not sufficient for L3.",
+      "PARADIGM: this is a Rust workspace following object-oriented ports-and-adapters (@nw-software-crafter). The generic nWave Hypothesis / @given / assert_state_delta / pytest TEST PARADIGM MANDATE is Python-specific and does NOT apply -- the project test discipline (.claude/rules/testing.md) is the authority: proptest for property-based tests (SpiffeId::for_allocation newtype roundtrip; the View serde round-trip shape), Tier-1 DST (assert_always!/assert_eventually!, seed-reproducible) for the running-set convergence + twin-run determinism, the identity_read_equivalence DST contract test as the structural guard, example-pinned sad paths (audit-write failure, emit-gated seam) at the relevant tier, and integration-tests-gated openssl verify at L3.",
+      "DEFERRALS cite real issues only (no inventions, no new GitHub issues): #40 [3.3] cert_rotation workflow (needs #39 [3.2] workflow primitive) -- the emit-gated rotation seam's destination; #26 sockops/kTLS mTLS consumer of the IdentityRead port; #36 [2.14] multi-node held sets / gossiped audit rows / node attestation; roadmap step 4.7 ACME / public-trust certs unified into IdentityMgr; #215 [blocked on #35] operator `alloc status` render of issued_certificates + deployed-SVID operator-verify flow (O05/E03); Phase 5 SVID revocation (CRL/OCSP). #217 (input_digest) is #40's and unaffected.",
+      "EARNED TRUST (ADR-0067 D9 probe contract): the held map honors hold/drop (the assert_eventually! invariant + a deliberately-broken executor that drops the hold or fails to drop fails it -- it has teeth, K1/K2); no silent issuance (issue_and_audit's refuse-on-audit-failure binding, exercised by an audit-write-failure fault injection, S-WIM-07); the reconciler actually ticks at the lifecycle moments (the enqueue/handoff regression test, S-WIM-10 -- a reconciler that builds but is never enqueued is the silent failure this probe catches); restart recovery actually re-issues (the restart-mid-run DST scenario, S-WIM-12); CA reachable + boot bundle composable (inherited from ADR-0063's CA boot probe -- no held bundle means the CA boot already refused). The identity_read_equivalence DST test exercises the IdentityRead contract (incl. clause 5: post-drop svid_for == None) against both adapters."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 01 - Issue-on-start, hold, drop-on-stop, audit, converge (walking skeleton)",
+      "description": "US-WIM-01 (core) + US-WIM-03: bind a live, chain-verifiable SVID to the exact set of running allocations. A standalone pure SvidLifecycle reconciler converges desired = running allocs vs actual = the IdentityMgr held set, emitting Action::IssueSvid on Running / Action::DropSvid on Stop; an action-shim executor mints via the shipped ca_issuance::issue_and_audit and holds the SvidMaterial in a shared Arc<IdentityMgr>; drop removes it (the node-held leaf key is no longer held); and the binding converges under a DST assert_eventually! North-Star invariant. Completes the feature's thinnest end-to-end cut: the running set holds live, audited, chain-verifiable identity and a stopped workload holds none. Lands the cross-cutting foundation (SpiffeId::for_allocation, the two Actions, IdentityMgr, the executor, the enqueue/handoff trigger, the held-set-as-actual hydration) every later slice builds on.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "SpiffeId::for_allocation canonical extraction, migrate both private helpers",
+          "criteria": [
+            "SpiffeId::for_allocation(workload: &WorkloadId, alloc: &AllocationId) -> Self exists on overdrive-core/src/id.rs: infallible, #[must_use], deriving spiffe://overdrive.local/job/<workload>/alloc/<alloc> via the trust-domain const, validated through the existing SpiffeId::new with unwrap_or_else(|| unreachable!(..)) (the logically-unreachable idiom, not ? and not .expect()).",
+            "The two existing private helpers mint_alloc_identity (backend_discovery_bridge.rs:424) and mint_identity (workload_lifecycle.rs:808) are MIGRATED to call for_allocation (or deleted and their call sites point at it directly) -- single-cut, no third implementation of the identity string remains.",
+            "A proptest over a (WorkloadId, AllocationId) strategy confirms for_allocation always yields a valid SpiffeId whose canonical Display equals spiffe://overdrive.local/job/<workload>/alloc/<alloc> and round-trips through FromStr.",
+            "overdrive-core stays dst-lint-clean (core class; no .await, no real-infra call on its compile path)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/spiffe_region_validation.rs",
+          "scenario_name": "spiffe_for_allocation_derives_canonical_uri_and_consolidates_both_helpers",
+          "scenario_ids": "enabling -- D5 consolidation/extraction; no direct S-WIM scenario; covered transitively by S-WIM-01 (the reconciler builds the SpiffeId via for_allocation) and S-WIM-WS (the minted leaf carries the for_allocation URI as its single SPIFFE SAN)",
+          "files_to_modify": [
+            "crates/overdrive-core/src/id.rs",
+            "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
+            "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+            "crates/overdrive-core/tests/acceptance/spiffe_region_validation.rs"
+          ],
+          "deps": [],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "Pure L1, default lane. Foundation/enabling: ADR-0067 D5 reframes this as a CANONICAL EXTRACTION (not net-new surface -- the Medium rev-1 finding mislabelled it net-new). The allocation->SPIFFE-URI derivation ALREADY exists twice as private reconciler helpers (mint_alloc_identity, mint_identity), both format!(\"spiffe://overdrive.local/job/{}/alloc/{}\", ..) + SpiffeId::new(&raw).expect(..). What is genuinely unbuilt is the public allocation-shaped constructor on SpiffeId. Build for_allocation ONCE and migrate BOTH helpers in the same step per the single-cut discipline (CLAUDE.md / feedback_single_cut_greenfield_migrations) -- shipping for_allocation alongside the two private helpers would leave THREE implementations of one identity string, the exact drift the reviewer flagged. Infallibility is honest: the inputs are already-validated newtypes whose grammars cannot produce an invalid SPIFFE path, so SpiffeId::new cannot fail -- use unwrap_or_else(|| unreachable!(..)) (development.md 'Logically unreachable None/Err -- use unreachable!()'), NEVER ? (suggests a valid early-return path) and NEVER .expect() (panics; feedback_no_expect_in_production). The reconciler (01-04) builds the SpiffeId pure and passes it in IssueSvid; identity DERIVATION is pure, identity ISSUANCE (CA I/O) is the executor's. PARADIGM: proptest newtype roundtrip over a (WorkloadId, AllocationId) strategy (generators live next to the types per testing.md; reuse SpiffeId's Arbitrary if present, else add the strategy) -- the canonical-form preservation is the property, the consolidation is the example-pinned companion. Do NOT add any SpiffeId method/const the ADR does not name beyond for_allocation."
+        },
+        {
+          "id": "01-02",
+          "name": "Action::IssueSvid / Action::DropSvid variants plus the dispatch triple",
+          "criteria": [
+            "Action (overdrive-core/src/reconcilers/mod.rs) gains exactly two additive plain-enum variants with the ADR-0067 D2 fields verbatim: Action::IssueSvid { alloc_id: AllocationId, spiffe_id: SpiffeId, node_id: NodeId, correlation: CorrelationKey } and Action::DropSvid { alloc_id: AllocationId, correlation: CorrelationKey }.",
+            "correlation is DERIVED, not a request id: CorrelationKey::derive(target = svid-lifecycle/<alloc>, spec_hash, purpose = issue-svid / drop-svid) per the ADR-0035 reconciler-I/O correlation discipline (links cause to the audit/observation surface deterministically across ticks).",
+            "node_id is KEPT on IssueSvid (the action is self-describing -- it names the issuing node, which is the issued_certificates row's node_id and the issue_and_audit(.., node, ..) argument; #36-forward-compat).",
+            "Action stays a plain enum (no boxing) -- the same additive shape Action::DataplaneUpdateService / HttpCall / StartWorkflow were added in; the change compiles against every existing exhaustive Action match (or those matches gain the two new arms)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs",
+          "scenario_name": "running_alloc_without_held_svid_emits_issue_svid",
+          "scenario_ids": "enabling for S-WIM-01 / S-WIM-03 (the variant + field surface the reconciler emits); the variants are asserted via the reconcile output in 01-04",
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconcilers/mod.rs",
+            "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 pure, default lane. ADR-0067 D2: two ADDITIVE plain-enum variants -- do NOT box, do NOT add a third variant or any field the ADR does not name (CLAUDE.md 'Implement to the design, never invent API surface' -- precedent: the ADR-0065 TerminalErrorKind::Retryable + ctx.run_retryable inventions cost a rework cycle). The dispatch-triple extension (AnyState / AnyReconciler / AnyReconcilerView +3 variants apiece -- the standard reconciler-registration triple) lands in 01-04 alongside the reconciler and SvidLifecycleState; this step adds ONLY the two Action variants + the correlation derivation so the reconciler (01-04) and the executor (01-06) have the surface to emit/dispatch. The correlation key is the deterministic cause->response link (NOT a per-attempt request id -- ADR-0035 correlation discipline): CorrelationKey::derive(target=\"svid-lifecycle/<alloc>\", spec_hash, \"issue-svid\"). REUSE CorrelationKey / AllocationId / SpiffeId / NodeId as-is. PARADIGM: the variant/field shape is asserted via the reconcile output (01-04), not a standalone PBT here."
+        },
+        {
+          "id": "01-03",
+          "name": "IdentityMgr held store: RwLock<BTreeMap> + bundle, hold/drop/set_bundle + held_snapshot",
+          "criteria": [
+            "IdentityMgr (overdrive-control-plane/src/identity_mgr.rs, adapter-host class) holds parking_lot::RwLock<IdentityState> where IdentityState { held: BTreeMap<AllocationId, SvidMaterial>, bundle: Option<TrustBundle> }; new(bundle: Option<TrustBundle>) constructs it with the boot trust bundle.",
+            "Mutators hold(&self, alloc, svid) / drop_svid(&self, alloc) / set_bundle(&self, bundle) take the write-lock, mutate, and drop the guard within the call -- NEVER across an .await.",
+            "held_snapshot(&self) -> BTreeMap<AllocationId, HeldSvidFacts> is the sync actual-projection reader: read-lock -> iter().map(..).collect() -> drop-guard, materialising per held alloc the facts the pure convergence needs -- the AllocationId (presence = held), the SpiffeId, and the cert's real not_after (SvidMaterial's validity end); it returns the projection, NOT the SvidMaterial itself (the leaf key never leaves IdentityMgr except through the IdentityRead getter), keeping the core reconciler's actual key-free. HeldSvidFacts { spiffe_id: SpiffeId, not_after: UnixInstant } is a small core type.",
+            "drop_svid removes the entry so SvidMaterial::leaf_key is no longer reachable in the held set (K2 secret-hygiene-on-drop). The held map is BTreeMap, not HashMap (iterated by the invariant + held_snapshot)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs",
+          "scenario_name": "issue_svid_executor_audits_before_hold",
+          "scenario_ids": "enabling for S-WIM-02 / S-WIM-05 / S-WIM-WS (the held store the executor writes and the read port reads); held/drop behaviour asserted via the executor in 01-06 and the read port in 02-01",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/identity_mgr.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs"
+          ],
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1/L2, default lane (pure in-process map; no real I/O). ADR-0067 D4: IdentityMgr is the in-process holder of the SVID set + the trust bundle -- state-layer hygiene (whitepaper §4): the held SvidMaterial (incl. the node-held leaf private key) is NEITHER intent NOR observation; ephemeral runtime state bounded to the running set, intentionally NEVER persisted (the leaf key is not an audit fact and must not reach disk). parking_lot::RwLock NOT tokio::sync (A7): the critical section is a synchronous map mutation / clone-out that does not and must NOT cross an .await; parking_lot is the project default for sync critical sections (faster uncontended, no poisoning) and the read/mutate/clone-and-drop shape keeps the guard off every await point (development.md § Concurrency & async). BTreeMap is MANDATORY (A8): the held map is iterated by the assert_eventually! North-Star invariant AND by held_snapshot (whose output the runtime folds into actual, itself iterated by the convergence), so iteration order must be deterministic across DST seeds (K5). held_snapshot is sync precisely so the hydrate_actual arm (01-04) reads it without an .await, mirroring WorkflowLifecycle's live_instances(). held_snapshot returns the HeldSvidFacts PROJECTION (spiffe_id + not_after), never SvidMaterial -- the leaf key stays inside IdentityMgr and out of the core reconciler's actual. Do NOT add a mutator/reader the ADR does not name (hold / drop_svid / set_bundle / held_snapshot + the IdentityRead impl in 02-01 are the whole surface). REUSE SvidMaterial / TrustBundle as-is (ADR-0063)."
+        },
+        {
+          "id": "01-04",
+          "name": "SvidLifecycle::reconcile pure transition + state + hydrate_actual held-set-as-actual arm",
+          "criteria": [
+            "SvidLifecycle (overdrive-core/src/reconcilers/svid_lifecycle.rs, core class) is a pure-sync Reconciler converging SvidLifecycleState { desired: <running allocs>, actual: <held snapshot> }: running ∧ ¬held -> Action::IssueSvid (SpiffeId built pure via for_allocation); ¬running ∧ held -> Action::DropSvid; running ∧ held(valid, not_after not near-expiry) -> Noop.",
+            "reconcile is pure: no .await, no Ca handle, no ObservationStore handle, wall-clock ONLY via tick.now; it passes dst-lint on the core compile path.",
+            "hydrate_actual (reconciler_runtime.rs:~2190) gains one AnyReconciler::SvidLifecycle(_) arm reading state.identity.held_snapshot() synchronously in-process and building SvidLifecycleState { desired: <running allocs from obs.alloc_status_rows()>, actual: <held snapshot> } -- the identical shape to the WorkflowLifecycle arm (reconciler_runtime.rs:2206-2209 -> hydrate_workflow_actual_instances -> live_instances()).",
+            "The dispatch triple AnyState / AnyReconciler / AnyReconcilerView each gain the SvidLifecycle variant (the standard reconciler-registration triple); SvidLifecycle is registered at boot."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs",
+          "scenario_name": "running_alloc_without_held_svid_emits_issue_svid, stopped_alloc_with_held_svid_emits_drop_svid",
+          "scenario_ids": "S-WIM-01, S-WIM-03",
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconcilers/svid_lifecycle.rs",
+            "crates/overdrive-core/src/reconcilers/mod.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs"
+          ],
+          "deps": ["01-01", "01-02", "01-03"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 pure, default lane. ADR-0067 D1/D4: the headline -- a standalone pure-sync Reconciler that converges TWO sets and emits the diff, mirroring the shipped ServiceMapHydrator -> Action -> executor pattern AND the WorkflowLifecycle held-state-in-actual pattern exactly. The KEY rev-2 addition is held-set-as-actual: actual = the set IdentityMgr currently HOLDS (held_snapshot projection from 01-03), NOT a View 'issued' map -- so the reconciler does NOT GC an issued-set View (there is no such map; D8). desired = the running allocs from obs.alloc_status_rows() (the same filter WorkloadLifecycle / BackendDiscoveryBridge already use). FEASIBILITY (ADR-0067 rev-2 verdict: FEASIBLE, no blocker): the runtime's hydrate_actual is a match over AnyReconciler; the WorkflowLifecycle arm (:2206-2209) already projects a non-persisted in-process runtime set (the workflow engine's live-task set via live_instances():2166) into actual -- the new SvidLifecycle arm reading state.identity.held_snapshot() is the IDENTICAL shape, one new match arm, no runtime-mechanism change. RECONCILER PURITY is a CORRECTNESS constraint (DIVERGE D-WIM-3): no .await, no Ca/ObservationStore handle, wall-clock via tick.now only -- dst-lint enforces at the crate boundary; CA I/O stays entirely in the executor (01-06). The reconciler BUILDS the SpiffeId (pure, via for_allocation from 01-01) and passes it in IssueSvid. Restart recovery falls out for free here -- on an empty held set actual = ∅ and every running alloc matches running ∧ ¬held -> IssueSvid (Slice 03 adds the retry-memory backoff; Slice 01's View may be minimal/empty). Do NOT route restart re-issue through the (forbidden) synchronous-rotation path -- it is the ordinary first-issue branch running again. PARADIGM: S-WIM-01 is @property (a running-without-held alloc ALWAYS emits exactly one IssueSvid with the four fields and reconcile performs no CA/ObservationStore I/O -- a proptest over running-set/held-set populations); S-WIM-03 is the ¬running ∧ held -> DropSvid companion. Universe: emitted action list + next View; no private runtime fields. Do NOT invent surface beyond SvidLifecycle / SvidLifecycleState / the one hydrate_actual arm / the triple variants."
+        },
+        {
+          "id": "01-05",
+          "name": "Enqueue/handoff: EnqueueEvaluation from WorkloadLifecycle + the exit observer",
+          "criteria": [
+            "WorkloadLifecycle::reconcile (workload_lifecycle.rs:181) emits a third Action::EnqueueEvaluation -- ungated by workload kind -- targeting SvidLifecycle for job/<workload_id>, inside the existing if actions.iter().any(is_alloc_mutating_action) block (Start/Restart/Stop/FinalizeFailed: exactly when a Running alloc is added or removed), using the same compile-time NAME-alias anti-drift const the file already uses (const SVID_LIFECYCLE_NAME: &str = <SvidLifecycle as Reconciler>::NAME;).",
+            "The exit observer (worker/exit_observer.rs:230-256) gains a sibling runtime.broker().submit(Evaluation { reconciler: svid_lifecycle_name(), target: job/<workload_id> }) next to the bridge submit -- unconditional (not kind-gated), so an observed alloc-exit (Running -> Failed/Stopped) ticks SvidLifecycle and the ¬running ∧ held -> DropSvid branch fires.",
+            "Emissions are one EnqueueEvaluation per tick per producer (NOT per action); duplicate enqueues for the same job/<workload_id> collapse to one dispatch per drain cycle (broker LWW at (ReconcilerName, TargetResource)).",
+            "A regression test proves BOTH a Running transition (StartAllocation/RestartAllocation) AND a Stopped transition (StopAllocation/FinalizeFailed/observed exit) cause SvidLifecycle to be submitted to the broker for job/<workload_id> with NO manual broker poke."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs",
+          "scenario_name": "workload_lifecycle_transitions_enqueue_svid_lifecycle",
+          "scenario_ids": "S-WIM-10",
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs"
+          ],
+          "deps": ["01-04"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 (the WorkloadLifecycle action-vector emission) + L2 (the exit-observer broker submit). ADR-0067 D5b (the High-2 rev-2 fix): a reconciler does NOT run unless the broker is told to evaluate it -- rev 1 said SvidLifecycle 'observes Running <-> Stopped' but never specified HOW the broker is poked, so as-written the reconciler would build correctly and NEVER tick at the moments the feature depends on. This is the load-bearing wiring (Earned Trust probe: a reconciler that builds but is never enqueued is the silent failure S-WIM-10 catches; the assert_eventually! invariant only holds if the convergence actually runs). Target key job/<workload_id> (NOT alloc/<alloc_id>) -- the same scope backend-discovery-bridge / service-lifecycle use: the broker is LWW at workload grain, the running-alloc set the reconciler converges is exactly one workload's running allocs, and keying at job grain means duplicate enqueues across the two producer sites collapse to one dispatch (an alloc-grain key would fragment the running-set view and break dedup). Producer 1: WorkloadLifecycle::reconcile already emits EnqueueEvaluation to backend-discovery-bridge (:191-195) + service-lifecycle (:241-245) on is_alloc_mutating_action -- ADD a third emission ungated by kind (identity is needed by EVERY running alloc, not only Service). Producer 2: the exit observer already submits Evaluations directly for workload_lifecycle (:233-236) + backend_discovery_bridge (:253-256) on an observed exit (the path that flips actual outside the main action vector) -- ADD a sibling submit, unconditional like the GAP-9 service-lifecycle enqueue (a spurious enqueue for an already-dropped/never-held alloc runs exactly one empty reconcile -- held snapshot has no entry -> desired ⊇ actual -> Noop -> drains; it cannot busy-loop). Both additive; no new mechanism (the broker, Action::EnqueueEvaluation, the submit path all exist). PARADIGM: example-based regression assertion on the emitted action list / broker submit for both transition classes (mirrors the UI-06 / GAP-9 enqueue regression coverage)."
+        },
+        {
+          "id": "01-06",
+          "name": "action_shim/issue_svid.rs executor: mint via issue_and_audit, hold; drop on DropSvid",
+          "criteria": [
+            "A new executor action_shim/issue_svid.rs (mirroring action_shim/dataplane_update_service.rs) handles the two new arms in dispatch_single: on Action::IssueSvid it calls the shipped ca_issuance::issue_and_audit(ca, observation, clock, node, request) (REUSED wholesale, NOT re-implemented -- it mints the leaf, writes the issued_certificates row, and refuses issuance on audit-write failure), then identity.hold(alloc_id, svid), then opportunistically identity.set_bundle(ca.trust_bundle()?).",
+            "On Action::DropSvid the executor calls identity.drop_svid(alloc_id), removing the entry so the node-held leaf private key is no longer reachable in the held set.",
+            "Audit-before-hold is honored: an issue_and_audit audit-write failure refuses the hold -- dispatch reports the failure, IdentityMgr does NOT hold SvidMaterial for the allocation, and no unaudited SVID is handed to a consumer (K4 no silent issuance).",
+            "AppState gains ca: Arc<dyn Ca> and identity: Arc<IdentityMgr>; ca / clock / identity are threaded into dispatch / dispatch_single for the two new arms; production composes Arc<dyn Ca> from the existing ca_boot path (lib.rs)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs",
+          "scenario_name": "issue_svid_executor_audits_before_hold, audit_write_failure_refuses_hold",
+          "scenario_ids": "S-WIM-02, S-WIM-07",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/issue_svid.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/identity_mgr.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs"
+          ],
+          "deps": ["01-02", "01-03"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1/L2, default lane (sim stores/fakes -- a SimObservationStore + a Ca fake; no real crypto). ADR-0067 D3: this is the ONE place CA I/O happens -- the executor is the async boundary (ADR-0023's sanctioned shim boundary), the pure reconciler drives it through typed Actions and observes its effect through the issued_certificates ObservationStore row, exactly as ServiceMapHydrator drives EbpfDataplane. issue_and_audit is REUSED WHOLESALE (ADR-0063 D6 served O5 -- mints the leaf via Ca::issue_svid, writes the issued_certificates row, and refuses issuance on audit-write failure): do NOT re-implement minting or the audit binding (feedback_single_cut_greenfield_migrations / REUSE hard gate). Audit-before-hold is the K4 fail-closed invariant -- S-WIM-07 (@error) injects an audit-write failure inside issue_and_audit and asserts dispatch reports the failure + the held map has no entry + no unaudited SVID escapes (Earned Trust probe: the audit row is real before the SVID is held). After a successful mint+audit+hold, set_bundle(ca.trust_bundle()?) opportunistically refreshes the hydrated bundle (D6 -- the executor already holds &dyn Ca). The 'found wiring': AppState grows ca + identity (recorded as an ADR consequence, NOT a silent change -- additive, existing AppState consumers untouched, the production Arc<dyn Ca> is the SAME adapter ca_boot already builds). S-WIM-02 asserts the issued_certificates row is observable + IdentityMgr holds the returned SvidMaterial + the held cert serial matches the audit row serial. Universe: action-shim result, IdentityMgr held snapshot, ObservationStore audit row. Do NOT add an executor arm/field the ADR does not name. PARADIGM: example-based action-shim dispatch with sim stores (the audit-write-failure sad path is example-pinned per testing.md Tier discipline)."
+        },
+        {
+          "id": "01-07",
+          "name": "Convergence proof: assert_eventually! North-Star invariant (with teeth) + walking-skeleton e2e",
+          "criteria": [
+            "A Tier-1 DST assert_eventually!(\"running allocs hold a valid SVID\") invariant over the held BTreeMap vs the running set holds across Running/Stopped churn at a fixed seed; eventually every Running allocation holds a valid SVID and no stopped allocation holds an SVID.",
+            "The invariant has TEETH: a deliberately-broken executor (drops the hold, or fails to drop) fails it (K1/K2 Earned-Trust probe that the holder actually holds and actually drops).",
+            "The identity-lifecycle DST scenario reproduces bit-identically across a seed-deterministic twin run (BTreeMap iteration + serials via Entropy + fixture keys, K5).",
+            "The integration-tests-gated walking-skeleton test (real CA booted, real ObservationStore): an alloc reaching Running issues+holds the minted SVID, an issued_certificates row is observable, openssl verify -CAfile <root> -untrusted <intermediate> <svid.pem> exits 0; then DropSvid -> IdentityMgr no longer holds that allocation's SVID."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs, crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs",
+          "scenario_name": "running_set_identity_invariant_fails_on_broken_hold_or_drop, walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid",
+          "scenario_ids": "S-WIM-11, S-WIM-WS",
+          "files_to_modify": [
+            "crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs",
+            "crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs"
+          ],
+          "deps": ["01-04", "01-05", "01-06"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "Tier-1 DST (overdrive-sim, default lane) + Tier-3 integration (overdrive-control-plane, integration-tests-gated, Lima). ADR-0067 D9 + Earned Trust: this is where the walking skeleton is PROVEN converged (the Slice-01 learning hypothesis -- identity warrants its own convergence target). S-WIM-11 (@dst_invariant @property) is the North-Star K1/O1 invariant -- assert_eventually!(\"running allocs hold a valid SVID\") over the held BTreeMap vs the running set, with allocations churning Running and Stopped; the TEETH requirement is load-bearing (a deliberately-broken hold/drop MUST fail it, per testing.md 'A scripted scenario test without an invariant is a smell' + ADR-0067 Earned-Trust 'the held map honors drop'). Twin-run determinism (K5): the scenario reproduces bit-identically from a seed -- on failure the harness prints the seed, cargo dst --seed <N> reproduces bit-for-bit; flaky DST is a bug in the sim layer, never a rerun. S-WIM-WS (@walking_skeleton @real-io) is the headline end-to-end proof at the TEST tier (#35 is a FOUNDATION feature -- no operator CLI verb; openssl verify is the honest external entry point): real CA booted (inheriting ADR-0063's CA boot probe -- KEK present, persisted root decrypts), real ObservationStore, openssl verify -CAfile <root> -untrusted <intermediate> <svid.pem> -> exit 0 (assert on the tool exit code, NOT internal reachability, per testing.md Tier 3); the dual-When lifecycle shape (issue+hold+audit+verify, THEN stop+drop+not-held) is the accepted single demo-able journey. The integration test is gated behind integration-tests and runs via cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests (the macOS --no-run compile gate is necessary but NOT sufficient). Universe S-WIM-11: running allocation set + held BTreeMap snapshot + SVID validity. Universe S-WIM-WS: real held map, real observation row, openssl verify exit code. Cgroup-free issuance path -- the WS test exercises the control-plane convergence + CA chain, not the cgroup workload path (use SimDriver or the existing test harness; cgroup writes need root via cargo xtask lima run --)."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 02 - Shared read surface behind the IdentityRead port",
+      "description": "US-WIM-02: expose the held SVID + current trust bundle to the dataplane consumers (sockops/gateway/telemetry) through an IdentityRead port trait -- sync, in-process owned-clone getters that never re-issue per read -- with a SimIdentityRead double and a test consumer that takes Arc<dyn IdentityRead> as a required constructor parameter. The trust bundle is HYDRATED into IdentityMgr (set at boot, refreshed by the issue executor, pushed by #40 via set_bundle), so the read hot path touches zero CA I/O (the O3 guarantee). A DST equivalence test drives the real IdentityMgr read path and SimIdentityRead through the same calls and asserts identical observable reads -- the structural guard that the sim double does not diverge from the production holder. Gives the unbuilt consumers (#26 etc.) a sound, low-latency, mockable seam.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "IdentityRead port trait + IdentityMgr impl, 5 pinned clauses, hydrated bundle",
+          "criteria": [
+            "An IdentityRead port trait in overdrive-core/src/traits/identity_read.rs (core class) exposes exactly two sync owned-clone getters per ADR-0067 D7: fn svid_for(&self, alloc: &AllocationId) -> Option<SvidMaterial>; fn current_bundle(&self) -> Option<TrustBundle>; (: Send + Sync).",
+            "The trait rustdoc pins the FIVE observable clauses every adapter MUST honor: (1) a read never issues (no Ca::issue_svid on the read path -- O3); (2) a read never mutates; (3) None is explicit absence (not an error, not an empty-but-present credential); (4) returns owned clones (no lock held after the read); (5) post-DropSvid(alloc), svid_for(alloc) == None.",
+            "IdentityMgr implements IdentityRead by read-lock -> .cloned() out -> drop-guard-within-the-read-expression (the guard is NEVER held across .await, per development.md § Concurrency & async); a held allocation returns the current SvidMaterial + TrustBundle without re-issuing, and an absent allocation returns None.",
+            "The TrustBundle is HYDRATED (ADR-0067 D6): current_bundle() reads the bundle held in IdentityMgr (set at boot via IdentityMgr::new(Some(Ca::trust_bundle())), refreshed by the issue executor after issue_and_audit via identity.set_bundle(ca.trust_bundle()?)) -- ZERO CA I/O on the read hot path; set_bundle is #40's push seam."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/identity_mgr_read_contract.rs",
+          "scenario_name": "identity_read_returns_svid_and_trust_bundle_without_reissue, identity_read_returns_none_after_drop",
+          "scenario_ids": "S-WIM-04, S-WIM-05",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/identity_read.rs",
+            "crates/overdrive-core/src/traits/mod.rs",
+            "crates/overdrive-control-plane/src/identity_mgr.rs",
+            "crates/overdrive-control-plane/tests/acceptance/identity_mgr_read_contract.rs"
+          ],
+          "deps": ["01-03", "01-06"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 (the trait in core) + L1/L2 (the IdentityMgr impl contract, default lane against the held map). ADR-0067 D7: a port trait mirroring Clock / Transport / Ca, with the SAME signature surface verbatim -- do NOT add a getter the ADR does not name (svid_for / current_bundle are the whole surface). Per development.md § 'Trait definitions specify behavior, not just signature', the trait's rustdoc IS the contract: pin all five clauses (preconditions/postconditions/edge-cases/observable-invariants) -- the equivalence test (02-02) is the enforcement; a vague docstring cannot be enforced. Clause 1 (a read never issues) is the O3 guarantee; clause 4 (owned clones, no lock after read) is why the read-lock is dropped WITHIN the read expression (.cloned() out) -- NEVER hold the guard across .await (development.md § Concurrency & async); clause 5 (post-drop None) is the K2 observable-on-read drop-on-stop. Trust-bundle currency RESOLVED HYDRATED (D6, A4 rejected pull-on-demand): set at boot, refreshed by the issue executor (01-06 already calls set_bundle after issue_and_audit), pushed by #40 via set_bundle -- current_bundle() reads in-process, zero CA I/O on the read hot path (O3). S-WIM-04 asserts owned clones of the current SVID + bundle with no CA issuance call on the read path (a CA call counter is the universe); S-WIM-05 (@error) asserts explicit absence after drop (the consumer cannot observe a stale credential for a stopped alloc). Universe S-WIM-04: IdentityRead return values + a CA call counter. Universe S-WIM-05: svid_for result for the dropped allocation. PARADIGM: example-based read-contract assertions (the generative equivalence PROPERTY is at 02-02)."
+        },
+        {
+          "id": "02-02",
+          "name": "SimIdentityRead double + required-param test consumer + DST equivalence test",
+          "criteria": [
+            "SimIdentityRead (overdrive-sim, adapter-sim class) implements IdentityRead over a preloaded BTreeMap<AllocationId, SvidMaterial> + Option<TrustBundle>, preloadable with fixture SVID + bundle for consumer tests.",
+            "A test consumer/fixture takes Arc<dyn IdentityRead> as a REQUIRED constructor parameter (never defaulted to a production binding), proving the port-trait dependency discipline as a contract (development.md § Port-trait dependencies -- constructor params required, no with_clock-style builder, no production-binding default).",
+            "A DST equivalence test (tests/acceptance/identity_read_equivalence.rs) drives the real IdentityMgr read path and SimIdentityRead through the SAME call sequence and asserts identical observable reads: every held allocation returns equivalent SvidMaterial, absent allocations return absence in both adapters, and current_bundle returns equivalent trust-bundle material.",
+            "The equivalence covers clause 5 (post-drop svid_for == None) against both adapters -- the structural guard that the sim double does not diverge from the production holder."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs",
+          "scenario_name": "sim_identity_read_matches_identity_mgr_contract",
+          "scenario_ids": "S-WIM-06",
+          "files_to_modify": [
+            "crates/overdrive-sim/src/adapters/identity_read.rs",
+            "crates/overdrive-sim/src/adapters/mod.rs",
+            "crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs"
+          ],
+          "deps": ["02-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L2 sim, default lane. ADR-0067 D7/D9: SimIdentityRead is the adapter-sim double over a preloaded BTreeMap + Option<TrustBundle> (BTreeMap for the same deterministic-iteration reason -- the equivalence walks both adapters). The required-param test consumer is the port-trait discipline proof: it takes Arc<dyn IdentityRead> as a MANDATORY constructor parameter (development.md § 'Port-trait dependencies' -- 'optional means tests can forget'; make the dependency mandatory in new(), no builder, no production-binding default) -- the PRODUCTION consumers (sockops #26 / gateway / telemetry) are deferred to those features, this slice ships only the port + sim double + the contract-proving test consumer (building the production consumers here = single-cut violation). The identity_read_equivalence DST test is the STRUCTURAL GUARD (development.md § 'The DST equivalence test is the structural guard') -- it drives the real IdentityMgr and SimIdentityRead through the same calls and asserts identical observable reads, mirroring ADR-0063's ca_equivalence; when it fails, exactly one of the contract / IdentityMgr / SimIdentityRead is wrong and the test isolates which. overdrive-sim owns turmoil/StdRng -- the fixture SVIDs + SimIdentityRead stay in adapter-sim and never leak into a [dependencies] (dst-lint). Note adapters/identity_read.rs is the new sim file (alongside the existing adapters/ca.rs etc.); add it to adapters/mod.rs. PARADIGM: S-WIM-06 is @property -- the equivalence is generative over the same fixture call sequence on both adapters (trait-observable values only, no private fields). Do NOT add a SimIdentityRead method the trait does not name."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 03 - Restart recovery (re-issue) + retry-memory View + gated #40 rotation seam",
+      "description": "US-WIM-01 (O4 facet + the pre-wired seam): make the held-identity set recoverable across a control-plane restart. On boot the held set is empty (the leaf key cannot persist -- CaKeyPem has no Serialize, ADR-0063 D9 -- and is non-reconstructable -- each issue_and_audit mints a fresh leaf), so actual = ∅ and the SvidLifecycle reconciler (held set = actual) re-issues a fresh, audited SVID for every still-Running allocation (running ∧ ¬held -> IssueSvid, bounded, each audited via issue_and_audit). The View is RETRY MEMORY only (IssueRetry { attempts, last_failure_seen_at }) so a FAILED re-issue backs off instead of hammering every tick. The #40 rotation seam is pre-wired (the near-expiry branch reads the held cert's real not_after off actual) but EMIT-GATED (ROTATION_ENABLED = false) so no UnknownWorkflow-per-tick fires while cert_rotation is unregistered. O4/K3 reframed: bounded, audited restart re-issue; no stale/silent credential.",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Retry-memory View (IssueRetry) + restart recovery re-issue branch + backoff",
+          "criteria": [
+            "The SvidLifecycle View is SvidLifecycleView { retry: BTreeMap<AllocationId, IssueRetry> } where IssueRetry { attempts: u32, last_failure_seen_at: UnixInstant } -- RETRY MEMORY ONLY: NO serial / issued_at / spiffe_id success fact and NO derived expires_at / next_renewal_at (a future-event field or success fact is a review-rejection smell, persist-inputs-not-derived).",
+            "The View carries 6 derive bounds (Serialize, Deserialize, Default, Clone, PartialEq, Eq + the auto Send + Sync) -- Eq because the runtime NextView diff compares views; IssueRetry needs #[serde(default = \"epoch_zero\")] on last_failure_seen_at (UnixInstant: !Default) plus a manual impl Default for IssueRetry (the ServiceMapHydrator::RetryMemory precedent).",
+            "On a control-plane restart the in-memory IdentityMgr is empty (actual = ∅), so the SAME running ∧ ¬held -> IssueSvid branch re-issues a fresh, audited SVID for every still-Running allocation (bounded, one per running alloc) -- RECOVERY, distinct from the gated #40 rotation; there is no recompute-without-reissue.",
+            "A FAILED IssueSvid (CA error / audit-write failure) records IssueRetry and backs off -- the running ∧ ¬held branch emits IssueSvid only when no IssueRetry entry exists OR now_unix >= last_failure_seen_at + backoff_for_attempt(attempts) (deadline RECOMPUTED each tick, never persisted); IssueRetry entries for allocations no longer Running are GC'd (retain)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs",
+          "scenario_name": "svid_lifecycle_view_is_retry_memory_only",
+          "scenario_ids": "S-WIM-08, S-WIM-12 (the retry-memory View shape + the restart re-issue branch; the L3 restart integration proof rides in 03-02)",
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconcilers/svid_lifecycle.rs",
+            "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs"
+          ],
+          "deps": ["01-04", "01-06"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 pure, default lane. ADR-0067 D8 + D1: the View is RETRY MEMORY ONLY -- the development.md § 'Reconciler I/O' RetryMemory worked-example shape (IssueRetry { attempts, last_failure_seen_at }). Rev 1's IssuedInputs { issued_at, spiffe_id, serial } was WRONG on two counts (the Critical + High-1 findings): (a) serial is a POST-DISPATCH executor output the pure reconciler cannot know, and the runtime persists next_view BEFORE dispatch (reconciler_runtime.rs:1222-1226 vs :1324), so a View claiming 'issued serial X' could be durably written when the CA/audit write then FAILS, leaving the View lying about a hold that does not exist; (b) the success fact ALREADY lives in the issued_certificates observation row, and 'is this alloc held?' is answered by actual (the held set, D1/D4), not the View. The View's ONLY job is retry-policy memory for a FAILED request. 6 derive bounds NOT 4 (the runtime NextView diff needs Eq -- a crafter who derives only the usual 4 will not compile against the runtime's diff). UnixInstant: !Default forces #[serde(default = \"epoch_zero\")] + a manual impl Default for IssueRetry (the ServiceMapHydrator::RetryMemory precedent). The backoff DEADLINE is RECOMPUTED each tick (now_unix >= last_failure_seen_at + backoff_for_attempt(attempts) -- the exact development.md worked-example shape), NEVER persisted (a next_attempt_at field is a persist-derived-state smell). Restart recovery FALLS OUT of the Slice-01 convergence: on actual = ∅ every running alloc matches running ∧ ¬held -> IssueSvid (RECOVERY, always live) -- distinct from the gated near-expiry rotation; restart re-issue is NOT the forbidden synchronous-rotation path, it is the first-issue branch running again because the holder was reset. GC IssueRetry for allocations no longer Running (mirror ServiceMapHydrator's retain). S-WIM-08 (@property) inspects the public View shape via a serde round-trip: it contains only retry memory and NO serial/issued_at/spiffe_id/expires_at/next_renewal_at success fact (universe: the public View type shape / serde round-trip). Do NOT add a View field the ADR does not name."
+        },
+        {
+          "id": "03-02",
+          "name": "Emit-gated #40 rotation seam (near-expiry off actual.not_after) + restart DST/integration proof",
+          "criteria": [
+            "The near-expiry branch (running ∧ held(near-expiry)) is structurally present in reconcile() and reads the held cert's REAL not_after off actual (held_snapshot's HeldSvidFacts.not_after, NEVER a persisted expires_at View field), comparing it against tick.now_unix + the live near-expiry threshold; it targets Action::StartWorkflow(cert_rotation).",
+            "The StartWorkflow(cert_rotation) emit is GATED/DORMANT (const ROTATION_ENABLED: bool = false, or the absent emit) so it is NEVER emitted while cert_rotation is unregistered -- producing NO WorkflowEngineError::UnknownWorkflow per tick against production's empty-registry engine (the load-bearing caveat -- lib.rs:417-418, action_shim/mod.rs:429).",
+            "A Tier-1 DST restart-mid-run scenario proves a workload running across a control-plane restart is re-held with a fresh, audited SVID (actual = ∅ -> re-issue every still-Running alloc, each writing an issued_certificates row), a FAILED re-issue backs off via the retry-memory View, the gated seam emits nothing, and the scenario reproduces bit-identically across a seed-deterministic twin run.",
+            "The integration-tests-gated restart-recovery test (real CA + real ObservationStore, Lima): after a restart each still-Running alloc is re-issued with a fresh issued_certificates audit row and the surviving leaf verifies under openssl verify (exit 0); the old leaf key was not persisted or reconstructed."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs, crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs",
+          "scenario_name": "near_expiry_rotation_seam_is_emit_gated_until_cert_rotation_registered, restart_reissues_each_still_running_alloc_with_audit_row",
+          "scenario_ids": "S-WIM-09, S-WIM-12",
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconcilers/svid_lifecycle.rs",
+            "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs",
+            "crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs"
+          ],
+          "deps": ["03-01"],
+          "agent": "nw-software-crafter",
+          "implementation_notes": "L1 pure (the gated seam, S-WIM-09) + Tier-3 integration (the restart proof, S-WIM-12, integration-tests-gated, Lima). ADR-0067 D8: the #40 rotation seam is STRUCTURALLY PRE-WIRED but EMIT-GATED. The near-expiry branch keys off actual.not_after (the held cert's TRUE validity end, projected by held_snapshot into actual at D4) -- NOT a View field; there is no expires_at anywhere (not_after is an observed fact of the held material, not a derived View value). The gate is LOAD-BEARING, not cosmetic (DIVERGE D-WIM-8, grounded in code): production ALWAYS wires an empty-registry workflow engine (WorkflowRegistry::new(), lib.rs:1534); a committed StartWorkflow for an UNREGISTERED kind raises WorkflowEngineError::UnknownWorkflow (lib.rs:417-418), isolated per-action by the shim (action_shim/mod.rs:429) but RE-EMITTED each tick the near-expiry condition holds -- so a naive emit raises UnknownWorkflow every tick. The seam stays a CLEAN no-op (const ROTATION_ENABLED: bool = false, or simply the absent emit) until #40 registers cert_rotation and flips the gate, with ZERO #35 View/branch rework. The (None-engine no-op path is NOT production's -- production wires a real, empty-registry engine, so the gate, not the None path, is the defense.) Rotation (running ∧ held(near-expiry) -> StartWorkflow, gated) is DISTINCT from restart re-issue (running ∧ ¬held -> IssueSvid, always live) -- keeping them separate ensures restart recovery is NEVER routed through the forbidden synchronous-rotation path; NO throwaway synchronous sync-rotate path (A5 rejected -- a single-cut violation #40 would delete). S-WIM-09 (@error) evaluates the near-expiry branch and asserts no StartWorkflow(cert_rotation) action is emitted and no UnknownWorkflow can be produced per tick (universe: emitted action list). S-WIM-12 (@error @real-io) is the K3/O4 restart proof at L3 -- Earned Trust probe 'restart recovery actually re-issues': re-issue every still-Running alloc each leaving a fresh issued_certificates row, the surviving leaf verifies (openssl verify exit 0), and the old leaf key was not persisted or reconstructed (the leaf key is non-persistable per ADR-0063 D9). Gated behind integration-tests, run via cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests. Universe S-WIM-12: post-restart held map + audit rows + openssl verify exit code. #40 deferral cited (needs #39 workflow primitive); do NOT create any issue or invent a number. PARADIGM: S-WIM-09 is example-based on the emitted action list (the @error gated-seam contract -- explicitly example-only; the adjacent assert_eventually! North-Star + the restart-mid-run DST twin-run compensate with generative/seed coverage); S-WIM-12 is the integration-tests-gated openssl-verify restart proof."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/reconcilers/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-core/src/id.rs",
+      "crates/overdrive-control-plane/src/identity_mgr.rs",
+      "crates/overdrive-control-plane/src/action_shim/",
+      "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+      "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+      "crates/overdrive-sim/src/adapters/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/acceptance/",
+      "crates/overdrive-sim/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/integration/workload_identity_manager/"
+    ],
+    "excluded_patterns": [
+      "crates/overdrive-control-plane/src/ca_issuance.rs",
+      "crates/overdrive-control-plane/src/tls_bootstrap.rs",
+      "crates/overdrive-core/src/traits/ca.rs"
+    ]
+  },
+  "validation": {
+    "status": "reviewed",
+    "reviewer": "nw-solution-architect-reviewer (Atlas)",
+    "approved_at": "2026-06-08",
+    "verdict": "APPROVED",
+    "review_type": "cross-wave coherence / design-faithfulness (ADR-0067 rev 2 as contract)",
+    "critical_issues_count": 0,
+    "high_issues_count": 0,
+    "findings_summary": "9/9 ADR-0067 decisions (D1-D9) realized with pinned surface matching exactly (independently spot-verified against the ADR: D8 IssueRetry vs rejected IssuedInputs, D2 node_id kept vs rejected A6, D7 svid_for/current_bundle/held_snapshot/HeldSvidFacts, D5 for_allocation canonical extraction, D4 RwLock<IdentityState>, ROTATION_ENABLED=false gate); 13/13 RED scaffolds (S-WIM-01..12 + S-WIM-WS) owned by the correct step(s) with verbatim test_file/scenario_name fidelity to distill/test-scenarios.md; 3 slices map 1:1 to 3 phases, no scope dropped; deps DAG sound and acyclic (Actions before reconciler, IdentityMgr before executor/read-port, View before gated seam); D8 retry-memory-only View correctly implemented (rev-1 IssuedInputs rejection applied, 6 derive bounds, epoch_zero serde default); reconciler purity + BTreeMap + audit-before-hold fail-closed enforced by criteria; D5b enqueue/handoff wiring grounded against verified code anchors; emit-gated #40 seam keyed off actual.not_after; foundation feature owes no verification/expectations entry (proof at test tier; #215 owns operator render); all deferrals (#40/#26/#36/#215/#39/#217/4.7) cite existing issues, none invented or created. All 6 roadmap checks PASSED. No invented API surface. No blocking issues.",
+    "verification_checklist": {
+      "decision_coverage_D1_D9": "9/9 exact",
+      "no_invented_api_surface": "PASS",
+      "scenario_coverage_13": "13/13 owned, verbatim fidelity",
+      "scope_completeness_slices_to_phases": "1:1, no drop",
+      "dependency_ordering": "sound, acyclic",
+      "persist_inputs_not_derived_D8": "PASS (rev-2 correction applied)",
+      "reconciler_purity_btreemap_failclosed": "PASS",
+      "test_tier_discipline": "PASS (L1/L2 default; L3 integration-tests+Lima)",
+      "deferral_anchoring": "PASS (no invented numbers, none created)",
+      "foundation_feature_claim": "PASS (no verification/expectations entry owed)"
+    }
+  }
+}
