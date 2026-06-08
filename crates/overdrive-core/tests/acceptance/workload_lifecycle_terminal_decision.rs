@@ -577,6 +577,14 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // cgroup_sock_addr program. They make no terminal claim
         // — same rationale as DataplaneUpdateService above.
         | Action::RegisterLocalBackend { .. }
-        | Action::DeregisterLocalBackend { .. } => None,
+        | Action::DeregisterLocalBackend { .. }
+        // workload-identity-manager (ADR-0067 D2): IssueSvid / DropSvid
+        // are SVID-lifecycle primitives — they make no terminal claim by
+        // construction. The terminal claim for an alloc lives on
+        // WorkloadLifecycle's StopAllocation / FinalizeFailed above; the
+        // SvidLifecycle reconciler converges the held set, never the
+        // alloc terminal.
+        | Action::IssueSvid { .. }
+        | Action::DropSvid { .. } => None,
     }
 }

@@ -1149,6 +1149,20 @@ async fn dispatch_single(
                 .map_err(ShimError::from)?;
             Ok(())
         }
+        // RED scaffold: the real IssueSvid/DropSvid executor lands GREEN in
+        // step 01-06 (ADR-0067 D3 — `issue_and_audit` + `IdentityMgr::hold`
+        // / `drop_svid`). This arm is UNREACHABLE before 01-06: nothing
+        // dispatches these variants until the `SvidLifecycle` reconciler
+        // (01-04) emits them, and 01-04/01-05 assert on the emitted action
+        // LIST, not on dispatch. 01-06 REPLACES this scaffold with the real
+        // executor call.
+        #[expect(
+            clippy::todo,
+            reason = "RED scaffold; IssueSvid/DropSvid executor lands GREEN in step 01-06"
+        )]
+        Action::IssueSvid { .. } | Action::DropSvid { .. } => {
+            todo!("RED scaffold: IssueSvid/DropSvid executor lands in step 01-06")
+        }
     }
 }
 
