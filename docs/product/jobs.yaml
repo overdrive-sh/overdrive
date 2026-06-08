@@ -306,9 +306,10 @@ jobs:
       O1 (running ⇒ held, chain-verifiable SVID — the
       `assert_eventually!("running allocs hold a valid SVID")` invariant),
       O2 (stopped ⇒ dropped, leaf key not lingering), O3 (minimize
-      consumer read latency for SVID + trust bundle), O4 (idempotent
-      across control-plane restart — persist issuance INPUTS, not a
-      derived expires_at), O5 (no SVID handed out without an observable
+      consumer read latency for SVID + trust bundle), O4 (bounded,
+      audited restart re-issue — no stale or silent credential; the leaf
+      key is non-persistable, so a restart re-issues each still-Running
+      alloc, audited), O5 (no SVID handed out without an observable
       `issued_certificates` audit row), O6 (minimize additional
       concurrency/storage mechanisms beyond the shipped reconciler
       runtime + Ca port + ObservationStore). See
@@ -320,8 +321,10 @@ jobs:
         when an allocation reaches Running, is readable by dataplane
         consumers (sockops/gateway/telemetry) without re-issuing per read,
         loses the entry when the allocation stops, and also exposes the
-        current CA trust bundle relying parties verify against. Re-issuance
-        is idempotent across control-plane restarts.
+        current CA trust bundle relying parties verify against. On a
+        control-plane restart, re-issuance is bounded and audited — each
+        still-Running alloc is re-issued and audited (no stale or silent
+        credential), since the held leaf key cannot survive a restart.
       emotional: >
         Trust that the running set is CONSISTENTLY identity-bearing — that
         the gap between Running and identity-held is bounded by convergence

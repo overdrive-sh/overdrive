@@ -1,5 +1,20 @@
 # Slice 01 — Issue-on-start, hold, drop-on-stop, audit, converge
 
+> **DESIGN RESOLVED THE OPEN SURFACES — implement ADR-0067 (rev 2), NOT the
+> "DESIGN call" text below.** The pinned decisions: the two Actions are
+> `IssueSvid { alloc_id, spiffe_id, node_id, correlation }` / `DropSvid { alloc_id,
+> correlation }` (ADR-0067 D2); the reconciler converges **`desired` = running
+> allocs vs `actual` = the `IdentityMgr` held set** (held-set-as-`actual`, D1/D4 —
+> the runtime's `hydrate_actual` reads `state.identity.held_snapshot()`, mirroring
+> the `WorkflowLifecycle`/`live_instances()` arm, `reconciler_runtime.rs:2206-2209`);
+> `SpiffeId::for_allocation` is the **canonical extraction** of `mint_alloc_identity`
+> (`backend_discovery_bridge.rs:424`) + `mint_identity` (`workload_lifecycle.rs:808`)
+> — migrate BOTH call sites (D5); and **`SvidLifecycle` is level-triggered via
+> `Action::EnqueueEvaluation`** from `WorkloadLifecycle::reconcile` (`:181`) + the
+> exit observer (`:230-256`) keyed `job/<workload_id>` (D5b — without this the
+> reconciler builds but never ticks). Implement ADR-0067 rev 2, not the
+> Open-Questions "DESIGN call" wording.
+
 **Job**: J-SEC-002 | **Feature**: workload-identity-manager (GH #35) | **Stories**: US-WIM-01 (core), US-WIM-03
 **Walking skeleton**: YES — the feature's own thinnest end-to-end cut (D2 brownfield)
 
@@ -16,11 +31,27 @@ converges under a DST `assert_eventually!` invariant.
 
 - `SvidLifecycle` reconciler in `overdrive-core` (core class, pure
   `reconcile(desired, actual, view, tick) -> (Vec<Action>, View)` — NO `.await`,
-  NO `Ca`/`ObservationStore` handle, wall-clock only via `tick.now`). Emits
-  `Action::IssueSvid` when an alloc reaches Running, `Action::DropSvid` on Stop.
-  Trait/behaviour pinned in docstrings.
-- New typed `Action::IssueSvid` / `Action::DropSvid` variants (exact field set is
-  a DESIGN call — see feature-delta Open-Questions #1).
+  NO `Ca`/`ObservationStore` handle, wall-clock only via `tick.now`). Converges
+  **`desired` = running allocs vs `actual` = the held set**: `running ∧ ¬held →
+  IssueSvid`, `¬running ∧ held → DropSvid`, `running ∧ held(valid) → Noop`.
+  Builds the `SpiffeId` (pure). Trait/behaviour pinned in docstrings.
+- New typed `Action::IssueSvid { alloc_id, spiffe_id, node_id, correlation }` /
+  `Action::DropSvid { alloc_id, correlation }` variants (ADR-0067 D2 — `node_id`
+  KEPT; correlation via `CorrelationKey::derive`). Plain-enum +2 variants + the
+  dispatch triple.
+- **`SpiffeId::for_allocation`** (ADR-0067 D5) — the canonical extraction of the
+  two existing private helpers; **migrate `mint_alloc_identity`
+  (`backend_discovery_bridge.rs:424`) + `mint_identity` (`workload_lifecycle.rs:808`)
+  to it in the same slice** (single-cut — no third implementation).
+- **Enqueue/handoff** (ADR-0067 D5b): a third `Action::EnqueueEvaluation` in
+  `WorkloadLifecycle::reconcile` (`:181` alloc-mutating block, ungated by kind,
+  target `job/<workload_id>`) + a sibling `broker().submit` in the exit observer
+  (`:230-256`). Without it the reconciler never ticks. Regression test: Running AND
+  Stopped transitions tick `SvidLifecycle` with no manual broker poke.
+- **`hydrate_actual` `SvidLifecycle` arm** (`reconciler_runtime.rs:2190`): one new
+  `AnyReconciler::SvidLifecycle(_)` arm reading `state.identity.held_snapshot()`
+  (sync, in-process) → `SvidLifecycleState{desired, actual}` — identical shape to
+  the `WorkflowLifecycle` arm (`:2206-2209`).
 - Action-shim executor `action_shim/issue_svid.rs` (mirroring
   `dataplane_update_service.rs`): on `IssueSvid` calls
   `ca_issuance::issue_and_audit(ca, observation, clock, node, request)` and
@@ -28,8 +59,10 @@ converges under a DST `assert_eventually!` invariant.
   removes the `AllocationId` from the held map.
 - `IdentityMgr` struct in `overdrive-control-plane`: held-SVID
   `BTreeMap<AllocationId, SvidMaterial>` (`BTreeMap` mandatory — iterated by the
-  invariant) behind the concurrency primitive DESIGN pins. Drop-on-stop removes
-  the entry so the leaf private key (`SvidMaterial::leaf_key`) is no longer held.
+  invariant + `held_snapshot`) behind `parking_lot::RwLock` (ADR-0067 D4); mutators
+  `hold`/`drop_svid`/`set_bundle` + `held_snapshot()` (the sync `actual`-projection
+  reader). Drop-on-stop removes the entry so the leaf private key
+  (`SvidMaterial::leaf_key`) is no longer held.
 - Reuse of `issue_and_audit` writes the `issued_certificates` row per issuance
   and refuses issuance on audit-write failure (US-WIM-03 O5 — no silent issuance).
 - DST `assert_eventually!("running allocs hold a valid SVID")` invariant over the
@@ -44,11 +77,14 @@ converges under a DST `assert_eventually!` invariant.
 ## OUT scope
 
 - The `IdentityRead` consumer read surface → Slice 02.
-- Restart-idempotence (recompute held state on boot from persisted inputs) →
-  Slice 03 (Slice 01's View may be minimal/empty; durability is Slice 03).
+- Restart **recovery** (re-issue every still-Running alloc on boot via the
+  `running ∧ ¬held` branch — same branch this slice builds, re-running on an empty
+  held set) + the retry-memory View backoff → Slice 03. Slice 01's View may be
+  minimal/empty (no retry-backoff path yet); the recovery story is Slice 03.
 - The #40 rotation seam (near-expiry branch) → Slice 03.
 - The dataplane consumers themselves (#26 sockops / gateway / telemetry).
-- `SpiffeId::for_allocation` derivation shape → DESIGN handoff (#1).
+- (`SpiffeId::for_allocation` is IN scope here — ADR-0067 D5 pins it; the two
+  private-helper call sites migrate in this slice.)
 
 ## Learning hypothesis
 
@@ -65,7 +101,10 @@ converges under a DST `assert_eventually!` invariant.
 
 ## Acceptance criteria
 
-- [ ] `SvidLifecycle::reconcile` is pure (no `.await`, no CA/observation handle, wall-clock via `tick.now` only) and passes dst-lint; emits `IssueSvid` on Running, `DropSvid` on Stop.
+- [ ] `SvidLifecycle::reconcile` is pure (no `.await`, no CA/observation handle, wall-clock via `tick.now` only) and passes dst-lint; converges `desired` = running allocs vs `actual` = the held set: `running ∧ ¬held → IssueSvid`, `¬running ∧ held → DropSvid`, `running ∧ held(valid) → Noop`.
+- [ ] `hydrate_actual` gains a `SvidLifecycle` arm reading `state.identity.held_snapshot()` (sync, in-process) into `actual` — the same shape as the `WorkflowLifecycle` arm (`reconciler_runtime.rs:2206-2209`).
+- [ ] `SvidLifecycle` is enqueued via `Action::EnqueueEvaluation` (from `WorkloadLifecycle::reconcile` + the exit observer, keyed `job/<workload_id>`); a regression test proves a Running transition AND a Stopped transition each tick `SvidLifecycle` with no manual broker poke.
+- [ ] `SpiffeId::for_allocation` exists (infallible, `#[must_use]`) and the two existing private helpers (`mint_alloc_identity`, `mint_identity`) are migrated to it (no third implementation remains).
 - [ ] The executor mints via the shipped `ca_issuance::issue_and_audit` (NOT re-implemented) and writes/removes the `SvidMaterial` in the `Arc<IdentityMgr>` held `BTreeMap`.
 - [ ] After Running: the `issued_certificates` row is written for the issuance (read back via the ObservationStore in a gated `integration-tests` test) and `openssl verify -CAfile <root> -untrusted <intermediate> <svid.pem>` exits 0 on the minted leaf at the TEST tier (built-in-ca's `rcgen_ca_chain_verify` shape). (The operator `alloc status` render + the deployed-SVID operator-verify flow are deferred to **#215** — its O05/E03, blocked on #35 — NOT this slice's AC.)
 - [ ] After Stop: the held map no longer contains the allocation (the leaf private key is no longer reachable in the held set).
@@ -92,8 +131,11 @@ The new parts are the held `IdentityMgr` map + the two actions + the
 
 Not needed — the shipped `Ca` port + `issue_and_audit` remove the crypto/audit
 uncertainty; the reconciler + executor + `assert_eventually!` patterns are all
-proven in-tree. The one DESIGN-pinned uncertainty (Action field set + `SpiffeId`
-derivation) is resolved by the architect before crafting, not by a spike.
+proven in-tree; the held-set-as-`actual` + enqueue/handoff are grounded against the
+`WorkflowLifecycle` precedent (`reconciler_runtime.rs:2206-2209`,
+`workload_lifecycle.rs:181`). All previously "DESIGN-pinned" surfaces (Action field
+set, `SpiffeId` derivation, held-set-as-`actual`, the enqueue trigger) are RESOLVED
+in ADR-0067 rev 2 before crafting, not by a spike.
 
 ## Taste-test note
 

@@ -1,5 +1,14 @@
 # Slice 02 — Shared read surface behind the `IdentityRead` port
 
+> **DESIGN RESOLVED THE OPEN SURFACES — implement ADR-0067 (rev 2), NOT the
+> "DESIGN call" text below.** The pinned signatures: `IdentityRead { svid_for(&
+> AllocationId) -> Option<SvidMaterial>; current_bundle() -> Option<TrustBundle> }`
+> with 5 behaviour-pinning rustdoc clauses (ADR-0067 D7). The trust-bundle currency
+> mechanism is RESOLVED as **HYDRATED into `IdentityMgr`** (set at boot, refreshed
+> by the issue executor, pushed by #40 via `set_bundle`; zero CA I/O on the read hot
+> path — ADR-0067 D6) — NOT "pull-on-demand vs hydrated, DESIGN's call." Implement
+> ADR-0067 rev 2 D6/D7, not the Open-Questions "DESIGN call" wording below.
+
 **Job**: J-SEC-002 | **Feature**: workload-identity-manager (GH #35) | **Story**: US-WIM-02
 **Release**: Release 1 (first enhancement past the walking skeleton)
 
@@ -13,13 +22,13 @@ seam to read identity from.
 
 ## IN scope
 
-- `IdentityRead` port trait in `overdrive-core` (core class): sync getters for
-  the current SVID by `AllocationId` and the current `TrustBundle`. Trait
-  docstring pins observable behaviour — including that a read NEVER triggers
-  issuance and that an absent allocation is reported explicitly. (Exact
-  signatures are a DESIGN call — recommended `svid_for(&AllocationId) ->
-  Option<SvidMaterial>` + `current_bundle() -> TrustBundle`; feature-delta
-  Open-Questions #2.)
+- `IdentityRead` port trait in `overdrive-core` (core class), signatures pinned by
+  ADR-0067 D7: `svid_for(&AllocationId) -> Option<SvidMaterial>` + `current_bundle()
+  -> Option<TrustBundle>`. The trait docstring pins **5 observable clauses** every
+  adapter MUST honor: (1) a read NEVER triggers issuance (no `Ca::issue_svid` on the
+  read path — O3); (2) a read NEVER mutates; (3) `None` = explicit absence; (4)
+  returns owned clones (no lock held after the read); (5) post-`DropSvid(alloc)`,
+  `svid_for(alloc) == None`.
 - `IdentityMgr` implements `IdentityRead` by reading its held `BTreeMap` + the
   current bundle (read-lock, clone-out, drop guard — never holds the lock across
   `.await`, per `.claude/rules/development.md` § "Concurrency & async").
@@ -31,9 +40,11 @@ seam to read identity from.
   port for real are deferred to their own features (see OUT scope).
 - DST equivalence test driving the real `IdentityMgr` read path and
   `SimIdentityRead` through the same calls, asserting identical observable reads.
-- Trust-bundle currency wiring (the mechanism — pull `Ca::trust_bundle()` on
-  demand vs reconciler-hydrated — is DESIGN's call, feature-delta Open-Questions
-  #5; this slice consumes whatever DESIGN pins).
+- Trust-bundle currency wiring — RESOLVED **HYDRATED** (ADR-0067 D6):
+  `current_bundle()` reads the bundle held in `IdentityMgr` (set at boot via
+  `IdentityMgr::new(Some(Ca::trust_bundle()))`, refreshed by the issue executor
+  after `issue_and_audit` via `identity.set_bundle(ca.trust_bundle()?)`). ZERO CA
+  I/O on the read hot path; `set_bundle` is #40's push seam. (NOT pull-on-demand.)
 
 ## OUT scope
 
@@ -63,7 +74,7 @@ seam to read identity from.
 
 - [ ] An `IdentityRead` port trait in `overdrive-core` exposes sync getters for the current SVID (by `AllocationId`) and the current trust bundle; the docstring pins that a read never triggers issuance.
 - [ ] `IdentityMgr` implements `IdentityRead`; a **test consumer/fixture** takes `Arc<dyn IdentityRead>` as a required constructor parameter (never defaulted), proving the port-trait discipline as a contract. No lock held across `.await`. (Production consumer wiring — sockops #26 / gateway / telemetry — is deferred to those features, not an AC here.)
-- [ ] A read for a held allocation returns the current `SvidMaterial` + `TrustBundle` **without re-issuing** — NO `issue_svid` on the read path; the SVID is served from the held map (the O3 guarantee). The **trust-bundle currency mechanism** (pull-on-demand via `Ca::trust_bundle()` vs hydrated into `IdentityMgr`) stays **DESIGN's call** (feature-delta Open-Questions #5) — a cheap bundle pull is permitted; re-issuing the SVID per read is not.
+- [ ] A read for a held allocation returns the current `SvidMaterial` + `TrustBundle` **without re-issuing** — NO `issue_svid` on the read path; the SVID is served from the held map and the bundle is served from the **hydrated** `IdentityMgr` (ADR-0067 D6 — ZERO CA I/O on the read hot path, the O3 guarantee).
 - [ ] A read for an absent allocation returns an explicit "absent" (e.g. `None`), not a stale or empty-but-present credential.
 - [ ] A `SimIdentityRead` double exists; a DST equivalence test drives the real read path and the sim double through the same sequence and asserts identical observable reads.
 
@@ -83,8 +94,9 @@ signatures and the read-lock-clone-out discipline.
 ## Pre-slice SPIKE
 
 Not needed — the port-trait+sim-double+equivalence pattern is well-trodden in
-the workspace. The one DESIGN-pinned uncertainty (exact getter signatures + the
-trust-bundle currency mechanism) is resolved by the architect before crafting.
+the workspace. Both previously "DESIGN-pinned" surfaces (the getter signatures +
+the trust-bundle currency mechanism) are RESOLVED in ADR-0067 rev 2 (D7 signatures +
+5 clauses; D6 HYDRATED bundle) before crafting.
 
 ## Taste-test note
 

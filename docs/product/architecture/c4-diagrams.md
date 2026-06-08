@@ -935,3 +935,187 @@ Five properties the diagrams make explicit:
    refuses startup (`health.startup.refused`), distinct errors for tampered vs
    wrong-KEK.
 
+## Workload Identity Manager — `SvidLifecycle` reconciler + `IdentityMgr` holder (Mermaid)
+
+**Source:** `docs/feature/workload-identity-manager/` DESIGN-wave artifacts.
+**ADR:** ADR-0067. Builds on ADR-0063 (built-in CA) — ADR-0063 *mints*,
+this *holds/reads/drops*. **Date:** 2026-06-08. **GH:** #35 [2.13]. Single-node.
+
+### C4 Level 1 — System Context
+
+The platform binds a live SVID to the running set, holds it where the
+dataplane can read it, and drops it on stop — sidecarless (whitepaper §7), so
+the credential's lifecycle is driven from the allocation lifecycle the control
+plane already owns. #35 is a FOUNDATION feature: its observable proof is
+TEST-tier (`openssl verify` the held chain + ObservationStore readback of the
+`issued_certificates` row + the DST `assert_eventually!` convergence
+invariant). The **operator** `alloc status` render is **#215's** (blocked on
+#35); the dataplane **consumer** is **#26's** (sockops/kTLS).
+
+```mermaid
+C4Context
+  title System Context — Overdrive Workload Identity Manager (GH #35)
+
+  Person(sam, "Platform/Security Engineer (Sam)", "Operates the running set; verifies the held chain with `openssl verify`; defends the identity story to a security reviewer")
+  System(overdrive, "Overdrive node", "Single binary — control plane + worker; now BINDS a held SVID to each Running allocation, exposes it behind an IdentityRead port, and drops it on stop")
+  System_Ext(ca, "Built-in CA (#28, ADR-0063)", "Mints the SVID + audit row via ca_issuance::issue_and_audit; supplies the trust bundle. This feature HOLDS what it mints")
+  System_Ext(consumer, "Dataplane consumer (#26, future)", "sockops/kTLS mTLS + L7 gateway + telemetry — read the held SVID + trust bundle via IdentityRead; fail closed on absence. OUT OF SCOPE this phase")
+  System_Ext(ci, "CI", "Gates: 100% Running allocs hold a valid SVID (K1); no leak on stop (K2); bounded audited restart re-issue, no stale credential (K3, rev 2); no silent issuance (K4); DST determinism (K5)")
+
+  Rel(sam, overdrive, "Runs a workload (overdrive deploy); verifies the held leaf chain; reads the issued_certificates audit row (test-tier)")
+  Rel(overdrive, ca, "issue_and_audit (mint + audit + refuse-on-audit-failure); trust_bundle (hydrate at boot + refresh per issuance)")
+  Rel(consumer, overdrive, "Reads svid_for(alloc) + current_bundle() through the IdentityRead port (in-process, no re-issue)")
+  Rel(ci, overdrive, "assert_eventually!(running allocs hold a valid SVID); drop-on-stop; identity_read_equivalence; openssl verify at the test tier")
+```
+
+### C4 Level 2 — Container
+
+`overdrive-core` gains the pure `SvidLifecycle` reconciler + its View + the two
+`Action` variants + `SpiffeId::for_allocation` + the `IdentityRead` port — **no
+CA handle, no `.await`** (dst-lint boundary). `overdrive-control-plane` gains
+`IdentityMgr` (the in-process `RwLock<BTreeMap>` holder) + the
+`action_shim/issue_svid.rs` executor (the sole CA-I/O site) + the two
+`AppState` fields. `overdrive-sim` gains `SimIdentityRead`. The held
+`SvidMaterial` is in-process runtime state (never persisted) and **IS the
+reconciler's `actual`** (rev 2 — the runtime's `hydrate_actual` projects a
+held-snapshot in, mirroring `WorkflowEngine::live_instances()`); the View carries
+**retry memory** (not issuance success facts); the `issued_certificates` row is
+observation (ADR-0063). `SvidLifecycle` is triggered by an explicit
+`Action::EnqueueEvaluation` handoff from `WorkloadLifecycle` + the exit observer
+(rev 2).
+
+```mermaid
+C4Container
+  title Container Diagram — Overdrive Workload Identity Manager
+
+  Person(sam, "Platform/Security Engineer (Sam)", "Runs workloads; verifies the held chain; audits issuance")
+
+  Container(cli, "overdrive-cli", "Rust binary", "Composition root — composes Arc<dyn Ca> (ca_boot, lib.rs:50) + IdentityMgr::new(Some(Ca::trust_bundle())); wires both into AppState")
+  Container(ctrl, "overdrive-control-plane", "Rust crate (adapter-host)", "NEW IdentityMgr (RwLock<BTreeMap<AllocationId, SvidMaterial>> + Option<TrustBundle>) + action_shim/issue_svid.rs executor (the only CA-I/O site). AppState gains ca + identity")
+  Container(core, "overdrive-core", "Rust crate (class core)", "NEW SvidLifecycle reconciler (pure) + SvidLifecycleView + Action::IssueSvid/DropSvid + SpiffeId::for_allocation + IdentityRead port. NO Ca handle, NO .await (dst-lint). Reuses SvidMaterial/TrustBundle/CorrelationKey/AllocationId/NodeId/WorkloadId/CertSerial")
+  Container(ca, "Built-in CA (#28)", "Ca port + ca_issuance::issue_and_audit", "Mints the leaf, writes the audit row, refuses issuance on audit-write failure; supplies trust_bundle(). REUSED AS-IS (ADR-0063)")
+  Container(sim, "overdrive-sim", "adapter-sim", "NEW SimIdentityRead (preloaded BTreeMap + Option<TrustBundle>); the identity_read_equivalence DST test drives it vs IdentityMgr")
+  ContainerDb(view, "RedbViewStore (redb)", "ViewStore (reconciler memory)", "SvidLifecycleView — RETRY MEMORY only (attempts, last_failure_seen_at). NO serial/issued_at success facts, NO derived expires_at. Runtime owns persistence")
+  ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "issued_certificates row — written INSIDE issue_and_audit (ADR-0063 D6). Read back at the test tier")
+
+  Rel(sam, cli, "overdrive deploy <spec>")
+  Rel(cli, ctrl, "Boots control plane; injects Arc<dyn Ca> + Arc<IdentityMgr> into AppState")
+  Rel(cli, ca, "Ca::trust_bundle() → IdentityMgr::new(Some(bundle)) at boot")
+  Rel(ctrl, core, "Registers SvidLifecycle; dispatch_single routes IssueSvid/DropSvid")
+  Rel(core, view, "reconcile() returns NextView; runtime write-throughs retry memory (fsync-then-memory)")
+  Rel(ctrl, ca, "issue_and_audit(ca, observation, clock, node, request); trust_bundle() to refresh the held bundle")
+  Rel(ctrl, obs, "issued_certificates written inside issue_and_audit (no silent issuance)")
+  Rel(sim, core, "SimIdentityRead implements IdentityRead [tests/DST]")
+```
+
+### C4 Level 3 — Identity subsystem component decomposition
+
+Warranted by the complexity (enqueue handoff → broker → hydrate-actual → pure
+reconciler → action → executor → in-process holder → read port → CA). Makes the
+load-bearing decisions explicit: **the held set IS `actual`** (rev 2 — projected
+by `hydrate_actual` via `held_snapshot`, the `WorkflowLifecycle`/`live_instances()`
+precedent); **`SvidLifecycle` is level-triggered** by `EnqueueEvaluation` from
+`WorkloadLifecycle` (`:181`) + the exit observer (`:230-256`); **the reconciler
+builds the `SpiffeId` (pure)**, CA I/O stays in the executor; the held map is
+`RwLock<BTreeMap>` (sync lock, deterministic iteration); the View is **retry
+memory** (not success facts); the bundle is **hydrated** into `IdentityMgr` (zero
+CA I/O on read); the #40 rotation seam is pre-wired but **emit-gated**, keyed off
+`actual.not_after`.
+
+```mermaid
+C4Component
+  title Component Diagram — Workload Identity subsystem
+
+  Container_Boundary(core, "overdrive-core (class core — no Ca handle, no .await)") {
+    Component(recon, "SvidLifecycle reconciler (NEW)", "reconcilers/svid_lifecycle.rs", "Pure reconcile(): converges desired=running allocs vs actual=IdentityMgr HELD SET. running∧¬held→IssueSvid (incl. restart re-issue), ¬running∧held→DropSvid, running∧held(valid)→Noop. BUILDS the SpiffeId (pure). #40 near-expiry branch (running∧held(near-expiry)) pre-wired, emit GATED (ROTATION_ENABLED=false), keyed off actual.not_after")
+    Component(view, "SvidLifecycleView + IssueRetry (NEW)", "reconcilers/svid_lifecycle.rs", "retry: BTreeMap<AllocationId, IssueRetry{attempts, last_failure_seen_at}>. RETRY MEMORY only — a failed IssueSvid backs off. NO serial/issued_at/spiffe_id success facts (held-ness is actual; success is the issued_certificates row). 6 derive bounds (+Eq); manual Default")
+    Component(actions, "Action::IssueSvid / DropSvid (NEW)", "reconcilers/mod.rs", "IssueSvid{alloc_id, spiffe_id, node_id, correlation} / DropSvid{alloc_id, correlation}. Plain enum +2 variants; +3 dispatch-enum variants (AnyState/AnyReconciler/AnyReconcilerView). correlation = CorrelationKey::derive(svid-lifecycle/<alloc>, spec_hash, issue-svid)")
+    Component(spiffe, "SpiffeId::for_allocation (NEW impl)", "id.rs", "Infallible for_allocation(&WorkloadId, &AllocationId) -> Self; #[must_use]; trust-domain overdrive.local; builds spiffe://…/job/<wl>/alloc/<id>; validates via new with unwrap_or_else(|| unreachable!(…))")
+    Component(readport, "IdentityRead port (NEW)", "traits/identity_read.rs", "svid_for(&AllocationId) -> Option<SvidMaterial> + current_bundle() -> Option<TrustBundle>. Sync, owned clones. 5 rustdoc clauses: no-issue, no-mutate, None=absent, owned-clone, post-drop None")
+    Component(svidmat, "SvidMaterial / TrustBundle (REUSE)", "traits/ca.rs", "Existing — cert + node-held leaf_key (redacted Debug, ADR-0063 D9); trust bundle. No change")
+    Component(corr, "CorrelationKey::derive (REUSE)", "id.rs", "Existing derive(target, spec_hash, purpose). No change")
+  }
+
+  Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
+    Component(mgr, "IdentityMgr (NEW)", "identity_mgr.rs", "parking_lot::RwLock<IdentityState{held: BTreeMap<AllocationId, SvidMaterial>, bundle: Option<TrustBundle>}>. new(bundle); hold/drop_svid/set_bundle; impl IdentityRead; held_snapshot()→BTreeMap<AllocationId, HeldSvidFacts{spiffe_id, not_after}> (sync actual-projection, mirrors WorkflowEngine::live_instances()). All reads/writes read-or-write-lock→clone/mutate→drop, NEVER across .await. BTreeMap MANDATORY")
+    Component(exec, "action_shim/issue_svid.rs executor (NEW)", "action_shim/issue_svid.rs", "IssueSvid → issue_and_audit → identity.hold → identity.set_bundle(ca.trust_bundle()?). DropSvid → identity.drop_svid. The ONE CA-I/O site (mirrors dataplane_update_service.rs)")
+    Component(appstate, "AppState + shim signature (EXTEND)", "lib.rs", "Gains ca: Arc<dyn Ca> + identity: Arc<IdentityMgr>; threads ca/clock/identity into dispatch/dispatch_single. Prod composes Arc<dyn Ca> from ca_boot (lib.rs:50)")
+  }
+
+  Container_Boundary(sim, "overdrive-sim (adapter-sim)") {
+    Component(simread, "SimIdentityRead (NEW)", "adapters/identity_read.rs", "Implements IdentityRead over a preloaded BTreeMap + Option<TrustBundle>. identity_read_equivalence DST test drives it vs IdentityMgr")
+  }
+
+  Container(ca, "Built-in CA (#28, REUSE)", "Ca port + issue_and_audit", "Mints leaf, writes issued_certificates, refuses on audit-write failure; trust_bundle()")
+  ContainerDb(view_db, "ViewStore (redb)", "RedbViewStore", "SvidLifecycleView — RETRY MEMORY (attempts, last_failure_seen_at)")
+  ContainerDb(obs, "ObservationStore (redb)", "LocalObservationStore", "alloc_status (→ desired) + issued_certificates (written inside issue_and_audit)")
+
+  Container_Boundary(runtime, "Reconciler runtime + broker (REUSE) — the enqueue/handoff + hydrate-actual wiring (rev 2)") {
+    Component(broker, "EvaluationBroker (REUSE)", "reconciler_runtime.rs", "LWW at (ReconcilerName, TargetResource). Drains evaluations → run_convergence_tick. Dedups duplicate EnqueueEvaluation for job/<workload_id>")
+    Component(hydrate, "hydrate_actual SvidLifecycle arm (NEW arm)", "reconciler_runtime.rs:2190", "Reads state.identity.held_snapshot() (sync, in-process) → SvidLifecycleState{desired: running allocs (alloc_status), actual: held set}. IDENTICAL shape to the WorkflowLifecycle arm (:2206-2209 → live_instances():2166). FEASIBLE — one new match arm")
+    Component(wll, "WorkloadLifecycle::reconcile (EXTEND)", "reconcilers/workload_lifecycle.rs:181", "On is_alloc_mutating_action (Start/Restart/Stop/Finalize): pushes a THIRD EnqueueEvaluation → svid-lifecycle, target job/<wl>, ungated by kind")
+    Component(exobs, "exit observer (EXTEND)", "worker/exit_observer.rs:230-256", "On observed exit (Running→Failed/Stopped): broker().submit a sibling Evaluation → svid-lifecycle (drops leaf key on exit, not only operator StopAllocation)")
+  }
+
+  Rel(recon, actions, "Emits IssueSvid/DropSvid (the desired-vs-actual diff)")
+  Rel(recon, spiffe, "Builds the SpiffeId per allocation (PURE)")
+  Rel(recon, view, "Returns NextView (retry memory); GC non-Running entries")
+  Rel(view, view_db, "Runtime write-through (fsync-then-memory)")
+  Rel(actions, exec, "dispatch_single routes the 2 arms to the executor")
+  Rel(exec, appstate, "Reads ca + identity (+ node_id) from AppState")
+  Rel(exec, ca, "issue_and_audit (mint + audit + refuse); trust_bundle() to refresh bundle")
+  Rel(exec, obs, "issued_certificates written inside issue_and_audit")
+  Rel(exec, mgr, "identity.hold / drop_svid / set_bundle")
+  Rel(mgr, readport, "implements (sync getters, owned clones)")
+  Rel(mgr, svidmat, "Holds SvidMaterial + TrustBundle")
+  Rel(simread, readport, "implements [tests/DST]")
+  Rel(actions, corr, "correlation via CorrelationKey::derive")
+  Rel(wll, broker, "EnqueueEvaluation → svid-lifecycle (job/<wl>) [handoff]")
+  Rel(exobs, broker, "submit Evaluation → svid-lifecycle (job/<wl>) [on exit]")
+  Rel(broker, hydrate, "Drains → run_convergence_tick → hydrate_actual")
+  Rel(hydrate, mgr, "held_snapshot() — projects the HELD SET into actual (sync, in-process)")
+  Rel(hydrate, obs, "alloc_status_rows() — projects RUNNING allocs into desired")
+  Rel(hydrate, recon, "Calls reconcile(desired, actual, view, tick)")
+```
+
+Eight properties the diagrams make explicit (rev 2):
+
+1. **The reconciler is pure — CA I/O is the executor's.** `SvidLifecycle`
+   builds the `SpiffeId` and emits the actions with NO `Ca` handle and NO
+   `.await` (dst-lint boundary); `issue_and_audit` runs only in
+   `action_shim/issue_svid.rs`. (Purity is a CORRECTNESS constraint — DIVERGE
+   D-WIM-3 / ADR-0067 D1.)
+2. **The held set IS the reconciler's `actual` (rev 2).** `hydrate_actual` reads
+   `state.identity.held_snapshot()` (sync, in-process) into `actual`, exactly as
+   the `WorkflowLifecycle` arm reads `live_instances()` into `actual.has_live_task`
+   (`reconciler_runtime.rs:2206-2209`/`:2166`). The convergence is `desired`
+   (running allocs) vs `actual` (held set); on restart `actual = ∅` → re-issue all
+   running (RECOVERY). (ADR-0067 D1 / D4 — FEASIBLE, one new match arm.)
+3. **The held map is `RwLock<BTreeMap>`, iterated by the North-Star invariant.**
+   `parking_lot::RwLock` (sync — the guard never crosses `.await`); `BTreeMap`
+   mandatory so `assert_eventually!("running allocs hold a valid SVID")` and
+   `held_snapshot` walk a deterministic order across seeds (K5). (ADR-0067 D4.)
+4. **The View is RETRY MEMORY, not success facts (rev 2).** `IssueRetry{attempts,
+   last_failure_seen_at}` — a failed `IssueSvid` backs off. NO `serial`/`issued_at`
+   (serial is a post-dispatch output; `next_view` persists BEFORE dispatch,
+   `reconciler_runtime.rs:1222-1226` vs `:1324`); held-ness is `actual`, success is
+   the `issued_certificates` row. 6 derive bounds (+`Eq`). (ADR-0067 D8.)
+5. **`SvidLifecycle` is level-triggered via `EnqueueEvaluation` (rev 2).**
+   `WorkloadLifecycle::reconcile` (`:181`) + the exit observer (`:230-256`) emit/
+   submit to the broker for `job/<workload_id>`; broker LWW dedups. Without the
+   handoff the reconciler builds but never ticks. (ADR-0067 D5b.)
+6. **The trust bundle is HYDRATED — zero CA I/O on the read hot path.** Set at
+   boot (`Ca::trust_bundle()` → `IdentityMgr::new`), refreshed by the executor
+   (`set_bundle(ca.trust_bundle()?)`), pushed by #40 via the same `set_bundle`
+   seam; `current_bundle()` reads in-process. (O3 / ADR-0067 D6.)
+7. **No silent issuance — the audit row is bound to issuance.** `issue_and_audit`
+   writes `issued_certificates` and refuses the issuance on audit-write failure
+   (ADR-0063 D6) — no unaudited `SvidMaterial` reaches the held map. (O5.)
+8. **The #40 rotation seam is pre-wired but EMIT-GATED.** The near-expiry branch
+   (`running ∧ held(near-expiry)`) exists, keyed off the held cert's real
+   `not_after` from `actual` (NOT a View field — rev 2); the
+   `StartWorkflow(cert_rotation)` emit is suppressed until #40 registers the kind —
+   production wires an empty-registry engine, so a naïve emit would raise
+   `UnknownWorkflow` every tick. Restart re-issue (`¬held → IssueSvid`) is RECOVERY,
+   a *distinct* branch from this gated rotation. (ADR-0067 D8 / D1.)
+
