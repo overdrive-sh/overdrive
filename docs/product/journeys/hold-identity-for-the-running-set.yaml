@@ -54,7 +54,7 @@ journey:
   emotional_arc:
     start: "Skeptical — 'a CA that mints is not the same as identity that is HELD. Show me the running set actually holds live identity, that stop drops it, and that this is checked, not asserted.'"
     middle: "Reassured incrementally — a running workload holds a chain-verifiable SVID; stopping it removes the held entry (and the leaf key) from memory; the held set is bounded to the running set by a convergence loop."
-    end: "Confident — 'the assert_eventually! invariant proves availability mechanically, every issuance leaves an audit row, identity survives a restart without redundant re-issue, and there is no second daemon to operate.'"
+    end: "Confident — 'the assert_eventually! invariant proves availability mechanically, every issuance leaves an audit row, restart recovery is bounded and audited, and there is no second daemon to operate.'"
 
 steps:
   - id: 1
@@ -114,14 +114,14 @@ steps:
       (serial, spiffe_id, issuer_serial, validity), read back via the
       ObservationStore at the TEST tier (the operator alloc-status render of
       the row is #215's O05/E03, blocked on #35); an unauditable issuance is
-      refused (no silent issuance). The
-      held set is recomputed from persisted issuance INPUTS (not a derived
-      expires_at) after a control-plane restart, with no redundant
-      re-issue. (The #40 rotation seam is pre-wired but gated — a clean
-      no-op until #40 registers cert_rotation.)
+      refused (no silent issuance). After a control-plane restart the held
+      set starts empty because the leaf key is non-persistable; every
+      still-Running allocation is re-issued once during recovery and each
+      re-issue writes an audit row. (The #40 rotation seam is pre-wired but
+      gated — a clean no-op until #40 registers cert_rotation.)
     emotional_state:
       entry: "Skeptical — 'is availability CHECKED, or just claimed? and does it survive a restart?'"
-      exit: "Confident — 'a convergence invariant proves it, every issuance is audited, and restart recomputes from inputs without re-issuing.'"
+      exit: "Confident — 'a convergence invariant proves it, every issuance is audited, and restart recovery re-issues boundedly with an audit trail.'"
 
 error_paths:
   - step: 1
@@ -152,24 +152,24 @@ error_paths:
     recovery: >
       DropSvid removes the AllocationId from the held map; the acceptance
       proof is that the held set no longer contains the stopped allocation,
-      so the leaf private key is no longer reachable. (Whether to
-      additionally zeroize the key bytes is a DESIGN call — removing the
-      entry meets the O2 outcome; zeroization is future hardening.)
+      so the leaf private key is no longer reachable. Zeroization beyond map
+      removal is an accepted residual risk outside #35.
   - step: 4
-    failure: "Restart non-idempotence — a control-plane restart leaves a Running workload with no held SVID, or redundantly re-issues one already validly held (O4)"
+    failure: "Restart recovery gap — a control-plane restart leaves a Running workload with no held SVID, or re-issues without an audit row (O4)"
     recovery: >
-      The SvidLifecycle View persists issuance INPUTS (issued-at /
-      validity-window + identity keys), never a derived expires_at; on
-      boot the runtime bulk-loads the View and the reconciler recomputes
-      held state from the inputs + the running set — a Running alloc with a
-      valid persisted issuance is NOT re-issued; one with no/expired
-      issuance IS. No orphaned prior credential, no churned audit trail.
+      The held SvidMaterial, including its leaf private key, is in-process
+      only and cannot survive restart. On boot the held set is empty, so
+      every still-Running allocation is re-issued (`running ∧ ¬held →
+      IssueSvid`) during recovery. The re-issue is bounded to one per
+      still-Running allocation per recovery convergence and every re-issue
+      leaves an issued_certificates audit row. No stale credential, no
+      silent credential.
 
 integration_validation:
   shared_artifacts_summary:
     - "SpiffeId (the allocation's identity) — single source is the SpiffeId newtype in overdrive-core; the per-allocation derivation (spiffe://overdrive.local/job/<name>/alloc/<id>) is unbuilt surface (SpiffeId::new only validates) — a DESIGN handoff item (who builds it: the reconciler into the IssueSvid field, or the executor). Consumed by the leaf SAN, the held-map key context, and the audit row."
     - "SvidMaterial (the held credential) — single source is the executor's issue_and_audit result, held in-process in Arc<IdentityMgr>; consumed by the IdentityRead getters (the dataplane read surface) and dropped on stop. Holds the node-held leaf private key (ADR-0063 D9, redacted Debug); never persisted (not an audit fact)."
-    - "TrustBundle (what relying parties verify against) — single source is Ca::trust_bundle() (currency mechanism — pull-on-demand vs reconciler-hydrated — is a DESIGN call); held alongside the SVIDs in IdentityMgr; read via IdentityRead::current_bundle."
+    - "TrustBundle (what relying parties verify against) — single source is Ca::trust_bundle(); hydrated into IdentityMgr at boot and refreshed by the executor/#40 seam; read via IdentityRead::current_bundle."
     - "issued_certificates serial — drawn via the Entropy port at mint time (OsEntropy prod, SeededEntropy DST), wrapped in CertSerial; the same serial appears on the held cert and on the issued_certificates audit row (the link an auditor walks)."
 
 related_jobs: [J-SEC-002]
@@ -181,7 +181,7 @@ related_features:
     role: "Mints what this journey holds: the persistent Root → per-node Intermediate → workload SVID hierarchy + ca_issuance::issue_and_audit (GH #28, ADR-0063). J-SEC-001 mints; J-SEC-002 holds/reads/drops."
 
 deferred_outside_this_journey:
-  - "Certificate rotation lifecycle (near-expiry → mint-fresh → swap → retire) → GH #40 (a cert_rotation workflow), depends on workflow primitive GH #39. The near-expiry branch + View input are pre-wired but GATED here (a clean no-op until #40 registers cert_rotation — a committed StartWorkflow for an unregistered kind raises UnknownWorkflow per tick, so the emit stays dormant). No throwaway sync-rotate path."
+  - "Certificate rotation lifecycle (near-expiry → mint-fresh → swap → retire) → GH #40 (a cert_rotation workflow), depends on workflow primitive GH #39. The near-expiry branch reads the held cert's real not_after from actual and is pre-wired but GATED here (a clean no-op until #40 registers cert_rotation — a committed StartWorkflow for an unregistered kind raises UnknownWorkflow per tick, so the emit stays dormant). No throwaway sync-rotate path."
   - "The dataplane consumers that USE the IdentityRead port — kernel-side sockops/kTLS mTLS (GH #26), the L7 gateway, the telemetry sink. This journey ships the read port + its sim double, not the consumers."
   - "Multi-node held sets, gossiped audit rows across nodes, per-node identity, node attestation → GH #36 [2.14] (node enrollment / admission handler; already depends on #28). Single-node Phase 2 = one node's running set."
   - "ACME / public-trust gateway certs unified into IdentityMgr → roadmap step 4.7 (whitepaper §11). The 4.7 commitment is firm and is WHY a dedicated IdentityMgr is the right seam — but 4.7's ACME certs (no allocation behind them) are not held here; the IdentityMgr is shaped to admit them later."

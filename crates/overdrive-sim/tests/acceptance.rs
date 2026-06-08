@@ -74,4 +74,10 @@ mod acceptance {
     mod workflow_emit_action_not_re_emitted_after_crash; // S-WP-03-04
     mod workflow_signal_already_seen_not_rewaited; // S-WP-03-02
     mod workflow_signal_wait_reblocks_after_crash; // S-WP-03-01
+
+    // workload-identity-manager (GH #35) — DISTILL RED scaffolds for
+    // `SimIdentityRead` equivalence and the running-set identity DST
+    // invariant. DELIVER replaces the pending bodies once the sim double and
+    // invariant are introduced.
+    mod identity_read_equivalence;
 }

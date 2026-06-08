@@ -937,11 +937,11 @@ to the design")** — named here so no crafter invents them.
 3. **`IdentityMgr` concurrency primitive** (`parking_lot::RwLock<BTreeMap<…>>`
    recommended; `BTreeMap` mandatory because the held map is iterated by the
    `assert_eventually!` invariant).
-4. **The View's persisted issuance-input shape** (issued-at / validity-window
-   inputs for O4 + near-expiry recompute) — MUST be inputs, never a derived
-   `expires_at`.
-5. **Trust-bundle currency mechanism** — pull `Ca::trust_bundle()` on demand vs
-   reconciler-hydrate into `IdentityMgr` (DIVERGE fork C, left open).
+4. **The View's retry-memory shape** — `IssueRetry { attempts,
+   last_failure_seen_at }`, never issuance success facts and never a derived
+   `expires_at` / `next_renewal_at`.
+5. **Trust-bundle currency mechanism** — resolved as HYDRATED into `IdentityMgr`
+   at boot and refreshed through the executor / #40 seam.
 
 ---
 
@@ -1331,10 +1331,10 @@ No new GH issue required; every deferral cites an EXISTING issue/phase
   registers `cert_rotation` (a naïve emit raises `UnknownWorkflow` every tick
   against production's empty-registry engine).
 - **Upstream (PO / orchestrator)**: the **O4/K3 reframe** ("no redundant re-issue"
-  → "bounded, audited restart re-issue; no stale/silent credential") is a DISCUSS
-  back-propagation recorded in `design/upstream-changes.md` — it flags `jobs.yaml`
-  J-SEC-002 O4 + the feature-delta DISCUSS Outcome-KPIs K3 for the PO's update.
-  (The architect does not edit `jobs.yaml` — product SSOT is PO territory.)
+  → "bounded, audited restart re-issue; no stale/silent credential") is recorded
+  in `design/upstream-changes.md`. The product SSOT updates were applied on
+  2026-06-08; this handoff treats ADR-0067 rev 2 and the applied product wording
+  as authoritative.
 - **Paradigm**: OOP / ports-and-adapters → `@nw-software-crafter` for DELIVER.
 
 ---
@@ -1365,6 +1365,122 @@ the PO):
   have had no coherent implementation path — the Critical finding). The reframe
   keeps the *intent* (a restart must not leave a workload without identity, and
   must not silently mint) while making the target match the cryptographic reality.
-- **Propagation:** `jobs.yaml` J-SEC-002 O4 + the feature-delta DISCUSS K3 row need
-  the PO's wording update — see `design/upstream-changes.md`. The architect does
-  NOT edit `jobs.yaml` (product SSOT = PO territory).
+- **Propagation:** `jobs.yaml` J-SEC-002 O4 + the feature-delta DISCUSS K3 row were
+  updated by the orchestrator on 2026-06-08; see `design/upstream-changes.md` for
+  the retained traceability record.
+
+---
+
+## Wave: DISTILL / [REF] Reconciliation
+
+**Result: PASSED — 0 unresolved contradictions after pre-scenario cleanup.**
+
+DISTILL found one stale live journey statement that still described the rev-1
+"recompute held state without re-issue" restart model. That contradicted
+ADR-0067 rev 2. The journey now matches the accepted design: after restart,
+`IdentityMgr` starts empty; every still-Running allocation is re-issued once
+during recovery convergence; every re-issue is audited. DIVERGE prose preserving
+the earlier hypothesis remains historical and is superseded by ADR-0067 rev 2
+plus `design/upstream-changes.md`.
+
+## Wave: DISTILL / [REF] Scenario List
+
+Executable scenario SSOT: `docs/feature/workload-identity-manager/distill/test-scenarios.md`.
+
+| ID | Scenario | Tags | Scaffold |
+|---|---|---|---|
+| S-WIM-01 | Running alloc without held SVID emits `IssueSvid` | `@in-memory @property` | `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs` |
+| S-WIM-02 | `IssueSvid` executor audits before hold | `@in-memory` | `crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs` |
+| S-WIM-03 | Stopped alloc with held SVID emits `DropSvid` | `@in-memory` | `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs` |
+| S-WIM-04 | `IdentityRead` returns SVID + trust bundle without re-issue | `@in-memory` | `crates/overdrive-control-plane/tests/acceptance/identity_mgr_read_contract.rs` |
+| S-WIM-05 | `IdentityRead` returns absence after drop | `@in-memory @error` | `crates/overdrive-control-plane/tests/acceptance/identity_mgr_read_contract.rs` |
+| S-WIM-06 | `SimIdentityRead` matches `IdentityMgr` read contract | `@in-memory @property` | `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs` |
+| S-WIM-07 | Audit-write failure refuses hold | `@in-memory @error` | `crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs` |
+| S-WIM-08 | View is retry memory only | `@in-memory @property` | `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs` |
+| S-WIM-09 | Rotation seam is emit-gated until #40 | `@in-memory @error` | `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs` |
+| S-WIM-10 | Lifecycle transitions enqueue `SvidLifecycle` | `@in-memory` | `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs` |
+| S-WIM-11 | Running-set identity invariant has teeth | `@in-memory @dst_invariant @property` | `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs` |
+| S-WIM-WS | Walking skeleton: issue, hold, audit, verify, drop | `@walking_skeleton @real-io @adapter-integration` | `crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs` |
+| S-WIM-12 | Restart re-issues each still-running alloc with audit row | `@real-io @error` | `crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs` |
+
+## Wave: DISTILL / [REF] Adapter Coverage
+
+| Adapter / port | Covered by |
+|---|---|
+| `SvidLifecycle::reconcile` | S-WIM-01, S-WIM-03, S-WIM-08, S-WIM-09 |
+| Workload lifecycle / exit-observer handoff | S-WIM-10 |
+| Action-shim `IssueSvid` / `DropSvid` | S-WIM-02, S-WIM-07, S-WIM-WS |
+| `IdentityMgr` holder | S-WIM-02, S-WIM-04, S-WIM-05, S-WIM-WS, S-WIM-12 |
+| `IdentityRead` / `SimIdentityRead` | S-WIM-04, S-WIM-05, S-WIM-06 |
+| `Ca` + `issue_and_audit` | S-WIM-02, S-WIM-07, S-WIM-WS, S-WIM-12 |
+| `ObservationStore` audit rows | S-WIM-02, S-WIM-07, S-WIM-WS, S-WIM-12 |
+| Reconciler ViewStore / retry memory | S-WIM-08, S-WIM-12 |
+
+## Wave: DISTILL / [REF] Scaffolds
+
+Rust pending scaffolds created and wired into Cargo:
+
+- `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs`
+- `crates/overdrive-control-plane/tests/acceptance/issue_svid_action_shim.rs`
+- `crates/overdrive-control-plane/tests/acceptance/identity_mgr_read_contract.rs`
+- `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs`
+- `crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs`
+
+Entrypoints updated:
+
+- `crates/overdrive-core/tests/acceptance.rs`
+- `crates/overdrive-control-plane/tests/acceptance.rs`
+- `crates/overdrive-control-plane/tests/integration.rs`
+- `crates/overdrive-sim/tests/acceptance.rs`
+
+## Wave: DISTILL / [REF] Test Placement
+
+Placement follows the workspace Rust ATDD policy in
+`docs/architecture/atdd-infrastructure-policy.md`: no `.feature` files, no
+Python step definitions, direct Rust `#[test]` / integration tests only.
+
+Layer mapping:
+
+- L1 pure contracts in `overdrive-core`.
+- L1/L2 control-plane action/read contracts in `overdrive-control-plane`.
+- L2 sim equivalence and DST invariant in `overdrive-sim`.
+- L3 real stores + real CA + `openssl verify` under
+  `overdrive-control-plane/tests/integration`, gated by `integration-tests`.
+
+## Wave: DISTILL / [REF] Pre-DELIVER RED Classification
+
+`docs/feature/workload-identity-manager/distill/red-classification.md` records the
+pending-scaffold status. The scaffolds compile as expected-panic placeholders now.
+DELIVER must replace one scaffold at a time with real assertions and confirm the
+resulting failure is missing functionality, not import/setup failure, before
+writing production code.
+
+## Wave: DISTILL / [REF] Outcome Registry
+
+DISTILL registers three #35 contract surfaces in
+`docs/product/outcomes/registry.yaml`:
+
+- `OUT-WIM-SVID-LIFECYCLE` — `SvidLifecycle` issue/drop specification.
+- `OUT-WIM-IDENTITY-READ` — `IdentityRead` operation.
+- `OUT-WIM-RUNNING-SET-INVARIANT` — running-set identity invariant.
+
+## Wave: DISTILL / [REF] Verification Catalogue
+
+No new EDD expectation is created. #35 has no new operator CLI surface; its
+test-tier walking skeleton unblocks existing catalogue entries:
+
+- `E03-ca-full-chain-verifies` — full Root → Intermediate → SVID chain verifies.
+- `O05-ca-issued-certificates-audit-row` — issued certificate row is observable
+  once the operator render lands.
+
+The pure reconciler, action-shim, read-port, and DST-invariant scenarios remain
+in the Rust test tiers.
+
+## Wave: DISTILL / [REF] Handoff
+
+- **To DELIVER**: implement the scaffolds slice by slice, replacing
+  `#[should_panic(expected = "RED scaffold")]` bodies with real assertions.
+- **Authority**: ADR-0067 rev 2 supersedes any older wording that claims restart
+  recovery recomputes held SVIDs without re-issue.
+- **Boundary**: #35 remains a foundation feature. Operator-facing certificate
+  rendering belongs to #215, blocked on #35.

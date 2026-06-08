@@ -205,6 +205,12 @@ mod acceptance {
     // (KPI K2, `@property`) + role->extension mapping live in core so they
     // are DST-testable and dst-lint-clean. Layer 1, PBT-full per Mandate 9.
     mod ca_cert_spec_policy;
+    // workload-identity-manager (GH #35) — DISTILL RED scaffolds for
+    // `SvidLifecycle` pure reconciliation (ADR-0067): running-without-held
+    // emits IssueSvid, stopped-with-held emits DropSvid, View is retry
+    // memory only, rotation emit is gated, and lifecycle transitions enqueue
+    // SvidLifecycle so the reconciler is reachable.
+    mod svid_lifecycle_reconcile;
     // workflow-primitive DISTILL (GH #39, J-PLAT-005) — slice-01 author-
     // surface scenarios per
     // `docs/feature/workflow-primitive/distill/test-scenarios.md`

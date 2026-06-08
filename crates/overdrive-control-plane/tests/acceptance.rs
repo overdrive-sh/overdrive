@@ -316,4 +316,10 @@ mod acceptance {
     // minting `BudgetExhausted`. DST sibling:
     // `WorkflowPerStepRetryPolicyGovernsRedrive`.
     mod workflow_per_step_retry_policy_governs_redrive;
+
+    // workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
+    // in-process control-plane side of ADR-0067: `IssueSvid` action-shim
+    // audit-before-hold semantics and the `IdentityRead` read contract.
+    mod identity_mgr_read_contract;
+    mod issue_svid_action_shim;
 }
