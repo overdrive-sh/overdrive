@@ -294,10 +294,13 @@ jobs:
     outcome: >
       so design principle 3 ("every packet carries cryptographic workload
       identity") is OPERATIONALLY TRUE for the running set — not merely
-      mintable in principle (J-SEC-001) — with no race where a workload
-      serves traffic before its identity is held, no leak where a stopped
-      workload's leaf private key lingers in memory, and identity
-      availability is a DST-proven converged invariant rather than a hope.
+      mintable in principle (J-SEC-001) — with the window between Running
+      and identity-held bounded to one reconcile tick and fail-closed (a
+      workload with no held SVID cannot present identity, so the mTLS
+      consumer fails closed — the bounded window is not an exposure), no
+      leak where a stopped workload's leaf private key lingers in memory,
+      and identity availability a DST-proven converged invariant rather
+      than a hope.
       This is the consumer-lifecycle peer of J-SEC-001 (which mints
       identity); J-SEC-002 holds it, reads it, and drops it. ODI outcomes:
       O1 (running ⇒ held, chain-verifiable SVID — the
@@ -320,10 +323,12 @@ jobs:
         current CA trust bundle relying parties verify against. Re-issuance
         is idempotent across control-plane restarts.
       emotional: >
-        Trust that the running set is CONSISTENTLY identity-bearing — no
-        window where a running workload is unidentifiable on the wire, no
-        quiet leak where a stopped workload's private key survives in
-        memory. Identity availability is a converged invariant, not a hope.
+        Trust that the running set is CONSISTENTLY identity-bearing — that
+        the gap between Running and identity-held is bounded by convergence
+        (one reconcile tick) and fail-closed (a workload with no held SVID
+        cannot present identity), no quiet leak where a stopped workload's
+        private key survives in memory. Identity availability is a converged
+        invariant, not a hope.
       social: >
         Tell a security reviewer "the live credential set is bounded to
         the running workload set by a convergence loop with a DST-proven

@@ -146,7 +146,7 @@ dataplane can present — and nothing held for a workload that has stopped."**
 | Dimension | Statement |
 |---|---|
 | **Functional** | Maintain an in-memory map `running-allocation → current SvidMaterial` that (a) gains an entry, chain-verifiable to the root, when an allocation reaches Running; (b) is readable by dataplane consumers (sockops/gateway/telemetry) via a shared handle without re-issuing per read; (c) loses the entry when the allocation stops; and (d) also exposes the current CA trust bundle relying parties verify against. Re-issuance is idempotent across control-plane restarts. |
-| **Emotional** | Trust that the running set is *consistently* identity-bearing — no race where a workload is serving traffic before its identity is held, and no quiet leak where a stopped workload's private key lingers in memory. "Identity availability is a converged invariant, not a hope." |
+| **Emotional** | Trust that the running set is *consistently* identity-bearing — the gap between Running and identity-held is bounded by convergence (one reconcile tick) and fail-closed (a workload with no held SVID cannot present identity), and no quiet leak where a stopped workload's private key lingers in memory. "Identity availability is a converged invariant, not a hope." |
 | **Social** | Be able to tell a security reviewer "the live credential set is bounded to the running workload set by a convergence loop with a DST-proven `assert_eventually!` invariant — identity availability is mechanically checked, not asserted" — and have that be true. |
 
 **Disruption check** — is there a higher-level job that makes this whole job unnecessary?

@@ -1,0 +1,218 @@
+schema_version: 1
+
+# Product-level journey for the workload IdentityMgr subsystem (GH #35).
+#
+# This is the CONSUMER-LIFECYCLE peer of issue-workload-identity.yaml:
+# that journey (J-SEC-001, #28) MINTS identity and ends where this one
+# begins. This journey (J-SEC-002, #35) HOLDS the minted identity bound to
+# the running set, makes it READABLE by the dataplane, and DROPS it on
+# stop. Do NOT extend issue-workload-identity.yaml — the two jobs are
+# distinct (different progress, different failure mode; see
+# docs/feature/workload-identity-manager/diverge/job-analysis.md §3).
+#
+# Like its sibling this is a SECURITY-PRIMITIVE / capability journey, not
+# an operator-CLI journey. Hold/read/drop is internal platform mechanism —
+# there is NO operator verb to "issue/hold an SVID" in this phase. #35 is a
+# FOUNDATION feature: its own HONEST observables are TEST-tier — the
+# issued_certificates row WRITTEN per issuance (read back via the
+# ObservationStore) and `openssl verify` on the minted leaf chain. The
+# OPERATOR-visible surfaces — `overdrive alloc status --job <id>` rendering
+# the issued_certificates row, and the deployed-SVID operator-verify flow —
+# are #215's (O05/E03), BLOCKED ON #35 (the current AllocStatusResponse has
+# no issued-cert field; no SVID consumer #26 exists yet).
+#
+# Lightweight depth (D3): happy path + the load-bearing error/race paths,
+# no rich human emotional arc (Sam's is the same skeptical→confident
+# security-review arc). Maps to J-SEC-002.
+#
+# Feature origin: workload-identity-manager DISCUSS wave (2026-06-08). The
+# authoritative detailed version lives in
+# docs/feature/workload-identity-manager/feature-delta.md (§ Wave: DISCUSS).
+# This file is the product-level summary for cross-feature reference.
+
+journey:
+  name: "Hold a live, readable identity for exactly the running set"
+  goal: >
+    The Overdrive control plane binds a live, chain-verifiable SVID to the
+    exact set of currently-running allocations: a standalone SvidLifecycle
+    reconciler observes allocation Running↔Stopped, an action-shim executor
+    mints (via the shipped built-in CA + issue_and_audit) and holds the
+    SvidMaterial in a shared Arc<IdentityMgr>, drops it the moment a
+    workload stops, and exposes it to the sockops/gateway/telemetry
+    consumers through an IdentityRead port — so "every packet carries
+    cryptographic workload identity" is OPERATIONALLY TRUE for the running
+    set, not merely mintable in principle, with no in-workload agent
+    (Overdrive is sidecarless).
+  persona: >
+    Sam, platform/security engineer (see
+    docs/product/personas/sam-platform-security-engineer.yaml). Defends the
+    identity-availability story to a security reviewer through a J-SEC-002
+    liveness lens: is the running set consistently identity-bearing? is
+    there a leak on stop? can the dataplane read it the instant it must
+    present it?
+
+  emotional_arc:
+    start: "Skeptical — 'a CA that mints is not the same as identity that is HELD. Show me the running set actually holds live identity, that stop drops it, and that this is checked, not asserted.'"
+    middle: "Reassured incrementally — a running workload holds a chain-verifiable SVID; stopping it removes the held entry (and the leaf key) from memory; the held set is bounded to the running set by a convergence loop."
+    end: "Confident — 'the assert_eventually! invariant proves availability mechanically, every issuance leaves an audit row, identity survives a restart without redundant re-issue, and there is no second daemon to operate.'"
+
+steps:
+  - id: 1
+    name: "A running workload gains a held, chain-verifiable identity"
+    command: "(internal — on allocation reaching Running; SvidLifecycle emits IssueSvid)"
+    summary: >
+      When an allocation reaches Running, the SvidLifecycle reconciler
+      (pure reconcile — CA I/O is in the executor, never in reconcile())
+      emits Action::IssueSvid. The action-shim executor calls the shipped
+      ca_issuance::issue_and_audit, which mints a leaf with exactly one
+      SPIFFE URI SAN (spiffe://overdrive.local/job/<name>/alloc/<id>) and
+      writes the issued_certificates audit row, then holds the SvidMaterial
+      in the shared Arc<IdentityMgr> (a BTreeMap keyed by AllocationId —
+      BTreeMap because the convergence invariant iterates it).
+    emotional_state:
+      entry: "Skeptical — 'is the running workload actually HOLDING identity, or just theoretically mintable?'"
+      exit: "Reassured — 'the running alloc holds a leaf that chain-verifies to the root, and the issuance is audited.'"
+
+  - id: 2
+    name: "The dataplane can read the held SVID + trust bundle the instant it must present identity"
+    command: "(internal — sockops/gateway/telemetry read via the IdentityRead port; no re-issue per read)"
+    summary: >
+      The held identity is exposed behind an IdentityRead port trait: sync,
+      in-process getters return the current SvidMaterial for an
+      AllocationId and the current TrustBundle, with no gRPC, no IPC, and
+      no re-issuing per use (whitepaper §7). A read for an allocation that
+      is not held reports absence explicitly, so a consumer can refuse the
+      handshake rather than present a stale credential. (The consumers
+      themselves — sockops #26, gateway, telemetry — are out of scope; this
+      journey ships the read port + its sim double.)
+    emotional_state:
+      entry: "Focused — 'can the mTLS layer read the right credential fast enough, on the connection hot path, without re-minting?'"
+      exit: "Reassured — 'an in-process getter returns the current SVID + bundle; absence is explicit; no re-issue per read.'"
+
+  - id: 3
+    name: "Stopping a workload drops its held identity and leaf private key"
+    command: "(internal — on allocation Stop; SvidLifecycle emits DropSvid)"
+    summary: >
+      When an allocation stops, the SvidLifecycle reconciler emits
+      Action::DropSvid; the executor removes the AllocationId from the held
+      map, so the SvidMaterial — including the node-held leaf private key
+      (CaKeyPem, redacted Debug per ADR-0063) — is no longer held in
+      memory. A stopped workload holds no credential: no dead weight, no
+      leak / attack-surface expansion.
+    emotional_state:
+      entry: "Threat-modelling — 'when the workload is gone, is its private key gone too, or lingering in memory?'"
+      exit: "Reassured — 'stop removes the held entry; the leaf key is no longer reachable.'"
+
+  - id: 4
+    name: "Identity availability is a converged invariant, audited, and survives restart"
+    command: "openssl verify (minted leaf chain, TEST tier) + issued_certificates row via ObservationStore. (#35 is a FOUNDATION feature: the operator `alloc status` render of the row is #215's O05/E03, blocked on #35.)"
+    summary: >
+      A DST assert_eventually!("running allocs hold a valid SVID") invariant
+      walks the held BTreeMap against the running set and holds at every
+      stable point (a deliberately broken hold/drop fails it — it has
+      teeth). Every issuance leaves an issued_certificates observation row
+      (serial, spiffe_id, issuer_serial, validity), read back via the
+      ObservationStore at the TEST tier (the operator alloc-status render of
+      the row is #215's O05/E03, blocked on #35); an unauditable issuance is
+      refused (no silent issuance). The
+      held set is recomputed from persisted issuance INPUTS (not a derived
+      expires_at) after a control-plane restart, with no redundant
+      re-issue. (The #40 rotation seam is pre-wired but gated — a clean
+      no-op until #40 registers cert_rotation.)
+    emotional_state:
+      entry: "Skeptical — 'is availability CHECKED, or just claimed? and does it survive a restart?'"
+      exit: "Confident — 'a convergence invariant proves it, every issuance is audited, and restart recomputes from inputs without re-issuing.'"
+
+error_paths:
+  - step: 1
+    failure: "Bounded convergence window — an allocation reaches Running but its IssueSvid has not yet executed (one tick behind), so the held set transiently lacks it (O1). This is a bounded window, NOT an exposure."
+    recovery: >
+      The convergence loop issues on the next reconcile tick; the
+      assert_eventually! invariant holds because the window is BOUNDED
+      (one tick), never permanent. Identity availability is eventually
+      consistent for the running set — the bound is a reconcile tick, not
+      "never". Crucially this is NOT a race where a workload serves
+      without identity: a workload with no held SVID cannot present
+      identity, so the mTLS consumer (#26 — the enforcer, itself out of
+      scope this phase) FAILS CLOSED during the window. The bounded window
+      is therefore not an exposure (and in Phase 2 there is no consumer at
+      all). This is the bounded convergence window the model exists to
+      close, not a race the model merely tolerates.
+  - step: 1
+    failure: "Issuance failure — the CA cannot mint the leaf, or the issued_certificates audit row cannot be written (O5)"
+    recovery: >
+      The executor reuses ca_issuance::issue_and_audit, which BINDS
+      issuance + audit: a signing failure (CaIssuanceError::Ca) or an
+      audit-write failure (CaIssuanceError::Audit) refuses the issuance —
+      no unaudited SvidMaterial is ever placed in the held map. The held
+      set does not gain an unaudited or partially-issued entry; the loop
+      retries on a later tick.
+  - step: 3
+    failure: "Drop-on-stop leak — a stopped allocation's SvidMaterial (incl. leaf private key) lingers in the held map (O2)"
+    recovery: >
+      DropSvid removes the AllocationId from the held map; the acceptance
+      proof is that the held set no longer contains the stopped allocation,
+      so the leaf private key is no longer reachable. (Whether to
+      additionally zeroize the key bytes is a DESIGN call — removing the
+      entry meets the O2 outcome; zeroization is future hardening.)
+  - step: 4
+    failure: "Restart non-idempotence — a control-plane restart leaves a Running workload with no held SVID, or redundantly re-issues one already validly held (O4)"
+    recovery: >
+      The SvidLifecycle View persists issuance INPUTS (issued-at /
+      validity-window + identity keys), never a derived expires_at; on
+      boot the runtime bulk-loads the View and the reconciler recomputes
+      held state from the inputs + the running set — a Running alloc with a
+      valid persisted issuance is NOT re-issued; one with no/expired
+      issuance IS. No orphaned prior credential, no churned audit trail.
+
+integration_validation:
+  shared_artifacts_summary:
+    - "SpiffeId (the allocation's identity) — single source is the SpiffeId newtype in overdrive-core; the per-allocation derivation (spiffe://overdrive.local/job/<name>/alloc/<id>) is unbuilt surface (SpiffeId::new only validates) — a DESIGN handoff item (who builds it: the reconciler into the IssueSvid field, or the executor). Consumed by the leaf SAN, the held-map key context, and the audit row."
+    - "SvidMaterial (the held credential) — single source is the executor's issue_and_audit result, held in-process in Arc<IdentityMgr>; consumed by the IdentityRead getters (the dataplane read surface) and dropped on stop. Holds the node-held leaf private key (ADR-0063 D9, redacted Debug); never persisted (not an audit fact)."
+    - "TrustBundle (what relying parties verify against) — single source is Ca::trust_bundle() (currency mechanism — pull-on-demand vs reconciler-hydrated — is a DESIGN call); held alongside the SVIDs in IdentityMgr; read via IdentityRead::current_bundle."
+    - "issued_certificates serial — drawn via the Entropy port at mint time (OsEntropy prod, SeededEntropy DST), wrapped in CertSerial; the same serial appears on the held cert and on the issued_certificates audit row (the link an auditor walks)."
+
+related_jobs: [J-SEC-002]
+
+related_features:
+  - id: workload-identity-manager
+    role: "Ships the SvidLifecycle reconciler + Arc<IdentityMgr> held store + IdentityRead read port that bind the held-SVID set to the running-allocation set (GH #35, roadmap 2.13)."
+  - id: built-in-ca
+    role: "Mints what this journey holds: the persistent Root → per-node Intermediate → workload SVID hierarchy + ca_issuance::issue_and_audit (GH #28, ADR-0063). J-SEC-001 mints; J-SEC-002 holds/reads/drops."
+
+deferred_outside_this_journey:
+  - "Certificate rotation lifecycle (near-expiry → mint-fresh → swap → retire) → GH #40 (a cert_rotation workflow), depends on workflow primitive GH #39. The near-expiry branch + View input are pre-wired but GATED here (a clean no-op until #40 registers cert_rotation — a committed StartWorkflow for an unregistered kind raises UnknownWorkflow per tick, so the emit stays dormant). No throwaway sync-rotate path."
+  - "The dataplane consumers that USE the IdentityRead port — kernel-side sockops/kTLS mTLS (GH #26), the L7 gateway, the telemetry sink. This journey ships the read port + its sim double, not the consumers."
+  - "Multi-node held sets, gossiped audit rows across nodes, per-node identity, node attestation → GH #36 [2.14] (node enrollment / admission handler; already depends on #28). Single-node Phase 2 = one node's running set."
+  - "ACME / public-trust gateway certs unified into IdentityMgr → roadmap step 4.7 (whitepaper §11). The 4.7 commitment is firm and is WHY a dedicated IdentityMgr is the right seam — but 4.7's ACME certs (no allocation behind them) are not held here; the IdentityMgr is shaped to admit them later."
+  - "The watch/broadcast push read surface (consumers notified on change) → future (a non-breaking change behind the IdentityRead port once a consumer demands change-notification)."
+  - "SVID revocation (CRL / OCSP / revoked_operator_certs) → Phase 5 (whitepaper §8). Revocation-by-expiry (1h TTL) is the model here."
+
+changelog:
+  - date: 2026-06-08
+    feature: workload-identity-manager
+    change: >
+      Initial product-level journey for the workload IdentityMgr subsystem
+      (GH #35). Maps to J-SEC-002 (the consumer-lifecycle peer of J-SEC-001
+      — holds/reads/drops what the built-in CA mints). Lightweight depth —
+      security-primitive capability path, no operator-facing
+      issue/hold/drop verb in this phase; the load-bearing error/race paths
+      (race-before-held, issuance failure, drop-on-stop leak, restart
+      idempotence) are mapped. Authored against the LOCKED DIVERGE Option 1
+      architecture; do NOT re-open. Sibling of
+      issue-workload-identity.yaml (which it deliberately does not extend).
+  - date: 2026-06-08
+    feature: workload-identity-manager
+    change: >
+      [REF] review revisions (F1 + F2). F1: the step-1 error path was
+      reframed from a bare "Race" to a BOUNDED CONVERGENCE WINDOW that is
+      fail-closed (a workload with no held SVID cannot present identity, so
+      the mTLS consumer #26 fails closed during the window — it is not an
+      exposure), matching O1 "minimize likelihood" and the bounded-window
+      domain example rather than an overstated "no race" promise. F2: #35
+      re-grounded as a FOUNDATION feature — its own observable is TEST-tier
+      (issued_certificates row via the ObservationStore + openssl verify on
+      the minted leaf); the OPERATOR alloc-status render of the row + the
+      deployed-SVID operator-verify flow are #215's (O05/E03), blocked on
+      #35. The header comment, step-4 command/summary, and the step-1
+      error-path recovery were updated for consistency.
