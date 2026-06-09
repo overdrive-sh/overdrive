@@ -2,10 +2,12 @@
 
 ## Status
 
-Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key) and
+Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key),
 2026-06-08 (rev 2 — `SvidMaterial.not_after` + validity window threaded through
-`SvidRequest`)** — see § Changelog for both dated amendments (each reopens this
-Accepted ADR via a dated entry, not a silent rewrite). Supersedes **ADR-0010 for
+`SvidRequest`), and 2026-06-09 (#215 wires `boot_ca`/`bootstrap_node_intermediate`
+into `run_server` — closes the D-CA-4 "CA not wired into serve" deferral)** — see
+§ Changelog for the dated amendments (each reopens this Accepted ADR via a dated
+entry, not a silent rewrite). Supersedes **ADR-0010 for
 *workload identity* only** — ADR-0010's ephemeral CA (`tls_bootstrap.rs`)
 continues to serve the control-plane-HTTPS / operator-CLI consumer unchanged
 (see § Consequences and D-CA-5 in the feature delta). This ADR governs the
@@ -75,8 +77,10 @@ A pure `Ca` **trait** lives in `overdrive-core/src/traits/ca.rs` (no impl, no
 Constraints). A **sim adapter**
 (`SimCa`) in `overdrive-sim` (`adapter-sim`) loads pre-generated fixture keys
 for DST. Consumers (control-plane boot, node bootstrap, workload-lifecycle on
-alloc-start, and later the #40 rotation workflow) take `Arc<dyn Ca>` as a
-**required constructor parameter** — never defaulted to a production binding
+alloc-start, the internal SVID issue/reissue executor — incl. near-expiry reissue,
+which is a live `Action::IssueSvid`, NOT a workflow — and a future external-ACME /
+public-trust root-rotation workflow) take `Arc<dyn Ca>` as a **required
+constructor parameter** — never defaulted to a production binding
 (per `.claude/rules/development.md` § "Port-trait dependencies").
 
 **The trait surface speaks project newtypes + typed DER/PEM byte newtypes,
@@ -267,12 +271,17 @@ provides HKDF-SHA256 today; one extract + one expand call):
    `info`, with no key-reuse across domains.
 2. **A clean key-rotation seam** — `kek_id` + per-seal `salt` mean KEK rotation
    (re-seal under a new KEK) is a re-encrypt of the record, not a format change.
-   This is the seam #40 (rotation) and a future HSM KEK provider build on.
+   This is the seam **future KEK / root-CA rotation** (workflow-shaped, a
+   separate concern — genuinely multi-step; future / not yet ticketed) and a
+   future HSM KEK provider build on. (Distinct from *internal SVID near-expiry
+   reissue*, which is a live `Action::IssueSvid` this feature owns — that is the
+   scope #40 closed here, NOT a workflow.)
 
 Direct AES-256-GCM under the raw KEK would be simpler and *sufficient* for
 Phase 2.6's single secret — but the HKDF cost is negligible and the
 domain-separation + rotation properties are exactly what the deferred work
-(#40, HSM) will need, so paying it now avoids a format migration later. AAD =
+(future KEK / root-CA rotation, HSM) will need, so paying it now avoids a
+format migration later. AAD =
 `kek_id` binds the ciphertext to the KEK identity (defends against
 KEK-confusion).
 
@@ -567,15 +576,16 @@ Encrypt the root key directly under the raw KEK, envelope =
 `{version, ciphertext, nonce, kek_id, aead_tag}`. **Rejected (reconciliation
 A):** simpler and sufficient for one secret, but HKDF-derive costs one
 extract+expand and buys domain separation (reuse the KEK for future secrets via
-`info`) and a clean rotation seam (`kek_id` + `salt`) — exactly what #40 and a
-future HSM provider need. Paying the negligible HKDF cost now avoids a format
-migration later.
+`info`) and a clean rotation seam (`kek_id` + `salt`) — exactly what future
+KEK / root-CA rotation and a future HSM provider need. Paying the negligible
+HKDF cost now avoids a format migration later.
 
 ### A6 — Audit trail in the workflow journal only (no observation row)
 
-Rely on the (future #40) rotation workflow's await-point journal as the sole
-audit surface. **Rejected:** issuance happens on alloc-start *before* any
-rotation workflow exists; the journal is per-workflow and not gossip-readable.
+Rely on a future (workflow-shaped, external-ACME / public-trust or root-CA)
+rotation workflow's await-point journal as the sole audit surface.
+**Rejected:** issuance happens on alloc-start *before* any rotation workflow
+exists; the journal is per-workflow and not gossip-readable.
 The `issued_certificates` observation row is queryable by any node via the
 existing observation path and is the internal-CT equivalent (research
 Finding 15). The two are complementary (journal = workflow step inputs;
@@ -598,8 +608,9 @@ was issued."
 - **Refuse-to-start over silent re-mint**: a decrypt failure refuses startup
   rather than orphaning every issued identity.
 - **Clean extension seams**: KEK-source pluggable (env → systemd-creds → future
-  HSM); rotation seam (`kek_id`/`salt`/HKDF) ready for #40; multi-node
-  intermediate shape ready for #36.
+  HSM); rotation seam (`kek_id`/`salt`/HKDF) ready for future KEK / root-CA
+  rotation (workflow-shaped, separate concern); multi-node intermediate shape
+  ready for #36.
 - **Reuse, not reinvention**: `SpiffeId` / `CertSerial` / `NodeId` / `Entropy` /
   `IntentStore` / `ObservationStore` / `VersionedEnvelope` are all reused
   as-is (see brief § Reuse Analysis). The proven `rcgen` usage in
@@ -678,13 +689,59 @@ for DISTILL.
 - ADR-0048 — rkyv versioned envelope (the `RootCaKeyEnvelope` /
   `IssuedCertificateRowEnvelope` discipline).
 - Whitepaper §4 (state layers; CA material is intent), §8 (security),
-  §18 (rotation is a workflow → #40), §21 (DST).
-- Deferrals: #40 [3.3] rotation (needs #39 [3.2] workflow primitive),
-  #36 [2.14] multi-node CA / node attestation, #104 [7.1] / #83 [5.17]
-  multi-region, #81 operator-cert minting (Phase 5), Phase 5 gossip-revocation,
-  Phase 7 SPIFFE Workload API.
+  §18 (durable workflows — applies to **external-ACME / public-trust** rotation
+  only; **internal** SVID near-expiry reissue is a reconciler **action**, NOT a
+  workflow — see the rev 6 reframe below), §21 (DST).
+- Deferrals (rev 6 — `built-in-ca-operator-composition`, 2026-06-09):
+  **#40 internal SVID near-expiry rotation is CLOSED — it is a live
+  `Action::IssueSvid` (not a workflow, does NOT need #39).** Only
+  **external-ACME / public-trust gateway rotation** (if it ever ships) stays
+  workflow-shaped and future-owned (Phase 5, revocation-coupled). Remaining
+  deferrals unchanged: #36 [2.14] multi-node CA / node attestation, #104 [7.1] /
+  #83 [5.17] multi-region, #81 operator-cert minting (Phase 5), Phase 5
+  gossip-revocation, Phase 7 SPIFFE Workload API. *(Historical, superseded:
+  "#40 [3.3] rotation needs #39 [3.2] workflow primitive" — that framing was
+  external-ACME, never internal SVID reissue.)*
 
 ## Changelog
+
+- 2026-06-09 — **#215 wires the persistent CA into `run_server` — closes the
+  D-CA-4 "CA not wired into serve" deferral (decision change: ephemeral →
+  persistent at the production composition root).** The `built-in-ca-operator-
+  composition` feature (folds #40 + #215) replaces the 2026-06-08 ephemeral
+  `RcgenCa` composition at `overdrive-control-plane/src/lib.rs:1580-1600` with
+  the persistent boot path this ADR shipped: `boot_ca(...)` (generate-or-load the
+  KEK-sealed root, Earned-Trust probe-then-use — KEK-resolve probe (a) + envelope
+  decrypt-probe (b), adopt-on-restart) then `bootstrap_node_intermediate(...)`
+  (generate-or-load the node intermediate, adopt-on-restart). Both already
+  implemented in `ca_boot.rs` — this is the *wiring*, not new logic. The boot
+  root constructs `SystemdCredsKeyring::new()` (the `Kek` provider) +
+  `RootKeyAeadCodec::new()` + `root_kek_id()`, coerces the `IntentStore` to
+  `Arc<dyn IntentStore>`, and `.await`s both. **`ControlPlaneError::CaBoot(#[from]
+  CaBootError)`** is the new dedicated top-level variant (never flattened to
+  `Internal`, per `development.md` § Errors) — so refuse-to-start surfaces the
+  typed `CaBootError` and the distinct `CaError` cause survives to the operator's
+  stderr.
+
+  **O04 cause-distinctness — CONFIRMED satisfiable, no fix needed.** D3's claim
+  that AES-GCM authentication distinguishes wrong-KEK from tampered-envelope is
+  TRUE in code: `CaError` carries two distinct variants — `WrongKek {
+  sealed_under, supplied }` ("root-key envelope sealed under kek_id `X` cannot be
+  opened with kek_id `Y`") and `TamperedEnvelope { kek_id }` ("root-key envelope
+  is corrupt or tampered (AES-GCM auth failed) for kek_id `Z`") — each with a
+  distinct `#[error(...)]` Display (`crates/overdrive-core/src/traits/ca.rs:
+  546-607`). `CaBootError::EnvelopeDecrypt { #[source] source: CaError }` renders
+  `cause: {source}`, so the boot stderr surfaces the distinct cause. The O04
+  EDD sub-claim 2 (wrong-KEK message distinct from tampered) is met as-is.
+
+  **D01 / O04 move pending → wired.** Both EDD expectations were blocked on #215
+  (`overdrive serve` exposed no CA boot surface); this feature unblocks them. D01
+  (root key never plaintext at rest) and O04 (refuse-to-start, actionable error)
+  are captured against the built binary in Lima during the feature's DELIVER
+  slice ②. (The *operator/control-plane HTTPS* ephemeral CA,
+  `tls_bootstrap::mint_ephemeral_ca`, ADR-0010 / D-CA-5 / #81, is a DIFFERENT CA
+  and is explicitly out of scope — it is not a `Ca` and cannot issue workload
+  SVIDs.)
 
 - 2026-06-08 — **Phase-2 production wires an *ephemeral* workload CA, not the
   persistent KEK-backed root (note, no decision change).** Recorded while
@@ -725,9 +782,10 @@ for DISTILL.
   spiffe_id, leaf_key`. The window the cert is actually signed with was an
   adapter-internal detail (`RcgenCa::issue_svid` computed it from
   `SystemTime::now()` at `rcgen_ca.rs:478-480`) and never crossed the trait
-  boundary. The #40 near-expiry rotation seam (ADR-0067 D8 / S-WIM-09) compares
-  `actual.not_after` against `tick.now_unix`, so without a real field that
-  comparison had nothing sound to read.
+  boundary. The near-expiry reissue branch (ADR-0067 D8 / S-WIM-09 — rev 6: a live
+  `Action::IssueSvid`, NOT a workflow) compares `actual.not_after` against
+  `tick.now_unix`, so without a real field that comparison had nothing sound to
+  read.
 
   **The amendment (the "Option A" the user ratified):**
   - **`SvidMaterial` gains `not_after: UnixInstant`** (+ a `const fn
@@ -799,7 +857,7 @@ for DISTILL.
   baked-in window, independently of `issue_and_audit`'s `clock`. Rejected: it
   re-creates the exact drift this amendment closes — host-path sub-second skew
   between `held.not_after` and `row.not_after`, and (worse) a DST-non-deterministic
-  `SimCa` window unrelated to `SimClock`, breaking the #40 near-expiry seam's
+  `SimCa` window unrelated to `SimClock`, breaking the near-expiry reissue branch's
   replay-equivalence. The single-clock-read-threaded-through-the-request shape is
   the only one that makes the consistency invariant hold *by construction* rather
   than by two paths happening to agree.

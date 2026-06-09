@@ -30,7 +30,15 @@ restart-recovery success signal (checked BEFORE the backoff gate), keeps the
 retry View strictly as failure-backoff memory, and reconciles the addition with
 **A3** (reading an already-durable observation row as `actual` is what every
 reconciler does — it is NOT persisting a new success fact). Touches **D1, D4,
-D8, A3** and adds **D10**. Builds on
+D8, A3** and adds **D10**. **Revised rev 6 (2026-06-09)** — see § Revision
+(rev 6): the `built-in-ca-operator-composition` feature (folds #40 + #215)
+reframes the #40 near-expiry rotation seam from a *gated workflow* to a *live
+reconciler action* (`Action::IssueSvid` rotate-correlation). A5's rejection is
+reframed (it correctly rejected a *synchronous in-`reconcile` mint*, NOT an
+action-emit); D8's near-expiry branch and the #40-boundary section drop the
+"wait-for-DNS-propagation workflow" framing (that was external ACME, never
+internal SVID reissue) and emit `IssueSvid`; D1/D8 restart-re-mint is
+re-validated. Touches **A5, D8, D1, #40-boundary**. Builds on
 **ADR-0063** (built-in CA — the `Ca` port, `SvidMaterial`, `TrustBundle`,
 `ca_issuance::issue_and_audit`)
 and the reconciler / action-shim machinery of **ADR-0013 / ADR-0023 / ADR-0035 /
@@ -85,7 +93,8 @@ outcomes O1–O6):
    so "recompute held state without re-issue" is **impossible**. The honest model
    is **re-issue on boot** for every still-Running allocation (one per running
    alloc, bounded, each audited via `issue_and_audit`). This is **RECOVERY** — a
-   distinct reconciler branch from the gated #40 near-expiry *rotation* (D8). The
+   distinct reconciler branch from the near-expiry reissue branch (D8 — rev 6: a
+   live `Action::IssueSvid`, NOT a workflow), though both emit `Action::IssueSvid`. The
    View carries **retry memory** so a *failed* re-issue backs off instead of
    hammering every tick; no secret reaches disk.
 5. **No silent issuance (K4 / O5)** + **mechanism economy (O6)** — every issuance
@@ -114,7 +123,8 @@ outcomes O1–O6):
   `persist_view`, vs dispatch at `:1324`), so a View entry claiming "issued" could
   be durably written when the CA / audit write then fails; (b) the success fact
   *already lives* in the `issued_certificates` observation row. Near-expiry (for
-  the #40 seam) is recomputed every tick from the **held cert's real `not_after`**
+  the near-expiry reissue branch — rev 6: a live `Action::IssueSvid`, NOT a
+  workflow) is recomputed every tick from the **held cert's real `not_after`**
   (read off `actual` — D4), not a View field. A future-event field or a success
   fact in the View is a review-rejection smell.
 - **State-layer hygiene** (whitepaper §4, ADR-0063 D2/D6): the held
@@ -166,16 +176,18 @@ The pure convergence rules:
 | running | ¬held | `Action::IssueSvid` |
 | ¬running | held | `Action::DropSvid` |
 | running | held (valid — `not_after` not near-expiry) | no-op (`Noop`) |
-| running | held (near-expiry) | the gated #40 rotation branch (D8 — EMIT-GATED) |
+| running | held (near-expiry) | `Action::IssueSvid` **unconditionally** (rev 6 — `"rotate-svid"` correlation; threshold ½ × `WORKLOAD_SVID_TTL` = 1800s; NO `ROTATION_ENABLED` gate, NO `StartWorkflow`) |
 
 **Restart recovery falls out for free.** On a control-plane restart the in-memory
 `IdentityMgr` is empty (the held set was never persisted — the leaf key cannot
 reach disk), so `actual = ∅`; every still-Running allocation matches `running ∧
 ¬held` and is **re-issued** (one `IssueSvid` per running alloc, bounded, each
 audited via `issue_and_audit`). This is **RECOVERY** — the `running ∧ ¬held →
-issue` branch — and is *distinct* from the gated near-expiry *rotation* branch
-(`running ∧ held(near-expiry) → #40`). Re-issue-on-restart is NOT the forbidden
-synchronous-rotation path; it is the first-issue path running again because the
+issue` branch — and is a *distinct branch* from the near-expiry reissue branch
+(`running ∧ held(near-expiry) → Action::IssueSvid`, rev 6 — also a live action, NOT
+a workflow). Both emit `Action::IssueSvid` through the same executor; neither is the
+forbidden synchronous-rotation path. Re-issue-on-restart is the first-issue path
+running again because the
 holder was reset. There is no "recompute held state without re-issue" — that is
 impossible (the leaf key is non-persistable per ADR-0063 D9 and non-reconstructable
 per `ca_issuance.rs:34-40`), and rev 1's claim that it could is the Critical
@@ -327,7 +339,11 @@ is the "found wiring" — an ADR consequence, recorded explicitly):
 > `trust_bundle()` (:757).
 >
 > **What is deferred — #215** ("Compose built-in CA into operator surface +
-> satisfy EDD expectations", blocked on #35). The **persistent KEK-backed root**
+> satisfy EDD expectations"). *(rev 6, 2026-06-09: #215 is now CLOSED by
+> `built-in-ca-operator-composition` — no longer blocked on #35; the
+> "blocked on #35 / not yet wired" description below is rev-2-era historical
+> state. See § "Downstream boundary" → "#215 (operator surface — CLOSED …)".)*
+> The **persistent KEK-backed root**
 > (`boot_ca` + `SystemdCredsKeyring`, ADR-0063 D2/D8) and the operator surface
 > (`alloc status` SVID render, deployed-SVID operator-verify) are #215's scope,
 > not yet wired. ADR-0063's persistent design is the **upgrade target** for #215;
@@ -576,8 +592,10 @@ pull `Ca::trust_bundle()` on demand vs. hydrate the bundle into `IdentityMgr`.
   `&dyn Ca`): after `issue_and_audit`, `identity.set_bundle(ca.trust_bundle()?)`.
 - **`current_bundle()` reads in-process** — ZERO CA I/O on the read hot path (O3).
 
-`set_bundle` is the seam **#40** (rotation) later uses to push a rotated bundle
-through the same surface, with no consumer change. This satisfies O3 (the read
+`set_bundle` is the seam a future **external-ACME / public-trust root rotation**
+later uses to push a rotated bundle through the same surface, with no consumer
+change. (Internal SVID near-expiry reissue re-mints a leaf under the unchanged
+intermediate, so it does not touch this bundle seam.) This satisfies O3 (the read
 hot path touches no CA) and keeps the bundle current without a per-read CA pull.
 
 ### D7 — `IdentityRead` port: sync, owned-clone read surface
@@ -618,7 +636,7 @@ parameter** (never defaulted). Production consumers (sockops #26 / gateway /
 telemetry) are deferred to those features; this ADR ships the port + sim double
 + the contract-proving test consumer.
 
-### D8 — The View is RETRY MEMORY (request inputs); the #40 rotation seam is pre-wired but EMIT-GATED
+### D8 — The View is RETRY MEMORY (request inputs); the near-expiry branch emits a live `Action::IssueSvid` (rev 6)
 
 The `SvidLifecycle` View (`overdrive-core/src/reconcilers/svid_lifecycle.rs`)
 holds **retry memory only** — the `development.md` § "Reconciler I/O"
@@ -689,8 +707,27 @@ pub struct IssueRetry {
 - **GC** `IssueRetry` entries for allocations no longer Running (mirror
   `ServiceMapHydrator`'s `retain`).
 
+> **rev 6 reframe (2026-06-09) — the near-expiry branch emits a LIVE
+> `Action::IssueSvid`, not a gated `StartWorkflow`.** Below, this section
+> describes the `running ∧ held(near-expiry)` branch as targeting
+> `Action::StartWorkflow(cert_rotation)` behind the `ROTATION_ENABLED` gate. The
+> `built-in-ca-operator-composition` feature retires that: internal SVID
+> near-expiry reissue is a reconciler **action** — the branch emits
+> `Action::IssueSvid { alloc_id, spiffe_id: held.spiffe_id, node_id:
+> running.node_id, correlation: identity_correlation(alloc, &held.spiffe_id,
+> "rotate-svid") }` **unconditionally** (the existing variant, unchanged — no new
+> field). The `ROTATION_ENABLED` gate const, `CERT_ROTATION_WORKFLOW` name, and
+> `StartWorkflow`/`WorkflowName` imports are deleted. The threshold is **½ ×
+> `WORKLOAD_SVID_TTL` = 1800s** (verified TTL = 3600s), derived-from-TTL. The
+> `near_expiry` `<=` boundary becomes a LIVE mutation target (the gate is gone),
+> so its `#[mutants::skip]` + `.cargo/mutants.toml` `exclude_re` entry are removed
+> and a boundary kill-test lands in the same slice. Everything below about
+> reading the held cert's *real* `not_after` from `actual` stays exactly right —
+> only the emitted action and the gate change.
+
 **Near-expiry keys off the HELD cert's real `not_after` (from `actual`), NOT a
-View field.** The gated #40 branch (`running ∧ held(near-expiry)`) reads the
+View field.** The near-expiry reissue branch (`running ∧ held(near-expiry)` —
+rev 6: a live `Action::IssueSvid`, NOT a workflow) reads the
 `not_after` the `held_snapshot` projected into `actual` (D4 — `HeldSvidFacts.
 not_after`, sourced from `SvidMaterial::not_after()`, the cert's true validity
 end) and compares it against `tick.now_unix` + the live near-expiry threshold.
@@ -702,34 +739,35 @@ SAME injected `Clock` as `tick.now_unix`, so the comparison is between two value
 off one clock and is replayable bit-for-bit under a DST seed. Before the
 amendment, `held.not_after` would have been a host wall-clock read (sub-second
 skew from `tick`) or a `SimCa` frozen-fixture value (unrelated to `SimClock`,
-non-deterministic) — the gated branch would have tested against garbage. The
+non-deterministic) — the near-expiry branch would have tested against garbage. The
 amendment is what makes this branch sound.
 
-**The #40 rotation seam is structurally pre-wired but EMIT-GATED.** The
-near-expiry branch is present in `reconcile()` and *would* target
-`Action::StartWorkflow(cert_rotation)` — but the **emit is suppressed** by a
-compile-time gate (`const ROTATION_ENABLED: bool = false`, or simply the absent
-emit) so `StartWorkflow(cert_rotation)` is **NEVER emitted** until #40 flips it.
-This branch is **distinct from restart-recovery** (D1): restart re-issue is
-`running ∧ ¬held → IssueSvid` (RECOVERY, always live); rotation is `running ∧
-held(near-expiry) → StartWorkflow` (gated until #40). Keeping them distinct is
-load-bearing — restart re-issue must NOT route through the (forbidden,
-synchronous) rotation path; it is the ordinary first-issue branch running again
-because the holder was reset.
+**The near-expiry branch emits `Action::IssueSvid` unconditionally (rev 6).** The
+`running ∧ held(near-expiry)` branch in `reconcile()` emits the existing
+`Action::IssueSvid` variant — unchanged, `"rotate-svid"` correlation — through the
+same action-shim executor as first-issue and restart-reissue. There is **no**
+`ROTATION_ENABLED` gate, **no** `CERT_ROTATION_WORKFLOW`, **no**
+`StartWorkflow(cert_rotation)`, and **no** `#39`/workflow dependency. Nothing is
+committed to the workflow engine, so there is **no** `UnknownWorkflow` risk — the
+empty-registry-engine concern is gone entirely with the action reframe. This branch
+is **distinct from restart-recovery** (D1): restart re-issue is `running ∧ ¬held →
+IssueSvid` (RECOVERY); near-expiry reissue is `running ∧ held(near-expiry) →
+IssueSvid`. Both emit `Action::IssueSvid` through the same executor and neither is
+the forbidden synchronous-rotation path; keeping the two branches distinct is
+load-bearing only so restart recovery is evaluated immediately (D10), not because
+one routes through a workflow. Because near-expiry reads `actual.not_after` (D4),
+the branch needs **no** View field to carry an issuance timestamp — the held cert's
+own validity is the input. **NO throwaway synchronous sync-rotate path.**
 
-Why the gate is load-bearing, not cosmetic: production **always wires an
-empty-registry workflow engine** (`WorkflowRegistry::new()` —
-`overdrive-control-plane/src/lib.rs:1534`). A committed `StartWorkflow` for an
-*unregistered* kind raises `WorkflowEngineError::UnknownWorkflow`
-(`overdrive-control-plane/src/lib.rs:417-418`), isolated per-action by the shim
-(`action_shim/mod.rs:429`) but **re-emitted each tick the near-expiry condition
-holds** — so a naïve emit raises `UnknownWorkflow` every tick. (The `None`-engine
-no-op path is NOT production's — production wires a real, empty-registry engine.)
-The seam stays a *clean* no-op until #40 registers `cert_rotation` and flips the
-gate. Because near-expiry reads `actual.not_after` (D4), the seam needs **no** View
-field to carry an issuance timestamp — the held cert's own validity is the input.
-**NO throwaway synchronous sync-rotate path** (a single-cut violation #40 would
-delete).
+> **Provenance (rev 1–5, SUPERSEDED by rev 6 above — do not implement):** earlier
+> revisions modelled this branch as an EMIT-GATED `StartWorkflow(cert_rotation)`
+> behind `const ROTATION_ENABLED: bool = false`, kept a clean no-op against the
+> production empty-registry `WorkflowRegistry::new()` so a committed
+> `StartWorkflow` for an unregistered kind would not loop on `UnknownWorkflow`,
+> and deferred flipping the gate to #40. rev 6 deletes the gate const, the
+> `CERT_ROTATION_WORKFLOW` name, and the `StartWorkflow`/`WorkflowName` imports
+> (single-cut). A DELIVER agent must NOT preserve any of them; only external-ACME /
+> public-trust root rotation remains workflow-shaped.
 
 ### D9 — Architecture-rule enforcement
 
@@ -796,14 +834,14 @@ presence** — `ever_issued: bool` per running alloc — NOT the row contents
 (`serial`, `not_after`, `issued_at` stay out of the reconciler's `actual`; the
 near-expiry `not_after` continues to come from the *held* cert via
 `HeldSvidFacts`, D4/D8, because only a held cert has a live validity window the
-rotation seam cares about).
+near-expiry reissue branch cares about).
 
 **The reconcile-body model the crafter implements (pin — this is the model, not a
 signature).** For each running alloc, in priority order:
 
 | held | ever_issued (audit row) | branch | retry-View effect |
 |---|---|---|---|
-| held | (any) | no-op; evaluate gated near-expiry (D8) | **clear** the alloc's retry entry (clear-on-success) |
+| held | (any) | no-op; evaluate near-expiry → emit `IssueSvid` if near-expiry (D8 — rev 6, unconditional, not gated) | **clear** the alloc's retry entry (clear-on-success) |
 | ¬held | true | **restart recovery** → emit `IssueSvid` IMMEDIATELY, bypassing the backoff gate | **clear** the alloc's retry entry (a prior success is durably proven; no failure is pending) |
 | ¬held | false | first-issue / failing path → emit `IssueSvid` **backoff-gated** by the retry entry | record/keep the attempt (failure-backoff memory) |
 
@@ -903,8 +941,9 @@ Expose held identity as a `watch` channel consumers subscribe to (notified on
 change) rather than sync getters. **Rejected (deferred):** speculative until a
 real consumer demands change-notification — no consumer exists this phase (#26 is
 unbuilt). The sync-getter `IdentityRead` port is the sound first step and is a
-**non-breaking** surface: #40 rotation can push down the *same* port later
-(`set_bundle` is already the push seam, D6). Adding a channel now is mechanism the
+**non-breaking** surface: a future external-ACME / public-trust root rotation can
+push a rotated bundle down the *same* port later (`set_bundle` is already the push
+seam, D6). Adding a channel now is mechanism the
 running set does not yet need (O6).
 
 ### A3 (DIVERGE Option 4) — Persist issuance success facts / a derived renewal deadline in the View
@@ -968,18 +1007,41 @@ derived success into memory*.
 `current_bundle()` calls through to the CA each read. **Rejected (chosen 5-A
 hydrated instead):** a CA pull on the read hot path violates O3 ("minimize time a
 dataplane consumer takes to read the current SVID + trust bundle"). The bundle
-changes only on rotation (#40); hydrating it into `IdentityMgr` (set at boot,
-refreshed by the issue executor, pushed by #40 via `set_bundle`) makes the read
-touch zero CA I/O while staying current. A cheap pull was *permitted* by the
-DISCUSS AC, but hydration is strictly better for O3 and gives #40 its push seam.
+changes only on **root / external rotation** (future external-ACME / public-trust);
+hydrating it into `IdentityMgr` (set at boot, refreshed by the issue executor,
+pushed by a future root-rotation path via `set_bundle`) makes the read touch zero
+CA I/O while staying current. A cheap pull was *permitted* by the DISCUSS AC, but
+hydration is strictly better for O3 and gives the future root-rotation path its
+push seam. (Internal SVID near-expiry reissue does not change the bundle — it
+re-mints a leaf under the same intermediate — so it is unrelated to this seam.)
 
-### A5 (DIVERGE Option 6) — A throwaway synchronous sync-rotate path now
+### A5 (DIVERGE Option 6) — A throwaway synchronous in-`reconcile` mint
 
-Ship a minimal in-`reconcile` rotation (mint-fresh + swap) ahead of #40.
-**Rejected:** a single-cut violation #40 would delete (`.claude/rules` single-cut
-greenfield migrations). Rotation is a multi-step durable sequence — a workflow
-(#40, depends on workflow primitive #39), not a reconciler branch. The seam is
-pre-wired and emit-gated (D8); the rotation *logic* is #40's.
+> **rev 6 reframe (2026-06-09).** This section's *substance* was right —
+> rotation is mint+swap, single-cut — but its *framing* was wrong: it called
+> rotation "a multi-step durable sequence — a workflow (#40)" and described the
+> rejected option as a "throwaway synchronous *sync-rotate* path." The
+> `built-in-ca-operator-composition` feature corrects this: **internal SVID
+> near-expiry reissue is the PERMANENT design as a reconciler *action*
+> (`Action::IssueSvid` rotate-correlation), not a workflow.** The reconciler only
+> EMITS the action; the action-shim *executor* does the CA I/O (the sanctioned
+> ADR-0023 action-shim boundary), exactly as first-issue and restart-reissue do.
+> A5's rejection still stands, but it applies ONLY to the genuinely-rejected
+> shape: a *synchronous mint INSIDE `reconcile`* (CA I/O on the pure reconciler
+> hot path, which would break dst-lint + the pure-`reconcile` contract). The
+> action-emit is NOT that — it is the ordinary `IssueSvid` branch firing on a
+> near-expiry condition. The `ROTATION_ENABLED` gate and the `cert_rotation`
+> workflow name are deleted in that feature; see § Revision (rev 6).
+
+Ship a minimal in-`reconcile` rotation (a SYNCHRONOUS mint-fresh + swap *inside*
+`reconcile`). **Rejected:** CA I/O inside the pure-sync `reconcile` body breaks
+dst-lint and the pure-`reconcile` contract (ADR-0035) — minting is the executor's
+job, not the reconciler's. The correct shape is the reconciler EMITTING
+`Action::IssueSvid` (a near-expiry rotate-correlation) and the action-shim
+executor performing the mint+swap — which is exactly what
+`built-in-ca-operator-composition` ships (rev 6). That is NOT a "throwaway"
+path and NOT a workflow: it is the permanent rotation design as a reconciler
+action.
 
 ### A6 — Drop `node_id` from `Action::IssueSvid`
 
@@ -1033,8 +1095,9 @@ iteration order must be deterministic across DST seeds (`.claude/rules/developme
   the issuance; no unaudited `SvidMaterial` ever reaches the held map.
 - **Mechanism economy** (O6): no new concurrency / storage mechanism — the
   shipped reconciler runtime, `Ca` port, ObservationStore, and one in-process
-  `RwLock<BTreeMap>` hold the whole subsystem. The #40 rotation seam is pre-wired
-  on the same surface (`set_bundle`).
+  `RwLock<BTreeMap>` hold the whole subsystem. Internal SVID near-expiry reissue
+  reuses the same `Action::IssueSvid` executor (rev 6 — no new mechanism); a future
+  root-rotation path reuses the same `set_bundle` push seam.
 - **Reuse-heavy**: `Ca` / `ca_issuance::issue_and_audit` / `SvidMaterial` /
   `TrustBundle` / `IssuedCertificateRow` / reconciler runtime / action-shim /
   `CorrelationKey` / `AllocationId` / `NodeId` / `WorkloadId` / `CertSerial` /
@@ -1048,14 +1111,19 @@ iteration order must be deterministic across DST seeds (`.claude/rules/developme
   consequence, not a silent change. It is additive (the existing `AppState`
   consumers are untouched) and the production `Arc<dyn Ca>` is the *same* adapter
   `ca_boot` already builds (lib.rs:50).
-- **The #40 rotation seam carries a load-bearing gating caveat**: the emit MUST
-  stay suppressed (`const ROTATION_ENABLED: bool = false` / absent emit) until
-  #40 registers `cert_rotation` — a naïve emit raises `UnknownWorkflow` every
-  tick against production's empty-registry engine. The near-expiry branch reads the
-  held cert's real `not_after` off `actual` (D4), so the seam needs no View field
-  to drive it. Restart re-issue (`¬held → issue`) is a *distinct* branch from the
-  gated near-expiry rotation — keeping them separate ensures restart recovery is
-  never routed through the (forbidden) synchronous-rotation path.
+- **The near-expiry reissue branch emits `Action::IssueSvid` unconditionally**
+  (rev 6 — NO gating caveat, NO `ROTATION_ENABLED`, NO `StartWorkflow`): a single
+  internal mint+swap through the existing executor, `"rotate-svid"` correlation.
+  Nothing is committed to the workflow engine, so the empty-registry
+  `UnknownWorkflow` concern is gone. The near-expiry branch reads the held cert's
+  real `not_after` off `actual` (D4), so it needs no View field to drive it.
+  Restart re-issue (`¬held → IssueSvid`) and near-expiry reissue (`held ∧
+  near-expiry → IssueSvid`) are distinct branches that both emit `Action::IssueSvid`
+  through the same executor; neither is the forbidden synchronous-rotation path.
+  *(Provenance: rev 1–5 modelled this as an EMIT-GATED `StartWorkflow(cert_rotation)`
+  behind `const ROTATION_ENABLED: bool = false`; rev 6 deletes that gate, name, and
+  the `StartWorkflow`/`WorkflowName` imports. A DELIVER agent must NOT preserve
+  them.)*
 - **`SvidLifecycle` needs its enqueue/handoff wiring landed with it** (rev 2,
   D5b): a third `Action::EnqueueEvaluation` emission in
   `WorkloadLifecycle::reconcile` (`workload_lifecycle.rs:181` block) and a sibling
@@ -1080,8 +1148,9 @@ iteration order must be deterministic across DST seeds (`.claude/rules/developme
   O(rows) and cheap at single-node scale. The reconciler stays pure — it holds no
   store handle; the runtime does the read and folds the boolean into `actual`. No
   new `Action`, no new store, no new persisted View field. The append-only growth
-  of `issued_certificates` (one row per first-issue / restart re-issue / #40
-  rotation — already noted for #215) means the per-tick scan grows over an
+  of `issued_certificates` (one row per first-issue / restart re-issue / near-expiry
+  reissue — all `Action::IssueSvid`, rev 6; already noted for #215) means the
+  per-tick scan grows over an
   allocation's lifetime; #36 (multi-node, gossiped audit rows) and any future
   read-index are the place to bound it if it becomes a hot path — out of scope for
   Phase 2 single-node.
@@ -1150,68 +1219,110 @@ flagged for DISTILL.
 - ADR-0013 / ADR-0035 / ADR-0036 — reconciler primitive runtime, typed-View
   ViewStore, `AnyState`/`AnyReconciler` registration triple.
 - ADR-0023 — action-shim placement (the executor's async boundary).
-- ADR-0064 / ADR-0066 — `Workflow` trait + journal (the #40 rotation seam's
-  destination; the engine is empty-registry in production until #40).
+- ADR-0064 / ADR-0066 — `Workflow` trait + journal (the destination for
+  **external-ACME / public-trust** rotation only; the engine stays
+  empty-registry in production — internal SVID near-expiry reissue is a
+  reconciler *action*, NOT a workflow, so it does NOT register here).
 - Whitepaper §4 (state layers — held material is in-process, audit is observation,
   View is reconciler memory), §7 (sidecarless — no in-pod agent; node-held leaf
-  key), §18 (rotation is a workflow → #40), §21 (DST).
-- Deferrals (all cite EXISTING issues / roadmap lines — no inventions):
-  **#215** [blocked on #35] — operator `alloc status` render of
-  `issued_certificates` + deployed-SVID operator-verify flow (O05/E03);
-  **#26** — sockops/kTLS mTLS consumer; **#40** [3.3] rotation (needs **#39**
-  [3.2] workflow primitive); **#36** [2.14] multi-node held sets / node
-  attestation; **roadmap step 4.7** — ACME / public-trust certs unified into
-  `IdentityMgr`; **Phase 5** — SVID revocation (CRL/OCSP). **#217** (input_digest)
-  is **#40's** and is unaffected by this ADR.
+  key), §18 (durable workflows — applies to **external-ACME** rotation only;
+  **internal** SVID near-expiry reissue is an `Action::IssueSvid`, see the rev 6
+  reframe in § "Downstream boundary"), §21 (DST).
+- Deferrals (rev 6, 2026-06-09 — all cite EXISTING issues / roadmap lines):
+  **#215 — CLOSED by `built-in-ca-operator-composition`** (operator `alloc
+  status` render of `issued_certificates` (O05) + the exported-PEM `openssl
+  verify` chain proof (E03); no longer blocked on #35); **#40 internal SVID
+  near-expiry rotation — CLOSED** (a live `Action::IssueSvid`, NOT a workflow,
+  does NOT need **#39**); **#26** — sockops/kTLS mTLS consumer; **#36** [2.14]
+  multi-node held sets / node attestation; **roadmap step 4.7** — ACME /
+  public-trust certs unified into `IdentityMgr` (the only remaining
+  **workflow-shaped** rotation, future-owned); **Phase 5** — SVID revocation
+  (CRL/OCSP). **#217** (input_digest) is unaffected by this ADR. *(Historical,
+  superseded: "#215 blocked on #35; #40 [3.3] rotation needs #39 [3.2] workflow
+  primitive" — that framing was external-ACME, never internal SVID reissue.)*
 
 ## Downstream boundary with #40 (rotation) and #215 (operator surface)
 
 Rev 2 sharpens the boundary the re-issue-on-restart model creates with the two
-downstream features. **Noted in-tree only — this ADR does NOT edit #40 or #215.**
+downstream features. **rev 6 (2026-06-09):** #40 + #215 are both folded into the
+`built-in-ca-operator-composition` feature; the #40 boundary is rewritten below
+(internal SVID near-expiry reissue is a reconciler *action*, not a workflow), and
+this ADR's emit/gate text is corrected accordingly.
 
-### #40 (`cert_rotation` workflow) — what #35 owns vs what #40 owns
+### Near-expiry reissue — owned HERE as `Action::IssueSvid` (rev 6; #40 owns nothing for internal SVID reissue)
 
 Re-issue-on-restart makes **#35** own *issue + hold + swap-into-`IdentityMgr` +
 converge*: when a fresh `SvidMaterial` is minted (first issue, restart re-issue,
-OR #40's rotated output), `IdentityMgr::hold(alloc, svid)` **replaces** the prior
-entry under the same `AllocationId`. **#40** owns only the *durable rotation
-workflow* — the near-expiry → request → wait-for-DNS-propagation → validate →
-publish sequence (the textbook Bar-2 workflow, GH #40 / `.claude/rules/
-workflows.md` precedent) — whose `SvidMaterial` output #35 swaps in via the same
-`hold` / `set_bundle` surface (D6's push seam).
+OR near-expiry reissue), `IdentityMgr::hold(alloc, svid)` **replaces** the prior
+entry under the same `AllocationId`. Internal near-expiry reissue is owned by THIS
+feature as a live `Action::IssueSvid` (rev 6); #40 no longer owns any part of it —
+only external-ACME / public-trust root rotation remains future-/#40-adjacent.
 
-**The boundary to pin (rev 2):** #40's issue body states "SvidMaterial lands as
-observation," which is **loose and must not be read literally** — the leaf private
-key MUST NEVER enter the gossiped ObservationStore (`CaKeyPem` has no `Serialize`,
-ADR-0063 D9; the leaf key is not an audit fact). The honest contract is: **#40's
-rotation *status / audit* lands as observation** (a rotation row + the
-`issued_certificates` row `issue_and_audit` writes); the **`SvidMaterial` itself
-is swapped IN-PROCESS** into `IdentityMgr` (via `hold` + `set_bundle`), exactly as
-#35's first-issue and restart-re-issue paths do. No material on the wire.
+> **rev 6 — internal SVID near-expiry reissue is OWNED HERE as a reconciler
+> ACTION, not deferred to a workflow.** The prior framing ("#40 owns the durable
+> rotation *workflow* — the near-expiry → request → wait-for-DNS-propagation →
+> validate → publish sequence, the textbook Bar-2 workflow") was a **fiction for
+> internal SVID reissue**: that 4-step external-wait shape is **external ACME
+> public-cert** rotation, not internal SVID reissue. An internal near-expiry SVID
+> reissue is a SINGLE internal mint+swap — the SAME `Action::IssueSvid` the
+> first-issue and restart-reissue paths already emit, with a `"rotate-svid"`
+> correlation purpose. It coordinates no external steps and has no external-wait
+> terminal, so it fails the `.claude/rules/workflows.md` workflow-candidacy test.
+> The `SvidLifecycle` reconciler EMITS `IssueSvid`; the action-shim *executor*
+> performs the mint+swap (the sanctioned ADR-0023 boundary). The
+> `built-in-ca-operator-composition` feature ships this: it deletes the
+> `ROTATION_ENABLED` gate and the `cert_rotation` workflow name, and the
+> near-expiry branch emits `IssueSvid` unconditionally.
+>
+> **External-ACME public-cert rotation** (if it ever ships) is a SEPARATE
+> concern — that one genuinely coordinates ≥2 external steps and would be a
+> workflow (the TBD candidate first production workflow, Phase 5,
+> revocation-coupled; see `.claude/rules/workflows.md` § precedent). It does not
+> touch the internal SVID path.
 
-**Two distinct branches, kept separate:** restart re-issue is `running ∧ ¬held →
-IssueSvid` (RECOVERY — always live, the holder was reset); near-expiry rotation is
-`running ∧ held(near-expiry) → StartWorkflow(cert_rotation)` (gated until #40,
-keyed off the held cert's real `not_after` from `actual`). Restart re-issue is NOT
-the forbidden synchronous-rotation path; it is the first-issue branch running
-again. #40 flips the gate on the rotation branch only — it does not touch the
-recovery branch.
+**The leaf-key-on-the-wire boundary (rev 2, unchanged):** the leaf private key
+MUST NEVER enter the gossiped ObservationStore (`CaKeyPem` has no `Serialize`,
+ADR-0063 D9; the leaf key is not an audit fact). Reissue *status / audit* lands as
+observation (the `issued_certificates` row `issue_and_audit` writes); the
+**`SvidMaterial` itself is swapped IN-PROCESS** into `IdentityMgr` (via `hold` +
+`set_bundle`), exactly as #35's first-issue and restart-re-issue paths do. No
+material on the wire.
 
-### #215 (operator surface, blocked on #35) — append-only audit shape
+**Three branches, all the SAME action (rev 6):** first-issue, restart re-issue
+(`running ∧ ¬held → IssueSvid`, RECOVERY), and near-expiry reissue (`running ∧
+held(near-expiry) → IssueSvid` with a `"rotate-svid"` correlation, keyed off the
+held cert's real `not_after` from `actual`) all emit `Action::IssueSvid` and
+dispatch through the same executor. None is a synchronous in-`reconcile` mint
+(A5, rejected); none is a workflow.
 
-Re-issue-on-restart **plus** rotation means **many `issued_certificates` rows per
-allocation over time** (the table is append-only audit — one row per issuance:
-first issue, each restart re-issue, each #40 rotation). **#215** therefore renders
-the **current** cert — the latest row matching the serial the alloc currently
-*holds* (cross-referenced via `IdentityRead` / the held set), NOT one row per
-alloc and NOT the whole history as if each were live. A **serial change after a
-restart** should read as *legible* ("re-issued on restart"), NOT as an anomaly —
-the operator surface must treat a post-restart serial change as expected
-recovery, not a security event. O05 ("no silent issuance") is *reinforced* by
-this: every restart re-issue and every rotation leaves an audit row, so the
-operator can always see *why* the current serial is what it is. (Noted for #215's
-section; #215 is **blocked on #35** and owns the render — this ADR does not build
-it.)
+### #215 (operator surface — CLOSED by `built-in-ca-operator-composition`, rev 6) — append-only audit shape
+
+> **rev 6 (2026-06-09) — #215 is CLOSED, no longer blocked on #35.** The
+> `built-in-ca-operator-composition` feature builds the operator surface this
+> section describes: its Slice ② wires the persistent CA into `serve` (boot-side)
+> and its Slice ③ lands the consumer-side `AllocStatusResponse.issued_certificates`
+> summary + CLI render. **Surface split (load-bearing for DELIVER):** the
+> summary render is the **O05** surface (operator-legible metadata — `serial /
+> spiffe_id / issuer_serial / not_after`, NO cert bytes/key); **E03** (full chain
+> verifies) is proven SEPARATELY by an exported-PEM `openssl verify` capture
+> (test-only env-gated export from `rcgen_ca_chain_verify.rs`), NOT by the
+> summary render. The current owner/status is unambiguous: **this feature, not a
+> future #35-unblock.**
+
+Re-issue-on-restart **plus** near-expiry reissue means **many `issued_certificates`
+rows per allocation over time** (the table is append-only audit — one row per
+issuance: first issue, each restart re-issue, each near-expiry reissue — all
+`Action::IssueSvid`, rev 6). The operator surface therefore renders the **current**
+cert — the latest-by-`issued_at` row matching `SpiffeId::for_allocation(...)`
+(cross-referenced via `IdentityRead` / the held set), NOT one row per alloc and NOT
+the whole history as if each were live. A **serial change after a restart** should
+read as *legible* ("re-issued on restart"), NOT as an anomaly — the operator
+surface must treat a post-restart serial change as expected recovery, not a
+security event. O05 ("no silent issuance") is *reinforced* by this: every restart
+re-issue and every near-expiry reissue leaves an audit row, so the operator can
+always see *why* the current serial is what it is. *(Historical, superseded: "#215 is blocked on #35 and owns the
+render — this ADR does not build it" was true for ADR-0067 rev 2; rev 6 folds
+#215 into `built-in-ca-operator-composition`.)*
 
 ## Revision (rev 2, 2026-06-08) — DESIGN-review findings
 
@@ -1221,7 +1332,7 @@ finding, the resolution, and where it landed:
 
 | Finding (severity) | Rev-1 defect | Rev-2 resolution | Where |
 |---|---|---|---|
-| **Critical** — restart-idempotence impossible | "recompute held state on boot with no re-issue" — impossible: leaf key non-persistable (`CaKeyPem` no `Serialize`, ADR-0063 D9) + non-reconstructable (`ca_issuance.rs:34-40` mints fresh each call) | **Re-issue on restart** for every still-Running alloc (`running ∧ ¬held → IssueSvid`, bounded, audited) — RECOVERY, distinct from #40 rotation. O4/K3 reframed "no redundant re-issue" → "bounded, audited restart re-issue; no stale/silent credential." | D1; Context driver 4; § upstream-changes.md |
+| **Critical** — restart-idempotence impossible | "recompute held state on boot with no re-issue" — impossible: leaf key non-persistable (`CaKeyPem` no `Serialize`, ADR-0063 D9) + non-reconstructable (`ca_issuance.rs:34-40` mints fresh each call) | **Re-issue on restart** for every still-Running alloc (`running ∧ ¬held → IssueSvid`, bounded, audited) — RECOVERY, distinct from the near-expiry reissue branch (rev 6: also a live `Action::IssueSvid`, NOT a workflow). O4/K3 reframed "no redundant re-issue" → "bounded, audited restart re-issue; no stale/silent credential." | D1; Context driver 4; § upstream-changes.md |
 | **High-1** — View holds executor outputs | `IssuedInputs{issued_at, spiffe_id, serial}`: `serial` is post-dispatch (`reconciler_runtime.rs:1222-1226` persists `next_view` BEFORE dispatch at `:1324`); persisting success facts is broken | **The held set becomes `actual`** (the key addition — grounded against the `WorkflowLifecycle`/`live_instances()` precedent, `:2206-2209`/`:2166`). The View drops to **retry memory** (`IssueRetry{attempts, last_failure_seen_at}`). Success facts live in `issued_certificates`. | D1; D4; D8; A3 |
 | **High-2** — no enqueue/handoff trigger | `SvidLifecycle` would never tick | **`Action::EnqueueEvaluation`** from `WorkloadLifecycle::reconcile` (`:181` block, third emission, ungated) + the exit observer (`:230-256`, sibling submit); target `job/<workload_id>`; broker LWW dedup; DELIVER regression test obligation. | **D5b** (new) |
 | **High-3** — stale slice briefs | slices 01/02/03 still say "DESIGN call" | Slices updated: top-of-file "implement ADR-0067 rev 2" note + inlined decisions; slice-03 restart model corrected (re-issue, not recompute). | slice-01/02/03 |
@@ -1248,7 +1359,7 @@ implements. It touches D4 and D8 only; D1/D2/D5/D5b/D6/D7/D9 are unchanged.
 | Finding | Defect | Resolution | Where |
 |---|---|---|---|
 | **D4 `not_after` asserted a non-existent field** | D4/D8 (rev 1/2) described `HeldSvidFacts.not_after` as "the cert's real `not_after` (`SvidMaterial`'s validity end)", but `SvidMaterial` (`crates/overdrive-core/src/traits/ca.rs:298-357`) has NO `not_after` field — its fields are `cert_pem, cert_der, serial, spiffe_id, leaf_key`. The validity window was an adapter-internal value (`RcgenCa` read `SystemTime::now()`; `SimCa` returned a frozen-fixture window) that never crossed the trait boundary. | **ADR-0063 rev 2 amendment** (2026-06-08): `SvidMaterial` gains `not_after: UnixInstant` (+ accessor), populated at mint from the validity window `ca_issuance::issue_and_audit` computes ONCE from its injected `Clock` and threads through `SvidRequest`. `held_snapshot` reads `svid.not_after()` directly; D4 is now literally true. | D4; ADR-0063 Changelog "rev 2 amendment" |
-| **D8 near-expiry seam was comparing against garbage** | The gated #40 branch compares `actual.not_after` vs `tick.now_unix`. With `held.not_after` a host wall-clock read (sub-second skew) or a `SimCa` fixture value (unrelated to `SimClock`, non-deterministic), the comparison was unsound and DST-non-deterministic. | The threaded window derives from the SAME injected `Clock` as `tick.now_unix`. `svid.not_after() == issued_certificates.not_after` by construction (one clock read, one value, used for both cert and audit row). The branch is now sound and replayable under a seed. | D8 |
+| **D8 near-expiry seam was comparing against garbage** | The near-expiry branch (rev-3-era: described as a "gated #40 branch"; **SUPERSEDED — rev 6 makes it a live unconditional `Action::IssueSvid`, no gate, no workflow**) compares `actual.not_after` vs `tick.now_unix`. With `held.not_after` a host wall-clock read (sub-second skew) or a `SimCa` fixture value (unrelated to `SimClock`, non-deterministic), the comparison was unsound and DST-non-deterministic. | The threaded window derives from the SAME injected `Clock` as `tick.now_unix`. `svid.not_after() == issued_certificates.not_after` by construction (one clock read, one value, used for both cert and audit row). The branch is now sound and replayable under a seed. | D8 |
 
 **Consistency mechanism (why `svid.not_after == row.not_after` by construction).**
 `issue_and_audit` (`overdrive-control-plane/src/ca_issuance.rs:142-198`) already
@@ -1419,7 +1530,8 @@ fact rather than trusted across a restart.
 allocation: `held?` (volatile `HeldSvidFacts`, unchanged) AND `ever_issued?`
 (durable boolean from `issued_certificates` rows keyed on the derived
 `spiffe_id`). The reconcile body, per running alloc, in priority order:
-`held → no-op + clear retry + gated near-expiry`; `¬held ∧ ever_issued → emit
+`held → no-op + clear retry, then if near-expiry emit IssueSvid (rev 6 —
+unconditional, NOT gated, NOT a workflow)`; `¬held ∧ ever_issued → emit
 IssueSvid IMMEDIATELY (no backoff gate) + clear retry`; `¬held ∧ ¬ever_issued →
 emit IssueSvid backoff-gated + record/keep the attempt`. The three non-negotiable
 invariants: (1) `¬held ∧ ever_issued` re-issues with no backoff gate; (2) a
@@ -1432,3 +1544,37 @@ invent a new `Action` variant, a new store, or a new persisted View field. The
 characterization test that pins the defect must be FLIPPED from
 characterization-of-defect to assert the DESIRED behaviour (immediate
 post-restart re-issue) once D10 lands — it is the regression anchor.
+
+## Revision (rev 6, 2026-06-09) — #40 rotation is a reconciler ACTION, not a workflow
+
+This revision is the DESIGN output of the `built-in-ca-operator-composition`
+feature (folds #40 + #215; see `docs/feature/built-in-ca-operator-composition/
+feature-delta.md`). It corrects a framing error that ran through rev 1–5: the #40
+near-expiry rotation seam was modeled as a *gated `cert_rotation` workflow* that
+would emit `Action::StartWorkflow`. That is wrong for **internal SVID reissue**.
+It touches **A5, D8, D1, and the #40-boundary section**; D2/D3/D4/D5/D6/D7/D9/D10
+are unchanged.
+
+| Finding | Defect | Resolution | Where |
+|---|---|---|---|
+| **#40 internal near-expiry reissue was framed as a workflow** | D8 + the #40-boundary section described "near-expiry → request → wait-for-DNS-propagation → validate → publish" as the textbook Bar-2 workflow #40 ships, with the reconciler emitting `StartWorkflow(cert_rotation)` behind the `ROTATION_ENABLED` gate. That 4-step external-wait shape is **external ACME public-cert rotation**, NOT internal SVID reissue. An internal near-expiry SVID reissue is a SINGLE internal mint+swap — it coordinates no external steps and has no external-wait terminal, so it is NOT workflow-shaped. | The near-expiry branch emits `Action::IssueSvid` (the EXISTING variant, with a `"rotate-svid"` correlation purpose) UNCONDITIONALLY. The `ROTATION_ENABLED` gate const, the `CERT_ROTATION_WORKFLOW` name, and the `StartWorkflow`/`WorkflowName` imports are DELETED (single-cut). The action dispatches through the SAME action-shim executor as first-issue/restart-reissue. | D8, #40-boundary |
+| **A5's framing called the rejected option a "synchronous sync-rotate path" and rotation "a workflow"** | A5 was substantively right (rotation is mint+swap, single-cut) but mis-framed: it rejected a "throwaway sync-rotate path" and asserted rotation "is a workflow (#40)." | Reframed: A5 rejects ONLY a *synchronous mint INSIDE `reconcile`* (CA I/O on the pure-sync hot path — breaks dst-lint + the pure-`reconcile` contract). The reconciler EMITTING `IssueSvid` and the executor doing the mint+swap is the PERMANENT design — not throwaway, not a workflow. | A5 |
+| **Near-expiry threshold const was wrong on two counts** | `NEAR_EXPIRY_THRESHOLD_SECS = 28_800` (8h) assumed a 24h TTL; the real `WORKLOAD_SVID_TTL` is **3600s (1h)**. It was also a bare literal not tied to the TTL. | Threshold = **½ × `WORKLOAD_SVID_TTL` = 1800s**, derived-from-TTL (persist-inputs spirit; SPIRE half-life norm). | D8 |
+| **The `near_expiry` `<=` boundary was a permanently-excluded mutation target** | Because the emit was gated (`ROTATION_ENABLED == false`), the `<=` boundary was a genuine equivalent mutant and was excluded via `#[mutants::skip]` + a `.cargo/mutants.toml` `exclude_re` entry. | With the gate retired the boundary is OBSERVABLE (a real `IssueSvid` emit). The `#[mutants::skip]` and the `exclude_re` entry are REMOVED, and a boundary kill-test (`held.not_after <= now + 1800s` → exactly one rotate `IssueSvid`; none otherwise) lands in the same DELIVER slice. A mandatory mutation target. | D8 |
+
+**External-ACME rotation is the separate concern.** If public-trust gateway-cert
+rotation ever ships (roadmap step 4.7 / Phase 5, revocation-coupled), THAT
+genuinely coordinates ≥2 external steps and would be a workflow — the TBD
+candidate first first-party production workflow per `.claude/rules/workflows.md` §
+"Codebase precedent" (corrected in the same feature). It does not touch the
+internal SVID path this ADR governs.
+
+**D1/D8 restart-re-mint re-validation (rev 6).** Restart = re-mint (leaf keys are
+non-persistable, ADR-0063 D9; on boot the held set is empty) is **re-validated
+against this feature** and is correct as-is. The rev 5 D10 `running ∧ ¬held ∧
+ever_issued → IssueSvid` branch (re-issue IMMEDIATELY, bypassing backoff, on the
+audit-row restart marker) is correct as-is — `built-in-ca-operator-composition`
+confirms it and does NOT reshape it. The near-expiry rotate path (rev 6) and the
+restart-recovery path both emit `Action::IssueSvid`; they remain distinct branches
+(the rotate path fires on `running ∧ held(near-expiry)`, recovery on `running ∧
+¬held ∧ ever_issued`).
