@@ -1385,7 +1385,21 @@ pub async fn run_convergence_tick(
     // operators. Convergence retries on the next tick; once the
     // reconciler is fixed, normal dispatch resumes. The control-plane
     // does NOT panic on a buggy reconciler.
-    if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
+    //
+    // Capture the dispatch outcome instead of `?`-propagating it inline: a
+    // recoverable shim error (e.g. a transient `IssueSvid` issuance failure)
+    // MUST still fall through to the `yield_now` + `if has_work` self-re-enqueue
+    // below before it returns. Early-`?` here skipped the re-enqueue, so the
+    // FIRST failed tick — which has already persisted its retry-bearing View
+    // (above) — stalled forever: the broker drained empty and the persisted
+    // retry memory never re-drove (`view_has_backoff_pending` only re-enqueues
+    // once a tick actually runs). The error is still propagated (returned last,
+    // unchanged) so `lib.rs` logs it; the self-heal is the re-enqueue. The
+    // invariant-conflict branch directly below already self-heals by NOT
+    // early-returning — this matches that posture for the dispatch path.
+    let dispatch_outcome: Result<(), ConvergenceError> = if let Err(violation) =
+        action_shim::validate::validate_reconcile_output(&actions)
+    {
         // Surface-then-continue (`.claude/rules/reconcilers.md` self-heal
         // posture; RCA `fix-mixed-backend-dispatch-spin` § Fix C). On a
         // genuine same-slot conflict we surface the violation on TWO
@@ -1454,6 +1468,10 @@ pub async fn run_convergence_tick(
             violation = ?violation,
             "reconciler emitted conflicting Actions in one tick; skipping dispatch"
         );
+        // The validate-violation path is itself a self-heal: skip dispatch,
+        // keep the persisted View, retry next tick. It contributes no dispatch
+        // error to propagate.
+        Ok(())
     } else {
         // Dispatch through the action shim — this is where `.await`
         // is permitted. Per-action error isolation lives in the shim.
@@ -1468,10 +1486,14 @@ pub async fn run_convergence_tick(
         // the actions to the engine off the shim — so the workflow-lifecycle
         // reconciler's `hydrate_desired` can read the instance back on the
         // next tick (and re-emit on restart).
+        // NOTE: no `?` here — the outcome is captured into `dispatch_outcome`
+        // and returned at the END of the function, AFTER the self-re-enqueue
+        // below. A recoverable shim error must still re-enqueue (self-heal) so
+        // the persisted retry memory actually re-drives on a later tick.
         action_shim::dispatch_with_workflow_intent(actions, state, &tick)
             .await
-            .map_err(ConvergenceError::Shim)?;
-    }
+            .map_err(ConvergenceError::Shim)
+    };
 
     // Cooperative yield — every action_shim::dispatch path on the
     // single-node SimObservationStore returns Ready synchronously
@@ -1502,7 +1524,11 @@ pub async fn run_convergence_tick(
             .broker()
             .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
     }
-    Ok(())
+    // Return the (still-propagated) dispatch outcome LAST — after the
+    // self-re-enqueue above ran on ALL paths. On a recoverable shim error this
+    // is `Err(ConvergenceError::Shim(_))`, which `lib.rs` logs; the re-enqueue
+    // is what lets the persisted retry memory re-drive next tick.
+    dispatch_outcome
 }
 
 /// Pure predicate over `next_view`: does the `WorkloadLifecycle` reconciler

@@ -223,6 +223,13 @@ mod acceptance {
     // sibling above.
     #[cfg(feature = "integration-tests")]
     mod svid_lifecycle_actual_scoped_to_workload;
+    // BUG-2 regression — a `svid-lifecycle` tick whose `IssueSvid` dispatch
+    // FAILS must still self-re-enqueue (the persisted retry memory re-drives on
+    // a later tick) instead of stalling forever. Pre-fix the early `?` on the
+    // shim error skipped the `if has_work { submit }` self-re-enqueue. Same
+    // `run_convergence_tick` integration-tests gate as its siblings above.
+    #[cfg(feature = "integration-tests")]
+    mod svid_lifecycle_reenqueues_on_dispatch_failure;
 
     // service-health-check-probes step 01-03e3 — handler dispatch
     // wiring for Service-kind submit. S-SHCP-WIRE-09 through
