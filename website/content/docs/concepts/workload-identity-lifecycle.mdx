@@ -1,0 +1,211 @@
+---
+title: Workload identity lifecycle
+description: How Overdrive binds a live SVID to every running allocation, holds it in-process for the dataplane to read, and drops it the moment a workload stops — a reconciler that converges held identity against the running set.
+---
+
+A certificate authority that mints identities is half the story. The other half
+is holding each identity for exactly as long as its workload runs, dropping it
+the instant the workload stops, and keeping it somewhere the dataplane can read
+it without a network round trip. Overdrive's [built-in CA](/docs/concepts/identity)
+mints; this subsystem holds, reads, and drops. It is a reconciler that converges
+the set of held identities against the set of running allocations.
+
+<Callout title="Wired into serve, with an ephemeral CA and no consumer yet">
+	The lifecycle runs in `overdrive serve` today: the reconciler is registered, and
+	every running allocation gets an SVID issued, held, audited, and dropped on stop.
+	Two boundaries matter. The CA backing it at boot is **ephemeral** — a fresh
+	in-memory root per process, not the persistent envelope-encrypted root the
+	[built-in CA page](/docs/concepts/identity) describes. And nothing **reads** the
+	held SVID to present it on a connection yet: the sockops/kTLS mTLS layer, the
+	gateway, and the telemetry sink are unbuilt. Identity is held and provable, not
+	yet presented. See [Where it stands](#where-it-stands) for the exact line.
+</Callout>
+
+## The CA mints; nothing held what it minted
+
+Overdrive is sidecarless (see the [architecture overview](/docs/concepts/architecture)).
+There is no agent inside the workload to fetch a credential when it starts, keep
+it through the workload's life, and discard it on exit. A Kubernetes deployment
+leans on a per-pod sidecar or a node agent for exactly this. Overdrive has
+neither, so the credential's lifecycle has only one place it can come from: the
+allocation lifecycle the control plane already tracks.
+
+Without a holder, "every packet carries cryptographic workload identity" is true
+only in principle. The CA can mint a flawless SVID that no layer ever presents,
+that no consumer can read, and that lingers in memory after its workload is gone.
+This subsystem makes the principle operationally true for the running set.
+
+## A reconciler binds identity to the running set
+
+The core is a pure reconciler, `SvidLifecycle`. Like every
+[reconciler](/docs/concepts/reconcilers) in Overdrive it compares a desired state
+against an actual state and emits actions to close the gap — and it does so as a
+pure function, with no I/O of its own:
+
+- **Desired** is the set of allocations in the Running state.
+- **Actual** is the set of identities currently held.
+- **The rule** is two lines. A running allocation with no held identity gets an
+  `IssueSvid` action. A held identity whose allocation is no longer running gets
+  a `DropSvid` action.
+
+<Mermaid chart={`
+flowchart LR
+  desired["Desired<br/>running allocations"]
+  actual["Actual<br/>held identities"]
+  rec["SvidLifecycle<br/>(pure reconcile)"]
+  exec["IssueSvid / DropSvid<br/>action-shim executor"]
+  mgr["IdentityMgr<br/>held set + trust bundle"]
+  desired --> rec
+  actual --> rec
+  rec -->|IssueSvid / DropSvid| exec
+  exec -->|hold / drop| mgr
+  mgr -.->|held snapshot| actual
+`} />
+
+The reconciler never touches the CA. Minting a certificate is I/O, and the
+reconciler is pure — no `.await`, no CA handle, no clock except the tick it is
+handed. It only decides. The minting happens one step downstream, in an
+**action-shim executor**: the single place workload-CA I/O is allowed to run. The
+executor mints through the CA's audited issuance path and writes the result into
+the held set. This split — a pure decider plus an effectful executor — is the
+same shape the rest of the control plane uses, and it is what makes the whole
+lifecycle replayable under simulation.
+
+## Where the credential lives
+
+The held identities live in `IdentityMgr`, an in-process map from allocation to
+its SVID material, alongside the current trust bundle. The map is ordered, so
+that iterating it under [simulation testing](/docs/concepts/deterministic-simulation-testing)
+is deterministic across seeds.
+
+The held set is deliberately **not** persisted. It is neither intent nor
+observation in the [state-layer model](/docs/concepts/intent-observation) — it is
+ephemeral runtime state, scoped to the running set, that exists only while the
+process runs. The reason is the leaf private key: it has no serialized form and
+must never reach disk. The durable record of an issuance is the audit row, not
+the key. `IdentityMgr` holds the live credential; the observation store holds the
+proof that it was issued.
+
+**Drop-on-stop is removal, not erasure.** When an allocation stops, its entry
+leaves the held map, and the leaf private key is no longer reachable through any
+read. This is reachability, not memory zeroization — Overdrive does not scrub the
+key bytes, it drops the only handle to them. The acceptance proof is that the
+held set no longer contains the stopped allocation.
+
+## Reading it: the IdentityRead port
+
+The whole point of holding identity in-process is that a consumer on a connection
+hot path can read it with no gRPC, no IPC, and no re-issuing. That read surface
+is a port trait, `IdentityRead`, with two synchronous getters: the current SVID
+for an allocation, and the current trust bundle. Its contract is strict, and a
+simulation test enforces every clause against both the real holder and a test
+double:
+
+- **A read never issues.** The getter serves the SVID from the held set and the
+  bundle from a hydrated copy. It never calls the CA. Reading identity costs a
+  lock and a clone, not a certificate.
+- **A read never mutates.** Reading the held set does not change it.
+- **Absence is explicit.** An allocation that was never issued an identity, or
+  whose identity was dropped, reads as `None` — not an empty credential. A
+  consumer can refuse a handshake rather than present something stale.
+- **The caller holds no lock.** The getter clones out and releases the lock
+  before returning.
+- **A drop is visible immediately.** Once a stopped allocation's identity is
+  dropped, reading it returns `None` — the read surface reflects the drop, so a
+  consumer can never read back a credential the lifecycle has already removed.
+
+No production consumer binds this port yet. The port, its test double, and a test
+consumer that takes it as a required constructor parameter prove the contract is
+sound and mockable; the real consumers — sockops/kTLS, the gateway, telemetry —
+will bind it when they are built.
+
+## Surviving a restart
+
+Because the held set lives in memory and is never persisted, a control-plane
+restart starts with an empty held set. This is not a problem to engineer around;
+it is the convergence rule doing its job. On boot, every still-running allocation
+reads as running-but-not-held, which is precisely the `IssueSvid` trigger. The
+control plane re-issues a fresh, audited identity for each one. No special
+recovery path, no held-state serialization — the same two-line rule that runs
+every tick also rebuilds the held set after a crash.
+
+The reconciler's only memory across ticks is retry bookkeeping: how many times an
+issuance has been attempted, and when the last one failed. A failed re-issue
+backs off rather than hammering the CA every tick. It stores those inputs and
+recomputes the backoff each tick against the live policy — it does not persist a
+"next attempt at" deadline, which would be a stale cache of today's policy.
+
+## Convergence is proven, not asserted
+
+"The running set holds identity" is the kind of claim that is easy to state and
+easy to quietly break. So it is a checked invariant, not a comment. Under the
+[simulation harness](/docs/concepts/deterministic-simulation-testing),
+allocations churn into and out of Running while the invariant
+`running allocs hold a valid SVID` walks the held set against the running set at
+every stable point. A deliberately broken executor — one that fails to hold, or
+fails to drop — fails the invariant. The check has teeth.
+
+There is a window between an allocation reaching Running and its `IssueSvid`
+executing, bounded to one reconcile tick. That window is **fail-closed, not a
+race**. A workload with no held identity cannot present one, so a future mTLS
+consumer fails closed during the gap rather than presenting something wrong. In
+this phase there is no consumer at all, so the window is doubly inert. Identity
+availability is eventually consistent for the running set, with the bound a
+single tick — never "never."
+
+Every issuance is audited on the same path the [built-in CA](/docs/concepts/identity)
+already uses: a row recording the serial, the SPIFFE identity, the issuer, and
+the validity window. If that row cannot be written, the issuance is refused, and
+no unaudited credential enters the held set.
+
+## Rotation: a wired but dormant seam
+
+Short-lived certificates need re-issuing before they expire. The reconciler
+already has the branch for it — it compares each held identity's expiry against
+the current tick and, when one is close, would start a rotation workflow. That
+emit is **gated off**. Re-issuing on a schedule is a bounded, ordered sequence,
+which is exactly what a [workflow](/docs/concepts/workflows) is for, and
+certificate rotation is the canonical first workflow
+([#40](https://github.com/overdrive-sh/overdrive/issues/40)). Until that workflow
+is registered, starting it would raise an "unknown workflow" error on every tick,
+so the seam stays a clean no-op. The branch is present and waiting; it does
+nothing until rotation lands.
+
+## Where it stands
+
+The lifecycle is implemented and wired into a running control plane, with two
+honest boundaries:
+
+- **Live in serve:** the `SvidLifecycle` reconciler is registered in the boot
+  path, and `IdentityMgr` is threaded into the control plane's shared state. A
+  running allocation gets an SVID issued, held, and audited; a stopped one has its
+  identity dropped. Convergence and audit are proven by simulation tests and a
+  test-tier `openssl verify` of the minted chain.
+- **The boot CA is ephemeral:** the CA composed into `serve` mints a fresh
+  in-memory root per process — no key-encryption key, no persistence. It is not
+  the persistent envelope-encrypted root from the
+  [built-in CA page](/docs/concepts/identity); that root, and the operator-facing
+  surfaces, are tracked separately and depend on this subsystem landing first. An
+  identity issued today does not outlive its process as a chain to the old root;
+  after a restart it is simply re-issued under the new boot root.
+- **No consumer presents it:** the read port is proven against a test consumer,
+  but the sockops/kTLS mTLS layer, the gateway, and the telemetry sink that would
+  read a held SVID and present it on a connection are unbuilt. Identity is held
+  and readable; it is not yet on the wire.
+- **No operator verb:** holding and dropping identity is an internal mechanism.
+  There is no `overdrive` subcommand to issue or inspect an SVID; the
+  `alloc status` render of issued certificates is future work that depends on this
+  feature.
+
+## Where to go next
+
+- The CA that mints what this subsystem holds:
+  [the built-in CA](/docs/concepts/identity).
+- The primitive the lifecycle is built on:
+  [reconcilers](/docs/concepts/reconcilers).
+- Where the held credential sits in the state model:
+  [intent and observation](/docs/concepts/intent-observation).
+- The destination of the dormant rotation seam:
+  [workflows](/docs/concepts/workflows).
+- Why issuance and convergence replay deterministically:
+  [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

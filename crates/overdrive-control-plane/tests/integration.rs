@@ -232,4 +232,10 @@ mod integration {
         mod test_server;
         mod walking_skeleton;
     }
+
+    /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
+    /// Layer-3 walking skeleton and bounded audited restart re-issue.
+    pub mod workload_identity_manager {
+        mod lifecycle;
+    }
 }

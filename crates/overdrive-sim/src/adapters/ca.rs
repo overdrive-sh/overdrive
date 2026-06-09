@@ -362,12 +362,21 @@ impl Ca for SimCa {
         // pattern as `FIXTURE_ROOT_KEY_PEM` / `FIXTURE_INTERMEDIATE_KEY_PEM`). A
         // `const` is byte-identical across seeds, so K5 (serial-only determinism)
         // is preserved.
+        // The validity-window end rides on the request (ADR-0063 rev 2
+        // amendment): `SimCa` needs no clock — it CARRIES the threaded
+        // `req.not_after()` onto the returned material so the held-set
+        // near-expiry comparison (ADR-0067 rev 3 D8) sees the same value the
+        // audit row records. The opaque fixture cert BYTES are unchanged (their
+        // embedded window is the fixed-identity limitation above), so only the
+        // structured `not_after` accessor tracks the request — exactly as
+        // `spiffe_id` already does.
         Ok(SvidMaterial::new(
             CaCertPem::new(FIXTURE_SVID_CERT_PEM.to_owned()),
             CaCertDer::new(FIXTURE_SVID_CERT_DER.to_vec()),
             self.draw_serial(),
             spec.subject().clone(),
             CaKeyPem::new(FIXTURE_SVID_KEY_PEM.to_owned()),
+            req.not_after(),
         ))
     }
 

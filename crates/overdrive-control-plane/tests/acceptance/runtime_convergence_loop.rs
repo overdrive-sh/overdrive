@@ -19,7 +19,12 @@
 //! the `tests/acceptance.rs` entrypoint header — this crate's acceptance
 //! suite is in-process serde + sim-adapter only.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+// `too_many_lines` on `run_one_tick_with_seeded_view`: the 01-06
+// required-field AppState change (adds `ca` + `identity`) tipped this
+// fixture-builder fn from 100 → 102 lines via two mechanical wiring
+// args; the body is a single linear fixture-assembly with no decomposition
+// to extract. Allow it at file scope for the fixture surface.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,6 +75,10 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         driver,
         clock,
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -262,6 +271,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         driver,
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -468,6 +481,10 @@ async fn stop_after_failed_alloc_drains_broker() {
         driver,
         clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -634,25 +651,33 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     self-re-enqueues until `restart_counts` reaches the
     //     ceiling — observable as ≥5 extra dispatches.
     //
-    //     GAP-9 raises the bound from 2 to 3: the warm-up's last
+    //     GAP-9 raised the bound from 2 to 3: the warm-up's last
     //     Service-kind RestartAllocation dual-emits a `service-lifecycle`
     //     EnqueueEvaluation (Shape C) that is still pending when the
     //     stop snapshot is taken; the post-stop ticks drain it exactly
     //     once (the intent is a `WorkloadIntent::Job`, so the
     //     service-lifecycle hydrate is an empty Service state → 0 actions
-    //     → no re-enqueue). That is one bounded extra dispatch, NOT a
-    //     busy-loop — assertion 1 above (`queued == 0`) is the
+    //     → no re-enqueue). ADR-0067 D5b raises it again from 3 to 4: the
+    //     same alloc-mutating tick now ALSO emits a `svid-lifecycle`
+    //     EnqueueEvaluation (ungated by kind), pending at the stop
+    //     snapshot, drained exactly once post-stop. `svid-lifecycle` is
+    //     not registered in this test's runtime, so its drain is a
+    //     bounded single no-op dispatch (`run_convergence_tick` treats an
+    //     unregistered reconciler as a no-op, same as the unregistered
+    //     `service-lifecycle` above). Both are one bounded extra dispatch
+    //     EACH, NOT a busy-loop — assertion 1 above (`queued == 0`) is the
     //     busy-loop guard and still holds. The pre-fix ≥5 signal stays
-    //     well above the new bound.
+    //     at/above the new bound, so this still kills the always-true /
+    //     inverted-predicate mutation (a busy-loop would blow past 4).
     let dispatched_during_stop = counters.dispatched - dispatched_at_stop_submit;
     assert!(
-        dispatched_during_stop <= 3,
-        "post-stop dispatch traffic must be bounded; expected <= 3 \
+        dispatched_during_stop <= 4,
+        "post-stop dispatch traffic must be bounded; expected <= 4 \
          dispatches between stop submit and broker drain (≤2 job-lifecycle \
-         + ≤1 bounded GAP-9 service-lifecycle drain), got \
-         {dispatched_during_stop} (pre-fix value: ≥5 — the broker \
-         self-re-enqueues until restart_counts reaches \
-         RESTART_BACKOFF_CEILING)",
+         + ≤1 bounded GAP-9 service-lifecycle drain + ≤1 bounded ADR-0067 \
+         D5b svid-lifecycle drain), got {dispatched_during_stop} (pre-fix \
+         value: ≥5 — the broker self-re-enqueues until restart_counts \
+         reaches RESTART_BACKOFF_CEILING)",
     );
 }
 
@@ -746,6 +771,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         driver,
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
@@ -1036,6 +1065,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         driver,
         sim_clock.clone(),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         overdrive_core::id::NodeId::new("writer-1").unwrap(),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

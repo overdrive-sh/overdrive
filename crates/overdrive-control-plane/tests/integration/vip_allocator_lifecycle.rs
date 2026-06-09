@@ -130,6 +130,10 @@ fn build_state_with_range(
         driver,
         Arc::new(SimClock::new()),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
         overdrive_control_plane::test_empty_listener_facts(),
@@ -255,6 +259,11 @@ async fn dispatch_release(
         driver.as_ref(),
         obs.as_ref(),
         dataplane.as_ref(),
+        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -568,6 +577,10 @@ async fn build_state_with_range_and_reconciler(
         driver,
         Arc::new(SimClock::new()),
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         NodeId::new("writer-1").expect("NodeId"),
         Arc::clone(&allocator),
         overdrive_control_plane::test_empty_listener_facts(),

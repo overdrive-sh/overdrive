@@ -33,7 +33,7 @@
 //! the project-wide ordered-collection-as-nondeterminism rule in
 //! `.claude/rules/development.md`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -46,10 +46,10 @@ use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
 use overdrive_core::reconcilers::ServiceMapHydrator;
 use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
 use overdrive_core::reconcilers::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName,
-    ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
-    WorkflowLifecycleState, WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName, RunningAlloc,
+    ServiceMapHydratorState, ServiceMapHydratorView, SvidLifecycleState, SvidLifecycleView,
+    TargetResource, TickContext, WorkflowLifecycleState, WorkflowLifecycleView, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -109,6 +109,11 @@ enum AnyViewMap {
     /// wiring); the runtime-registration call site lands in a
     /// later slice.
     ServiceLifecycle(BTreeMap<TargetResource, ServiceLifecycleView>),
+    /// `SvidLifecycle` carries `View = SvidLifecycleView` — retry memory
+    /// (`retry: BTreeMap<AllocationId, IssueRetry>`) per ADR-0067 D8, so a
+    /// failed `IssueSvid` backs off instead of re-firing every tick. The map
+    /// holds per-target persisted views per ADR-0035 §5.
+    SvidLifecycle(BTreeMap<TargetResource, SvidLifecycleView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -321,6 +326,19 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::ServiceLifecycle(loaded)
             }
+            // workload-identity-manager — bulk-load the persisted
+            // `SvidLifecycleView` retry-memory map (ADR-0067 D8); shape mirrors
+            // `WorkflowLifecycle` exactly.
+            AnyReconciler::SvidLifecycle(_) => {
+                let loaded: BTreeMap<TargetResource, SvidLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::SvidLifecycle(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -404,7 +422,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
+            | AnyViewMap::ServiceLifecycle(_)
+            | AnyViewMap::SvidLifecycle(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -465,6 +484,11 @@ impl ReconcilerRuntime {
             // the WorkloadLifecycle / ServiceMapHydrator arms.
             AnyViewMap::ServiceLifecycle(map) => {
                 AnyReconcilerView::ServiceLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+            // workload-identity-manager step 01-04 — same shape as the
+            // WorkflowLifecycle arm (Slice-01 empty view; ADR-0067 D8).
+            AnyViewMap::SvidLifecycle(map) => {
+                AnyReconcilerView::SvidLifecycle(map.get(target).cloned().unwrap_or_default())
             }
         })
     }
@@ -550,7 +574,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::ServiceLifecycle(_) => WorkloadLifecycleView::default(),
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::SvidLifecycle(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -601,7 +626,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::ServiceLifecycle(_) => WorkflowLifecycleView::default(),
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::SvidLifecycle(_) => WorkflowLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -641,7 +667,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::ServiceLifecycle(_) => ServiceMapHydratorView::default(),
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::SvidLifecycle(_) => ServiceMapHydratorView::default(),
                     }
                 };
                 if current == view {
@@ -685,7 +712,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::ServiceLifecycle(_) => BackendDiscoveryBridgeView::default(),
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::SvidLifecycle(_) => BackendDiscoveryBridgeView::default(),
                     }
                 };
                 if current == view {
@@ -727,7 +755,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_) => ServiceLifecycleView::default(),
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::SvidLifecycle(_) => ServiceLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -750,6 +779,53 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::ServiceLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            // workload-identity-manager step 01-04 — Eq-diff skip +
+            // fsync-then-memory write-through, mirrors the WorkflowLifecycle
+            // arm above. The Slice-01 `SvidLifecycleView` is empty
+            // (ADR-0067 D8), so the current-vs-next comparison is always
+            // equal and this arm elides the fsync every tick; the arm is
+            // kept full so the retry-memory view (03-01) persists through
+            // the same ordering.
+            AnyReconcilerView::SvidLifecycle(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::SvidLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_) => SvidLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::SvidLifecycle(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -807,7 +883,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::ServiceLifecycle(_) => None,
+            | AnyViewMap::ServiceLifecycle(_)
+            | AnyViewMap::SvidLifecycle(_) => None,
         }
     }
 
@@ -883,7 +960,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::ServiceLifecycle(_) => None,
+            | AnyViewMap::ServiceLifecycle(_)
+            | AnyViewMap::SvidLifecycle(_) => None,
         }
     }
 
@@ -938,7 +1016,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::ServiceLifecycle(_) => None,
+            | AnyViewMap::ServiceLifecycle(_)
+            | AnyViewMap::SvidLifecycle(_) => None,
         }
     }
 
@@ -996,7 +1075,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_) => None,
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::SvidLifecycle(_) => None,
         }
     }
 
@@ -1029,6 +1109,64 @@ impl ReconcilerRuntime {
         };
         let mut guard = entry.views.lock();
         if let AnyViewMap::ServiceLifecycle(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
+
+    /// Snapshot of the in-memory `SvidLifecycleView` map for `name`.
+    /// Mirrors the ServiceLifecycle variant for the SvidLifecycle
+    /// reconciler (workload-identity-manager). **Test-only.** Exposes
+    /// the in-memory retry-memory state so the Eq-diff write-skip gate
+    /// (`persist_view`'s `SvidLifecycle` arm `if current == view`) can
+    /// be asserted directly — the kill site for the missed `==`→`!=`
+    /// mutant on that arm.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_svid_lifecycle_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, SvidLifecycleView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::SvidLifecycle(map) => Some(map.clone()),
+            AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
+            | AnyViewMap::WorkloadLifecycle(_)
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path with a typed
+    /// `SvidLifecycleView`. Mirrors the ServiceLifecycle variant.
+    /// **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_svid_lifecycle_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: SvidLifecycleView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::SvidLifecycle(next)).await
+    }
+
+    /// Seed the in-memory view for `(svid-lifecycle, target)` directly,
+    /// bypassing the `ViewStore`. Mirrors the ServiceLifecycle variant.
+    /// **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_svid_lifecycle_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: SvidLifecycleView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&svid_lifecycle_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::SvidLifecycle(map) = &mut *guard {
             map.insert(target.clone(), view);
         }
     }
@@ -1075,6 +1213,15 @@ fn service_lifecycle_canonical_name() -> ReconcilerName {
         <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
     )
     .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn svid_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(
+        <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
+    )
+    .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Map the dispatch-boundary [`action_shim::validate::WriteRoute`] onto
@@ -1238,7 +1385,21 @@ pub async fn run_convergence_tick(
     // operators. Convergence retries on the next tick; once the
     // reconciler is fixed, normal dispatch resumes. The control-plane
     // does NOT panic on a buggy reconciler.
-    if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
+    //
+    // Capture the dispatch outcome instead of `?`-propagating it inline: a
+    // recoverable shim error (e.g. a transient `IssueSvid` issuance failure)
+    // MUST still fall through to the `yield_now` + `if has_work` self-re-enqueue
+    // below before it returns. Early-`?` here skipped the re-enqueue, so the
+    // FIRST failed tick — which has already persisted its retry-bearing View
+    // (above) — stalled forever: the broker drained empty and the persisted
+    // retry memory never re-drove (`view_has_backoff_pending` only re-enqueues
+    // once a tick actually runs). The error is still propagated (returned last,
+    // unchanged) so `lib.rs` logs it; the self-heal is the re-enqueue. The
+    // invariant-conflict branch directly below already self-heals by NOT
+    // early-returning — this matches that posture for the dispatch path.
+    let dispatch_outcome: Result<(), ConvergenceError> = if let Err(violation) =
+        action_shim::validate::validate_reconcile_output(&actions)
+    {
         // Surface-then-continue (`.claude/rules/reconcilers.md` self-heal
         // posture; RCA `fix-mixed-backend-dispatch-spin` § Fix C). On a
         // genuine same-slot conflict we surface the violation on TWO
@@ -1307,6 +1468,10 @@ pub async fn run_convergence_tick(
             violation = ?violation,
             "reconciler emitted conflicting Actions in one tick; skipping dispatch"
         );
+        // The validate-violation path is itself a self-heal: skip dispatch,
+        // keep the persisted View, retry next tick. It contributes no dispatch
+        // error to propagate.
+        Ok(())
     } else {
         // Dispatch through the action shim — this is where `.await`
         // is permitted. Per-action error isolation lives in the shim.
@@ -1321,10 +1486,14 @@ pub async fn run_convergence_tick(
         // the actions to the engine off the shim — so the workflow-lifecycle
         // reconciler's `hydrate_desired` can read the instance back on the
         // next tick (and re-emit on restart).
+        // NOTE: no `?` here — the outcome is captured into `dispatch_outcome`
+        // and returned at the END of the function, AFTER the self-re-enqueue
+        // below. A recoverable shim error must still re-enqueue (self-heal) so
+        // the persisted retry memory actually re-drives on a later tick.
         action_shim::dispatch_with_workflow_intent(actions, state, &tick)
             .await
-            .map_err(ConvergenceError::Shim)?;
-    }
+            .map_err(ConvergenceError::Shim)
+    };
 
     // Cooperative yield — every action_shim::dispatch path on the
     // single-node SimObservationStore returns Ready synchronously
@@ -1355,7 +1524,11 @@ pub async fn run_convergence_tick(
             .broker()
             .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
     }
-    Ok(())
+    // Return the (still-propagated) dispatch outcome LAST — after the
+    // self-re-enqueue above ran on ALL paths. On a recoverable shim error this
+    // is `Err(ConvergenceError::Shim(_))`, which `lib.rs` logs; the re-enqueue
+    // is what lets the persisted retry memory re-drive next tick.
+    dispatch_outcome
 }
 
 /// Pure predicate over `next_view`: does the `WorkloadLifecycle` reconciler
@@ -1403,6 +1576,48 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // running-no-task instance is driven by the action-emitted gate
         // (the reconciler returns a `StartWorkflow`), not this predicate.
         | AnyReconcilerView::WorkflowLifecycle(_) => false,
+        // The svid-lifecycle view carries per-allocation issue-retry
+        // memory (ADR-0067 D8). A `retry` entry is written on EVERY
+        // `IssueSvid` emit — the record-on-emit / `bump_if_dispatched`
+        // shape in `SvidLifecycle::reconcile` (`attempts += 1`,
+        // `last_failure_seen_at = tick.now_unix`) — so a non-empty `retry`
+        // does NOT exclusively mean "a recorded FAILED attempt mid-backoff".
+        // It can equally be the transient artifact of an as-yet-unconfirmed
+        // SUCCESSFUL first issue: the entry persists from the emit tick until
+        // the confirming tick observes the alloc held and clear-on-success
+        // removes it (`reconcile`'s `running ∧ held` branch). The predicate
+        // INTENTIONALLY keeps the reconciler enqueued in BOTH cases —
+        // failing-and-backing-off, and emitted-but-not-yet-confirmed-held.
+        //
+        // Division of labour with the §18 action-emitted gate (`has_work`):
+        // on a tick that EMITS `IssueSvid` (first issue or restart recovery),
+        // the re-tick is ALREADY driven by `has_work` (an `IssueSvid` is
+        // non-`Noop`), so this predicate firing too is redundant-but-harmless
+        // — the broker collapses duplicate `(reconciler, target)` submits.
+        // This predicate is the SOLE re-enqueue driver only on a SUPPRESSED
+        // tick: a `running ∧ ¬held` alloc inside its backoff window emits a
+        // bare `Noop`, `has_work` is false, and without this arm the broker
+        // drains empty and the reconciler is never re-ticked at the deadline.
+        // That suppressed-tick path is the one pinned by
+        // `svid_lifecycle_reenqueues_while_issue_backoff_pending`.
+        //
+        // The bump is LOAD-BEARING, not incidental: removing it would let a
+        // FAILED issue re-fire every tick with no backoff. Do not "simplify"
+        // it away — it is pinned by
+        // `running_alloc_without_held_svid_emits_issue_svid` and
+        // `first_issue_unheld_never_issued_alloc_issues_and_records_one_attempt`
+        // (both assert `attempts == 1` after a first emit).
+        //
+        // Unlike `WorkloadLifecycle`, the svid reconciler has NO terminal
+        // backoff ceiling — a failed issue retries indefinitely (there is no
+        // `attempts >= CEILING` give-up in `SvidLifecycle::reconcile`), so
+        // EVERY non-empty `retry` entry is outstanding work. The reconcile
+        // body's `retain` GCs entries for non-Running allocs and its
+        // clear-on-success removes entries for held allocs, so a non-empty map
+        // means a still-running alloc has a recorded attempt not yet
+        // confirmed-held — exactly the keep-enqueued condition. Derivable from
+        // `next_view` alone, as the contract requires.
+        AnyReconcilerView::SvidLifecycle(view) => !view.retry.is_empty(),
         // GAP-9 Shape B — keep the service-lifecycle reconciler alive
         // across cadences while any observed alloc is mid-startup-window.
         //
@@ -1496,6 +1711,15 @@ async fn hydrate_desired(
         // `tests::workflow_lifecycle_hydrate::hydrate_desired_does_not_rescan_workflow_intent`.
         AnyReconciler::WorkflowLifecycle(_) => {
             Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
+        }
+        // workload-identity-manager step 01-04 — `desired = the Running
+        // allocations for this workload` (ADR-0067 D1). The per-row projection
+        // lives in `hydrate_svid_desired_running` so this match arm stays
+        // within `clippy::too_many_lines`.
+        AnyReconciler::SvidLifecycle(_) => {
+            let workload_id = workload_id_from_target(target)?;
+            let desired = hydrate_svid_desired_running(state, &workload_id).await?;
+            Ok(AnyState::SvidLifecycle(svid_desired_state(desired)))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -1921,6 +2145,118 @@ async fn hydrate_bridge_desired_listeners(
     Ok(listeners)
 }
 
+/// Project the `SvidLifecycle` reconciler's `desired` set — the Running
+/// allocations for `workload_id` (ADR-0067 D1, step 01-04).
+///
+/// Reads `obs.alloc_status_rows()`, filters to `workload_id == this workload
+/// AND state == Running`, and yields one [`RunningAlloc`] per running alloc
+/// (the inputs the reconciler's pure `SpiffeId::for_allocation` derivation +
+/// the self-describing `IssueSvid.node_id` need). The same `alloc_status_rows`
+/// filter the `WorkloadLifecycle` / `BackendDiscoveryBridge` actual arms use;
+/// single-node row counts are bounded by the local node's allocations. Extracted
+/// from the `hydrate_desired` match arm to keep it within `clippy::too_many_lines`.
+async fn hydrate_svid_desired_running(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<BTreeMap<overdrive_core::id::AllocationId, RunningAlloc>, ConvergenceError> {
+    let rows = state
+        .obs
+        .alloc_status_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    let mut desired: BTreeMap<overdrive_core::id::AllocationId, RunningAlloc> = BTreeMap::new();
+    for row in rows.into_iter().filter(|r| {
+        r.workload_id == *workload_id
+            && r.state == overdrive_core::traits::observation_store::AllocState::Running
+    }) {
+        desired.insert(
+            row.alloc_id,
+            RunningAlloc { workload_id: row.workload_id, node_id: row.node_id },
+        );
+    }
+    Ok(desired)
+}
+
+/// Project the `SvidLifecycle` reconciler's `actual` set — the held-set-as-
+/// `actual` PLUS the durable `ever_issued` restart-recovery signal (ADR-0067
+/// D1/D4 + rev 5 D10).
+///
+/// Two reads, both already available to the runtime:
+///
+/// * The held set —
+///   [`IdentityMgr::held_snapshot`](crate::identity_mgr::IdentityMgr::held_snapshot)
+///   SYNCHRONOUSLY, in-process — exactly as the `WorkflowLifecycle` arm reads the
+///   engine's non-persisted live-task set via `live_instances()`. The held set is
+///   the reconciler's VOLATILE `actual` (presence = "held").
+/// * The `ever_issued` signal (rev 5 D10) — `state.obs.issued_certificate_rows()`
+///   (an `async` ObservationStore read the runtime already performs for other
+///   arms). The DURABLE restart-recovery success fact, projected as the SET of
+///   `spiffe_id`s observed in the audit rows. The reconciler derives
+///   `SpiffeId::for_allocation` per running alloc and tests membership against
+///   this set; `¬held ∧ ever_issued` is the unambiguous restart marker
+///   (minted-then-lost-hold, audit-before-hold per ADR-0063 D6). Keyed on
+///   `spiffe_id` because the audit row carries `spiffe_id`, NOT `alloc_id`. The
+///   boolean presence is projected — the row contents (`serial` / `not_after` /
+///   `issued_at`) stay OUT of `actual`; the near-expiry `not_after` continues to
+///   come from the *held* cert via `HeldSvidFacts`.
+///
+/// The reconciler holds no store handle: the runtime does the read here and folds
+/// the projected `actual` in (A3 reconciliation — reading observation into
+/// `actual` is what every reconciler does; D10 WRITES no success fact, it READS
+/// the one the executor already durably wrote). `desired` is filled by
+/// `hydrate_desired`, so the `actual` value's `desired` field stays empty.
+/// Build the `desired`-role `SvidLifecycleState` from the Running-allocation set
+/// (ADR-0067 D1). The `actual` / `ever_issued` fields are filled by the
+/// actual-side projection (`hydrate_svid_actual_held`), so they are empty on the
+/// desired value — the reconcile body reads them off the `actual`-role value.
+/// Extracted so `hydrate_desired`'s match arm stays within `clippy::too_many_lines`.
+fn svid_desired_state(
+    desired: BTreeMap<overdrive_core::id::AllocationId, RunningAlloc>,
+) -> SvidLifecycleState {
+    SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
+}
+
+/// `actual` is scoped to the TARGET workload's held entries — symmetry with the
+/// desired side (`hydrate_svid_desired_running`), which already filters by the
+/// workload-scoped target `job/<workload_id>` (ADR-0067 D5b). The held snapshot
+/// is GLOBAL (one `IdentityMgr` for the node holds every workload's SVIDs), so
+/// hydrating it unfiltered would feed the reconciler's `¬running ∧ held →
+/// DropSvid` loop every OTHER workload's still-live entries — a `payments` tick
+/// would drop `inventory`'s SVID because `inventory`'s allocs are absent from
+/// `payments`'s desired set. The filter keeps an entry iff its held SPIFFE id
+/// equals the canonical `SpiffeId::for_allocation(target_workload, alloc_id)`
+/// derivation, so only THIS workload's identities reach `actual`.
+///
+/// `ever_issued` stays GLOBAL: it is keyed by the workload-discriminating SPIFFE
+/// URI, so a global audit-row set is correct — membership only matches this
+/// workload's identities (the reconciler tests `SpiffeId::for_allocation(...)`
+/// per running alloc against it).
+async fn hydrate_svid_actual_held(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<AnyState, ConvergenceError> {
+    let actual = state
+        .identity
+        .held_snapshot()
+        .into_iter()
+        .filter(|(alloc_id, facts)| {
+            facts.spiffe_id == overdrive_core::SpiffeId::for_allocation(workload_id, alloc_id)
+        })
+        .collect();
+    let audit_rows = state
+        .obs
+        .issued_certificate_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    let ever_issued: BTreeSet<overdrive_core::SpiffeId> =
+        audit_rows.into_iter().map(|row| row.spiffe_id).collect();
+    Ok(AnyState::SvidLifecycle(SvidLifecycleState {
+        desired: BTreeMap::new(),
+        actual,
+        ever_issued,
+    }))
+}
+
 /// Read a workload from the `IntentStore` at the canonical
 /// `workloads/<id>` key (per ADR-0050 OQ-5 single-cut migration),
 /// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes, and
@@ -2206,6 +2542,13 @@ async fn hydrate_actual(
         AnyReconciler::WorkflowLifecycle(_) => {
             let instances = hydrate_workflow_actual_instances(state).await?;
             Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
+        }
+        // workload-identity-manager step 01-04 + rev 5 D10 — the held-set-as-
+        // `actual` projection PLUS the durable `ever_issued` audit-row signal;
+        // built in `hydrate_svid_actual_held` so this match arm stays within
+        // `clippy::too_many_lines`.
+        AnyReconciler::SvidLifecycle(_) => {
+            hydrate_svid_actual_held(state, &workload_id_from_target(target)?).await
         }
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
@@ -2871,6 +3214,10 @@ mod tests {
                 driver,
                 Arc::new(SimClock::new()),
                 Arc::new(SimDataplane::new()),
+                Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
+                ))),
+                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
                 writer_node(),
                 allocator,
                 listener_facts,
@@ -3342,6 +3689,10 @@ mod tests {
                 driver,
                 Arc::new(SimClock::new()),
                 Arc::new(SimDataplane::new()),
+                Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
+                ))),
+                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
                 writer_node(),
                 allocator,
                 crate::test_empty_listener_facts(),

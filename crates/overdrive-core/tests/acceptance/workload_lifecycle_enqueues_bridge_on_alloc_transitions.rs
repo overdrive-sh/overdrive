@@ -171,6 +171,34 @@ fn assert_single_service_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     );
 }
 
+/// ADR-0067 D5b helper — assert that `actions` contains exactly one
+/// `Action::EnqueueEvaluation` routed at `svid-lifecycle` for the given
+/// workload, keyed `job/<workload_id>`. The svid-lifecycle enqueue is
+/// UNGATED by workload kind (identity is needed by every running alloc).
+fn assert_single_svid_enqueue(actions: &[Action], workload_id: &WorkloadId) {
+    let mut count = 0;
+    let mut found_target: Option<&TargetResource> = None;
+    for action in actions {
+        if let Action::EnqueueEvaluation { reconciler, target } = action
+            && reconciler.as_str() == "svid-lifecycle"
+        {
+            count += 1;
+            found_target = Some(target);
+        }
+    }
+    assert_eq!(
+        count, 1,
+        "ADR-0067 D5b: an alloc-mutating tick MUST emit exactly one EnqueueEvaluation \
+         routed at 'svid-lifecycle'; got {count} in {actions:?}",
+    );
+    let target = found_target.expect("count==1 checked above");
+    assert_eq!(
+        target.as_str(),
+        &format!("job/{workload_id}"),
+        "ADR-0067 D5b: svid-lifecycle enqueue target MUST be 'job/<workload_id>'"
+    );
+}
+
 /// GAP-9 helper — assert NO `service-lifecycle` enqueue appears.
 fn assert_no_service_enqueue(actions: &[Action]) {
     let count = actions
@@ -223,13 +251,14 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // GAP-9: Service-kind StartAllocation now emits THREE actions —
-    // StartAllocation + bridge EnqueueEvaluation + service-lifecycle
-    // EnqueueEvaluation.
+    // GAP-9 + ADR-0067 D5b: Service-kind StartAllocation now emits FOUR
+    // actions — StartAllocation + bridge EnqueueEvaluation +
+    // service-lifecycle EnqueueEvaluation + svid-lifecycle EnqueueEvaluation.
     assert_eq!(
         actions.len(),
-        3,
-        "expected StartAllocation + bridge enqueue + service-lifecycle enqueue; got {actions:?}"
+        4,
+        "expected StartAllocation + bridge enqueue + service-lifecycle enqueue \
+         + svid-lifecycle enqueue; got {actions:?}"
     );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
@@ -237,6 +266,7 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
     assert_single_service_enqueue(&actions, &workload_id);
+    assert_single_svid_enqueue(&actions, &workload_id);
 }
 
 // -------------------------------------------------------------------
@@ -282,11 +312,13 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
     // GAP-9: StopAllocation is a terminal-REMOVAL transition — NOT an
     // alloc-starting one — so it dual-emits the bridge enqueue (the
     // bridge cares about removals) but NOT the service-lifecycle
-    // enqueue (no new startup window). Stays at 2 actions.
+    // enqueue (no new startup window). ADR-0067 D5b: it DOES emit the
+    // svid-lifecycle enqueue (a removal must drop the held leaf). 3 actions.
     assert_eq!(
         actions.len(),
-        2,
-        "expected StopAllocation + bridge enqueue (no service enqueue on Stop); got {actions:?}"
+        3,
+        "expected StopAllocation + bridge enqueue + svid-lifecycle enqueue \
+         (no service enqueue on Stop); got {actions:?}"
     );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
@@ -294,6 +326,7 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
     assert_no_service_enqueue(&actions);
+    assert_single_svid_enqueue(&actions, &workload_id);
 }
 
 // -------------------------------------------------------------------
@@ -337,11 +370,13 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // GAP-9: GC StopAllocation is a removal — bridge enqueue only, no
-    // service-lifecycle enqueue (no new startup window). Stays at 2.
+    // service-lifecycle enqueue (no new startup window). ADR-0067 D5b
+    // adds the svid-lifecycle enqueue (a removal drops the held leaf). 3.
     assert_eq!(
         actions.len(),
-        2,
-        "expected StopAllocation + bridge enqueue (no service enqueue on GC stop); got {actions:?}"
+        3,
+        "expected StopAllocation + bridge enqueue + svid-lifecycle enqueue \
+         (no service enqueue on GC stop); got {actions:?}"
     );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
@@ -349,6 +384,7 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
     assert_no_service_enqueue(&actions);
+    assert_single_svid_enqueue(&actions, &workload_id);
 }
 
 // -------------------------------------------------------------------
@@ -399,11 +435,13 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // GAP-9: FinalizeFailed is a terminal-removal transition — bridge
-    // enqueue only, no service-lifecycle enqueue. Stays at 2.
+    // enqueue only, no service-lifecycle enqueue. ADR-0067 D5b adds the
+    // svid-lifecycle enqueue (a removal drops the held leaf). 3 actions.
     assert_eq!(
         actions.len(),
-        2,
-        "expected FinalizeFailed + bridge enqueue (no service enqueue on Finalize); got {actions:?}"
+        3,
+        "expected FinalizeFailed + bridge enqueue + svid-lifecycle enqueue \
+         (no service enqueue on Finalize); got {actions:?}"
     );
     assert!(
         actions.iter().any(|a| matches!(
@@ -417,6 +455,7 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
     assert_no_service_enqueue(&actions);
+    assert_single_svid_enqueue(&actions, &workload_id);
 }
 
 // -------------------------------------------------------------------
@@ -650,13 +689,15 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // Job-kind StartAllocation: StartAllocation + bridge enqueue only
-    // (the bridge is kind-agnostic). NO service-lifecycle enqueue.
+    // Job-kind StartAllocation: StartAllocation + bridge enqueue +
+    // svid-lifecycle enqueue (both are kind-agnostic — ADR-0067 D5b
+    // svid-lifecycle is UNGATED by kind). NO service-lifecycle enqueue
+    // (service-lifecycle IS Service-gated). 3 actions.
     assert_eq!(
         actions.len(),
-        2,
-        "Job-kind StartAllocation: StartAllocation + bridge enqueue only (no service-lifecycle); \
-         got {actions:?}"
+        3,
+        "Job-kind StartAllocation: StartAllocation + bridge enqueue + svid-lifecycle enqueue \
+         (no service-lifecycle); got {actions:?}"
     );
     assert!(
         actions.iter().any(|a| matches!(a, Action::StartAllocation { .. })),
@@ -664,4 +705,5 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
     );
     assert_single_bridge_enqueue(&actions, &workload_id);
     assert_no_service_enqueue(&actions);
+    assert_single_svid_enqueue(&actions, &workload_id);
 }

@@ -266,7 +266,11 @@ proptest! {
             let test_broker = parking_lot::Mutex::new(
                 overdrive_core::eval_broker::EvaluationBroker::new(),
             );
-            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node, allocator, &test_broker, None)
+            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(),
+                &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
+                &overdrive_sim::adapters::clock::SimClock::new(),
+                &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+                &tx, &tick, &writer_node, allocator, &test_broker, None)
                 .await
                 .expect("dispatch must succeed");
 
@@ -332,6 +336,11 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         driver.as_ref(),
         obs.as_ref(),
         dataplane.as_ref(),
+        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
         &tx,
         &tick,
         &writer_node,
@@ -477,6 +486,11 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         driver.as_ref(),
         obs.as_ref(),
         dataplane.as_ref(),
+        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
         &tx,
         &tick,
         &writer_node,

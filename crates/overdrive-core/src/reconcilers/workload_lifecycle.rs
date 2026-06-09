@@ -244,6 +244,33 @@ impl Reconciler for WorkloadLifecycle {
                     });
                 }
             }
+
+            // ADR-0067 D5b (producer 1) — enqueue `svid-lifecycle` for the
+            // same workload-scoped target so the SVID reconciler re-converges
+            // its held set against the running set. UNGATED by workload kind:
+            // identity is needed by EVERY running allocation, not only Service
+            // (unlike the service-lifecycle dual-emit above). Every one of the
+            // four alloc-mutating variants ADDs or REMOVEs a Running alloc —
+            // exactly when the held set must re-converge (Start/Restart →
+            // `running ∧ ¬held → IssueSvid`; Stop/Finalize →
+            // `¬running ∧ held → DropSvid`).
+            //
+            // Single emission per tick (not per action): the broker is LWW at
+            // `(ReconcilerName, TargetResource)`, so a duplicate enqueue across
+            // this site and the exit observer's `job/<workload_id>` submit
+            // collapses to one dispatch per drain cycle.
+            #[allow(clippy::expect_used)]
+            {
+                let svid_name = ReconcilerName::new(SVID_LIFECYCLE_NAME)
+                    .expect("'svid-lifecycle' is a valid ReconcilerName by construction");
+                let svid_target = TargetResource::new(&format!("job/{}", desired.workload_id))
+                    .expect(
+                        "'job/<workload_id>' is a valid TargetResource by construction \
+                         (WorkloadId is constructor-validated, prefix is canonical)",
+                    );
+                actions
+                    .push(Action::EnqueueEvaluation { reconciler: svid_name, target: svid_target });
+            }
         }
 
         (actions, next_view)
@@ -266,6 +293,15 @@ const BACKEND_DISCOVERY_BRIDGE_NAME: &str = <BackendDiscoveryBridge as Reconcile
 /// compile error, not a silent GAP-9-style dead handoff.
 const SERVICE_LIFECYCLE_NAME: &str =
     <crate::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME;
+
+/// ADR-0067 D5b — name of the `SvidLifecycle` reconciler.
+///
+/// Compile-time alias to `<SvidLifecycle as Reconciler>::NAME` — same
+/// anti-drift discipline as [`BACKEND_DISCOVERY_BRIDGE_NAME`] /
+/// [`SERVICE_LIFECYCLE_NAME`]: renaming the reconciler's `NAME` const
+/// without updating this reference is a compile error, not a silent
+/// dead handoff (the failure mode D5b exists to prevent).
+const SVID_LIFECYCLE_NAME: &str = <super::svid_lifecycle::SvidLifecycle as Reconciler>::NAME;
 
 /// UI-06 — predicate: is `action` one of the four alloc-mutating
 /// variants the `BackendDiscoveryBridge` cares about?
@@ -615,7 +651,7 @@ impl WorkloadLifecycle {
                     // .clone() calls + identity derivation), and
                     // preserves the shim's stateless-dispatcher
                     // contract per ADR-0023.
-                    let identity = mint_identity(&job.id, &failed.alloc_id);
+                    let identity = SpiffeId::for_allocation(&job.id, &failed.alloc_id);
                     // Per ADR-0031 Amendment 1: destructure the
                     // tagged-enum `WorkloadDriver` to project to the
                     // flat `AllocationSpec` (which stays flat per
@@ -698,7 +734,7 @@ impl WorkloadLifecycle {
                         // promise.
                         let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
                         let alloc_id = mint_alloc_id(&job.id, attempt);
-                        let identity = mint_identity(&job.id, &alloc_id);
+                        let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
                         // Per ADR-0031 §5 + Amendment 1: the Start
                         // action carries the operator-declared command
                         // + args projected from the tagged-enum
@@ -802,17 +838,6 @@ fn mint_alloc_id(workload_id: &WorkloadId, attempt: u32) -> AllocationId {
     let raw = format!("alloc-{}-{}", workload_id.as_str(), attempt);
     #[allow(clippy::expect_used)]
     AllocationId::new(&raw).expect("derived alloc id format is valid")
-}
-
-/// Mint a deterministic [`SpiffeId`] for an allocation.
-fn mint_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId {
-    let raw = format!(
-        "spiffe://overdrive.local/job/{}/alloc/{}",
-        workload_id.as_str(),
-        alloc_id.as_str()
-    );
-    #[allow(clippy::expect_used)]
-    SpiffeId::new(&raw).expect("derived SpiffeId is valid")
 }
 
 /// service-vip-allocator step 03-01 — pure helper for the Service-arm

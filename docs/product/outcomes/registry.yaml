@@ -100,3 +100,70 @@ outcomes:
   artifact: crates/overdrive-core/src/cert_spec.rs
   related: []
   superseded_by: null
+- id: OUT-WIM-SVID-LIFECYCLE
+  kind: specification
+  summary: SvidLifecycle converges the running allocation set against the held SVID
+    set without CA or ObservationStore I/O inside reconcile
+  feature: workload-identity-manager
+  inputs:
+  - shape: desired running allocations, held IdentityMgr snapshot, retry-memory View,
+      TickContext
+  output:
+    shape: Vec<Action> containing IssueSvid for running-and-unheld and DropSvid for
+      stopped-and-held; next View remains retry memory only
+  keywords:
+  - svid
+  - identity
+  - lifecycle
+  - reconciler
+  - issue
+  - drop
+  - running-set
+  artifact: crates/overdrive-core/src/reconcilers/svid_lifecycle.rs
+  related: []
+  superseded_by: null
+- id: OUT-WIM-RUNNING-SET-INVARIANT
+  kind: invariant
+  summary: The workload identity held set eventually equals the Running allocation
+    set, with valid SVIDs for running allocations and no held credential for stopped
+    allocations
+  feature: workload-identity-manager
+  inputs:
+  - shape: seeded sequence of allocation Running and Stopped transitions plus held
+      SVID map snapshots
+  output:
+    shape: eventually every Running allocation holds a valid SVID and no stopped allocation
+      holds one; broken hold/drop fails the invariant
+  keywords:
+  - dst
+  - invariant
+  - running-set
+  - svid
+  - drop-on-stop
+  - identity-availability
+  artifact: crates/overdrive-sim/src/invariants/workload_identity.rs
+  related: []
+  superseded_by: null
+- id: OUT-WIM-IDENTITY-READ
+  kind: specification
+  summary: IdentityRead is a sync owned-clone read port over the held SVID set — a
+    read never issues, never mutates, returns explicit None for absence, hands back
+    owned clones holding no lock, and observes drop-on-stop as None
+  feature: workload-identity-manager
+  inputs:
+  - shape: AllocationId for svid_for; no argument for current_bundle; reads served
+      from the held IdentityMgr map and hydrated TrustBundle
+  output:
+    shape: Option<SvidMaterial> owned clone (None == explicit absence, incl. post-DropSvid)
+      and Option<TrustBundle> owned clone, with zero CA issuance on the read path
+  keywords:
+  - svid
+  - identity
+  - read-port
+  - trust-bundle
+  - owned-clone
+  - no-reissue
+  - drop-on-stop
+  artifact: crates/overdrive-core/src/traits/identity_read.rs
+  related: []
+  superseded_by: null

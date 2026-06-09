@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 64bd55c7d0259accd93e98a85bf79e9496a4a405cc96a1bfffc85ad6a3052584 # shrinks to reason = Scheduling
+cc 5005159cf3b36412c55afb50e22c0b96c5e4db0fa58a1d64c16860276a78ddb5 # shrinks to reason = CgroupSetupFailed { kind: "jhz3b", source: "x6-f7-9t-wto---" }

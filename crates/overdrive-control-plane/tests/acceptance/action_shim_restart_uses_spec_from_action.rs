@@ -178,6 +178,11 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         driver_dyn.as_ref(),
         obs.as_ref(),
         dataplane.as_ref(),
+        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
         &lifecycle_tx,
         &tick,
         &writer_node,

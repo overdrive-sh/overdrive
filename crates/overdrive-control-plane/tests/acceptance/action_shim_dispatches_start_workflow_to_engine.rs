@@ -130,6 +130,11 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
         &driver,
         obs.as_ref(),
         &dataplane,
+        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
         &bus,
         &tick,
         &node,

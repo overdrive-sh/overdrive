@@ -217,9 +217,10 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
     // fires with Operator terminal).
     assert_eq!(
         actions.len(),
-        2,
+        3,
         "GC arm must emit StopAllocation for the orphan Running row + bridge \
-         EnqueueEvaluation per UI-06; got {actions:?}",
+         EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per \
+         ADR-0067 D5b; got {actions:?}",
     );
     match &actions[0] {
         Action::StopAllocation { terminal, .. } => {
@@ -332,8 +333,9 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
     // Under `==`: exactly one StopAllocation, naming the Running alloc.
     assert_eq!(
         actions.len(),
-        2,
-        "must emit StopAllocation + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "must emit StopAllocation + bridge EnqueueEvaluation per UI-06 + \
+         svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::StopAllocation { alloc_id, .. } => {
@@ -437,9 +439,10 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
 
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "must emit StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle \
-         EnqueueEvaluation per GAP-9 (Service-kind start); got {actions:?}"
+         EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b \
+         (Service-kind start); got {actions:?}"
     );
     assert!(
         matches!(
@@ -466,8 +469,8 @@ fn restart_emitted_when_attempts_below_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(attempts_when_below_ceiling);
     assert_eq!(
         actions.len(),
-        3,
-        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions:?}",
+        4,
+        "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b (Service-kind restart); got {actions:?}",
     );
     assert!(
         matches!(
@@ -494,8 +497,8 @@ fn restart_suppressed_at_exact_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(RESTART_BACKOFF_CEILING);
     assert_eq!(
         actions.len(),
-        2,
-        "attempts == ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+        3,
+        "attempts == ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}",
     );
     assert!(
         matches!(actions[0], Action::FinalizeFailed { .. }),
@@ -515,8 +518,8 @@ fn restart_suppressed_above_ceiling() {
     let actions = run_with_failed_alloc_and_attempts(RESTART_BACKOFF_CEILING + 1);
     assert_eq!(
         actions.len(),
-        2,
-        "attempts > ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+        3,
+        "attempts > ceiling must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}",
     );
     assert!(
         matches!(actions[0], Action::FinalizeFailed { .. }),
@@ -609,9 +612,10 @@ fn restart_emitted_when_now_equals_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "now_unix == seen_at + backoff must emit RestartAllocation + bridge \
          EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 \
+         + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b \
          (Service-kind restart, backoff elapsed); got {actions:?}",
     );
     assert!(
@@ -638,9 +642,10 @@ fn restart_emitted_when_now_strictly_after_deadline() {
     let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "now_unix > seen_at + backoff must emit RestartAllocation + bridge \
          EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 \
+         + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b \
          (Service-kind restart, backoff elapsed); got {actions:?}",
     );
 }
@@ -751,9 +756,10 @@ fn fresh_failure_writes_seen_at_into_next_view() {
     // RestartAllocation emitted for the failed alloc.
     assert_eq!(
         actions.len(),
-        3,
+        4,
         "fresh failure must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + \
-         service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions:?}"
+         service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation \
+         per ADR-0067 D5b (Service-kind restart); got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, .. } => {
@@ -912,8 +918,8 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
 
     assert_eq!(
         actions_2.len(),
-        3,
-        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 (Service-kind restart); got {actions_2:?}",
+        4,
+        "tick 2 after backoff elapsed must emit one RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b (Service-kind restart); got {actions_2:?}",
     );
     assert!(
         matches!(
@@ -1201,8 +1207,8 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
         // emitted actions, compare to expected — order-independent.
         assert_eq!(
             actions.len(),
-            4,
-            "kind={kind:?}: expected one StopAllocation per Running row + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+            5,
+            "kind={kind:?}: expected one StopAllocation per Running row (×3) + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}",
         );
         let expected_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc });
         let mut emitted: Vec<(String, Option<TerminalCondition>)> = actions
@@ -1413,9 +1419,10 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
         // (alloc-payments-1 — index 1 in the state list above).
         assert_eq!(
             actions.len(),
-            2,
+            3,
             "kind={kind:?}: mixed states must emit exactly one StopAllocation \
-             (the Running row) + bridge EnqueueEvaluation per UI-06; got {actions:?}",
+             (the Running row) + bridge EnqueueEvaluation per UI-06 + svid-lifecycle \
+             EnqueueEvaluation per ADR-0067 D5b; got {actions:?}",
         );
         match &actions[0] {
             Action::StopAllocation { alloc_id, terminal } => {
@@ -1521,12 +1528,15 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
         // GAP-9: Service-kind emits an extra service-lifecycle
         // EnqueueEvaluation on the StartAllocation (a starting
         // transition); Job / Schedule do not (the gate is `== Service`).
-        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
+        // ADR-0067 D5b: svid-lifecycle EnqueueEvaluation is emitted for
+        // EVERY kind (ungated), so +1 to both arms.
+        let expected_len = if *kind == WorkloadKind::Service { 4 } else { 3 };
         assert_eq!(
             actions.len(),
             expected_len,
             "kind={kind:?}: SystemGc-Terminated row + intent present must emit \
              exactly one fresh placement + bridge EnqueueEvaluation per UI-06 \
+             + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b \
              (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         match &actions[0] {
@@ -1706,13 +1716,16 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
         // transition) → +1 service-lifecycle EnqueueEvaluation.
         // Schedule emits RestartAllocation too but the `== Service`
         // gate excludes it; Job emits FinalizeFailed (not a starting
-        // transition). So only Service hits 3.
-        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
+        // transition). ADR-0067 D5b: svid-lifecycle EnqueueEvaluation is
+        // emitted for EVERY kind (ungated), so +1 to both arms — Service
+        // hits 4, Job/Schedule hit 3.
+        let expected_len = if *kind == WorkloadKind::Service { 4 } else { 3 };
         assert_eq!(
             actions.len(),
             expected_len,
             "kind={kind:?}: SystemGc row + Failed row must emit exactly one action \
              (against the Failed row, not the SystemGc row) + bridge EnqueueEvaluation per UI-06 \
+             + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b \
              (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         let action_alloc_id = match &actions[0] {
@@ -1879,13 +1892,16 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
         // NEW alloc_id (architecture.md § 5 promise). Same assertion
         // shape across kinds — the placement path is kind-agnostic.
         // GAP-9: Service-kind StartAllocation → +1 service-lifecycle
-        // EnqueueEvaluation; Job / Schedule stay at 2.
-        let expected_len = if *kind == WorkloadKind::Service { 3 } else { 2 };
+        // EnqueueEvaluation. ADR-0067 D5b: svid-lifecycle
+        // EnqueueEvaluation for EVERY kind (ungated), so +1 to both arms —
+        // Service hits 4, Job/Schedule hit 3.
+        let expected_len = if *kind == WorkloadKind::Service { 4 } else { 3 };
         assert_eq!(
             actions.len(),
             expected_len,
             "kind={kind:?}: filtered SystemGc-via-reason row + intent present must \
              emit exactly one fresh placement + bridge EnqueueEvaluation per UI-06 \
+             + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b \
              (+ service-lifecycle EnqueueEvaluation per GAP-9 for Service kind); got {actions:?}",
         );
         match &actions[0] {

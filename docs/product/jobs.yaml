@@ -273,6 +273,82 @@ jobs:
     served_by_phase: 2
     status: active
 
+  - id: J-SEC-002
+    title: "Keep every running workload holding a live, readable identity the dataplane can present — and nothing held for a workload that has stopped"
+    relates_to: J-SEC-001
+    situation: >
+      When a workload I run transitions into (or out of) the Running
+      state on the platform — and my kernel-side sockops/kTLS mTLS layer,
+      my L7 gateway, and my telemetry sink all need to present or stamp
+      that workload's cryptographic identity right now — and Overdrive is
+      sidecarless, so there is no in-workload agent to fetch, hold, or
+      drop a credential,
+    motivation: >
+      I want the platform to bind a live, chain-verifiable SVID to that
+      exact allocation — issued the moment it starts (via the built-in
+      CA, J-SEC-001), held where my dataplane consumers can read it the
+      instant they need it, and dropped the moment the workload stops —
+      with the issuance lifecycle driven by the allocation lifecycle the
+      control plane already observes, not by an in-workload agent or
+      manual plumbing,
+    outcome: >
+      so design principle 3 ("every packet carries cryptographic workload
+      identity") is OPERATIONALLY TRUE for the running set — not merely
+      mintable in principle (J-SEC-001) — with the window between Running
+      and identity-held bounded to one reconcile tick and fail-closed (a
+      workload with no held SVID cannot present identity, so the mTLS
+      consumer fails closed — the bounded window is not an exposure), no
+      leak where a stopped workload's leaf private key lingers in memory,
+      and identity availability a DST-proven converged invariant rather
+      than a hope.
+      This is the consumer-lifecycle peer of J-SEC-001 (which mints
+      identity); J-SEC-002 holds it, reads it, and drops it. ODI outcomes:
+      O1 (running ⇒ held, chain-verifiable SVID — the
+      `assert_eventually!("running allocs hold a valid SVID")` invariant),
+      O2 (stopped ⇒ dropped, leaf key not lingering), O3 (minimize
+      consumer read latency for SVID + trust bundle), O4 (bounded,
+      audited restart re-issue — no stale or silent credential; the leaf
+      key is non-persistable, so a restart re-issues each still-Running
+      alloc, audited), O5 (no SVID handed out without an observable
+      `issued_certificates` audit row), O6 (minimize additional
+      concurrency/storage mechanisms beyond the shipped reconciler
+      runtime + Ca port + ObservationStore). See
+      docs/feature/workload-identity-manager/diverge/job-analysis.md.
+    job_dimensions:
+      functional: >
+        Maintain an in-memory map running-allocation → current
+        SvidMaterial that gains an entry (chain-verifiable to the root)
+        when an allocation reaches Running, is readable by dataplane
+        consumers (sockops/gateway/telemetry) without re-issuing per read,
+        loses the entry when the allocation stops, and also exposes the
+        current CA trust bundle relying parties verify against. On a
+        control-plane restart, re-issuance is bounded and audited — each
+        still-Running alloc is re-issued and audited (no stale or silent
+        credential), since the held leaf key cannot survive a restart.
+      emotional: >
+        Trust that the running set is CONSISTENTLY identity-bearing — that
+        the gap between Running and identity-held is bounded by convergence
+        (one reconcile tick) and fail-closed (a workload with no held SVID
+        cannot present identity), no quiet leak where a stopped workload's
+        private key survives in memory. Identity availability is a converged
+        invariant, not a hope.
+      social: >
+        Tell a security reviewer "the live credential set is bounded to
+        the running workload set by a convergence loop with a DST-proven
+        assert_eventually! invariant — identity availability is
+        mechanically checked, not asserted" — and have it be true.
+    source: >
+      whitepaper §5 (per-allocation identity), §8 (Identity and mTLS), §11
+      (gateway / unified IdentityMgr across SVID + ACME); roadmap step
+      2.13; GH #35 (Depends on #28 J-SEC-001); design principle 3.
+      DIVERGE wave (2026-06-08) minted this as a job DISTINCT from
+      J-SEC-001 — see the changelog entry below and
+      docs/feature/workload-identity-manager/diverge/job-analysis.md §3
+      for the new-job verdict justification. Distilled from the whitepaper
+      + roadmap, not from user interviews (per the header precedent).
+    served_by_phase: 2
+    status: active
+
   - id: J-DOCS-001
     title: "Find an authoritative Overdrive answer fast while evaluating or adopting"
     situation: >
@@ -460,3 +536,36 @@ changelog:
       HA/multi-node (tracked in GH #205) — NOT promised in any Phase-1
       acceptance criterion. The job statement itself (served_by_phase: 3) is
       unchanged. Existing entries unmodified.
+  - date: 2026-06-08
+    change: >
+      Added J-SEC-002 for the workload-identity-manager feature (GH #35,
+      roadmap step 2.13), minted by the DIVERGE wave. VERDICT: this is a
+      NEW, DISTINCT job — NOT the consumer surface of J-SEC-001. The
+      DIVERGE Phase-1 analysis weighed two framings (extend J-SEC-001 vs
+      mint a new job) and chose to mint J-SEC-002 on three grounds: (1)
+      different JTBD progress + failure mode — J-SEC-001 is forgery-
+      resistance / no-external-PKI (failure = a forgeable identity), while
+      J-SEC-002 is liveness/availability/lifecycle-binding of identity for
+      the running set (failure = a running-but-unidentifiable workload, a
+      stopped-but-key-leaking workload, or a consumer that cannot read the
+      credential it must present) — the two are independently satisfiable
+      and independently failable; (2) different actor-circumstance — the
+      trigger is the allocation Running↔Stopped lifecycle transition, not
+      the absence of a CA; (3) the roadmap + whitepaper already treat them
+      as distinct primitives (step 2.6 CA / #28 vs step 2.13 IdentityMgr /
+      #35, #35 Depends on #28). The udp-sendmsg4 precedent (elevate under
+      an existing job rather than mint a new one, 2026-06-05) was
+      considered and found NOT to apply — that was the SAME reachability
+      job at finer granularity (same progress, same failure mode); this is
+      a genuinely distinct job, so collapsing it under J-SEC-001 would
+      over-correct. J-SEC-002 carries a relates_to: J-SEC-001 link
+      (consumer of the CA primitive), full functional/emotional/social
+      dimensions, and six ODI outcomes O1-O6 (O1/O2/O3 the high-
+      opportunity under-served core: holding, dropping, and reading
+      identity is entirely unbuilt today). served_by_phase: 2. The DIVERGE
+      recommended Option 1 (standalone SvidLifecycle reconciler + typed
+      Action::IssueSvid/DropSvid + action-shim executor → shared
+      Arc<IdentityMgr>; consumers read via sync getters behind an
+      IdentityRead port; rotation deferred to #40 as a no-op
+      Action::StartWorkflow). Existing entries unmodified. See
+      docs/feature/workload-identity-manager/.

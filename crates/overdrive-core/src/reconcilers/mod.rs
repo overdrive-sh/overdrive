@@ -160,7 +160,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::aggregate::WorkloadKind;
-use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
 use crate::traits::driver::AllocationSpec;
 use crate::traits::observation_store::ServiceBackendRow;
 use crate::transition_reason::TerminalCondition;
@@ -169,6 +169,7 @@ use crate::wall_clock::UnixInstant;
 pub mod backend_discovery_bridge;
 pub mod noop_heartbeat;
 pub mod service_map_hydrator;
+pub mod svid_lifecycle;
 pub mod workflow_lifecycle;
 pub mod workload_lifecycle;
 
@@ -179,6 +180,9 @@ pub use noop_heartbeat::NoopHeartbeat;
 pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, classify_backend_address,
+};
+pub use svid_lifecycle::{
+    HeldSvidFacts, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
 };
 pub use workflow_lifecycle::{
     WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
@@ -347,6 +351,10 @@ pub enum AnyState {
     /// [`crate::service_lifecycle::ServiceLifecycleState`]. Per
     /// ADR-0055; landed by the `service-health-check-probes` feature.
     ServiceLifecycle(ServiceLifecycleState),
+    /// `SvidLifecycle` reconciler's typed projection — see
+    /// [`SvidLifecycleState`] (ADR-0067 D1: `desired = running allocs`,
+    /// `actual = the IdentityMgr held set`).
+    SvidLifecycle(SvidLifecycleState),
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +532,46 @@ pub enum Action {
         /// Mirrors `RegisterLocalBackend::backend`.
         backend: std::net::SocketAddrV4,
         /// Cause-to-response linkage.
+        correlation: CorrelationKey,
+    },
+
+    /// Issue (or re-issue) a workload SVID for a Running allocation that
+    /// the `IdentityMgr` does not yet hold (ADR-0067 D2). Emitted by the
+    /// pure `SvidLifecycle` reconciler (01-04) on the `running ∧ ¬held`
+    /// branch; dispatched by the action-shim `issue_svid` executor (01-06),
+    /// which mints the leaf via `ca_issuance::issue_and_audit` and holds it
+    /// in the in-process `IdentityMgr`. CA I/O lives entirely in the
+    /// executor — never in `reconcile()`.
+    IssueSvid {
+        /// The allocation the SVID is issued for.
+        alloc_id: AllocationId,
+        /// The workload identity, built PURE by the reconciler via
+        /// [`SpiffeId::for_allocation`] (ADR-0067 D5) — identity derivation
+        /// is pure; identity issuance is the executor's.
+        spiffe_id: SpiffeId,
+        /// The node the SVID is issued on. Self-describing: this is the
+        /// `issued_certificates` row's `node_id` and the
+        /// `issue_and_audit(.., node, ..)` argument (#36-forward-compat).
+        node_id: NodeId,
+        /// Cause-to-response linkage. Derived via
+        /// `CorrelationKey::derive("svid-lifecycle/<alloc>", spec_hash,
+        /// "issue-svid")` — NOT a per-attempt request id (ADR-0035
+        /// reconciler-I/O correlation discipline).
+        correlation: CorrelationKey,
+    },
+
+    /// Drop a held workload SVID for an allocation that is no longer
+    /// Running (ADR-0067 D2). Emitted by the pure `SvidLifecycle`
+    /// reconciler (01-04) on the `¬running ∧ held` branch; dispatched by
+    /// the action-shim executor (01-06), which calls
+    /// `IdentityMgr::drop_svid` so the node-held leaf private key is no
+    /// longer reachable in the held set (O2 — leak resistance on stop).
+    DropSvid {
+        /// The allocation whose held SVID is dropped.
+        alloc_id: AllocationId,
+        /// Cause-to-response linkage. Derived via
+        /// `CorrelationKey::derive("svid-lifecycle/<alloc>", spec_hash,
+        /// "drop-svid")` — NOT a per-attempt request id.
         correlation: CorrelationKey,
     },
 }
@@ -756,6 +804,10 @@ pub enum AnyReconciler {
     /// Service-health-check-probes — `service-lifecycle` per
     /// ADR-0055. See [`crate::service_lifecycle::ServiceLifecycleReconciler`].
     ServiceLifecycle(ServiceLifecycleReconciler),
+    /// Workload-identity-manager — `svid-lifecycle` per ADR-0067 D1.
+    /// Converges `desired = running allocs` against `actual = held set`,
+    /// emitting `IssueSvid` / `DropSvid`. See [`SvidLifecycle`].
+    SvidLifecycle(SvidLifecycle),
 }
 
 impl AnyReconciler {
@@ -769,6 +821,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(r) => r.name(),
             Self::BackendDiscoveryBridge(r) => r.name(),
             Self::ServiceLifecycle(r) => r.name(),
+            Self::SvidLifecycle(r) => r.name(),
         }
     }
 
@@ -783,6 +836,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
             Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
+            Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
         }
     }
 
@@ -846,6 +900,15 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::ServiceLifecycle(next_view))
             }
+            (
+                Self::SvidLifecycle(r),
+                AnyState::SvidLifecycle(desired),
+                AnyState::SvidLifecycle(actual),
+                AnyReconcilerView::SvidLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::SvidLifecycle(next_view))
+            }
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
@@ -876,4 +939,8 @@ pub enum AnyReconcilerView {
     /// set) — derived state (`Stable` predicate, deadlines) is
     /// recomputed every tick.
     ServiceLifecycle(ServiceLifecycleView),
+    /// `SvidLifecycle` reconciler's view (Slice 01: empty — the issue/drop
+    /// decision is pure over `desired`/`actual`; retry memory lands in
+    /// 03-01). ADR-0067 D8.
+    SvidLifecycle(SvidLifecycleView),
 }

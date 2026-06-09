@@ -62,6 +62,12 @@ pub mod cgroup_preflight;
 pub mod dataplane_config;
 pub mod error;
 pub mod handlers;
+// workload-identity-manager step 01-03 (ADR-0067 D4) — `IdentityMgr`, the
+// in-process held-SVID store + boot trust bundle. Ephemeral runtime state
+// (neither intent nor observation); `held_snapshot` yields the `HeldSvidFacts`
+// projection the `SvidLifecycle` reconciler reads as `actual`. The
+// `IdentityRead` impl lands 02-01; the reconciler wiring 01-04.
+pub mod identity_mgr;
 // backend-discovery-bridge-service-reachability step 02-01 — host
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved
@@ -127,6 +133,7 @@ use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
 use overdrive_core::id::NodeId;
+use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::Driver;
@@ -136,6 +143,7 @@ use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_store_local::LocalIntentStore;
 use tokio_util::sync::CancellationToken;
 
+use crate::identity_mgr::IdentityMgr;
 use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
 /// Shared application state passed to every axum handler via
@@ -279,6 +287,25 @@ pub struct AppState {
     /// (the 01-05/01-06 `dispatch(... None)` placeholder is gone). Tests
     /// inject an engine over `Sim*` ports.
     pub workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
+    /// The built-in certificate-authority driving port (ADR-0067 D3). The
+    /// action shim's `Action::IssueSvid` arm dispatches through this trait
+    /// object via `ca_issuance::issue_and_audit` (the ONE place workload-CA
+    /// I/O happens). Production composes an EPHEMERAL `RcgenCa` at boot (fresh
+    /// in-memory P-256 root each boot, NO KEK / NO persistence — the original
+    /// Phase-2 plan; the persistent KEK-backed root + operator render are
+    /// GH #215, blocked on #35). Tests inject `SimCa`.
+    ///
+    /// Mandatory at construction (`Arc<dyn Ca>`, NOT `Option`) per
+    /// `.claude/rules/development.md` § "Port-trait dependencies": there IS a
+    /// CA now, so the dependency is required at every call site.
+    pub ca: Arc<dyn Ca>,
+    /// The in-process held-SVID store + boot trust bundle (ADR-0067 D4). The
+    /// action shim's `Action::IssueSvid` arm holds the minted `SvidMaterial`
+    /// here after `issue_and_audit` succeeds; `Action::DropSvid` removes it.
+    /// The `SvidLifecycle` reconciler (01-04) reads its `held_snapshot` as
+    /// `actual`. Ephemeral runtime state — neither intent nor observation —
+    /// rebuilt on restart by re-issuing for every still-Running alloc.
+    pub identity: Arc<IdentityMgr>,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -405,6 +432,8 @@ impl AppState {
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
+        ca: Arc<dyn Ca>,
+        identity: Arc<IdentityMgr>,
         node_id: NodeId,
         allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
@@ -431,6 +460,8 @@ impl AppState {
             driver,
             clock,
             dataplane,
+            ca,
+            identity,
             node_id,
             allocator,
             listener_facts,
@@ -458,6 +489,8 @@ impl AppState {
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
+        ca: Arc<dyn Ca>,
+        identity: Arc<IdentityMgr>,
         node_id: NodeId,
         allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
@@ -480,6 +513,8 @@ impl AppState {
             listener_facts,
             host_ipv4,
             workflow_engine,
+            ca,
+            identity,
         }
     }
 }
@@ -1245,6 +1280,13 @@ pub async fn run_server_with_obs_and_driver(
     // drives `run` off the shim. `ReconcilerIsPure` holds with it
     // registered (the reconcile body holds no `.await`).
     runtime.register(workflow_lifecycle()).await?;
+    // ADR-0067 D1 — the pure-sync svid-lifecycle reconciler. Converges
+    // `desired = running allocs` against `actual = the IdentityMgr held set`
+    // and emits `Action::IssueSvid` / `Action::DropSvid`; the action-shim
+    // executor (01-06) drives the CA I/O off the shim. `ReconcilerIsPure`
+    // holds with it registered (the reconcile body holds no `.await`, reaches
+    // for no CA / ObservationStore handle, and reads no wall-clock).
+    runtime.register(svid_lifecycle()).await?;
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -1535,6 +1577,28 @@ pub async fn run_server_with_obs_and_driver(
         Arc::clone(&obs),
     ));
 
+    // ADR-0067 D3 rev 4 — compose the EPHEMERAL workload CA into the
+    // production AppState. A fresh in-memory P-256 root is minted each boot
+    // (cached in `RcgenCa` via `RaceOnceCell`); the node intermediate is
+    // signed by it; the trust bundle seeds the `IdentityMgr` so relying
+    // parties can verify SVIDs from boot. The `IssueSvid` executor (the ONE
+    // place workload-CA I/O happens) mints leaves off this CA on demand.
+    //
+    // This is EPHEMERAL: NO KEK, NO persistence, NOT `boot_ca` — the original
+    // Phase-2 plan. The persistent KEK-backed root + operator-render surface
+    // are GH #215 (blocked on #35); do NOT wire `boot_ca` /
+    // `SystemdCredsKeyring` here. All `Ca` methods are SYNC, `Result`-returning
+    // (no `.await`); their typed `CaError` maps into `ControlPlaneError::Ca`
+    // via the dedicated `#[from]` variant (never flattened to `Internal`).
+    let ca_subject = overdrive_core::SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
+        .unwrap_or_else(|e| unreachable!("CA trust-domain subject is a valid SPIFFE URI: {e}"));
+    let ca: Arc<dyn Ca> =
+        Arc::new(overdrive_host::ca::RcgenCa::new(Arc::new(overdrive_host::OsEntropy), ca_subject));
+    ca.root()?; // ephemeral P-256 root (cached in RcgenCa via RaceOnceCell)
+    ca.issue_intermediate(&node_id)?; // node intermediate signed by root (cached)
+    let bundle = ca.trust_bundle()?;
+    let identity: Arc<IdentityMgr> = Arc::new(IdentityMgr::new(Some(bundle)));
+
     let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
@@ -1543,6 +1607,8 @@ pub async fn run_server_with_obs_and_driver(
         driver,
         config.clock.clone(),
         dataplane,
+        ca,
+        identity,
         node_id,
         allocator,
         listener_facts,
@@ -1883,6 +1949,25 @@ pub fn workflow_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
     use overdrive_core::reconcilers::{AnyReconciler, WorkflowLifecycle};
 
     AnyReconciler::WorkflowLifecycle(WorkflowLifecycle::canonical())
+}
+
+/// Construct the `svid-lifecycle` reconciler per ADR-0067 D1.
+///
+/// The pure-sync workload-identity reconciler: it converges
+/// `desired = the Running allocations for a workload` against
+/// `actual = the in-process `IdentityMgr` held set`, emitting
+/// [`Action::IssueSvid`](overdrive_core::reconcilers::Action::IssueSvid) for a
+/// Running-but-unheld alloc and
+/// [`Action::DropSvid`](overdrive_core::reconcilers::Action::DropSvid) for a
+/// held-but-stopped alloc. CA I/O lives entirely in the action-shim executor
+/// (01-06); the reconciler builds the `SpiffeId` purely and NEVER `.await`s or
+/// reaches for the CA (`ReconcilerIsPure` holds). Registered at boot alongside
+/// the other first-party reconcilers.
+#[must_use]
+pub fn svid_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::{AnyReconciler, SvidLifecycle};
+
+    AnyReconciler::SvidLifecycle(SvidLifecycle::canonical())
 }
 
 /// Construct the `backend-discovery-bridge` reconciler per

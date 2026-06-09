@@ -124,6 +124,20 @@ pub mod workload_gc_absent_intent;
 // harness dispatches to them from the `Invariant::Bridge*` arms.
 pub mod backend_discovery_bridge;
 
+// workload-identity-manager step 01-07 (Slice 01 CAPSTONE; ADR-0067 D9,
+// O1 / K1). The North-Star held-SVID convergence invariant — drives the
+// REAL svid-lifecycle convergence loop (the pure `SvidLifecycle` reconciler
+// + the `issue_svid` / `drop_svid` action-shim executors over `SimCa` +
+// `SimObservationStore` + `IdentityMgr`) through allocations churning
+// Running↔Stopped, asserting eventually every Running alloc holds a valid
+// SVID (K1/O1) and no Stopped alloc holds one (K2/O2). The evaluator (the
+// healthy North-Star path) lives in
+// `crate::invariants::svid_running_set::evaluate_running_set_holds_valid_svid`;
+// its teeth (a deliberately-broken executor fails the relation) + twin-run
+// determinism are exercised by the acceptance test at
+// `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs`.
+pub mod svid_running_set;
+
 /// Catalogue of invariants the DST harness evaluates.
 ///
 /// Each variant name IS the canonical name printed in both green
@@ -547,6 +561,24 @@ pub enum Invariant {
     /// policy + `RunStep` builder + journal `started_at_unix` landed in the same
     /// diff). The evaluator body lives in `crate::invariants::evaluators`.
     WorkflowPerStepRetryPolicyGovernsRedrive,
+
+    /// workload-identity-manager step 01-07 (Slice 01 CAPSTONE; ADR-0067 D9,
+    /// O1 / K1) — eventually invariant, the North-Star. Drives the REAL
+    /// svid-lifecycle convergence loop (the pure `SvidLifecycle` reconciler +
+    /// the `issue_svid` / `drop_svid` action-shim executors over `SimCa` +
+    /// `SimObservationStore` + `IdentityMgr`) through allocations churning
+    /// Running↔Stopped, and asserts the held `BTreeMap` converges against the
+    /// running-allocation set: eventually every Running alloc holds a valid
+    /// SVID (held `spiffe_id == SpiffeId::for_allocation` AND an
+    /// `issued_certificates` audit row exists — K1/O1) AND no Stopped alloc
+    /// holds one (the drop executor removed the held leaf key — K2/O2). The
+    /// held-vs-running relation is the steady-state target reached within a
+    /// tick budget (the bounded convergence window is fail-CLOSED), so this is
+    /// `assert_eventually!`, not `assert_always!`. A deliberately-broken
+    /// executor (drops the hold, or fails to drop on stop) fails it — the
+    /// teeth are exercised in the acceptance test. The evaluator body lives in
+    /// `crate::invariants::svid_running_set`.
+    SvidRunningSetHoldsValidSvid,
 }
 
 impl Invariant {
@@ -685,6 +717,13 @@ impl Invariant {
         // (not the global `WORKFLOW_RETRY_BUDGET`) governing the re-drive count,
         // plus the `max_duration` elapsed-window gate.
         Self::WorkflowPerStepRetryPolicyGovernsRedrive,
+        // workload-identity-manager step 01-07 (Slice 01 CAPSTONE; ADR-0067 D9,
+        // O1 / K1) — the North-Star held-SVID convergence invariant. Authored
+        // GREEN directly (the svid-lifecycle reconciler + issue/drop executors
+        // landed in steps 01-04 / 01-06); the evaluator body lives in
+        // `crate::invariants::svid_running_set`. On the `cargo dst` critical
+        // path — the whole subsystem exists to satisfy this relation.
+        Self::SvidRunningSetHoldsValidSvid,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -749,6 +788,8 @@ impl Invariant {
             Self::WorkflowPerStepRetryPolicyGovernsRedrive => {
                 "workflow-per-step-retry-policy-governs-redrive"
             }
+            // workload-identity-manager step 01-07 (Slice 01 CAPSTONE).
+            Self::SvidRunningSetHoldsValidSvid => "svid-running-set-holds-valid-svid",
         }
     }
 }

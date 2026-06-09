@@ -13,6 +13,7 @@ use axum::response::{IntoResponse, Response};
 use thiserror::Error;
 
 use overdrive_core::reconcilers::ReconcilerName;
+use overdrive_core::traits::ca::CaError;
 
 use crate::api::ErrorBody;
 use crate::view_store::{ProbeError, ViewStoreError};
@@ -528,6 +529,19 @@ pub enum ControlPlaneError {
         spec_digest: String,
     },
 
+    /// Built-in CA failure surfaced from the boot-time ephemeral workload-CA
+    /// composition (ADR-0067 D3 rev 4: `RcgenCa::root` /
+    /// `issue_intermediate` / `trust_bundle`). Pass-through embedding via
+    /// `#[from]` per `.claude/rules/development.md` § "Never flatten a typed
+    /// error to `Internal(String)`": the typed [`CaError`] carries a distinct
+    /// variant per failure mode (signing failure, invalid subject, adoption
+    /// conflict, tampered envelope, …), so the CLI / §12 investigation agent
+    /// can branch on the cause without `Display`-grepping. Same boot-path
+    /// shape as `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the listener
+    /// binds, so the `to_response` arm is exhaustiveness-only.
+    #[error(transparent)]
+    Ca(#[from] CaError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -769,6 +783,17 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // precedent above.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: err.to_string(), field: None },
+        ),
+        ControlPlaneError::Ca(e) => (
+            // Same shape as `ViewStoreBoot` / `DataplaneBoot` above: the
+            // ephemeral workload-CA composition (ADR-0067 D3 rev 4) happens
+            // BEFORE the listener binds, so this arm is exhaustiveness-only.
+            // The composition root branches on the typed variant
+            // (`matches!(e, ControlPlaneError::Ca(_))`) for structured startup
+            // diagnostics; the typed `CaError`'s own `Display` carries the
+            // signing / subject / adoption cause.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,

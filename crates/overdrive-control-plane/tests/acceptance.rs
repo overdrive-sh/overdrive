@@ -207,9 +207,39 @@ mod acceptance {
     // gate the module behind the feature (mirrors `runtime_convergence_loop`).
     #[cfg(feature = "integration-tests")]
     mod service_lifecycle_runtime_reenqueue;
+    // Finding-1 runtime witness — svid-lifecycle stays enqueued across
+    // cadences while an IssueSvid is mid-backoff (uses the test-only
+    // `loaded_svid_lifecycle_views_for_test` accessor; same feature gate).
     mod service_lifecycle_stable;
     mod service_submit_event_taxonomy;
     mod service_submit_event_v2;
+    #[cfg(feature = "integration-tests")]
+    mod svid_lifecycle_runtime_backoff_reenqueue;
+    // BUG-1 regression — the svid-lifecycle actual (held) side is scoped to the
+    // TARGET workload, so a `job/payments` convergence tick never drops a
+    // DIFFERENT workload's still-live SVID (ADR-0067 D5b; the global actual fed
+    // the reconciler's ¬running ∧ held → DropSvid loop every other workload's
+    // held entry). Same `run_convergence_tick` integration-tests gate as its
+    // sibling above.
+    #[cfg(feature = "integration-tests")]
+    mod svid_lifecycle_actual_scoped_to_workload;
+    // Bugfix regression — a D6 trust-bundle refresh failure inside the `IssueSvid`
+    // action-shim executor must be SURFACED via a structured
+    // `issue_svid.trust_bundle_refresh_failed` warning (pre-fix the `Err` arm was
+    // silently swallowed, contradicting the function's own comment) while staying
+    // non-fatal: the SVID was already minted + audited + held (K4), so the hold is
+    // not unwound and the dispatch still returns `Ok`. Richer ObservationStore
+    // surfacing tracked in issue #223. Same `run_convergence_tick`
+    // integration-tests gate as its siblings above.
+    #[cfg(feature = "integration-tests")]
+    mod issue_svid_surfaces_bundle_refresh_failure;
+    // BUG-2 regression — a `svid-lifecycle` tick whose `IssueSvid` dispatch
+    // FAILS must still self-re-enqueue (the persisted retry memory re-drives on
+    // a later tick) instead of stalling forever. Pre-fix the early `?` on the
+    // shim error skipped the `if has_work { submit }` self-re-enqueue. Same
+    // `run_convergence_tick` integration-tests gate as its siblings above.
+    #[cfg(feature = "integration-tests")]
+    mod svid_lifecycle_reenqueues_on_dispatch_failure;
 
     // service-health-check-probes step 01-03e3 — handler dispatch
     // wiring for Service-kind submit. S-SHCP-WIRE-09 through
@@ -316,4 +346,10 @@ mod acceptance {
     // minting `BudgetExhausted`. DST sibling:
     // `WorkflowPerStepRetryPolicyGovernsRedrive`.
     mod workflow_per_step_retry_policy_governs_redrive;
+
+    // workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
+    // in-process control-plane side of ADR-0067: `IssueSvid` action-shim
+    // audit-before-hold semantics and the `IdentityRead` read contract.
+    mod identity_mgr_read_contract;
+    mod issue_svid_action_shim;
 }

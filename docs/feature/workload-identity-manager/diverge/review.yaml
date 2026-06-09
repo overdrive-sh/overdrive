@@ -1,0 +1,226 @@
+schema_version: 1
+
+# Peer-review record for the workload-identity-manager DIVERGE wave (GH #35).
+#
+# IMPORTANT — read the `review_status` field first. The independent
+# nw-diverger-reviewer (Prism) sub-agent COULD NOT be invoked from this DIVERGE
+# run: the Task tool is unavailable inside a subagent context, and this DIVERGE
+# run is itself a dispatched subagent (the same constraint that prevented
+# invoking the nw-researcher sub-agent in Phase 2). Per the diverger's discipline
+# ("Obtain peer review approval before handoff. The reviewer is the quality
+# gate") a fabricated Prism approval is NOT acceptable. This file therefore
+# records a RIGOROUS SELF-REVIEW against Prism's five dimensions, explicitly
+# labeled as such, and the inability to run the independent review is surfaced as
+# a BLOCKER for the orchestrator to run Prism externally.
+
+review_status: INDEPENDENT_REVIEW_APPROVED   # Prism ran from top-level context (see independent_review).
+reviewer: "Flux (nw-diverger) self-review + Prism (nw-diverger-reviewer) independent review"
+review_date: 2026-06-08
+feature_id: workload-identity-manager
+gh_issue: 35
+iterations: 1
+max_iterations: 2
+
+# ----------------------------------------------------------------------------
+# Independent Phase-5 gate — run by the orchestrator from the top-level context
+# (resolves blocker R0). Prism read the full artifact set fresh, did NOT inherit
+# this self-review's conclusions, and pressure-tested the four high-stakes calls.
+# ----------------------------------------------------------------------------
+independent_review:
+  reviewer: "Prism (nw-diverger-reviewer) — independent, top-level dispatch"
+  review_date: 2026-06-08
+  verdict: APPROVE   # zero nits, zero requested revisions
+  dimensions:
+    jtbd_rigor: PASS
+    research_quality: PASS          # content STRONG; self-conducted research noted, not a reject lever
+    option_diversity: PASS
+    taste_correctness: PASS         # arithmetic re-verified by hand: Option 1 = 4.450, Option 2 = 4.200
+    recommendation_coherence: PASS
+  high_stakes_checks:
+    j_sec_002_mint: EARNED          # three independent reasons; udp-precedent rebuttal sound
+    reconciler_purity: PASS         # recommended Option 1 keeps CA I/O in the executor, not reconcile()
+    single_cut: PASS                # near-expiry branch no-op/absent; no throwaway sync-rotate path
+    confirmation_by_evidence: PASS  # SPIRE/istio/Linkerd converge independently; not anchoring
+  note: >
+    Sole observation (not a reject lever): Phase-2 research was self-conducted
+    (WebSearch/WebFetch) rather than via an independent nw-researcher sub-agent,
+    because the Task tool is unavailable inside a subagent. Evidence is primary-
+    sourced and the load-bearing istio SDS push-on-rotate seam is confirmed by the
+    official architecture doc. Handoff to DISCUSS is ready; surface B1 (the 4.7
+    unified-IdentityMgr commitment) to the user before DISCUSS begins.
+
+# ----------------------------------------------------------------------------
+# Second independent pass — /nw-review, run AFTER B1 + B2 were resolved (the
+# first independent pass above reviewed the pre-resolution state). Additive
+# value: validates the resolution edits the first pass never saw, and
+# code-verifies the B2 caveat against the actual source.
+# ----------------------------------------------------------------------------
+second_review:
+  trigger: "/nw-review diverge artifacts"
+  reviewer: "nw-diverger-reviewer — independent, top-level dispatch (post-B1/B2 state)"
+  review_date: 2026-06-08
+  verdict: APPROVED   # zero blocking, zero suggestions, zero nitpicks
+  scope: "Current on-disk state incl. B1 (D-WIM-7) + B2 (D-WIM-8) resolutions; instructed NOT to defer to the first pass."
+  dimensions:
+    jtbd_rigor: PASS
+    research_quality: PASS
+    option_diversity: PASS
+    taste_correctness: PASS         # arithmetic re-verified by hand: 4.45 / 4.20, margin 0.25 stable
+    recommendation_coherence: PASS
+  b1_verification:
+    status: VERIFIED
+    finding: >
+      Resolution recorded CONSISTENTLY across all three files (wave-decisions.md D-WIM-7,
+      recommendation.md decision statement + blocker 1, review.yaml B1) with identical
+      language + date; no file still carries the old conditional as the live decision.
+      Logic sound: 4.7 ACME gateway certs are not allocation-bound, so a dedicated
+      IdentityMgr is the correct seam and folding into WorkloadLifecycle would be a seam
+      4.7 must unbuild.
+  b2_verification:
+    status: VERIFIED_CODE_GROUNDED
+    finding: >
+      Reviewer independently READ the cited source. lib.rs:417-418 confirms a committed
+      StartWorkflow for an unregistered kind surfaces WorkflowEngineError::UnknownWorkflow;
+      action_shim/mod.rs:429 confirms per-action isolation (failure recorded to first_error,
+      that StartWorkflow DROPPED from the batch). The recorded DESIGN guidance (gate the
+      emit until #40 registers cert_rotation so the pre-wired seam is a clean no-op, not an
+      UnknownWorkflow-per-tick) is therefore accurate and grounded, not a false premise.
+      Single-cut-clean; no throwaway sync-rotate path.
+  high_stakes_checks:
+    j_sec_002_mint: EARNED
+    reconciler_purity: PASS
+    single_cut: PASS
+    confirmation_by_evidence: PASS
+  praise: >
+    The J-SEC-002 mint is the highest-risk call and the justification is airtight — three
+    independent reasons + explicit rebuttal of the udp-sendmsg4 precedent; textbook
+    first-principles job extraction distinguishing "same job, finer granularity" from
+    "genuinely distinct jobs."
+
+# ----------------------------------------------------------------------------
+# Phase-4 hard gate (validated complete before this review per the diverger spec)
+# ----------------------------------------------------------------------------
+phase_4_gate:
+  G1_jtbd:
+    status: PASS
+    evidence: >
+      Job at physical/strategic level (abstraction-navigation table tactical→physical);
+      no feature refs in the job statement; 6 ODI outcomes (>=3); job verdict explicit
+      (mint J-SEC-002, three-reason justification + counter-argument addressed).
+      diverge/job-analysis.md §2/§4/§5/§6.
+  G2_research:
+    status: PASS
+    evidence: >
+      5 real systems + non-obvious alternative (SPIRE, istio/Envoy SDS, Linkerd2,
+      Nomad WI, cert-manager+csi-driver-spiffe); every dimension names a concrete
+      type/RPC with cited primary source; inference flagged. diverge/competitive-research.md.
+  G3_options:
+    status: PASS
+    evidence: >
+      9 generated (SCAMPER 7 + Crazy 8s 2), curated to 6, all pass 3-point diversity
+      test; options-raw.md free of evaluation language. diverge/options-raw.md.
+  G4_taste:
+    status: PASS
+    evidence: >
+      DVF filter applied (none < 6); weights locked before scoring with pre-scoring
+      adjustment rationale; full 6x4 matrix; recommendation = rank 1 (4.45) no override;
+      dissent documented; decision statement explicit. diverge/taste-evaluation.md,
+      recommendation.md.
+
+# ----------------------------------------------------------------------------
+# The five reviewer dimensions (self-assessed, adversarially)
+# ----------------------------------------------------------------------------
+dimensions:
+
+  - dimension: jtbd_rigor
+    self_verdict: STRONG
+    findings:
+      - "Job is at the physical/strategic boundary (bind-credential-lifetime-to-workload-lifetime + readability); navigation table and 5-Why chain present."
+      - "The new-job verdict (J-SEC-002 vs extending J-SEC-001) is the highest-risk claim; mitigated with three independent reasons (distinct progress/failure-mode, distinct trigger, distinct roadmap primitive) AND an explicit rebuttal of the udp-sendmsg4 elevate-precedent the dispatch flagged."
+    residual_risks:
+      - "O3 (consumer read latency) has only MODERATE opportunity — the latency delta across in-process options is small. It is a genuine outcome (handshake hot path) but a reviewer could argue it is weakly discriminating. Documented in job-analysis.md §5 opportunity table (O3 score 16 driven by Satisfaction=2, i.e. 'no read surface exists yet' — defensible)."
+
+  - dimension: research_quality
+    self_verdict: STRONG_BUT_PROCESS_DEVIATION
+    findings:
+      - "All 5 required systems + the non-obvious alternative covered; every claim names a real component/RPC (SPIRE cache.Cache/cacheRecord/FetchX509SVID; istio SecretManager/SDS StreamSecrets/GenerateSecret/SECRET_GRACE_PERIOD_RATIO; Linkerd tmpfs emptyDir/70%-TTL CSR; Nomad identity block/NOMAD_TOKEN_*/JWKS; CSI CertificateRequest/tmpfs mount) with cited primary sources; inference flagged."
+      - "6 cross-system load-bearing lessons (L1-L7), each tied to the systems that evidence it and to the design fork it bears on."
+    residual_risks:
+      - "PROCESS: research was conducted by Flux directly (WebSearch/WebFetch), NOT by the independent nw-researcher sub-agent (Task tool unavailable in subagent context). Evidence quality is high and primary-sourced, but it was not independently produced. A subset of istio impl-detail came from the architecture doc + search synthesis rather than a source-file read; the SDS push-on-rotate SEAM (the load-bearing claim) is confirmed by the official istio-agent architecture doc directly."
+
+  - dimension: option_diversity
+    self_verdict: STRONG
+    findings:
+      - "6 curated options span 4 storage substrates (heap struct / View / observation rows / kernel BPF map), 3 lifecycle-wiring shapes (standalone vs folded reconciler vs executor), and 4 read surfaces (sync getter / watch push / kernel map / View accessor). All 9 representative pairs differ in mechanism AND assumption AND cost."
+      - "Curation trail explicit: M folded as a read-surface dimension (orthogonal to storage), X1 folded into Option 2's lifecycle-wiring family, X2 logged un-promoted."
+    residual_risks:
+      - "The concurrency axis is under-represented in the SCORED 6 (X2 actor-per-identity dropped). Mitigated: X2 is logged in options-raw.md as the un-promoted 7th and is available if review/DESIGN finds the 6 insufficiently diverse on concurrency. Judged acceptable because the 6 already span all 4 forks the dispatch named."
+
+  - dimension: taste_correctness
+    self_verdict: STRONG
+    findings:
+      - "Weights LOCKED before scoring (Dev-Tool profile, 3 documented adjustments: DVF 25→30, T1 15→20, T4 25→15 — each with pre-scoring rationale)."
+      - "DVF used as a filter not a tiebreaker; correctness-rule strain (reconciler purity, state-layer hygiene, single-cut) encoded in Feasibility scores, the honest place for it."
+      - "Recommendation = rank 1 (Option 1, 4.45) with NO weight adjustment — follows the matrix directly. Anti-patterns (cherry-picking, retroactive justification, weight manipulation, feels-right override) checked and avoided."
+    residual_risks:
+      - "An initial arithmetic/rounding error in the first-draft matrix (Option 3 DVF normalization; 4/5/6 sub-order) was CORRECTED in-place; the worked totals are now shown explicitly so the ranking is auditable. The top-2 (4.45 > 4.20) is stable under any rounding — the error never threatened the recommendation. Flagged here for transparency."
+      - "Scores are engineering judgment (no end-user survey) — appropriate for a platform-internal primitive, consistent with the jobs.yaml 'distilled from whitepaper not interviews' precedent."
+
+  - dimension: recommendation_coherence
+    self_verdict: STRONG
+    findings:
+      - "Recommendation is derivable from job (J-SEC-002) → research (L1/L3/L4 converge on shared identity-keyed store + decoupled rotation trigger) → scores (Option 1 rank 1). Traceable end-to-end."
+      - "Dissent is precise and conditional: Option 2 wins IFF the 4.7 unified-IdentityMgr-across-SVID+ACME commitment is dropped — a named, falsifiable condition, surfaced as a product BLOCKER. Secondary dissent: Option 3 is the next-step (getter→watch behind the IdentityRead port), not a competitor."
+      - "Decision statement explicit with the key-risk assumption named; 'both viable' explicitly rejected."
+      - "Design-sensitive surfaces (Action variant shapes, IdentityRead signatures, concurrency primitive, View input shape, trust-bundle currency) are handed to DESIGN to pin — NOT invented here, per CLAUDE.md 'Implement to the design'."
+    residual_risks:
+      - "The recommendation CONFIRMS the issue-pinned direction. This is the honest expected outcome (the dispatch anticipated it) and is traceable to the matrix — not manufactured. A reviewer should verify it is confirmation-by-evidence, not confirmation-by-anchoring; the competitive research converging independently on the same shape is the key check that it is the former."
+
+# ----------------------------------------------------------------------------
+# Blockers for the orchestrator
+# ----------------------------------------------------------------------------
+blockers:
+  - id: R0
+    severity: PROCESS
+    status: RESOLVED   # Prism ran from the top-level orchestrator context on 2026-06-08; verdict APPROVE. See independent_review above.
+    title: "Independent nw-diverger-reviewer (Prism) review NOT run — Phase-5 gate cannot self-certify"
+    detail: >
+      The Task tool is unavailable inside a subagent context (this DIVERGE run is a
+      dispatched subagent), so neither nw-researcher (Phase 2) nor nw-diverger-reviewer
+      (Phase 5, Prism) could be invoked. This self-review is rigorous and adversarial but
+      is NOT an independent quality gate — by construction the same reasoning that produced
+      the artifacts produced this review (the fox-guarding-the-henhouse failure the peer
+      protocol exists to break). RECOMMENDATION FOR ORCHESTRATOR: run nw-diverger-reviewer
+      (Prism) from the top-level context against this artifact set before handing off to
+      DISCUSS (nw-product-owner), OR explicitly accept the self-review and proceed. The
+      artifacts are gate-complete (G1-G4 PASS) and ready for that review.
+  - id: B1
+    severity: PRODUCT_DECISION
+    status: RESOLVED   # User confirmed 4.7 is firm (2026-06-08) → Option 1 LOCKED; Option 2 does not re-open. See wave-decisions.md D-WIM-7.
+    title: "The 4.7 unified-IdentityMgr (SVID + ACME) commitment gates Option 1 vs Option 2"
+    detail: >
+      Option 1 (recommended) wins over Option 2 BECAUSE the whitepaper commits IdentityMgr
+      to also hold public-trust ACME gateway certs (roadmap 4.7, whitepaper §11). If that
+      commitment is dropped/deferred indefinitely, Option 2 (fold into WorkloadLifecycle)
+      becomes competitive. This is a product/roadmap call above the DIVERGE wave. Surface
+      to the user: 'Is the unified SVID+ACME IdentityMgr (4.7) still committed?' NO GH issue
+      created (project rule).
+  - id: B2
+    severity: NON_BLOCKING
+    status: RESOLVED   # User chose option (a) pre-wire the seam (2026-06-08). See wave-decisions.md D-WIM-8.
+    resolution: >
+      Pre-wire the seam (option a): #35's near-expiry branch is structurally present and
+      targets Action::StartWorkflow(cert_rotation); the View persists the issuance-time
+      INPUT so near-expiry is computable. DESIGN CAVEAT (grounded in code): a committed
+      StartWorkflow for an unregistered kind surfaces WorkflowEngineError::UnknownWorkflow
+      (lib.rs:417-418), isolated per-action (action_shim/mod.rs:429) but re-emitted each
+      tick the condition holds — so DESIGN must keep the actual emission gated/dormant
+      until #40 registers cert_rotation, keeping the pre-wired seam a clean no-op rather
+      than an UnknownWorkflow-per-tick. Single-cut-clean; no throwaway sync-rotate path.
+    detail: >
+      The recommendation leaves the near-expiry branch as a no-op Action::StartWorkflow.
+      DESIGN should pick (a) ship the no-op StartWorkflow branch now, or (b) leave the
+      branch absent until #40. Both single-cut-clean; neither ships a throwaway sync-rotate
+      path (which the dispatch forbids). Confirm at DESIGN; no issue needed.
+
+gh_issues_created: []   # none — per project rule, deferrals map to existing #40/#26/#36/4.7

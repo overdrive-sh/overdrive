@@ -90,6 +90,10 @@ async fn build_state(
         driver,
         clock,
         Arc::new(SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
         nid("writer-1"),
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

@@ -14,6 +14,7 @@ note: for a trait to be dyn compatible it needs to allow building a vtable
               overdrive_core::reconcilers::BackendDiscoveryBridge
               overdrive_core::reconcilers::NoopHeartbeat
               overdrive_core::reconcilers::ServiceMapHydrator
+              overdrive_core::reconcilers::SvidLifecycle
               overdrive_core::reconcilers::WorkflowLifecycle
               overdrive_core::reconcilers::WorkloadLifecycle
               overdrive_core::service_lifecycle::ServiceLifecycleReconciler

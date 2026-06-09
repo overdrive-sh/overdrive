@@ -179,8 +179,8 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "Job-kind natural clean exit must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "Job-kind natural clean exit must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::FinalizeFailed { alloc_id, terminal } => {
@@ -235,8 +235,8 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
 
     assert_eq!(
         actions.len(),
-        2,
-        "Job-kind natural failed exit must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06; got {actions:?}"
+        3,
+        "Job-kind natural failed exit must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::FinalizeFailed { alloc_id, terminal } => {
@@ -353,8 +353,8 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9; got {actions:?}"
+        4,
+        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}

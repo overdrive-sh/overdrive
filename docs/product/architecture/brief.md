@@ -4321,7 +4321,14 @@ relying-party verifier (#26 sockops/kTLS), not the issuer. (Research:
 SPIFFE §2/§5.2 + SPIRE reference impl + "parse, don't validate".) The rustdoc
 also pins re-issue idempotency (fresh serial, new validity window, same
 SpiffeId) and what `issue_intermediate` guarantees about pathLen (=0, enforced
-not merely set). The **enforcement** is
+not merely set). **Validity window (ADR-0063 rev 2 amendment, 2026-06-08):**
+`SvidMaterial` carries a `not_after: UnixInstant` (+ accessor); the window
+(`not_before`/`not_after`) is supplied by the caller on `SvidRequest` from a
+single injected-`Clock` read in `ca_issuance::issue_and_audit`, so the adapter
+stamps that exact window on the leaf (host) or carries it on `SvidMaterial`
+(sim fixture) rather than reading its own clock — guaranteeing `svid.not_after()
+== issued_certificates.not_after` by construction and DST-determinism under
+`SimClock`. The **enforcement** is
 `crates/<crate>/tests/integration/ca_equivalence.rs` — a DST equivalence test
 driving `RcgenCa` and `SimCa` through the same call sequence asserting
 observable equivalence.
@@ -4446,6 +4453,420 @@ new typed reader, the same shape every prior observation row was added
 | mTLS handshake + kTLS session-key install | **Separate consumer feature** (whitepaper §8 Kernel mTLS) |
 | SPIFFE Workload API + SVID distribution to workloads | **Phase 7+** / consumer feature (research Gap 1) |
 | HSM / KMS KEK source | **Later phase** — the `Kek` provider port is the seam |
+## workload-identity-manager extension
+
+This section extends the Application Architecture with the workload identity
+holder/reader/dropper (GH #35 [2.13]). Nothing prior is rewritten; this builds
+**on** the built-in-ca extension above — ADR-0063 *mints* a SPIFFE SVID, and
+this feature *holds, reads, and drops* what it mints. Supersedes nothing.
+
+**ADR:** ADR-0067 (rev 2). **DESIGN artifacts:** `docs/feature/workload-identity-manager/`.
+**C4:** `c4-diagrams.md` § "Workload Identity Manager" (L1 + L2 + L3, Mermaid).
+**Date:** 2026-06-08. **Mode:** GUIDE (PASS-1 menu; all surfaces user-pinned).
+**Rev 2 (2026-06-08):** reworked against the DESIGN review — the held set is the
+reconciler's **`actual`** (held-set-observability), restart recovery is **re-issue
+on boot** (not recompute), the View is **retry memory** (not issuance success
+facts), and `SvidLifecycle` is triggered by an explicit `Action::EnqueueEvaluation`
+handoff. See ADR-0067 § Revision (rev 2).
+
+### Capability and DDD
+
+One bounded context — **workload identity (holder)** — spanning ~3 crates
+(`overdrive-core`, `overdrive-control-plane`, `overdrive-sim`). The core
+domain is "bind a live, chain-verifiable SVID to the *exact set of
+currently-running allocations*, hold it where the dataplane can read it, and
+drop it the moment a workload stops." Overdrive is **sidecarless** (whitepaper
+§7) — there is no in-pod agent to fetch/hold/drop a credential, so the
+credential's lifecycle can *only* be driven from the allocation lifecycle the
+control plane already owns (this is **J-SEC-002**, distinct from #28's
+J-SEC-001 "mintable in principle"). Three state layers stay separate (whitepaper
+§4): the **held `SvidMaterial`** (incl. the node-held leaf private key) is
+**in-process** runtime state in `IdentityMgr` (neither intent nor observation —
+ephemeral, bounded to the running set, never persisted: a leaf key is not an
+audit fact) — and **this held set IS the reconciler's `actual`** (rev 2: the
+runtime projects a held-snapshot into `SvidLifecycle`'s `actual` exactly as it
+projects the workflow engine's live-task set into `WorkflowLifecycle`'s `actual`);
+the **`issued_certificates` audit row** is **observation** (ADR-0063 D6); the
+**`SvidLifecycle` View** is **reconciler memory** (the runtime-owned ViewStore,
+carrying only **retry memory** for a failed issue — `attempts` +
+`last_failure_seen_at`, NOT issuance success facts). This is a *holder* primitive
+— it does not mint (that is the `Ca` port, #28), perform handshakes (that is #26
+sockops/kTLS), or rotate (that is #40).
+
+**Restart recovery (rev 2):** the held `SvidMaterial` cannot survive a restart —
+the leaf key is non-persistable (`CaKeyPem` has no `Serialize`, ADR-0063 D9) and
+non-reconstructable (each `issue_and_audit` mints a fresh leaf). So restart
+recovery is **re-issue on boot** for every still-Running allocation
+(`running ∧ ¬held → IssueSvid`, bounded, audited) — RECOVERY, distinct from #40's
+near-expiry rotation. "Recompute held state without re-issue" is impossible; the
+honest model has no secret at rest.
+
+This is a **FOUNDATION feature (F2)**: it builds the lifecycle, the held store,
+the read port, WRITES the `issued_certificates` rows, and proves convergence —
+but its **operator surface** (the `alloc status` render of `issued_certificates`
++ the deployed-SVID operator-verify flow) is **#215's** (blocked on #35), and
+the **consumer** is **#26's**. #35's own Phase-2 proof is TEST-tier (`openssl
+verify` the chain + ObservationStore row readback + the DST `assert_eventually!`
+convergence invariant) — built-in-ca's `rcgen_ca_chain_verify` shape.
+
+### Component decomposition (which crate gets what)
+
+| Component | Crate (class) | Responsibility | Change |
+|---|---|---|---|
+| `SvidLifecycle` reconciler | `overdrive-core` (core) | Pure `reconcile()` — converges `desired` = running allocs (from `alloc_status` obs) vs `actual` = the `IdentityMgr` held set; `running ∧ ¬held → IssueSvid` (incl. restart re-issue), `¬running ∧ held → DropSvid`, `running ∧ held(valid) → Noop`; builds the `SpiffeId` (pure); GC retry-memory entries for non-Running allocs. No `.await`, no `Ca`/observation handle, wall-clock only via `tick.now`. | CREATE NEW |
+| `SvidLifecycleView` + `IssueRetry` | `overdrive-core` (core) | Reconciler memory — **retry memory only** (`attempts` + `last_failure_seen_at`, the `development.md` `RetryMemory` shape), so a *failed* `IssueSvid` backs off. **NO `serial`/`issued_at`/`spiffe_id` success facts** (serial is a post-dispatch executor output; success lives in `issued_certificates`). 6 derive bounds (`+Eq` for the runtime NextView diff); manual `Default` (`UnixInstant: !Default`). | CREATE NEW |
+| `Action::IssueSvid` / `Action::DropSvid` | `overdrive-core` (core) | Two additive plain-enum variants; `IssueSvid { alloc_id, spiffe_id, node_id, correlation }`, `DropSvid { alloc_id, correlation }`. +3 dispatch-enum variants (`AnyState`/`AnyReconciler`/`AnyReconcilerView`). | EXTEND (additive) |
+| `SpiffeId::for_allocation` | `overdrive-core` (core) | Infallible `for_allocation(&WorkloadId, &AllocationId) -> Self`, `#[must_use]`, trust-domain `overdrive.local`; builds `spiffe://overdrive.local/job/<workload>/alloc/<alloc>`, validates via existing `new` with `unwrap_or_else(\|\| unreachable!(…))`. | EXTEND (impl) |
+| `IdentityRead` port trait | `overdrive-core` (core) | Sync read surface — `svid_for(&AllocationId) -> Option<SvidMaterial>` + `current_bundle() -> Option<TrustBundle>`; owned clones; 5 behaviour-pinning rustdoc clauses. | CREATE NEW |
+| `IdentityMgr` | `overdrive-control-plane` (adapter-host) | `RwLock<IdentityState{ held: BTreeMap<AllocationId, SvidMaterial>, bundle: Option<TrustBundle> }>`; `new(bundle)`; mutators `hold`/`drop_svid`/`set_bundle`; `impl IdentityRead`; **`held_snapshot() -> BTreeMap<AllocationId, HeldSvidFacts{spiffe_id, not_after}>`** (the sync `actual`-projection reader the runtime folds into `SvidLifecycle`'s `actual` — mirrors `WorkflowEngine::live_instances()`). `parking_lot::RwLock` (sync), `BTreeMap` mandatory. | CREATE NEW |
+| `action_shim/issue_svid.rs` executor | `overdrive-control-plane` (adapter-host) | The 2 `dispatch_single` arms: `IssueSvid` → `ca_issuance::issue_and_audit` → `identity.hold` → `identity.set_bundle(ca.trust_bundle()?)`; `DropSvid` → `identity.drop_svid`. The one place CA I/O happens. | CREATE NEW |
+| `AppState` + shim signature | `overdrive-control-plane` (adapter-host) | Gain `ca: Arc<dyn Ca>` (required) + `identity: Arc<IdentityMgr>`; thread `ca`/`clock`/`identity` into `dispatch`/`dispatch_single`. Production composes `Arc<dyn Ca>` as an **ephemeral workload `RcgenCa`** built directly in `run_server` (ADR-0067 D3 rev 4) — NOT `ca_boot` (`lib.rs:50` is a bare `pub mod ca_boot;`; `boot_ca`/`RcgenCa` are never called in `lib.rs`). No KEK / no persistence; the persistent KEK-backed root (ADR-0063 D2/D8) + operator surface are **#215**. | EXTEND |
+| `SimIdentityRead` | `overdrive-sim` (adapter-sim) | Implements `IdentityRead` over a preloaded `BTreeMap` + `Option<TrustBundle>`. | CREATE NEW |
+
+### Driving ports (inbound) and driven ports (outbound)
+
+**Driving** (trigger identity behaviour): the **allocation lifecycle** → an
+explicit **`Action::EnqueueEvaluation` handoff** (rev 2) → `SvidLifecycle` →
+`IssueSvid` / `DropSvid` — the *only* trigger. The handoff is the missing
+level-trigger rev 1 left implicit: `WorkloadLifecycle::reconcile`
+(`workload_lifecycle.rs:181` alloc-mutating block) emits a third
+`EnqueueEvaluation` (ungated by kind — identity matters for every alloc) keyed
+`job/<workload_id>`, and the exit observer (`exit_observer.rs:230-256`) submits a
+sibling `Evaluation` on an observed exit. Broker LWW at `(ReconcilerName,
+TargetResource)` collapses duplicates. (Full design: § "Enqueue/handoff trigger"
+below; ADR-0067 D5b.) The **dataplane consumers** (sockops #26 / gateway /
+telemetry — themselves out of scope) read via the `IdentityRead` port. **No
+operator CLI verb** — by design (System Constraints); #35's observables are
+TEST-tier; the operator-visible `alloc status` render is **#215's** (blocked on
+#35). Per CLAUDE.md the workload verb is `overdrive deploy <SPEC>`, never `job
+submit`.
+
+**Driven** (the executor reaches out): `Ca` (`issue_svid` via
+`issue_and_audit`; `trust_bundle` for bundle hydration); `ObservationStore`
+(the `issued_certificates` row, written *inside* `issue_and_audit`). Both are
+required constructor parameters on the consuming types — never defaulted
+(`.claude/rules/development.md` § "Port-trait dependencies").
+
+### `IdentityRead` port surface (signatures; full contract in trait rustdoc)
+
+```rust
+pub trait IdentityRead: Send + Sync {
+    fn svid_for(&self, alloc: &AllocationId) -> Option<SvidMaterial>;
+    fn current_bundle(&self) -> Option<TrustBundle>;
+}
+```
+
+Per `.claude/rules/development.md` § "Trait definitions specify behavior", the
+rustdoc pins five observable clauses every adapter MUST honor: (1) a read never
+issues (no `Ca::issue_svid` on the read path — the O3 guarantee); (2) a read
+never mutates; (3) `None` is **explicit absence** (not an error, not an
+empty-but-present credential — a consumer refuses the handshake rather than
+present a stale credential); (4) returns **owned clones** (the caller holds no
+lock); (5) post-`DropSvid(alloc)`, `svid_for(alloc) == None` (drop-on-stop
+observable through the read surface). The **enforcement** is
+`crates/<crate>/tests/integration/identity_read_equivalence.rs` — a DST
+equivalence test driving `IdentityMgr` and `SimIdentityRead` through the same
+calls asserting identical observable reads (mirrors ADR-0063's `ca_equivalence`).
+Consumers — and the Slice-02 **test consumer/fixture** that proves the contract —
+take `Arc<dyn IdentityRead>` as a **required constructor parameter** (never
+defaulted). Production consumers (#26 / gateway / telemetry) are deferred to
+those features.
+
+### The two Actions + executor (the issue/hold/drop path)
+
+`Action` gains two additive plain-enum variants — `IssueSvid { alloc_id,
+spiffe_id, node_id, correlation }` and `DropSvid { alloc_id, correlation }` —
+plus the standard reconciler-registration triple (+3 variants apiece on
+`AnyState` / `AnyReconciler` / `AnyReconcilerView`) and 2 `dispatch_single` match
+arms. **The pure reconciler builds the `SpiffeId`** (D5) and passes it in the
+action; CA I/O stays in the executor (purity is a CORRECTNESS constraint —
+DIVERGE D-WIM-3). **`node_id` is KEPT** on `IssueSvid`: self-describing (it is
+the `issued_certificates` row's `node_id` + the `issue_and_audit(…, node, …)`
+argument), #36-forward-compat, executor MAY use `AppState.node_id` in Phase 2.
+Correlation is **derived** — `CorrelationKey::derive(target = "svid-lifecycle/<alloc>",
+spec_hash, "issue-svid")` (ADR-0035 correlation discipline; links cause to the
+audit surface across ticks, not a per-attempt request id).
+
+The executor (`action_shim/issue_svid.rs`, mirroring
+`dataplane_update_service.rs`) handles the arms: **`IssueSvid`** → the shipped
+`ca_issuance::issue_and_audit` (mints the leaf, writes the audit row, **refuses
+issuance on audit-write failure** — O5 served wholesale, NOT re-implemented) →
+`identity.hold(alloc_id, svid)` → `identity.set_bundle(ca.trust_bundle()?)` (the
+opportunistic bundle refresh, D6); **`DropSvid`** → `identity.drop_svid(alloc_id)`
+(removes the entry so the node-held leaf key is no longer reachable — O2). To
+wire it, **`AppState` is extended** (the "found wiring" — recorded as an ADR-0067
+consequence): it gains `ca: Arc<dyn Ca>` + `identity: Arc<IdentityMgr>`, threaded
+into `dispatch`/`dispatch_single` (`AppState.ca` stays a required `Arc<dyn Ca>`);
+production composes `Arc<dyn Ca>` as an **ephemeral workload `RcgenCa`** built
+directly in `run_server` (ADR-0067 D3 rev 4) — `RcgenCa::new(Arc::new(OsEntropy),
+SpiffeId "spiffe://overdrive.local/overdrive/ca")` → `root()` →
+`issue_intermediate(&node_id)` → `trust_bundle()` → `IdentityMgr::new(Some(bundle))`,
+fresh in-memory root each boot, NO KEK / NO persistence. This is **NOT** the
+`ca_boot` path: `lib.rs:50` is a bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa`
+are never called in `lib.rs`. The persistent KEK-backed root (`boot_ca` +
+`SystemdCredsKeyring`, ADR-0063 D2/D8) + the operator surface are **#215**
+(blocked on #35).
+
+### Held-set-as-`actual` — the convergence model (rev 2)
+
+The pure `SvidLifecycle::reconcile` converges two sets:
+
+- **`desired`** = currently-**Running** allocs for the workload, from
+  `obs.alloc_status_rows()` filtered `Running` (the filter
+  `WorkloadLifecycle`/`BackendDiscoveryBridge` already use —
+  `reconciler_runtime.rs:2210-2220, 2298-2325`).
+- **`actual`** = allocs the `IdentityMgr` currently **holds** — the held set
+  projected into `actual`.
+
+The diff: `running ∧ ¬held → IssueSvid`; `¬running ∧ held → DropSvid`; `running ∧
+held(valid `not_after`) → Noop`; `running ∧ held(near-expiry) →` the gated #40
+branch. **Restart recovery falls out for free** — on boot `IdentityMgr` is empty
+(held set never persisted), so `actual = ∅` and every still-Running alloc is
+re-issued (`running ∧ ¬held`). This is RECOVERY, a *distinct branch* from the
+gated near-expiry rotation; it is NOT the forbidden synchronous-rotation path.
+
+**Runtime wiring (grounded — feasibility verdict: FEASIBLE, no blocker).**
+`hydrate_actual` (`reconciler_runtime.rs:2190`) is a `match` over `AnyReconciler`.
+The `WorkflowLifecycle` arm (`:2206-2209`) already projects a non-persisted
+in-process runtime set — the workflow engine's live-task set
+(`hydrate_workflow_actual_instances:2152` → `state.workflow_engine.
+live_instances():2166`) — into `actual.has_live_task`. `IdentityMgr` is an
+`Arc<...>` field on `AppState` exactly as `workflow_engine` is (`lib.rs:281`); the
+new `AnyReconciler::SvidLifecycle(_)` arm reads `state.identity.held_snapshot()`
+(sync, in-process) and builds `SvidLifecycleState { desired, actual }`. Identical
+shape to the workflow precedent, no runtime-mechanism change (one new `match`
+arm). `held_snapshot` returns `HeldSvidFacts { spiffe_id, not_after }` per held
+alloc — facts the convergence needs (presence = held; `not_after` drives the gated
+near-expiry branch), NOT the leaf key (which never leaves `IdentityMgr` except via
+the `IdentityRead` getter).
+
+### Enqueue/handoff trigger (rev 2 — the missing level-trigger)
+
+A reconciler does not run unless the broker is told to evaluate it. The handoff
+mirrors the shipped `WorkloadLifecycle → backend-discovery-bridge /
+service-lifecycle` pattern:
+
+- **Target key:** `job/<workload_id>` — the same workload grain
+  backend/service-lifecycle use (`workload_lifecycle.rs:186-190, 236-240`); broker
+  LWW at `(ReconcilerName, TargetResource)` dedups duplicate enqueues.
+- **Producer 1 — `WorkloadLifecycle::reconcile`** (`:181`): inside the existing
+  `if actions.iter().any(is_alloc_mutating_action)` block (where
+  `is_alloc_mutating_action` = `StartAllocation | RestartAllocation |
+  StopAllocation | FinalizeFailed`, `:279-285`), push a **third**
+  `EnqueueEvaluation { reconciler: SVID_LIFECYCLE_NAME, target: job/<wl> }`,
+  **ungated by workload kind** (identity matters for every alloc, not only
+  Service). Use the same compile-time `NAME`-alias anti-drift const the file uses
+  (`:258`).
+- **Producer 2 — the exit observer** (`exit_observer.rs:230-256`): next to the
+  existing `runtime.broker().submit(...)` for `workload_lifecycle` / `backend_
+  discovery_bridge`, add a sibling submit for `svid_lifecycle` so an *exit*
+  (Running → Failed/Stopped, outside the main action vector) ticks the
+  `¬running ∧ held → DropSvid` branch (O2 — leaf key dropped on exit, not only on
+  operator `StopAllocation`). Unconditional, cannot busy-loop (an already-dropped
+  alloc reconciles to `Noop` and drains).
+- **Emissions + dedup:** one per tick per producer (NOT per action); the two
+  producers addressing the same key is intentional and safe (the existing
+  handoffs already do this).
+- **DELIVER regression obligation:** a test proving a Running transition AND a
+  Stopped transition each tick `SvidLifecycle` for `job/<workload_id>` with no
+  manual broker poke (mirrors the UI-06 / GAP-9 enqueue regression). Without it
+  Slice 01 builds a correct reconciler that never runs.
+
+### `IdentityMgr` (the in-process holder)
+
+```rust
+pub struct IdentityMgr { inner: parking_lot::RwLock<IdentityState> }
+struct IdentityState {
+    held:   BTreeMap<AllocationId, SvidMaterial>,
+    bundle: Option<TrustBundle>,
+}
+```
+
+`new(bundle: Option<TrustBundle>)`; mutators `hold` / `drop_svid` / `set_bundle`
+(write-lock → mutate → drop guard, never across `.await`); `impl IdentityRead`
+reads via read-lock → `.cloned()`-out (the guard dropped *within* the read
+expression); **`held_snapshot()`** is the sync `actual`-projection reader (read-lock
+→ `.iter().map(…).collect()` → drop, returning `HeldSvidFacts` per held alloc —
+the runtime's `hydrate_actual` arm folds it into `SvidLifecycle`'s `actual`, sync
+precisely so the arm needs no `.await`, mirroring `WorkflowEngine::live_instances()`).
+**`parking_lot::RwLock`, NOT `tokio::sync`** — the critical section is a
+synchronous map mutation / clone-out that does not cross an `.await` (the project
+default for sync critical sections; keeps the guard off every await point).
+**`BTreeMap` is MANDATORY** — the held map is iterated by the
+`assert_eventually!("running allocs hold a valid SVID")` North-Star invariant AND
+by `held_snapshot` (whose output the runtime folds into `actual`), so its
+iteration order must be deterministic across DST seeds (K5).
+
+### Bundle currency = HYDRATED (DIVERGE fork C → 5-A)
+
+The `TrustBundle` is held **in** `IdentityMgr` — set at boot (composition root:
+`Ca::trust_bundle()` → `IdentityMgr::new(Some(bundle))`) and refreshed
+opportunistically by the issue executor (which holds `&dyn Ca`; after
+`issue_and_audit`, `identity.set_bundle(ca.trust_bundle()?)`). `current_bundle()`
+reads **in-process — ZERO CA I/O on the read hot path** (O3). `set_bundle` is the
+seam **#40** (rotation) later uses to push a rotated bundle through the same
+surface with no consumer change. (Rejected alternative: pull `Ca::trust_bundle()`
+on demand per read — violates O3; hydration is strictly better and gives #40 its
+push seam. ADR-0067 D6 / A4.)
+
+### The `SvidLifecycle` View (retry memory) + the gated #40 rotation seam
+
+```rust
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
+pub struct SvidLifecycleView { #[serde(default)] retry: BTreeMap<AllocationId, IssueRetry> }
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct IssueRetry {
+    attempts:             u32,           // input to the backoff schedule
+    #[serde(default = "epoch_zero")]   // UnixInstant: !Default
+    last_failure_seen_at: UnixInstant,   // input; deadline recomputed each tick
+}
+```
+
+**The View is RETRY MEMORY ONLY** (rev 2) — the `development.md` § "Reconciler
+I/O" `RetryMemory` shape — so a *failed* `IssueSvid` (CA error / audit-write
+failure) backs off instead of re-firing every tick. **NO `serial`,
+`issued_at`-as-success-fact, or `spiffe_id`**: rev 1's `IssuedInputs` was wrong
+because (a) `serial` is a *post-dispatch executor output* the pure reconciler
+cannot know, and the runtime persists `next_view` BEFORE dispatch
+(`reconciler_runtime.rs:1222-1226` vs `:1324`) — a View claiming "issued" could be
+durably written when the CA/audit write then fails; (b) "is this alloc held?" is
+answered by `actual` (the held set), and the success fact lives in the
+`issued_certificates` observation row. **6 derive bounds** on the View (not 4) —
+`+Eq` for the runtime NextView diff. `UnixInstant` has **no `Default`**, so
+`IssueRetry` needs `#[serde(default = "epoch_zero")]` + a **manual `impl Default`**
+(the `ServiceMapHydrator::RetryMemory` precedent). The backoff **deadline is
+recomputed each tick** (`now_unix >= last_failure_seen_at +
+backoff_for_attempt(attempts)`), never persisted. **NO `expires_at`** — near-expiry
+reads the held cert's real `not_after` off `actual` (`held_snapshot`), not a View
+field. GC `IssueRetry` entries for allocs no longer Running (mirror
+`ServiceMapHydrator`'s `retain`).
+
+**The #40 rotation seam is pre-wired but EMIT-GATED.** The near-expiry branch is
+structurally present and *would* target `Action::StartWorkflow(cert_rotation)`,
+but the **emit is suppressed** (`const ROTATION_ENABLED: bool = false` / absent
+emit) so `StartWorkflow(cert_rotation)` is **NEVER emitted** until #40 flips it.
+This is load-bearing, not cosmetic: production **always wires an empty-registry
+workflow engine**, so a committed `StartWorkflow` for an *unregistered* kind
+raises `WorkflowEngineError::UnknownWorkflow` (`lib.rs:417-418`), isolated
+per-action by the shim (`action_shim/mod.rs:429`) but **re-emitted each tick** the
+condition holds — a naïve emit raises `UnknownWorkflow` every tick. (The
+`None`-engine no-op path is NOT production's.) Near-expiry reads the held cert's
+real `not_after` off `actual` (`held_snapshot`, rev 2), so the seam needs **no**
+View field to drive it; the branch is pre-wired, the emit is gated. Rotation
+(`held ∧ near-expiry → #40`) is a *distinct branch* from restart re-issue
+(`¬held → IssueSvid`, RECOVERY) — keeping them separate ensures restart recovery
+never routes through the (forbidden) synchronous-rotation path. **NO throwaway
+synchronous sync-rotate path** (a single-cut violation #40 would delete).
+
+### Reconciliation decisions resolved (stated, not punted)
+
+The 5 design-sensitive surfaces DISCUSS handed to DESIGN (Open-Questions #1–#5)
+are all RESOLVED here:
+
+- **(#1) `Action` field set + `SpiffeId` derivation** — `IssueSvid { alloc_id,
+  spiffe_id, node_id, correlation }` / `DropSvid { alloc_id, correlation }`;
+  **the pure reconciler builds the `SpiffeId`** via the new infallible
+  `SpiffeId::for_allocation` (`unwrap_or_else(|| unreachable!(…))` over the
+  existing `new`); `node_id` KEPT. `for_allocation` is the **canonical extraction**
+  of two existing private helpers (`mint_alloc_identity` /
+  `mint_identity`) — DELIVER migrates both (rev 2). (ADR-0067 D2 / D5; A6.)
+- **(#2) `IdentityRead` signatures + sim double** — `svid_for(&AllocationId) ->
+  Option<SvidMaterial>` + `current_bundle() -> Option<TrustBundle>`; 5 rustdoc
+  clauses; `SimIdentityRead` + `identity_read_equivalence` DST test. (ADR-0067 D7.)
+- **(#3) `IdentityMgr` concurrency primitive + the held-set-as-`actual`** —
+  `parking_lot::RwLock<IdentityState>` with `BTreeMap` held map (mandatory) +
+  `held_snapshot()` (the sync `actual`-projection reader the runtime folds into
+  `SvidLifecycle`'s `actual`, mirroring `WorkflowEngine::live_instances()` —
+  feasibility grounded against `reconciler_runtime.rs:2206-2209`). (ADR-0067 D1 /
+  D4; A7 / A8.)
+- **(#4) View shape — RETRY MEMORY** — `IssueRetry { attempts,
+  last_failure_seen_at }` (request inputs), NOT issuance success facts; held-ness
+  is `actual`, success lives in `issued_certificates`; 6 bounds; manual `Default`.
+  (ADR-0067 D8; A3.)
+- **(#5) Trust-bundle currency** — **HYDRATED into `IdentityMgr`** (set at boot,
+  refreshed by the executor, pushed by #40 via `set_bundle`); zero CA I/O on the
+  read hot path. (ADR-0067 D6; A4.)
+- **(rev 2) Enqueue/handoff trigger** — `Action::EnqueueEvaluation` from
+  `WorkloadLifecycle::reconcile` + the exit observer, keyed `job/<workload_id>`,
+  broker LWW dedup; DELIVER regression proves Running AND Stopped transitions tick
+  `SvidLifecycle`. (ADR-0067 D5b; § "Enqueue/handoff trigger" above.)
+
+### Earned Trust (probe contract — wire → probe → use)
+
+The identity subsystem inherits ADR-0063's CA boot probe: the composition root
+pulls `Ca::trust_bundle()` to seed `IdentityMgr::new(Some(bundle))` — if the CA
+refuses to start (KEK absent, persisted root fails to decrypt/adopt), the
+identity subsystem never wires (`health.startup.refused`, ADR-0063). The
+**behavioural probe** that the holder actually holds and actually drops is the
+`assert_eventually!("running allocs hold a valid SVID")` North-Star invariant +
+a deliberately-broken executor (drops the hold / fails to drop) failing it; the
+`identity_read_equivalence` DST test exercises the `IdentityRead` contract (incl.
+clause 5: post-drop `svid_for == None`) across both adapters. **No silent
+issuance** is the `issue_and_audit` binding (refuse issuance on audit-write
+failure, ADR-0063 D6) — the probe that the audit row is real before the SVID is
+held. Fault-injection (audit-write failure, broken hold/drop) flagged for DISTILL.
+
+### Quality-attribute scenarios (workload-identity-manager extension)
+
+| Attribute | Scenario | Strategy |
+|---|---|---|
+| Availability of identity (O1 / K1 — North Star) | Every Running alloc holds a valid chain-verifiable SVID at every stable point | `assert_eventually!("running allocs hold a valid SVID")` over the held `BTreeMap` vs the running set; a broken executor fails it |
+| Leak resistance (O2 / K2) | No SVID/leaf key held for a non-Running alloc | Drop-on-stop removes the held-map entry; `svid_for == None` post-drop; observable via the read surface |
+| Read latency (O3) | Consumer reads current SVID + bundle in-process, no re-issue | `Arc` + sync `IdentityRead` getter; SVID from the held map; bundle hydrated (zero CA I/O on read) |
+| Restart recovery (O4 / K3 — reframed rev 2) | Restart leaves no Running alloc without a held SVID; re-issue is bounded + audited; no stale/silent credential | Held set is `actual`; on boot `actual = ∅` (leaf key non-persistable) → `running ∧ ¬held → IssueSvid` re-issues every running alloc, each audited via `issue_and_audit`; a *failed* re-issue backs off via the retry-memory View. (RECOVERY — distinct from #40 rotation.) |
+| No silent issuance (O5 / K4) | Every issuance has an `issued_certificates` row; unauditable issuance refused | Reuse `issue_and_audit` (binds audit row, refuses on audit-write failure) — no unaudited material reaches the held map |
+| Mechanism economy (O6) | No new concurrency/storage beyond runtime + `Ca` + ObservationStore | One `RwLock<BTreeMap>` holder; reconciler runtime + action-shim; #40 seam on the same `set_bundle` surface |
+| Testability (K5) | Identity subsystem reproduces bit-identically from a seed | `BTreeMap` iteration; serials via `Entropy`; fixture keys; `identity_read_equivalence` + twin-run DST |
+
+### Reuse Analysis (HARD GATE)
+
+| Candidate | Verdict | Evidence |
+|---|---|---|
+| `Ca` port + `ca_issuance::issue_and_audit` | **REUSE (logic) + small amendment (ADR-0063 rev 2)** | The executor *calls* `issue_and_audit(ca, observation, clock, node, request)` wholesale — it mints the leaf via `Ca::issue_svid`, writes the `issued_certificates` row, and refuses issuance on audit-write failure (ADR-0063 D6). O5 served by reuse, not re-implementation. **Amendment (2026-06-08):** `issue_and_audit` computes the validity window once from `clock` and threads it through `SvidRequest` into `Ca::issue_svid`, reusing the same window for the audit row; `Ca::issue_svid`'s signature is unchanged (window rides on `SvidRequest`). Minting + audit-binding logic untouched. |
+| `SvidMaterial` / `TrustBundle` / `IssuedCertificateRow` | **REUSE + `SvidMaterial` amendment (ADR-0063 rev 2)** | The held map holds `SvidMaterial` (cert + node-held `leaf_key`, redacted Debug — ADR-0063 D9); `IdentityRead` returns `SvidMaterial` + `TrustBundle`; the audit row is `IssuedCertificateRow`. All three exist (ADR-0063). **Amendment (2026-06-08):** `SvidMaterial` gains a `not_after: UnixInstant` field + accessor (one trailing `new(...)` param) so `held_snapshot` reads the leaf's real validity end (D4); `TrustBundle` / `IssuedCertificateRow` unchanged. |
+| Reconciler runtime (pure `reconcile()` + ViewStore bulk-load/write-through) | **REUSE AS-IS** | `SvidLifecycle` is one more `Reconciler` on the shipped runtime (ADR-0035/0036); the runtime owns View persistence end-to-end. No runtime change. |
+| Action-shim executor pattern (`ServiceMapHydrator` → `Action::DataplaneUpdateService` → executor) | **REUSE (pattern), new executor** | `action_shim/issue_svid.rs` mirrors `dataplane_update_service.rs` exactly — a new executor on the existing shim. No shim *mechanism* change (the dispatch grows additively). |
+| `Action` enum | **EXTEND (additive)** | +2 plain-enum variants (`IssueSvid`/`DropSvid`) + 2 `dispatch_single` arms + the 3 dispatch-enum variants (`AnyState`/`AnyReconciler`/`AnyReconcilerView`) — the same additive shape `DataplaneUpdateService`/`StartWorkflow` were added. No existing variant changes. |
+| `AppState` + shim signature | **EXTEND** | Gain `ca: Arc<dyn Ca>` (required) + `identity: Arc<IdentityMgr>`; thread `ca`/`clock`/`identity` into the 2 new arms. Additive — existing `AppState` consumers untouched. Production `Arc<dyn Ca>` is an **ephemeral workload `RcgenCa`** built in `run_server` (ADR-0067 D3 rev 4) — NOT `ca_boot` (`lib.rs:50` is a bare module decl; `boot_ca`/`RcgenCa` are never called in `lib.rs`). Persistent KEK-backed root (ADR-0063 D2/D8) + operator surface = **#215**. |
+| `SpiffeId` | **EXTEND (impl) — CONSOLIDATION** | Add infallible `SpiffeId::for_allocation(&WorkloadId, &AllocationId) -> Self` — the **canonical extraction** of two existing private helpers that already derive the identical `spiffe://overdrive.local/job/<wl>/alloc/<id>` string: `mint_alloc_identity` (`backend_discovery_bridge.rs:424`) + `mint_identity` (`workload_lifecycle.rs:808`). Validates via the existing `new` with `unwrap_or_else(\|\| unreachable!(…))`; type / `new` / `Display`/`FromStr`/serde unchanged. **DELIVER migrates both call sites** to it (single-cut — prevents a third implementation). |
+| `CorrelationKey::derive` | **REUSE AS-IS** | `derive(target, spec_hash, purpose)` already exists (ADR-0035 reconciler-I/O / `id.rs`); the actions reuse it (`target = "svid-lifecycle/<alloc>"`, `"issue-svid"`). No change. |
+| `AllocationId` / `NodeId` / `WorkloadId` / `CertSerial` / `UnixInstant` | **REUSE AS-IS** | All exist in `id.rs` / the time types; used directly in the actions / View / `for_allocation`. No change. |
+| `Entropy` port | **REUSE AS-IS** | Serials flow through `Entropy` inside `issue_and_audit` (ADR-0063 D7) → DST-deterministic. Unchanged. |
+| `IdentityMgr` + `IdentityRead` + `SvidLifecycle` + `SvidLifecycleView` + `SimIdentityRead` + `action_shim/issue_svid.rs` | **CREATE NEW (justified)** | No existing component holds an SVID set in process, exposes a sync identity read surface, or reconciles identity as a separate convergence target. The holder/reader/dropper is the *feature* — no existing alternative. Each mirrors a shipped precedent (`ServiceMapHydrator` reconciler, the `Ca` port-trait+sim-double shape, the action-shim executor). |
+
+**Verdict: 8 REUSE AS-IS, 2 EXTEND (additive — `Action`, `SpiffeId`), 1 EXTEND
+(`AppState`), 1 REUSE-pattern-via-new-executor, 6 CREATE-NEW (justified).** The
+reuse-heavy profile is the expected shape — the CA, state layers, newtypes,
+reconciler runtime, and action-shim all already exist; the feature is the
+*holder/reader/dropper composition* behind a new reconciler + port trait. The
+EXTENDs are purely additive (new enum variants, a new impl method, two new
+`AppState` fields), the same shape prior features grew the same surfaces.
+
+### Open questions deferred to DISTILL / DELIVER
+
+- Whether to **additionally zeroize** the leaf key on drop (memory-scrubbing
+  beyond removing the held-map entry) — drop-on-stop removes the entry so the key
+  is no longer reachable (O2 met); zeroization is a hardening call, not invented
+  here (DISCUSS Out-of-scope: "DESIGN call / future hardening").
+- The exact `WORKLOAD_SVID_TTL` policy constant the near-expiry recompute reads
+  (ADR-0063's 1h SVID TTL is the policy; the near-expiry *threshold* the #40 seam
+  uses is #40's to pin when it flips the gate).
+- Fault-injection scenario set for the Earned-Trust probes (audit-write failure
+  refuses issuance; a broken executor fails the convergence invariant).
+
+### Out-of-scope (deferrals — all cite EXISTING issues, no inventions)
+
+| Non-goal | Owner |
+|---|---|
+| Certificate **rotation lifecycle** (near-expiry → mint-fresh → swap → retire) | **#40 [3.3]** (a `cert_rotation` workflow; needs workflow primitive **#39 [3.2]**). #35 owns *issue + hold + swap-into-`IdentityMgr` (`hold` replaces) + converge*; #40 owns the durable rotation workflow whose `SvidMaterial` output #35 swaps in. The near-expiry branch is pre-wired but EMIT-GATED, keyed off the held cert's real `not_after` (from `actual`), NOT a View field. **Boundary (rev 2):** #40's "SvidMaterial lands as observation" is loose — the leaf key NEVER enters the gossiped ObservationStore (`CaKeyPem` no `Serialize`, ADR-0063 D9); the honest contract is **rotation status/audit lands as observation; the material is swapped IN-PROCESS** into `IdentityMgr`. Restart re-issue (`¬held → IssueSvid`) is RECOVERY, a *distinct* branch from the gated near-expiry rotation. |
+| The dataplane **consumers** that present identity (sockops/kTLS mTLS, L7 gateway, telemetry sink) | **#26** (sockops/kTLS) + gateway/telemetry features. This feature ships the `IdentityRead` *read port + sim double + a test consumer*, not the production consumers. |
+| The operator `alloc status` render of `issued_certificates` + the deployed-SVID operator-verify flow | **#215** (compose built-in CA into the operator surface — O05/E03), **blocked on #35**. #35's own observable is TEST-tier (`openssl verify` + ObservationStore readback + DST convergence). **Boundary (rev 2):** re-issue-on-restart + rotation ⇒ **many `issued_certificates` rows per alloc** (append-only audit) — #215 renders the **current** cert (latest row matching the held serial), NOT one-per-alloc; a serial change after a restart reads as *legible* (re-issued on restart), NOT anomalous. O05 "no silent issuance" is reinforced (every re-issue leaves a row). |
+| **Multi-node** held sets, gossiped audit rows across nodes, per-node identity, node attestation | **#36 [2.14]** (`Depends on #28`). Single-node Phase 2: one node's running set. |
+| **ACME / public-trust gateway certs** unified into `IdentityMgr` | **Roadmap step 4.7** (whitepaper §11). `IdentityMgr` is shaped to admit them later, not to hold them now. |
+| The `watch`/`broadcast` **push** read surface (consumers notified on change) | **Future (DIVERGE Option 3)** — a non-breaking change behind the `IdentityRead` port; #40 rotation pushes down the same `set_bundle` seam. No new issue. |
+| SVID **revocation** (CRL / OCSP) | **Phase 5** (whitepaper §8) — revocation-by-expiry (1h TTL) is the model. |
+| Leaf-key **zeroization** on drop | **NOT in #35 — accepted residual risk** — O2 is reachability: drop removes the entry so the key is unreachable (O2 met); memory-scrubbing the key bytes is separate hardening, out of #35 scope (explicit scoping decision, not an open question). |
 ## Phase 1 workflow-primitive extension
 
 This section extends the Application Architecture with the decisions

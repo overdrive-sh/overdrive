@@ -2,11 +2,14 @@
 
 ## Status
 
-Accepted (2026-06-05). Supersedes **ADR-0010 for *workload identity* only** —
-ADR-0010's ephemeral CA (`tls_bootstrap.rs`) continues to serve the
-control-plane-HTTPS / operator-CLI consumer unchanged (see § Consequences
-and D-CA-5 in the feature delta). This ADR governs the persistent
-workload-identity trust hierarchy (GH #28, roadmap Phase 2.6).
+Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key) and
+2026-06-08 (rev 2 — `SvidMaterial.not_after` + validity window threaded through
+`SvidRequest`)** — see § Changelog for both dated amendments (each reopens this
+Accepted ADR via a dated entry, not a silent rewrite). Supersedes **ADR-0010 for
+*workload identity* only** — ADR-0010's ephemeral CA (`tls_bootstrap.rs`)
+continues to serve the control-plane-HTTPS / operator-CLI consumer unchanged
+(see § Consequences and D-CA-5 in the feature delta). This ADR governs the
+persistent workload-identity trust hierarchy (GH #28, roadmap Phase 2.6).
 
 ## Context
 
@@ -107,7 +110,13 @@ pub trait Ca: Send + Sync {
     /// Mint a workload SVID: exactly ONE spiffe:// URI SAN, CA:FALSE,
     /// keyUsage=digitalSignature (critical), CSPRNG serial via Entropy.
     /// Re-issue for an existing SpiffeId yields a fresh cert (distinct
-    /// serial, new validity window).
+    /// serial). The validity window (`not_before` / `not_after`) is
+    /// **supplied by the caller on `SvidRequest`** (rev 2 amendment,
+    /// 2026-06-08) — the adapter STAMPS that exact window on the leaf
+    /// (host) or CARRIES it on `SvidMaterial` (sim fixture); it does NOT
+    /// read its own clock. The returned `SvidMaterial.not_after()` echoes
+    /// the requested `not_after` (the consistency invariant — see the rev 2
+    /// changelog entry).
     fn issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial, CaError>;
 
     /// Compose the trust bundle a relying party verifies an SVID against
@@ -282,11 +291,19 @@ pub enum CertRole { Root, Intermediate { path_len: u8 }, Svid }
 pub struct CertSpec {
     role:        CertRole,
     subject:     SpiffeId,            // SVID: the workload id; CA: trust-domain only
-    serial:      CertSerial,          // drawn via Entropy
-    not_before:  UnixInstant,
-    not_after:   UnixInstant,
     // ... derived key-usage / basic-constraints per role
 }
+// NB (rev 2 amendment, 2026-06-08): the per-mint issuance inputs — `serial`
+// (drawn via the `Entropy` port) and the `not_before` / `not_after` validity
+// window — are NOT fields of this pure policy object. `CertSpec` is a
+// deterministic function of `(role, subject)` only. The serial is drawn by
+// the adapter; the validity window is supplied by the CALLER on `SvidRequest`
+// (see the rev 2 changelog entry "validity window threaded through
+// `SvidRequest`") so a SINGLE clock read sources both the cert window and the
+// `issued_certificates` audit-row window. This matches the shipped code —
+// `crates/overdrive-core/src/ca/cert_spec.rs` carries only `{ role, subject }`;
+// the earlier sketch above listing `serial` / `not_before` / `not_after` on
+// `CertSpec` never reflected the implementation.
 
 impl CertSpec {
     /// SVID constructor — enforces the single-URI-SAN invariant and the
@@ -372,6 +389,20 @@ back-propagation, commit `aab5a69b`).
 **Issuance is never silent:** an issuance whose audit row cannot be written
 surfaces a `CaError` rather than handing out an unaudited certificate (KPI/AC,
 US-CA-05).
+
+> **Downstream dependent (cross-ref, ADR-0067 D10, rev 5 2026-06-09).** The
+> **audit-before-hold** ordering this row's write site enforces — the
+> `issued_certificates` row is committed on mint success BEFORE the SVID is held
+> in `IdentityMgr`, and issuance refuses on audit-write failure — is **load-bearing
+> for the `SvidLifecycle` restart-recovery signal.** ADR-0067 D10 projects the
+> existence of an `issued_certificates` row (keyed on `spiffe_id`) into the
+> reconciler's `actual` as the durable "this alloc was successfully issued before"
+> marker: `audit-row ∧ ¬held ⟹ minted-then-lost-hold-on-restart ⟹ re-issue
+> immediately`. This is sound ONLY because `audit-row-exists ⟹ the mint succeeded
+> and was audited` (the refuse-on-audit-failure binding above). A future refactor
+> that wrote the audit row speculatively *before* a confirmed mint, or that held
+> the SVID before the audit write, would break that implication and silently
+> defeat ADR-0067's immediate restart recovery. Do not reorder.
 
 ### D7 — Serials via the `Entropy` port; key generation via the crypto backend CSPRNG
 
@@ -654,6 +685,135 @@ for DISTILL.
   Phase 7 SPIFFE Workload API.
 
 ## Changelog
+
+- 2026-06-08 — **Phase-2 production wires an *ephemeral* workload CA, not the
+  persistent KEK-backed root (note, no decision change).** Recorded while
+  correcting a false claim in ADR-0067 D3 (which had asserted production already
+  composes `Arc<dyn Ca>` from `ca_boot`). Ground truth: the workload-CA boot
+  *functions* this ADR ships (`boot_ca` + `SystemdCredsKeyring`, D2/D8) are
+  **never called in `overdrive-control-plane/src/lib.rs`** — `lib.rs:50` is a
+  bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa` appear only in tests. Phase 2
+  (#35, ADR-0067) instead composes an **ephemeral workload `RcgenCa` directly in
+  `run_server`** — `RcgenCa::new(Arc::new(OsEntropy), SpiffeId
+  "spiffe://overdrive.local/overdrive/ca")` → `root()` → `issue_intermediate(&node_id)`
+  → `trust_bundle()` → `IdentityMgr::new(Some(bundle))`, with a fresh in-memory
+  P-256 root each boot and **NO KEK / NO persistence**. This **does not contradict**
+  this ADR's persistent design: the ephemeral `RcgenCa` and the persistent
+  KEK-backed root implement the same `Ca` trait, so this ADR's D2/D8 persistent
+  root is the **production upgrade target** for #215 ("Compose built-in CA into
+  operator surface + satisfy EDD expectations", blocked on #35), not yet wired.
+  Swapping the `run_server` composition root from ephemeral `RcgenCa` to
+  `boot_ca` + `SystemdCredsKeyring` is the change #215 makes; no decision in
+  D1–D9 changes. (The *operator/control-plane HTTPS* ephemeral CA,
+  `tls_bootstrap::mint_ephemeral_ca` → `CaMaterial` at `lib.rs:1208`, ADR-0010,
+  is a different CA — it is not a `Ca` and cannot issue workload SVIDs.)
+
+- 2026-06-08 — **rev 2 amendment: `SvidMaterial` gains `not_after`; the SVID
+  validity window is threaded through `SvidRequest` from a single injected-clock
+  read (the "held cert's real `not_after`" becomes a real observable field). D1
+  signing-key custody, D5 cardinality, D6 audit shape, D9 leaf-key custody all
+  unchanged.** This entry **reopens an Accepted ADR** — it is recorded as a dated
+  amendment, not a silent history rewrite; the decision body above (D1 method
+  sketch, D5 `CertSpec` note) is annotated in place to point here.
+
+  **Trigger (a design/code contradiction, caught in #35 ADR-0067 review):**
+  ADR-0067 D4 stated that `IdentityMgr::held_snapshot()` yields `HeldSvidFacts {
+  spiffe_id, not_after }` where `not_after` is "the cert's real `not_after`
+  (`SvidMaterial`'s validity end)". That was **false against the shipped code**:
+  `SvidMaterial` (`crates/overdrive-core/src/traits/ca.rs:298-357`) has no
+  `not_after` field or accessor — its fields are `cert_pem, cert_der, serial,
+  spiffe_id, leaf_key`. The window the cert is actually signed with was an
+  adapter-internal detail (`RcgenCa::issue_svid` computed it from
+  `SystemTime::now()` at `rcgen_ca.rs:478-480`) and never crossed the trait
+  boundary. The #40 near-expiry rotation seam (ADR-0067 D8 / S-WIM-09) compares
+  `actual.not_after` against `tick.now_unix`, so without a real field that
+  comparison had nothing sound to read.
+
+  **The amendment (the "Option A" the user ratified):**
+  - **`SvidMaterial` gains `not_after: UnixInstant`** (+ a `const fn
+    not_after(&self) -> UnixInstant` accessor), reusing the existing
+    `overdrive_core::wall_clock::UnixInstant` newtype — the same pattern D9 used
+    to add `leaf_key`. `SvidMaterial::new` grows one trailing parameter. This is
+    an **observed fact of the issued credential**, NOT a derived-state smell
+    (see "Reconciling with persist-inputs-not-derived" below).
+  - **`SvidRequest` gains the validity window** (`not_before: UnixInstant,
+    not_after: UnixInstant`) and a windowed constructor; the window is the
+    per-mint issuance input the caller supplies (the same way the serial is the
+    per-mint input the adapter draws). `Ca::issue_svid(&self, req: &SvidRequest)`
+    keeps its signature — the window rides on the request, no new positional
+    param.
+  - **`ca_issuance::issue_and_audit` becomes the single window source.** It
+    already holds the injected `clock` and already computes `issued_at =
+    UnixInstant::from_clock(clock); not_before = issued_at − SKEW_TOLERANCE;
+    not_after = not_before + WORKLOAD_SVID_TTL` for the audit row
+    (`ca_issuance.rs:171-184`). Under the amendment it computes that window
+    **once, before minting**, builds the windowed `SvidRequest` from the
+    requested `SpiffeId` + that window, passes it to `ca.issue_svid(...)`, and
+    **reuses the same `not_before`/`not_after` values for the
+    `IssuedCertificateRow`.**
+  - **`RcgenCa::issue_svid`** stamps `req.not_before()` / `req.not_after()` onto
+    the rcgen params (converting `UnixInstant` → rcgen `OffsetDateTime` via the
+    `date_time_ymd(1970,1,1) + Duration` idiom already at `rcgen_ca.rs:478`),
+    **deleting its `SystemTime::now()` read** (`seconds_since_epoch` /
+    `rcgen_ca.rs:311-316`), and carries the same `not_after` onto the returned
+    `SvidMaterial`. A determinism bonus: the host issuer no longer reads
+    wall-clock independently of the control plane.
+  - **`SimCa::issue_svid`** carries `req.not_after()` onto the returned
+    `SvidMaterial` and leaves its **frozen fixture cert bytes unchanged** — fully
+    consistent with the limitation it already documents
+    (`overdrive-sim/src/adapters/ca.rs:348-364`: the structured fields track the
+    request, the opaque fixture bytes are fixed). `SimCa` needs no clock.
+
+  **The consistency invariant this closes:** `svid.not_after() ==
+  issued_certificates.not_after` for the same issuance, **by construction** — both
+  are the *same `UnixInstant` value*, computed once in `issue_and_audit` from one
+  `UnixInstant::from_clock(clock)` read and used for both the windowed
+  `SvidRequest` (→ the cert, via the adapter) and the audit row. There is no
+  second clock read on either path to drift from.
+
+  **Why it is DST-deterministic:** the window derives from the *injected* `Clock`
+  the control plane already uses (`SimClock` under DST, `SystemClock` in
+  production) — never from `SystemTime::now()` (deleted from `RcgenCa`) and never
+  from `SimCa`'s frozen fixture bytes (which were unrelated to `SimClock` and
+  thus non-deterministic relative to it). The held cert's `not_after` now
+  advances in lockstep with `tick.now_unix` (both off the same `SimClock`
+  elapsed-nanos counter), so the ADR-0067 D8 near-expiry branch (`actual.not_after`
+  vs `tick.now_unix`) compares two values from one clock — replayable bit-for-bit
+  under a seed.
+
+  **Reconciling with `.claude/rules/development.md` § "Persist inputs, not
+  derived state":** `not_after` on `SvidMaterial` (and in `HeldSvidFacts` / the
+  held set) is **NOT** a recompute-from-policy deadline — it is an **observed
+  fact of the minted credential.** The leaf is non-reconstructable (each
+  `issue_and_audit` mints a fresh leaf; the leaf key never persists, D9) and its
+  validity window is fixed at mint and embedded in the signed cert bytes. Storing
+  the fixed window of a non-reconstructable artifact is exactly the "persisted
+  field is an externally-fixed fact of immutable content" case the rule exempts —
+  the same shape as `issued_certificates.not_after`, which D6 already records as
+  an audit *input*. It is **not** a `next_attempt_at`-style derived deadline: a
+  reviewer must not mistake it for one. (The retry-policy deadline that *is*
+  recompute-from-inputs lives in ADR-0067 D8's `IssueRetry` View, untouched here.)
+
+  **Rejected alternative (naive Option A — each adapter computes its own
+  window):** `RcgenCa` reads `SystemTime::now()` and `SimCa` reads its fixture's
+  baked-in window, independently of `issue_and_audit`'s `clock`. Rejected: it
+  re-creates the exact drift this amendment closes — host-path sub-second skew
+  between `held.not_after` and `row.not_after`, and (worse) a DST-non-deterministic
+  `SimCa` window unrelated to `SimClock`, breaking the #40 near-expiry seam's
+  replay-equivalence. The single-clock-read-threaded-through-the-request shape is
+  the only one that makes the consistency invariant hold *by construction* rather
+  than by two paths happening to agree.
+
+  **Call sites the crafter updates** (all verified against HEAD): `SvidMaterial::new`
+  — `overdrive-host/src/ca/rcgen_ca.rs:496`, `overdrive-sim/src/adapters/ca.rs:365`,
+  `overdrive-core/src/traits/ca.rs:875` (Debug-redaction test). `SvidRequest::new`
+  / `ca.issue_svid` — the test call sites in `rcgen_ca_chain_verify.rs`,
+  `sim_ca_fixture_cert_key_match.rs`, `sim_ca_deterministic.rs`, `ca_equivalence.rs`,
+  `ca_boot_and_audit.rs` (incl. the `workload_request()` helper at :729 and the
+  sad-path mock `issue_svid` at :618). `issue_and_audit` — its 5 test call sites
+  in `ca_boot_and_audit.rs` (:755, :808, :867, :905, :908) and the not-yet-built
+  #35 executor (ADR-0067 D3 / roadmap 01-06). These are mechanical (pass a fixed
+  `UnixInstant` window in tests), mirroring the D9 `leaf_key` call-site sweep.
 
 - 2026-06-06 — **D9 added: leaf private key is node-held (`issue_svid` returns
   cert + key). D5 (cardinality) and D1 (root/intermediate signing-key custody)

@@ -84,6 +84,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
@@ -98,9 +99,11 @@ use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::{TerminalCondition, WorkloadId};
 use tempfile::TempDir;
 
+use crate::adapters::ca::SimCa;
 use crate::adapters::clock::SimClock;
 use crate::adapters::dataplane::SimDataplane;
 use crate::adapters::driver::SimDriver;
+use crate::adapters::entropy::SimEntropy;
 use crate::adapters::observation_store::SimObservationStore;
 use crate::harness::{InvariantResult, InvariantStatus};
 use overdrive_store_local::LocalIntentStore;
@@ -499,6 +502,8 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         driver,
         sim_clock.clone(),
         Arc::new(SimDataplane::new()),
+        Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
+        Arc::new(IdentityMgr::new(None)),
         NodeId::new("writer-1").map_err(|e| format!("writer node id: {e:?}"))?,
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),

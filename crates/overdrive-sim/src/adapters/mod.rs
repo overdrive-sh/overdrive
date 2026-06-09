@@ -19,9 +19,15 @@
 pub mod ca;
 pub mod cgroup_fs;
 pub mod clock;
+// workload-identity-manager step 02-02 — `SimIdentityRead`, the in-memory
+// `overdrive_core::traits::identity_read::IdentityRead` double over a preloaded
+// held set + trust bundle. The sim counterpart to the host `IdentityMgr`
+// (`overdrive-control-plane`); the `identity_read_equivalence` structural guard
+// drives both adapters through the same calls (ADR-0067 D7/D9).
 pub mod dataplane;
 pub mod driver;
 pub mod entropy;
+pub mod identity_read;
 pub mod llm;
 pub mod observation_store;
 pub mod transport;
@@ -40,3 +46,4 @@ pub mod probers;
 
 pub use ca::SimCa;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
+pub use identity_read::SimIdentityRead;

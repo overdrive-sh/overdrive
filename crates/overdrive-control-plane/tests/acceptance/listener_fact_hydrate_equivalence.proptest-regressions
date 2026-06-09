@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7bfd9d1548e6345c8c6fb953d949a45a00b366c1a41f54575ed7b643f814523d # shrinks to services = [[Listener { port: 14589, protocol: Tcp }], [Listener { port: 16362, protocol: Udp }, Listener { port: 31959, protocol: Udp }, Listener { port: 35828, protocol: Tcp }], [Listener { port: 8643, protocol: Udp }, Listener { port: 52750, protocol: Udp }], [Listener { port: 56173, protocol: Udp }, Listener { port: 52301, protocol: Udp }]]
+cc d738205213a95bbfd5ce607fff8a3533fe379dbcc748a6e4b88c1dea719ac73d # shrinks to listener = Listener { port: 18653, protocol: Tcp }

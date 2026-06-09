@@ -336,15 +336,16 @@ impl Reconciler for BackendDiscoveryBridge {
         for (service_id, listener) in &desired.desired.listeners {
             // Build backend set — one `Backend` per Running alloc.
             // Phase 2.2 single-node: every alloc resolves to
-            // `self.host_ipv4`. The SpiffeId derives from the
-            // canonical `mint_identity(workload_id, alloc_id)` shape
-            // used everywhere else in the reconciler module.
+            // `self.host_ipv4`. The SpiffeId derives from the canonical
+            // `SpiffeId::for_allocation(workload, alloc)` constructor
+            // (ADR-0067 D5) — the single derivation the reconciler module
+            // routes through.
             let backends: Vec<Backend> = actual
                 .actual
                 .running
                 .iter()
                 .map(|alloc_id| Backend {
-                    alloc: mint_alloc_identity(&actual.actual.workload_id, alloc_id),
+                    alloc: SpiffeId::for_allocation(&actual.actual.workload_id, alloc_id),
                     addr: SocketAddr::new(IpAddr::V4(self.host_ipv4), listener.port.get()),
                     weight: 1,
                     healthy: true, // GH #170 ships real health
@@ -416,19 +417,6 @@ impl Reconciler for BackendDiscoveryBridge {
 
         (actions, next_view)
     }
-}
-
-/// Derive a SpiffeId for a Running alloc — pure function over
-/// `(workload_id, alloc_id)`. Matches the project-wide shape used by
-/// `mint_identity` in the reconciler module.
-fn mint_alloc_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId {
-    let raw = format!(
-        "spiffe://overdrive.local/job/{}/alloc/{}",
-        workload_id.as_str(),
-        alloc_id.as_str()
-    );
-    #[allow(clippy::expect_used)]
-    SpiffeId::new(&raw).expect("derived SpiffeId is valid by construction")
 }
 
 /// Project a [`ServiceVip`] to the IPv4 wire shape used by

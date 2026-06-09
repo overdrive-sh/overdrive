@@ -12,6 +12,13 @@ schema_version: 1
 #
 # Origin: built-in-ca DISCUSS wave (2026-06-04). Distilled from whitepaper
 # §4/§8/§19 and vision.md, not from user interviews.
+#
+# Reused (not forked) by the workload-identity-manager DISCUSS wave
+# (2026-06-08) for J-SEC-002 — see related_jobs + the j_sec_002_lens block.
+# J-SEC-001 is Sam's "is identity FORGERY-PROOF, with no external PKI?" lens;
+# J-SEC-002 is the same engineer's "is the running set consistently
+# identity-BEARING — held, readable, dropped on stop — and is that CHECKED?"
+# lens (liveness/availability, not existence/forgery-resistance).
 
 persona:
   id: sam-platform-security-engineer
@@ -67,4 +74,25 @@ persona:
     - "Re-issuing an SVID on demand produces a fresh, valid leaf without restarting the control plane"
     - "Zero external identity components to deploy, monitor, or upgrade"
 
-  related_jobs: [J-SEC-001]
+  related_jobs: [J-SEC-001, J-SEC-002]
+
+  # J-SEC-002 lens (workload-identity-manager, GH #35). Same engineer, a
+  # liveness/availability lens rather than the forgery-resistance lens of
+  # J-SEC-001. Sam's questions here are about the RUNNING SET, not the trust
+  # hierarchy's correctness (which #28 settled).
+  j_sec_002_lens:
+    questions_sam_asks:
+      - "Is the running set CONSISTENTLY identity-bearing — is the window between Running and identity-held bounded and fail-closed (a workload with no held SVID cannot present identity), not an open exposure?"
+      - "When a workload stops, is its leaf private key actually gone from memory, or lingering as dead weight / attack surface?"
+      - "Can the dataplane (sockops/kTLS mTLS, gateway, telemetry) read the current SVID + trust bundle the INSTANT it must present identity — in-process, no re-issue per read?"
+      - "Is identity availability CHECKED by a convergence invariant, or merely asserted? Does it survive a control-plane restart without redundant re-issue?"
+    success_signals:
+      - "A running allocation demonstrably holds a chain-verifiable SVID (the issued_certificates row is written and openssl verify of the leaf chain exits 0 at the test tier; the operator alloc status render of that row is #215's, blocked on #35), and a stopped allocation holds none."
+      - "A DST assert_eventually!(\"running allocs hold a valid SVID\") invariant fails the build if a Running allocation lacks a held SVID — availability is mechanically checked, not asserted."
+      - "Every issuance leaves an observable audit row; an unauditable issuance is refused (no silent issuance)."
+      - "Identity survives a control-plane restart, recomputed from persisted issuance INPUTS, with no redundant re-issue."
+    frustrations_to_avoid:
+      - "A window where a running workload is unidentifiable on the wire (held set transiently missing it with no bounded convergence)."
+      - "A stopped workload's leaf private key surviving in memory after the workload is gone."
+      - "A read surface that re-issues a fresh cert per read (latency on the connection hot path) or cannot be exercised in tests."
+      - "A View that persists a derived expires_at instead of issuance inputs — silently binding the held set to today's TTL policy."
