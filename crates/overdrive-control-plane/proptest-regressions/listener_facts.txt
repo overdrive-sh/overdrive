@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 68d1eb21062545e0b80627185b41a1fac887bff487ca27df9fee6fb45f8aec5f # shrinks to set = IntentSet { services: [("svc-0", ServiceVip(10.96.0.1), [Listener { port: 29448, protocol: Tcp }, Listener { port: 29448, protocol: Tcp }])] }
+cc 777b91e62258a190a3520f22cdc6554ebe9d65a0695ebde83f841b351b7331d5 # shrinks to set = IntentSet { services: [("svc-0", ServiceVip(10.96.0.1), [Listener { port: 20192, protocol: Tcp }, Listener { port: 43255, protocol: Tcp }, Listener { port: 13593, protocol: Udp }]), ("svc-1", ServiceVip(10.96.0.2), [Listener { port: 24797, protocol: Tcp }, Listener { port: 10588, protocol: Udp }, Listener { port: 19384, protocol: Tcp }])] }
