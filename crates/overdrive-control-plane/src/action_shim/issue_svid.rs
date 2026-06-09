@@ -84,7 +84,7 @@ pub async fn dispatch_issue(
     clock: &dyn Clock,
     identity: &IdentityMgr,
 ) -> Result<(), IssueSvidDispatchError> {
-    let Action::IssueSvid { alloc_id, spiffe_id, node_id, correlation: _ } = action else {
+    let Action::IssueSvid { alloc_id, spiffe_id, node_id, correlation } = action else {
         panic!(
             "action_shim::issue_svid::dispatch_issue invoked with wrong Action \
              variant — caller is the action shim's match arm and is the sole \
@@ -107,10 +107,28 @@ pub async fn dispatch_issue(
     // D6 bundle refresh — opportunistically install the current trust bundle.
     // A bundle-compose failure is non-fatal to the issuance that already
     // succeeded and was audited: the cert is held and observable, so we do NOT
-    // unwind the hold on a bundle-refresh error. Surface it so a persistent
-    // refresh failure is not silently swallowed.
-    if let Ok(bundle) = ca.trust_bundle() {
-        identity.set_bundle(bundle);
+    // unwind the hold on a bundle-refresh error (K4). On failure the executor
+    // emits the structured `issue_svid.trust_bundle_refresh_failed` warning so a
+    // persistent refresh failure is not silently swallowed; the hold stays intact
+    // and the dispatch still returns `Ok`. A richer observable surface (an
+    // ObservationStore row / IdentityMgr counter) is deferred to issue #223.
+    match ca.trust_bundle() {
+        Ok(bundle) => identity.set_bundle(bundle),
+        Err(source) => {
+            tracing::warn!(
+                name: "issue_svid.trust_bundle_refresh_failed",
+                alloc_id = %alloc_id,
+                spiffe_id = %spiffe_id,
+                node_id = %node_id,
+                correlation = %correlation,
+                error = %source,
+                "D6 trust-bundle refresh failed after the SVID was issued and held; \
+                 the held bundle is stale (the issuance itself stands — K4, the hold \
+                 is not unwound). A persistent failure here means relying parties \
+                 verify against an out-of-date trust anchor. Richer observable \
+                 surfacing tracked in issue #223."
+            );
+        }
     }
 
     Ok(())

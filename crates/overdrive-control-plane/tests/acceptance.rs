@@ -223,6 +223,16 @@ mod acceptance {
     // sibling above.
     #[cfg(feature = "integration-tests")]
     mod svid_lifecycle_actual_scoped_to_workload;
+    // Bugfix regression — a D6 trust-bundle refresh failure inside the `IssueSvid`
+    // action-shim executor must be SURFACED via a structured
+    // `issue_svid.trust_bundle_refresh_failed` warning (pre-fix the `Err` arm was
+    // silently swallowed, contradicting the function's own comment) while staying
+    // non-fatal: the SVID was already minted + audited + held (K4), so the hold is
+    // not unwound and the dispatch still returns `Ok`. Richer ObservationStore
+    // surfacing tracked in issue #223. Same `run_convergence_tick`
+    // integration-tests gate as its siblings above.
+    #[cfg(feature = "integration-tests")]
+    mod issue_svid_surfaces_bundle_refresh_failure;
     // BUG-2 regression — a `svid-lifecycle` tick whose `IssueSvid` dispatch
     // FAILS must still self-re-enqueue (the persisted retry memory re-drives on
     // a later tick) instead of stalling forever. Pre-fix the early `?` on the
