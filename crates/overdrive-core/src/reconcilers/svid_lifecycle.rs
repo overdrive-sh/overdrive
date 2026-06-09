@@ -2,7 +2,8 @@
 //!
 //! This module is the home for the pure `SvidLifecycle` reconciler that
 //! converges the in-process held-SVID set against the Running-allocation set
-//! (`running ∧ ¬held → IssueSvid`, `¬running ∧ held → DropSvid`; ADR-0067 D2).
+//! (`running ∧ ¬held → IssueSvid`, `running ∧ held(near-expiry) → IssueSvid`
+//! rotate, `¬running ∧ held → DropSvid`; ADR-0067 D2, feature-delta D-OC-1).
 //! The reconciler, its `State` projection, and its retry-memory `View` land in
 //! step 01-04; this step (01-03) defines ONLY the projection the held set
 //! yields into the reconciler's `actual`:
@@ -248,7 +249,7 @@ impl SvidLifecycle {
 /// Derive the deterministic [`CorrelationKey`] for an identity action against an
 /// allocation: `target = "svid-lifecycle/<alloc>"`, `spec_hash =
 /// ContentHash::of(<spiffe-uri bytes>)`, `purpose ∈ {"issue-svid",
-/// "drop-svid"}` (ADR-0067 D2 — the ADR-0035 reconciler-I/O correlation
+/// "rotate-svid", "drop-svid"}` (ADR-0067 D2 — the ADR-0035 reconciler-I/O correlation
 /// discipline; the content identity is the SVID's own SPIFFE URI, stable across
 /// ticks for the same allocation, NOT a per-attempt request id).
 fn identity_correlation(

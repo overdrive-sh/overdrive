@@ -483,34 +483,32 @@ exclude_re = [
     "replace Ca::adopt_persisted_intermediate -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
 
     # `near_expiry` (`crates/overdrive-core/src/reconcilers/svid_lifecycle.rs`)
-    # — INERT gated-#40 rotation seam (ADR-0067 D8; workload-identity-manager
-    # #35 mutation cleanup). The predicate
-    # `not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)` is
-    # the near-expiry boundary the gated #40 cert-rotation branch reads. Its
-    # SOLE caller (`SvidLifecycle::reconcile`) guards the result behind
-    # `SvidLifecycle::ROTATION_ENABLED` (`false`), so the boundary is never
-    # observable: no committed `StartWorkflow(cert_rotation)` is emitted while
-    # the gate is closed (production wires an empty `WorkflowRegistry`). With
-    # the result gated away, the `<=` → `>` flip — and any window-arithmetic
-    # mutation folded into this fn — is a genuine EQUIVALENT MUTANT today: the
-    # S-WIM-09 acceptance proptest asserts ZERO StartWorkflow under EITHER
-    # operator, so no test can distinguish them. #40 (needs the workflow
-    # primitive #39) registers `cert_rotation`, flips the gate, removes this
-    # exclusion, and lands the boundary kill test in the SAME commit. The
-    # threshold ARITHMETIC was deliberately moved off module scope (the const
-    # `NEAR_EXPIRY_THRESHOLD_SECS = 28_800` is a bare literal, not `8 * 60 *
-    # 60`) so the `*` operators are no longer mutation targets at all. The LIVE
-    # backoff comparison in the same `reconcile` (`tick.now_unix < deadline`)
-    # is DELIBERATELY OUTSIDE this helper and remains a mutable, tested target
-    # — the `near_expiry` regex below matches every mutation of the inert
-    # helper (the `<=`→`>` operator flip AND the `-> bool with true`/`with
-    # false` whole-body replacements cargo-mutants also generates for the fn)
-    # and nothing else: the backoff comparison's description is `... in
-    # reconcile` with no `near_expiry` token, so it stays a tested target. The
-    # source-level `// mutants: skip` comment above the fn carries the same
-    # rationale as documentation; this regex is the actual suppression
-    # mechanism (comment-skip does not reliably fire for a single-expression
-    # fn body, same as the `ProbeRunner::probe` / `ListenerFactStore` entries).
+    # — the near-expiry rotation predicate
+    # `not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)`. As
+    # of step 01-01 this boundary is LIVE: `SvidLifecycle::reconcile` emits a
+    # rotate `Action::IssueSvid` (`"rotate-svid"` correlation) UNCONDITIONALLY
+    # when the predicate holds (feature-delta D-OC-1/2/3), so the `<=` is an
+    # OBSERVABLE mutation target — no longer the EQUIVALENT MUTANT it was under
+    # the (now-deleted) `ROTATION_ENABLED` gate.
+    #
+    # This exclusion is TEMPORARY. It and the source-level `// mutants: skip`
+    # on the fn are removed in step 01-02, which lands the dedicated boundary
+    # kill test (S-OC-03 `near_expiry_boundary_is_inclusive_at_half_ttl`, the
+    # hand-picked `now + 1800s` / `now + 1801s` examples) in the SAME commit —
+    # so the `<=` is never live-but-unkilled across the 01-01 → 01-02 gap.
+    # Until then this entry suppresses the `<=`→`<` / `<=`→`==` operator flips
+    # and the `-> bool with true` / `with false` whole-body replacements
+    # cargo-mutants generates for the fn.
+    #
+    # The LIVE backoff comparison in the same `reconcile`
+    # (`tick.now_unix < deadline`) is DELIBERATELY OUTSIDE this helper and
+    # remains a mutable, tested target — the `near_expiry` regex matches only
+    # mutations whose description carries the `near_expiry` token (the backoff
+    # comparison's description is `... in reconcile`, with no such token). The
+    # source-level `// mutants: skip` carries this rationale as documentation;
+    # this regex is the actual suppression mechanism (comment-skip does not
+    # reliably fire for a single-expression fn body, same as the
+    # `ProbeRunner::probe` / `ListenerFactStore` entries).
     "near_expiry",
 ]
 

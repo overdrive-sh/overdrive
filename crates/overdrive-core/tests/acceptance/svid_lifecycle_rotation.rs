@@ -224,7 +224,7 @@ proptest! {
 // is INCLUSIVE at half-TTL: `not_after == now + 1800s` rotates (emits one
 // IssueSvid); `not_after == now + 1801s` does not. This is the LIVE mutation
 // target (D-OC-8 — the `#[mutants::skip]` and the `.cargo/mutants.toml`
-// exclude_re entry are removed in Slice ①): this scenario must KILL `<=`→`<`
+// exclude_re entry are removed in step 01-02): this scenario must KILL `<=`→`<`
 // and `<=`→`==`. Two pinned boundary examples, NOT PBT. Universe: the emitted
 // IssueSvid count across the two fixtures.
 #[test]
