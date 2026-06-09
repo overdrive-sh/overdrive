@@ -33,7 +33,7 @@
 //! the project-wide ordered-collection-as-nondeterminism rule in
 //! `.claude/rules/development.md`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1549,13 +1549,29 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // carries no backoff-pending signal; the §18 re-enqueue for a
         // running-no-task instance is driven by the action-emitted gate
         // (the reconciler returns a `StartWorkflow`), not this predicate.
-        | AnyReconcilerView::WorkflowLifecycle(_)
-        // The svid-lifecycle view is Slice-01 empty (ADR-0067 D8) and
-        // carries no backoff-pending signal; the issue/drop re-enqueue is
-        // driven by the action-emitted gate (the reconciler returns
-        // `IssueSvid` / `DropSvid`), not this predicate. The retry-memory
-        // view + its backoff-pending arm land in step 03-01.
-        | AnyReconcilerView::SvidLifecycle(_) => false,
+        | AnyReconcilerView::WorkflowLifecycle(_) => false,
+        // The svid-lifecycle view carries per-allocation issue-retry
+        // memory (ADR-0067 D8): a `retry` entry means a still-Running,
+        // not-yet-held alloc has a recorded failed-issue attempt and is
+        // mid-backoff. During the backoff window the reconciler emits a
+        // bare `Noop` (the re-issue is suppressed until the deadline), so
+        // the §18 action-emitted self-re-enqueue gate (`has_work`) is
+        // false and the broker would drain empty after the suppressed
+        // tick — leaving the reconciler never re-ticked at the deadline
+        // unless another event pokes it. This predicate keeps it enqueued
+        // while any retry entry is outstanding (mirrors the
+        // `WorkloadLifecycle` arm directly below).
+        //
+        // Unlike `WorkloadLifecycle`, the svid reconciler has NO terminal
+        // backoff ceiling — a failed issue retries indefinitely (there is
+        // no `attempts >= CEILING` give-up in `SvidLifecycle::reconcile`),
+        // so EVERY non-empty `retry` entry is outstanding work. The
+        // reconcile body's `retain` GCs entries for non-Running allocs and
+        // its clear-on-success removes entries for held allocs, so a
+        // non-empty map already means "a still-running, not-yet-held alloc
+        // has a recorded attempt" — exactly the pending-backoff condition.
+        // Derivable from `next_view` alone, as the contract requires.
+        AnyReconcilerView::SvidLifecycle(view) => !view.retry.is_empty(),
         // GAP-9 Shape B — keep the service-lifecycle reconciler alive
         // across cadences while any observed alloc is mid-startup-window.
         //
@@ -1657,7 +1673,7 @@ async fn hydrate_desired(
         AnyReconciler::SvidLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
             let desired = hydrate_svid_desired_running(state, &workload_id).await?;
-            Ok(AnyState::SvidLifecycle(SvidLifecycleState { desired, actual: BTreeMap::new() }))
+            Ok(AnyState::SvidLifecycle(svid_desired_state(desired)))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -2116,20 +2132,58 @@ async fn hydrate_svid_desired_running(
 }
 
 /// Project the `SvidLifecycle` reconciler's `actual` set — the held-set-as-
-/// `actual` (ADR-0067 D1/D4, step 01-04).
+/// `actual` PLUS the durable `ever_issued` restart-recovery signal (ADR-0067
+/// D1/D4 + rev 5 D10).
 ///
-/// Reads [`IdentityMgr::held_snapshot`](crate::identity_mgr::IdentityMgr::held_snapshot)
-/// SYNCHRONOUSLY, in-process (no `.await`) — exactly as the `WorkflowLifecycle`
-/// arm reads the engine's non-persisted live-task set via `live_instances()`.
-/// The held set is the reconciler's `actual`; `desired` is filled by
-/// `hydrate_desired`, so the `actual` value's `desired` field stays empty (the
-/// reconcile body reads `actual.actual` off this value). Extracted from the
-/// `hydrate_actual` match arm to keep it within `clippy::too_many_lines`.
-fn hydrate_svid_actual_held(state: &AppState) -> AnyState {
-    AnyState::SvidLifecycle(SvidLifecycleState {
+/// Two reads, both already available to the runtime:
+///
+/// * The held set —
+///   [`IdentityMgr::held_snapshot`](crate::identity_mgr::IdentityMgr::held_snapshot)
+///   SYNCHRONOUSLY, in-process — exactly as the `WorkflowLifecycle` arm reads the
+///   engine's non-persisted live-task set via `live_instances()`. The held set is
+///   the reconciler's VOLATILE `actual` (presence = "held").
+/// * The `ever_issued` signal (rev 5 D10) — `state.obs.issued_certificate_rows()`
+///   (an `async` ObservationStore read the runtime already performs for other
+///   arms). The DURABLE restart-recovery success fact, projected as the SET of
+///   `spiffe_id`s observed in the audit rows. The reconciler derives
+///   `SpiffeId::for_allocation` per running alloc and tests membership against
+///   this set; `¬held ∧ ever_issued` is the unambiguous restart marker
+///   (minted-then-lost-hold, audit-before-hold per ADR-0063 D6). Keyed on
+///   `spiffe_id` because the audit row carries `spiffe_id`, NOT `alloc_id`. The
+///   boolean presence is projected — the row contents (`serial` / `not_after` /
+///   `issued_at`) stay OUT of `actual`; the near-expiry `not_after` continues to
+///   come from the *held* cert via `HeldSvidFacts`.
+///
+/// The reconciler holds no store handle: the runtime does the read here and folds
+/// the projected `actual` in (A3 reconciliation — reading observation into
+/// `actual` is what every reconciler does; D10 WRITES no success fact, it READS
+/// the one the executor already durably wrote). `desired` is filled by
+/// `hydrate_desired`, so the `actual` value's `desired` field stays empty.
+/// Build the `desired`-role `SvidLifecycleState` from the Running-allocation set
+/// (ADR-0067 D1). The `actual` / `ever_issued` fields are filled by the
+/// actual-side projection (`hydrate_svid_actual_held`), so they are empty on the
+/// desired value — the reconcile body reads them off the `actual`-role value.
+/// Extracted so `hydrate_desired`'s match arm stays within `clippy::too_many_lines`.
+fn svid_desired_state(
+    desired: BTreeMap<overdrive_core::id::AllocationId, RunningAlloc>,
+) -> SvidLifecycleState {
+    SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
+}
+
+async fn hydrate_svid_actual_held(state: &AppState) -> Result<AnyState, ConvergenceError> {
+    let actual = state.identity.held_snapshot();
+    let audit_rows = state
+        .obs
+        .issued_certificate_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    let ever_issued: BTreeSet<overdrive_core::SpiffeId> =
+        audit_rows.into_iter().map(|row| row.spiffe_id).collect();
+    Ok(AnyState::SvidLifecycle(SvidLifecycleState {
         desired: BTreeMap::new(),
-        actual: state.identity.held_snapshot(),
-    })
+        actual,
+        ever_issued,
+    }))
 }
 
 /// Read a workload from the `IntentStore` at the canonical
@@ -2418,10 +2472,11 @@ async fn hydrate_actual(
             let instances = hydrate_workflow_actual_instances(state).await?;
             Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
         }
-        // workload-identity-manager step 01-04 — the held-set-as-`actual`
-        // projection (ADR-0067 D1/D4); built in `hydrate_svid_actual_held`
-        // so this match arm stays within `clippy::too_many_lines`.
-        AnyReconciler::SvidLifecycle(_) => Ok(hydrate_svid_actual_held(state)),
+        // workload-identity-manager step 01-04 + rev 5 D10 — the held-set-as-
+        // `actual` projection PLUS the durable `ever_issued` audit-row signal;
+        // built in `hydrate_svid_actual_held` so this match arm stays within
+        // `clippy::too_many_lines`.
+        AnyReconciler::SvidLifecycle(_) => hydrate_svid_actual_held(state).await,
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
             let rows = state

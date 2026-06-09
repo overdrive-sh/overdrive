@@ -207,9 +207,14 @@ mod acceptance {
     // gate the module behind the feature (mirrors `runtime_convergence_loop`).
     #[cfg(feature = "integration-tests")]
     mod service_lifecycle_runtime_reenqueue;
+    // Finding-1 runtime witness — svid-lifecycle stays enqueued across
+    // cadences while an IssueSvid is mid-backoff (uses the test-only
+    // `loaded_svid_lifecycle_views_for_test` accessor; same feature gate).
     mod service_lifecycle_stable;
     mod service_submit_event_taxonomy;
     mod service_submit_event_v2;
+    #[cfg(feature = "integration-tests")]
+    mod svid_lifecycle_runtime_backoff_reenqueue;
 
     // service-health-check-probes step 01-03e3 — handler dispatch
     // wiring for Service-kind submit. S-SHCP-WIRE-09 through

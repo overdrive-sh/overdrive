@@ -32,6 +32,7 @@ use overdrive_control_plane::{AppState, noop_heartbeat, svid_lifecycle};
 use overdrive_core::SpiffeId;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource};
+use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -141,29 +142,39 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
         audit_rows.iter().map(|r| r.spiffe_id.to_string()).collect::<Vec<_>>()
     );
 
-    // AND `openssl verify -CAfile <root> -untrusted <intermediate> <svid.pem>`
-    // exits 0 — the CA wired into the convergence loop (`state.ca`) produces a
-    // chain a relying party accepts for the held identity. Root + intermediate
-    // come from the SAME CA the executor used; the leaf is minted for the SAME
-    // identity the executor held (the `ca_boot_and_audit` mint-then-verify
-    // shape; the held leaf PEM is not exposed via held_snapshot — K2).
+    // AND `openssl verify -CAfile <root> -untrusted <intermediate>
+    // <held-svid.pem>` exits 0 for the SVID ACTUALLY HELD by IdentityMgr — read
+    // through the `IdentityRead::svid_for` port (the dataplane read surface,
+    // ADR-0067 D7). This verifies the real held leaf material the executor minted
+    // and swapped into the holder, NOT a fresh leaf re-minted here: the held
+    // cert chains root → intermediate → leaf under a relying party, and the held
+    // material's structured identity matches the pure-derived
+    // SpiffeId::for_allocation. Root + intermediate come from the SAME CA the
+    // executor used (`state.ca`).
     let node = NodeId::new(NODE_NAME).expect("valid NodeId");
     let root = h.state.ca.root().expect("RcgenCa::root self-signs a real P-256 root");
     let intermediate =
         h.state.ca.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
-    let (not_before, not_after) = now_window();
-    let req = overdrive_core::traits::ca::SvidRequest::new(identity.clone(), not_before, not_after);
-    let leaf =
-        h.state.ca.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf for the identity");
+
+    let held_material = h.state.identity.svid_for(&alloc).unwrap_or_else(|| {
+        panic!("IdentityRead::svid_for must return the held SVID material for the Running alloc")
+    });
+    assert_eq!(
+        held_material.spiffe_id(),
+        &identity,
+        "the HELD SVID material's identity must be the pure-derived SpiffeId::for_allocation"
+    );
 
     let pem_dir = TempDir::new().expect("pem tempdir");
     let root_pem = pem_dir.path().join("root.pem");
     let inter_pem = pem_dir.path().join("intermediate.pem");
-    let svid_pem = pem_dir.path().join("svid.pem");
+    let svid_pem = pem_dir.path().join("held-svid.pem");
     std::fs::write(&root_pem, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
     std::fs::write(&inter_pem, intermediate.cert_pem().as_pem().as_bytes())
         .expect("write intermediate.pem");
-    std::fs::write(&svid_pem, leaf.cert_pem().as_pem().as_bytes()).expect("write svid.pem");
+    // The ACTUAL held leaf cert — not a fresh mint (Finding 3).
+    std::fs::write(&svid_pem, held_material.cert_pem().as_pem().as_bytes())
+        .expect("write held-svid.pem");
 
     let output = std::process::Command::new("openssl")
         .arg("verify")
@@ -176,8 +187,8 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
         .expect("invoke openssl verify");
     assert!(
         output.status.success(),
-        "openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem must exit 0 \
-         (the built-in CA's chain for the held identity verifies): stdout={}, stderr={}",
+        "openssl verify -CAfile root.pem -untrusted intermediate.pem held-svid.pem must exit 0 \
+         (the HELD SVID chain verifies): stdout={}, stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
@@ -230,8 +241,6 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
 /// `IdentityMgr` reads `None` before the re-issue tick).
 #[tokio::test]
 async fn restart_reissues_each_still_running_alloc_with_audit_row() {
-    use overdrive_core::traits::IdentityRead;
-
     // GIVEN a control-plane harness with a REAL RcgenCa + REAL
     // LocalObservationStore over `tmp`, svid-lifecycle registered. Two allocs
     // reach Running and each is issued + held (the pre-restart state).
@@ -323,27 +332,35 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
         "recovery re-issue of alloc1 writes a FRESH audit row ({count1_before} → {count1_after})"
     );
 
-    // AND the re-issued chain still verifies under `openssl verify` (exit 0) —
-    // the surviving (re-issued) leaf for the recovered identity is accepted by a
-    // relying party. Root + intermediate from the SAME CA; leaf minted for the
-    // SAME recovered identity (the ca_boot_and_audit mint-then-verify shape, as
-    // S-WIM-WS — held leaf PEM is not exposed via held_snapshot, K2).
+    // AND the ACTUAL re-issued+held chain still verifies under `openssl verify`
+    // (exit 0) — the leaf material IdentityMgr now holds for the recovered
+    // identity (read through `IdentityRead::svid_for`) is accepted by a relying
+    // party. Root + intermediate from the SAME CA; the leaf is the real HELD
+    // material the recovery executor minted, NOT a fresh re-mint (Finding 3). The
+    // held material's structured identity matches the recovered identity.
     let node = NodeId::new(NODE_NAME).expect("valid NodeId");
     let root = h2.state.ca.root().expect("RcgenCa::root self-signs a real P-256 root");
     let intermediate =
         h2.state.ca.issue_intermediate(&node).expect("RcgenCa::issue_intermediate signs by root");
-    let (not_before, not_after) = now_window();
-    let req = overdrive_core::traits::ca::SvidRequest::new(id0.clone(), not_before, not_after);
-    let leaf = h2.state.ca.issue_svid(&req).expect("RcgenCa::issue_svid mints a leaf");
+
+    let held0 = h2.state.identity.svid_for(&alloc0).unwrap_or_else(|| {
+        panic!("IdentityRead::svid_for must return the re-held SVID for alloc0")
+    });
+    assert_eq!(
+        held0.spiffe_id(),
+        &id0,
+        "the re-HELD SVID material's identity must be the recovered SpiffeId::for_allocation"
+    );
 
     let pem_dir = TempDir::new().expect("pem tempdir");
     let root_pem = pem_dir.path().join("root.pem");
     let inter_pem = pem_dir.path().join("intermediate.pem");
-    let svid_pem = pem_dir.path().join("svid.pem");
+    let svid_pem = pem_dir.path().join("held-svid.pem");
     std::fs::write(&root_pem, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
     std::fs::write(&inter_pem, intermediate.cert_pem().as_pem().as_bytes())
         .expect("write intermediate.pem");
-    std::fs::write(&svid_pem, leaf.cert_pem().as_pem().as_bytes()).expect("write svid.pem");
+    // The ACTUAL re-held leaf cert — not a fresh mint (Finding 3).
+    std::fs::write(&svid_pem, held0.cert_pem().as_pem().as_bytes()).expect("write held-svid.pem");
 
     let output = std::process::Command::new("openssl")
         .arg("verify")
@@ -356,10 +373,171 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
         .expect("invoke openssl verify");
     assert!(
         output.status.success(),
-        "openssl verify of the re-issued chain must exit 0 after restart recovery: \
+        "openssl verify of the re-HELD chain must exit 0 after restart recovery: \
          stdout={}, stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+/// `@real-io` `@error` `@regression` `@D10` `@FINDING-2` -- REGRESSION ANCHOR for
+/// the rev-5 D10 fix (formerly the characterized
+/// `restart_after_successful_issue_before_clear_stalls_reissue` defect). A
+/// SUCCESSFUL issue still persists a retry entry (record-on-emit +
+/// persist-`next_view`-before-dispatch, ADR-0035 §5 7→8). If the control plane
+/// crashes after the issue succeeded (SVID minted, `issued_certificates` audit
+/// row written — audit-before-hold, ADR-0063 D6 — held in-memory) but BEFORE the
+/// next converged tick clears the retry entry, restart sees an EMPTY held set
+/// (the held set is volatile, dies with the process — ADR-0063 D9) PLUS the
+/// durable, stale retry entry.
+///
+/// # What this test now pins (the FIX, not the defect)
+///
+/// Under D10 the runtime projects a DURABLE `ever_issued` signal into the
+/// reconciler's `actual` from the surviving `issued_certificates` audit row. So
+/// `¬held ∧ ever_issued` is the unambiguous restart marker and the reconciler
+/// re-issues IMMEDIATELY, BYPASSING the backoff gate, AND clears the stale retry
+/// entry — the stale entry can no longer suppress recovery (D10 invariants 1+2):
+///
+/// 1. **Immediately post-restart, at logical-0 (NO clock advance, INSIDE what
+///    would be the backoff window), the alloc IS re-held** — recovery is
+///    immediate, exactly as ADR-0067 D1 promises.
+/// 2. **The stale retry entry is cleared** by the recovery tick — it never
+///    persists as a live failure across the restart.
+///
+/// The crash is modelled the way `restart_reissues_*` models it — `drop(h1)`
+/// then boot `h2` over the same redb files — but it ticks h1 EXACTLY ONCE (so the
+/// retry entry is NOT cleared pre-crash; the crash lands in that window). The
+/// clock is SHARED across the restart so `tick.now_unix` is deterministic
+/// relative to the persisted `last_failure_seen_at` — and the test ticks h2 at
+/// logical-0 (still inside the would-be backoff window), so a PASS proves the
+/// gate was bypassed, not merely waited out.
+///
+/// The `¬held ∧ ¬ever_issued` never-succeeded case (a genuine failed issue still
+/// backs off — D10 invariant 3) is proven at the pure-reconciler layer by
+/// `unheld_never_issued_alloc_stays_backoff_gated_inside_window`
+/// (`crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs`): the
+/// real-CA harness here always SUCCEEDS (so it always writes an audit row →
+/// always `ever_issued`), and cannot synthesise a never-issued-but-retry-pending
+/// alloc without a fault-injecting CA double — which is exactly what the pure
+/// layer exercises directly.
+#[tokio::test]
+async fn restart_after_successful_issue_reissues_immediately_via_ever_issued_audit_row() {
+    use overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let ca: Arc<dyn Ca> = Arc::new(RcgenCa::new(Arc::new(OsEntropy), trust_domain_subject()));
+    // A SHARED clock survives the simulated restart — load-bearing: the
+    // persisted `last_failure_seen_at` was sampled from this clock during h1's
+    // tick, and the post-restart backoff comparison reads `tick.now_unix` off the
+    // SAME clock, so the deadline math is deterministic (a fresh-clock-per-harness
+    // would make `now_unix` drift by real wall-time between h1 and h2 boots). The
+    // test deliberately ticks h2 at logical-0, INSIDE the would-be backoff window
+    // — so re-issue here can only happen by BYPASSING the gate (the D10 fix), not
+    // by waiting it out.
+    let clock = Arc::new(SimClock::new());
+
+    let h1 = build_harness_with_ca_and_clock(&tmp, Arc::clone(&ca), Arc::clone(&clock)).await;
+
+    let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
+    let alloc = AllocationId::new("alloc-ws-c0").expect("valid AllocationId");
+    let identity = SpiffeId::for_allocation(&workload, &alloc);
+    let svid_name = ReconcilerName::new(<SvidLifecycle as Reconciler>::NAME).expect("valid name");
+
+    // The alloc reaches Running; tick EXACTLY ONCE — the issue succeeds (held),
+    // an issued_certificates audit row is written (audit-before-hold), and the
+    // reconcile body records a retry entry on emit (attempts == 1,
+    // last_failure_seen_at == now_unix). We DO NOT tick a second time, so the
+    // entry is NOT cleared (the crash lands in this window).
+    write_alloc_state(&h1, "alloc-ws-c0", AllocState::Running, 1).await;
+    tick(&h1, 2).await;
+
+    // The issue succeeded — the alloc is held pre-crash.
+    let held_before = h1.state.identity.held_snapshot();
+    assert!(
+        held_before.contains_key(&alloc),
+        "pre-crash the successful issue holds the SVID; held: {:?}",
+        held_before.keys().collect::<Vec<_>>()
+    );
+    // The durable success signal — an issued_certificates audit row exists for
+    // the identity (this is what `ever_issued` will project post-restart).
+    let audit_before = h1.state.obs.issued_certificate_rows().await.expect("read audit rows");
+    assert!(
+        audit_before.iter().any(|r| r.spiffe_id == identity),
+        "a durable audit row exists for the identity pre-crash (the ever_issued signal)",
+    );
+    // And — the defect's precondition (now harmless under D10) — a STALE retry
+    // entry was persisted for the SUCCESSFUL issue (record-on-emit), not yet
+    // cleared (no second tick).
+    let persisted_retry = h1
+        .state
+        .runtime
+        .loaded_svid_lifecycle_views_for_test(&svid_name)
+        .expect("svid-lifecycle view map present")
+        .get(&h1.target)
+        .and_then(|v| v.retry.get(&alloc).cloned());
+    assert!(
+        persisted_retry.is_some(),
+        "a retry entry is persisted on a SUCCESSFUL issue (record-on-emit) and survives the crash",
+    );
+
+    // CRASH: drop h1 (release redb locks, lose the in-memory held set). Boot h2
+    // over the SAME redb files + SAME CA + SAME clock (still at logical 0).
+    drop(h1);
+    let h2 = build_harness_with_ca_and_clock(&tmp, Arc::clone(&ca), Arc::clone(&clock)).await;
+
+    // Post-boot the held set is empty (volatile), but BOTH the stale retry entry
+    // AND the durable audit row survive in redb.
+    assert!(
+        h2.state.identity.svid_for(&alloc).is_none(),
+        "post-restart the held set is empty — the leaf key was never persisted",
+    );
+    assert!(
+        h2.state
+            .runtime
+            .loaded_svid_lifecycle_views_for_test(&svid_name)
+            .expect("view map present")
+            .get(&h2.target)
+            .and_then(|v| v.retry.get(&alloc).cloned())
+            .is_some(),
+        "the stale retry entry from the successful issue survives the restart in redb",
+    );
+
+    // Tick h2 at logical-0 (now_unix == unix_epoch == the persisted
+    // last_failure_seen_at). The backoff gate WOULD compute deadline =
+    // last_failure_seen_at + backoff_for_attempt(1) > now_unix and suppress — but
+    // the `¬held ∧ ever_issued` branch (D10) bypasses the gate and re-issues NOW.
+    tick(&h2, 3).await;
+    tick(&h2, 4).await;
+
+    // FACT 1 (the FIX) — the alloc IS re-held immediately, with NO clock advance.
+    // Recovery is immediate (ADR-0067 D1), driven by the durable audit-row
+    // ever_issued signal, NOT delayed by the backoff window.
+    let held_after = h2.state.identity.svid_for(&alloc).unwrap_or_else(|| {
+        panic!(
+            "D10 FIX: immediately post-restart at logical-0 (INSIDE the would-be backoff window) \
+             the alloc is re-issued — the ¬held ∧ ever_issued branch bypasses the backoff gate \
+             that the stale retry entry would otherwise impose"
+        )
+    });
+    assert_eq!(
+        held_after.spiffe_id(),
+        &identity,
+        "the immediately-re-held SVID carries the recovered identity",
+    );
+
+    // FACT 2 — the stale retry entry is CLEARED by the recovery tick (it never
+    // persists as a live failure across the restart; D10 invariant 2).
+    let retry_after = h2
+        .state
+        .runtime
+        .loaded_svid_lifecycle_views_for_test(&svid_name)
+        .expect("view map present")
+        .get(&h2.target)
+        .and_then(|v| v.retry.get(&alloc).cloned());
+    assert!(
+        retry_after.is_none(),
+        "the ever_issued recovery branch CLEARS the stale retry entry; it survived as: {retry_after:?}",
     );
 }
 
@@ -390,6 +568,21 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 /// persist across the "restart" while the in-memory held set is lost (the leaf
 /// key is non-persistable, ADR-0063 D9).
 async fn build_harness_with_ca(tmp: &TempDir, ca: Arc<dyn Ca>) -> Harness {
+    build_harness_with_ca_and_clock(tmp, ca, Arc::new(SimClock::new())).await
+}
+
+/// Build a convergence harness with a CALLER-SUPPLIED `SimClock` so a test can
+/// drive logical time deterministically (the Finding-2 characterization needs
+/// the SAME clock to survive the simulated restart, since the persisted retry
+/// memory's `last_failure_seen_at` is compared against `tick.now_unix =
+/// UnixInstant::from_clock(state.clock)`). The default-clock callers
+/// (`build_harness` / `build_harness_with_ca`) construct a fresh clock per
+/// harness, matching the production "each boot is its own clock" shape.
+async fn build_harness_with_ca_and_clock(
+    tmp: &TempDir,
+    ca: Arc<dyn Ca>,
+    sim_clock: Arc<SimClock>,
+) -> Harness {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime composes");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
@@ -406,7 +599,6 @@ async fn build_harness_with_ca(tmp: &TempDir, ca: Arc<dyn Ca>) -> Harness {
         Arc::new(LocalObservationStore::open(tmp.path().join("obs.redb")).expect("open obs store"));
 
     let node_id = NodeId::new(NODE_NAME).expect("valid NodeId");
-    let sim_clock = Arc::new(SimClock::new());
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver;
 
@@ -481,16 +673,4 @@ async fn write_alloc_state(h: &Harness, alloc_raw: &str, state: AllocState, coun
         .write(ObservationRow::AllocStatus(Box::new(row)))
         .await
         .unwrap_or_else(|e| panic!("write alloc_status row for {alloc_raw}: {e:?}"));
-}
-
-/// A validity window straddling the current wall-clock so the directly-minted
-/// leaf is valid *now* under `openssl verify`. Mirrors `rcgen_ca_chain_verify`.
-fn now_window() -> (overdrive_core::wall_clock::UnixInstant, overdrive_core::wall_clock::UnixInstant)
-{
-    use overdrive_core::wall_clock::UnixInstant;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("wall-clock after epoch");
-    let not_before = UnixInstant::from_unix_duration(now.saturating_sub(Duration::from_secs(60)));
-    let not_after = not_before + Duration::from_secs(3600);
-    (not_before, not_after)
 }

@@ -25,7 +25,7 @@
 //! the `issued_certificates` audit row's `not_after` and derives from the same
 //! injected clock, so the comparison is sound and DST-deterministic.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -93,10 +93,11 @@ pub struct RunningAlloc {
 /// * **`actual`** — `actual` carries the [`IdentityMgr`]-held snapshot
 ///   (`desired` is ignored on this value), keyed by [`AllocationId`].
 ///
-/// `reconcile` reads `desired.desired` and `actual.actual` to converge the two
-/// sets. Both maps are [`BTreeMap`] for deterministic iteration across DST seeds
-/// per `.claude/rules/development.md` § "Ordered-collection choice" — the
-/// reconcile body iterates them and the held-set invariant walks the result.
+/// `reconcile` reads `desired.desired` and `actual.actual` / `actual.ever_issued`
+/// to converge the two sets. Both maps are [`BTreeMap`] / [`BTreeSet`] for
+/// deterministic iteration across DST seeds per `.claude/rules/development.md` §
+/// "Ordered-collection choice" — the reconcile body iterates them and the
+/// held-set invariant walks the result.
 ///
 /// [`IdentityMgr`]: ../../../overdrive_control_plane/identity_mgr/struct.IdentityMgr.html
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -108,6 +109,25 @@ pub struct SvidLifecycleState {
     /// allocation is currently held; the value is the non-secret
     /// [`HeldSvidFacts`] projection (`IdentityMgr::held_snapshot`).
     pub actual: BTreeMap<AllocationId, HeldSvidFacts>,
+    /// The DURABLE restart-recovery success signal (ADR-0067 rev 5 D10): the set
+    /// of `SpiffeId`s observed in the `issued_certificates` audit rows. A running
+    /// alloc whose pure-derived [`SpiffeId::for_allocation`] is in this set was
+    /// *successfully issued before* (audit-before-hold, ADR-0063 D6 — the row
+    /// exists only on a prior successful mint).
+    ///
+    /// This is the volatile-held-set's durable complement: `¬held ∧ ever_issued`
+    /// is the unambiguous *restart marker* (minted-then-lost-hold), distinguished
+    /// from `¬held ∧ ¬ever_issued` (genuinely never-succeeded). It is a
+    /// recomputed-each-tick projection of the durable audit rows — derived at read
+    /// time in the runtime's `hydrate_actual`, NEVER persisted (the audit row is
+    /// an existing observation INPUT the reconciler READS; it writes nothing). The
+    /// reconciler derives the expected `spiffe_id` per running alloc and tests
+    /// membership against this set — keyed on `spiffe_id` because the audit row
+    /// carries `spiffe_id`, NOT `alloc_id`.
+    ///
+    /// Empty on a `desired`-role value (`hydrate_desired` fills only `desired`);
+    /// the reconcile body reads `actual.ever_issued` off the `actual`-role value.
+    pub ever_issued: BTreeSet<SpiffeId>,
 }
 
 /// Per-allocation issue-retry memory — the INPUTS the backoff schedule consumes
@@ -297,22 +317,28 @@ impl Reconciler for SvidLifecycle {
     /// `desired = Running allocs` (`desired.desired`) against
     /// `actual = held set` (`actual.actual`) and maintains the retry-memory View:
     ///
-    /// - **`running ∧ ¬held`** → emit [`Action::IssueSvid`] carrying the
-    ///   pure-derived [`SpiffeId::for_allocation`] identity, the issuing
-    ///   `node_id`, and the derived `issue-svid` correlation — BUT only when no
-    ///   [`IssueRetry`] entry exists for the alloc OR the backoff window has
-    ///   elapsed (`tick.now_unix >= last_failure_seen_at +
-    ///   backoff_for_attempt(attempts)`; the deadline is recomputed each tick
-    ///   from the persisted inputs + the live policy, NEVER persisted). On a
-    ///   control-plane restart the held set is empty, so every Running alloc
-    ///   takes this branch — restart recovery falls out for free (ADR-0067 D1,
-    ///   RECOVERY; this is the ordinary first-issue branch running again because
-    ///   the holder was reset, NOT the gated #40 rotation path). Each emitted
-    ///   `IssueSvid` bumps the alloc's `IssueRetry` in `next_view` (`attempts +=
-    ///   1`, `last_failure_seen_at = tick.now_unix`) — the `bump_if_dispatched`
-    ///   shape, so a re-issue that then FAILS backs off (the pure reconciler
-    ///   infers "still failing" from the alloc remaining `¬held` next tick with a
-    ///   retry entry).
+    /// - **`running ∧ ¬held ∧ ever_issued`** (RESTART RECOVERY, ADR-0067 rev 5
+    ///   D10) → emit [`Action::IssueSvid`] **IMMEDIATELY, bypassing the backoff
+    ///   gate**, and CLEAR the alloc's `IssueRetry` entry. `ever_issued` is the
+    ///   pure-derived [`SpiffeId::for_allocation`] identity being present in
+    ///   `actual.ever_issued` (the `issued_certificates` audit-row identity set,
+    ///   D4/D10) — an unambiguous restart marker (a prior successful mint whose
+    ///   hold was lost when the holder was reset). Evaluated BEFORE the backoff
+    ///   gate, so a stale retry entry (a record-on-emit artifact from the prior
+    ///   successful issue) can no longer suppress recovery. This is the ordinary
+    ///   first-issue branch running again — NOT the gated #40 rotation path.
+    /// - **`running ∧ ¬held ∧ ¬ever_issued`** (first-issue / genuinely-failing) →
+    ///   emit [`Action::IssueSvid`] carrying the pure-derived
+    ///   [`SpiffeId::for_allocation`] identity, the issuing `node_id`, and the
+    ///   derived `issue-svid` correlation — BUT only when no [`IssueRetry`] entry
+    ///   exists for the alloc OR the backoff window has elapsed (`tick.now_unix >=
+    ///   last_failure_seen_at + backoff_for_attempt(attempts)`; the deadline is
+    ///   recomputed each tick from the persisted inputs + the live policy, NEVER
+    ///   persisted). Each emitted `IssueSvid` bumps the alloc's `IssueRetry` in
+    ///   `next_view` (`attempts += 1`, `last_failure_seen_at = tick.now_unix`) —
+    ///   the `bump_if_dispatched` shape, so a re-issue that then FAILS backs off
+    ///   (the pure reconciler infers "still failing" from the alloc remaining
+    ///   `¬held ∧ ¬ever_issued` next tick with a retry entry).
     /// - **`¬running ∧ held`** → emit [`Action::DropSvid`] so the executor drops
     ///   the held leaf key (ADR-0067 O2 — leak resistance on stop).
     /// - **`running ∧ held`** → clear the alloc's `IssueRetry` entry (the issue
@@ -341,7 +367,12 @@ impl Reconciler for SvidLifecycle {
         let mut actions: Vec<Action> = Vec::new();
         let mut next_view = view.clone();
 
-        // running ∧ ¬held → IssueSvid (backoff-gated), recording the attempt.
+        // Per running alloc, in the ADR-0067 rev 5 D10 priority order:
+        //   held              → no-op + gated near-expiry; clear retry
+        //   ¬held ∧ ever_issued → restart recovery: IssueSvid IMMEDIATELY
+        //                         (bypass the backoff gate); clear retry
+        //   ¬held ∧ ¬ever_issued → first-issue / failing: IssueSvid backoff-gated;
+        //                          record/keep the failure memory
         for (alloc_id, running) in &desired.desired {
             if let Some(held) = actual.actual.get(alloc_id) {
                 // running ∧ held → the issue succeeded, so clear any recorded
@@ -379,11 +410,40 @@ impl Reconciler for SvidLifecycle {
                 continue;
             }
 
-            // Backoff gate: emit only when no prior failed attempt is recorded
-            // OR the backoff window has elapsed. The DEADLINE is recomputed here
-            // from the persisted inputs (`attempts` + `last_failure_seen_at`) +
-            // the live `backoff_for_attempt` policy — never persisted (a
-            // `next_attempt_at` field would be a persist-derived-state smell;
+            // ¬held — derive the identity once; it drives both the recovery
+            // membership test (against `actual.ever_issued`) and the action.
+            let spiffe_id = SpiffeId::for_allocation(&running.workload_id, alloc_id);
+
+            // ¬held ∧ ever_issued → RESTART RECOVERY (ADR-0067 rev 5 D10): a
+            // prior successful mint whose hold was lost to a control-plane
+            // restart, proven by the `issued_certificates` audit row's identity
+            // being in `actual.ever_issued`. Re-issue IMMEDIATELY, BYPASSING the
+            // backoff gate — and clear any stale retry entry, because a durable
+            // success is proven (no failure is pending). This is the fix for the
+            // `restart_after_successful_issue_before_clear` defect: the
+            // `ever_issued` check is evaluated BEFORE the backoff gate, so a stale
+            // retry entry (a record-on-emit artifact from the prior successful
+            // issue) can no longer suppress recovery. It is the ordinary
+            // first-issue branch running again because the holder was reset —
+            // NOT the gated #40 rotation path.
+            if actual.ever_issued.contains(&spiffe_id) {
+                next_view.retry.remove(alloc_id);
+                let correlation = identity_correlation(alloc_id, &spiffe_id, "issue-svid");
+                actions.push(Action::IssueSvid {
+                    alloc_id: alloc_id.clone(),
+                    spiffe_id,
+                    node_id: running.node_id.clone(),
+                    correlation,
+                });
+                continue;
+            }
+
+            // ¬held ∧ ¬ever_issued — first-issue / genuinely-failing path. Backoff
+            // gate: emit only when no prior failed attempt is recorded OR the
+            // backoff window has elapsed. The DEADLINE is recomputed here from the
+            // persisted inputs (`attempts` + `last_failure_seen_at`) + the live
+            // `backoff_for_attempt` policy — never persisted (a `next_attempt_at`
+            // field would be a persist-derived-state smell;
             // `.claude/rules/development.md` § "Persist inputs, not derived
             // state").
             if let Some(retry) = next_view.retry.get(alloc_id) {
@@ -396,7 +456,6 @@ impl Reconciler for SvidLifecycle {
                 }
             }
 
-            let spiffe_id = SpiffeId::for_allocation(&running.workload_id, alloc_id);
             let correlation = identity_correlation(alloc_id, &spiffe_id, "issue-svid");
             actions.push(Action::IssueSvid {
                 alloc_id: alloc_id.clone(),
