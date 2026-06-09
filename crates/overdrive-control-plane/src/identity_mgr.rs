@@ -155,6 +155,7 @@ impl IdentityRead for IdentityMgr {
 mod tests {
     use super::IdentityMgr;
     use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
+    use overdrive_core::traits::identity_read::IdentityRead;
     use overdrive_core::wall_clock::UnixInstant;
     use overdrive_core::{AllocationId, CertSerial, SpiffeId};
     use std::time::Duration;
@@ -180,6 +181,18 @@ mod tests {
     fn bundle() -> TrustBundle {
         TrustBundle::new(
             CaCertPem::new("-----BEGIN CERTIFICATE-----\nROOT\n-----END CERTIFICATE-----\n".into()),
+            None,
+        )
+    }
+
+    /// A trust bundle whose root anchor differs from [`bundle`] — so a
+    /// `set_bundle`-then-`current_bundle` round-trip is OBSERVABLY distinct from
+    /// the boot bundle.
+    fn other_bundle() -> TrustBundle {
+        TrustBundle::new(
+            CaCertPem::new(
+                "-----BEGIN CERTIFICATE-----\nROOT-ROTATED\n-----END CERTIFICATE-----\n".into(),
+            ),
             None,
         )
     }
@@ -285,6 +298,34 @@ mod tests {
         assert!(
             mgr.held_snapshot().contains_key(&a),
             "set_bundle leaves the held SVID set unchanged (independent slot)"
+        );
+    }
+
+    /// `set_bundle` REPLACES the installed trust bundle — the observable effect
+    /// is that `current_bundle()` (the `IdentityRead` read surface, D6/D7) then
+    /// returns the newly-installed bundle, distinct from the boot bundle. A
+    /// no-op `set_bundle` would leave `current_bundle()` returning the boot
+    /// bundle, so this kills the "replace set_bundle with ()" mutant.
+    #[test]
+    fn set_bundle_replaces_the_current_bundle() {
+        let mgr = IdentityMgr::new(Some(bundle()));
+        assert_eq!(
+            mgr.current_bundle(),
+            Some(bundle()),
+            "before set_bundle, current_bundle reflects the boot bundle"
+        );
+
+        mgr.set_bundle(other_bundle());
+
+        assert_eq!(
+            mgr.current_bundle(),
+            Some(other_bundle()),
+            "set_bundle installs the new bundle — current_bundle returns it"
+        );
+        assert_ne!(
+            mgr.current_bundle(),
+            Some(bundle()),
+            "the boot bundle is no longer the current bundle after set_bundle"
         );
     }
 }

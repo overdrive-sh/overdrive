@@ -176,7 +176,8 @@ pub struct SvidLifecycleView {
 
 /// The near-expiry threshold (seconds) the gated #40 rotation branch compares
 /// the held cert's REAL `not_after` against (`held.not_after <= tick.now_unix +
-/// NEAR_EXPIRY_THRESHOLD_SECS` ⇒ near-expiry; ADR-0067 D8).
+/// NEAR_EXPIRY_THRESHOLD_SECS` ⇒ near-expiry; ADR-0067 D8). `28_800` is
+/// `8 * 60 * 60` — eight hours, a third of the 24-hour SVID TTL.
 ///
 /// This is a DOCUMENTED PLACEHOLDER. The emit it gates is dormant
 /// ([`SvidLifecycle::ROTATION_ENABLED`] is `false`) until #40 (which needs the
@@ -186,7 +187,35 @@ pub struct SvidLifecycleView {
 /// only so the near-expiry branch is STRUCTURALLY PRESENT and reads
 /// `actual.not_after` exactly as #40 will, with zero #35 rework. A third of the
 /// 24-hour SVID TTL is a sane starting fraction; #40 owns the final value.
-pub const NEAR_EXPIRY_THRESHOLD_SECS: u64 = 8 * 60 * 60;
+///
+/// Stored as a plain literal (not `8 * 60 * 60`) deliberately: the arithmetic
+/// would otherwise be a mutation target at module scope, but it is INERT
+/// gated-#40 code (`ROTATION_ENABLED == false`) that no test can observe until
+/// #40 flips the gate. The `<=` comparison this threshold feeds lives inside the
+/// `#[mutants::skip]` [`near_expiry`] helper for the same reason. See #40.
+pub const NEAR_EXPIRY_THRESHOLD_SECS: u64 = 28_800;
+
+/// The gated #40 near-expiry predicate: is the held cert's REAL `not_after`
+/// within [`NEAR_EXPIRY_THRESHOLD_SECS`] of `now` (ADR-0067 D8)?
+///
+/// Extracted into its own function so the threshold-window computation and the
+/// `<=` comparison are one named, reviewable predicate whose mutation can be
+/// suppressed at function granularity.
+// mutants: skip — INERT gated-#40 seam code. The only caller
+// (`SvidLifecycle::reconcile`) guards this predicate's result behind
+// `SvidLifecycle::ROTATION_ENABLED` (`false`), so the boundary it computes is
+// never observable until #40 registers `cert_rotation` and flips the gate. No
+// test can distinguish the `<=` from a `>` while the result is gated away — it
+// is a genuine equivalent mutant today. #40 flips the gate, removes this skip,
+// and the kill test for the boundary lands in the same commit. The LIVE backoff
+// comparison in `reconcile` (`tick.now_unix < deadline`) is DELIBERATELY left
+// OUTSIDE this helper so it stays a mutable, tested target. The actual
+// suppression mechanism is the `exclude_re` entry in `.cargo/mutants.toml`
+// (this comment is the load-bearing documentation; comment-skip alone does not
+// reliably fire for a single-expression fn body).
+fn near_expiry(not_after: UnixInstant, now: UnixInstant) -> bool {
+    not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)
+}
 
 /// The workload-SVID lifecycle reconciler (ADR-0067 D1).
 pub struct SvidLifecycle {
@@ -333,10 +362,7 @@ impl Reconciler for SvidLifecycle {
                 // kind and flips the gate with ZERO rework. This is DISTINCT from
                 // restart re-issue (`running ∧ ¬held → IssueSvid`, above) — there
                 // is no synchronous sync-rotate path (A5 rejected).
-                let near_expiry_at =
-                    tick.now_unix + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS);
-                let is_near_expiry = held.not_after <= near_expiry_at;
-                if Self::ROTATION_ENABLED && is_near_expiry {
+                if Self::ROTATION_ENABLED && near_expiry(held.not_after, tick.now_unix) {
                     let name =
                         WorkflowName::new(Self::CERT_ROTATION_WORKFLOW).unwrap_or_else(|_| {
                             unreachable!(

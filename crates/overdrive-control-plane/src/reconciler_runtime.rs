@@ -1112,6 +1112,64 @@ impl ReconcilerRuntime {
             map.insert(target.clone(), view);
         }
     }
+
+    /// Snapshot of the in-memory `SvidLifecycleView` map for `name`.
+    /// Mirrors the ServiceLifecycle variant for the SvidLifecycle
+    /// reconciler (workload-identity-manager). **Test-only.** Exposes
+    /// the in-memory retry-memory state so the Eq-diff write-skip gate
+    /// (`persist_view`'s `SvidLifecycle` arm `if current == view`) can
+    /// be asserted directly — the kill site for the missed `==`→`!=`
+    /// mutant on that arm.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_svid_lifecycle_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, SvidLifecycleView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::SvidLifecycle(map) => Some(map.clone()),
+            AnyViewMap::Unit
+            | AnyViewMap::WorkflowLifecycle(_)
+            | AnyViewMap::WorkloadLifecycle(_)
+            | AnyViewMap::ServiceMapHydrator(_)
+            | AnyViewMap::BackendDiscoveryBridge(_)
+            | AnyViewMap::ServiceLifecycle(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path with a typed
+    /// `SvidLifecycleView`. Mirrors the ServiceLifecycle variant.
+    /// **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_svid_lifecycle_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: SvidLifecycleView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::SvidLifecycle(next)).await
+    }
+
+    /// Seed the in-memory view for `(svid-lifecycle, target)` directly,
+    /// bypassing the `ViewStore`. Mirrors the ServiceLifecycle variant.
+    /// **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_svid_lifecycle_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: SvidLifecycleView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&svid_lifecycle_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::SvidLifecycle(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
 }
 
 /// Build the canonical [`ReconcilerName`] for the [`WorkloadLifecycle`]
@@ -1155,6 +1213,15 @@ fn service_lifecycle_canonical_name() -> ReconcilerName {
         <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
     )
     .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn svid_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(
+        <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
+    )
+    .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Map the dispatch-boundary [`action_shim::validate::WriteRoute`] onto

@@ -326,3 +326,96 @@ fn dispatch_routes_service_lifecycle_triple_to_service_lifecycle_view() {
         "AnyReconciler::reconcile must return the same view as the direct call"
     );
 }
+
+// -------------------------------------------------------------------
+// L903 — SvidLifecycle dispatch arm
+// (workload-identity-manager #35 mutation cleanup)
+// -------------------------------------------------------------------
+
+#[test]
+fn dispatch_routes_svid_lifecycle_triple_to_svid_lifecycle_view() {
+    // Construct a `SvidLifecycle`, wrap it in `AnyReconciler::SvidLifecycle`,
+    // and dispatch with the matching state + view triple. Production: routes
+    // to `SvidLifecycle::reconcile` → returns
+    // `AnyReconcilerView::SvidLifecycle(_)`. Mutant (`delete match arm` at
+    // mod.rs:903): the arm vanishes and the dispatch falls through to the
+    // wildcard `_ => panic!`. The variant-of-returned-view assertion AND the
+    // oracle-equivalence check below are uniquely produced by the SvidLifecycle
+    // dispatch arm — under the mutation the dispatch panics, failing the test.
+    //
+    // This was the one dispatch arm whose `delete match arm` mutant was MISSED
+    // in the #35 per-PR mutation run — every other arm (NoopHeartbeat,
+    // WorkloadLifecycle, ServiceMapHydrator, BackendDiscoveryBridge,
+    // ServiceLifecycle) already had a coverage test in this file.
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::reconcilers::svid_lifecycle::{
+        RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
+    };
+
+    let any = AnyReconciler::SvidLifecycle(SvidLifecycle::canonical());
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    // A `running ∧ ¬held` alloc: `desired` carries the Running alloc, `actual`
+    // is empty (not held). The reconciler MUST emit exactly one
+    // `Action::IssueSvid` for it (ADR-0067 D1). Using a non-trivial action
+    // shape (not just the converged Noop) makes the oracle action-list
+    // comparison below load-bearing: a wrong dispatch arm would not produce an
+    // IssueSvid for this identity.
+    let alloc = AllocationId::new("alloc-payments-0").expect("valid AllocationId");
+    let running = RunningAlloc {
+        workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
+        node_id: NodeId::new("host-0").expect("valid NodeId"),
+    };
+    let mut desired_inner = SvidLifecycleState::default();
+    desired_inner.desired.insert(alloc, running);
+    let actual_inner = SvidLifecycleState::default();
+    let view_inner = SvidLifecycleView::default();
+    let view = AnyReconcilerView::SvidLifecycle(view_inner.clone());
+
+    let (actions_via_any, returned_view) = any.reconcile(
+        &AnyState::SvidLifecycle(desired_inner.clone()),
+        &AnyState::SvidLifecycle(actual_inner.clone()),
+        &view,
+        &tick,
+    );
+
+    assert!(
+        matches!(returned_view, AnyReconcilerView::SvidLifecycle(_)),
+        "SvidLifecycle dispatch must return AnyReconcilerView::SvidLifecycle; got {returned_view:?}",
+    );
+
+    // The dispatch produced the real IssueSvid action for the running ∧ ¬held
+    // alloc — not a Noop, not a wrong arm's output.
+    let issue_count =
+        actions_via_any.iter().filter(|a| matches!(a, Action::IssueSvid { .. })).count();
+    assert_eq!(
+        issue_count, 1,
+        "SvidLifecycle dispatch must emit exactly one IssueSvid for a running ∧ ¬held alloc; \
+         got {actions_via_any:?}",
+    );
+
+    // Oracle: direct reconcile call. Same inputs => same output. This is what
+    // structurally kills the `delete match arm` mutant — the only way to get
+    // this exact (actions, view) tuple is to route through the SvidLifecycle
+    // arm and call `SvidLifecycle::reconcile`.
+    let r = SvidLifecycle::canonical();
+    let (actions_direct, view_direct) =
+        r.reconcile(&desired_inner, &actual_inner, &view_inner, &tick);
+    assert_eq!(
+        actions_via_any, actions_direct,
+        "AnyReconciler::reconcile must emit the same actions as the direct SvidLifecycle call"
+    );
+    let AnyReconcilerView::SvidLifecycle(unwrapped) = returned_view else {
+        panic!("must be SvidLifecycle variant")
+    };
+    assert_eq!(
+        unwrapped, view_direct,
+        "AnyReconciler::reconcile must return the same view as the direct SvidLifecycle call"
+    );
+}

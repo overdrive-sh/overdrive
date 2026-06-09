@@ -536,3 +536,102 @@ async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memor
     let after2 = runtime.loaded_service_lifecycle_views_for_test(&n).expect("map present");
     assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
 }
+
+/// Same Eq-diff contract as the four preceding variants, but for
+/// `SvidLifecycleView` (workload-identity-manager). The `persist_view`
+/// arm at `crates/overdrive-control-plane/src/reconciler_runtime.rs:809`
+/// carries `if current == view { return Ok(()); }`. The mutation-test
+/// catalogue flips that `==` to `!=`, which would (a) elide
+/// `write_through` when the retry-memory view CHANGED (a recorded
+/// `IssueRetry` would be lost, so a failed issue would never back off)
+/// and (b) fsync on every equal (no-op) tick. The two assertion pairs
+/// below catch both halves of the mutation in a single test:
+///
+/// 1. equal-view path — `write_through_count` must remain 0 and the
+///    in-memory map must still carry the seeded view.
+/// 2. changed-view path — `write_through_count` must advance by exactly
+///    one and the in-memory map must reflect the new (retry-recording)
+///    view.
+///
+/// Closes the gap (workload-identity-manager #35 mutation cleanup) where
+/// the `WorkloadLifecycle` / `ServiceMapHydrator` /
+/// `BackendDiscoveryBridge` / `ServiceLifecycle` variants each had their
+/// Eq-diff gate pinned, but the `SvidLifecycle` arm did not — the source
+/// of the missed `==`→`!=` mutant on that arm.
+#[tokio::test]
+async fn runtime_skips_write_through_when_svid_lifecycle_view_equals_in_memory() {
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::reconcilers::svid_lifecycle::{IssueRetry, SvidLifecycleView};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let sim = Arc::new(SimViewStore::new());
+    let n = name("svid-lifecycle");
+    let t = target("job/payments");
+
+    let mut runtime =
+        ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
+    runtime
+        .register(overdrive_control_plane::svid_lifecycle())
+        .await
+        .expect("register svid-lifecycle");
+
+    // Seed an in-memory retry-memory view directly via the test-only
+    // seeder (bypasses the very `persist_view` gate this test asserts on).
+    let mut seeded = SvidLifecycleView::default();
+    let alloc_id = AllocationId::new("alloc-payments-0").expect("valid AllocationId");
+    seeded.retry.insert(
+        alloc_id.clone(),
+        IssueRetry {
+            attempts: 2,
+            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(100)),
+        },
+    );
+    runtime.seed_svid_lifecycle_view_for_test(&t, seeded.clone());
+
+    // Reset the counter — `register` calls `probe()` which itself performs
+    // a write_through against the probe sentinel name.
+    sim.reset_write_through_count();
+    assert_eq!(sim.write_through_count(), 0, "counter must be zero after reset");
+
+    // (1) Equal-view path — `next_view == in-memory view`. The Eq-diff
+    //     gate MUST elide the fsync; the call still returns Ok.
+    let result = runtime.apply_next_svid_lifecycle_view_for_test(&n, &t, seeded.clone()).await;
+    assert!(result.is_ok(), "Eq-diff skip must return Ok, got {result:?}");
+
+    assert_eq!(
+        sim.write_through_count(),
+        0,
+        "runtime MUST skip write_through when SvidLifecycleView next_view == \
+         in-memory view; observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+
+    let after =
+        runtime.loaded_svid_lifecycle_views_for_test(&n).expect("svid-lifecycle map must exist");
+    assert_eq!(after.get(&t), Some(&seeded), "in-memory map must be unchanged");
+
+    // (2) Changed-view path — `next_view != in-memory view` (a bumped
+    //     `IssueRetry` — the failed-issue backoff memory the runtime MUST
+    //     persist so the next tick honours the backoff window). The gate
+    //     MUST fall through; write_through fires exactly once.
+    let mut changed = seeded.clone();
+    changed.retry.insert(
+        alloc_id,
+        IssueRetry {
+            attempts: 3,
+            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(200)),
+        },
+    );
+    runtime
+        .apply_next_svid_lifecycle_view_for_test(&n, &t, changed.clone())
+        .await
+        .expect("changed view must persist");
+    assert_eq!(
+        sim.write_through_count(),
+        1,
+        "a non-equal next_view MUST write through exactly once; observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+    let after2 = runtime.loaded_svid_lifecycle_views_for_test(&n).expect("map present");
+    assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
+}
