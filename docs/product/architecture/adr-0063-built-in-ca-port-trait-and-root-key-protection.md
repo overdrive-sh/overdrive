@@ -390,6 +390,20 @@ back-propagation, commit `aab5a69b`).
 surfaces a `CaError` rather than handing out an unaudited certificate (KPI/AC,
 US-CA-05).
 
+> **Downstream dependent (cross-ref, ADR-0067 D10, rev 5 2026-06-09).** The
+> **audit-before-hold** ordering this row's write site enforces — the
+> `issued_certificates` row is committed on mint success BEFORE the SVID is held
+> in `IdentityMgr`, and issuance refuses on audit-write failure — is **load-bearing
+> for the `SvidLifecycle` restart-recovery signal.** ADR-0067 D10 projects the
+> existence of an `issued_certificates` row (keyed on `spiffe_id`) into the
+> reconciler's `actual` as the durable "this alloc was successfully issued before"
+> marker: `audit-row ∧ ¬held ⟹ minted-then-lost-hold-on-restart ⟹ re-issue
+> immediately`. This is sound ONLY because `audit-row-exists ⟹ the mint succeeded
+> and was audited` (the refuse-on-audit-failure binding above). A future refactor
+> that wrote the audit row speculatively *before* a confirmed mint, or that held
+> the SVID before the audit write, would break that implication and silently
+> defeat ADR-0067's immediate restart recovery. Do not reorder.
+
 ### D7 — Serials via the `Entropy` port; key generation via the crypto backend CSPRNG
 
 Certificate **serial numbers** flow through the existing `Entropy` port

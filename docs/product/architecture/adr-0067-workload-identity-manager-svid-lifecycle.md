@@ -16,7 +16,21 @@ the same adapter the boot path already builds") was **false** — `lib.rs:50` is
 bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa` are never called in `lib.rs`.
 Corrected to the ratified plan: Phase 2 composes an **ephemeral workload
 `RcgenCa` directly in `run_server`** (no KEK, no persistence); the persistent
-KEK-backed root (ADR-0063 D2/D8) + operator surface are **#215**. Builds on
+KEK-backed root (ADR-0063 D2/D8) + operator surface are **#215**.
+**Revised rev 5 (2026-06-09)** — see § Revision (rev 5): resolves a restart-recovery
+defect surfaced by adversarial review of the DELIVER implementation
+(characterization test
+`restart_after_successful_issue_before_clear_stalls_reissue_until_backoff_elapses`).
+Record-on-emit conflated two distinct durable signals — a *success* fact
+("this alloc was issued before") with a *failure* fact ("the last attempt did
+not hold"). A successful issue persisted a retry entry that, after a crash
+before the clearing tick, suppressed the immediate restart re-issue D1
+promises. Rev 5 adds the `issued_certificates` audit row to `actual` as the
+restart-recovery success signal (checked BEFORE the backoff gate), keeps the
+retry View strictly as failure-backoff memory, and reconciles the addition with
+**A3** (reading an already-durable observation row as `actual` is what every
+reconciler does — it is NOT persisting a new success fact). Touches **D1, D4,
+D8, A3** and adds **D10**. Builds on
 **ADR-0063** (built-in CA — the `Ca` port, `SvidMaterial`, `TrustBundle`,
 `ca_issuance::issue_and_audit`)
 and the reconciler / action-shim machinery of **ADR-0013 / ADR-0023 / ADR-0035 /
@@ -166,6 +180,29 @@ holder was reset. There is no "recompute held state without re-issue" — that i
 impossible (the leaf key is non-persistable per ADR-0063 D9 and non-reconstructable
 per `ca_issuance.rs:34-40`), and rev 1's claim that it could is the Critical
 finding this rev corrects.
+
+> **rev 5 correction — restart recovery must be IMMEDIATE, and the retry-memory
+> View alone cannot make it so.** The model above is correct in shape but
+> rev-2..4 left "every still-Running alloc … is re-issued, immediately" served
+> *only* by the volatile `actual = ∅` condition. With record-on-emit (D8) a
+> **successful** issue still persisted a retry entry, cleared only on a later
+> converged tick. A crash *after* the issue succeeded (SVID minted,
+> `issued_certificates` row written, held in-memory) but *before* the clearing
+> tick leaves restart with an empty held set (volatile) PLUS a surviving
+> persisted retry entry — and the backoff gate suppresses the immediate reissue
+> this branch promises until the backoff window elapses. The held set is volatile
+> but the retry View is durable, and they diverge exactly on restart.
+>
+> **The fix (D10):** the reconciler reads a SECOND durable success signal —
+> presence of an `issued_certificates` audit row for the alloc's derived
+> `spiffe_id` — projected into `actual`. `audit-row ∧ ¬held` is an unambiguous
+> *restart marker* (audit-before-hold, D6, means a row exists only on a *prior
+> successful* mint), and the reconciler re-issues **immediately**, bypassing the
+> backoff gate. The retry View is narrowed to a strict *failure*-backoff signal
+> governing only the genuinely-never-succeeded path (`¬held ∧ no audit row`). See
+> **D10** for the precise `actual` shape and reconcile-body predicate, and **A3**
+> for why reading the audit row does not contradict A3's rejection of
+> persisting success facts.
 
 It is a *separate* convergence target from `WorkloadLifecycle` (DIVERGE Option 1)
 — identity availability warrants its own desired-vs-actual loop and its own
@@ -368,6 +405,22 @@ into `actual.has_live_task`. The held set is a non-persisted in-process runtime
 set with a sync reader, just like the live-task set — so projecting it into
 `actual` is feasible against the runtime **as written**, with no runtime-mechanism
 change (one new `match` arm). **Feasibility verdict: FEASIBLE — no blocker.**
+
+**rev 5 — `actual` ALSO carries the per-alloc `ever_issued` audit-row fact (D10).**
+The same `AnyReconciler::SvidLifecycle(_)` `hydrate_actual` arm additionally reads
+`state.obs.issued_certificate_rows()` (an `async` ObservationStore read the
+runtime already performs for other arms; `hydrate_actual` is already `async`) and
+projects, per running alloc, whether an `issued_certificates` row exists for its
+derived `spiffe_id` — the durable restart-recovery success signal. This is keyed
+on `spiffe_id` because the audit row carries `spiffe_id`, not `alloc_id`
+(`issued_certificate_row.rs:82-97`); `SpiffeId::for_allocation` (D5) derives the
+expected identity per alloc deterministically. The projected fact is a boolean
+presence, NOT the row contents — `serial` / `not_after` / `issued_at` stay out of
+`actual`; the near-expiry `not_after` continues to come from the *held* cert
+(`HeldSvidFacts`, above). `SvidLifecycleState.actual` therefore yields, per
+allocation, both "held?" (volatile `HeldSvidFacts`) and "ever issued?" (durable
+boolean). See **D10** for the reconcile-body model and **A3** for the A3
+reconciliation.
 
 **`BTreeMap` is MANDATORY** — the held map is iterated by the `assert_eventually!`
 North-Star invariant (O1, K1) AND by `held_snapshot` (whose output the runtime
@@ -616,11 +669,23 @@ pub struct IssueRetry {
 - **The backoff deadline is RECOMPUTED each tick** from `last_failure_seen_at` +
   `attempts` against the live backoff schedule (`now_unix >= last_failure_seen_at
   + backoff_for_attempt(attempts)` — the exact `development.md` § "Reconciler I/O"
-  worked-example shape), never persisted. The `running ∧ ¬held` branch emits
-  `IssueSvid` only when no `IssueRetry` entry exists OR the backoff window has
-  elapsed; the executor's success removes the entry on the next converged tick
-  (the held alloc is now in `actual`, so the branch is no longer taken). A
+  worked-example shape), never persisted. The backoff gate governs **only the
+  `running ∧ ¬held ∧ ¬ever_issued` path** (rev 5 — D10): it emits `IssueSvid`
+  only when no `IssueRetry` entry exists OR the backoff window has elapsed. A
   `next_attempt_at` field would be a persist-derived-state smell.
+- **rev 5 — the backoff gate is SECOND, after the restart-recovery short-circuit
+  (D10).** The `running ∧ ¬held ∧ ever_issued` case (a prior successful mint whose
+  hold was lost to a restart, proven by the `issued_certificates` audit row in
+  `actual`, D4/D10) re-issues **IMMEDIATELY and bypasses the backoff gate**, and
+  clears the alloc's retry entry. This is the fix for the
+  `restart_after_successful_issue_before_clear_stalls_reissue_until_backoff_elapses`
+  characterized defect: a stale retry entry from a successful issue can no longer
+  suppress restart recovery, because the audit-row branch is evaluated before the
+  gate and evicts the entry. **Record-on-emit is RETAINED but made restart-aware**
+  by this short-circuit (D10 spells out the retained-vs-record-on-observed-failure
+  latitude and the three non-negotiable invariants). The retry entry is cleared
+  whenever the alloc becomes `held` OR `ever_issued` — so it never persists as a
+  live failure across a restart.
 - **GC** `IssueRetry` entries for allocations no longer Running (mirror
   `ServiceMapHydrator`'s `retain`).
 
@@ -680,6 +745,142 @@ delete).
   deliberately-broken executor (drops the hold, or fails to drop) fails it.
 - **Earned Trust (probe contract)** — see § Earned Trust below.
 
+### D10 — The `issued_certificates` audit row is the durable restart-recovery signal in `actual`; the retry View is strictly failure-backoff memory (rev 5)
+
+**The defect (characterized, not hypothetical).** The
+`restart_after_successful_issue_before_clear_stalls_reissue_until_backoff_elapses`
+test (a passing characterization in
+`crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs`)
+pins it: with record-on-emit (D8 rev 2–4) a **successful** `IssueSvid` bumps
+`IssueRetry { attempts, last_failure_seen_at }` on EMIT. The runtime persists
+`next_view` BEFORE dispatch (ADR-0035 §5 step 7→8). A crash *after* the executor
+succeeds but *before* the next converged tick clears the entry leaves restart
+with `actual = ∅` (held set volatile — ADR-0063 D9) PLUS a durable, stale retry
+entry. The reconcile body's backoff gate
+(`tick.now_unix < last_failure_seen_at + backoff_for_attempt(attempts)`) then
+SUPPRESSES the immediate restart re-issue D1 promises until the backoff window
+elapses. The reconciler's only durable cross-tick memory was its `View`, and its
+`actual` mixed a *volatile* success signal (the in-memory held set) with nothing
+durable to disambiguate "minted-then-lost-hold-on-restart" from "still failing."
+
+**Two distinct durable signals were conflated.** They must be carried by two
+distinct durable inputs:
+
+1. **Restart-recovery signal (a SUCCESS fact)** — "this alloc was successfully
+   issued before." The durable carrier is the `issued_certificates` **audit row**
+   (written inside `issue_and_audit` on mint success, BEFORE hold — D6's
+   audit-before-hold ordering). So `audit-row-exists ∧ ¬held ⟹
+   minted-but-lost-hold ⟹ restart ⟹ re-issue IMMEDIATELY, never back off`.
+2. **Failure-backoff signal (a FAILURE fact)** — "the last issue attempt did not
+   produce a held SVID." A *failed* mint leaves **no** audit row (the audit write
+   is inside `issue_and_audit`, downstream of a successful mint; an `issue_and_audit`
+   failure either failed to mint or refused on audit-write failure — D6 — so no
+   row lands), so the audit row alone cannot carry this. The durable carrier stays
+   the `IssueRetry` View entry — but it now governs ONLY the
+   `¬held ∧ no-audit-row` path.
+
+**The `actual` projection gains the audit-row fact.** `SvidLifecycleState.actual`
+is extended so the reconciler can read, per allocation, BOTH "is it held?" (the
+volatile held snapshot, unchanged) AND "does an `issued_certificates` audit row
+exist for its identity?" (the durable success fact). The runtime's
+`hydrate_actual` arm for `SvidLifecycle` already reads
+`state.identity.held_snapshot()`; it additionally reads the audit rows it already
+has a handle to — `state.obs.issued_certificate_rows()` — and projects, per
+running alloc's derived `spiffe_id`, whether a row exists. **Keying:** the
+`issued_certificates` row carries `spiffe_id` (NOT `alloc_id` —
+`crates/overdrive-core/src/ca/issued_certificate_row.rs:82-97`). `SpiffeId::for_allocation`
+is a deterministic derivation (D5), so the reconciler derives the expected
+`spiffe_id` for each running alloc and tests membership against the set of
+`spiffe_id`s observed in the audit rows. The fact projected is a **boolean
+presence** — `ever_issued: bool` per running alloc — NOT the row contents
+(`serial`, `not_after`, `issued_at` stay out of the reconciler's `actual`; the
+near-expiry `not_after` continues to come from the *held* cert via
+`HeldSvidFacts`, D4/D8, because only a held cert has a live validity window the
+rotation seam cares about).
+
+**The reconcile-body model the crafter implements (pin — this is the model, not a
+signature).** For each running alloc, in priority order:
+
+| held | ever_issued (audit row) | branch | retry-View effect |
+|---|---|---|---|
+| held | (any) | no-op; evaluate gated near-expiry (D8) | **clear** the alloc's retry entry (clear-on-success) |
+| ¬held | true | **restart recovery** → emit `IssueSvid` IMMEDIATELY, bypassing the backoff gate | **clear** the alloc's retry entry (a prior success is durably proven; no failure is pending) |
+| ¬held | false | first-issue / failing path → emit `IssueSvid` **backoff-gated** by the retry entry | record/keep the attempt (failure-backoff memory) |
+
+The load-bearing ordering: **the `ever_issued` check is evaluated BEFORE the
+backoff gate.** When it fires (the restart case), the backoff gate is never
+reached, so a stale retry entry cannot suppress the recovery re-issue — and the
+entry is cleared in the same tick because a durable success is proven. The
+backoff gate governs ONLY the `¬held ∧ ¬ever_issued` case — a genuinely
+never-succeeded alloc that may be repeatedly failing.
+
+**Record-on-emit vs record-on-observed-failure — what rev 5 pins.** Record-on-emit
+is **retained, but made restart-aware** by the `ever_issued` short-circuit above —
+it is no longer a "persist-a-failure-not-yet-observed" violation in *effect*,
+because the durable success fact (the audit row) overrides it the instant it
+appears: a success makes the alloc `held` (→ clear) or, post-restart, `¬held ∧
+ever_issued` (→ clear + immediate re-issue), in both cases evicting the entry
+before it can gate anything. The retry entry is therefore only ever *consulted as
+a backoff timer* for an alloc with no audit row — the one case where "no success
+has been observed" is durably true. Equivalent and also acceptable: shift to
+strict **record-on-observed-failure** (bump only when `¬held ∧ ¬ever_issued ∧ an
+entry already exists OR an emit was made this tick), which records the attempt but
+treats the audit row as the sole authority on "did it actually succeed." The
+crafter MAY pick either; both produce the identical observable behaviour because
+the `ever_issued` branch is what makes restart immediate. **The non-negotiable
+invariants** the crafter must satisfy: (1) `¬held ∧ ever_issued` re-issues with
+NO backoff gate; (2) a successful issue's retry entry is cleared by the *next*
+tick's `held` OR `ever_issued` branch (it never persists as a live failure across
+a restart); (3) the `¬held ∧ ¬ever_issued` path remains backoff-gated so a
+genuinely failing mint does not hammer every tick.
+
+**Why this is NOT a synchronous-rotation path and NOT a new mechanism.** The
+recovery branch is the ordinary `running ∧ ¬held → IssueSvid` first-issue branch
+(D1); the audit-row read adds no `Action`, no concurrency primitive, no store —
+it reads an ObservationStore row the runtime already has a handle to (the same
+`state.obs` the WS test reads via `issued_certificate_rows()`), exactly as
+`alloc_status` rows are read into `desired`. The pure reconciler stays pure: it
+holds no `ObservationStore` handle (the runtime does the read in `hydrate_actual`
+and hands the projected `actual` in), reads no wall-clock except `tick.now`, and
+passes dst-lint.
+
+**Persist-inputs-not-derived-state compliance.** Nothing new is persisted. The
+audit row is an existing observation INPUT (D6 records it as an audit input — not
+a derived value); the reconciler READS it, it does not write it. The retry View
+continues to persist only `attempts` + `last_failure_seen_at` (inputs), with the
+backoff deadline recomputed each tick from those inputs + the live policy. The
+`ever_issued` boolean is a *recomputed-each-tick projection* of the durable audit
+rows — derived at read time, never persisted. This is strictly more
+persist-inputs-compliant than rev 2–4: record-on-emit's latent "persist a failure
+that hasn't happened" is now overridden by the durable success fact rather than
+trusted across a restart.
+
+**Interaction with `view_has_backoff_pending` (the runtime self-re-enqueue
+predicate) — CONFIRMED UNCHANGED.** The `SvidLifecycle` arm of
+`view_has_backoff_pending` (`reconciler_runtime.rs:1574`) is `!view.retry.is_empty()`
+— "re-enqueue while any retry entry survives, so a mid-backoff alloc is re-ticked
+rather than draining the broker empty." Rev 5 does NOT change this predicate, and
+it remains correct under D10:
+
+- A retry entry now exists ONLY for an alloc in the `¬held ∧ ¬ever_issued`
+  backoff path — a genuinely-never-succeeded, possibly-failing alloc. That is
+  exactly the case the self-re-enqueue must keep alive (the reconcile emits no
+  `IssueSvid` mid-window but `actual ≠ desired`, so without the predicate the
+  broker drains and the loop sleeps). `!retry.is_empty()` correctly flags it.
+- A restart-recovery alloc (`¬held ∧ ever_issued`) re-issues immediately and its
+  retry entry is CLEARED that tick (D10), so it does not depend on
+  `view_has_backoff_pending` at all — the emitted `IssueSvid` is itself the
+  `has_work` signal, and the entry is gone before the next tick. No stale entry is
+  left to spuriously hold the predicate true.
+- A successful issue clears its entry on the `held` OR `ever_issued` branch, so
+  the predicate flips to false once convergence is reached — no busy-loop. This is
+  the same "flips false at terminal" discipline the `WorkloadLifecycle` /
+  `ServiceLifecycle` arms maintain.
+
+So the already-shipped `!view.retry.is_empty()` predicate is exactly right under
+the rev-5 model: it is true IFF a genuinely-failing alloc is mid-backoff, false
+once every alloc is held / ever-issued / GC'd. **No adjustment needed.**
+
 ## Alternatives Considered
 
 These are the DIVERGE options and the per-surface alternatives weighed in
@@ -725,6 +926,42 @@ retry-memory):
   held?" is answered by `actual` (the held set, D1/D4); the success fact lives in
   the `issued_certificates` observation row. The View carries only retry inputs
   (`attempts`, `last_failure_seen_at` — D8).
+
+**A3 reconciliation with the rev-5 restart-recovery signal (D10) — explicit.**
+D10 reads the `issued_certificates` audit row as part of `actual` to drive
+immediate restart recovery. This is a *durable success fact*, so the reconciliation
+with A3's rejection above must be stated, not implied:
+
+- **A3 rejects WRITING a new success fact into the reconciler's durable memory**
+  (the View) or into intent. The rev-1 `IssuedInputs` design tried to make the
+  *reconciler itself* persist `{serial, issued_at, spiffe_id}` as proof-of-issue
+  into the View — a fact the pure reconciler cannot even know (post-dispatch
+  output) and which the BEFORE-dispatch persist ordering makes a potential lie.
+  That is still rejected, unchanged.
+- **D10 does NOT write any success fact. It READS one that already exists.** The
+  `issued_certificates` row is written by `issue_and_audit` (D6) into the
+  ObservationStore — it is *observation*, the same state layer `alloc_status` (the
+  `desired` source) and `service_backends` live in. Projecting an observation row
+  into a reconciler's `actual` is what EVERY reconciler does — it is the definition
+  of `actual` (whitepaper §18; `development.md` § "Reconciler I/O" rule 5:
+  "`HttpCall` responses are observation … reconcilers read it locally via
+  `actual`"). The reconciler holds no store handle, derives no new fact, persists
+  nothing; the runtime reads the row in `hydrate_actual` and folds a boolean
+  presence into `actual`, recomputed every tick.
+- **The distinction is WHO persists and WHEN.** A3 forbids the *reconciler* from
+  durably claiming a success it cannot verify before the executor confirms it. D10
+  relies on the *executor* (via `issue_and_audit`) having ALREADY durably recorded
+  the success — audit-before-hold (D6) — and the reconciler merely observes that
+  durable record. There is no window where the reconciler asserts a success the
+  executor has not committed: the audit row exists IFF `issue_and_audit` succeeded
+  far enough to write it, and D6 binds issuance to refuse on audit-write failure,
+  so `audit-row-exists ⟹ the mint succeeded and was audited`. Reading it is sound;
+  persisting a parallel copy in the View would not be (and is not done).
+
+So the rule preserved across rev 1 → rev 5 is: **the reconciler never WRITES a
+success fact; it READS the one the executor already durably wrote.** D10 honours
+A3 exactly because it adds a *read of observation into `actual`*, not a *write of
+derived success into memory*.
 
 ### A4 (DIVERGE Option 5) — Pull `Ca::trust_bundle()` on demand on every read
 
@@ -836,6 +1073,18 @@ iteration order must be deterministic across DST seeds (`.claude/rules/developme
   !Default` forces a `#[serde(default = "epoch_zero")]` + manual `Default` on
   `IssueRetry` (the `RetryMemory` precedent). Minor, but a crafter who derives only
   the usual 4 bounds will not compile against the runtime's diff.
+- **`hydrate_actual` for `SvidLifecycle` now reads the `issued_certificates`
+  rows** (rev 5, D10) — one additional `state.obs.issued_certificate_rows()` read
+  per tick to project the `ever_issued` boolean per running alloc. `hydrate_actual`
+  is already `async` and the runtime already holds `state.obs`; the read is
+  O(rows) and cheap at single-node scale. The reconciler stays pure — it holds no
+  store handle; the runtime does the read and folds the boolean into `actual`. No
+  new `Action`, no new store, no new persisted View field. The append-only growth
+  of `issued_certificates` (one row per first-issue / restart re-issue / #40
+  rotation — already noted for #215) means the per-tick scan grows over an
+  allocation's lifetime; #36 (multi-node, gossiped audit rows) and any future
+  read-index are the place to bound it if it becomes a hot path — out of scope for
+  Phase 2 single-node.
 
 ### Earned Trust (probe contract)
 
@@ -869,6 +1118,17 @@ system relies on it — *wire then probe then use*:
   `running ∧ ¬held` re-issues every still-Running alloc, each leaving a fresh
   `issued_certificates` row, with no stale/silent credential. A surviving leaf
   verifies (`openssl verify`) at the TEST tier.
+- **Restart recovery is IMMEDIATE even after a crash mid-issue** (rev 5, D10) —
+  the characterization test
+  `restart_after_successful_issue_before_clear_stalls_reissue_until_backoff_elapses`
+  is FLIPPED to assert the desired behaviour: a crash AFTER a successful issue but
+  BEFORE the clearing tick, followed by restart, re-issues the still-Running alloc
+  IMMEDIATELY (logical-0 tick, no backoff wait) because `¬held ∧ ever_issued`
+  short-circuits the backoff gate. This is the probe that the durable audit-row
+  success signal — not the volatile held set alone — drives recovery, and that a
+  stale retry entry can no longer suppress it. A genuinely-failing alloc
+  (`¬held ∧ ¬ever_issued`) still backs off — a sibling assertion proves the gate
+  is NOT bypassed for the never-succeeded case.
 
 These probes are the composition-root invariant; the `identity_read_equivalence`
 DST test + the North-Star invariant + the enqueue-handoff regression test + the
@@ -1131,3 +1391,44 @@ D9's `leaf_key` addition required.
 `HeldSvidFacts { spiffe_id: SpiffeId, not_after: UnixInstant }` is built per held
 alloc from `svid.spiffe_id().clone()` + `svid.not_after()`. No surface beyond D4's
 already-named shape is added.
+
+## Revision (rev 5, 2026-06-09) — restart-recovery success signal vs failure-backoff signal
+
+This revision resolves a restart-recovery defect surfaced by adversarial review
+of the DELIVER implementation and characterized by the passing test
+`restart_after_successful_issue_before_clear_stalls_reissue_until_backoff_elapses`
+(`crates/overdrive-control-plane/tests/integration/workload_identity_manager/lifecycle.rs`).
+It touches **D1, D4, D8, A3** and adds **D10**; D2/D3/D5/D5b/D6/D7/D9 are
+unchanged.
+
+| Finding (severity) | Defect | Resolution | Where |
+|---|---|---|---|
+| **High — restart recovery is not immediate when a crash lands between issue-success and the clearing tick** | Record-on-emit (D8 rev 2–4) persists an `IssueRetry` entry on a SUCCESSFUL `IssueSvid`. The runtime persists `next_view` BEFORE dispatch (ADR-0035 §5 7→8). A crash after the executor succeeds (SVID minted, `issued_certificates` row written, held in-memory) but before the next converged tick clears the entry leaves restart with `actual = ∅` (held set volatile, ADR-0063 D9) PLUS a stale durable retry entry. The backoff gate then suppresses the immediate restart re-issue D1 promises until the backoff window elapses. The reconciler conflated a volatile success signal (held set) with a durable one (audit row) that diverge exactly on restart. | Add the `issued_certificates` audit row to `actual` as an `ever_issued: bool` per running alloc (keyed on the derived `spiffe_id` — audit rows carry `spiffe_id`, not `alloc_id`). `¬held ∧ ever_issued` is an unambiguous restart marker (audit-before-hold, D6) → re-issue IMMEDIATELY, bypassing the backoff gate, evaluated BEFORE the gate, clearing the retry entry. The retry View narrows to a strict failure-backoff signal governing only the `¬held ∧ ¬ever_issued` path. Record-on-emit is retained but made restart-aware by the short-circuit (or, equivalently, shifted to record-on-observed-failure — crafter's latitude, three invariants pinned). | **D10** (new); D1; D4; D8 |
+| **A3 reconciliation (required, was implicit)** | A3 rejects "persist issuance success facts." D10 reads a durable success fact (the audit row). The relationship must be explicit, not implied. | Made explicit in A3: A3 rejects the *reconciler WRITING* a success fact into its durable memory; D10 *READS* an observation row the executor already durably wrote (`issue_and_audit`, D6). Reading observation into `actual` is what every reconciler does (whitepaper §18; Reconciler I/O rule 5). No new persisted fact; the reconciler holds no store handle. The preserved rule: the reconciler never writes a success fact, it reads the one the executor wrote. | A3 |
+| **`view_has_backoff_pending` interaction** | The runtime self-re-enqueue predicate (`!view.retry.is_empty()`, `reconciler_runtime.rs:1574`) was already fixed for the immediate stall. Confirm it stays correct under the new model. | CONFIRMED unchanged. A retry entry now exists ONLY for a genuinely-failing `¬held ∧ ¬ever_issued` alloc (exactly the case the predicate must keep alive); restart-recovery and successful-issue allocs clear their entries the same tick, so no stale entry spuriously holds the predicate true. No adjustment. | D10 |
+
+**Persist-inputs verdict (rev 5): COMPLIANT and strictly improved.** Nothing new
+is persisted — the audit row is an existing observation input the reconciler
+reads; the retry View persists only `attempts` + `last_failure_seen_at` (inputs)
+with the deadline recomputed each tick; `ever_issued` is a recomputed-each-tick
+projection of durable observation, never persisted. Record-on-emit's latent
+"persist a failure not yet observed" is now overridden by the durable success
+fact rather than trusted across a restart.
+
+**The pinned crafter model (rev 5).** `SvidLifecycleState.actual` yields per
+allocation: `held?` (volatile `HeldSvidFacts`, unchanged) AND `ever_issued?`
+(durable boolean from `issued_certificates` rows keyed on the derived
+`spiffe_id`). The reconcile body, per running alloc, in priority order:
+`held → no-op + clear retry + gated near-expiry`; `¬held ∧ ever_issued → emit
+IssueSvid IMMEDIATELY (no backoff gate) + clear retry`; `¬held ∧ ¬ever_issued →
+emit IssueSvid backoff-gated + record/keep the attempt`. The three non-negotiable
+invariants: (1) `¬held ∧ ever_issued` re-issues with no backoff gate; (2) a
+successful issue's retry entry is cleared by the next tick's `held`/`ever_issued`
+branch; (3) `¬held ∧ ¬ever_issued` stays backoff-gated. The exact Rust signature
+of the `actual` projection (a `bool` field on the per-alloc actual value vs a
+separate set) is an implementation detail — the crafter picks the cleanest shape
+that satisfies the three invariants and keeps the leaf key off `actual`; do NOT
+invent a new `Action` variant, a new store, or a new persisted View field. The
+characterization test that pins the defect must be FLIPPED from
+characterization-of-defect to assert the DESIRED behaviour (immediate
+post-restart re-issue) once D10 lands — it is the regression anchor.
