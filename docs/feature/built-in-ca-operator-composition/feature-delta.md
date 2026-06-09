@@ -388,3 +388,136 @@ rewrite, D1/D8 restart note), ADR-0063 (dated amendment: D-CA-4 closure,
 `ControlPlaneError::CaBoot`, D01/O04 pending→wired), and
 `.claude/rules/workflows.md` § "Codebase precedent" (correct the "canonical
 first workflow = certificate rotation" claim).
+
+---
+
+## Wave: DISTILL
+
+**Density:** lean (Tier-1 `[REF]` only) · **Designer:** Quinn · **Acceptance
+SSOT:** `docs/feature/built-in-ca-operator-composition/distill/test-scenarios.md`
+(GIVEN/WHEN/THEN are SPECIFICATION ONLY — no `.feature` files; the Rust scaffolds
+under `crates/*/tests/{acceptance,integration}` are the executable artifacts).
+**RED classification:** `docs/feature/built-in-ca-operator-composition/distill/red-classification.md`.
+
+### [REF] Inherited commitments
+
+| Origin | Commitment | DDD | Impact |
+|--------|------------|-----|--------|
+| DESIGN#D-OC-1 | #40 near-expiry reissue is a reconciler `Action::IssueSvid` (`"rotate-svid"`), NOT a workflow | n/a | S-OC-01/05/10 pin the rotate-as-action emit + executor reuse; no StartWorkflow anywhere |
+| DESIGN#D-OC-2 | Near-expiry branch emits unconditionally (gate retired) | n/a | S-OC-01 asserts the unconditional emit; the existing gated-seam GREEN test is deleted (single-cut) |
+| DESIGN#D-OC-3 | Threshold = ½ × `WORKLOAD_SVID_TTL` (1800s), derived | n/a | S-OC-04 pins the threshold TRACKS TTL via the emitted action (no const inspection); S-OC-03 pins the literal `<=` boundary |
+| DESIGN#D-OC-4 | Wire `boot_ca` + `bootstrap_node_intermediate` into `run_server` | n/a | S-OC-06/07 prove persistent boot + adopt-on-restart through the wired `overdrive serve` binary |
+| DESIGN#D-OC-5 | `ControlPlaneError::CaBoot` — cause-distinct refuse-to-start | n/a | S-OC-08a/b/c pin one refusal cause each (wrong-KEK / tampered / absent); S-OC-08d pins pairwise-distinct stderr; S-OC-09 pins no silent re-mint |
+| DESIGN#D-OC-6 | Restart = re-mint (confirm only) | n/a | S-OC-05/07 keep the restart-recovery branch distinct from rotate |
+| DESIGN#D-OC-7 | Additive `AllocStatusResponse.issued_certificates`, latest-by-`issued_at` | n/a | S-OC-11/12 pin the render + the no-cert-bytes / latest-by-`issued_at` projection |
+| DESIGN#D-OC-8 | Un-skip the `near_expiry` mutation boundary | n/a | S-OC-03 is the live mutation kill-test for the `<=` boundary |
+| review-design#Medium-1 | E03 runner MUST enforce all 3 sub-claims before `satisfied` | n/a | S-OC-13/14/15 specify all three; S-OC-15 is the mandatory pathLen=0 negative anchor |
+
+### [REF] Scenario list (18) + tags
+
+| ID | Title | Tags | Slice | Tier |
+|---|---|---|---|---|
+| S-OC-01 | Near-expiry held SVID emits one rotate `IssueSvid` | `@dst @property @driving_port @slice-1` | ① | L1 |
+| S-OC-02 | Not-near-expiry held SVID emits no `IssueSvid` | `@dst @property @error @driving_port @slice-1` | ① | L1 |
+| S-OC-03 | Near-expiry `<=` boundary inclusive at half-TTL (kill-test) | `@dst @error @driving_port @slice-1` | ① | L1 |
+| S-OC-04 | Rotation threshold TRACKS ½ × `WORKLOAD_SVID_TTL` via emitted action | `@dst @driving_port @slice-1` | ① | L1 |
+| S-OC-05 | Rotate distinct from restart-recovery re-issue | `@dst @property @error @driving_port @slice-1` | ① | L1 |
+| S-OC-06 | `serve` first boot generates + seals + persists root | `@integration @real-io @adapter-integration @driving_port @slice-2 @edd:D01` | ② | L3 |
+| S-OC-07 | `serve` restart adopts SAME root (no re-mint) | `@integration @real-io @adapter-integration @driving_port @slice-2 @edd:D01` | ② | L3 |
+| S-OC-08a | `serve` refuses to start on the WRONG KEK | `@integration @real-io @error @driving_port @slice-2 @edd:O04` | ② | L3 |
+| S-OC-08b | `serve` refuses to start on a TAMPERED envelope | `@integration @real-io @error @driving_port @slice-2 @edd:O04` | ② | L3 |
+| S-OC-08c | `serve` refuses to start when the KEK is ABSENT | `@integration @real-io @error @driving_port @slice-2 @edd:O04` | ② | L3 |
+| S-OC-08d | The three refusal causes render pairwise-distinct stderr | `@integration @real-io @error @driving_port @slice-2 @edd:O04` | ② | L3 |
+| S-OC-09 | Refuse-to-start leaves root unchanged (no re-mint) | `@integration @real-io @error @driving_port @slice-2 @edd:O04` | ② | L3 |
+| S-OC-10 | Rotate-correlation `IssueSvid` reuses the executor | `@integration @real-io @adapter-integration @driving_port @slice-1` | ① | L3 |
+| S-OC-11 | `alloc status` surfaces current issued-cert summary | `@integration @real-io @adapter-integration @driving_port @slice-3 @edd:O05` | ③ | L3 |
+| S-OC-12 | Summary omits cert bytes/key; latest-by-`issued_at` | `@integration @real-io @error @driving_port @slice-3 @edd:O05` | ③ | L3 |
+| S-OC-13 | Exported chain verifies (`openssl verify`) | `@integration @real-io @adapter-integration @driving_port @slice-3 @edd:E03` | ③ | L3 |
+| S-OC-14 | Exported leaf profile (one URI SAN / CA:FALSE / crit digSig) | `@integration @real-io @adapter-integration @driving_port @slice-3 @edd:E03` | ③ | L3 |
+| S-OC-15 | pathLen=0 negative anchor FAILS `openssl verify` | `@integration @real-io @error @driving_port @slice-3 @edd:E03` | ③ | L3 |
+
+**Error/edge ratio: 10/18 = 56%** (S-OC-02/03/05/08a/08b/08c/08d/09/12/15) — ≥ 40% met.
+
+### [REF] Scaffolds created / modified
+
+| File | Type | Scenarios |
+|---|---|---|
+| `crates/overdrive-core/tests/acceptance/svid_lifecycle_rotation.rs` | NEW (`#[should_panic(expected = "RED scaffold")]`) | S-OC-01..05 |
+| `crates/overdrive-core/tests/acceptance.rs` | MODIFY (wire `mod svid_lifecycle_rotation;`) | — |
+| `crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/serve_persistent_ca.rs` | NEW (`#[ignore]`, Lima-gated) | S-OC-06/07/08a/08b/08c/08d/09 |
+| `crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs` | NEW (`#[ignore]`, Lima-gated) | S-OC-10 |
+| `crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/alloc_status_issued_certificates.rs` | NEW (`#[ignore]`, Lima-gated) | S-OC-11/12 |
+| `crates/overdrive-control-plane/tests/integration.rs` | MODIFY (wire `mod built_in_ca_operator_composition`) | — |
+| `crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs` | MODIFY (DELIVER-obligation note for `OD_E03_CA_DIR` export hook; existing tests stay GREEN) | S-OC-13/14/15 |
+
+E03 (S-OC-13/14/15) has NO new scaffold: it reuses the EXISTING GREEN
+`rcgen_ca_chain_verify.rs` tests; Slice ③ adds an env-gated PEM export (a test
+fixture change, NOT a behavioural one — the tests stay GREEN). DISTILL does NOT
+edit `verification/expectations/E03-…/runner.sh` (DELIVER owns the 3-check
+extension + export-hook wiring).
+
+### [REF] Driving Adapter coverage
+
+| Driving adapter | Real-protocol scenarios | Mechanism |
+|---|---|---|
+| `overdrive serve` (CLI) | S-OC-06/07/08a/08b/08c/08d/09 | Real subprocess in Lima (boot / restart / refuse-to-start ×3 + pairwise-distinct stderr) |
+| `overdrive alloc status --job <id>` (CLI) | S-OC-11/12 | Real subprocess in Lima (issued-cert summary render) |
+| `SvidLifecycle::reconcile` (domain port) | S-OC-01..05 | Direct pure call (Tier-1 DST) |
+| `IssueSvid` action-shim executor | S-OC-10 | Direct dispatch, real CA + ObservationStore |
+| `rcgen_ca_chain_verify` test + `openssl` | S-OC-13/14/15 | Real mint → PEM export → `openssl verify` subprocess |
+
+### [REF] Adapter coverage (driven, ≥1 real-I/O Tier-3)
+
+| Driven adapter | Real-I/O scenarios |
+|---|---|
+| `Ca` / `RcgenCa` | S-OC-06/07/10/13/14/15 |
+| `Kek` / `SystemdCredsKeyring` | S-OC-06/07/08a/08b/08c/09 |
+| `IntentStore` / `LocalIntentStore` (redb) | S-OC-06/07/09 |
+| `ObservationStore` / `LocalObservationStore` | S-OC-10/11/12 |
+
+### [REF] EDD mapping (graduation)
+
+| Expectation | Slice | Graduating scenarios | Capture surface |
+|---|---|---|---|
+| D01 (root key never plaintext at rest) | ② | S-OC-06/07 | on-disk IntentStore byte-scan (built binary) |
+| O04 (refuse-to-start, actionable) | ② | S-OC-08a/08b/08c/08d/09 | `overdrive serve` stderr (3 cause-distinct, one scenario each + pairwise-distinct contract) + no re-mint |
+| O05 (issued-certificates audit row) | ③ | S-OC-11/12 | `overdrive alloc status` render (no cert bytes) |
+| E03 (full chain verifies) | ③ | S-OC-13/14/15 | exported-PEM `openssl verify` (ALL 3 sub-claims) |
+
+Slice ① scenarios (S-OC-01..05, S-OC-10) do NOT graduate to EDD — pure
+in-process reconciler logic + action-shim dispatch, no new operator surface.
+**E03 is satisfiable ONLY when the runner enforces sub-claims 1–3**; the
+different-fox Haiku reviewer per expectation MUST refute E03 evidence missing the
+pathLen=0 negative anchor (S-OC-15).
+
+### [REF] Test placement + pre-requisites
+
+- **Placement**: Slice ① pure → `overdrive-core/tests/acceptance/`
+  (default lane, no Lima); Slice ①/②/③ real-I/O → `overdrive-control-plane/tests/integration/built_in_ca_operator_composition/`
+  (gated `integration-tests`, Lima); E03 → existing `overdrive-host/tests/integration/rcgen_ca_chain_verify.rs`.
+- **Pre-requisites** (DESIGN driving ports + environment): `overdrive serve` and
+  `overdrive alloc status` CLI verbs (existing); real `RcgenCa` / `SystemdCredsKeyring`
+  / `LocalIntentStore` (redb) / `LocalObservationStore`; Lima VM with cgroup v2 +
+  systemd-creds/keyring for the boot subprocess; `openssl` on PATH (E03). DEVOPS
+  delta absent → single-node default + existing integration-test/Lima policy
+  (warning, not blocker). `cargo xtask bpf-build` is a compile prereq for the
+  control-plane integration binary.
+- **Compile-check (this run, via Lima)**: `overdrive-core --test acceptance --no-run`
+  and `overdrive-control-plane --test integration --features integration-tests --no-run`
+  both GREEN; `svid_lifecycle_rotation` 5 scaffolds run as 5 passed (RED, not
+  BROKEN). Integration scaffolds `#[ignore]` until per-slice wiring lands.
+
+### [REF] Outcome-registration candidates (OUT-N)
+
+The orchestrator registers these (DISTILL has no Bash CLI access for
+`nwave-ai outcomes register`). Two genuinely-new typed contract surfaces:
+
+| id | kind | input-shape | output-shape | keywords |
+|---|---|---|---|---|
+| `OUT-OC-ISSUED-CERTS-READ` | operation | `overdrive alloc status --job <WorkloadId>` over `issued_certificate_rows()` | `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary { serial, spiffe_id, issuer_serial, not_after }>` — latest-by-`issued_at` per running alloc, NO cert bytes / NO key | issued-certificates, alloc-status, operator-read, audit, svid-summary |
+| `OUT-OC-CA-BOOT-REFUSE` | invariant | `run_server` boot with persisted root + (resolvable \| wrong \| absent) KEK / (intact \| tampered) envelope | refuse-to-start with cause-distinct `ControlPlaneError::CaBoot(CaBootError)` (`WrongKek` \| `TamperedEnvelope` \| `KekUnavailable`) + `health.startup.refused`, NO silent re-mint (root unchanged) | ca-boot, refuse-to-start, earned-trust, no-remint, kek, envelope |
+
+The rotate-as-action behaviour (S-OC-01..05/10) does NOT register a new outcome:
+it reuses the existing `OUT-WIM-SVID-LIFECYCLE` contract (`Action::IssueSvid`
+unchanged) — a behavioural extension of an already-registered surface, not a new
+typed contract.

@@ -31,6 +31,27 @@
 //! `#[should_panic(expected = "RED scaffold")]`; no import of unbuilt
 //! `RcgenCa`. DELIVER replaces with real `RcgenCa` calls + `openssl verify`
 //! subprocess assertions.
+//!
+//! # DELIVER obligation — `built-in-ca-operator-composition` Slice ③ (EDD E03)
+//!
+//! These two tests are the SOURCE of the E03 evidence PEMs (S-OC-13/14/15 in
+//! `docs/feature/built-in-ca-operator-composition/distill/test-scenarios.md`).
+//! Slice ③ adds an ENV-GATED export (a TEST FIXTURE change — NO production /
+//! library / CLI change): when `$OD_E03_CA_DIR` is set, the tests ALSO write
+//! their PEMs to that directory before the `TempDir` drops, so the E03 runner
+//! can run `openssl verify` over real exported material.
+//! `rcgen_full_svid_chain_verifies_root_intermediate_svid` exports
+//! `root.pem` / `intermediate.pem` / `svid.pem` (E03 sub-claims 1+2);
+//! `rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced` exports the
+//! further-CA chain (E03 sub-claim 3 — the pathLen=0 NEGATIVE ANCHOR that MUST
+//! FAIL `openssl verify`).
+//!
+//! E03 is NOT `satisfied` until the runner enforces all THREE sub-claims; the
+//! different-fox audit MUST reject E03 evidence missing sub-claim 3. DELIVER
+//! owns both the `OD_E03_CA_DIR` export hook AND the
+//! `verification/expectations/E03-…/runner.sh` 3-check extension (DISTILL does
+//! NOT edit `runner.sh`). These tests stay GREEN throughout — the export is an
+//! additive side-effect behind the env gate, not a behavioural change.
 
 use std::process::Command;
 use std::sync::Arc;

@@ -211,6 +211,13 @@ mod acceptance {
     // memory only, rotation emit is gated, and lifecycle transitions enqueue
     // SvidLifecycle so the reconciler is reachable.
     mod svid_lifecycle_reconcile;
+    // built-in-ca-operator-composition Slice ① (folds GH #40) — the
+    // near-expiry rotation branch flips from a gated StartWorkflow to an
+    // unconditional rotate-correlation IssueSvid; threshold = ½ ×
+    // WORKLOAD_SVID_TTL (1800s); the <= boundary is a live mutation target.
+    // RED scaffolds per docs/feature/built-in-ca-operator-composition/
+    // distill/test-scenarios.md (S-OC-01..05).
+    mod svid_lifecycle_rotation;
     // workflow-primitive DISTILL (GH #39, J-PLAT-005) — slice-01 author-
     // surface scenarios per
     // `docs/feature/workflow-primitive/distill/test-scenarios.md`
