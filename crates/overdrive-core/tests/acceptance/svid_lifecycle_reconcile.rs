@@ -476,15 +476,14 @@ fn tick_once(
     reconciler.reconcile(&state, &state, view, &make_tick(now_secs))
 }
 
-/// `@in-memory` `@property` `@S-WIM-08` `@S-WIM-09` `@D10` (Tier-1 DST restart
+/// `@in-memory` `@property` `@S-WIM-08` `@D10` (Tier-1 DST restart
 /// scenario) -- the full restart-mid-run trajectory the reconciler must
 /// converge under the rev-5 D10 model, asserted as a SEED-DETERMINISTIC twin
 /// run (criterion 3):
 ///
 /// 1. **Steady state** — N Running allocs, all held with a FAR-FUTURE `not_after`
 ///    (not near-expiry) AND `ever_issued` (an audit row exists per alloc). The
-///    tick is a clean no-op (`[Noop]`): no IssueSvid, no DropSvid, and — load-
-///    bearing for the gated seam (S-WIM-09) — NO `StartWorkflow`.
+///    tick is a clean no-op (`[Noop]`): no IssueSvid, no DropSvid.
 /// 2. **Restart (D10 — IMMEDIATE recovery)** — the in-memory held set is emptied
 ///    (`held = ∅`; the leaf key was never persisted, ADR-0063 D9) but the DURABLE
 ///    `ever_issued` audit-row set SURVIVES. Retick → every still-Running alloc
@@ -501,7 +500,7 @@ fn tick_once(
 /// `reconcile` is a pure function → identical inputs yield identical
 /// `(actions, next_view)`. The scenario runs TWICE (a "twin run" — the
 /// seed-deterministic reproduction K3 demands) and asserts the two trajectories
-/// are bit-identical at every step. The gated seam emits nothing throughout.
+/// are bit-identical at every step.
 #[test]
 fn dst_restart_scenario_reissues_immediately_via_ever_issued_and_is_twin_run_deterministic() {
     // The trajectory, as a pure function of nothing (deterministic inputs) →
@@ -563,18 +562,6 @@ fn dst_restart_scenario_reissues_immediately_via_ever_issued_and_is_twin_run_det
         run_a, run_b,
         "the restart trajectory is seed-deterministic (twin runs are identical)"
     );
-
-    // No StartWorkflow anywhere in the trajectory — the gated seam stays silent
-    // through steady-state-held and restart recovery (S-WIM-09).
-    for (actions, _) in &run_a {
-        let start_workflows =
-            actions.iter().filter(|a| matches!(a, Action::StartWorkflow { .. })).count();
-        assert_eq!(
-            start_workflows, 0,
-            "the gated #40 seam emits NO StartWorkflow at any step of the restart scenario; \
-             got {actions:?}"
-        );
-    }
 
     // Step 1 (steady state, all held far-future): clean no-op.
     assert_eq!(

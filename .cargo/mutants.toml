@@ -481,35 +481,6 @@ exclude_re = [
     # carry the same rationale as documentation, this regex is the mechanism.
     "replace Ca::adopt_persisted_root -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
     "replace Ca::adopt_persisted_intermediate -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
-
-    # `near_expiry` (`crates/overdrive-core/src/reconcilers/svid_lifecycle.rs`)
-    # — the near-expiry rotation predicate
-    # `not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)`. As
-    # of step 01-01 this boundary is LIVE: `SvidLifecycle::reconcile` emits a
-    # rotate `Action::IssueSvid` (`"rotate-svid"` correlation) UNCONDITIONALLY
-    # when the predicate holds (feature-delta D-OC-1/2/3), so the `<=` is an
-    # OBSERVABLE mutation target — no longer the EQUIVALENT MUTANT it was under
-    # the (now-deleted) `ROTATION_ENABLED` gate.
-    #
-    # This exclusion is TEMPORARY. It and the source-level `// mutants: skip`
-    # on the fn are removed in step 01-02, which lands the dedicated boundary
-    # kill test (S-OC-03 `near_expiry_boundary_is_inclusive_at_half_ttl`, the
-    # hand-picked `now + 1800s` / `now + 1801s` examples) in the SAME commit —
-    # so the `<=` is never live-but-unkilled across the 01-01 → 01-02 gap.
-    # Until then this entry suppresses the `<=`→`<` / `<=`→`==` operator flips
-    # and the `-> bool with true` / `with false` whole-body replacements
-    # cargo-mutants generates for the fn.
-    #
-    # The LIVE backoff comparison in the same `reconcile`
-    # (`tick.now_unix < deadline`) is DELIBERATELY OUTSIDE this helper and
-    # remains a mutable, tested target — the `near_expiry` regex matches only
-    # mutations whose description carries the `near_expiry` token (the backoff
-    # comparison's description is `... in reconcile`, with no such token). The
-    # source-level `// mutants: skip` carries this rationale as documentation;
-    # this regex is the actual suppression mechanism (comment-skip does not
-    # reliably fire for a single-expression fn body, same as the
-    # `ProbeRunner::probe` / `ListenerFactStore` entries).
-    "near_expiry",
 ]
 
 # ---------------------------------------------------------------------------

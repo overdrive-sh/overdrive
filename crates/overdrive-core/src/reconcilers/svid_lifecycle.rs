@@ -213,14 +213,9 @@ pub const NEAR_EXPIRY_THRESHOLD_SECS: u64 = WORKLOAD_SVID_TTL.as_secs() / 2;
 /// boundary (`<=`): a cert expiring at exactly `now + threshold` rotates.
 ///
 /// Extracted into its own function so the threshold-window computation and the
-/// `<=` comparison are one named, reviewable predicate whose mutation can be
-/// suppressed at function granularity.
-// mutants: skip — the `<=` boundary is the LIVE mutation target, but its kill
-// test (S-OC-03 `near_expiry_boundary_is_inclusive_at_half_ttl`) and the
-// removal of this skip + the `.cargo/mutants.toml` exclude_re entry land
-// TOGETHER in step 01-02, so the boundary is never live-but-unkilled. Until
-// then this skip stays (step 01-01 flips the branch live; 01-02 un-skips and
-// adds the kill test in one commit).
+/// `<=` comparison are one named, reviewable predicate. The `<=` boundary is a
+/// LIVE mutation target killed by S-OC-03
+/// (`near_expiry_boundary_is_inclusive_at_half_ttl`).
 fn near_expiry(not_after: UnixInstant, now: UnixInstant) -> bool {
     not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)
 }

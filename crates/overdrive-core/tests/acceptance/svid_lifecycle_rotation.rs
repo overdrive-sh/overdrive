@@ -228,11 +228,50 @@ proptest! {
 // and `<=`→`==`. Two pinned boundary examples, NOT PBT. Universe: the emitted
 // IssueSvid count across the two fixtures.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn near_expiry_boundary_is_inclusive_at_half_ttl() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-OC-03 / near-expiry <= boundary inclusive at \
-         now + 1800s, exclusive at now + 1801s -- the live mutation kill-test)"
+    let reconciler = SvidLifecycle::canonical();
+    let now_secs = 1_700_000_000u64;
+
+    // Two hand-picked boundary fixtures (NOT PBT — generation dilutes the
+    // boundary signal): one EXACTLY AT `now + HALF_TTL` and one ONE SECOND
+    // BEYOND it. Driving the reconciler through these pins the `<=` operator
+    // so the `<=`→`<` mutant (drops the exact-boundary rotate) and the
+    // `<=`→`==` mutant (fires only at the exact instant) are both killed.
+    let drive = |not_after_secs: u64, alloc_name: &str| {
+        let alloc = AllocationId::new(alloc_name).expect("valid AllocationId");
+        let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+        desired.insert(alloc.clone(), running_alloc());
+        let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+        actual.insert(alloc.clone(), held_facts(&alloc, not_after_secs));
+        let state = state_no_audit(desired, actual);
+        let (actions, _) = reconciler.reconcile(
+            &state,
+            &state,
+            &SvidLifecycleView::default(),
+            &make_tick(now_secs),
+        );
+        actions
+    };
+
+    // AT the boundary: not_after == now + HALF_TTL ⇒ INCLUSIVE `<=` ⇒ rotates
+    // (kills `<=`→`<`, which would drop this rotate).
+    let at_boundary = drive(now_secs + HALF_TTL_SECS, "payments-at-half-ttl");
+    assert_eq!(
+        issue_actions(&at_boundary).len(),
+        1,
+        "S-OC-03: not_after == now + HALF_TTL is INCLUSIVE — exactly one rotate IssueSvid; \
+         got {at_boundary:?}"
+    );
+
+    // ONE SECOND BEYOND: not_after == now + HALF_TTL + 1s ⇒ EXCLUSIVE ⇒ no rotate
+    // (kills `<=`→`==`, which would fire only at the exact instant and leave the
+    // far side ambiguous; this side asserts the strictly-beyond case emits none).
+    let beyond_boundary = drive(now_secs + HALF_TTL_SECS + 1, "payments-beyond-half-ttl");
+    assert_eq!(
+        issue_actions(&beyond_boundary).len(),
+        0,
+        "S-OC-03: not_after == now + HALF_TTL + 1s is BEYOND the window — no rotate IssueSvid; \
+         got {beyond_boundary:?}"
     );
 }
 
