@@ -26,8 +26,7 @@ use overdrive_core::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, Region, SpiffeId, WorkloadId,
 };
 use overdrive_core::reconcilers::svid_lifecycle::{
-    IssueRetry, NEAR_EXPIRY_THRESHOLD_SECS, RunningAlloc, SvidLifecycle, SvidLifecycleState,
-    SvidLifecycleView,
+    IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
 };
 use overdrive_core::reconcilers::{
     Action, HeldSvidFacts, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext,
@@ -779,85 +778,6 @@ fn svid_lifecycle_view_is_retry_memory_only() {
     let restored: SvidLifecycleView =
         serde_json::from_value(json).expect("View round-trips through serde");
     assert_eq!(restored, view, "S-WIM-08: the View round-trips losslessly");
-}
-
-// `@in-memory` `@error` `@property` `@S-WIM-09` -- the #40 near-expiry branch is
-// structurally present but emit-gated until `cert_rotation` is registered, so
-// production (which ALWAYS wires an empty-registry workflow engine —
-// `WorkflowRegistry::new()`, lib.rs:1576) never has a committed
-// `StartWorkflow(cert_rotation)` raise `WorkflowEngineError::UnknownWorkflow`
-// (lib.rs:1560) re-emitted every tick the near-expiry condition holds.
-//
-// The fixture drives the EXACT near-expiry condition the gated branch reads:
-// a `running ∧ held` alloc whose held cert's REAL `not_after` (the
-// `HeldSvidFacts.not_after` projected off `actual`, D4) is within the
-// near-expiry threshold of `tick.now_unix`. For an arbitrary `now` and an
-// arbitrary slack INSIDE the threshold window, the observable universe (the
-// emitted action list) MUST contain ZERO `Action::StartWorkflow` — the gate
-// (`ROTATION_ENABLED == false`) holds, so the seam is a clean no-op (D8). It
-// must ALSO emit no `IssueSvid` / `DropSvid` for the held-running alloc (it is
-// `running ∧ held`, not `¬held` / `¬running`) — the only action is the
-// converged `Noop`.
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-    #[test]
-    fn near_expiry_rotation_seam_is_emit_gated_until_cert_rotation_registered(
-        now_secs in 1_000_000u64..2_000_000_000u64,
-        // Slack STRICTLY INSIDE the near-expiry window: the held cert expires
-        // between `now` (already near-expiry) and `now + threshold - 1`.
-        slack_secs in 0u64..(NEAR_EXPIRY_THRESHOLD_SECS - 1),
-    ) {
-        let reconciler = SvidLifecycle::canonical();
-        let alloc = AllocationId::new("payments-near-expiry").expect("valid AllocationId");
-
-        // desired = the alloc is Running.
-        let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
-        desired.insert(alloc.clone(), running_alloc());
-
-        // actual = the alloc is HELD, and its REAL not_after is within the
-        // near-expiry threshold of `now` (the gated #40 condition: running ∧
-        // held(near-expiry)).
-        let not_after = now_secs + slack_secs;
-        let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(alloc.clone(), held_facts(&alloc, not_after));
-
-        let state = state_no_audit(desired, actual);
-        let view = SvidLifecycleView::default();
-        let tick = make_tick(now_secs);
-
-        let (actions, _next_view) = reconciler.reconcile(&state, &state, &view, &tick);
-
-        // THE GATE HOLDS: ZERO StartWorkflow emitted even though the near-expiry
-        // condition is met — so a production empty-registry engine never raises
-        // UnknownWorkflow, and it cannot be re-raised every tick.
-        let start_workflows =
-            actions.iter().filter(|a| matches!(a, Action::StartWorkflow { .. })).count();
-        prop_assert_eq!(
-            start_workflows, 0,
-            "S-WIM-09: the #40 rotation seam is EMIT-GATED — a near-expiry held alloc MUST NOT \
-             emit StartWorkflow(cert_rotation) (ROTATION_ENABLED == false); got {:?}",
-            actions
-        );
-
-        // The held-running alloc is neither issued nor dropped (it is
-        // `running ∧ held`); the only action is the converged Noop.
-        prop_assert_eq!(
-            issue_count(&actions), 0,
-            "a running ∧ held alloc must not be re-issued; got {:?}", actions
-        );
-        let drops =
-            actions.iter().filter(|a| matches!(a, Action::DropSvid { .. })).count();
-        prop_assert_eq!(
-            drops, 0,
-            "a running ∧ held alloc must not be dropped; got {:?}", actions
-        );
-        prop_assert_eq!(
-            actions.as_slice(),
-            [Action::Noop].as_slice(),
-            "the gated near-expiry seam is a clean no-op: the only action is Noop; got {:?}",
-            actions
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
