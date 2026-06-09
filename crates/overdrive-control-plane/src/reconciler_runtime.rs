@@ -2170,8 +2170,33 @@ fn svid_desired_state(
     SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
 }
 
-async fn hydrate_svid_actual_held(state: &AppState) -> Result<AnyState, ConvergenceError> {
-    let actual = state.identity.held_snapshot();
+/// `actual` is scoped to the TARGET workload's held entries — symmetry with the
+/// desired side (`hydrate_svid_desired_running`), which already filters by the
+/// workload-scoped target `job/<workload_id>` (ADR-0067 D5b). The held snapshot
+/// is GLOBAL (one `IdentityMgr` for the node holds every workload's SVIDs), so
+/// hydrating it unfiltered would feed the reconciler's `¬running ∧ held →
+/// DropSvid` loop every OTHER workload's still-live entries — a `payments` tick
+/// would drop `inventory`'s SVID because `inventory`'s allocs are absent from
+/// `payments`'s desired set. The filter keeps an entry iff its held SPIFFE id
+/// equals the canonical `SpiffeId::for_allocation(target_workload, alloc_id)`
+/// derivation, so only THIS workload's identities reach `actual`.
+///
+/// `ever_issued` stays GLOBAL: it is keyed by the workload-discriminating SPIFFE
+/// URI, so a global audit-row set is correct — membership only matches this
+/// workload's identities (the reconciler tests `SpiffeId::for_allocation(...)`
+/// per running alloc against it).
+async fn hydrate_svid_actual_held(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<AnyState, ConvergenceError> {
+    let actual = state
+        .identity
+        .held_snapshot()
+        .into_iter()
+        .filter(|(alloc_id, facts)| {
+            facts.spiffe_id == overdrive_core::SpiffeId::for_allocation(workload_id, alloc_id)
+        })
+        .collect();
     let audit_rows = state
         .obs
         .issued_certificate_rows()
@@ -2476,7 +2501,9 @@ async fn hydrate_actual(
         // `actual` projection PLUS the durable `ever_issued` audit-row signal;
         // built in `hydrate_svid_actual_held` so this match arm stays within
         // `clippy::too_many_lines`.
-        AnyReconciler::SvidLifecycle(_) => hydrate_svid_actual_held(state).await,
+        AnyReconciler::SvidLifecycle(_) => {
+            hydrate_svid_actual_held(state, &workload_id_from_target(target)?).await
+        }
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
             let rows = state

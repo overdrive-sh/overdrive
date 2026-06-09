@@ -215,6 +215,14 @@ mod acceptance {
     mod service_submit_event_v2;
     #[cfg(feature = "integration-tests")]
     mod svid_lifecycle_runtime_backoff_reenqueue;
+    // BUG-1 regression — the svid-lifecycle actual (held) side is scoped to the
+    // TARGET workload, so a `job/payments` convergence tick never drops a
+    // DIFFERENT workload's still-live SVID (ADR-0067 D5b; the global actual fed
+    // the reconciler's ¬running ∧ held → DropSvid loop every other workload's
+    // held entry). Same `run_convergence_tick` integration-tests gate as its
+    // sibling above.
+    #[cfg(feature = "integration-tests")]
+    mod svid_lifecycle_actual_scoped_to_workload;
 
     // service-health-check-probes step 01-03e3 — handler dispatch
     // wiring for Service-kind submit. S-SHCP-WIRE-09 through
