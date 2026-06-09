@@ -1591,9 +1591,7 @@ pub async fn run_server_with_obs_and_driver(
     // (no `.await`); their typed `CaError` maps into `ControlPlaneError::Ca`
     // via the dedicated `#[from]` variant (never flattened to `Internal`).
     let ca_subject = overdrive_core::SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
-        .map_err(|e| {
-            error::ControlPlaneError::Internal(format!("CA trust-domain subject rejected: {e}"))
-        })?;
+        .unwrap_or_else(|e| unreachable!("CA trust-domain subject is a valid SPIFFE URI: {e}"));
     let ca: Arc<dyn Ca> =
         Arc::new(overdrive_host::ca::RcgenCa::new(Arc::new(overdrive_host::OsEntropy), ca_subject));
     ca.root()?; // ephemeral P-256 root (cached in RcgenCa via RaceOnceCell)

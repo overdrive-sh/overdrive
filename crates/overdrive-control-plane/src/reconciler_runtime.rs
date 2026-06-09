@@ -1577,26 +1577,46 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // (the reconciler returns a `StartWorkflow`), not this predicate.
         | AnyReconcilerView::WorkflowLifecycle(_) => false,
         // The svid-lifecycle view carries per-allocation issue-retry
-        // memory (ADR-0067 D8): a `retry` entry means a still-Running,
-        // not-yet-held alloc has a recorded failed-issue attempt and is
-        // mid-backoff. During the backoff window the reconciler emits a
-        // bare `Noop` (the re-issue is suppressed until the deadline), so
-        // the §18 action-emitted self-re-enqueue gate (`has_work`) is
-        // false and the broker would drain empty after the suppressed
-        // tick — leaving the reconciler never re-ticked at the deadline
-        // unless another event pokes it. This predicate keeps it enqueued
-        // while any retry entry is outstanding (mirrors the
-        // `WorkloadLifecycle` arm directly below).
+        // memory (ADR-0067 D8). A `retry` entry is written on EVERY
+        // `IssueSvid` emit — the record-on-emit / `bump_if_dispatched`
+        // shape in `SvidLifecycle::reconcile` (`attempts += 1`,
+        // `last_failure_seen_at = tick.now_unix`) — so a non-empty `retry`
+        // does NOT exclusively mean "a recorded FAILED attempt mid-backoff".
+        // It can equally be the transient artifact of an as-yet-unconfirmed
+        // SUCCESSFUL first issue: the entry persists from the emit tick until
+        // the confirming tick observes the alloc held and clear-on-success
+        // removes it (`reconcile`'s `running ∧ held` branch). The predicate
+        // INTENTIONALLY keeps the reconciler enqueued in BOTH cases —
+        // failing-and-backing-off, and emitted-but-not-yet-confirmed-held.
+        //
+        // Division of labour with the §18 action-emitted gate (`has_work`):
+        // on a tick that EMITS `IssueSvid` (first issue or restart recovery),
+        // the re-tick is ALREADY driven by `has_work` (an `IssueSvid` is
+        // non-`Noop`), so this predicate firing too is redundant-but-harmless
+        // — the broker collapses duplicate `(reconciler, target)` submits.
+        // This predicate is the SOLE re-enqueue driver only on a SUPPRESSED
+        // tick: a `running ∧ ¬held` alloc inside its backoff window emits a
+        // bare `Noop`, `has_work` is false, and without this arm the broker
+        // drains empty and the reconciler is never re-ticked at the deadline.
+        // That suppressed-tick path is the one pinned by
+        // `svid_lifecycle_reenqueues_while_issue_backoff_pending`.
+        //
+        // The bump is LOAD-BEARING, not incidental: removing it would let a
+        // FAILED issue re-fire every tick with no backoff. Do not "simplify"
+        // it away — it is pinned by
+        // `running_alloc_without_held_svid_emits_issue_svid` and
+        // `first_issue_unheld_never_issued_alloc_issues_and_records_one_attempt`
+        // (both assert `attempts == 1` after a first emit).
         //
         // Unlike `WorkloadLifecycle`, the svid reconciler has NO terminal
-        // backoff ceiling — a failed issue retries indefinitely (there is
-        // no `attempts >= CEILING` give-up in `SvidLifecycle::reconcile`),
-        // so EVERY non-empty `retry` entry is outstanding work. The
-        // reconcile body's `retain` GCs entries for non-Running allocs and
-        // its clear-on-success removes entries for held allocs, so a
-        // non-empty map already means "a still-running, not-yet-held alloc
-        // has a recorded attempt" — exactly the pending-backoff condition.
-        // Derivable from `next_view` alone, as the contract requires.
+        // backoff ceiling — a failed issue retries indefinitely (there is no
+        // `attempts >= CEILING` give-up in `SvidLifecycle::reconcile`), so
+        // EVERY non-empty `retry` entry is outstanding work. The reconcile
+        // body's `retain` GCs entries for non-Running allocs and its
+        // clear-on-success removes entries for held allocs, so a non-empty map
+        // means a still-running alloc has a recorded attempt not yet
+        // confirmed-held — exactly the keep-enqueued condition. Derivable from
+        // `next_view` alone, as the contract requires.
         AnyReconcilerView::SvidLifecycle(view) => !view.retry.is_empty(),
         // GAP-9 Shape B — keep the service-lifecycle reconciler alive
         // across cadences while any observed alloc is mid-startup-window.
