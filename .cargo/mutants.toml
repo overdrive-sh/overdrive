@@ -502,12 +502,16 @@ exclude_re = [
     # 60`) so the `*` operators are no longer mutation targets at all. The LIVE
     # backoff comparison in the same `reconcile` (`tick.now_unix < deadline`)
     # is DELIBERATELY OUTSIDE this helper and remains a mutable, tested target
-    # — this regex names `near_expiry` precisely and does NOT touch it. The
+    # — the `near_expiry` regex below matches every mutation of the inert
+    # helper (the `<=`→`>` operator flip AND the `-> bool with true`/`with
+    # false` whole-body replacements cargo-mutants also generates for the fn)
+    # and nothing else: the backoff comparison's description is `... in
+    # reconcile` with no `near_expiry` token, so it stays a tested target. The
     # source-level `// mutants: skip` comment above the fn carries the same
     # rationale as documentation; this regex is the actual suppression
     # mechanism (comment-skip does not reliably fire for a single-expression
     # fn body, same as the `ProbeRunner::probe` / `ListenerFactStore` entries).
-    "replace <= with > in near_expiry",
+    "near_expiry",
 ]
 
 # ---------------------------------------------------------------------------
