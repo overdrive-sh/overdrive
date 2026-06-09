@@ -166,6 +166,12 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
     // `dst_clean_clone_green.rs`.
     "workflow-per-step-retry-policy-governs-redrive",
+    // workload-identity-manager ADR-0067 — the North-Star convergence
+    // invariant (held SVID set converges to the running set, every held SVID is
+    // chain-verifiable, stopped allocations' SVIDs are dropped). Added to
+    // `Invariant::ALL`; blessed here so both catalogues track `Invariant::ALL`
+    // exactly. Mirrors `dst_clean_clone_green.rs`.
+    "svid-running-set-holds-valid-svid",
 ];
 
 // -----------------------------------------------------------------------------

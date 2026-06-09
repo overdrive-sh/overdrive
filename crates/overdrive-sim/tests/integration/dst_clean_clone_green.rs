@@ -195,6 +195,12 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `Invariant::ALL` with the per-step policy + `RunStep` builder; blessed
     // here so the catalogue length + named-set checks track `Invariant::ALL`.
     "workflow-per-step-retry-policy-governs-redrive",
+    // workload-identity-manager ADR-0067 — the North-Star convergence
+    // invariant: the held SVID set converges to exactly the running-allocation
+    // set, every held SVID is chain-verifiable, and a stopped allocation's SVID
+    // is dropped. Added to `Invariant::ALL`; blessed here so the catalogue
+    // length + named-set checks track `Invariant::ALL` exactly.
+    "svid-running-set-holds-valid-svid",
 ];
 
 // -----------------------------------------------------------------------------
