@@ -1,6 +1,6 @@
 # D01 — The root CA private key is never observable in plaintext at rest
 
-**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured (awaiting different-fox review)` (re-captured at SHA `87d53026` alongside the O04 cause-taxonomy correction; the no-plaintext byte-scan contract is unchanged, but the evidence is refreshed on the corrected tree — the orchestrator re-runs the different-fox audit before re-asserting `satisfied`)
+**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `satisfied` (re-captured at SHA `87d53026` alongside the O04 cause-taxonomy correction; the no-plaintext byte-scan contract is unchanged, and a fresh different-fox audit re-CONFIRMED the refreshed evidence — see § "Different-fox review")
 
 ## Expectation
 
@@ -148,4 +148,13 @@ agent did NOT self-stamp. The orchestrator dispatched independent adversarial
   proves externals-only with no modified tracked source; `executed_in_lima:
   true`, exit 0.
 
-Status set to `satisfied` on Fox 3's confirmation.
+- Fox 4 — **CONFIRMED** (SHA `87d53026`, 2026-06-10, no novel defects): the
+  evidence was re-captured at `87d53026` alongside the O04 cause-taxonomy
+  correction (the D01 byte-scan contract itself is unchanged). A fresh fox
+  re-verified the inline non-vacuity self-test (4/4 detected, 2/2 benign clean,
+  hard gate), zero plaintext markers across first boot + restart, the
+  sealed-envelope-present check, and externals-only dirty tree; Fox 1 & 2's
+  cured grounds stay cured.
+
+Status set to `satisfied` on the Fox 3 + Fox 4 confirmations (Fox 4 re-confirming
+the `87d53026` re-capture).
