@@ -1,6 +1,6 @@
 # E03 — The full Root → Intermediate → SVID chain verifies under `openssl verify`
 
-**Surface:** E (end-to-end) · **KPI:** K1 · **Status:** `pending`
+**Surface:** E (end-to-end) · **KPI:** K1 · **Status:** `satisfied`
 
 ## Expectation
 
@@ -88,10 +88,16 @@ What the captured `evidence/` shows:
   on a *signature* mismatch — the wrong reason — because its rebuilt issuer DN
   omitted the per-node `CN=node-a` and never linked the chain.)
 
-**Status candidate: evidence captured, all three sub-claims executed cleanly;
-awaiting the different-fox Haiku audit** (the authoring agent does not
-self-stamp `satisfied` per `.claude/rules/verification.md`). The headline
-`Status:` line stays `pending` until the audit confirms — the auditor reads
-only `evidence/` and MUST verify sub-claim 3's `path length constraint
-exceeded` is present (E03 evidence missing the negative anchor is a mandatory
-`refuted`).
+**Status: `satisfied`** — a different-fox Haiku auditor (a separate agent that
+read ONLY `evidence/` + this README's anchors, never the producing test/runner
+code, per `.claude/rules/verification.md`) returned **CONFIRMED**. The audit
+independently re-inspected the on-disk PEMs (intermediate `CA:TRUE, pathlen:0`;
+further-CA signed by the intermediate; leaf below the further-CA) and verified:
+all three sub-claims executed on the real Lima run (`executed_in_lima: true`,
+2026-06-10T21:05:51Z); the `.meta`/`.out` exit codes are consistent (0 / 0 / 2);
+no narration smell (raw `openssl` output, not prose); and — the critical check —
+sub-claim 3 fails on `error 25 ... path length constraint exceeded`, the genuine
+basicConstraints/pathLen signal, NOT a signature mismatch, expiry, or
+unable-to-get-local-issuer reason. pathLen is proven ENFORCED, not merely set.
+The authoring agent did not self-stamp; this `satisfied` is the auditor's
+verdict.
