@@ -192,6 +192,16 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
     // allocation count (including 0) so a pre-convergence UDP Service
     // surfaces `5353/udp`. Gated only on listener presence.
     render_listeners_section(&mut s, &out.snapshot.listeners);
+    // Issued-certificate summaries are the consumer-side of built-in-ca
+    // #215 (ADR-0067 #215-boundary): the server projects the current SVID
+    // FACTS per running alloc onto the snapshot envelope. This is the LIVE
+    // operator-visible render path (`main.rs` dispatches `overdrive alloc
+    // status` here, NOT through `alloc_status_kind_aware`), so the section
+    // must render here — reading `out.snapshot.issued_certificates`.
+    // Presence-guarded + additive: a workload with no issued certs renders
+    // byte-identically to before. Shares the helper with
+    // `alloc_status_kind_aware` so the live and test-only paths do not drift.
+    render_issued_certificates_section(&mut s, &out.snapshot.issued_certificates);
     s
 }
 

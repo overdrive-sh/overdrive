@@ -15,11 +15,14 @@
 
 use overdrive_cli::commands::alloc::AllocStatusOutput;
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, ResourcesBody,
+    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
 };
 use overdrive_core::aggregate::Listener;
 use overdrive_core::dataplane::Proto;
+use overdrive_core::id::{CertSerial, SpiffeId};
+use overdrive_core::wall_clock::UnixInstant;
 use std::num::NonZeroU16;
+use std::time::Duration;
 
 fn fixture_empty_state() -> AllocStatusOutput {
     AllocStatusOutput {
@@ -426,5 +429,138 @@ fn render_alloc_status_running_allocation_does_not_read_as_failed() {
         !rendered.contains("Failed"),
         "a healthy Running allocation must NOT read as Failed — no false failure \
          signal; got:\n{rendered}",
+    );
+}
+
+// -------------------------------------------------------------------
+// (i) Issued-certificate section on the LIVE path (built-in-ca #215,
+// EDD O05 / S-OC-11 + S-OC-12, ADR-0067 #215-boundary).
+//
+// `main.rs:158` dispatches `overdrive alloc status` through
+// `render::alloc_status(&AllocStatusOutput)` — NOT through
+// `alloc_status_kind_aware`. The 03-02 issued-certificates section was
+// wired only into `alloc_status_kind_aware` (a test-only renderer with
+// zero `src/` callers), so the operator saw nothing. The section MUST
+// render on the live path: it reads `out.snapshot.issued_certificates`
+// (the `&AllocStatusOutput` shape — fields live under `out.snapshot.*`),
+// surfacing the four audit-row FACTS (serial / spiffe_id / issuer_serial
+// / not_after) via `Display` and NEVER any cert PEM/DER bytes or private
+// key (the audit row carries facts only). See `overdrive-cli/CLAUDE.md`
+// § "Alloc-status rendering — `render::alloc_status` is the LIVE path".
+// -------------------------------------------------------------------
+
+/// Build an `IssuedCertSummary` from string parts + a `not_after` seconds
+/// value. `serial`/`issuer_serial` are `CertSerial` (even-length hex);
+/// `spiffe_id` is a `SpiffeId`.
+fn issued_cert_summary(
+    serial: &str,
+    spiffe_id: &str,
+    issuer_serial: &str,
+    not_after_secs: u64,
+) -> IssuedCertSummary {
+    IssuedCertSummary {
+        serial: CertSerial::new(serial).expect("valid hex serial"),
+        spiffe_id: SpiffeId::new(spiffe_id).expect("valid spiffe id"),
+        issuer_serial: CertSerial::new(issuer_serial).expect("valid hex issuer serial"),
+        not_after: UnixInstant::from_unix_duration(Duration::from_secs(not_after_secs)),
+    }
+}
+
+/// A running alloc whose `AllocStatusResponse.issued_certificates` carries
+/// an `IssuedCertSummary` renders the issued-certificate section on the
+/// LIVE `render::alloc_status` path — surfacing the four audit-row facts
+/// (serial / `spiffe_id` / `issuer_serial` / `not_after`) via `Display`, and
+/// NEVER leaking cert PEM/DER bytes or private-key material (the S-OC-11 +
+/// S-OC-12 contract on the path `main.rs:158` actually calls).
+///
+/// Kind is realistic: a running Job alloc with a `/job/` SPIFFE id. The
+/// server projects `issued_certificates` per running alloc with no
+/// `WorkloadKind` filter, so a Job legitimately carries this summary.
+#[test]
+fn render_alloc_status_surfaces_issued_certificate_summary_on_live_path() {
+    let summary = issued_cert_summary(
+        "0a1b2c3d4e5f",
+        "spiffe://overdrive.local/job/dns-resolver/alloc/alloc-0",
+        "ffeeddccbbaa",
+        1_700_000_000,
+    );
+    let serial_text = summary.serial.to_string();
+    let spiffe_text = summary.spiffe_id.to_string();
+    let issuer_text = summary.issuer_serial.to_string();
+    let not_after_text = summary.not_after.to_string();
+
+    let snapshot = AllocStatusResponse {
+        rows: vec![row_with_state("alloc-0", AllocStateWire::Running, None, None)],
+        issued_certificates: vec![summary],
+        ..Default::default()
+    };
+
+    let out = AllocStatusOutput {
+        workload_id: "dns-resolver".to_string(),
+        spec_digest: "d7b885".to_string() + &"0".repeat(58),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot,
+    };
+
+    let rendered = overdrive_cli::render::alloc_status(&out);
+
+    // The four audit-row facts are each surfaced via their `Display` on the
+    // LIVE path (these FAIL before the production wiring — the live
+    // `alloc_status` does not render the section yet).
+    assert!(
+        rendered.contains(&serial_text),
+        "live alloc_status render must surface the issued-cert serial {serial_text:?}; \
+         got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(&spiffe_text),
+        "live alloc_status render must surface the issued-cert spiffe_id {spiffe_text:?}; \
+         got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(&issuer_text),
+        "live alloc_status render must surface the issued-cert issuer_serial {issuer_text:?}; \
+         got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(&not_after_text),
+        "live alloc_status render must surface the issued-cert not_after {not_after_text:?}; \
+         got:\n{rendered}",
+    );
+
+    // No-leak invariant (ADR-0067 #215-boundary): the audit-row facts carry
+    // no cert material, and the live render must never reconstruct or print
+    // any cert PEM/DER bytes or private key.
+    for forbidden in ["-----BEGIN", "PRIVATE KEY", "CERTIFICATE-----"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "live alloc_status render must NOT leak cert PEM/DER or private-key material \
+             (found {forbidden:?}); got:\n{rendered}",
+        );
+    }
+}
+
+/// A workload with no issued certs renders NO `Issued certificates:`
+/// header on the LIVE path — the section is presence-guarded and purely
+/// additive, so the output is byte-identical to before the section
+/// existed.
+#[test]
+fn render_alloc_status_omits_issued_certificate_section_when_empty_on_live_path() {
+    let out = AllocStatusOutput {
+        workload_id: "coinflip".to_string(),
+        spec_digest: "f".repeat(64),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        // default snapshot carries an empty `issued_certificates` vec.
+        snapshot: AllocStatusResponse::default(),
+    };
+
+    let rendered = overdrive_cli::render::alloc_status(&out);
+
+    assert!(
+        !rendered.contains("Issued certificates:"),
+        "a workload with no issued certs must NOT render an 'Issued certificates:' \
+         section on the live path; got:\n{rendered}",
     );
 }
