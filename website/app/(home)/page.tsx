@@ -1,4 +1,11 @@
 import Link from "next/link";
+import {
+	Eyebrow,
+	Glyph,
+	PlannedPill,
+	PrimaryCta,
+	SecondaryCta,
+} from "@/components/marketing";
 
 // The marketing landing page at `/`, rendered inside `app/(home)/layout.tsx`
 // (`HomeLayout` + `baseOptions()`) so `/`, `/docs`, and `/blog` share ONE nav
@@ -27,47 +34,6 @@ export const metadata = {
 	description:
 		"Deploy web services, background jobs, virtual machines, and functions on one platform — encrypted, load-balanced, and self-healing from the first deploy, on your own hardware.",
 };
-
-// ── Small brand glyph: four rects echoing the hero pixel cubes. ──────────────
-function Glyph({ size = 20 }: { size?: number }) {
-	return (
-		<svg
-			aria-hidden
-			width={size}
-			height={size}
-			viewBox="0 0 20 20"
-			fill="none"
-			className="shrink-0"
-		>
-			<rect x="0" y="0" width="9" height="9" fill="var(--color-brand)" />
-			<rect x="11" y="0" width="9" height="9" fill="var(--color-brand)" opacity="0.35" />
-			<rect x="0" y="11" width="9" height="9" fill="#3a3a44" />
-			<rect x="11" y="11" width="9" height="9" fill="var(--color-brand)" opacity="0.6" />
-		</svg>
-	);
-}
-
-// ── A mono section eyebrow: `// label`. ─────────────────────────────────────
-function Eyebrow({ children, accent = true }: { children: string; accent?: boolean }) {
-	return (
-		<p
-			className={`mb-3 font-mono text-xs uppercase tracking-widest ${
-				accent ? "text-[var(--color-brand)]" : "text-fd-muted-foreground"
-			}`}
-		>
-			{children}
-		</p>
-	);
-}
-
-// ── A small "Planned" pill for roadmap blocks (C-6). ────────────────────────
-function PlannedPill() {
-	return (
-		<span className="mb-3 inline-block border border-fd-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-fd-muted-foreground">
-			Planned
-		</span>
-	);
-}
 
 // The workload kinds Overdrive runs under one control plane. Used as hero
 // chips and in the "Run anything" tile.
@@ -172,6 +138,16 @@ const assembledVsIncluded = [
 	"Per-connection network telemetry",
 ] as const;
 
+// The intended push-to-release path, rendered as the Deployments pipeline
+// ribbon. Planned, not shipped (C-6).
+const deployPipeline = [
+	"Push",
+	"Build",
+	"Release",
+	"Preview",
+	"Rollback",
+] as const;
+
 // Intended, not shipped. Today's real primitive is `overdrive deploy <spec>`;
 // this is where deploy is going — building and releasing from source, with
 // previews and rollbacks. Rendered in the marked "on the roadmap" block (C-6).
@@ -233,29 +209,6 @@ const faqs = [
 		a: "The comparison page makes the case and the counter-case plainly, including where Overdrive is the wrong choice today.",
 	},
 ] as const;
-
-// A reusable primary CTA button.
-function PrimaryCta({ href, children }: { href: string; children: string }) {
-	return (
-		<Link
-			href={href}
-			className="rounded-md bg-fd-primary px-6 py-3 font-semibold text-fd-primary-foreground transition-all hover:bg-[var(--color-brand-2)] hover:shadow-[0_0_32px_rgba(255,92,40,0.35)]"
-		>
-			{children}
-		</Link>
-	);
-}
-
-function SecondaryCta({ href, children }: { href: string; children: string }) {
-	return (
-		<Link
-			href={href}
-			className="rounded-md border border-fd-border px-6 py-3 font-medium transition-colors hover:bg-fd-muted"
-		>
-			{children}
-		</Link>
-	);
-}
 
 export default function HomePage() {
 	return (
@@ -684,52 +637,257 @@ port = 8080`}</code>
 				</div>
 			</section>
 
-			{/* ───────────── On the roadmap: deployments ───────────── */}
+			{/* ─────── On the roadmap: Deployments (own section) ─────── */}
 			<section className="border-b border-fd-border">
 				<div className="container mx-auto max-w-6xl px-4 py-16 md:py-24">
-					<Eyebrow accent={false}>{"// On the roadmap"}</Eyebrow>
+					<Eyebrow accent={false}>{"// On the roadmap · Deployments"}</Eyebrow>
 					<h2 className="mb-3 max-w-3xl font-serif text-3xl font-normal md:text-4xl">
-						What we&apos;re building next.
+						From your source, not just a spec.
 					</h2>
-					<p className="mb-12 max-w-2xl text-fd-muted-foreground">
-						The capabilities below are intent, not shipped behaviour.
-						Everything in this section is marked accordingly.
+					<p className="mb-8 max-w-2xl text-fd-muted-foreground">
+						Push your source and Overdrive will build it, release it, preview
+						every branch, and roll back in one command.
 					</p>
 
-					{/* Deployments */}
-					<h3 className="mb-1 text-lg font-semibold">
-						Deployments — from your source, not just a spec
-					</h3>
-					<p className="mb-6 max-w-2xl text-sm text-fd-muted-foreground">
-						Today you deploy a pre-built workload from a spec. Next, push your
-						source and let Overdrive build, release, preview, and roll back.
-					</p>
-					<div className="grid gap-px overflow-hidden border border-dashed border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
+					{/* Pipeline ribbon — the intended push-to-release path. */}
+					<div className="mb-12 flex flex-wrap items-center gap-x-2 gap-y-3">
+						{deployPipeline.map((step, i) => (
+							<span key={step} className="flex items-center gap-2">
+								<span className="flex items-center gap-2 border border-dashed border-fd-border bg-fd-card px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
+									<span className="text-[var(--color-brand)]">{`0${i + 1}`}</span>
+									{step}
+								</span>
+								{i < deployPipeline.length - 1 && (
+									<span aria-hidden className="text-fd-muted-foreground">
+										→
+									</span>
+								)}
+							</span>
+						))}
+					</div>
+
+					{/* Copy + mock "releases" panel (illustrative, clearly planned). */}
+					<div className="grid items-center gap-10 md:grid-cols-2">
+						<div>
+							<ul className="space-y-3 text-sm text-fd-muted-foreground">
+								<li className="flex items-start gap-3">
+									<span className="mt-1">
+										<Glyph size={14} />
+									</span>
+									Push a repository and Overdrive builds a reproducible
+									artifact — no separate CI to stand up first.
+								</li>
+								<li className="flex items-start gap-3">
+									<span className="mt-1">
+										<Glyph size={14} />
+									</span>
+									Each build becomes a discrete, promotable release, and every
+									branch gets its own isolated preview environment.
+								</li>
+								<li className="flex items-start gap-3">
+									<span className="mt-1">
+										<Glyph size={14} />
+									</span>
+									Reverting a bad deploy is one command against a prior
+									release — not a fresh redeploy.
+								</li>
+							</ul>
+							<Link
+								href="/docs/how-to/deploy-a-workload"
+								className="mt-6 inline-block font-medium text-[var(--color-brand)] hover:underline"
+							>
+								Deploy from a spec today →
+							</Link>
+						</div>
+
+						<div className="overflow-hidden border border-dashed border-fd-border bg-fd-card font-mono text-sm">
+							<div className="flex items-center justify-between border-b border-dashed border-fd-border px-4 py-2 text-xs text-fd-muted-foreground">
+								<span>releases</span>
+								<span className="uppercase tracking-widest">
+									Illustrative · planned
+								</span>
+							</div>
+							<div className="px-4 py-3 leading-relaxed text-fd-muted-foreground">
+								<div>
+									<span className="text-[var(--color-brand)]">$</span> git push
+									overdrive main
+								</div>
+								<div className="mt-1">building payments…</div>
+								<div>
+									released <span className="text-fd-foreground">v3</span>
+									&nbsp;&nbsp;1/1 healthy
+								</div>
+							</div>
+							<div className="divide-y divide-dashed divide-fd-border border-t border-dashed border-fd-border text-xs">
+								{[
+									{ v: "v3", when: "just now", state: "current" },
+									{ v: "v2", when: "3 days ago", state: "rollback" },
+									{ v: "v1", when: "last week", state: "rollback" },
+								].map((r) => (
+									<div
+										key={r.v}
+										className="flex items-center justify-between px-4 py-2.5"
+									>
+										<span className="flex items-center gap-3">
+											<span className="text-fd-foreground">{r.v}</span>
+											<span className="text-fd-muted-foreground">{r.when}</span>
+										</span>
+										{r.state === "current" ? (
+											<span className="text-[var(--color-brand)] uppercase tracking-widest">
+												serving
+											</span>
+										) : (
+											<span className="border border-fd-border px-2 py-0.5 uppercase tracking-widest text-fd-muted-foreground">
+												rollback
+											</span>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					</div>
+
+					{/* What lands with it — the four roadmap capabilities. */}
+					<div className="mt-12 grid gap-px overflow-hidden border border-dashed border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
 						{roadmap.map((r) => (
 							<div key={r.title} className="bg-fd-background p-6">
 								<PlannedPill />
-								<h4 className="mb-2 text-base font-semibold">{r.title}</h4>
+								<h3 className="mb-2 text-base font-semibold">{r.title}</h3>
 								<p className="text-sm text-fd-muted-foreground">{r.body}</p>
 							</div>
 						))}
 					</div>
+				</div>
+			</section>
 
-					{/* Self-healing */}
-					<h3 className="mb-1 mt-12 text-lg font-semibold">
-						Self-healing — tiered, ending in an SRE agent
-					</h3>
-					<p className="mb-6 max-w-2xl text-sm text-fd-muted-foreground">
+			{/* ─────── On the roadmap: Self-healing (own section) ─────── */}
+			<section className="border-b border-fd-border">
+				<div className="container mx-auto max-w-6xl px-4 py-16 md:py-24">
+					<Eyebrow accent={false}>{"// On the roadmap · Self-healing"}</Eyebrow>
+					<h2 className="mb-3 max-w-3xl font-serif text-3xl font-normal md:text-4xl">
+						Tiered, ending in an SRE agent.
+					</h2>
+					<p className="mb-8 max-w-2xl text-fd-muted-foreground">
 						Restarting a failed instance is the easy tier. The intended end
 						state investigates: correlate across the fleet by workload
 						identity, find the root cause, and apply typed fixes through a
 						risk-based approval gate — auto-applying the safe ones, asking
 						before the risky ones, and remembering every resolved incident.
 					</p>
-					<div className="grid gap-px overflow-hidden border border-dashed border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-3">
+
+					{/* Escalation ribbon — each tier catches what the one below can't. */}
+					<div className="mb-12 flex flex-wrap items-center gap-x-2 gap-y-3">
+						{selfHealingTiers.map((t, i) => (
+							<span key={t.title} className="flex items-center gap-2">
+								<span className="flex items-center gap-2 border border-dashed border-fd-border bg-fd-card px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
+									<span className="text-[var(--color-brand)]">{`0${i + 1}`}</span>
+									{t.title}
+								</span>
+								{i < selfHealingTiers.length - 1 && (
+									<span aria-hidden className="text-fd-muted-foreground">
+										→
+									</span>
+								)}
+							</span>
+						))}
+					</div>
+
+					{/* Copy + mock "incident" panel (illustrative, clearly planned). */}
+					<div className="grid items-center gap-10 md:grid-cols-2">
+						<div>
+							<ul className="space-y-3 text-sm text-fd-muted-foreground">
+								<li className="flex items-start gap-3">
+									<span className="mt-1">
+										<Glyph size={14} />
+									</span>
+									Each tier catches what the one below it can&apos;t —
+									escalation, not duplication.
+								</li>
+								<li className="flex items-start gap-3">
+									<span className="mt-1">
+										<Glyph size={14} />
+									</span>
+									The fast tiers act in the data path and the scheduler, with
+									no human in the loop and no control-plane round trip.
+								</li>
+								<li className="flex items-start gap-3">
+									<span className="mt-1">
+										<Glyph size={14} />
+									</span>
+									The reasoning tier proposes rather than acts unprompted: safe
+									fixes auto-apply, risky ones wait for you.
+								</li>
+							</ul>
+							<Link
+								href="/docs/how-to/deploy-a-workload"
+								className="mt-6 inline-block font-medium text-[var(--color-brand)] hover:underline"
+							>
+								Health checks ship today →
+							</Link>
+						</div>
+
+						<div className="overflow-hidden border border-dashed border-fd-border bg-fd-card font-mono text-sm">
+							<div className="flex items-center justify-between border-b border-dashed border-fd-border px-4 py-2 text-xs text-fd-muted-foreground">
+								<span>incident</span>
+								<span className="uppercase tracking-widest">
+									Illustrative · planned
+								</span>
+							</div>
+							<div className="px-4 py-3 leading-relaxed text-fd-muted-foreground">
+								<div>payments · liveness failing 1/3</div>
+								<div className="mt-1">
+									<span className="text-[var(--color-brand)]">reflexive</span>{" "}
+									routed around the dead backend
+								</div>
+								<div>
+									<span className="text-[var(--color-brand)]">reactive</span>{" "}
+									rescheduled onto healthy capacity
+								</div>
+							</div>
+							<div className="divide-y divide-dashed divide-fd-border border-t border-dashed border-fd-border text-xs">
+								{[
+									{
+										stage: "reasoning",
+										what: "correlated by identity",
+										state: "root cause found",
+										kind: "found",
+									},
+									{
+										stage: "proposed",
+										what: "roll back payments → v2",
+										state: "awaiting approval",
+										kind: "pending",
+									},
+								].map((r) => (
+									<div
+										key={r.stage}
+										className="flex items-center justify-between gap-3 px-4 py-2.5"
+									>
+										<span className="flex items-center gap-3">
+											<span className="text-fd-foreground">{r.stage}</span>
+											<span className="text-fd-muted-foreground">{r.what}</span>
+										</span>
+										{r.kind === "found" ? (
+											<span className="shrink-0 text-[var(--color-brand)] uppercase tracking-widest">
+												{r.state}
+											</span>
+										) : (
+											<span className="shrink-0 border border-fd-border px-2 py-0.5 uppercase tracking-widest text-fd-muted-foreground">
+												{r.state}
+											</span>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					</div>
+
+					{/* What runs at each tier. */}
+					<div className="mt-12 grid gap-px overflow-hidden border border-dashed border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-3">
 						{selfHealingTiers.map((t) => (
 							<div key={t.title} className="bg-fd-background p-6">
 								<PlannedPill />
-								<h4 className="mb-2 text-base font-semibold">{t.title}</h4>
+								<h3 className="mb-2 text-base font-semibold">{t.title}</h3>
 								<p className="text-sm text-fd-muted-foreground">{t.body}</p>
 							</div>
 						))}
