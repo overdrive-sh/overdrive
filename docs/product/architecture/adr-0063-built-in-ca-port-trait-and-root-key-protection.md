@@ -4,8 +4,11 @@
 
 Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key),
 2026-06-08 (rev 2 — `SvidMaterial.not_after` + validity window threaded through
-`SvidRequest`), and 2026-06-09 (#215 wires `boot_ca`/`bootstrap_node_intermediate`
-into `run_server` — closes the D-CA-4 "CA not wired into serve" deferral)** — see
+`SvidRequest`), 2026-06-09 (#215 wires `boot_ca`/`bootstrap_node_intermediate`
+into `run_server` — closes the D-CA-4 "CA not wired into serve" deferral), and
+2026-06-10 (decrypt-failure cause taxonomy correction — AES-GCM cannot
+distinguish wrong-KEK-material from tampering; `TamperedEnvelope` →
+`EnvelopeAuthFailed`)** — see
 § Changelog for the dated amendments (each reopens this Accepted ADR via a dated
 entry, not a silent rewrite). Supersedes **ADR-0010 for
 *workload identity* only** — ADR-0010's ephemeral CA (`tls_bootstrap.rs`)
@@ -223,11 +226,17 @@ The keyring/systemd-creds plumbing is a **host-adapter concern**
      silently breaking the chain. Adoption happens **once, before any
      issuance**, and is idempotent for the same root (a divergent
      already-minted root fails loud with a typed `CaError`).
-  4. **Decrypt failure (wrong KEK, tampered ciphertext) → refuse to start**
-     with a typed `CaError` + `health.startup.refused`. **Never silently
-     re-mint** — a re-mint orphans every issued identity. AEAD authentication
-     distinguishes "tampered envelope" from "wrong KEK" (distinct error
-     variants).
+  4. **Decrypt failure → refuse to start** with a typed `CaError` +
+     `health.startup.refused`. **Never silently re-mint** — a re-mint orphans
+     every issued identity. The cause taxonomy the boot path can actually
+     detect is the **honest four-cause** set in D4 § "Honest decrypt-failure
+     cause taxonomy" — NOT the false "AES-GCM authentication distinguishes
+     tampered from wrong-KEK" claim corrected on 2026-06-10 (see § Changelog).
+     AES-GCM **cannot** distinguish wrong-KEK-*material* from a tampered
+     ciphertext; both surface as one opaque auth failure. The only id-level
+     discrimination is the `kek_id` identity check (`WrongKek`), which is the
+     **rotation/migration guard** and is **Phase-1-unreachable** (the `kek_id`
+     is a hardcoded constant).
 
 **Dev / non-systemd fallback:** an `OVERDRIVE_CA_KEK` environment variable
 supplies the KEK for local dev and non-systemd environments. It is **dev-only**
@@ -284,6 +293,90 @@ domain-separation + rotation properties are exactly what the deferred work
 format migration later. AAD =
 `kek_id` binds the ciphertext to the KEK identity (defends against
 KEK-confusion).
+
+#### Honest decrypt-failure cause taxonomy (corrected 2026-06-10)
+
+**Load-bearing cryptographic fact: AES-256-GCM cannot distinguish "wrong KEK
+*material* (same id)" from "tampered ciphertext/tag (same id)".** Both produce
+one opaque authentication failure under a matching `kek_id`. The only thing
+that distinguishes `WrongKek` is the **`kek_id` plaintext identity check**
+performed *before* the crypto runs — NOT "AEAD authentication". The earlier
+claim that "AEAD authentication distinguishes tampered from wrong KEK" was
+false and is corrected here.
+
+The boot path (`ca_boot::boot_ca` → `RootKeyAeadCodec::open`, AES-256-GCM,
+`aad = kek_id`) can detect exactly these four causes, and no more:
+
+| Cause | How it is detected | Distinguishable? | `CaError` |
+|---|---|---|---|
+| **KEK unavailable** | KEK resolve returns nothing — *before* any crypto | yes | `CaBootError::KekUnavailable` (boot layer) |
+| **KEK id mismatch** | `supplied_kek_id != record.kek_id` — plaintext compare *before* crypto | yes | `CaError::WrongKek { sealed_under, supplied }` |
+| **Auth failure** — wrong KEK *material* (matching id) **OR** tampered ciphertext/tag (matching id, still structurally decodable) | AES-GCM returns one opaque auth failure | **NO** — wrong-material and ciphertext-tamper are the **same signal** | `CaError::EnvelopeAuthFailed { kek_id }` |
+| **Malformed / decode** | bytes don't deserialize into a valid `RootCaKeyRecord` — *before* crypto | yes (fails at decode) | decode/`Malformed` → `CaBootError::EnvelopeDecode` |
+
+**The three operationally-real, pairwise-distinct refusal causes for Phase-1
+single-node are `{ KEK-unavailable, decrypt-auth-failure, decode-malformed }`** —
+three classes the system genuinely tells apart. A tamper that *keeps the record
+structurally decodable* surfaces as **auth-failure** (same class as
+wrong-material — NOT distinct); a tamper/corruption that *breaks the record
+structure* surfaces as **decode-malformed**. So the honest "tampered" scenario
+is the structural-corruption one; ciphertext-tamper is covered by the
+auth-failure message's "or tampered" wording.
+
+`WrongKek` (id-mismatch) is the **KEK-rotation/migration guard** (D4's
+`kek_id`-as-rotation-seam). It is correctly coded but **Phase-1-unreachable**:
+the supplied id is a hardcoded constant (`ca_boot::root_kek_id()`), so no
+in-tree boot can produce an id mismatch. Document it as the rotation seam, NOT
+as "the wrong KEK an operator hits today" — the wrong-KEK an operator actually
+hits (a different cred under the same id) lands in **auth-failure**, not
+`WrongKek`.
+
+#### `CaError` auth-failure contract (prescription for the crafter)
+
+**Decision: RENAME `CaError::TamperedEnvelope` → `CaError::EnvelopeAuthFailed`.**
+
+*Rationale.* The variant fires for the **common operator case** of wrong KEK
+*material* under the right id, not only for tampering. A name that says
+"tampered" sends an operator who merely mounted the wrong credential down a
+forensic/incident path ("someone corrupted my key at rest") when the fix is
+"mount the right cred". Per `.claude/rules/development.md` § "Distinct failure
+modes get distinct error variants … never misdiagnose the cause → wrong
+remediation", the name and message must name *both* possibilities. The
+API-churn of the rename is bounded and mechanical — the match sites in
+`error_mapping_exhaustive.rs`, the `CaBootError::EnvelopeDecrypt { #[source] }`
+wrapping, and the `tampered_envelope(kek_id)` constructor (→
+`envelope_auth_failed(kek_id)`) — and is worth paying once to retire a
+misleading name that would mis-route every operator who hits the common case.
+A reword-only fix (keep `TamperedEnvelope`, fix the message) was rejected: the
+*variant name* leaks into match arms and logs, and a variant literally named
+`Tampered` firing on a benign wrong-cred is the exact "variant has become a
+catch-all whose name lies about the cause" smell the rule names.
+
+The crafter implements (in `crates/overdrive-core/src/traits/ca.rs`; the
+architect does **not** edit `ca.rs`):
+
+- **Rename** the variant `TamperedEnvelope { kek_id }` →
+  `EnvelopeAuthFailed { kek_id }`, the constructor `tampered_envelope` →
+  `envelope_auth_failed`, and update all match sites
+  (`error_mapping_exhaustive.rs`, the `CaBootError::EnvelopeDecrypt` wrapping).
+- **The EXACT `#[error("…")]` message string** the auth-failure cause must
+  render (the IntentStore path is added by the boot layer's
+  `CaBootError::EnvelopeDecrypt` wrapping, so this `CaError` message names the
+  cause + `kek_id` only):
+
+  ```
+  root-key envelope failed AES-GCM authentication for kek_id `{kek_id}` — the KEK material is wrong OR the envelope was tampered/corrupted (these are indistinguishable under AEAD)
+  ```
+
+- **`WrongKek` stays as-is** (correctly coded; rotation-seam guard). Its
+  rendered form the crafter asserts on:
+  `root-key envelope sealed under kek_id \`{sealed_under}\` cannot be opened with kek_id \`{supplied}\``.
+- **The decode/Malformed path stays as-is** — structurally invalid bytes fail
+  at deserialize *before* crypto and surface through the boot layer's
+  decode/`Malformed` rendering (`… envelope decode failed … Malformed …`,
+  naming the redb path), NOT through `CaError`. The crafter asserts the
+  `decode`/`Malformed` token, not an `EnvelopeAuthFailed` token, for the
+  structural-corruption case.
 
 ### D5 — Pure `CertSpec` builder in `overdrive-core`; host adapter translates to `rcgen::CertificateParams`
 
@@ -558,9 +651,14 @@ owns the rcgen call.
 RustCrypto `pkcs8` with scrypt-derived key + AES-256-CBC (research Finding 8
 Approach A). **Rejected:** AES-CBC is *unauthenticated* — for the platform's
 trust anchor, authenticated encryption (AES-GCM, integrity + confidentiality)
-is the defensible floor. AEAD lets us distinguish "tampered envelope" from
-"wrong key" as distinct errors (an AC). PKCS#8's only advantage —
-`openssl pkcs8` interop — is irrelevant for an internal key never exported.
+is the defensible floor — AES-GCM gives integrity (tamper detection) on top of
+confidentiality, where AES-CBC gives confidentiality only. (NB: AEAD detects
+*that* authentication failed; it does **not** distinguish wrong-key-material
+from tampering — both are one opaque auth failure. The cause taxonomy is in D4
+§ "Honest decrypt-failure cause taxonomy"; an earlier version of this bullet
+overclaimed that AEAD distinguishes the two — corrected 2026-06-10.) PKCS#8's
+only advantage — `openssl pkcs8` interop — is irrelevant for an internal key
+never exported.
 
 ### A4 — Root key protection: passphrase-derived KEK (the DISCUSS sketch)
 
@@ -659,8 +757,12 @@ the system accepts traffic — *wire then probe then use*:
   (`health.startup.refused`), not a panic mid-issuance.
 - **Persisted envelope decrypts, then the root is adopted** — on subsequent
   boot, the adapter performs a trial HKDF-derive + AES-GCM-open of the
-  persisted `RootCaKeyRecord` at composition time; an auth failure (tampered)
-  or wrong-KEK failure refuses startup with the *distinct* typed error. The
+  persisted `RootCaKeyRecord` at composition time; an **auth failure** (wrong
+  KEK material OR tampered ciphertext — indistinguishable under AEAD,
+  `CaError::EnvelopeAuthFailed`), a **decode failure** (structurally malformed
+  bytes, before crypto), or — only across a future KEK rotation — a **`kek_id`
+  mismatch** (`CaError::WrongKek`) each refuses startup with its typed error
+  (D4 § "Honest decrypt-failure cause taxonomy"). The
   *use* step closes the loop: after the trial decrypt succeeds, the boot path
   installs the persisted root into the adapter via `Ca::adopt_persisted_root`
   **before** any issuance — so "use" means "issue under the persisted root,"
@@ -705,6 +807,45 @@ for DISTILL.
 
 ## Changelog
 
+- 2026-06-10 — **Decrypt-failure cause taxonomy correction (no decision
+  reversed; the refuse-to-start / never-silently-re-mint decision is intact).**
+  A code review of DELIVER step 02-03 (`serve` persistent-CA boot integration)
+  surfaced that D3's decision-4 bullet, the A3 alternatives bullet, the
+  Earned-Trust probe bullet, and the 2026-06-09 changelog sub-block all carried
+  a **false cryptographic claim**: *"AEAD authentication distinguishes 'tampered
+  envelope' from 'wrong KEK' (distinct error variants)."* **AES-256-GCM cannot
+  distinguish wrong KEK *material* (matching `kek_id`) from a tampered
+  ciphertext/tag (matching `kek_id`) — both are one opaque authentication
+  failure.** The only id-level discrimination is the **plaintext `kek_id`
+  identity check** (`WrongKek`), performed *before* the crypto runs — and that
+  guard is **Phase-1-unreachable** because the supplied id is a hardcoded
+  constant (`ca_boot::root_kek_id()`); it is the **KEK-rotation/migration
+  guard**, not the wrong-KEK an operator hits today. The captured O04/S-OC-08
+  EDD evidence confirms the swap: the "tampered" scenario rendered a
+  *decode/Malformed* message and the "wrong KEK" scenario rendered the
+  *AES-GCM-auth-failed* message.
+
+  **What this amendment changes:**
+  - D3 decision-4, A3, and the Earned-Trust probe bullets are corrected to the
+    **honest four-cause taxonomy** (`{ KEK-unavailable, decrypt-auth-failure,
+    decode-malformed }` pairwise-distinct + `WrongKek` as the
+    Phase-1-unreachable rotation guard) — added as D4 § "Honest decrypt-failure
+    cause taxonomy".
+  - **`CaError::TamperedEnvelope` → `CaError::EnvelopeAuthFailed`** (variant +
+    `tampered_envelope` constructor → `envelope_auth_failed`), with a message
+    that names *both* possibilities (wrong material OR tamper). The full
+    prescription — exact `#[error(...)]` string, match-site sweep, the
+    `WrongKek`/decode tokens to assert — is pinned in D4 § "`CaError`
+    auth-failure contract (prescription for the crafter)". *(The architect does
+    not edit `ca.rs`; the crafter implements against this pinned contract.)*
+  - The 2026-06-09 "CONFIRMED satisfiable, no fix needed" sub-block is annotated
+    as the corrected-wrong claim.
+
+  **What is NOT changed:** the refuse-to-start-over-silent-re-mint decision (D3),
+  the AEAD shape (D4 HKDF→AES-256-GCM), the `kek_id`-AAD rotation seam, and every
+  D1/D2/D5–D9 decision. This is reconciliation of the *cause-labelling* prose to
+  cryptographic reality, not a design change. — Morgan.
+
 - 2026-06-09 — **#215 wires the persistent CA into `run_server` — closes the
   D-CA-4 "CA not wired into serve" deferral (decision change: ephemeral →
   persistent at the production composition root).** The `built-in-ca-operator-
@@ -723,16 +864,18 @@ for DISTILL.
   typed `CaBootError` and the distinct `CaError` cause survives to the operator's
   stderr.
 
-  **O04 cause-distinctness — CONFIRMED satisfiable, no fix needed.** D3's claim
-  that AES-GCM authentication distinguishes wrong-KEK from tampered-envelope is
-  TRUE in code: `CaError` carries two distinct variants — `WrongKek {
-  sealed_under, supplied }` ("root-key envelope sealed under kek_id `X` cannot be
-  opened with kek_id `Y`") and `TamperedEnvelope { kek_id }` ("root-key envelope
-  is corrupt or tampered (AES-GCM auth failed) for kek_id `Z`") — each with a
-  distinct `#[error(...)]` Display (`crates/overdrive-core/src/traits/ca.rs:
-  546-607`). `CaBootError::EnvelopeDecrypt { #[source] source: CaError }` renders
-  `cause: {source}`, so the boot stderr surfaces the distinct cause. The O04
-  EDD sub-claim 2 (wrong-KEK message distinct from tampered) is met as-is.
+  **O04 cause-distinctness — claim was WRONG; corrected 2026-06-10 (see the
+  2026-06-10 amendment below).** This entry originally asserted "D3's claim that
+  AES-GCM authentication distinguishes wrong-KEK from tampered-envelope is TRUE
+  in code … no fix needed." That was **false**: AES-GCM cannot distinguish wrong
+  KEK *material* (matching id) from a tampered ciphertext (matching id) — both
+  are one opaque auth failure. The two variants `WrongKek` (id mismatch — a
+  plaintext check, NOT AEAD) and the auth-failure variant discriminate
+  *different* things than the original prose claimed; and `WrongKek` is
+  Phase-1-unreachable (hardcoded `kek_id`). The honest taxonomy and the variant
+  rename (`TamperedEnvelope` → `EnvelopeAuthFailed`) are in the 2026-06-10
+  amendment. This stale paragraph is retained struck-through-in-spirit so the
+  history of the correction is legible.
 
   **D01 / O04 move pending → wired.** Both EDD expectations were blocked on #215
   (`overdrive serve` exposed no CA boot surface); this feature unblocks them. D01

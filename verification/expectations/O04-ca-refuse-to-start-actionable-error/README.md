@@ -1,6 +1,10 @@
 # O04 — Control plane refuses to start on root-key decrypt failure with an actionable error
 
-**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `satisfied`
+**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:**
+`pending-recapture` (was `satisfied` at SHA `fc276c70`; the 2026-06-10
+cause-taxonomy correction + the `TamperedEnvelope` → `EnvelopeAuthFailed`
+rename invalidate the prior evidence's sub-claim labels — the crafter
+re-captures against the corrected contract before re-asserting `satisfied`)
 
 ## Expectation
 
@@ -12,8 +16,16 @@ already-issued workload identity and break the trust hierarchy).
 
 The error is qualitative, not just an exit code:
 
-- It names the **cause** — *bad KEK* vs *corrupt/tampered envelope* are
-  **distinct** messages (AES-GCM authentication distinguishes them).
+- It names the **cause** over the **three causes the system genuinely
+  discriminates** (ADR-0063 D4 § "Honest decrypt-failure cause taxonomy",
+  corrected 2026-06-10): **decrypt-auth-failure** vs **decode-malformed** vs
+  **KEK-unavailable** are **pairwise-distinct** messages. The auth-failure
+  message names **both** possibilities — wrong KEK material OR a
+  tampered/corrupt envelope — because AES-GCM **cannot** distinguish them (both
+  are one opaque authentication failure). The `kek_id`-mismatch cause
+  (`CaError::WrongKek`) is the rotation/migration guard and is
+  Phase-1-unreachable (hardcoded id); it is NOT one of the three operator
+  causes here.
 - It is **actionable** — it points at the IntentStore path / the KEK source,
   not a cryptic panic or a bare backtrace.
 - It emits `health.startup.refused` (per `development.md` § Intent =
@@ -36,21 +48,39 @@ probe. This expectation captures the **operator-observable** refuse-to-start
 behaviour: the exact stderr an operator sees, and the absence of a re-minted
 root.
 
-Sub-claims:
+Sub-claims (corrected to the honest cause taxonomy, 2026-06-10):
 
-1. With a tampered persisted envelope, `overdrive serve` refuses to start; the
-   stderr names a **corrupt/tampered envelope** (actionable, not a panic).
-2. With the wrong KEK, `overdrive serve` refuses to start; the stderr names a
-   **wrong-KEK** cause — **distinct** from the tampered-envelope message.
+1. With the **wrong KEK material** under the matching `kek_id` (the common
+   operator case), `overdrive serve` refuses to start; the stderr names a
+   **decrypt-auth-failure** cause (`CaError::EnvelopeAuthFailed`) that names
+   **both** possibilities — wrong KEK material OR tampered/corrupt envelope
+   (indistinguishable under AEAD) — actionable, not a panic.
+2. With a **structurally corrupted** persisted envelope (bytes that no longer
+   deserialize into a valid `RootCaKeyRecord`), `overdrive serve` refuses to
+   start; the stderr names a **decode/Malformed** cause (fails before crypto)
+   — **distinct cause class** from sub-claim 1. *(A tamper that keeps the
+   record decodable is auth-failure, the SAME class as sub-claim 1 — to
+   exercise a distinct cause the corruption must break the record structure.)*
 3. With an absent keyring KEK (and no `OVERDRIVE_CA_KEK` dev opt-in),
-   `overdrive serve` refuses to start **before any issuance** — no throwaway
-   KEK is silently generated.
+   `overdrive serve` refuses to start **before any issuance** with a
+   **KEK-unavailable** cause — no throwaway KEK is silently generated.
 4. In every case the persisted root identity is **unchanged** (no silent
    re-mint): re-supplying the correct KEK afterward reuses the SAME root.
 
+The cross-cause contract is that the three cause **classes**
+(`{ EnvelopeAuthFailed, decode/Malformed, KekUnavailable }`) are
+**pairwise-distinct** — asserted as cause-class distinctness, not bare
+rendered-string inequality. `CaError::WrongKek` (id mismatch) is the
+rotation-seam guard and is Phase-1-unreachable; it is NOT one of these three.
+
 `satisfied` requires sub-claims 1–4 on a Lima run, reviewed adversarially for
 "is the error actually actionable to an operator, or merely a non-zero exit?"
-(Step 4 — don't outsource taste).
+(Step 4 — don't outsource taste). **The current `evidence/` was captured
+against the pre-correction sub-claim wording (the labels were swapped — the
+"tampered" capture rendered decode/Malformed and the "wrong KEK" capture
+rendered AES-GCM auth-failure); the crafter MUST re-capture against this
+corrected contract + the renamed `EnvelopeAuthFailed` variant before
+re-asserting `satisfied`.**
 
 ## Evidence
 

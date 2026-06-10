@@ -277,33 +277,57 @@ Universe: the root serial observed before vs after restart (must be identical),
 the on-disk file byte-scan (no plaintext, EDD D01 sub-claim 3 — guardrail holds
 across the lifecycle). Example-based.
 
-#### S-OC-08a — `overdrive serve` refuses to start on the WRONG KEK
+> **Cause-taxonomy correction (2026-06-10, ADR-0063 D4 § "Honest
+> decrypt-failure cause taxonomy").** AES-256-GCM **cannot** distinguish wrong
+> KEK *material* (matching `kek_id`) from a tampered ciphertext (matching
+> `kek_id`) — both are one opaque auth failure (`CaError::EnvelopeAuthFailed`,
+> renamed from `TamperedEnvelope`). The id-mismatch variant `CaError::WrongKek`
+> is a plaintext `kek_id` check (NOT AEAD) and is **Phase-1-unreachable** —
+> the supplied id is a hardcoded constant (`ca_boot::root_kek_id()`); it is the
+> KEK-rotation/migration guard, not an operator-reachable Phase-1 cause. The
+> three operationally-real, pairwise-distinct refusal causes are therefore
+> **{ decrypt-auth-failure, decode-malformed, KEK-unavailable }**. S-OC-08a/b
+> below are corrected to the causes actually exercised.
+
+#### S-OC-08a — `overdrive serve` refuses to start on the WRONG KEK MATERIAL (same id)
 
 ```gherkin
-Given a persisted root whose envelope cannot be opened with the supplied KEK
-When overdrive serve starts with the WRONG KEK
-Then it refuses to start and the stderr names a wrong-KEK cause (CaError::WrongKek)
+Given a persisted root whose envelope is sealed under kek_id `overdrive-ca-root`
+And the keyring resolves a KEK under that SAME id but with the WRONG key material
+When overdrive serve starts
+Then it refuses to start and the stderr names a decrypt-auth-failure cause (CaError::EnvelopeAuthFailed)
+And the cause names BOTH possibilities — wrong KEK material OR a tampered/corrupt envelope (indistinguishable under AEAD) — plus the IntentStore path
 And the control plane does NOT begin serving
 And health.startup.refused is emitted
 ```
 
 Universe: the `overdrive serve` exit outcome (refuse) + the stderr cause string
-(names the wrong-KEK cause + the IntentStore path, not a bare panic/backtrace).
-EDD O04 sub-claim 1. NAMED example-based sad path (Mandate 11): `Sad_wrong_kek`.
+(names the auth-failure cause + the IntentStore path, not a bare
+panic/backtrace; NOT `CaError::WrongKek` — the id matches, so this is
+auth-failure). EDD O04 sub-claim 1. NAMED example-based sad path (Mandate 11):
+`Sad_wrong_kek_material`. *(The crafter asserts the `EnvelopeAuthFailed` cause
+class / the "wrong KEK material OR tampered" tokens — NOT `WrongKek`.)*
 
-#### S-OC-08b — `overdrive serve` refuses to start on a TAMPERED envelope
+#### S-OC-08b — `overdrive serve` refuses to start on a STRUCTURALLY CORRUPTED envelope
 
 ```gherkin
-Given a persisted root whose envelope has been TAMPERED (AEAD tag mismatch)
-When overdrive serve starts against the tampered envelope
-Then it refuses to start and the stderr names a corrupt/tampered-envelope cause (CaError::TamperedEnvelope)
+Given a persisted root whose envelope bytes have been corrupted so the record no longer DESERIALIZES into a valid RootCaKeyRecord
+When overdrive serve starts against the corrupted envelope
+Then it refuses to start and the stderr names an envelope DECODE/MALFORMED cause (before any crypto)
+And the cause names the IntentStore path
 And the control plane does NOT begin serving
 And health.startup.refused is emitted
 ```
 
 Universe: the `overdrive serve` exit outcome (refuse) + the stderr cause string
-(names the tampered-envelope cause + the IntentStore path). EDD O04 sub-claim 2.
-NAMED example-based sad path (Mandate 11): `Sad_tampered_envelope`.
+(names the decode/Malformed cause + the IntentStore path). EDD O04 sub-claim 2.
+NAMED example-based sad path (Mandate 11): `Sad_corrupted_envelope`.
+*(Note for the crafter: a tamper that keeps the record structurally
+**decodable** surfaces as auth-failure — the SAME class as S-OC-08a, NOT
+distinct. To exercise a distinct decode-failure cause, the corruption must
+break the record structure (e.g. truncate / mangle the rkyv framing) so it
+fails at deserialize BEFORE crypto. The crafter asserts the `decode`/`Malformed`
+token, NOT an `EnvelopeAuthFailed` token.)*
 
 #### S-OC-08c — `overdrive serve` refuses to start when the KEK is ABSENT
 
@@ -321,20 +345,39 @@ Universe: the `overdrive serve` exit outcome (refuse) + the stderr cause string
 generated throwaway KEK. EDD O04 sub-claim 3. NAMED example-based sad path
 (Mandate 11): `Sad_absent_kek`.
 
-#### S-OC-08d — The three refusal causes render pairwise-distinct stderr
+#### S-OC-08d — The three refusal causes are pairwise-distinct cause classes
 
 ```gherkin
-Given the three refused-boot stderr messages from S-OC-08a/b/c
-When the rendered cause strings are compared
-Then the wrong-KEK, tampered-envelope, and absent-KEK messages are pairwise distinct
+Given the three refused boots from S-OC-08a/b/c
+When the refusal cause CLASS of each is compared
+Then the decrypt-auth-failure, decode-malformed, and KEK-unavailable causes are pairwise distinct
+And each rendered stderr names its own cause + the IntentStore path
 ```
 
-Universe: the three captured stderr cause strings, compared for pairwise
-distinctness. EDD O04 sub-claims 1–3 (the cross-cause contract). This pins the
-operator-triage value the original single-When scenario carried — that an
-operator can tell the three failure modes apart from stderr alone — without
-muddying the per-cause fail-for-right-reason triage. Example-based; reuses the
-three captured outputs from S-OC-08a/b/c.
+Universe: the three refusal cause classes
+(`{ EnvelopeAuthFailed, decode/Malformed, KekUnavailable }`), compared for
+pairwise distinctness. EDD O04 sub-claims 1–3 (the cross-cause contract). This
+pins the operator-triage value — that an operator can tell the three failure
+modes apart — over the three causes the system **genuinely** discriminates.
+
+*Note for the crafter:* assert on the **exact cause class / cause tokens**
+(`matches!` the typed cause where reachable; otherwise assert the distinctive
+substring of each — "AES-GCM authentication" / "decode … Malformed" /
+"no KEK registered"), **NOT** rendered-string inequality. Three strings can be
+trivially unequal while still failing to discriminate the operator-meaningful
+cause; the contract is "the operator can tell the cause apart", which is a
+cause-class assertion, not a string `!=`.
+
+> **`CaError::WrongKek` (id-mismatch) is NOT one of the three S-OC-08 causes.**
+> It is the KEK-rotation/migration guard (ADR-0063 D4 `kek_id`-as-rotation-seam)
+> and is **Phase-1-unreachable** — the supplied `kek_id` is a hardcoded constant
+> (`ca_boot::root_kek_id()`), so no in-tree single-node boot can produce an id
+> mismatch. It is therefore deliberately untested by S-OC-08 (no reachable path
+> to exercise). **Open question (surface to the user, do NOT create a ticket):**
+> a future KEK-rotation feature would make `WrongKek` reachable (rotating to a
+> new `kek_id` while a record still references the old) and SHOULD then carry a
+> scenario that exercises the id-mismatch guard — flagged here as a candidate
+> for that future feature's DISTILL, not this one's.
 
 #### S-OC-09 — Refuse-to-start leaves the persisted root unchanged (no silent re-mint)
 
