@@ -1,6 +1,6 @@
 # D01 — The root CA private key is never observable in plaintext at rest
 
-**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (awaiting different-fox review)
+**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `satisfied`
 
 ## Expectation
 
@@ -130,9 +130,22 @@ The gated integration test
 record; this expectation captures the on-disk IntentStore-file byte-scan through
 the wired binary.
 
-**Status gate**: this evidence is `evidence-captured`, NOT `satisfied`. Per
-`.claude/rules/verification.md` § "the different fox audit", the authoring agent
-MUST NOT self-stamp `satisfied`. A SEPARATE `*-reviewer` (Haiku) agent must read
-`evidence/run.log` + `evidence/verification.yaml` adversarially and confirm
-sub-claims 1–3 before the status is set to `satisfied`. The orchestrator
-dispatches that review (the DELIVER subagent could not self-dispatch it).
+### Different-fox review
+
+Per `.claude/rules/verification.md` § "the different fox audit", the authoring
+agent did NOT self-stamp. The orchestrator dispatched independent adversarial
+`nw-software-crafter-reviewer` (Haiku) foxes reading only `evidence/`:
+
+- Fox 1 — **REFUTED**: the byte-scan caught only PEM armor, so an unarmored
+  raw-DER key would pass vacuously; also captured against a dirty tree.
+- Fox 2 — **REFUTED**: raw-DER OID scan accepted as sound, but non-vacuity was
+  asserted in prose (not demonstrated in `run.log`) and the dirty-tree
+  cleanliness lacked a proof artifact.
+- Fox 3 — **CONFIRMED** (SHA `bc43082c`, 2026-06-10, no novel defects): the
+  inline self-test demonstrates non-vacuity (4/4 plaintext encodings detected,
+  2/2 benign inputs clean, hard gate before the production scan); sub-claims
+  1–3 PASS with zero markers on first boot and restart; `dirty-status.txt`
+  proves externals-only with no modified tracked source; `executed_in_lima:
+  true`, exit 0.
+
+Status set to `satisfied` on Fox 3's confirmation.
