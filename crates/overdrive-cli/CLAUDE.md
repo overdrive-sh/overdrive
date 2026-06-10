@@ -159,7 +159,18 @@ output:
    renderers take `&AllocStatusResponse` directly. Wiring a section into
    the live path means reading `out.snapshot.<field>`.
 
-> The three-renderer split is a known maintenance hazard: the test-only
-> pair are dead-to-production. Consolidating onto a single renderer is
-> the real fix; until that lands, treat `render::alloc_status` as the
-> single source of operator-visible truth.
+> The three-renderer split is a known hazard — but do NOT "fix" it by
+> deleting or `#[cfg(test)]`-gating the unused pair on sight.
+> `alloc_status_kind_aware` is the kind-aware renderer the **in-flight
+> `workload-kind-discriminator` feature** built (commit `72175d7e`) to
+> give `overdrive alloc status` Job-verdict / per-attempt-exit /
+> Service-replica output; its commit message says the command "dispatches
+> on `response.kind`", but the step that actually wires the command
+> through it was never completed — so it has zero `src/` callers today.
+> `alloc_snapshot` is an older ADR-0033 §4 TUI mockup. The real fix is to
+> **finish that wiring** (dispatch the command through the kind-aware
+> renderer and retire the flat `alloc_status`, folding the shared section
+> helpers into the survivor), which is a `workload-kind-discriminator`
+> completion decision — not a delete. Until that lands,
+> `render::alloc_status` is the single source of operator-visible truth
+> and the only renderer to change/test for operator-facing work.
