@@ -1,0 +1,13 @@
+expectation_id: "O04"
+date_utc: "2026-06-10T10:53:00Z"
+overdrive_sha: "aaaaa0cd9a765e6a8ea73154e56f73a888b9a971"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "bbfe120b18bc41dbe7066f8aed8f4f9b5fac566b"
+harness_invocation: "verification/harness/run-expectation.sh O04"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["S-02-06 (`boot_refuses_to_start_on_envelope_decrypt_failure_without_remint`)","S-02-07 (`boot_refuses_to_start_when_kek_absent_from_keyring`)","ADR-0063 D3 + § Earned Trust (refuse-to-start over silent re-mint)","docs/product/journeys/issue-workload-identity.yaml — error_paths step 1"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

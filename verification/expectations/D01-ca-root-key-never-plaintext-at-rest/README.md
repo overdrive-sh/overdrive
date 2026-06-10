@@ -1,6 +1,6 @@
 # D01 — The root CA private key is never observable in plaintext at rest
 
-**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `pending`
+**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (awaiting different-fox review)
 
 ## Expectation
 
@@ -47,10 +47,30 @@ fixture/first-boot key the test uses, not a guess.
 
 ## Evidence
 
-Executed through `harness/run-expectation.sh D01` at SHA `2f4eccd4` and
-self-reports `pending` — the byte-scan needs a persisted IntentStore from the
-built binary, but the CA is not wired into `overdrive serve` this phase (D-CA-4).
-**Unblocked by #215** (wire `boot_ca` into `overdrive serve`). The gated integration test
+Executed through `harness/run-expectation.sh D01` at SHA `aaaaa0cd` in Lima
+(real kernel, real redb), `executed_in_lima: true`, `runner_exit_code: 0`. #215
+wired `boot_ca` into `run_server`, so first boot now generates + KEK-seals +
+persists the root to the on-disk IntentStore. The runner drives the BUILT
+`overdrive serve` binary BLACK-BOX (no `overdrive-*` crate linked) and byte-scans
+the on-disk `intent.redb`:
+
+- Sub-claim 1 — **PASS**: zero plaintext PRIVATE KEY PEM markers on disk
+  (`BEGIN=2 PRIVKEY=0`; the 2 BEGIN blocks are PUBLIC certificate PEM, not the
+  private key).
+- Sub-claim 2 — **PASS**: the sealed root-key envelope is present
+  (`key-envelope` marker, non-empty store).
+- Sub-claim 3 — **PASS**: after a restart that decrypts + adopts the same root,
+  STILL zero plaintext PRIVATE KEY PEM (`BEGIN=2 PRIVKEY=0`).
+
+The gated integration test
 `rcgen_ca_root_key_envelope.rs::root_key_envelope_contains_no_plaintext_key_bytes`
 (S-02-02) proves the no-plaintext invariant in-tree against the serialized
-record; this expectation captures the on-disk IntentStore-file byte-scan.
+record; this expectation captures the on-disk IntentStore-file byte-scan through
+the wired binary.
+
+**Status gate**: this evidence is `evidence-captured`, NOT `satisfied`. Per
+`.claude/rules/verification.md` § "the different fox audit", the authoring agent
+MUST NOT self-stamp `satisfied`. A SEPARATE `*-reviewer` (Haiku) agent must read
+`evidence/run.log` + `evidence/verification.yaml` adversarially and confirm
+sub-claims 1–3 before the status is set to `satisfied`. The orchestrator
+dispatches that review (the DELIVER subagent could not self-dispatch it).

@@ -1,22 +1,5 @@
-# shellcheck shell=bash
-# D01 — root CA private key is never plaintext at rest (byte-scan the IntentStore).
-#
-# Black-box: drives the BUILT `overdrive serve` binary inside Lima (real kernel,
-# real redb IntentStore, production `SystemdCredsKeyring` KEK provider reading
-# `$CREDENTIALS_DIRECTORY/overdrive-ca-root`). No `overdrive-*` crate is linked.
-# #215 wired `boot_ca` into `run_server`, so first boot now generates +
-# KEK-seals + persists the root to the on-disk IntentStore.
-#
-# The disk-observable guardrail (K3): the sealed root key is AES-256-GCM
-# ciphertext, so the plaintext PKCS#8/SEC1 PEM armor markers
-# (`-----BEGIN ... PRIVATE KEY-----`) MUST NOT appear in the redb file. The boot
-# path seals the key in PEM form (ca_boot_and_audit::
-# persisted_root_key_envelope_seals_pem_not_der), so an un-sealed write would
-# show those markers verbatim. Scanning for the armor markers is the honest,
-# key-material-free disk scan.
-source "$REPO_ROOT/verification/harness/lima-helpers.sh"
-
-in_lima bash -lc '
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/xtask lima run -- bash -lc '
 set -uo pipefail
 WORK="$(mktemp -d)"
 DATA="$WORK/data"; CONF="$WORK/conf"; CREDS="$WORK/creds"
@@ -36,7 +19,7 @@ rc=0
 
 # --- First boot: generate + seal + persist the root. -------------------------
 serve 25
-if [ ! -f "$INTENT" ]; then
+if [ '\!' -f "$INTENT" ]; then
   echo "  [FAIL] first boot did not persist $INTENT"
   sed -n "1,40p" "$WORK/serve.out"
   rm -rf "$WORK"; exit 1
@@ -78,4 +61,11 @@ fi
 
 rm -rf "$WORK"
 exit $rc
-'
+'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+  [PASS] first boot persisted the IntentStore at /tmp/tmp.NFaEXMUmqx/data/intent.redb
+  [PASS] sub-claim 1: zero plaintext PRIVATE KEY PEM in /tmp/tmp.NFaEXMUmqx/data/intent.redb (BEGIN=2 PRIVKEY=0)
+  [PASS] sub-claim 2: sealed root-key envelope present in the IntentStore
+  [PASS] sub-claim 3: still zero plaintext PRIVATE KEY PEM after restart (BEGIN=2 PRIVKEY=0)
+[3J'unknown': I need something more specific.

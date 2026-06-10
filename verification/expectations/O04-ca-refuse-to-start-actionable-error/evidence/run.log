@@ -1,30 +1,5 @@
-# shellcheck shell=bash
-# O04 — control plane refuses to start on root-key decrypt failure with an
-# actionable error, distinctly per cause, with no silent re-mint.
-#
-# Black-box: drives the BUILT `overdrive serve` binary inside Lima (real kernel,
-# real cgroup v2, real redb IntentStore, the production `SystemdCredsKeyring`
-# KEK provider reading `$CREDENTIALS_DIRECTORY/overdrive-ca-root`). No
-# `overdrive-*` crate is linked — the only surfaces observed are the CLI exit
-# code, stderr, and the on-disk redb file. #215 wired `boot_ca` into
-# `run_server`, so the refuse-to-start paths are now reachable from `serve`.
-#
-# Capture sequence:
-#   1. First boot (correct KEK) -> root persisted to $DATA/intent.redb. The
-#      server is backgrounded, given a moment to persist + bind, then stopped.
-#   2. Wrong KEK         -> refuse-to-start; stderr names the wrong-KEK cause.
-#   3. Tampered envelope -> flip a byte of the persisted envelope; correct KEK;
-#      refuse-to-start; stderr names the tampered-envelope cause (distinct).
-#   4. Absent KEK        -> empty creds dir, no dev opt-in; refuse-to-start
-#      BEFORE any issuance; stderr names the KEK as unavailable.
-#   5. No-remint         -> re-supply the correct KEK; SAME root reused (the
-#      persisted cert-material bytes are unchanged across the refused boots).
-source "$REPO_ROOT/verification/harness/lima-helpers.sh"
-
-# The whole O04 capture runs as one scripted sequence inside Lima (real kernel),
-# black-box over the built `overdrive` binary. The guest script writes its own
-# pass/fail verdicts to stdout, which `run-expectation.sh` tees into evidence/.
-in_lima bash -lc '
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running `target/debug/xtask lima run -- bash -lc '
 set -uo pipefail
 ROOT="$PWD"
 WORK="$(mktemp -d)"
@@ -62,7 +37,7 @@ rc=0
 # --- 1. Seed: first boot under the CORRECT KEK persists the root. -------------
 mk_kek "\\377"   # 0xFF bytes
 seed_rc=$(serve "$CREDS" "$WORK/seed.out" 20)
-if [ ! -f "$INTENT" ]; then
+if [ '\!' -f "$INTENT" ]; then
   echo "  [FAIL] seeding boot did not persist $INTENT (rc=$seed_rc)"
   sed -n "1,40p" "$WORK/seed.out"
   exit 1
@@ -77,7 +52,7 @@ WRONG="$WORK/wrong"; mkdir -p "$WRONG"
 head -c 32 /dev/zero | tr "\0" "\\042" > "$WRONG/$KEK_ID"   # 0x22 bytes
 wrong_rc=$(serve "$WRONG" "$WORK/wrong.out" 20)
 wrong_msg="$(cat "$WORK/wrong.out")"
-if [ "$wrong_rc" != 0 ]; then
+if [ "$wrong_rc" '\!'= 0 ]; then
   echo "  [PASS] wrong-KEK boot refused to start (exit $wrong_rc, non-zero)"
 else
   echo "  [FAIL] wrong-KEK boot did NOT refuse (exit 0)"; rc=1
@@ -114,7 +89,7 @@ open(p,"wb").write(b)
 PY
 tamper_rc=$(serve "$CREDS" "$WORK/tamper.out" 20)
 tamper_msg="$(cat "$WORK/tamper.out")"
-if [ "$tamper_rc" != 0 ]; then
+if [ "$tamper_rc" '\!'= 0 ]; then
   echo "  [PASS] tampered-envelope boot refused to start (exit $tamper_rc)"
 else
   echo "  [FAIL] tampered-envelope boot did NOT refuse (exit 0)"; rc=1
@@ -130,7 +105,7 @@ absent_rc=$(keyctl session - env -u OVERDRIVE_CA_KEK -u OVERDRIVE_CA_KEK_DEV_OPT
   cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA2" \
   > "$WORK/absent.out" 2>&1; echo $?)
 absent_msg="$(cat "$WORK/absent.out")"
-if [ "$absent_rc" != 0 ]; then
+if [ "$absent_rc" '\!'= 0 ]; then
   echo "  [PASS] absent-KEK boot refused to start (exit $absent_rc)"
 else
   echo "  [FAIL] absent-KEK boot did NOT refuse (exit 0)"; rc=1
@@ -155,9 +130,9 @@ ac_="$(cause "$WORK/absent.out")"
 echo "  wrong-KEK cause:        $wc_"
 echo "  tampered-envelope cause:$tc_"
 echo "  absent-KEK cause:       $ac_"
-[ "$wc_" != "$tc_" ] && echo "  [PASS] wrong-KEK vs tampered-envelope distinct" || { echo "  [FAIL] wrong vs tampered identical"; rc=1; }
-[ "$wc_" != "$ac_" ] && echo "  [PASS] wrong-KEK vs absent-KEK distinct" || { echo "  [FAIL] wrong vs absent identical"; rc=1; }
-[ "$tc_" != "$ac_" ] && echo "  [PASS] tampered-envelope vs absent-KEK distinct" || { echo "  [FAIL] tampered vs absent identical"; rc=1; }
+[ "$wc_" '\!'= "$tc_" ] && echo "  [PASS] wrong-KEK vs tampered-envelope distinct" || { echo "  [FAIL] wrong vs tampered identical"; rc=1; }
+[ "$wc_" '\!'= "$ac_" ] && echo "  [PASS] wrong-KEK vs absent-KEK distinct" || { echo "  [FAIL] wrong vs absent identical"; rc=1; }
+[ "$tc_" '\!'= "$ac_" ] && echo "  [PASS] tampered-envelope vs absent-KEK distinct" || { echo "  [FAIL] tampered vs absent identical"; rc=1; }
 
 # --- O04 sub-claim 4: no silent re-mint across the refused boots. -------------
 # The wrong-KEK refusal ran against the original $INTENT (before tamper); its
@@ -190,7 +165,7 @@ keyctl session - env CREDENTIALS_DIRECTORY="$WRONG" OVERDRIVE_CONFIG_DIR="$CONF"
   cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA3" \
   > "$WORK/refuse3.out" 2>&1 || true
 h_after="$(root_cert_hash "$DATA3/intent.redb")"
-if [ "$h_before" = "$h_after" ] && [ "$h_before" != "NO-CERT" ]; then
+if [ "$h_before" = "$h_after" ] && [ "$h_before" '\!'= "NO-CERT" ]; then
   echo "  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: $h_before)"
 else
   echo "  [FAIL] refused boot changed the persisted root cert ($h_before -> $h_after)"; rc=1
@@ -208,4 +183,20 @@ fi
 
 rm -rf "$WORK"
 exit $rc
-'
+'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+  [PASS] first boot persisted the root IntentStore at /tmp/tmp.k6T86CltmE/data/intent.redb
+  [PASS] wrong-KEK boot refused to start (exit 1, non-zero)
+  [PASS] tampered-envelope boot refused to start (exit 1)
+  [PASS] absent-KEK boot refused to start (exit 1)
+  [PASS] absent-KEK boot persisted no root-key envelope (no throwaway KEK)
+  wrong-KEK cause:        [2m2026-06-10T10:53:22.231277Z[0m [31mERROR[0m persisted root-key envelope failed to decrypt; control-plane refusing to start (no silent re-mint) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mredb_path[0m[2m=[0m/tmp/tmp.k6T86CltmE/data/intent.redb [3mcause[0m[2m=[0mroot-key envelope is corrupt or tampered (AES-GCM auth failed) for kek_id `overdrive-ca-root`
+  tampered-envelope cause:[2m2026-06-10T10:53:22.504509Z[0m [31mERROR[0m root CA key envelope decode failed; control-plane refusing to start [3mredb_path[0m[2m=[0m/tmp/tmp.k6T86CltmE/data/intent.redb [3mkey[0m[2m=[0m"ca/node/intermediate-key-envelope/v1" [3menvelope_error[0m[2m=[0mMalformed { source: Error { inner: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: Utf8Error }, trace: TupleStructCheckContext { tuple_struct_name: "ArchivedKekId", field_index: 0 } } }, trace: StructCheckContext { struct_name: "ArchivedRootCaKeyRecordV1", field_name: "kek_id" } } }, trace: UnnamedEnumVariantCheckContext { enum_name: "ArchivedRootCaKeyEnvelope", variant_name: "V1", field_index: 1 } } } } }
+  absent-KEK cause:       [2m2026-06-10T10:53:22.779565Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
+  [PASS] wrong-KEK vs tampered-envelope distinct
+  [PASS] wrong-KEK vs absent-KEK distinct
+  [PASS] tampered-envelope vs absent-KEK distinct
+  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: dd1fb5ab9f46c8918284111e4330e4531c99f93349110903c83d4b3c41621a07)
+  [PASS] re-supplying the correct KEK adopts the SAME root (byte-stable)
+[3J'unknown': I need something more specific.

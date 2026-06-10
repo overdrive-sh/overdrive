@@ -1,6 +1,6 @@
 # O04 — Control plane refuses to start on root-key decrypt failure with an actionable error
 
-**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `pending`
+**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (awaiting different-fox review)
 
 ## Expectation
 
@@ -54,9 +54,41 @@ Sub-claims:
 
 ## Evidence
 
-Executed through `harness/run-expectation.sh O04` at SHA `2f4eccd4` and
-self-reports `pending` — `overdrive serve --help` builds and runs in Lima but
-exposes no CA boot surface (D-CA-4). **Unblocked by #215** (wire `boot_ca` into
-`overdrive serve`). The gated integration tests in
-`ca_boot_and_audit.rs` (S-02-06/07) prove the refuse-to-start in-tree; this
-expectation captures the operator-visible stderr quality.
+Executed through `harness/run-expectation.sh O04` at SHA `aaaaa0cd` in Lima
+(real kernel, real cgroup v2, real redb, production `SystemdCredsKeyring` KEK
+provider), `executed_in_lima: true`, `runner_exit_code: 0`. #215 wired `boot_ca`
+into `run_server`, so the refuse-to-start paths are now reachable from `serve`.
+The runner drives the BUILT `overdrive serve` binary BLACK-BOX (no `overdrive-*`
+crate linked). Each boot runs under a FRESH kernel session keyring
+(`keyctl session -`) so the production keyring KEK cache cannot leak across boots
+and mask a refusal (the kernel-keyring-leak hazard).
+
+Captured verdicts (all **PASS**, runner exit 0):
+
+- Sub-claim 1 (tampered envelope) — refuses (exit 1); stderr: *"root CA key
+  envelope decode failed; control-plane refusing to start … Malformed …"*,
+  naming the redb path.
+- Sub-claim 2 (wrong KEK) — refuses (exit 1); stderr: *"persisted root-key
+  envelope failed to decrypt; control-plane refusing to start (no silent
+  re-mint) … root-key envelope is corrupt or tampered (AES-GCM auth failed)"*,
+  naming the redb path — DISTINCT from sub-claim 1.
+- Sub-claim 3 (absent KEK) — refuses (exit 1); stderr: *"KEK unavailable at boot;
+  control-plane refusing to start (no throwaway KEK minted) … no KEK registered
+  for id `overdrive-ca-root`"*; and NO root-key envelope was persisted (no
+  throwaway KEK).
+- Pairwise-distinct — the three cause strings are pairwise distinct.
+- Sub-claim 4 (no re-mint) — the persisted root cert PEM is byte-stable across
+  the refused boot, and re-supplying the correct KEK adopts the SAME root.
+
+The gated integration tests in `ca_boot_and_audit.rs` (S-02-06/07) plus the new
+`serve_persistent_ca.rs` (S-OC-08a/b/c/d, S-OC-09, through the wired
+`run_server`) prove the refuse-to-start in-tree; this expectation captures the
+operator-visible stderr quality through the wired binary.
+
+**Status gate**: this evidence is `evidence-captured`, NOT `satisfied`. Per
+`.claude/rules/verification.md` § "the different fox audit", the authoring agent
+MUST NOT self-stamp `satisfied`. A SEPARATE `*-reviewer` (Haiku) agent must read
+`evidence/run.log` + `evidence/verification.yaml` adversarially and confirm
+sub-claims 1–4 + pairwise-distinctness before the status is set to `satisfied`.
+The orchestrator dispatches that review (the DELIVER subagent could not
+self-dispatch it).
