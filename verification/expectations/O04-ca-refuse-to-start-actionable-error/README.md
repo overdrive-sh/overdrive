@@ -1,6 +1,6 @@
 # O04 — Control plane refuses to start on root-key decrypt failure with an actionable error
 
-**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (awaiting different-fox review)
+**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `satisfied`
 
 ## Expectation
 
@@ -90,10 +90,32 @@ The gated integration tests in `ca_boot_and_audit.rs` (S-02-06/07) plus the new
 `run_server`) prove the refuse-to-start in-tree; this expectation captures the
 operator-visible stderr quality through the wired binary.
 
-**Status gate**: this evidence is `evidence-captured`, NOT `satisfied`. Per
-`.claude/rules/verification.md` § "the different fox audit", the authoring agent
-MUST NOT self-stamp `satisfied`. A SEPARATE `*-reviewer` (Haiku) agent must read
-`evidence/run.log` + `evidence/verification.yaml` adversarially and confirm
-sub-claims 1–4 + pairwise-distinctness before the status is set to `satisfied`.
-The orchestrator dispatches that review (the DELIVER subagent could not
-self-dispatch it).
+## Different-fox review
+
+- **Reviewer:** `nw-software-crafter-reviewer` (Haiku) — a SEPARATE agent from
+  the one that authored the implementation, the runner, and the evidence. The
+  authoring agent did **not** self-stamp `satisfied`.
+- **Verdict:** CONFIRMED.
+- **SHA reviewed:** `5f4ca915` (evidence committed at `b2cc8e99`).
+- **Date:** 2026-06-10.
+- **Mode:** read-only over `evidence/run.log` + `evidence/verification.yaml`
+  (the evidence, never the code that produced it), per
+  `.claude/rules/verification.md` § "the different fox audit".
+
+All four sub-claims demonstrated:
+
+1. **Wrong-KEK / tampered-envelope / absent-KEK each refuse to start** with a
+   non-zero exit and a **pairwise-distinct, actionable** stderr — each names
+   the redb IntentStore path and the actual cause (malformed/decode vs AES-GCM
+   auth-failure vs no-KEK-registered).
+2. **No silent re-mint** — the persisted root cert hash `ef83f495…` is
+   byte-stable across the refused → recovered boots; re-supplying the correct
+   KEK adopts the SAME root.
+3. **Fresh session keyring per boot** (`keyctl session -`) so the production
+   keyring KEK cache cannot leak across boots and mask a refusal.
+4. **Black-box** (no `overdrive-*` crate linked), `executed_in_lima: true`,
+   `runner_exit_code: 0`.
+
+Status set to `satisfied` by the orchestrator on the strength of the CONFIRMED
+different-fox verdict above. No re-capture was needed — the evidence committed
+at `b2cc8e99` is the reviewed artifact.

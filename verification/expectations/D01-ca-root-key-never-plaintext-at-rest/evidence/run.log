@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
      Running `target/debug/xtask lima run -- bash -lc '
 set -uo pipefail
 WORK="$(mktemp -d)"
@@ -17,23 +17,14 @@ serve() { # <timeout_secs>
 
 rc=0
 
-# --- First boot: generate + seal + persist the root. -------------------------
-serve 25
-if [ '\!' -f "$INTENT" ]; then
-  echo "  [FAIL] first boot did not persist $INTENT"
-  sed -n "1,40p" "$WORK/serve.out"
-  rm -rf "$WORK"; exit 1
-fi
-echo "  [PASS] first boot persisted the IntentStore at $INTENT"
-
-# Scan the on-disk IntentStore for plaintext-private-key markers. Binary-safe,
-# single pass in Python (grep -c on a binary blob mis-counts: exit-code-on-zero
-# and newline-framing both corrupt the tally). Excise CERTIFICATE PEM blocks
-# FIRST — a P-256 public cert legitimately carries the curve OID in its
-# SubjectPublicKeyInfo, so the OID scan must not fire on it; a leaked raw-DER
-# private key lives in the redb VALUE bytes OUTSIDE any CERTIFICATE PEM block,
-# so excision never hides it. Echoes "<armor_count> <der_oid_run_count>".
-scan_plaintext_key() { # <redb_path>
+# The scan function the whole expectation rests on. Defined ONCE here so the
+# inline self-test below and the production scan further down exercise the
+# SAME code. Binary-safe single pass in Python (grep -c on a binary blob
+# mis-counts). Excises CERTIFICATE PEM blocks FIRST — a P-256 public cert
+# legitimately carries the curve OID in its SubjectPublicKeyInfo, so the OID
+# scan must not fire on it; a leaked raw-DER private key lives OUTSIDE any
+# CERTIFICATE block, so excision never hides it. Echoes "<armor> <der_oid_runs>".
+scan_plaintext_key() { # <path>
   python3 - "$1" <<"PY"
 import sys, re
 b = open(sys.argv[1], "rb").read()
@@ -50,6 +41,85 @@ oid_curve = b.count(bytes.fromhex("06082a8648ce3d030107"))
 print("%d %d" % (armor, oid_pub + oid_curve))
 PY
 }
+
+# scan_hits <path> -> echoes total marker count (armor + der-oid-runs), 0 = clean.
+scan_hits() { # <path>
+  read -r a o <<<"$(scan_plaintext_key "$1")"
+  echo $(( a + o ))
+}
+
+# === INLINE NON-VACUITY SELF-TEST (printed to run.log) =======================
+# Before trusting a CLEAN result on the production IntentStore, PROVE the scan
+# is non-vacuous RIGHT HERE: it must DETECT a real plaintext P-256 key in all
+# four serializations, and stay CLEAN on benign inputs (a real public cert
+# post-excision, and high-entropy random bytes). A throwaway key is generated
+# in this temp space only and NEVER touches the real IntentStore. openssl is
+# available in Lima. If ANY positive control fails to detect, or ANY negative
+# control falsely matches, the self-test FAILS the runner (hard gate).
+echo "  --- non-vacuity self-test: prove the byte-scan detects real keys ---"
+ST="$WORK/selftest"; mkdir -p "$ST"
+selftest_fail=0
+
+# Throwaway P-256 key (SEC1 PEM), then derive the other three serializations.
+openssl ecparam -name prime256v1 -genkey -noout -out "$ST/sec1.pem" 2>/dev/null
+openssl pkcs8 -topk8 -nocrypt -in "$ST/sec1.pem" -out "$ST/pkcs8.pem" 2>/dev/null
+openssl ec    -in "$ST/sec1.pem"  -outform DER -out "$ST/sec1.der"  2>/dev/null
+openssl pkcs8 -topk8 -nocrypt -in "$ST/sec1.pem" -outform DER -out "$ST/pkcs8.der" 2>/dev/null
+
+# Positive controls — the scan MUST report a non-zero marker count for each form.
+for form in sec1.pem:SEC1-PEM pkcs8.pem:PKCS8-PEM sec1.der:raw-SEC1-DER pkcs8.der:raw-PKCS8-DER; do
+  file="${form%%:*}"; name="${form##*:}"
+  hits="$(scan_hits "$ST/$file")"
+  if [ "$hits" -gt 0 ]; then
+    echo "  [selftest PASS] detects $name (markers=$hits)"
+  else
+    echo "  [selftest FAIL] scan BLIND to $name (markers=0) — scan is vacuous"; selftest_fail=1
+  fi
+done
+
+# Negative control (i): a REAL P-256 PUBLIC cert, AFTER cert excision, must scan
+# CLEAN — proving excision does not blind the scan to a key (the key is outside
+# CERT blocks; the cert merely advertises its curve and is legitimately excised).
+openssl req -x509 -new -key "$ST/sec1.pem" -days 1 -subj "/CN=selftest" \
+  -out "$ST/cert.pem" 2>/dev/null
+cert_hits="$(scan_hits "$ST/cert.pem")"
+if [ "$cert_hits" -eq 0 ]; then
+  echo "  [selftest PASS] clean on public-cert-post-excision (markers=0)"
+else
+  echo "  [selftest FAIL] scan fired on a public cert (markers=$cert_hits) — excision broken / false-positive"; selftest_fail=1
+fi
+
+# Negative control (ii): high-entropy random bytes (ciphertext-sized) must scan
+# CLEAN — proving the OID runs do not appear by accident in sealed-envelope-like
+# data.
+openssl rand 4096 > "$ST/random.bin" 2>/dev/null
+rand_hits="$(scan_hits "$ST/random.bin")"
+if [ "$rand_hits" -eq 0 ]; then
+  echo "  [selftest PASS] clean on random-ciphertext-sized-bytes (markers=0)"
+else
+  echo "  [selftest FAIL] scan fired on random bytes (markers=$rand_hits) — false-positive"; selftest_fail=1
+fi
+
+if [ "$selftest_fail" -ne 0 ]; then
+  echo "  [FAIL] non-vacuity self-test FAILED — scan cannot be trusted; aborting"
+  rm -rf "$WORK"; exit 1
+fi
+echo "  [PASS] scan proven non-vacuous (4/4 detected, 2/2 benign clean)"
+rm -rf "$ST"
+# === end self-test ===========================================================
+
+# --- First boot: generate + seal + persist the root. -------------------------
+serve 25
+if [ '\!' -f "$INTENT" ]; then
+  echo "  [FAIL] first boot did not persist $INTENT"
+  sed -n "1,40p" "$WORK/serve.out"
+  rm -rf "$WORK"; exit 1
+fi
+echo "  [PASS] first boot persisted the IntentStore at $INTENT"
+
+# Production byte-scan: now that the scan is proven non-vacuous above, scan the
+# REAL on-disk IntentStore for plaintext-private-key markers.
+echo "  --- production IntentStore scan (scan proven non-vacuous above) ---"
 
 # Sub-claim 1 — zero plaintext private-key markers (armored OR raw-DER) on disk.
 read -r armor1 oid1 <<<"$(scan_plaintext_key "$INTENT")"
@@ -81,8 +151,17 @@ exit $rc
 '`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
-  [PASS] first boot persisted the IntentStore at /tmp/tmp.3xovgdrqfW/data/intent.redb
-  [PASS] sub-claim 1: zero plaintext private-key markers in /tmp/tmp.3xovgdrqfW/data/intent.redb (PEM-armor=0 DER-OID-runs=0; certs excised before scan)
+  --- non-vacuity self-test: prove the byte-scan detects real keys ---
+  [selftest PASS] detects SEC1-PEM (markers=2)
+  [selftest PASS] detects PKCS8-PEM (markers=2)
+  [selftest PASS] detects raw-SEC1-DER (markers=1)
+  [selftest PASS] detects raw-PKCS8-DER (markers=2)
+  [selftest PASS] clean on public-cert-post-excision (markers=0)
+  [selftest PASS] clean on random-ciphertext-sized-bytes (markers=0)
+  [PASS] scan proven non-vacuous (4/4 detected, 2/2 benign clean)
+  [PASS] first boot persisted the IntentStore at /tmp/tmp.sE7tIdglxz/data/intent.redb
+  --- production IntentStore scan (scan proven non-vacuous above) ---
+  [PASS] sub-claim 1: zero plaintext private-key markers in /tmp/tmp.sE7tIdglxz/data/intent.redb (PEM-armor=0 DER-OID-runs=0; certs excised before scan)
   [PASS] sub-claim 2: sealed root-key envelope present in the IntentStore
   [PASS] sub-claim 3: still zero plaintext private-key markers after restart (PEM-armor=0 DER-OID-runs=0)
 [3J'unknown': I need something more specific.

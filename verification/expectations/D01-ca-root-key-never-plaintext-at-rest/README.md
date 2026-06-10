@@ -76,10 +76,18 @@ its random scalar:
   the remainder — a leaked raw-DER private key lives in the redb VALUE bytes
   outside any CERTIFICATE block, so excision never hides it.
 
-  The scan is proven non-vacuous: against real `openssl`-generated P-256 keys
-  it DETECTS SEC1-PEM, PKCS#8-PEM, raw-SEC1-DER, and raw-PKCS#8-DER, while a
-  public cert (post-excision) and 4 KiB of `os.urandom` ciphertext both scan
-  CLEAN.
+  The scan is proven non-vacuous **inline in the runner** (so `run.log` shows
+  it, not narrated out-of-band): the runner generates a throwaway P-256 key in
+  its temp space (`openssl`, Lima) in all four serializations and runs the SAME
+  scan function over each. Positive controls — it DETECTS SEC1-PEM, PKCS#8-PEM,
+  raw-SEC1-DER, and raw-PKCS#8-DER (each a `[selftest PASS] detects …` line).
+  Negative controls — it stays CLEAN on (i) a real P-256 public cert AFTER the
+  cert-excision step (proving excision does not blind the scan to a key) and
+  (ii) 4 KiB of `openssl rand` ciphertext-sized bytes (each a
+  `[selftest PASS] clean on …` line). The self-test is a HARD GATE: any
+  positive-control miss or negative-control false-match fails the runner
+  (non-zero exit) before the production scan ever runs. The throwaway key never
+  touches the real IntentStore.
 
 `satisfied` requires sub-claims 1–3 on a Lima run, reviewed adversarially for
 "did the byte-scan actually run against the real on-disk file, or narrate it?"
@@ -87,17 +95,28 @@ its random scalar:
 
 ## Evidence
 
-Executed through `harness/run-expectation.sh D01` at SHA `fc276c70` in Lima
-(real kernel, real redb), `executed_in_lima: true`, `runner_exit_code: 0`. The
-working tree carries only untracked externals (`AGENTS.md`, the `deliver/` DES
-artifacts) plus the just-written `evidence/` of this very capture, so the
-harness records `working_tree_dirty: true`; no *tracked source* is modified.
-#215 wired `boot_ca` into `run_server`, so first boot now generates + KEK-seals
-+ persists the root to the on-disk IntentStore. The runner drives the BUILT
-`overdrive serve` binary BLACK-BOX (no `overdrive-*` crate linked) and runs the
-strengthened structural byte-scan (armor + raw-DER OID runs, certs excised) over
-the on-disk `intent.redb`:
+Executed through `harness/run-expectation.sh D01` in Lima (real kernel, real
+redb), `executed_in_lima: true`, `runner_exit_code: 0`. The working tree at
+capture carries only the in-flight verification work for this step (this
+expectation's `runner.sh` + `README.md`, the O04 `README.md`, and the
+just-written `evidence/`) plus untracked externals (`AGENTS.md`, the `deliver/`
+DES artifacts) — **no tracked `.rs`/production source is modified** (proven by
+the retained `evidence/dirty-status.txt` artifact, NOT narrated). #215 wired
+`boot_ca` into `run_server`, so first boot now generates + KEK-seals + persists
+the root to the on-disk IntentStore. The runner drives the BUILT `overdrive
+serve` binary BLACK-BOX (no `overdrive-*` crate linked).
 
+First, an **inline non-vacuity self-test** runs (printed to `run.log`) — it
+generates a throwaway P-256 key in temp space and proves the byte-scan DETECTS
+all four plaintext serializations and stays CLEAN on benign inputs; it is a
+hard gate that aborts the runner on any miss/false-match. Then the SAME
+strengthened structural byte-scan (armor + raw-DER OID runs, certs excised)
+runs over the real on-disk `intent.redb`:
+
+- Self-test — **PASS**: `[selftest PASS] detects SEC1-PEM / PKCS8-PEM /
+  raw-SEC1-DER / raw-PKCS8-DER` (4/4 positive controls) and `[selftest PASS]
+  clean on public-cert-post-excision / random-ciphertext-sized-bytes` (2/2
+  negative controls) → `scan proven non-vacuous`.
 - Sub-claim 1 — **PASS**: zero plaintext private-key markers on disk
   (`PEM-armor=0 DER-OID-runs=0`, after excising the public certificate PEM).
 - Sub-claim 2 — **PASS**: the sealed root-key envelope is present
