@@ -1,65 +1,131 @@
 import Link from "next/link";
 
-// Slice 08 (US-08, J-DOCS-001) — the marketing landing page at `/`, rendered
-// inside the existing `app/(home)/layout.tsx` (`HomeLayout` + `baseOptions()`)
-// so `/`, `/docs`, and `/blog` all share ONE nav shell (the baseOptions_shell
-// invariant). Content is PORTED from the repo-root `index.html` — the approved
-// marketing copy (C-6: real content only, no invented features). This is a
-// placeholder content-port, NOT a pixel-perfect redesign; it carries the value
-// prop and a clear path into the docs.
+// The marketing landing page at `/`, rendered inside `app/(home)/layout.tsx`
+// (`HomeLayout` + `baseOptions()`) so `/`, `/docs`, and `/blog` share ONE nav
+// shell (the baseOptions_shell invariant).
 //
-// Statically rendered (no "use client", no client-only hooks) so the hero value
-// prop is in the server-rendered HTML on first load — the DISCUSS DoR 3rd UAT
-// cold-load scenario for US-08.
+// Voice: sell OUTCOMES, not internals. No component names (etcd, CNI, Envoy,
+// SPIRE), no implementation primitives (reconcilers, Raft, XDP, kTLS, SPIFFE),
+// no unmeasured performance numbers. Every line says what the reader GETS.
+// Claims are grounded in real or explicitly-designed behaviour from
+// docs/product and the whitepaper (C-6: real content only, no invented
+// features, nothing presented as measured that hasn't been).
+//
+// Statically rendered (no "use client") so the hero value prop is in the
+// server-rendered HTML on first load.
 
 export const metadata = {
-	title: "Overdrive — Orchestration infrastructure for a new generation of workloads",
+	title: "Overdrive — Everything you run, on one platform",
 	description:
-		"One Rust binary. Kernel-native dataplane. Built on the primitives Kubernetes never had.",
+		"Deploy web services, background jobs, virtual machines, and functions on one platform — encrypted, load-balanced, and self-healing from the first deploy, on your own hardware.",
 };
 
-const valueProps = [
+// A small brutalist square glyph — brand rects, echoing the hero pixel cubes.
+function Glyph() {
+	return (
+		<svg
+			aria-hidden
+			width="20"
+			height="20"
+			viewBox="0 0 20 20"
+			fill="none"
+			className="shrink-0"
+		>
+			<rect x="0" y="0" width="9" height="9" fill="var(--color-brand)" />
+			<rect x="11" y="0" width="9" height="9" fill="var(--color-brand)" opacity="0.35" />
+			<rect x="0" y="11" width="9" height="9" fill="#3a3a44" />
+			<rect x="11" y="11" width="9" height="9" fill="var(--color-brand)" opacity="0.6" />
+		</svg>
+	);
+}
+
+// What you get — outcomes, not internals. Each card is something the reader can
+// do or rely on, with no component names and no engineering jargon.
+const capabilities = [
 	{
-		audience: "Platform Engineering",
-		title: "Get out from under the stack you maintain.",
-		body: "Stop running etcd, cert-manager, an ingress controller, a service mesh, and a CNI plugin as four independent failure domains. Overdrive ships them as one binary, with three-node HA that fits in 80 MB of memory.",
+		tag: "RUN",
+		title: "Run anything",
+		body: "Long-running services, batch jobs, microVMs, full VMs, and WebAssembly functions run side by side under one control plane — not a separate stack for the workloads that don't fit in a container.",
 	},
 	{
-		audience: "SRE & On-Call",
-		title: "Incidents that investigate themselves.",
-		body: "Every eBPF event carries cryptographic workload identity. The native SRE agent correlates across alerts via SQL joins, attaches signed BPF probes to verify hypotheses, and proposes typed remediations through a graduated approval gate.",
+		tag: "NETWORKING",
+		title: "Networking, built in",
+		body: "Service discovery, load balancing across healthy backends, and network policy ship with the platform. There is no separate ingress controller or external load balancer to stand up and keep in sync.",
 	},
 	{
-		audience: "AI Engineering",
-		title: "Agents that can't exfiltrate what they don't have.",
-		body: "Prompt injection becomes structurally inert. The credential proxy holds the real keys. Domain allowlists run in-kernel via TC eBPF. BPF LSM blocks raw sockets. Security is enforced by infrastructure, not by the model's judgment.",
+		tag: "SECURITY",
+		title: "Mutual TLS by default",
+		body: "Every service-to-service connection is mTLS-encrypted automatically — on from the first deploy, with no sidecar to inject and no certificates to rotate by hand.",
+	},
+	{
+		tag: "IDENTITY",
+		title: "Authorized by identity, not IP",
+		body: "Each workload gets a short-lived cryptographic identity (SPIFFE) from a built-in CA. You write policy against what a service is, not the IP address it happens to hold today.",
+	},
+	{
+		tag: "RELIABILITY",
+		title: "Health-checked and restarted",
+		body: "Readiness and liveness probes gate traffic and catch failures; an allocation that fails its liveness check restarts, and the platform holds the replica count you declared.",
+	},
+	{
+		tag: "OBSERVABILITY",
+		title: "Flow telemetry, no agent",
+		body: "Per-connection and per-request telemetry, tagged with the workload identity on each side, with no sidecar to run and no code to instrument. You see what actually talked to what.",
+	},
+	{
+		tag: "SECRETS",
+		title: "Workloads never hold the keys",
+		body: "A credential proxy holds the real secrets and signs outbound requests on a workload's behalf; the process only ever sees a handle. An AI agent can't exfiltrate a key it was never given.",
+	},
+	{
+		tag: "DEPLOY",
+		title: "Ship from one file",
+		body: "Describe an app in a single TOML spec and deploy it with one command. Deploy is idempotent on the spec's content hash — an identical spec is a no-op, so it is safe to run straight from CI.",
+	},
+	{
+		tag: "INFRASTRUCTURE",
+		title: "Runs as a sealed appliance",
+		body: "Nodes boot an immutable, minimal OS image — no shell, no package manager, no SSH. Your hardware, locked down like an appliance, instead of a general-purpose distro you harden and hope stays hardened.",
 	},
 ] as const;
 
-const metrics = [
-	{ figure: "~10×", label: "Less control-plane RAM", note: "~100 MB vs ~1 GB on Kubernetes" },
-	{ figure: "~100×", label: "Less mTLS CPU overhead", note: "kTLS in-kernel vs Envoy sidecar" },
-	{ figure: "~50×", label: "Faster scheduling", note: "< 100 ms vs 1–10 s on Kubernetes" },
-	{ figure: "2.3×", label: "Workload density", note: "~70% utilization vs ~30% baseline" },
-	{ figure: "<10 s", label: "Node join", note: "vs 2–5 minutes on Kubernetes" },
-	{ figure: "~1 ms", label: "WASM cold start", note: "Wasmtime warm pool, no Firecracker tax" },
+// Intended, not shipped. Rendered in a visually distinct, explicitly-labelled
+// "on the roadmap" block so it can't be read as a shipped capability (C-6).
+// Today's real primitive is `overdrive deploy <spec>`; this is where deploy is
+// going — building and releasing from source, with previews and rollbacks.
+const roadmap = [
+	{
+		title: "Push to deploy",
+		body: "Push your source and Overdrive builds the image and releases it — no separate CI to wire up before the first deploy.",
+	},
+	{
+		title: "Build pipeline",
+		body: "Turn a repository into a runnable, reproducible artifact on the platform, without hand-managing a registry.",
+	},
+	{
+		title: "Preview environments",
+		body: "Every branch or pull request gets its own isolated environment, created on push and torn down on merge.",
+	},
+	{
+		title: "Instant rollback",
+		body: "Releases are discrete, promotable versions, so reverting a bad deploy is one command rather than a fresh redeploy.",
+	},
 ] as const;
 
-const pillars = [
+// Self-healing, the whitepaper §12 way: tiered remediation ending in an LLM SRE
+// agent. Intended, not shipped — rendered in the marked "on the roadmap" block.
+const selfHealingTiers = [
 	{
-		index: "01 / Own your primitives",
-		title: "Every dependency is a future incident.",
-		body: "No etcd. No Envoy. No SPIRE. No CNI. Every critical subsystem is built into the platform or is a standard Rust library. External processes you didn't write are operational liabilities — they get cut.",
+		title: "Reflexive",
+		body: "Dead backends are routed around in-kernel and resource pressure is relieved before an OOM kill — in milliseconds, with no control-plane round trip.",
 	},
 	{
-		index: "02 / The kernel is the dataplane",
-		title: "Userspace proxies become unnecessary.",
-		body: "Service routing, network policy, load balancing, mTLS, and telemetry happen at line rate in the kernel via aya-rs. No sidecar tax. No proxy reconfigurations. No tail-latency spikes from a userspace hop.",
+		title: "Reactive",
+		body: "A crashed allocation reschedules onto healthy capacity and an unhealthy node drains its workloads, converging back to the state you declared.",
 	},
 	{
-		index: "03 / Security is structural",
-		title: "mTLS isn't an option you remember to enable.",
-		body: "Every connection is wrapped in kTLS with a SPIFFE identity. Policy is enforced in-kernel by BPF LSM. A compromised workload, a misconfigured pod, and a malicious dependency all hit the same walls.",
+		title: "Reasoning",
+		body: "An SRE agent correlates signals by workload identity, finds the root cause, and proposes typed remediations through a risk-based approval gate — learning from every past incident.",
 	},
 ] as const;
 
@@ -68,7 +134,7 @@ export default function HomePage() {
 		<main className="flex flex-1 flex-col">
 			{/* Hero */}
 			<section className="relative overflow-hidden border-b border-fd-border">
-				{/* Warm radial glow at the top of the hero (index.html .hero::after). */}
+				{/* Warm radial glow at the top of the hero. */}
 				<div
 					aria-hidden
 					className="pointer-events-none absolute left-1/2 top-[-180px] z-0 h-[700px] w-[900px] max-w-none -translate-x-1/2"
@@ -77,7 +143,7 @@ export default function HomePage() {
 							"radial-gradient(ellipse, rgba(255,92,40,0.10) 0%, transparent 60%)",
 					}}
 				/>
-				{/* Floating pixel cubes (index.html .pixel-accent), hidden on narrow viewports. */}
+				{/* Floating pixel cubes, hidden on narrow viewports. */}
 				<svg
 					aria-hidden
 					className="pointer-events-none absolute left-[4%] top-[18%] z-0 hidden opacity-55 xl:block"
@@ -111,127 +177,236 @@ export default function HomePage() {
 				</svg>
 				<div className="container relative z-10 mx-auto max-w-5xl px-4 py-20 md:py-28">
 					<p className="mb-4 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
-						Source-available · FSL-1.1-ALv2 · Apache 2.0 after 2 years
+						Services · Jobs · microVMs · WASM
 					</p>
 					<h1 className="max-w-3xl font-serif text-5xl font-normal leading-[1.05] tracking-tight md:text-7xl">
-						Redefining how compute runs.
+						Everything you run, on one platform.
 					</h1>
 					<p className="mt-6 max-w-2xl text-lg text-fd-muted-foreground md:text-xl">
-						Orchestration infrastructure for a new generation of workloads.
-						One Rust binary. Kernel-native dataplane. Built on the primitives
-						Kubernetes never had.
+						Deploy long-running services, batch jobs, microVMs, and
+						WebAssembly functions — with mutual TLS, load balancing, and
+						self-healing built in. One platform to operate on your own
+						hardware, instead of a stack you assemble and babysit.
 					</p>
 					<div className="mt-8 flex flex-wrap gap-4">
 						<Link
-							href="/docs"
+							href="/docs/how-to/deploy-a-workload"
 							className="rounded-md bg-fd-primary px-6 py-3 font-semibold text-fd-primary-foreground transition-all hover:bg-[var(--color-brand-2)] hover:shadow-[0_0_32px_rgba(255,92,40,0.35)]"
+						>
+							Deploy a workload
+						</Link>
+						<Link
+							href="/docs"
+							className="rounded-md border border-fd-border px-6 py-3 font-medium transition-colors hover:bg-fd-muted"
 						>
 							Read the docs
 						</Link>
+					</div>
+				</div>
+			</section>
+
+			{/* What you get — the product surface grid */}
+			<section className="border-b border-fd-border">
+				<div className="container mx-auto max-w-6xl px-4 py-16 md:py-20">
+					<p className="mb-3 font-mono text-xs uppercase tracking-widest text-[var(--color-brand)]">
+						{"// What you get"}
+					</p>
+					<h2 className="mb-3 max-w-3xl font-serif text-3xl font-normal md:text-4xl">
+						Everything you need to run an app, already included.
+					</h2>
+					<p className="mb-10 max-w-2xl text-fd-muted-foreground">
+						Networking, security, identity, and self-healing aren&apos;t
+						add-ons you pick, wire together, and keep running. They&apos;re
+						part of the platform — on by default, from the first deploy.
+					</p>
+					<div className="grid gap-px overflow-hidden border border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-3">
+						{capabilities.map((c) => (
+							<div
+								key={c.title}
+								className="group bg-fd-background p-6 transition-colors hover:bg-fd-muted"
+							>
+								<div className="mb-4 flex items-center gap-3">
+									<Glyph />
+									<span className="font-mono text-[10px] uppercase tracking-widest text-fd-muted-foreground">
+										{c.tag}
+									</span>
+								</div>
+								<h3 className="mb-2 text-lg font-semibold">{c.title}</h3>
+								<p className="text-sm text-fd-muted-foreground">{c.body}</p>
+							</div>
+						))}
+					</div>
+				</div>
+			</section>
+
+			{/* The deploy flow — the actual product UX */}
+			<section className="border-b border-fd-border">
+				<div className="container mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 md:grid-cols-2 md:py-20">
+					<div>
+						<p className="mb-3 font-mono text-xs uppercase tracking-widest text-[var(--color-brand)]">
+							{"// Ship it"}
+						</p>
+						<h2 className="mb-3 font-serif text-3xl font-normal md:text-4xl">
+							From a file to a running app.
+						</h2>
+						<p className="mb-6 text-fd-muted-foreground">
+							Describe a workload in one TOML file — what to run, the CPU and
+							memory it gets, and the health checks that tell the platform
+							when it&apos;s ready. Deploy it with one command and watch it
+							converge. No YAML templating, no apply-then-wait dance.
+						</p>
+						<ul className="space-y-3 text-sm text-fd-muted-foreground">
+							<li className="flex gap-3">
+								<span className="font-mono text-[var(--color-brand)]">1</span>
+								<span>
+									<code className="font-mono text-fd-foreground">overdrive deploy</code>{" "}
+									ships the spec and streams progress until your app is
+									running and healthy.
+								</span>
+							</li>
+							<li className="flex gap-3">
+								<span className="font-mono text-[var(--color-brand)]">2</span>
+								<span>
+									Re-run it any time — deploy is idempotent, so an identical
+									spec changes nothing and a CI job that can&apos;t tell
+									whether it already landed is safe to run anyway.
+								</span>
+							</li>
+						</ul>
 						<Link
-							href="/blog"
-							className="rounded-md border border-fd-border px-6 py-3 font-medium transition-colors hover:bg-fd-muted"
+							href="/docs/how-to/deploy-a-workload"
+							className="mt-6 inline-block font-medium text-[var(--color-brand)] hover:underline"
 						>
-							Read the blog
+							Read the deploy guide →
 						</Link>
 					</div>
-					<dl className="mt-12 flex flex-wrap gap-x-10 gap-y-4 font-mono text-sm text-fd-muted-foreground">
-						<div>
-							<dt className="sr-only">Node image</dt>
-							<dd>~50 MB node image</dd>
+					<div className="overflow-hidden border border-fd-border bg-fd-card font-mono text-sm">
+						<div className="border-b border-fd-border px-4 py-2 text-xs text-fd-muted-foreground">
+							payments.toml
 						</div>
-						<div>
-							<dt className="sr-only">Control plane</dt>
-							<dd>~30 MB single-mode control plane</dd>
+						<pre className="overflow-x-auto p-4 leading-relaxed">
+							<code>{`[service]
+id       = "payments"
+replicas = 1
+
+[exec]
+command = "/opt/payments/bin/server"
+
+[[listener]]
+port = 8080
+
+[[health_check.readiness]]
+type = "http"
+path = "/healthz"
+port = 8080`}</code>
+						</pre>
+						<div className="border-t border-fd-border px-4 py-3 leading-relaxed text-fd-muted-foreground">
+							<div>
+								<span className="text-[var(--color-brand)]">$</span> overdrive
+								deploy payments.toml
+							</div>
+							<div className="mt-1">payments · deploying…</div>
+							<div>
+								payments ·{" "}
+								<span className="text-fd-foreground">running</span>
+								&nbsp;&nbsp;1/1 healthy
+							</div>
 						</div>
-						<div>
-							<dt className="sr-only">Node join</dt>
-							<dd>&lt; 10s node join</dd>
-						</div>
-					</dl>
+					</div>
 				</div>
 			</section>
 
-			{/* Value props by audience */}
+			{/* On the roadmap — intended capabilities, clearly marked not-yet-shipped */}
 			<section className="border-b border-fd-border">
-				<div className="container mx-auto grid max-w-5xl gap-8 px-4 py-16 md:grid-cols-3">
-					{valueProps.map((vp) => (
-						<div key={vp.audience}>
-							<p className="mb-2 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
-								{vp.audience}
-							</p>
-							<h3 className="mb-3 text-xl font-semibold">{vp.title}</h3>
-							<p className="text-fd-muted-foreground">{vp.body}</p>
-						</div>
-					))}
-				</div>
-			</section>
-
-			{/* By the numbers */}
-			<section className="border-b border-fd-border">
-				<div className="container mx-auto max-w-5xl px-4 py-16">
-					<h2 className="mb-2 font-serif text-3xl font-normal md:text-4xl">
-						Architecture decisions, measured at fleet scale.
-					</h2>
-					<p className="mb-10 max-w-2xl text-fd-muted-foreground">
-						Not micro-optimizations. These are direct consequences of the
-						design — the kind of differences that turn three racks back into
-						one.
+				<div className="container mx-auto max-w-6xl px-4 py-16 md:py-20">
+					<p className="mb-3 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
+						{"// On the roadmap"}
 					</p>
-					<div className="grid gap-8 sm:grid-cols-2 md:grid-cols-3">
-						{metrics.map((m) => (
-							<div key={m.label} className="border-l border-fd-border pl-4">
-								<div className="font-mono text-3xl font-bold">{m.figure}</div>
-								<div className="mt-1 font-medium">{m.label}</div>
-								<div className="text-sm text-fd-muted-foreground">{m.note}</div>
+					<h2 className="mb-3 max-w-3xl font-serif text-3xl font-normal md:text-4xl">
+						What we&apos;re building next.
+					</h2>
+					<p className="mb-12 max-w-2xl text-fd-muted-foreground">
+						Two capabilities we intend to ship, set out here as intent — not
+						as shipped behaviour. Everything in this section is marked
+						accordingly.
+					</p>
+
+					{/* Deployments */}
+					<h3 className="mb-1 text-lg font-semibold">
+						Deployments — from your source, not just a spec
+					</h3>
+					<p className="mb-6 max-w-2xl text-sm text-fd-muted-foreground">
+						Today you deploy a pre-built workload from a spec. Next, push your
+						source and let Overdrive build, release, preview, and roll back.
+					</p>
+					<div className="grid gap-px overflow-hidden border border-dashed border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
+						{roadmap.map((r) => (
+							<div key={r.title} className="bg-fd-background p-6">
+								<span className="mb-3 inline-block border border-fd-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-fd-muted-foreground">
+									Planned
+								</span>
+								<h4 className="mb-2 text-base font-semibold">{r.title}</h4>
+								<p className="text-sm text-fd-muted-foreground">{r.body}</p>
+							</div>
+						))}
+					</div>
+
+					{/* Self-healing */}
+					<h3 className="mb-1 mt-12 text-lg font-semibold">
+						Self-healing — tiered, ending in an SRE agent
+					</h3>
+					<p className="mb-6 max-w-2xl text-sm text-fd-muted-foreground">
+						Restarting a failed instance is the easy tier. The intended end
+						state investigates: correlate across the fleet by workload
+						identity, find the root cause, and apply typed fixes through a
+						risk-based approval gate — auto-applying the safe ones, asking
+						before the risky ones, and remembering every resolved incident.
+					</p>
+					<div className="grid gap-px overflow-hidden border border-dashed border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-3">
+						{selfHealingTiers.map((t) => (
+							<div key={t.title} className="bg-fd-background p-6">
+								<span className="mb-3 inline-block border border-fd-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-fd-muted-foreground">
+									Planned
+								</span>
+								<h4 className="mb-2 text-base font-semibold">{t.title}</h4>
+								<p className="text-sm text-fd-muted-foreground">{t.body}</p>
 							</div>
 						))}
 					</div>
 				</div>
 			</section>
 
-			{/* Why now */}
-			<section className="border-b border-fd-border">
-				<div className="container mx-auto max-w-5xl px-4 py-16">
-					<h2 className="mb-2 font-serif text-3xl font-normal md:text-4xl">
-						Kubernetes was right for 2014. It is not right for 2026.
-					</h2>
-					<p className="mb-10 max-w-2xl text-fd-muted-foreground">
-						Stable eBPF APIs, kernel TLS offload, production Rust systems
-						libraries, and embeddable WASM only matured in the last two years.
-						Overdrive is the orchestrator that becomes possible when all four
-						exist at once.
-					</p>
-					<div className="grid gap-8 md:grid-cols-3">
-						{pillars.map((p) => (
-							<div key={p.index}>
-								<p className="mb-2 font-mono text-xs uppercase tracking-widest text-fd-muted-foreground">
-									{p.index}
-								</p>
-								<h3 className="mb-3 text-lg font-semibold">{p.title}</h3>
-								<p className="text-fd-muted-foreground">{p.body}</p>
-							</div>
-						))}
-					</div>
-				</div>
-			</section>
-
-			{/* CTA */}
+			{/* Honest status + CTA */}
 			<section>
-				<div className="container mx-auto max-w-5xl px-4 py-20 text-center">
-					<h2 className="text-2xl font-bold md:text-3xl">
-						One binary. Every workload type.
-					</h2>
-					<p className="mx-auto mt-4 max-w-xl text-fd-muted-foreground">
-						Built on the primitives Kubernetes never had. Start with the
-						architecture and the design decisions in the docs.
+				<div className="container mx-auto max-w-5xl px-4 py-20">
+					<p className="mb-3 font-mono text-xs uppercase tracking-widest text-[var(--color-brand)]">
+						{"// Where it is today"}
 					</p>
-					<div className="mt-8 flex flex-wrap justify-center gap-4">
+					<h2 className="mb-3 font-serif text-3xl font-normal md:text-4xl">
+						Early, single-node, and honest about it.
+					</h2>
+					<p className="mb-8 max-w-2xl text-fd-muted-foreground">
+						Overdrive runs on a single node today and is pre-production. The
+						docs mark every behaviour still at the design stage rather than
+						describing it as shipped, and there are no benchmark numbers on
+						this page because there is nothing at fleet scale to measure yet.
+						It is source-available, and converts to a permissive open-source
+						licence two years after each release. If you are weighing it
+						against Kubernetes, Nomad, or Fly.io, the comparison page makes
+						the case and the counter-case plainly.
+					</p>
+					<div className="flex flex-wrap gap-4">
 						<Link
-							href="/docs"
+							href="/docs/how-to/deploy-a-workload"
 							className="rounded-md bg-fd-primary px-6 py-3 font-semibold text-fd-primary-foreground transition-all hover:bg-[var(--color-brand-2)] hover:shadow-[0_0_32px_rgba(255,92,40,0.35)]"
 						>
-							Get started in the docs
+							Deploy a workload
+						</Link>
+						<Link
+							href="/docs/comparisons"
+							className="rounded-md border border-fd-border px-6 py-3 font-medium transition-colors hover:bg-fd-muted"
+						>
+							See how it compares
 						</Link>
 					</div>
 				</div>
