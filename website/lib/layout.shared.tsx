@@ -19,5 +19,8 @@ export function baseOptions(): BaseLayoutProps {
 		// Fumadocs renders a GitHub icon link in the nav from this URL, on every
 		// surface that uses `baseOptions()` (landing, docs, blog).
 		githubUrl: "https://github.com/overdrive-sh/overdrive",
+		// The brand is dark-only (the root layout forces `dark`), so the
+		// light/dark appearance toggle is dead UI — hide it.
+		themeSwitch: { enabled: false },
 	};
 }
