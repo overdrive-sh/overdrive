@@ -96,10 +96,6 @@ pub mod openapi;
 // `ProbeRunner` Earned-Trust boot helper per ADR-0054 § 7.
 pub mod probe_runner_boot;
 pub mod reconciler_runtime;
-// Phase 2.2 reconcilers per DWD-3. Currently hosts only the
-// `service_map_hydrator`; future Phase 2+ reconcilers will land
-// alongside.
-pub mod reconcilers;
 pub mod streaming;
 pub mod tls_bootstrap;
 // single-node-dataplane-wiring step 01-02 — single-node veth provisioner
