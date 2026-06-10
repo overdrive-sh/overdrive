@@ -69,7 +69,8 @@ control-plane composition root. No new aggregates. DDD verdicts:
 |---|---|---|---|
 | `SvidLifecycle` reconciler | `crates/overdrive-core/src/reconcilers/svid_lifecycle.rs` | **MODIFY** | Delete `ROTATION_ENABLED` + `CERT_ROTATION_WORKFLOW` consts; delete `StartWorkflow` / `WorkflowName` imports; near-expiry branch emits `Action::IssueSvid { alloc_id, spiffe_id: held.spiffe_id.clone(), node_id: running.node_id.clone(), correlation: identity_correlation(alloc_id, &held.spiffe_id, "rotate-svid") }` unconditionally; set `NEAR_EXPIRY_THRESHOLD = WORKLOAD_SVID_TTL / 2`; remove `#[mutants::skip]` on `near_expiry`. **No new API surface** (reuse `Action::IssueSvid` unchanged). |
 | `.cargo/mutants.toml` | `.cargo/mutants.toml:485-514` | **MODIFY** | Remove the `"near_expiry"` `exclude_re` entry + its comment block (the boundary is now a live, tested target). |
-| `run_server` boot composition | `crates/overdrive-control-plane/src/lib.rs:1580-1600` | **MODIFY** | Replace ephemeral `RcgenCa::new` + `ca.root()` + `ca.issue_intermediate()` with: construct `SystemdCredsKeyring` + `RootKeyAeadCodec::new()` + `root_kek_id()`; coerce `store` to `Arc<dyn IntentStore>`; `boot_ca(...).await?` then `bootstrap_node_intermediate(...).await?`; build the bundle from the adopted CA; `.await` on both. |
+| `run_server` boot composition | `crates/overdrive-control-plane/src/lib.rs:1580-1617` | **MODIFY** | Replace ephemeral `RcgenCa::new` + `ca.root()` + `ca.issue_intermediate()` with the persistent boot, consuming the **injected** `Kek` provider from `config.kek` (the C1-AMEND seam below) instead of constructing `SystemdCredsKeyring::new()` inline: `RootKeyAeadCodec::new()` + `root_kek_id()`; coerce `store` to `Arc<dyn IntentStore>`; `boot_ca(ca.as_ref(), config.kek.as_ref(), &kek_id, &codec, &intent_store, &store_path).await?` then `bootstrap_node_intermediate(...)` (same `config.kek.as_ref()`); build the bundle from the adopted CA. `boot_ca` / `bootstrap_node_intermediate` already take `&dyn Kek` — REUSE-AS-IS; only the *source* of the `&dyn Kek` changes (inline production binding → injected `config.kek`). |
+| `ServerConfig` (C1-AMEND seam) | `crates/overdrive-control-plane/src/lib.rs:525-687 (struct), 715-773 (Default impl)` | **MODIFY** | Add the **mandatory** `Kek` injection seam — see § C1-AMEND below. New field `pub kek: Arc<dyn overdrive_core::ca::kek::Kek>`. `ServerConfig: Default` is **removed** (a mandatory `Arc<dyn Kek>` cannot be defaulted to a benign value — defaulting it to `SystemdCredsKeyring::new()` is the regression). A new `ServerConfig::new(kek: Arc<dyn Kek>) -> Self` constructor supplies every *other* field's former-`Default` value, so fixtures write `ServerConfig { ..ServerConfig::new(test_kek()) }` in place of `..Default::default()`. |
 | `ControlPlaneError` | `crates/overdrive-control-plane/src/error.rs:349-547` | **MODIFY** | Add `Ca`-boot variant `CaBoot(#[from] CaBootError)` + its exhaustive `to_response` arm (boot-path → 500, exhaustiveness-only). |
 | `AllocStatusResponse` | `crates/overdrive-control-plane/src/api.rs:207-257` | **MODIFY** | Add additive `issued_certificates: Vec<IssuedCertSummary>` (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`); new `IssuedCertSummary { serial, spiffe_id, issuer_serial, not_after }` wire struct (NO cert bytes, NO key). |
 | `alloc status` handler | `crates/overdrive-control-plane/src/` (alloc-status read path) | **MODIFY** | Aggregate `obs.issued_certificate_rows()`, project per running alloc the latest-by-`issued_at` row whose `spiffe_id == SpiffeId::for_allocation(workload_id, alloc_id)`, into `issued_certificates`. |
@@ -131,7 +132,7 @@ in the workspace from `built-in-ca` (ADR-0063) and `workload-identity-manager`
 |---|---|
 | **A1** rotate emit | `Action::IssueSvid { alloc_id: alloc_id.clone(), spiffe_id: held.spiffe_id.clone(), node_id: running.node_id.clone(), correlation: identity_correlation(alloc_id, &held.spiffe_id, "rotate-svid") }` — reuse the existing variant, NO new field/flag. `running` (the `RunningAlloc`) is in scope in the `running ∧ held` arm; source `node_id` from `running.node_id` (no `HeldSvidFacts` change). |
 | **B1** gate + threshold | Delete `ROTATION_ENABLED` + `CERT_ROTATION_WORKFLOW` consts + `StartWorkflow`/`WorkflowName` imports; near-expiry emits `IssueSvid` unconditionally; `NEAR_EXPIRY_THRESHOLD = WORKLOAD_SVID_TTL / 2` (1800s). Remove `#[mutants::skip]` on `near_expiry` + the `.cargo/mutants.toml` `exclude_re` entry; the `<=` boundary is a live mutation target → kill-test DELIVER obligation. |
-| **C1** boot wiring | At `lib.rs:1595`: construct `SystemdCredsKeyring::new()` + `RootKeyAeadCodec::new()` + `root_kek_id()`; `let intent: Arc<dyn IntentStore> = Arc::clone(&store) as Arc<dyn IntentStore>;`; `let root = boot_ca(ca.as_ref(), &kek, &kek_id, &codec, &intent, &store_path).await?;` then `bootstrap_node_intermediate(ca.as_ref(), &node_id, &intent, &kek, &kek_id, &codec, &store_path).await?`; build `trust_bundle()` from the adopted CA → `IdentityMgr`. Add `ControlPlaneError::CaBoot(#[from] CaBootError)`. |
+| **C1** boot wiring **(AMENDED 2026-06-10 — see § C1-AMEND)** | At `lib.rs:1595`: consume the **injected** `Kek` from `config.kek` (do NOT construct `SystemdCredsKeyring::new()` inline); `let codec = RootKeyAeadCodec::new();` + `let kek_id = root_kek_id();`; `let intent: Arc<dyn IntentStore> = Arc::clone(&store) as Arc<dyn IntentStore>;`; `let root = boot_ca(ca.as_ref(), config.kek.as_ref(), &kek_id, &codec, &intent, &store_path).await?;` then `bootstrap_node_intermediate(ca.as_ref(), &node_id, &intent, config.kek.as_ref(), &kek_id, &codec, &store_path).await?`; build `trust_bundle()` from the adopted CA → `IdentityMgr`. Add `ControlPlaneError::CaBoot(#[from] CaBootError)`. The `Kek` provider is injected through `ServerConfig.kek` (mandatory field) — production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a hermetic fixture KEK. |
 | **D1** consumer field | Additive `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary>` (skip-if-empty); server aggregates `issued_certificate_rows()` and projects per running alloc the latest-by-`issued_at` row whose `spiffe_id == SpiffeId::for_allocation(...)`; CLI renders `serial / spiffe_id / issuer_serial / not_after` — NO cert bytes, NO key. |
 | **E1** slices + EDD | ONE feature-delta, 3 DELIVER slices (below); EDD per slice via `verification/harness/run-expectation.sh` in Lima, then a different-fox Haiku reviewer PER expectation over `evidence/` before any `satisfied`. |
 
@@ -142,7 +143,8 @@ in the workspace from `built-in-ca` (ADR-0063) and `workload-identity-manager`
 | Candidate | Verdict | Evidence |
 |---|---|---|
 | `ca_boot::boot_ca` + `bootstrap_node_intermediate` | **REUSE AS-IS — only newly called** | Fully implemented in `ca_boot.rs` (KEK probe (a), envelope decrypt-probe (b), generate-or-load, adopt-on-restart, `health.startup.refused`, redb_path-threaded remediation). This feature *calls* it from `run_server` — no signature change, no logic change. Closes D-CA-4. |
-| `SystemdCredsKeyring` (`Kek`) | **REUSE AS-IS** | Production KEK provider (ADR-0063 D3/D6); `SystemdCredsKeyring::new()` reads `$CREDENTIALS_DIRECTORY` at resolve time. Constructed at the boot root. No change. |
+| `SystemdCredsKeyring` (`Kek`) | **REUSE AS-IS** | Production KEK provider (ADR-0063 D3/D6); `SystemdCredsKeyring::new()` reads `$CREDENTIALS_DIRECTORY` at resolve time. **Composed at the CLI `serve` boundary and injected into `ServerConfig.kek`** (C1-AMEND) — NOT constructed inline inside `run_server`. The adapter type itself is unchanged; only its composition site moves outward to the binary boundary so tests inject a hermetic fixture KEK instead of inheriting the production binding. |
+| `SystemdCredsKeyring::with_credentials_dir(dir)` (`Kek`, hermetic test path) | **REUSE AS-IS** | The same adapter type, constructed against a pinned `tempdir` credentials directory + a staged `overdrive-ca-root` credential, is the **hermetic test KEK** injected through `ServerConfig.kek` in fixtures. Already used by `ca_boot_and_audit.rs::stage_kek_credential` (`crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs:67-71`); promote that staging helper to a shared test fixture (see crafter obligations). No adapter change. |
 | `RootKeyAeadCodec` | **REUSE AS-IS** | `RootKeyAeadCodec::new()` over the crypto-backend CSPRNG; `seal`/`open`/`seal_intermediate`. No change. |
 | `root_kek_id()` | **REUSE AS-IS** | `KekId::new("overdrive-ca-root")` — the stable single-node KEK identity. No change. |
 | `Action::IssueSvid` | **REUSE AS-IS (UNCHANGED)** | The rotate path reuses the existing variant with a `"rotate-svid"` correlation purpose — NO new field/flag/variant (honors "never invent API surface"). The `node_id` comes from `running.node_id` already in scope. |
@@ -168,6 +170,178 @@ the operator*.
 
 ---
 
+## § C1-AMEND — `Kek` injection seam (DELIVER-review amendment to C1, 2026-06-10)
+
+**Why this amendment exists.** The originally-pinned C1 said "construct
+`SystemdCredsKeyring::new()` … in `run_server`" — i.e. hardcode the production
+`Kek` binding inline at the composition root, with no injection seam. That is
+the exact anti-pattern `.claude/rules/development.md` § "Port-trait dependencies"
+forbids: *"Never default the field to a production binding … that silently
+inherits … behaviour into tests that forgot to override."* `Kek`
+(`overdrive_core::ca::kek::Kek`) is a port trait; `boot_ca` already takes
+`&dyn Kek`. With the inline binding, **every** fixture that boots through
+`run_server` / `run_server_with_obs_and_driver` (~26 callers across
+`tests/integration/` + `tests/acceptance/`) hits
+`SystemdCredsKeyring::new().resolve("overdrive-ca-root")`, which in a **cold
+environment** (no `$CREDENTIALS_DIRECTORY`, no `OVERDRIVE_CA_KEK` opt-in, empty
+kernel keyring) returns `KekError::NotFound` → `CaBootError::KekUnavailable` →
+boot refuses → the fixture panics at `.expect("run_server")`. This was masked
+locally by a leaked persistent kernel-keyring key; on a fresh CI VM all ~26
+callers fail identically (hard repro: `server_lifecycle.rs:105:65 … CaBoot(
+KekUnavailable { kek_id: "overdrive-ca-root", source: NotFound { … } })`).
+
+**The pinned shape (Option A, user-approved). The `Kek` is a MANDATORY injected
+field — no `Default`, no `Option`-override.**
+
+### Seam decision — why mandatory, not defaulted and not optional-override
+
+`ServerConfig` carries both idioms today, and BOTH reproduce the regression for
+this trait:
+
+- A **defaulted** `kek` (mirroring `clock`'s `Arc::new(SystemClock)` default) is
+  wrong because `clock`'s forgotten default is *benign* (a test silently uses
+  wall-clock — a smell, but it boots), whereas `kek`'s forgotten production
+  default `SystemdCredsKeyring::new()` is *malign* — it refuses to boot cold.
+  The compiler does NOT catch the omission. This is precisely the
+  "tests can forget" failure development.md warns against, and it is the exact
+  defect just observed.
+- An **`Option<Arc<dyn Kek>>` override** (mirroring `dataplane_override`,
+  `None → SystemdCredsKeyring::new()` composed in `run_server`) is the SAME
+  hazard spelled with `Option`: a `..Default::default()` fixture that forgets
+  the override silently gets the cold-failing production KEK. development.md
+  explicitly names optional/builder overrides an anti-pattern *for port traits*
+  ("optional means tests can forget"). Reproduces the regression.
+- A **mandatory** `kek: Arc<dyn Kek>` (development.md's stated preference) is the
+  ONLY shape where a fixture that forgets the KEK **fails to compile** instead of
+  failing cold at boot. The compiler — not a CI VM's keyring state — enforces
+  that every boot site is explicit about its KEK.
+
+**Churn is identical across all three shapes, so it is not a tie-breaker.** Every
+fixture already constructs `ServerConfig { <required>, ..Default::default() }`
+with an explicit struct literal (verified — e.g.
+`server_lifecycle.rs:86-103`). Under the `Option` shape each forgetting-fixture
+would add one line (`kek_override: Some(test_kek())`); under the mandatory shape
+each adds one line (`kek: test_kek()`). Same one-line edit — but the mandatory
+shape makes the omission a compile error and the `Option` shape makes it a
+silent cold-boot failure. Given equal churn, the safer shape wins.
+
+**`Default` consequence (accepted churn, not avoidable).** `..Default::default()`
+requires `Self: Default`, which requires every field defaultable — so a truly
+mandatory `kek` field forces **removing the `ServerConfig: Default` impl**.
+There is no honest way to keep `Default` AND make `kek` mandatory (defaulting it
+to a benign `Kek` would be a second hidden production-or-fake binding — the same
+hazard). The resolution that preserves ergonomics for every *other* field is a
+constructor:
+
+```rust
+impl ServerConfig {
+    /// Construct a `ServerConfig` with the mandatory `kek` provider and every
+    /// other field set to its prior `Default` value. Replaces the removed
+    /// `Default` impl: the `Kek` port binding MUST be supplied explicitly
+    /// (production composes `SystemdCredsKeyring::new()`; tests inject a
+    /// hermetic fixture KEK) so a boot site that forgets it fails to COMPILE,
+    /// never inherits the production binding and refuses to start in a cold
+    /// environment. See feature-delta § C1-AMEND.
+    #[must_use]
+    pub fn new(kek: Arc<dyn overdrive_core::ca::kek::Kek>) -> Self {
+        Self {
+            kek,
+            // … every field that the removed `Default::default()` body set,
+            // moved verbatim into this constructor body …
+        }
+    }
+}
+```
+
+Fixtures change `..Default::default()` → `..ServerConfig::new(test_kek())` (a
+mechanical one-token swap per call site, plus the shared `test_kek()` helper).
+The `#[cfg(feature = "integration-tests")] dataplane_probe_fault` field stays
+cfg-gated inside the constructor body exactly as it is inside the current
+`Default` body.
+
+### Exact pinned signatures
+
+| Element | Exact shape |
+|---|---|
+| New field | `pub kek: Arc<dyn overdrive_core::ca::kek::Kek>,` on `ServerConfig` (place adjacent to `clock`, with a rustdoc block stating: production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a hermetic `SystemdCredsKeyring::with_credentials_dir(tempdir)` + staged credential; the field is mandatory specifically so a forgotten KEK is a compile error, not a cold-boot refusal — citing development.md § "Port-trait dependencies" and this § C1-AMEND). |
+| `Default` impl | **REMOVED** (`impl Default for ServerConfig`, `lib.rs:715-773`). |
+| Constructor | `pub fn ServerConfig::new(kek: Arc<dyn overdrive_core::ca::kek::Kek>) -> Self` — body is the old `Default::default()` body with `kek` taken from the argument. `#[must_use]`. |
+| `Debug` impl | Extend the manual `Debug` (`lib.rs:689-713`) with `.field("kek", &"<dyn Kek>")` (it is `Arc<dyn Kek>`, not `Debug`). |
+| Production composition | At the CLI `serve` boundary (`overdrive-cli::commands::serve` → the site that builds `ServerConfig` for `run_server`): `kek: Arc::new(overdrive_host::ca::SystemdCredsKeyring::new())`. |
+| `run_server` consumption | At `lib.rs:1601` (inside `run_server_with_obs_and_driver`): delete `let kek = overdrive_host::ca::SystemdCredsKeyring::new();`; pass `config.kek.as_ref()` to both `boot_ca` and `bootstrap_node_intermediate` (both already take `&dyn Kek`). `boot_ca` / `bootstrap_node_intermediate` / `RootKeyAeadCodec` / `root_kek_id` are UNCHANGED — only the source of the `&dyn Kek` changes. |
+
+### Crafter obligations (C-1 … C-4)
+
+These bind the follow-up implementation dispatch. Cite them by id.
+
+- **C-1 — production wiring change in `run_server`.** Replace the inline
+  `let kek = overdrive_host::ca::SystemdCredsKeyring::new();` (`lib.rs:1601`)
+  with consumption of `config.kek` (`config.kek.as_ref()` into both `boot_ca`
+  and `bootstrap_node_intermediate`). Do NOT change `boot_ca` /
+  `bootstrap_node_intermediate` / `RootKeyAeadCodec` / `root_kek_id` — those are
+  REUSE-AS-IS. Compose `SystemdCredsKeyring::new()` once, at the CLI `serve`
+  boundary, into `ServerConfig.kek`.
+
+- **C-2 — `ServerConfig` seam.** Add `pub kek: Arc<dyn Kek>`; remove
+  `impl Default for ServerConfig`; add `ServerConfig::new(kek)` carrying every
+  former-`Default` field value; extend the manual `Debug` with the elided `kek`
+  field. Do NOT introduce a defaulted or `Option`-override `kek` — the mandatory
+  shape is the decision (see § "Seam decision" above); reproducing the
+  defaulted/optional hazard is a design divergence, not an implementation choice.
+
+- **C-3 — test-fixture obligation (hermetic KEK, EVERY caller).** EVERY
+  `run_server` / `run_server_with_obs_and_driver` caller across
+  `crates/overdrive-control-plane/tests/integration/` and
+  `crates/overdrive-control-plane/tests/acceptance/` MUST inject a **hermetic**
+  test KEK: a `SystemdCredsKeyring::with_credentials_dir(tempdir)` provider plus
+  a staged `overdrive-ca-root` credential file (the existing
+  `ca_boot_and_audit.rs::stage_kek_credential` pattern, `crates/
+  overdrive-control-plane/tests/integration/ca_boot_and_audit.rs:67-71`). Do NOT
+  rely on process-global env (`$CREDENTIALS_DIRECTORY` / `OVERDRIVE_CA_KEK`) or
+  the leaked kernel keyring — the fixture must own its KEK material end-to-end so
+  the suite passes on a cold CI VM. **Prefer ONE shared test helper** (e.g.
+  `fn hermetic_test_kek() -> (TempDir, Arc<dyn Kek>)` that creates the tempdir,
+  stages the credential, and returns the keyring as `Arc<dyn Kek>` — keep the
+  `TempDir` alive for the fixture's lifetime) over per-file duplication, per
+  `.claude/rules/development.md` § "Shared real-infra test fixtures". **Placement
+  judgment:** this helper's only consumer is `overdrive-control-plane`'s own
+  integration + acceptance suites (no second crate needs it), so it belongs in a
+  **crate-local** `crates/overdrive-control-plane/tests/integration/helpers/`
+  module (net-new — no `helpers/` tree exists yet), NOT in `overdrive-testing`
+  (which is for fixtures shared across ≥2 crates). If the acceptance suite cannot
+  reach an `integration/`-rooted helper through its module tree, hoist the helper
+  to a sibling location both entrypoints (`tests/integration.rs`,
+  `tests/acceptance.rs`) can `mod`-include; the crafter picks the minimal shape
+  that both suites compile against — but it stays crate-local and is ONE helper,
+  not per-file. The `stage_kek_credential` body in `ca_boot_and_audit.rs` is the
+  promotion source; once the shared helper exists, `ca_boot_and_audit.rs` SHOULD
+  consume it rather than keep its private copy (single SSOT for credential
+  staging).
+
+- **C-4 — corrected gate (RUN, not `--no-run`).** The step's quality gate MUST
+  actually execute the `run_server` fixture suite under Lima:
+  `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane
+  --features integration-tests` (the acceptance suite likewise:
+  `… --test acceptance --features integration-tests`). A `--no-run` compile-only
+  gate is INSUFFICIENT and is explicitly what let this regression land — a
+  `--no-run` build never calls `boot_ca`, so a cold-environment KEK refusal is
+  invisible to it. The macOS `--no-run` compile-check (per
+  `.claude/rules/testing.md`) remains necessary-but-not-sufficient; the Lima RUN
+  is the load-bearing gate that proves the ~26 fixtures actually boot.
+
+### Out of scope for this amendment
+
+- `boot_ca` / `bootstrap_node_intermediate` / `RootKeyAeadCodec` / `root_kek_id`
+  — UNCHANGED (REUSE-AS-IS). The ONLY new public surface is `ServerConfig.kek` +
+  `ServerConfig::new`.
+- The two-CA discipline is intact: this amendment touches ONLY the
+  workload-identity CA's KEK source (`lib.rs:1595` path). The operator /
+  control-plane HTTPS CA (`mint_ephemeral_ca`, `lib.rs:1237`) is ephemeral by
+  design, unrelated, and untouched.
+- The `serve_persistent_ca.rs` scaffolds (S-OC-06/07/08a-d/09) STAY `#[ignore]`
+  — still owned by the later runtime slice. This amendment does NOT un-ignore
+  them; it only makes the *pre-existing* ~26 `run_server` fixtures boot again.
+
 ## DELIVER slices (3) + EDD capture plan
 
 ### Slice ① — Rotation (core action flip)
@@ -192,14 +366,31 @@ un-skip.
 
 ### Slice ② — Boot-side #215 (persistent CA wired into `serve`)
 
-**Scope:** `lib.rs:1580-1600` composition + `ControlPlaneError::CaBoot`.
+**Scope:** `lib.rs:1580-1617` composition + `ServerConfig.kek` injection seam
+(§ C1-AMEND) + `ControlPlaneError::CaBoot` + the ~26-fixture test-KEK
+injection + the **corrected RUN gate**.
 
-- Construct `SystemdCredsKeyring::new()` + `RootKeyAeadCodec::new()` +
+- Add the mandatory `ServerConfig.kek: Arc<dyn Kek>` seam + `ServerConfig::new(kek)`
+  constructor; remove `ServerConfig: Default` (§ C1-AMEND).
+- Consume `config.kek` in the boot composition (do NOT construct
+  `SystemdCredsKeyring::new()` inline); `RootKeyAeadCodec::new()` +
   `root_kek_id()`; coerce `store` → `Arc<dyn IntentStore>`.
-- Replace ephemeral `RcgenCa` block: `boot_ca(...).await?` then
-  `bootstrap_node_intermediate(...).await?`; build bundle from adopted CA.
+- Replace ephemeral `RcgenCa` block: `boot_ca(ca.as_ref(), config.kek.as_ref(), …).await?`
+  then `bootstrap_node_intermediate(…, config.kek.as_ref(), …).await?`; build
+  bundle from adopted CA.
+- Compose `SystemdCredsKeyring::new()` at the CLI `serve` boundary
+  (`overdrive-cli::commands::serve`) and pass it as `ServerConfig.kek`.
+- Inject a **hermetic** test KEK (shared fixture, see crafter obligations C-3)
+  into EVERY `run_server` / `run_server_with_obs_and_driver` fixture across
+  `tests/integration/` + `tests/acceptance/`.
 - Add `ControlPlaneError::CaBoot(#[from] CaBootError)` + exhaustive `to_response`
   arm (boot-path → 500, exhaustiveness-only).
+- **Gate (CORRECTED):** the step MUST actually **RUN** the `run_server` fixture
+  suite under Lima — `cargo xtask lima run -- cargo nextest run -p
+  overdrive-control-plane --features integration-tests` — not merely `--no-run`
+  compile it. The original `--no-run`-only gate is what let the cold-env
+  `KekUnavailable` regression land (a `--no-run` build never executes `boot_ca`,
+  so the cold-boot refusal is invisible to it). See crafter obligation C-4.
 - **Captures EDD: D01** (root key never plaintext at rest — the persisted
   envelope is KEK-sealed) **+ O04** (refuse-to-start on decrypt failure with
   distinct wrong-KEK / tampered messages — the `CaBootError::EnvelopeDecrypt`
@@ -346,9 +537,20 @@ Rules to enforce (already enforced; this feature must not regress them):
   lives in `overdrive-control-plane` (composes host adapters at the binary
   boundary), never in `core`.
 - `overdrive-host` (`SystemdCredsKeyring`, `RootKeyAeadCodec`, `RcgenCa`) is the
-  production binding, composed only at `run_server`.
+  production binding. **The `Kek` production binding (`SystemdCredsKeyring::new()`)
+  is composed at the CLI `serve` binary boundary and injected through
+  `ServerConfig.kek` — NOT constructed inline inside `run_server` (§ C1-AMEND).**
+  Inline construction of a port-trait production binding inside `run_server` is
+  the regression this amendment closes: it is the `.claude/rules/development.md`
+  § "Port-trait dependencies" violation ("never default the field to a production
+  binding … tests that forgot to override" — here the *inline construction*
+  forces the production binding on every fixture). `RootKeyAeadCodec` / `RcgenCa`
+  remain composed at `run_server` (they have no cold-environment failure mode and
+  no test-double the suite needs to inject).
 - The `Ca` / `Kek` / `IntentStore` / `ObservationStore` port traits are the
-  boundary; `boot_ca` takes `&dyn Ca` / `&dyn Kek` / `&Arc<dyn IntentStore>`.
+  boundary; `boot_ca` takes `&dyn Ca` / `&dyn Kek` / `&Arc<dyn IntentStore>`. The
+  `Kek` `&dyn` argument is sourced from the injected `ServerConfig.kek`, so the
+  trait boundary is honored by injection, not by inline binding.
 
 ---
 
