@@ -327,6 +327,15 @@ components:
       required:
       - rows
       properties:
+        issued_certificates:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssuedCertSummary'
+          description: |-
+            Current issued-certificate summary per running alloc (built-in-ca
+            #215 consumer-side, D-OC-7). Latest-by-`issued_at` row whose SPIFFE
+            identity matches the running alloc. NO cert bytes, NO key. Additive
+            + skip-if-empty: existing consumers see no change.
         kind:
           oneOf:
           - type: 'null'
@@ -710,6 +719,31 @@ components:
       enum:
       - inserted
       - unchanged
+    IssuedCertSummary:
+      type: object
+      description: |-
+        Operator-legible summary of the CURRENT workload SVID for a running
+        allocation (built-in-ca #215 consumer-side, ADR-0067 #215-boundary).
+        Carries audit-row FACTS only — NO certificate PEM/DER bytes and NO
+        private key. This is EDD O05 (audit metadata), NOT an E03 chain proof.
+      required:
+      - serial
+      - spiffe_id
+      - issuer_serial
+      - not_after
+      properties:
+        issuer_serial:
+          type: string
+          description: Serial of the issuing CA certificate (chain lineage).
+        not_after:
+          type: string
+          description: End of the certificate validity window.
+        serial:
+          type: string
+          description: Serial of the issued leaf certificate.
+        spiffe_id:
+          type: string
+          description: SPIFFE identity the certificate was bound to.
     JobSpecInput:
       allOf:
       - $ref: '#/components/schemas/DriverInput'

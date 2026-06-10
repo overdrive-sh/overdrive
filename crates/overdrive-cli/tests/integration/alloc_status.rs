@@ -76,6 +76,7 @@ fn fixture_response(
         kind: Some(kind),
         vip: None,
         listeners: vec![],
+        issued_certificates: vec![],
     }
 }
 

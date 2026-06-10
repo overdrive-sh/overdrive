@@ -50,6 +50,7 @@ fn running_fixture() -> AllocStatusResponse {
         kind: None,
         vip: None,
         listeners: vec![],
+        issued_certificates: vec![],
     }
 }
 
@@ -83,6 +84,7 @@ fn failed_fixture() -> AllocStatusResponse {
         kind: None,
         vip: None,
         listeners: vec![],
+        issued_certificates: vec![],
     }
 }
 
@@ -117,6 +119,7 @@ fn pending_no_capacity_fixture() -> AllocStatusResponse {
         kind: None,
         vip: None,
         listeners: vec![],
+        issued_certificates: vec![],
     }
 }
 

@@ -133,6 +133,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusResponse 
         kind: Some(kind),
         vip: None,
         listeners: vec![],
+        issued_certificates: vec![],
     }
 }
 

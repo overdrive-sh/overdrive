@@ -33,9 +33,11 @@ use overdrive_core::api::describe::{DescribeSpecOutput, ScheduleSpecOutput, Serv
 use overdrive_core::api::submit::{
     ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput,
 };
+use overdrive_core::id::{CertSerial, SpiffeId};
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::StoppedBy;
+use overdrive_core::wall_clock::UnixInstant;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -192,6 +194,26 @@ pub struct BrokerCountersBody {
     pub dispatched: u64,
 }
 
+/// Operator-legible summary of the CURRENT workload SVID for a running
+/// allocation (built-in-ca #215 consumer-side, ADR-0067 #215-boundary).
+/// Carries audit-row FACTS only — NO certificate PEM/DER bytes and NO
+/// private key. This is EDD O05 (audit metadata), NOT an E03 chain proof.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct IssuedCertSummary {
+    /// Serial of the issued leaf certificate.
+    #[schema(value_type = String)]
+    pub serial: CertSerial,
+    /// SPIFFE identity the certificate was bound to.
+    #[schema(value_type = String)]
+    pub spiffe_id: SpiffeId,
+    /// Serial of the issuing CA certificate (chain lineage).
+    #[schema(value_type = String)]
+    pub issuer_serial: CertSerial,
+    /// End of the certificate validity window.
+    #[schema(value_type = String)]
+    pub not_after: UnixInstant,
+}
+
 /// Response for `GET /v1/allocs`.
 ///
 /// Per ADR-0033 §1 amended 2026-04-30 / Slice 01 step 01-03 — the
@@ -254,6 +276,12 @@ pub struct AllocStatusResponse {
     /// JSON wire backward-compatible for non-Service reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub listeners: Vec<overdrive_core::aggregate::Listener>,
+    /// Current issued-certificate summary per running alloc (built-in-ca
+    /// #215 consumer-side, D-OC-7). Latest-by-`issued_at` row whose SPIFFE
+    /// identity matches the running alloc. NO cert bytes, NO key. Additive
+    /// + skip-if-empty: existing consumers see no change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issued_certificates: Vec<IssuedCertSummary>,
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01
