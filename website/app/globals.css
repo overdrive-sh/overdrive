@@ -128,3 +128,92 @@ body::before {
 	mask-image: radial-gradient(ellipse at top, black 25%, transparent 78%);
 	-webkit-mask-image: radial-gradient(ellipse at top, black 25%, transparent 78%);
 }
+
+/*
+  Landing-page motion + decoration. All CSS-only so the marketing page stays
+  statically server-rendered (no "use client"). Every animation is disabled
+  under prefers-reduced-motion.
+*/
+@keyframes od-float {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-16px);
+	}
+}
+@keyframes od-float-alt {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(12px);
+	}
+}
+@keyframes od-glow {
+	0%,
+	100% {
+		opacity: 0.5;
+	}
+	50% {
+		opacity: 0.9;
+	}
+}
+@keyframes od-marquee {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(-50%);
+	}
+}
+@keyframes od-blink-dot {
+	50% {
+		opacity: 0.25;
+	}
+}
+.od-float {
+	animation: od-float 8s ease-in-out infinite;
+}
+.od-float-alt {
+	animation: od-float-alt 10s ease-in-out infinite;
+}
+.od-glow {
+	animation: od-glow 9s ease-in-out infinite;
+}
+.od-marquee {
+	animation: od-marquee 40s linear infinite;
+}
+.od-dot {
+	animation: od-blink-dot 1.4s steps(2) infinite;
+}
+
+/* Hairline accent that wipes in under a card on hover. */
+.od-card {
+	position: relative;
+}
+.od-card::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	height: 2px;
+	width: 0;
+	background: var(--color-brand);
+	transition: width 0.28s ease;
+}
+.od-card:hover::after {
+	width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.od-float,
+	.od-float-alt,
+	.od-glow,
+	.od-marquee,
+	.od-dot {
+		animation: none;
+	}
+}
