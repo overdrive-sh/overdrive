@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
      Running `target/debug/xtask lima run -- bash -lc '
 set -uo pipefail
 WORK="$(mktemp -d)"
@@ -159,9 +159,9 @@ xtask: running limactl shell <cmd>
   [selftest PASS] clean on public-cert-post-excision (markers=0)
   [selftest PASS] clean on random-ciphertext-sized-bytes (markers=0)
   [PASS] scan proven non-vacuous (4/4 detected, 2/2 benign clean)
-  [PASS] first boot persisted the IntentStore at /tmp/tmp.dXl0qLIRel/data/intent.redb
+  [PASS] first boot persisted the IntentStore at /tmp/tmp.rsCsD0dJ2x/data/intent.redb
   --- production IntentStore scan (scan proven non-vacuous above) ---
-  [PASS] sub-claim 1: zero plaintext private-key markers in /tmp/tmp.dXl0qLIRel/data/intent.redb (PEM-armor=0 DER-OID-runs=0; certs excised before scan)
+  [PASS] sub-claim 1: zero plaintext private-key markers in /tmp/tmp.rsCsD0dJ2x/data/intent.redb (PEM-armor=0 DER-OID-runs=0; certs excised before scan)
   [PASS] sub-claim 2: sealed root-key envelope present in the IntentStore
   [PASS] sub-claim 3: still zero plaintext private-key markers after restart (PEM-armor=0 DER-OID-runs=0)
 [3J'unknown': I need something more specific.

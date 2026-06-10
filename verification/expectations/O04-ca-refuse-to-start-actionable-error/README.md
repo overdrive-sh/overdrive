@@ -1,10 +1,13 @@
 # O04 — Control plane refuses to start on root-key decrypt failure with an actionable error
 
 **Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:**
-`pending-recapture` (was `satisfied` at SHA `fc276c70`; the 2026-06-10
-cause-taxonomy correction + the `TamperedEnvelope` → `EnvelopeAuthFailed`
-rename invalidate the prior evidence's sub-claim labels — the crafter
-re-captures against the corrected contract before re-asserting `satisfied`)
+`evidence-captured (awaiting different-fox review)` (re-captured at SHA
+`87d53026` against the corrected ADR-0063 D4 cause taxonomy + the
+`TamperedEnvelope` → `EnvelopeAuthFailed` rename; the runner now asserts each
+refusal's expected cause token — AES-GCM auth-failure / decode-malformed /
+KEK-unavailable — the IntentStore path, and the three classes pairwise-distinct.
+NOT self-stamped `satisfied`: the orchestrator runs the different-fox audit
+against `evidence/` before re-asserting `satisfied`)
 
 ## Expectation
 

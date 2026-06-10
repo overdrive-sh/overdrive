@@ -1,6 +1,6 @@
 # D01 — The root CA private key is never observable in plaintext at rest
 
-**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `satisfied`
+**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured (awaiting different-fox review)` (re-captured at SHA `87d53026` alongside the O04 cause-taxonomy correction; the no-plaintext byte-scan contract is unchanged, but the evidence is refreshed on the corrected tree — the orchestrator re-runs the different-fox audit before re-asserting `satisfied`)
 
 ## Expectation
 

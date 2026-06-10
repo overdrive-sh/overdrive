@@ -1,11 +1,6 @@
  M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
  M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/run.log
  M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/verification.yaml
- M verification/expectations/O04-ca-refuse-to-start-actionable-error/evidence/run.log
- M verification/expectations/O04-ca-refuse-to-start-actionable-error/evidence/verification.yaml
- M verification/expectations/O04-ca-refuse-to-start-actionable-error/runner.sh
+ M verification/expectations/O04-ca-refuse-to-start-actionable-error/evidence/dirty-status.txt
 ?? AGENTS.md
 ?? docs/feature/built-in-ca-operator-composition/deliver/
-?? verification/expectations/O04-ca-refuse-to-start-actionable-error/evidence/dirty-diff.patch
-?? verification/expectations/O04-ca-refuse-to-start-actionable-error/evidence/dirty-status.txt

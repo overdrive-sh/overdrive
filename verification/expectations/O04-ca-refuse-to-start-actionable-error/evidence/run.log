@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
      Running `target/debug/xtask lima run -- bash -lc '
 set -uo pipefail
 ROOT="$PWD"
@@ -261,15 +261,15 @@ exit $rc
 '`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
-  [PASS] first boot persisted the root IntentStore at /tmp/tmp.H1B29Q7Xfl/data/intent.redb
+  [PASS] first boot persisted the root IntentStore at /tmp/tmp.vynY1sOSYw/data/intent.redb
   [PASS] wrong-KEK-material boot refused to start (exit 1, non-zero)
   [PASS] wrong-KEK-material stderr names the AES-GCM auth-failure cause
   [PASS] wrong-KEK-material stderr names BOTH possibilities (wrong material OR tamper)
-  [PASS] wrong-KEK-material stderr names the IntentStore path /tmp/tmp.H1B29Q7Xfl/data/intent.redb
+  [PASS] wrong-KEK-material stderr names the IntentStore path /tmp/tmp.vynY1sOSYw/data/intent.redb
   [PASS] corrupted-envelope boot refused to start (exit 1)
   [PASS] corrupted-envelope stderr names a decode/Malformed cause
   [PASS] corrupted-envelope cause is distinct from the auth-failure class
-  [PASS] corrupted-envelope stderr names the IntentStore path /tmp/tmp.H1B29Q7Xfl/data/intent.redb
+  [PASS] corrupted-envelope stderr names the IntentStore path /tmp/tmp.vynY1sOSYw/data/intent.redb
   [PASS] absent-KEK boot refused to start (exit 1)
   [PASS] absent-KEK stderr names the KEK as unavailable
   [PASS] absent-KEK cause is distinct from the auth-failure and decode classes
@@ -283,6 +283,6 @@ xtask: running limactl shell <cmd>
   [PASS] auth-failure vs decode-malformed are distinct classes
   [PASS] auth-failure vs KEK-unavailable are distinct classes
   [PASS] decode-malformed vs KEK-unavailable are distinct classes
-  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: d60d378b01950068b8e84c532b1ffed43d8e01db50006cc2de0230b6fded2dc9)
+  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: 5fc3c01c00b98bd712c9484c713a205fce8371fbf8de33b43a7b61083d6e0159)
   [PASS] re-supplying the correct KEK adopts the SAME root (byte-stable)
 [3J'unknown': I need something more specific.
