@@ -16,5 +16,8 @@ export function baseOptions(): BaseLayoutProps {
 				</span>
 			),
 		},
+		// Fumadocs renders a GitHub icon link in the nav from this URL, on every
+		// surface that uses `baseOptions()` (landing, docs, blog).
+		githubUrl: "https://github.com/overdrive-sh/overdrive",
 	};
 }
