@@ -1,0 +1,10 @@
+  [capture] produce_pems -> produce_pems.out (exit 0)
+  [capture] chain_verify -> chain_verify.out (exit 0)
+  [PASS] 'chain_verify.out' contains: OK
+  [capture] svid_text -> svid_text.out (exit 0)
+  [PASS] svid carries a spiffe URI SAN
+  [PASS] exactly one URI SAN
+  [PASS] leaf carries no basicConstraints (CA:FALSE by X.509 default — never a CA)
+  [PASS] keyUsage digitalSignature marked critical
+  [capture] pathlen_negative -> pathlen_negative.out (exit 2)
+  [PASS] pathLen=0 anchor: chain FAILED openssl verify (exit 2) on the pathLen/basicConstraints check — pathLen ENFORCED

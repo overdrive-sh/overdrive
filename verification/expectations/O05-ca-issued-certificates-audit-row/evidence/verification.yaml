@@ -1,0 +1,13 @@
+expectation_id: "O05"
+date_utc: "2026-06-10T21:05:52Z"
+overdrive_sha: "c5702a13c46e984c4882c7c45a689c1e091a85b8"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "39e8824893e36a076d0b3efb08753a6f1b6d83ae"
+harness_invocation: "verification/harness/run-expectation.sh O05"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["S-05-03 (`issuance_writes_issued_certificates_row_matching_the_minted_cert`)","S-05-04 (`issuance_that_cannot_write_audit_row_surfaces_an_error` — no silent issuance)","ADR-0063 D6 (`issued_certificates` ObservationStore audit row)","docs/product/journeys/issue-workload-identity.yaml — step 4 ("issuance is auditable")"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

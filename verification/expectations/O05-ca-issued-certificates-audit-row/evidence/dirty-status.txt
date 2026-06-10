@@ -1,0 +1,24 @@
+ M crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs
+ M verification/expectations/E03-ca-full-chain-verifies/runner.sh
+ M verification/expectations/O05-ca-issued-certificates-audit-row/runner.sh
+?? AGENTS.md
+?? docs/feature/built-in-ca-operator-composition/deliver/
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/ca/
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/chain_verify.meta
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/chain_verify.out
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/dirty-diff.patch
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/dirty-status.txt
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/pathlen_negative.meta
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/pathlen_negative.out
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/produce_pems.meta
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/produce_pems.out
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/run.log
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/svid_text.meta
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/svid_text.out
+?? verification/expectations/E03-ca-full-chain-verifies/evidence/verification.yaml
+?? verification/expectations/O05-ca-issued-certificates-audit-row/evidence/dirty-diff.patch
+?? verification/expectations/O05-ca-issued-certificates-audit-row/evidence/dirty-status.txt
+?? verification/expectations/O05-ca-issued-certificates-audit-row/evidence/preflight_cluster.meta
+?? verification/expectations/O05-ca-issued-certificates-audit-row/evidence/preflight_cluster.out
+?? verification/expectations/O05-ca-issued-certificates-audit-row/evidence/run.log
+?? verification/expectations/O05-ca-issued-certificates-audit-row/evidence/verification.yaml

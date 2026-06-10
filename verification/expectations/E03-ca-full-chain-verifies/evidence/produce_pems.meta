@@ -1,0 +1,4 @@
+# command: in_lima env OD_E03_CA_DIR=/Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca cargo nextest run -p overdrive-host --features integration-tests -E test(rcgen_full_svid_chain_verifies_root_intermediate_svid) + test(rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced)
+# seed:    1
+# started: 2026-06-10T21:05:51Z
+# exit:    0

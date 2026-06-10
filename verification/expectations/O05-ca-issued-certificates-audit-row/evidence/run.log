@@ -1,0 +1,10 @@
+  [capture] preflight_cluster -> preflight_cluster.out (exit 1)
+  [pending] control plane not reachable — O05 needs a running deployment with
+  the built-in CA issuance path (DELIVER). The O05 runner reads an
+  already-running deployment; it does not stand up "serve" itself. In a
+  Lima-routed terminal:
+
+      cargo overdrive serve --bind 127.0.0.1:7443 --data-dir /tmp/od-o05
+      cargo overdrive deploy crates/overdrive-cli/examples/coinflip.toml --detach
+
+  then re-run O05. This run stays 'pending'.

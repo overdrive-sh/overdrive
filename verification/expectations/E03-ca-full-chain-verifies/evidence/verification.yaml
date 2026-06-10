@@ -1,0 +1,13 @@
+expectation_id: "E03"
+date_utc: "2026-06-10T21:05:51Z"
+overdrive_sha: "c5702a13c46e984c4882c7c45a689c1e091a85b8"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "39e8824893e36a076d0b3efb08753a6f1b6d83ae"
+harness_invocation: "verification/harness/run-expectation.sh E03"
+executed_in_lima: true
+runner_exit_code: "0"
+anchors: ["S-04-07 (`rcgen_full_svid_chain_verifies_root_intermediate_svid`, the `@walking_skeleton` scenario)","ADR-0063 D1 (`Ca` trait 3-tier hierarchy)","docs/feature/built-in-ca/feature-delta.md § Outcome KPIs — K1 (North Star: % of issued SVIDs that chain-verify to the root)"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

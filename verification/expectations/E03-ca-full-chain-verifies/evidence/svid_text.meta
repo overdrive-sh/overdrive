@@ -1,0 +1,4 @@
+# command: openssl x509 -in /Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca/positive/svid.pem -noout -text
+# seed:    1
+# started: 2026-06-10T21:05:51Z
+# exit:    0
