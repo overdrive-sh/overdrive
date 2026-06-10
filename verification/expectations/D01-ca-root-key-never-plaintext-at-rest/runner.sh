@@ -57,11 +57,12 @@ KEK_ID="overdrive-ca-root"
 INTENT="$DATA/intent.redb"
 head -c 32 /dev/zero | tr "\0" "\\377" > "$CREDS/$KEK_ID"   # 32 raw bytes (0xFF)
 
-serve() { # <timeout_secs>
+serve() { # <timeout_secs> <out_file> -> echoes the exit code
   CREDENTIALS_DIRECTORY="$CREDS" OVERDRIVE_CONFIG_DIR="$CONF" \
     timeout --preserve-status -s INT "${1}s" \
     cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA" \
-    >> "$WORK/serve.out" 2>&1 || true
+    > "$2" 2>&1
+  echo $?
 }
 
 rc=0
@@ -95,6 +96,30 @@ PY
 scan_hits() { # <path>
   read -r a o <<<"$(scan_plaintext_key "$1")"
   echo $(( a + o ))
+}
+
+# root_serials <redb_path> -> the sorted serial(s) of every persisted CERTIFICATE
+# PEM block, one per line (empty if none). This is the black-box root-IDENTITY
+# witness for the restart sub-claim: a silent re-mint replaces the root keypair,
+# which produces a NEW cert with a NEW serial, so a serial set that is unchanged
+# across restart proves the SAME root was decrypted + adopted (S-OC-07
+# "identical serial across restart"). openssl is available in Lima (the
+# non-vacuity self-test below uses it).
+root_serials() { # <redb_path>
+  local f="$1" tmp; tmp="$(mktemp -d)"
+  python3 - "$f" "$tmp" <<"PY"
+import sys, re
+b = open(sys.argv[1], "rb").read()
+outdir = sys.argv[2]
+blocks = re.findall(rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", b, re.S)
+for n, blk in enumerate(blocks):
+    open("%s/c%d.pem" % (outdir, n), "wb").write(blk)
+PY
+  for c in "$tmp"/c*.pem; do
+    [ -e "$c" ] || continue
+    openssl x509 -in "$c" -noout -serial 2>/dev/null
+  done | sort
+  rm -rf "$tmp"
 }
 
 # === INLINE NON-VACUITY SELF-TEST (printed to run.log) =======================
@@ -158,13 +183,22 @@ rm -rf "$ST"
 # === end self-test ===========================================================
 
 # --- First boot: generate + seal + persist the root. -------------------------
-serve 25
+boot1_rc="$(serve 25 "$WORK/boot1.out")"
 if [ ! -f "$INTENT" ]; then
-  echo "  [FAIL] first boot did not persist $INTENT"
-  sed -n "1,40p" "$WORK/serve.out"
+  echo "  [FAIL] first boot did not persist $INTENT (rc=$boot1_rc)"
+  sed -n "1,40p" "$WORK/boot1.out"
   rm -rf "$WORK"; exit 1
 fi
-echo "  [PASS] first boot persisted the IntentStore at $INTENT"
+# Serving witness: `serve::run` logs "control plane listening" ONLY after the
+# listener binds (a refuse-to-start returns Err before it). Confirm first boot
+# actually reached serving, not merely wrote a file then crashed.
+if grep -aq "control plane listening" "$WORK/boot1.out"; then
+  echo "  [PASS] first boot persisted the IntentStore at $INTENT and reached serving"
+else
+  echo "  [FAIL] first boot persisted $INTENT but never reached serving (rc=$boot1_rc)"
+  sed -n "1,40p" "$WORK/boot1.out"
+  rm -rf "$WORK"; exit 1
+fi
 
 # Production byte-scan: now that the scan is proven non-vacuous above, scan the
 # REAL on-disk IntentStore for plaintext-private-key markers.
@@ -186,13 +220,43 @@ else
   echo "  [FAIL] sub-claim 2: no sealed root-key envelope present"; rc=1
 fi
 
-# --- Restart (decrypt + adopt the SAME root), re-scan. -----------------------
-serve 25
+# --- Restart: a FRESH process must DECRYPT the sealed envelope, ADOPT the SAME
+# root (the boot-1 in-memory CA is gone), REACH SERVING, and re-mint nothing.
+# A restart that REFUSED to start (failed adopt/decrypt) leaves the on-disk file
+# byte-identical, so a re-scan-only check would still report "no plaintext" and
+# PASS vacuously. Assert the SERVING witness AND a stable root-IDENTITY witness,
+# not just the continued absence of plaintext.
+id_before="$(root_serials "$INTENT")"
+
+restart_rc="$(serve 25 "$WORK/restart.out")"
+
+# Sub-claim 3 — the restart reached serving (decrypt + adopt succeeded).
+if grep -aq "control plane listening" "$WORK/restart.out"; then
+  echo "  [PASS] sub-claim 3: restart decrypted + adopted the root and reached serving (rc=$restart_rc)"
+else
+  echo "  [FAIL] sub-claim 3: restart never reached serving — adopt/decrypt refused (rc=$restart_rc)"; rc=1
+  sed -n "1,40p" "$WORK/restart.out"
+fi
+
+# Sub-claim 4 — the SAME root was adopted, not re-minted: the persisted cert
+# serial(s) are byte-stable across the restart (S-OC-07 "identical serial").
+id_after="$(root_serials "$INTENT")"
+if [ -n "$id_before" ] && [ "$id_before" = "$id_after" ]; then
+  echo "  [PASS] sub-claim 4: restart adopted the SAME root (cert serial(s) stable across restart)"
+  printf "    serial(s): %s\n" "$(printf "%s" "$id_before" | tr "\n" " ")"
+else
+  echo "  [FAIL] sub-claim 4: persisted root cert serial changed across restart (re-mint?)"; rc=1
+  printf "    before: %s\n    after:  %s\n" \
+    "$(printf "%s" "$id_before" | tr "\n" " ")" "$(printf "%s" "$id_after" | tr "\n" " ")"
+fi
+
+# Sub-claim 5 — the guardrail holds across the lifecycle: still no plaintext
+# private-key markers after the decrypt-and-adopt restart.
 read -r armor2 oid2 <<<"$(scan_plaintext_key "$INTENT")"
 if [ "$armor2" -gt 0 ] || [ "$oid2" -gt 0 ]; then
-  echo "  [FAIL] sub-claim 3: plaintext private-key markers appeared after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"; rc=1
+  echo "  [FAIL] sub-claim 5: plaintext private-key markers appeared after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"; rc=1
 else
-  echo "  [PASS] sub-claim 3: still zero plaintext private-key markers after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"
+  echo "  [PASS] sub-claim 5: still zero plaintext private-key markers after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"
 fi
 
 rm -rf "$WORK"

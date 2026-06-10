@@ -117,8 +117,13 @@ fn rotate_issue_svid_action(alloc: &AllocationId, identity: &SpiffeId, node: &No
 // a FRESH `issued_certificates` row (NEW serial, NEW window) is observable;
 // `IdentityMgr` holds the freshly-minted `SvidMaterial` for the allocation
 // (hold-REPLACE, not a second hold); the held cert serial matches the new
-// audit-row serial. Universe: the action-shim result, the `IdentityMgr` held
-// snapshot (post-replace), the ObservationStore audit row.
+// audit-row serial; and the fresh row's validity window advanced past
+// first-issue's and matches the held material. The "NEW window" half is made
+// observable by advancing the injected clock by 1h between first-issue and
+// rotate — a single fixed instant would re-derive a byte-identical window and
+// leave that sub-claim vacuous. Universe: the action-shim result, the
+// `IdentityMgr` held snapshot (post-replace), the ObservationStore audit row
+// (serial + validity window).
 #[tokio::test]
 async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
     // GIVEN a real CA + a real observation store + a fixed clock + an
@@ -127,7 +132,18 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
     let obs_dir = TempDir::new().expect("obs-store tempdir");
     let ca = host_ca();
     let obs = audit_store(&obs_dir);
-    let clock = FixedClock::at_unix_secs(1_700_000_005);
+    // First issue at T0; rotation at T0 + 1h. Advancing the clock BETWEEN the
+    // two dispatches is what makes the rotated leaf carry a genuinely NEW
+    // validity window: the issuance seam derives `not_before` / `not_after`
+    // from the injected clock (`ca_issuance.rs` — `not_before = now −
+    // SKEW_TOLERANCE`, `not_after = not_before + TTL`), so a single fixed
+    // instant would re-derive a window byte-identical to first-issue's and
+    // S-OC-10's "new window" claim would be vacuous. Two clocks make the
+    // window shift observable.
+    let t0_secs: u64 = 1_700_000_005;
+    let rotate_delta_secs: u64 = 3_600;
+    let clock_first = FixedClock::at_unix_secs(t0_secs);
+    let clock_rotate = FixedClock::at_unix_secs(t0_secs + rotate_delta_secs);
     let identity_mgr = IdentityMgr::new(None);
 
     let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
@@ -147,7 +163,7 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
             CorrelationKey::derive(&target, &spec_hash, "issue-svid")
         },
     };
-    dispatch_issue(&first_issue, &ca, obs.as_ref(), &clock, &identity_mgr)
+    dispatch_issue(&first_issue, &ca, obs.as_ref(), &clock_first, &identity_mgr)
         .await
         .expect("first-issue dispatch seeds the prior hold");
     let prior_serial = identity_mgr
@@ -155,12 +171,22 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
         .expect("the prior leaf is held after first-issue")
         .serial()
         .clone();
-    let audit_count_before = obs.issued_certificate_rows().await.expect("read audit rows").len();
+    // Capture the FIRST-ISSUE validity window from its audit row — the baseline
+    // the rotated window must advance past (S-OC-10 "new window").
+    let prior_rows = obs.issued_certificate_rows().await.expect("read audit rows");
+    let prior_row = prior_rows
+        .iter()
+        .find(|r| r.serial == prior_serial && r.spiffe_id == identity)
+        .expect("the first-issue audit row is present");
+    let prior_not_before = prior_row.not_before;
+    let prior_not_after = prior_row.not_after;
+    let audit_count_before = prior_rows.len();
 
     // WHEN a rotate-correlation IssueSvid for the SAME held identity dispatches
-    // through the EXISTING executor.
+    // through the EXISTING executor — under an ADVANCED clock (T0 + 1h), so the
+    // freshly-minted leaf is signed with a NEW validity window.
     let rotate = rotate_issue_svid_action(&alloc, &identity, &node);
-    dispatch_issue(&rotate, &ca, obs.as_ref(), &clock, &identity_mgr)
+    dispatch_issue(&rotate, &ca, obs.as_ref(), &clock_rotate, &identity_mgr)
         .await
         .expect("rotate-correlation IssueSvid dispatches through the existing executor");
 
@@ -196,10 +222,40 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
     // AND the held serial MATCHES the new audit-row serial — the row the rotate
     // wrote is the row for the leaf now held (audit-before-hold, same cert).
     let new_serial = held.serial();
+    let new_row = rows
+        .iter()
+        .find(|r| &r.serial == new_serial && r.spiffe_id == identity)
+        .unwrap_or_else(|| {
+            panic!(
+                "the held leaf's serial must match a fresh issued_certificates row's serial for \
+                 the identity; held serial {new_serial}, rows: {:?}",
+                rows.iter().map(|r| r.serial.to_string()).collect::<Vec<_>>()
+            )
+        });
+
+    // AND that fresh row carries a genuinely NEW validity window — both bounds
+    // advanced past first-issue's. The issuance seam derives the window from the
+    // injected clock, so the +1h advance shifts `not_before` and `not_after`
+    // forward; a re-read of a cached leaf would carry the PRIOR window. This is
+    // the part of S-OC-10 ("new window") a single fixed clock could not show.
     assert!(
-        rows.iter().any(|r| &r.serial == new_serial && r.spiffe_id == identity),
-        "the held leaf's serial must match a fresh issued_certificates row's serial for the \
-         identity; held serial {new_serial}, rows: {:?}",
-        rows.iter().map(|r| r.serial.to_string()).collect::<Vec<_>>()
+        new_row.not_before > prior_not_before,
+        "rotation under an advanced clock must shift not_before forward ({prior_not_before} → {})",
+        new_row.not_before
+    );
+    assert!(
+        new_row.not_after > prior_not_after,
+        "rotation under an advanced clock must shift not_after forward ({prior_not_after} → {})",
+        new_row.not_after
+    );
+
+    // AND the fresh window MATCHES the held material — `SvidMaterial::not_after`
+    // equals the audit row's `not_after` by construction (`ca_issuance.rs`
+    // threads ONE window into both the signed leaf and the row), so the row the
+    // rotate wrote is the row for the leaf now held, in its NEW window.
+    assert_eq!(
+        new_row.not_after,
+        held.not_after(),
+        "the fresh audit row's not_after must match the held leaf's not_after (same minted window)"
     );
 }

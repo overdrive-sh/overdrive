@@ -1,6 +1,6 @@
 # D01 — The root CA private key is never observable in plaintext at rest
 
-**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `satisfied` (re-captured at SHA `87d53026` alongside the O04 cause-taxonomy correction; the no-plaintext byte-scan contract is unchanged, and a fresh different-fox audit re-CONFIRMED the refreshed evidence — see § "Different-fox review")
+**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (re-captured at SHA `ba8ddd51` after the restart sub-claim was STRENGTHENED in response to an adversarial-review High finding: the restart now asserts a **serving witness** + a **stable root-identity witness**, not just a plaintext re-scan — a refused restart that left disk unchanged previously satisfied the runner. Awaiting a FRESH different-fox audit of the strengthened evidence before `satisfied` — see § "Different-fox review")
 
 ## Expectation
 
@@ -36,9 +36,19 @@ Sub-claims:
    scan-rationale below).
 2. The persisted record DOES contain the AEAD envelope fields (a `nonce` +
    `ciphertext` + `aead_tag` are present — i.e. the key is sealed, not absent).
-3. After a restart that decrypts and reuses the root, the on-disk file STILL
-   contains no plaintext key bytes (the guardrail holds across the lifecycle,
-   not just at first write).
+3. The restart actually **reached serving** — `serve::run` logs `control plane
+   listening` only after the listener binds, and a refuse-to-start returns `Err`
+   before it, so the marker's presence proves the second boot decrypted the
+   sealed envelope and adopted the root rather than refusing. (Without this, a
+   restart that REFUSED would leave the disk byte-identical and pass sub-claim 5
+   vacuously — the adversarial-review High finding.)
+4. The restart adopted the **SAME root**, not a re-mint — the persisted
+   CERTIFICATE serial(s) are byte-stable across the restart (S-OC-07 "identical
+   serial across restart"). A silent re-mint would replace the root keypair with
+   a new cert carrying a new serial.
+5. After the decrypt-and-adopt restart, the on-disk file STILL contains no
+   plaintext key bytes (the guardrail holds across the lifecycle, not just at
+   first write).
 
 ### Why a STRUCTURAL scan, not a known-key content scan
 
@@ -89,9 +99,11 @@ its random scalar:
   (non-zero exit) before the production scan ever runs. The throwaway key never
   touches the real IntentStore.
 
-`satisfied` requires sub-claims 1–3 on a Lima run, reviewed adversarially for
+`satisfied` requires sub-claims 1–5 on a Lima run, reviewed adversarially for
 "did the byte-scan actually run against the real on-disk file, or narrate it?"
-(the different-fox audit reads only `evidence/`).
+**and** "did the restart actually reach serving + adopt the same root, or could
+a refused restart that left disk untouched have passed?" (the different-fox
+audit reads only `evidence/`).
 
 ## Evidence
 
@@ -117,12 +129,20 @@ runs over the real on-disk `intent.redb`:
   raw-SEC1-DER / raw-PKCS8-DER` (4/4 positive controls) and `[selftest PASS]
   clean on public-cert-post-excision / random-ciphertext-sized-bytes` (2/2
   negative controls) → `scan proven non-vacuous`.
+- First boot — **PASS**: persisted the IntentStore AND reached serving
+  (`control plane listening`).
 - Sub-claim 1 — **PASS**: zero plaintext private-key markers on disk
   (`PEM-armor=0 DER-OID-runs=0`, after excising the public certificate PEM).
 - Sub-claim 2 — **PASS**: the sealed root-key envelope is present
   (`key-envelope` marker, non-empty store).
-- Sub-claim 3 — **PASS**: after a restart that decrypts + adopts the same root,
-  STILL zero plaintext private-key markers (`PEM-armor=0 DER-OID-runs=0`).
+- Sub-claim 3 — **PASS**: the restart decrypted + adopted the root and reached
+  serving (`control plane listening`, `rc=0`).
+- Sub-claim 4 — **PASS**: the restart adopted the SAME root — persisted cert
+  serial(s) byte-stable across restart (`serial=2247FA9B2C168A9EACBF061B98D41B3C`
+  for the root, `serial=F83611B080785BF1CFE1D9CC604C07D1` for the node
+  intermediate, identical before and after).
+- Sub-claim 5 — **PASS**: after the decrypt-and-adopt restart, STILL zero
+  plaintext private-key markers (`PEM-armor=0 DER-OID-runs=0`).
 
 The gated integration test
 `rcgen_ca_root_key_envelope.rs::root_key_envelope_contains_no_plaintext_key_bytes`
@@ -156,5 +176,18 @@ agent did NOT self-stamp. The orchestrator dispatched independent adversarial
   sealed-envelope-present check, and externals-only dirty tree; Fox 1 & 2's
   cured grounds stay cured.
 
-Status set to `satisfied` on the Fox 3 + Fox 4 confirmations (Fox 4 re-confirming
-the `87d53026` re-capture).
+Fox 3 + Fox 4 confirmed the byte-scan contract (sub-claims 1–3 of the original
+runner). A LATER adversarial review (2026-06-10) raised a **High** finding the
+prior foxes did not cover: the restart section only re-scanned the file for
+plaintext and never asserted the second boot reached serving or adopted the same
+root, so a restart that REFUSED (leaving disk unchanged) would still satisfy the
+runner — even though S-OC-07 (roadmap AC) requires the restart to decrypt + adopt
+the SAME root. The runner was strengthened (the restart now asserts a serving
+witness + a stable cert-serial identity witness; old sub-claim 3 → sub-claim 5)
+and the evidence re-captured at `ba8ddd51` (all of self-test, first-boot-serving,
+sub-claims 1–5 PASS, exit 0).
+
+Because the runner materially changed, the Fox 3/Fox 4 confirmations no longer
+cover the live evidence. Status is therefore `evidence-captured` pending a FRESH
+different-fox audit of the strengthened evidence — the authoring agent does NOT
+self-stamp `satisfied`.

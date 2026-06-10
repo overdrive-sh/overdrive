@@ -1,263 +1,523 @@
+diff --git a/crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs b/crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs
+index bbc25bf3..7fe30088 100644
+--- a/crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs
++++ b/crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs
+@@ -117,8 +117,13 @@ fn rotate_issue_svid_action(alloc: &AllocationId, identity: &SpiffeId, node: &No
+ // a FRESH `issued_certificates` row (NEW serial, NEW window) is observable;
+ // `IdentityMgr` holds the freshly-minted `SvidMaterial` for the allocation
+ // (hold-REPLACE, not a second hold); the held cert serial matches the new
+-// audit-row serial. Universe: the action-shim result, the `IdentityMgr` held
+-// snapshot (post-replace), the ObservationStore audit row.
++// audit-row serial; and the fresh row's validity window advanced past
++// first-issue's and matches the held material. The "NEW window" half is made
++// observable by advancing the injected clock by 1h between first-issue and
++// rotate — a single fixed instant would re-derive a byte-identical window and
++// leave that sub-claim vacuous. Universe: the action-shim result, the
++// `IdentityMgr` held snapshot (post-replace), the ObservationStore audit row
++// (serial + validity window).
+ #[tokio::test]
+ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
+     // GIVEN a real CA + a real observation store + a fixed clock + an
+@@ -127,7 +132,18 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
+     let obs_dir = TempDir::new().expect("obs-store tempdir");
+     let ca = host_ca();
+     let obs = audit_store(&obs_dir);
+-    let clock = FixedClock::at_unix_secs(1_700_000_005);
++    // First issue at T0; rotation at T0 + 1h. Advancing the clock BETWEEN the
++    // two dispatches is what makes the rotated leaf carry a genuinely NEW
++    // validity window: the issuance seam derives `not_before` / `not_after`
++    // from the injected clock (`ca_issuance.rs` — `not_before = now −
++    // SKEW_TOLERANCE`, `not_after = not_before + TTL`), so a single fixed
++    // instant would re-derive a window byte-identical to first-issue's and
++    // S-OC-10's "new window" claim would be vacuous. Two clocks make the
++    // window shift observable.
++    const T0_SECS: u64 = 1_700_000_005;
++    const ROTATE_DELTA_SECS: u64 = 3_600;
++    let clock_first = FixedClock::at_unix_secs(T0_SECS);
++    let clock_rotate = FixedClock::at_unix_secs(T0_SECS + ROTATE_DELTA_SECS);
+     let identity_mgr = IdentityMgr::new(None);
+ 
+     let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
+@@ -147,7 +163,7 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
+             CorrelationKey::derive(&target, &spec_hash, "issue-svid")
+         },
+     };
+-    dispatch_issue(&first_issue, &ca, obs.as_ref(), &clock, &identity_mgr)
++    dispatch_issue(&first_issue, &ca, obs.as_ref(), &clock_first, &identity_mgr)
+         .await
+         .expect("first-issue dispatch seeds the prior hold");
+     let prior_serial = identity_mgr
+@@ -155,12 +171,22 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
+         .expect("the prior leaf is held after first-issue")
+         .serial()
+         .clone();
+-    let audit_count_before = obs.issued_certificate_rows().await.expect("read audit rows").len();
++    // Capture the FIRST-ISSUE validity window from its audit row — the baseline
++    // the rotated window must advance past (S-OC-10 "new window").
++    let prior_rows = obs.issued_certificate_rows().await.expect("read audit rows");
++    let prior_row = prior_rows
++        .iter()
++        .find(|r| r.serial == prior_serial && r.spiffe_id == identity)
++        .expect("the first-issue audit row is present");
++    let prior_not_before = prior_row.not_before;
++    let prior_not_after = prior_row.not_after;
++    let audit_count_before = prior_rows.len();
+ 
+     // WHEN a rotate-correlation IssueSvid for the SAME held identity dispatches
+-    // through the EXISTING executor.
++    // through the EXISTING executor — under an ADVANCED clock (T0 + 1h), so the
++    // freshly-minted leaf is signed with a NEW validity window.
+     let rotate = rotate_issue_svid_action(&alloc, &identity, &node);
+-    dispatch_issue(&rotate, &ca, obs.as_ref(), &clock, &identity_mgr)
++    dispatch_issue(&rotate, &ca, obs.as_ref(), &clock_rotate, &identity_mgr)
+         .await
+         .expect("rotate-correlation IssueSvid dispatches through the existing executor");
+ 
+@@ -196,10 +222,40 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
+     // AND the held serial MATCHES the new audit-row serial — the row the rotate
+     // wrote is the row for the leaf now held (audit-before-hold, same cert).
+     let new_serial = held.serial();
++    let new_row = rows
++        .iter()
++        .find(|r| &r.serial == new_serial && r.spiffe_id == identity)
++        .unwrap_or_else(|| {
++            panic!(
++                "the held leaf's serial must match a fresh issued_certificates row's serial for \
++                 the identity; held serial {new_serial}, rows: {:?}",
++                rows.iter().map(|r| r.serial.to_string()).collect::<Vec<_>>()
++            )
++        });
++
++    // AND that fresh row carries a genuinely NEW validity window — both bounds
++    // advanced past first-issue's. The issuance seam derives the window from the
++    // injected clock, so the +1h advance shifts `not_before` and `not_after`
++    // forward; a re-read of a cached leaf would carry the PRIOR window. This is
++    // the part of S-OC-10 ("new window") a single fixed clock could not show.
++    assert!(
++        new_row.not_before > prior_not_before,
++        "rotation under an advanced clock must shift not_before forward ({prior_not_before} → {})",
++        new_row.not_before
++    );
+     assert!(
+-        rows.iter().any(|r| &r.serial == new_serial && r.spiffe_id == identity),
+-        "the held leaf's serial must match a fresh issued_certificates row's serial for the \
+-         identity; held serial {new_serial}, rows: {:?}",
+-        rows.iter().map(|r| r.serial.to_string()).collect::<Vec<_>>()
++        new_row.not_after > prior_not_after,
++        "rotation under an advanced clock must shift not_after forward ({prior_not_after} → {})",
++        new_row.not_after
++    );
++
++    // AND the fresh window MATCHES the held material — `SvidMaterial::not_after`
++    // equals the audit row's `not_after` by construction (`ca_issuance.rs`
++    // threads ONE window into both the signed leaf and the row), so the row the
++    // rotate wrote is the row for the leaf now held, in its NEW window.
++    assert_eq!(
++        new_row.not_after,
++        held.not_after(),
++        "the fresh audit row's not_after must match the held leaf's not_after (same minted window)"
+     );
+ }
 diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
-index c4b3d32c..e69de29b 100644
+index 98dbb9c5..1192c489 100644
 --- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
 +++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
-@@ -1,258 +0,0 @@
+@@ -1,263 +0,0 @@
 -diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
--index 116124b6..e69de29b 100644
+-index c4b3d32c..e69de29b 100644
 ---- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
 -+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
--@@ -1,241 +0,0 @@
---diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
---index ed33e261..07d3c78a 100644
------ a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
---+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
---@@ -76,10 +76,18 @@ its random scalar:
---   the remainder — a leaked raw-DER private key lives in the redb VALUE bytes
---   outside any CERTIFICATE block, so excision never hides it.
--- 
----  The scan is proven non-vacuous: against real `openssl`-generated P-256 keys
----  it DETECTS SEC1-PEM, PKCS#8-PEM, raw-SEC1-DER, and raw-PKCS#8-DER, while a
----  public cert (post-excision) and 4 KiB of `os.urandom` ciphertext both scan
----  CLEAN.
---+  The scan is proven non-vacuous **inline in the runner** (so `run.log` shows
---+  it, not narrated out-of-band): the runner generates a throwaway P-256 key in
---+  its temp space (`openssl`, Lima) in all four serializations and runs the SAME
---+  scan function over each. Positive controls — it DETECTS SEC1-PEM, PKCS#8-PEM,
---+  raw-SEC1-DER, and raw-PKCS#8-DER (each a `[selftest PASS] detects …` line).
---+  Negative controls — it stays CLEAN on (i) a real P-256 public cert AFTER the
---+  cert-excision step (proving excision does not blind the scan to a key) and
---+  (ii) 4 KiB of `openssl rand` ciphertext-sized bytes (each a
---+  `[selftest PASS] clean on …` line). The self-test is a HARD GATE: any
---+  positive-control miss or negative-control false-match fails the runner
---+  (non-zero exit) before the production scan ever runs. The throwaway key never
---+  touches the real IntentStore.
--- 
--- `satisfied` requires sub-claims 1–3 on a Lima run, reviewed adversarially for
--- "did the byte-scan actually run against the real on-disk file, or narrate it?"
---@@ -87,17 +95,28 @@ its random scalar:
--- 
--- ## Evidence
--- 
----Executed through `harness/run-expectation.sh D01` at SHA `fc276c70` in Lima
----(real kernel, real redb), `executed_in_lima: true`, `runner_exit_code: 0`. The
----working tree carries only untracked externals (`AGENTS.md`, the `deliver/` DES
----artifacts) plus the just-written `evidence/` of this very capture, so the
----harness records `working_tree_dirty: true`; no *tracked source* is modified.
----#215 wired `boot_ca` into `run_server`, so first boot now generates + KEK-seals
----+ persists the root to the on-disk IntentStore. The runner drives the BUILT
----`overdrive serve` binary BLACK-BOX (no `overdrive-*` crate linked) and runs the
----strengthened structural byte-scan (armor + raw-DER OID runs, certs excised) over
----the on-disk `intent.redb`:
----
---+Executed through `harness/run-expectation.sh D01` in Lima (real kernel, real
---+redb), `executed_in_lima: true`, `runner_exit_code: 0`. The working tree at
---+capture carries only the in-flight verification work for this step (this
---+expectation's `runner.sh` + `README.md`, the O04 `README.md`, and the
---+just-written `evidence/`) plus untracked externals (`AGENTS.md`, the `deliver/`
---+DES artifacts) — **no tracked `.rs`/production source is modified** (proven by
---+the retained `evidence/dirty-status.txt` artifact, NOT narrated). #215 wired
---+`boot_ca` into `run_server`, so first boot now generates + KEK-seals + persists
---+the root to the on-disk IntentStore. The runner drives the BUILT `overdrive
---+serve` binary BLACK-BOX (no `overdrive-*` crate linked).
---+
---+First, an **inline non-vacuity self-test** runs (printed to `run.log`) — it
---+generates a throwaway P-256 key in temp space and proves the byte-scan DETECTS
---+all four plaintext serializations and stays CLEAN on benign inputs; it is a
---+hard gate that aborts the runner on any miss/false-match. Then the SAME
---+strengthened structural byte-scan (armor + raw-DER OID runs, certs excised)
---+runs over the real on-disk `intent.redb`:
---+
---+- Self-test — **PASS**: `[selftest PASS] detects SEC1-PEM / PKCS8-PEM /
---+  raw-SEC1-DER / raw-PKCS8-DER` (4/4 positive controls) and `[selftest PASS]
---+  clean on public-cert-post-excision / random-ciphertext-sized-bytes` (2/2
---+  negative controls) → `scan proven non-vacuous`.
--- - Sub-claim 1 — **PASS**: zero plaintext private-key markers on disk
---   (`PEM-armor=0 DER-OID-runs=0`, after excising the public certificate PEM).
--- - Sub-claim 2 — **PASS**: the sealed root-key envelope is present
---diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
---index afb2e984..acf1a639 100755
------ a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
---+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
---@@ -66,23 +66,14 @@ serve() { # <timeout_secs>
--- 
--- rc=0
--- 
----# --- First boot: generate + seal + persist the root. -------------------------
----serve 25
----if [ ! -f "$INTENT" ]; then
----  echo "  [FAIL] first boot did not persist $INTENT"
----  sed -n "1,40p" "$WORK/serve.out"
----  rm -rf "$WORK"; exit 1
----fi
----echo "  [PASS] first boot persisted the IntentStore at $INTENT"
----
----# Scan the on-disk IntentStore for plaintext-private-key markers. Binary-safe,
----# single pass in Python (grep -c on a binary blob mis-counts: exit-code-on-zero
----# and newline-framing both corrupt the tally). Excise CERTIFICATE PEM blocks
----# FIRST — a P-256 public cert legitimately carries the curve OID in its
----# SubjectPublicKeyInfo, so the OID scan must not fire on it; a leaked raw-DER
----# private key lives in the redb VALUE bytes OUTSIDE any CERTIFICATE PEM block,
----# so excision never hides it. Echoes "<armor_count> <der_oid_run_count>".
----scan_plaintext_key() { # <redb_path>
---+# The scan function the whole expectation rests on. Defined ONCE here so the
---+# inline self-test below and the production scan further down exercise the
---+# SAME code. Binary-safe single pass in Python (grep -c on a binary blob
---+# mis-counts). Excises CERTIFICATE PEM blocks FIRST — a P-256 public cert
---+# legitimately carries the curve OID in its SubjectPublicKeyInfo, so the OID
---+# scan must not fire on it; a leaked raw-DER private key lives OUTSIDE any
---+# CERTIFICATE block, so excision never hides it. Echoes "<armor> <der_oid_runs>".
---+scan_plaintext_key() { # <path>
---   python3 - "$1" <<"PY"
--- import sys, re
--- b = open(sys.argv[1], "rb").read()
---@@ -100,6 +91,85 @@ print("%d %d" % (armor, oid_pub + oid_curve))
--- PY
--- }
--- 
---+# scan_hits <path> -> echoes total marker count (armor + der-oid-runs), 0 = clean.
---+scan_hits() { # <path>
---+  read -r a o <<<"$(scan_plaintext_key "$1")"
---+  echo $(( a + o ))
---+}
---+
---+# === INLINE NON-VACUITY SELF-TEST (printed to run.log) =======================
---+# Before trusting a CLEAN result on the production IntentStore, PROVE the scan
---+# is non-vacuous RIGHT HERE: it must DETECT a real plaintext P-256 key in all
---+# four serializations, and stay CLEAN on benign inputs (a real public cert
---+# post-excision, and high-entropy random bytes). A throwaway key is generated
---+# in this temp space only and NEVER touches the real IntentStore. openssl is
---+# available in Lima. If ANY positive control fails to detect, or ANY negative
---+# control falsely matches, the self-test FAILS the runner (hard gate).
---+echo "  --- non-vacuity self-test: prove the byte-scan detects real keys ---"
---+ST="$WORK/selftest"; mkdir -p "$ST"
---+selftest_fail=0
---+
---+# Throwaway P-256 key (SEC1 PEM), then derive the other three serializations.
---+openssl ecparam -name prime256v1 -genkey -noout -out "$ST/sec1.pem" 2>/dev/null
---+openssl pkcs8 -topk8 -nocrypt -in "$ST/sec1.pem" -out "$ST/pkcs8.pem" 2>/dev/null
---+openssl ec    -in "$ST/sec1.pem"  -outform DER -out "$ST/sec1.der"  2>/dev/null
---+openssl pkcs8 -topk8 -nocrypt -in "$ST/sec1.pem" -outform DER -out "$ST/pkcs8.der" 2>/dev/null
---+
---+# Positive controls — the scan MUST report a non-zero marker count for each form.
---+for form in sec1.pem:SEC1-PEM pkcs8.pem:PKCS8-PEM sec1.der:raw-SEC1-DER pkcs8.der:raw-PKCS8-DER; do
---+  file="${form%%:*}"; name="${form##*:}"
---+  hits="$(scan_hits "$ST/$file")"
---+  if [ "$hits" -gt 0 ]; then
---+    echo "  [selftest PASS] detects $name (markers=$hits)"
---+  else
---+    echo "  [selftest FAIL] scan BLIND to $name (markers=0) — scan is vacuous"; selftest_fail=1
---+  fi
---+done
---+
---+# Negative control (i): a REAL P-256 PUBLIC cert, AFTER cert excision, must scan
---+# CLEAN — proving excision does not blind the scan to a key (the key is outside
---+# CERT blocks; the cert merely advertises its curve and is legitimately excised).
---+openssl req -x509 -new -key "$ST/sec1.pem" -days 1 -subj "/CN=selftest" \
---+  -out "$ST/cert.pem" 2>/dev/null
---+cert_hits="$(scan_hits "$ST/cert.pem")"
---+if [ "$cert_hits" -eq 0 ]; then
---+  echo "  [selftest PASS] clean on public-cert-post-excision (markers=0)"
---+else
---+  echo "  [selftest FAIL] scan fired on a public cert (markers=$cert_hits) — excision broken / false-positive"; selftest_fail=1
---+fi
---+
---+# Negative control (ii): high-entropy random bytes (ciphertext-sized) must scan
---+# CLEAN — proving the OID runs do not appear by accident in sealed-envelope-like
---+# data.
---+openssl rand 4096 > "$ST/random.bin" 2>/dev/null
---+rand_hits="$(scan_hits "$ST/random.bin")"
---+if [ "$rand_hits" -eq 0 ]; then
---+  echo "  [selftest PASS] clean on random-ciphertext-sized-bytes (markers=0)"
---+else
---+  echo "  [selftest FAIL] scan fired on random bytes (markers=$rand_hits) — false-positive"; selftest_fail=1
---+fi
---+
---+if [ "$selftest_fail" -ne 0 ]; then
---+  echo "  [FAIL] non-vacuity self-test FAILED — scan cannot be trusted; aborting"
---+  rm -rf "$WORK"; exit 1
---+fi
---+echo "  [PASS] scan proven non-vacuous (4/4 detected, 2/2 benign clean)"
---+rm -rf "$ST"
---+# === end self-test ===========================================================
---+
---+# --- First boot: generate + seal + persist the root. -------------------------
---+serve 25
---+if [ ! -f "$INTENT" ]; then
---+  echo "  [FAIL] first boot did not persist $INTENT"
---+  sed -n "1,40p" "$WORK/serve.out"
---+  rm -rf "$WORK"; exit 1
---+fi
---+echo "  [PASS] first boot persisted the IntentStore at $INTENT"
---+
---+# Production byte-scan: now that the scan is proven non-vacuous above, scan the
---+# REAL on-disk IntentStore for plaintext-private-key markers.
---+echo "  --- production IntentStore scan (scan proven non-vacuous above) ---"
---+
--- # Sub-claim 1 — zero plaintext private-key markers (armored OR raw-DER) on disk.
--- read -r armor1 oid1 <<<"$(scan_plaintext_key "$INTENT")"
--- if [ "$armor1" -gt 0 ] || [ "$oid1" -gt 0 ]; then
---diff --git a/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md b/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
---index 7a4c5fc1..f213e844 100644
------ a/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
---+++ b/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
---@@ -1,6 +1,6 @@
--- # O04 — Control plane refuses to start on root-key decrypt failure with an actionable error
--- 
----**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (awaiting different-fox review)
---+**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `satisfied`
--- 
--- ## Expectation
--- 
---@@ -90,10 +90,32 @@ The gated integration tests in `ca_boot_and_audit.rs` (S-02-06/07) plus the new
--- `run_server`) prove the refuse-to-start in-tree; this expectation captures the
--- operator-visible stderr quality through the wired binary.
--- 
----**Status gate**: this evidence is `evidence-captured`, NOT `satisfied`. Per
----`.claude/rules/verification.md` § "the different fox audit", the authoring agent
----MUST NOT self-stamp `satisfied`. A SEPARATE `*-reviewer` (Haiku) agent must read
----`evidence/run.log` + `evidence/verification.yaml` adversarially and confirm
----sub-claims 1–4 + pairwise-distinctness before the status is set to `satisfied`.
----The orchestrator dispatches that review (the DELIVER subagent could not
----self-dispatch it).
---+## Different-fox review
---+
---+- **Reviewer:** `nw-software-crafter-reviewer` (Haiku) — a SEPARATE agent from
---+  the one that authored the implementation, the runner, and the evidence. The
---+  authoring agent did **not** self-stamp `satisfied`.
---+- **Verdict:** CONFIRMED.
---+- **SHA reviewed:** `5f4ca915` (evidence committed at `b2cc8e99`).
---+- **Date:** 2026-06-10.
---+- **Mode:** read-only over `evidence/run.log` + `evidence/verification.yaml`
---+  (the evidence, never the code that produced it), per
---+  `.claude/rules/verification.md` § "the different fox audit".
---+
---+All four sub-claims demonstrated:
---+
---+1. **Wrong-KEK / tampered-envelope / absent-KEK each refuse to start** with a
---+   non-zero exit and a **pairwise-distinct, actionable** stderr — each names
---+   the redb IntentStore path and the actual cause (malformed/decode vs AES-GCM
---+   auth-failure vs no-KEK-registered).
---+2. **No silent re-mint** — the persisted root cert hash `ef83f495…` is
---+   byte-stable across the refused → recovered boots; re-supplying the correct
---+   KEK adopts the SAME root.
---+3. **Fresh session keyring per boot** (`keyctl session -`) so the production
---+   keyring KEK cache cannot leak across boots and mask a refusal.
---+4. **Black-box** (no `overdrive-*` crate linked), `executed_in_lima: true`,
---+   `runner_exit_code: 0`.
---+
---+Status set to `satisfied` by the orchestrator on the strength of the CONFIRMED
---+different-fox verdict above. No re-capture was needed — the evidence committed
---+at `b2cc8e99` is the reviewed artifact.
--diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
--index d9b8ccfc..6f8ba9d3 100644
----- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
--+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
--@@ -1,6 +1,3 @@
--- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
--- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
--- M verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
--+ M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
-- ?? AGENTS.md
-- ?? docs/feature/built-in-ca-operator-composition/deliver/
---?? verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+-@@ -1,258 +0,0 @@
+--diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
+--index 116124b6..e69de29b 100644
+----- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
+--+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-diff.patch
+--@@ -1,241 +0,0 @@
+---diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
+---index ed33e261..07d3c78a 100644
+------ a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
+---+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
+---@@ -76,10 +76,18 @@ its random scalar:
+---   the remainder — a leaked raw-DER private key lives in the redb VALUE bytes
+---   outside any CERTIFICATE block, so excision never hides it.
+--- 
+----  The scan is proven non-vacuous: against real `openssl`-generated P-256 keys
+----  it DETECTS SEC1-PEM, PKCS#8-PEM, raw-SEC1-DER, and raw-PKCS#8-DER, while a
+----  public cert (post-excision) and 4 KiB of `os.urandom` ciphertext both scan
+----  CLEAN.
+---+  The scan is proven non-vacuous **inline in the runner** (so `run.log` shows
+---+  it, not narrated out-of-band): the runner generates a throwaway P-256 key in
+---+  its temp space (`openssl`, Lima) in all four serializations and runs the SAME
+---+  scan function over each. Positive controls — it DETECTS SEC1-PEM, PKCS#8-PEM,
+---+  raw-SEC1-DER, and raw-PKCS#8-DER (each a `[selftest PASS] detects …` line).
+---+  Negative controls — it stays CLEAN on (i) a real P-256 public cert AFTER the
+---+  cert-excision step (proving excision does not blind the scan to a key) and
+---+  (ii) 4 KiB of `openssl rand` ciphertext-sized bytes (each a
+---+  `[selftest PASS] clean on …` line). The self-test is a HARD GATE: any
+---+  positive-control miss or negative-control false-match fails the runner
+---+  (non-zero exit) before the production scan ever runs. The throwaway key never
+---+  touches the real IntentStore.
+--- 
+--- `satisfied` requires sub-claims 1–3 on a Lima run, reviewed adversarially for
+--- "did the byte-scan actually run against the real on-disk file, or narrate it?"
+---@@ -87,17 +95,28 @@ its random scalar:
+--- 
+--- ## Evidence
+--- 
+----Executed through `harness/run-expectation.sh D01` at SHA `fc276c70` in Lima
+----(real kernel, real redb), `executed_in_lima: true`, `runner_exit_code: 0`. The
+----working tree carries only untracked externals (`AGENTS.md`, the `deliver/` DES
+----artifacts) plus the just-written `evidence/` of this very capture, so the
+----harness records `working_tree_dirty: true`; no *tracked source* is modified.
+----#215 wired `boot_ca` into `run_server`, so first boot now generates + KEK-seals
+----+ persists the root to the on-disk IntentStore. The runner drives the BUILT
+----`overdrive serve` binary BLACK-BOX (no `overdrive-*` crate linked) and runs the
+----strengthened structural byte-scan (armor + raw-DER OID runs, certs excised) over
+----the on-disk `intent.redb`:
+----
+---+Executed through `harness/run-expectation.sh D01` in Lima (real kernel, real
+---+redb), `executed_in_lima: true`, `runner_exit_code: 0`. The working tree at
+---+capture carries only the in-flight verification work for this step (this
+---+expectation's `runner.sh` + `README.md`, the O04 `README.md`, and the
+---+just-written `evidence/`) plus untracked externals (`AGENTS.md`, the `deliver/`
+---+DES artifacts) — **no tracked `.rs`/production source is modified** (proven by
+---+the retained `evidence/dirty-status.txt` artifact, NOT narrated). #215 wired
+---+`boot_ca` into `run_server`, so first boot now generates + KEK-seals + persists
+---+the root to the on-disk IntentStore. The runner drives the BUILT `overdrive
+---+serve` binary BLACK-BOX (no `overdrive-*` crate linked).
+---+
+---+First, an **inline non-vacuity self-test** runs (printed to `run.log`) — it
+---+generates a throwaway P-256 key in temp space and proves the byte-scan DETECTS
+---+all four plaintext serializations and stays CLEAN on benign inputs; it is a
+---+hard gate that aborts the runner on any miss/false-match. Then the SAME
+---+strengthened structural byte-scan (armor + raw-DER OID runs, certs excised)
+---+runs over the real on-disk `intent.redb`:
+---+
+---+- Self-test — **PASS**: `[selftest PASS] detects SEC1-PEM / PKCS8-PEM /
+---+  raw-SEC1-DER / raw-PKCS8-DER` (4/4 positive controls) and `[selftest PASS]
+---+  clean on public-cert-post-excision / random-ciphertext-sized-bytes` (2/2
+---+  negative controls) → `scan proven non-vacuous`.
+--- - Sub-claim 1 — **PASS**: zero plaintext private-key markers on disk
+---   (`PEM-armor=0 DER-OID-runs=0`, after excising the public certificate PEM).
+--- - Sub-claim 2 — **PASS**: the sealed root-key envelope is present
+---diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+---index afb2e984..acf1a639 100755
+------ a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+---+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+---@@ -66,23 +66,14 @@ serve() { # <timeout_secs>
+--- 
+--- rc=0
+--- 
+----# --- First boot: generate + seal + persist the root. -------------------------
+----serve 25
+----if [ ! -f "$INTENT" ]; then
+----  echo "  [FAIL] first boot did not persist $INTENT"
+----  sed -n "1,40p" "$WORK/serve.out"
+----  rm -rf "$WORK"; exit 1
+----fi
+----echo "  [PASS] first boot persisted the IntentStore at $INTENT"
+----
+----# Scan the on-disk IntentStore for plaintext-private-key markers. Binary-safe,
+----# single pass in Python (grep -c on a binary blob mis-counts: exit-code-on-zero
+----# and newline-framing both corrupt the tally). Excise CERTIFICATE PEM blocks
+----# FIRST — a P-256 public cert legitimately carries the curve OID in its
+----# SubjectPublicKeyInfo, so the OID scan must not fire on it; a leaked raw-DER
+----# private key lives in the redb VALUE bytes OUTSIDE any CERTIFICATE PEM block,
+----# so excision never hides it. Echoes "<armor_count> <der_oid_run_count>".
+----scan_plaintext_key() { # <redb_path>
+---+# The scan function the whole expectation rests on. Defined ONCE here so the
+---+# inline self-test below and the production scan further down exercise the
+---+# SAME code. Binary-safe single pass in Python (grep -c on a binary blob
+---+# mis-counts). Excises CERTIFICATE PEM blocks FIRST — a P-256 public cert
+---+# legitimately carries the curve OID in its SubjectPublicKeyInfo, so the OID
+---+# scan must not fire on it; a leaked raw-DER private key lives OUTSIDE any
+---+# CERTIFICATE block, so excision never hides it. Echoes "<armor> <der_oid_runs>".
+---+scan_plaintext_key() { # <path>
+---   python3 - "$1" <<"PY"
+--- import sys, re
+--- b = open(sys.argv[1], "rb").read()
+---@@ -100,6 +91,85 @@ print("%d %d" % (armor, oid_pub + oid_curve))
+--- PY
+--- }
+--- 
+---+# scan_hits <path> -> echoes total marker count (armor + der-oid-runs), 0 = clean.
+---+scan_hits() { # <path>
+---+  read -r a o <<<"$(scan_plaintext_key "$1")"
+---+  echo $(( a + o ))
+---+}
+---+
+---+# === INLINE NON-VACUITY SELF-TEST (printed to run.log) =======================
+---+# Before trusting a CLEAN result on the production IntentStore, PROVE the scan
+---+# is non-vacuous RIGHT HERE: it must DETECT a real plaintext P-256 key in all
+---+# four serializations, and stay CLEAN on benign inputs (a real public cert
+---+# post-excision, and high-entropy random bytes). A throwaway key is generated
+---+# in this temp space only and NEVER touches the real IntentStore. openssl is
+---+# available in Lima. If ANY positive control fails to detect, or ANY negative
+---+# control falsely matches, the self-test FAILS the runner (hard gate).
+---+echo "  --- non-vacuity self-test: prove the byte-scan detects real keys ---"
+---+ST="$WORK/selftest"; mkdir -p "$ST"
+---+selftest_fail=0
+---+
+---+# Throwaway P-256 key (SEC1 PEM), then derive the other three serializations.
+---+openssl ecparam -name prime256v1 -genkey -noout -out "$ST/sec1.pem" 2>/dev/null
+---+openssl pkcs8 -topk8 -nocrypt -in "$ST/sec1.pem" -out "$ST/pkcs8.pem" 2>/dev/null
+---+openssl ec    -in "$ST/sec1.pem"  -outform DER -out "$ST/sec1.der"  2>/dev/null
+---+openssl pkcs8 -topk8 -nocrypt -in "$ST/sec1.pem" -outform DER -out "$ST/pkcs8.der" 2>/dev/null
+---+
+---+# Positive controls — the scan MUST report a non-zero marker count for each form.
+---+for form in sec1.pem:SEC1-PEM pkcs8.pem:PKCS8-PEM sec1.der:raw-SEC1-DER pkcs8.der:raw-PKCS8-DER; do
+---+  file="${form%%:*}"; name="${form##*:}"
+---+  hits="$(scan_hits "$ST/$file")"
+---+  if [ "$hits" -gt 0 ]; then
+---+    echo "  [selftest PASS] detects $name (markers=$hits)"
+---+  else
+---+    echo "  [selftest FAIL] scan BLIND to $name (markers=0) — scan is vacuous"; selftest_fail=1
+---+  fi
+---+done
+---+
+---+# Negative control (i): a REAL P-256 PUBLIC cert, AFTER cert excision, must scan
+---+# CLEAN — proving excision does not blind the scan to a key (the key is outside
+---+# CERT blocks; the cert merely advertises its curve and is legitimately excised).
+---+openssl req -x509 -new -key "$ST/sec1.pem" -days 1 -subj "/CN=selftest" \
+---+  -out "$ST/cert.pem" 2>/dev/null
+---+cert_hits="$(scan_hits "$ST/cert.pem")"
+---+if [ "$cert_hits" -eq 0 ]; then
+---+  echo "  [selftest PASS] clean on public-cert-post-excision (markers=0)"
+---+else
+---+  echo "  [selftest FAIL] scan fired on a public cert (markers=$cert_hits) — excision broken / false-positive"; selftest_fail=1
+---+fi
+---+
+---+# Negative control (ii): high-entropy random bytes (ciphertext-sized) must scan
+---+# CLEAN — proving the OID runs do not appear by accident in sealed-envelope-like
+---+# data.
+---+openssl rand 4096 > "$ST/random.bin" 2>/dev/null
+---+rand_hits="$(scan_hits "$ST/random.bin")"
+---+if [ "$rand_hits" -eq 0 ]; then
+---+  echo "  [selftest PASS] clean on random-ciphertext-sized-bytes (markers=0)"
+---+else
+---+  echo "  [selftest FAIL] scan fired on random bytes (markers=$rand_hits) — false-positive"; selftest_fail=1
+---+fi
+---+
+---+if [ "$selftest_fail" -ne 0 ]; then
+---+  echo "  [FAIL] non-vacuity self-test FAILED — scan cannot be trusted; aborting"
+---+  rm -rf "$WORK"; exit 1
+---+fi
+---+echo "  [PASS] scan proven non-vacuous (4/4 detected, 2/2 benign clean)"
+---+rm -rf "$ST"
+---+# === end self-test ===========================================================
+---+
+---+# --- First boot: generate + seal + persist the root. -------------------------
+---+serve 25
+---+if [ ! -f "$INTENT" ]; then
+---+  echo "  [FAIL] first boot did not persist $INTENT"
+---+  sed -n "1,40p" "$WORK/serve.out"
+---+  rm -rf "$WORK"; exit 1
+---+fi
+---+echo "  [PASS] first boot persisted the IntentStore at $INTENT"
+---+
+---+# Production byte-scan: now that the scan is proven non-vacuous above, scan the
+---+# REAL on-disk IntentStore for plaintext-private-key markers.
+---+echo "  --- production IntentStore scan (scan proven non-vacuous above) ---"
+---+
+--- # Sub-claim 1 — zero plaintext private-key markers (armored OR raw-DER) on disk.
+--- read -r armor1 oid1 <<<"$(scan_plaintext_key "$INTENT")"
+--- if [ "$armor1" -gt 0 ] || [ "$oid1" -gt 0 ]; then
+---diff --git a/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md b/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
+---index 7a4c5fc1..f213e844 100644
+------ a/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
+---+++ b/verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
+---@@ -1,6 +1,6 @@
+--- # O04 — Control plane refuses to start on root-key decrypt failure with an actionable error
+--- 
+----**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (awaiting different-fox review)
+---+**Surface:** O (operator CLI) · **KPI:** K3 (guardrail) · **Status:** `satisfied`
+--- 
+--- ## Expectation
+--- 
+---@@ -90,10 +90,32 @@ The gated integration tests in `ca_boot_and_audit.rs` (S-02-06/07) plus the new
+--- `run_server`) prove the refuse-to-start in-tree; this expectation captures the
+--- operator-visible stderr quality through the wired binary.
+--- 
+----**Status gate**: this evidence is `evidence-captured`, NOT `satisfied`. Per
+----`.claude/rules/verification.md` § "the different fox audit", the authoring agent
+----MUST NOT self-stamp `satisfied`. A SEPARATE `*-reviewer` (Haiku) agent must read
+----`evidence/run.log` + `evidence/verification.yaml` adversarially and confirm
+----sub-claims 1–4 + pairwise-distinctness before the status is set to `satisfied`.
+----The orchestrator dispatches that review (the DELIVER subagent could not
+----self-dispatch it).
+---+## Different-fox review
+---+
+---+- **Reviewer:** `nw-software-crafter-reviewer` (Haiku) — a SEPARATE agent from
+---+  the one that authored the implementation, the runner, and the evidence. The
+---+  authoring agent did **not** self-stamp `satisfied`.
+---+- **Verdict:** CONFIRMED.
+---+- **SHA reviewed:** `5f4ca915` (evidence committed at `b2cc8e99`).
+---+- **Date:** 2026-06-10.
+---+- **Mode:** read-only over `evidence/run.log` + `evidence/verification.yaml`
+---+  (the evidence, never the code that produced it), per
+---+  `.claude/rules/verification.md` § "the different fox audit".
+---+
+---+All four sub-claims demonstrated:
+---+
+---+1. **Wrong-KEK / tampered-envelope / absent-KEK each refuse to start** with a
+---+   non-zero exit and a **pairwise-distinct, actionable** stderr — each names
+---+   the redb IntentStore path and the actual cause (malformed/decode vs AES-GCM
+---+   auth-failure vs no-KEK-registered).
+---+2. **No silent re-mint** — the persisted root cert hash `ef83f495…` is
+---+   byte-stable across the refused → recovered boots; re-supplying the correct
+---+   KEK adopts the SAME root.
+---+3. **Fresh session keyring per boot** (`keyctl session -`) so the production
+---+   keyring KEK cache cannot leak across boots and mask a refusal.
+---+4. **Black-box** (no `overdrive-*` crate linked), `executed_in_lima: true`,
+---+   `runner_exit_code: 0`.
+---+
+---+Status set to `satisfied` by the orchestrator on the strength of the CONFIRMED
+---+different-fox verdict above. No re-capture was needed — the evidence committed
+---+at `b2cc8e99` is the reviewed artifact.
+--diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+--index d9b8ccfc..6f8ba9d3 100644
+----- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+--+++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+--@@ -1,6 +1,3 @@
+--- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
+--- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+--- M verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
+--+ M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+-- ?? AGENTS.md
+-- ?? docs/feature/built-in-ca-operator-composition/deliver/
+---?? verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+index 6f8ba9d3..f6787abd 100644
+--- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
++++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+@@ -1,3 +1,5 @@
++ M crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs
+  M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
++ M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+ ?? AGENTS.md
+ ?? docs/feature/built-in-ca-operator-composition/deliver/
+diff --git a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+index acf1a639..571f3a6c 100755
+--- a/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
++++ b/verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+@@ -57,11 +57,12 @@ KEK_ID="overdrive-ca-root"
+ INTENT="$DATA/intent.redb"
+ head -c 32 /dev/zero | tr "\0" "\\377" > "$CREDS/$KEK_ID"   # 32 raw bytes (0xFF)
+ 
+-serve() { # <timeout_secs>
++serve() { # <timeout_secs> <out_file> -> echoes the exit code
+   CREDENTIALS_DIRECTORY="$CREDS" OVERDRIVE_CONFIG_DIR="$CONF" \
+     timeout --preserve-status -s INT "${1}s" \
+     cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA" \
+-    >> "$WORK/serve.out" 2>&1 || true
++    > "$2" 2>&1
++  echo $?
+ }
+ 
+ rc=0
+@@ -97,6 +98,30 @@ scan_hits() { # <path>
+   echo $(( a + o ))
+ }
+ 
++# root_serials <redb_path> -> the sorted serial(s) of every persisted CERTIFICATE
++# PEM block, one per line (empty if none). This is the black-box root-IDENTITY
++# witness for the restart sub-claim: a silent re-mint replaces the root keypair,
++# which produces a NEW cert with a NEW serial, so a serial set that is unchanged
++# across restart proves the SAME root was decrypted + adopted (S-OC-07
++# "identical serial across restart"). openssl is available in Lima (the
++# non-vacuity self-test below uses it).
++root_serials() { # <redb_path>
++  local f="$1" tmp; tmp="$(mktemp -d)"
++  python3 - "$f" "$tmp" <<"PY"
++import sys, re
++b = open(sys.argv[1], "rb").read()
++outdir = sys.argv[2]
++blocks = re.findall(rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", b, re.S)
++for n, blk in enumerate(blocks):
++    open("%s/c%d.pem" % (outdir, n), "wb").write(blk)
++PY
++  for c in "$tmp"/c*.pem; do
++    [ -e "$c" ] || continue
++    openssl x509 -in "$c" -noout -serial 2>/dev/null
++  done | sort
++  rm -rf "$tmp"
++}
++
+ # === INLINE NON-VACUITY SELF-TEST (printed to run.log) =======================
+ # Before trusting a CLEAN result on the production IntentStore, PROVE the scan
+ # is non-vacuous RIGHT HERE: it must DETECT a real plaintext P-256 key in all
+@@ -158,13 +183,22 @@ rm -rf "$ST"
+ # === end self-test ===========================================================
+ 
+ # --- First boot: generate + seal + persist the root. -------------------------
+-serve 25
++boot1_rc="$(serve 25 "$WORK/boot1.out")"
+ if [ ! -f "$INTENT" ]; then
+-  echo "  [FAIL] first boot did not persist $INTENT"
+-  sed -n "1,40p" "$WORK/serve.out"
++  echo "  [FAIL] first boot did not persist $INTENT (rc=$boot1_rc)"
++  sed -n "1,40p" "$WORK/boot1.out"
++  rm -rf "$WORK"; exit 1
++fi
++# Serving witness: `serve::run` logs "control plane listening" ONLY after the
++# listener binds (a refuse-to-start returns Err before it). Confirm first boot
++# actually reached serving, not merely wrote a file then crashed.
++if grep -aq "control plane listening" "$WORK/boot1.out"; then
++  echo "  [PASS] first boot persisted the IntentStore at $INTENT and reached serving"
++else
++  echo "  [FAIL] first boot persisted $INTENT but never reached serving (rc=$boot1_rc)"
++  sed -n "1,40p" "$WORK/boot1.out"
+   rm -rf "$WORK"; exit 1
+ fi
+-echo "  [PASS] first boot persisted the IntentStore at $INTENT"
+ 
+ # Production byte-scan: now that the scan is proven non-vacuous above, scan the
+ # REAL on-disk IntentStore for plaintext-private-key markers.
+@@ -186,13 +220,43 @@ else
+   echo "  [FAIL] sub-claim 2: no sealed root-key envelope present"; rc=1
+ fi
+ 
+-# --- Restart (decrypt + adopt the SAME root), re-scan. -----------------------
+-serve 25
++# --- Restart: a FRESH process must DECRYPT the sealed envelope, ADOPT the SAME
++# root (the boot-1 in-memory CA is gone), REACH SERVING, and re-mint nothing.
++# A restart that REFUSED to start (failed adopt/decrypt) leaves the on-disk file
++# byte-identical, so a re-scan-only check would still report "no plaintext" and
++# PASS vacuously. Assert the SERVING witness AND a stable root-IDENTITY witness,
++# not just the continued absence of plaintext.
++id_before="$(root_serials "$INTENT")"
++
++restart_rc="$(serve 25 "$WORK/restart.out")"
++
++# Sub-claim 3 — the restart reached serving (decrypt + adopt succeeded).
++if grep -aq "control plane listening" "$WORK/restart.out"; then
++  echo "  [PASS] sub-claim 3: restart decrypted + adopted the root and reached serving (rc=$restart_rc)"
++else
++  echo "  [FAIL] sub-claim 3: restart never reached serving — adopt/decrypt refused (rc=$restart_rc)"; rc=1
++  sed -n "1,40p" "$WORK/restart.out"
++fi
++
++# Sub-claim 4 — the SAME root was adopted, not re-minted: the persisted cert
++# serial(s) are byte-stable across the restart (S-OC-07 "identical serial").
++id_after="$(root_serials "$INTENT")"
++if [ -n "$id_before" ] && [ "$id_before" = "$id_after" ]; then
++  echo "  [PASS] sub-claim 4: restart adopted the SAME root (cert serial(s) stable across restart)"
++  printf "    serial(s): %s\n" "$(printf "%s" "$id_before" | tr "\n" " ")"
++else
++  echo "  [FAIL] sub-claim 4: persisted root cert serial changed across restart (re-mint?)"; rc=1
++  printf "    before: %s\n    after:  %s\n" \
++    "$(printf "%s" "$id_before" | tr "\n" " ")" "$(printf "%s" "$id_after" | tr "\n" " ")"
++fi
++
++# Sub-claim 5 — the guardrail holds across the lifecycle: still no plaintext
++# private-key markers after the decrypt-and-adopt restart.
+ read -r armor2 oid2 <<<"$(scan_plaintext_key "$INTENT")"
+ if [ "$armor2" -gt 0 ] || [ "$oid2" -gt 0 ]; then
+-  echo "  [FAIL] sub-claim 3: plaintext private-key markers appeared after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"; rc=1
++  echo "  [FAIL] sub-claim 5: plaintext private-key markers appeared after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"; rc=1
+ else
+-  echo "  [PASS] sub-claim 3: still zero plaintext private-key markers after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"
++  echo "  [PASS] sub-claim 5: still zero plaintext private-key markers after restart (PEM-armor=$armor2 DER-OID-runs=$oid2)"
+ fi
+ 
+ rm -rf "$WORK"
