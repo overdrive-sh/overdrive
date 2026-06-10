@@ -166,9 +166,11 @@ impl CaIssuanceError {
 ///    monotonic ONLY because `ObservationStore::issued_certificate_rows` is
 ///    never deleted, overwritten, or compacted (exactly one row per distinct
 ///    serial). A future delete/GC path — e.g. Phase-5 revocation pruning
-///    revoked certs — breaks ordinal uniqueness (a delete makes the next
-///    `len()` smaller than a prior ordinal) and MUST re-source the ordinal then
-///    (a persisted monotonic counter a delete cannot rewind, or equivalent).
+///    revoked certs, or an ADR-0007 `TombstoneSweeper` on this table —
+///    breaks ordinal uniqueness (a delete makes the next `len()` smaller
+///    than a prior ordinal) and MUST re-source the ordinal then (a persisted
+///    monotonic counter a delete cannot rewind, or equivalent). Tracked:
+///    overdrive-sh/overdrive#226.
 ///
 /// # Errors
 ///

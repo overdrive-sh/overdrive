@@ -433,15 +433,15 @@ audit-log GC/retention sweep — the append-only invariant is violated, `len()`
 stops being monotonic (a delete makes the next `len()` *smaller* than a prior
 ordinal), and the ordinal becomes **non-unique** — which directly reintroduces
 the equal-`issued_at` stale-cert tie this entire amendment exists to fix.
-Therefore: **Phase-5 revocation MUST address ordinal assignment when it lands**
-(switch the source to a persisted monotonic counter that delete cannot rewind,
-or equivalent) — it cannot remove rows while leaving `len()` as the ordinal
-source. Single-node today this is a non-issue (no delete path exists); the
-constraint is recorded here so the Phase-5 author inherits it rather than
-silently breaking the projection. (This is NOT a deferral requiring a tracking
-issue: it is a precondition on *future* work, not a promise of work this feature
-defers — Phase-5 revocation is its own future scope and owns this when it
-arrives.)
+Therefore: **whatever future work first adds a delete path to
+`issued_certificates` MUST re-source the ordinal** (switch to a persisted
+monotonic counter that a delete cannot rewind, or equivalent) — it cannot remove
+rows while leaving `len()` as the ordinal source. Single-node today this is a
+non-issue (no delete path exists); the constraint is **tracked as
+[overdrive-sh/overdrive#226](https://github.com/overdrive-sh/overdrive/issues/226)**
+so the future author (Phase-5 revocation per whitepaper §8, an ADR-0007
+`TombstoneSweeper` on this table, or audit-log GC) inherits it rather than
+silently breaking the projection.
 
 **TOCTOU note (addressed, not hand-waved).** "Read count, then write" is a
 check-then-act shape (§ "Check-and-act must be atomic"). It is safe HERE because
@@ -610,7 +610,7 @@ issued_cert_rows
   **append-only** precondition (the `len()`-derived ordinal is monotonic only
   because `issued_certificate_rows` is never deleted/overwritten/compacted — a
   future delete path, e.g. Phase-5 revocation, breaks ordinal uniqueness and must
-  re-source the ordinal then).
+  re-source the ordinal then; tracked as overdrive-sh/overdrive#226).
 - **D-3 — the row + fixture (single commit).** Add `issuance_ordinal` to
   `IssuedCertificateRowV1` in place; regenerate `FIXTURE_V1`; re-pin BOTH
   discriminant-offset sources; extend `canonical_v1_payload()`. NO `V2` envelope.
