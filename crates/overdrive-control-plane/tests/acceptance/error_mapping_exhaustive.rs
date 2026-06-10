@@ -277,10 +277,13 @@ fn kek(raw: &str) -> KekId {
 /// (`From`/`?` + `to_response`), never private fields.
 #[test]
 fn ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant() {
-    // The three boot causes the operator must be able to tell apart.
+    // The three CaError-class boot causes the mapping must tell apart. NB:
+    // `WrongKek` (id mismatch) is the rotation guard and is Phase-1-unreachable
+    // by an operator, but it remains a valid `CaError` variant the error-mapping
+    // plumbing must carry distinctly, so it is exercised here for exhaustiveness.
     // absent-KEK     → KekUnavailable
-    // wrong-KEK      → EnvelopeDecrypt(CaError::WrongKek)
-    // tampered       → EnvelopeDecrypt(CaError::TamperedEnvelope)
+    // wrong-KEK      → EnvelopeDecrypt(CaError::WrongKek)         (id mismatch)
+    // auth-failed    → EnvelopeDecrypt(CaError::EnvelopeAuthFailed) (wrong material OR tamper)
     type CauseBuilder = fn() -> CaBootError;
     let causes: [(&str, CauseBuilder); 3] = [
         ("absent-kek", || CaBootError::KekUnavailable {
@@ -291,9 +294,9 @@ fn ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant() {
             redb_path: std::path::PathBuf::from("/var/lib/overdrive/intent.redb"),
             source: CaError::wrong_kek(kek("sealed-under-kek"), kek("supplied-kek")),
         }),
-        ("tampered-envelope", || CaBootError::EnvelopeDecrypt {
+        ("envelope-auth-failed", || CaBootError::EnvelopeDecrypt {
             redb_path: std::path::PathBuf::from("/var/lib/overdrive/intent.redb"),
-            source: CaError::tampered_envelope(kek("overdrive-root-kek")),
+            source: CaError::envelope_auth_failed(kek("overdrive-root-kek")),
         }),
     ];
 
@@ -324,23 +327,33 @@ fn ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant() {
         rendered.insert(label, body.message);
     }
 
-    // (b) wrong-KEK and tampered render DIFFERENT cause strings — the two
-    //     are distinct underlying `CaError` variants and must NOT collapse
-    //     to one operator-facing string.
+    // (b) wrong-KEK (id mismatch) and auth-failed render distinct cause CLASSES
+    //     — asserted via each variant's distinctive token, not bare string
+    //     inequality (string `!=` is incidental; the contract is that the
+    //     operator can tell the cause CLASS apart — ADR-0063 D4 / S-OC-08d).
     let wrong = &rendered["wrong-kek"];
-    let tampered = &rendered["tampered-envelope"];
-    assert_ne!(
-        wrong, tampered,
-        "wrong-KEK and tampered-envelope must render distinct cause strings; \
-         both were {wrong:?}",
-    );
+    let auth_failed = &rendered["envelope-auth-failed"];
     assert!(
         wrong.contains("cannot be opened with kek_id"),
-        "wrong-KEK cause string must preserve the KEK-confusion cause; got {wrong:?}",
+        "wrong-KEK cause string must preserve the id-mismatch cause; got {wrong:?}",
     );
     assert!(
-        tampered.contains("corrupt or tampered"),
-        "tampered-envelope cause string must preserve the integrity-failure cause; got {tampered:?}",
+        auth_failed.contains("failed AES-GCM authentication"),
+        "auth-failed cause string must name the AES-GCM auth failure; got {auth_failed:?}",
+    );
+    assert!(
+        auth_failed.contains("wrong OR") && auth_failed.contains("tampered/corrupted"),
+        "auth-failed cause string must name BOTH possibilities (wrong material OR tamper); \
+         got {auth_failed:?}",
+    );
+    // The two render distinct token sets → distinct cause classes.
+    assert!(
+        !auth_failed.contains("cannot be opened with kek_id"),
+        "auth-failed must NOT carry the id-mismatch token; got {auth_failed:?}",
+    );
+    assert!(
+        !wrong.contains("failed AES-GCM authentication"),
+        "wrong-KEK must NOT carry the auth-failure token; got {wrong:?}",
     );
 }
 

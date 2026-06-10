@@ -139,10 +139,14 @@ fn root_key_envelope_contains_no_plaintext_key_bytes() {
 // S-02-03 — tampered ciphertext fails distinct from wrong KEK (US-CA-02)
 // ---------------------------------------------------------------------------
 
-/// `@real-io` `@adapter-integration` `@S-02` `@error` — AEAD tamper
-/// detection: flipping a byte in the sealed ciphertext makes AES-GCM open
-/// FAIL with a `CaError` naming a corrupt/tampered envelope, DISTINCT from
-/// the wrong-KEK error variant (the GCM auth tag distinguishes them).
+/// `@real-io` `@adapter-integration` `@S-02` `@error` — AEAD auth failure:
+/// flipping a byte in the sealed ciphertext (record stays structurally
+/// decodable) makes AES-GCM open FAIL with a `CaError::EnvelopeAuthFailed`,
+/// DISTINCT from the id-mismatch `WrongKek` variant. AEAD cannot tell wrong
+/// KEK *material* from a tampered ciphertext (both are one opaque auth
+/// failure); the only distinguishable case is the plaintext `kek_id` mismatch
+/// (`WrongKek`), checked before crypto (ADR-0063 D4 § "Honest decrypt-failure
+/// cause taxonomy").
 #[test]
 fn root_key_envelope_tampered_ciphertext_fails_distinct_from_wrong_kek() {
     // GIVEN a sealed record under a KEK.
@@ -152,21 +156,23 @@ fn root_key_envelope_tampered_ciphertext_fails_distinct_from_wrong_kek() {
     let codec = RootKeyAeadCodec::new();
     let mut record = codec.seal(&kek, &id, &key_der).expect("seal succeeds");
 
-    // WHEN a single ciphertext byte is flipped (corruption / tamper at rest).
+    // WHEN a single ciphertext byte is flipped (corruption / tamper at rest;
+    // the record still deserializes, so this is an AEAD auth failure, not a
+    // decode failure).
     record.ciphertext[0] ^= 0xFF;
 
-    // THEN opening under the CORRECT KEK fails with the tampered-envelope
-    // variant — integrity failure, NOT KEK-confusion.
+    // THEN opening under the matching-id KEK fails with the auth-failure
+    // variant — wrong material OR tamper, indistinguishable under AEAD.
     let err = codec.open(&kek, &id, &record).expect_err("tampered ciphertext must fail to open");
     assert!(
-        matches!(err, CaError::TamperedEnvelope { .. }),
-        "a tampered ciphertext fails with TamperedEnvelope, got {err:?}"
+        matches!(err, CaError::EnvelopeAuthFailed { .. }),
+        "a tampered ciphertext fails with EnvelopeAuthFailed, got {err:?}"
     );
 
-    // AND that variant is DISTINCT from the wrong-KEK variant.
+    // AND that variant is DISTINCT from the id-mismatch wrong-KEK variant.
     assert!(
         !matches!(err, CaError::WrongKek { .. }),
-        "tampered-envelope must be distinct from wrong-KEK"
+        "envelope-auth-failed must be distinct from wrong-KEK"
     );
 }
 
@@ -175,9 +181,10 @@ fn root_key_envelope_tampered_ciphertext_fails_distinct_from_wrong_kek() {
 // ---------------------------------------------------------------------------
 
 /// `@real-io` `@adapter-integration` `@S-02` `@error` — wrong-KEK path:
-/// opening the sealed record with a DIFFERENT KEK fails with a wrong-KEK
-/// `CaError` variant (distinct from tampered-envelope). AAD = `kek_id` binds
-/// the ciphertext to the KEK identity (defends KEK-confusion).
+/// opening the sealed record with a DIFFERENT-id KEK fails with the `WrongKek`
+/// `CaError` variant (distinct from the auth-failure variant). The id mismatch
+/// is detected before crypto — it is the only distinguishable KEK-confusion
+/// case (ADR-0063 D4). AAD = `kek_id` binds the ciphertext to the KEK identity.
 #[test]
 fn root_key_envelope_wrong_kek_fails_distinct_from_tampered() {
     // GIVEN a record sealed under `kek-root-01`, and a provider that ALSO
@@ -204,10 +211,10 @@ fn root_key_envelope_wrong_kek_fails_distinct_from_tampered() {
         "wrong KEK fails with WrongKek naming both identities, got {err:?}"
     );
 
-    // AND that variant is DISTINCT from the tampered-envelope variant.
+    // AND that variant is DISTINCT from the auth-failure variant.
     assert!(
-        !matches!(err, CaError::TamperedEnvelope { .. }),
-        "wrong-KEK must be distinct from tampered-envelope"
+        !matches!(err, CaError::EnvelopeAuthFailed { .. }),
+        "wrong-KEK must be distinct from envelope-auth-failed"
     );
 }
 
