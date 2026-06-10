@@ -95,7 +95,7 @@ observable surface.
 
 | Port (trait) | Production adapter | Sim adapter | Probe contract (Earned Trust) |
 |---|---|---|---|
-| `Kek` | `SystemdCredsKeyring` (`overdrive-host`) | `SimKek` / fixture | **Probe (a):** `kek.resolve(kek_id)` MUST succeed before any issuance; absence → `CaBootError::KekUnavailable` + `health.startup.refused`, NO throwaway KEK. Already implemented in `boot_ca`. |
+| `Kek` | `SystemdCredsKeyring` (`overdrive-host`) | `SimKek` (`overdrive-sim`) | **Probe (a):** `kek.resolve(kek_id)` MUST succeed before any issuance; absence → `CaBootError::KekUnavailable` + `health.startup.refused`, NO throwaway KEK. Already implemented in `boot_ca`. The hermetic test KEK injected by every `run_server` fixture is `overdrive_sim::adapters::SimKek::for_boot()` — a pure in-process `Kek` double (see § C1-AMEND C-3). |
 | `Ca` | `RcgenCa` (now persistent via `boot_ca` adopt) | `SimCa` / fixture | **Probe (b):** the persisted envelope MUST AES-GCM-open under the resolved KEK; tampered/wrong-KEK → `CaBootError::EnvelopeDecrypt` + `health.startup.refused`, NO silent re-mint (orphans every issued identity). Already implemented in `load_persistent_root` / `load_persistent_intermediate`. |
 | `IntentStore` | `LocalIntentStore` (redb) | `SimIntentStore` | Root-key envelope + public cert material persisted/loaded; the boot path threads `redb_path` so the refuse-to-start remediation names the real file. The production type is `LocalIntentStore` (`crates/overdrive-store-local/src/redb_backend.rs`), opened at the control-plane composition root. |
 | `ObservationStore` | `LocalObservationStore` (Corrosion/CR-SQLite) | `SimObservationStore` | `issued_certificate_rows()` is the append-only audit SSOT the consumer-side aggregates and the `ever_issued` restart signal reads. |
@@ -144,7 +144,7 @@ in the workspace from `built-in-ca` (ADR-0063) and `workload-identity-manager`
 |---|---|---|
 | `ca_boot::boot_ca` + `bootstrap_node_intermediate` | **REUSE AS-IS — only newly called** | Fully implemented in `ca_boot.rs` (KEK probe (a), envelope decrypt-probe (b), generate-or-load, adopt-on-restart, `health.startup.refused`, redb_path-threaded remediation). This feature *calls* it from `run_server` — no signature change, no logic change. Closes D-CA-4. |
 | `SystemdCredsKeyring` (`Kek`) | **REUSE AS-IS** | Production KEK provider (ADR-0063 D3/D6); `SystemdCredsKeyring::new()` reads `$CREDENTIALS_DIRECTORY` at resolve time. **Composed at the CLI `serve` boundary and injected into `ServerConfig.kek`** (C1-AMEND) — NOT constructed inline inside `run_server`. The adapter type itself is unchanged; only its composition site moves outward to the binary boundary so tests inject a hermetic fixture KEK instead of inheriting the production binding. |
-| `SystemdCredsKeyring::with_credentials_dir(dir)` (`Kek`, hermetic test path) | **REUSE AS-IS** | The same adapter type, constructed against a pinned `tempdir` credentials directory + a staged `overdrive-ca-root` credential, is the **hermetic test KEK** injected through `ServerConfig.kek` in fixtures. Already used by `ca_boot_and_audit.rs::stage_kek_credential` (`crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs:67-71`); promote that staging helper to a shared test fixture (see crafter obligations). No adapter change. |
+| `SimKek` (`overdrive-sim`, hermetic test `Kek` double) | **REUSE AS-IS** | `overdrive_sim::adapters::SimKek::for_boot()` — a pure in-process `Kek` test double (`crates/overdrive-sim/src/adapters/kek.rs`; preloads the canonical `overdrive-ca-root` KEK from a `BTreeMap`, no kernel keyring, no `$CREDENTIALS_DIRECTORY`, no FFI) — is the **hermetic test KEK** injected through `ServerConfig.kek` in every `run_server` fixture. A `Kek` fixture is a pure in-process double, so per `.claude/rules/development.md` § "Shared real-infra test fixtures" it belongs with the `Sim*` adapters in `overdrive-sim` (the sim/host split), NOT in `overdrive-testing`. Both consuming crates already dev-dep `overdrive-sim`, so zero new wiring. No adapter change. |
 | `RootKeyAeadCodec` | **REUSE AS-IS** | `RootKeyAeadCodec::new()` over the crypto-backend CSPRNG; `seal`/`open`/`seal_intermediate`. No change. |
 | `root_kek_id()` | **REUSE AS-IS** | `KekId::new("overdrive-ca-root")` — the stable single-node KEK identity. No change. |
 | `Action::IssueSvid` | **REUSE AS-IS (UNCHANGED)** | The rotate path reuses the existing variant with a `"rotate-svid"` correlation purpose — NO new field/flag/variant (honors "never invent API surface"). The `node_id` comes from `running.node_id` already in scope. |
@@ -263,7 +263,7 @@ cfg-gated inside the constructor body exactly as it is inside the current
 
 | Element | Exact shape |
 |---|---|
-| New field | `pub kek: Arc<dyn overdrive_core::ca::kek::Kek>,` on `ServerConfig` (place adjacent to `clock`, with a rustdoc block stating: production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a hermetic `SystemdCredsKeyring::with_credentials_dir(tempdir)` + staged credential; the field is mandatory specifically so a forgotten KEK is a compile error, not a cold-boot refusal — citing development.md § "Port-trait dependencies" and this § C1-AMEND). |
+| New field | `pub kek: Arc<dyn overdrive_core::ca::kek::Kek>,` on `ServerConfig` (place adjacent to `clock`, with a rustdoc block stating: production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a hermetic `overdrive_sim::adapters::SimKek::for_boot()`; the field is mandatory specifically so a forgotten KEK is a compile error, not a cold-boot refusal — citing development.md § "Port-trait dependencies" and this § C1-AMEND). |
 | `Default` impl | **REMOVED** (`impl Default for ServerConfig`, `lib.rs:715-773`). |
 | Constructor | `pub fn ServerConfig::new(kek: Arc<dyn overdrive_core::ca::kek::Kek>) -> Self` — body is the old `Default::default()` body with `kek` taken from the argument. `#[must_use]`. |
 | `Debug` impl | Extend the manual `Debug` (`lib.rs:689-713`) with `.field("kek", &"<dyn Kek>")` (it is `Arc<dyn Kek>`, not `Debug`). |
@@ -293,30 +293,24 @@ These bind the follow-up implementation dispatch. Cite them by id.
   `run_server` / `run_server_with_obs_and_driver` caller across
   `crates/overdrive-control-plane/tests/integration/` and
   `crates/overdrive-control-plane/tests/acceptance/` MUST inject a **hermetic**
-  test KEK: a `SystemdCredsKeyring::with_credentials_dir(tempdir)` provider plus
-  a staged `overdrive-ca-root` credential file (the existing
-  `ca_boot_and_audit.rs::stage_kek_credential` pattern, `crates/
-  overdrive-control-plane/tests/integration/ca_boot_and_audit.rs:67-71`). Do NOT
-  rely on process-global env (`$CREDENTIALS_DIRECTORY` / `OVERDRIVE_CA_KEK`) or
-  the leaked kernel keyring — the fixture must own its KEK material end-to-end so
-  the suite passes on a cold CI VM. **Prefer ONE shared test helper** (e.g.
-  `fn hermetic_test_kek() -> (TempDir, Arc<dyn Kek>)` that creates the tempdir,
-  stages the credential, and returns the keyring as `Arc<dyn Kek>` — keep the
-  `TempDir` alive for the fixture's lifetime) over per-file duplication, per
-  `.claude/rules/development.md` § "Shared real-infra test fixtures". **Placement
-  judgment:** this helper's only consumer is `overdrive-control-plane`'s own
-  integration + acceptance suites (no second crate needs it), so it belongs in a
-  **crate-local** `crates/overdrive-control-plane/tests/integration/helpers/`
-  module (net-new — no `helpers/` tree exists yet), NOT in `overdrive-testing`
-  (which is for fixtures shared across ≥2 crates). If the acceptance suite cannot
-  reach an `integration/`-rooted helper through its module tree, hoist the helper
-  to a sibling location both entrypoints (`tests/integration.rs`,
-  `tests/acceptance.rs`) can `mod`-include; the crafter picks the minimal shape
-  that both suites compile against — but it stays crate-local and is ONE helper,
-  not per-file. The `stage_kek_credential` body in `ca_boot_and_audit.rs` is the
-  promotion source; once the shared helper exists, `ca_boot_and_audit.rs` SHOULD
-  consume it rather than keep its private copy (single SSOT for credential
-  staging).
+  test KEK: `overdrive_sim::adapters::SimKek::for_boot()` as the
+  `Arc<dyn Kek>` — a pure in-process `Kek` test double
+  (`crates/overdrive-sim/src/adapters/kek.rs`) whose `for_boot()` preloads the
+  canonical `overdrive-ca-root` KEK from a `BTreeMap`. It uses no kernel keyring,
+  no `$CREDENTIALS_DIRECTORY`, and no FFI, so the fixture owns its KEK material
+  end-to-end and the suite passes on a cold CI VM. Do NOT rely on process-global
+  env (`$CREDENTIALS_DIRECTORY` / `OVERDRIVE_CA_KEK`) or the leaked kernel
+  keyring — `SimKek` is keyring-independent by construction, which eliminates the
+  leaked-kernel-keyring masking that hid the original regression and stops the
+  fixtures contributing to kernel-keyring key accumulation. **Placement
+  rationale:** a `Kek` fixture is a *pure in-process test double*, so per
+  `.claude/rules/development.md` § "Shared real-infra test fixtures" it belongs
+  with the other `Sim*` adapters in `overdrive-sim` (the sim/host split), NOT in
+  `overdrive-testing` (which is for *real-OS* fixtures) and NOT a crate-local
+  `tests/integration/helpers/` copy. Both consuming crates
+  (`overdrive-control-plane`, `overdrive-cli`) already dev-dep `overdrive-sim`,
+  so injecting `SimKek::for_boot()` is zero new wiring — no shared-helper module,
+  no credential staging, no `TempDir` lifetime to manage.
 
 - **C-4 — corrected gate (RUN, not `--no-run`).** The step's quality gate MUST
   actually execute the `run_server` fixture suite under Lima:
@@ -380,9 +374,10 @@ injection + the **corrected RUN gate**.
   bundle from adopted CA.
 - Compose `SystemdCredsKeyring::new()` at the CLI `serve` boundary
   (`overdrive-cli::commands::serve`) and pass it as `ServerConfig.kek`.
-- Inject a **hermetic** test KEK (shared fixture, see crafter obligations C-3)
-  into EVERY `run_server` / `run_server_with_obs_and_driver` fixture across
-  `tests/integration/` + `tests/acceptance/`.
+- Inject a **hermetic** test KEK (`overdrive_sim::adapters::SimKek::for_boot()`,
+  see crafter obligation C-3) into EVERY `run_server` /
+  `run_server_with_obs_and_driver` fixture across `tests/integration/` +
+  `tests/acceptance/`.
 - Add `ControlPlaneError::CaBoot(#[from] CaBootError)` + exhaustive `to_response`
   arm (boot-path → 500, exhaustiveness-only).
 - **Gate (CORRECTED):** the step MUST actually **RUN** the `run_server` fixture

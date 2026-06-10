@@ -156,9 +156,10 @@ to route the seam through it.
 - `run_server` consumes `config.kek.as_ref()` into `boot_ca` /
   `bootstrap_node_intermediate` (both unchanged). Production composes
   `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a
-  hermetic `SystemdCredsKeyring::with_credentials_dir(tempdir)` + staged
-  `overdrive-ca-root` credential (the existing `ca_boot_and_audit.rs`
-  staging pattern, promoted to a shared crate-local test helper).
+  hermetic `overdrive_sim::adapters::SimKek::for_boot()` — a pure in-process
+  `Kek` test double (`crates/overdrive-sim/src/adapters/kek.rs`) that preloads
+  the canonical `overdrive-ca-root` KEK from a `BTreeMap`, with no kernel
+  keyring, no `$CREDENTIALS_DIRECTORY`, and no FFI.
 
 **Why mandatory — not defaulted, not optional-override.** `ServerConfig`
 carries both idioms (`clock` is defaulted; `dataplane_override` is an
@@ -190,13 +191,17 @@ other field.
 `feature-delta.md` § C1-AMEND: (C-1) production wiring change in `run_server`
 (consume `config.kek`, do not construct inline); (C-2) the `ServerConfig` seam
 (mandatory field, remove `Default`, add `new(kek)`, extend `Debug`); (C-3) the
-hermetic test-KEK obligation for EVERY `run_server` caller via ONE shared
-crate-local helper (promote `ca_boot_and_audit.rs::stage_kek_credential`; place
-in `tests/integration/helpers/`, NOT `overdrive-testing` — single-crate
-consumer); (C-4) the corrected gate — actually **RUN** the fixture suite under
-Lima (`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane
---features integration-tests`), since the original `--no-run`-only gate never
-executes `boot_ca` and so cannot see a cold-boot refusal.
+hermetic test-KEK obligation for EVERY `run_server` caller —
+inject `overdrive_sim::adapters::SimKek::for_boot()` as the `Arc<dyn Kek>` (a
+pure in-process `Kek` double in `overdrive-sim`, keyring-independent by
+construction; per `.claude/rules/development.md` § "Shared real-infra test
+fixtures" a pure in-process double belongs with the `Sim*` adapters, NOT in
+`overdrive-testing` and NOT a crate-local helper — both consuming crates already
+dev-dep `overdrive-sim`, so zero new wiring); (C-4) the corrected gate —
+actually **RUN** the fixture suite under Lima (`cargo xtask lima run -- cargo
+nextest run -p overdrive-control-plane --features integration-tests`), since the
+original `--no-run`-only gate never executes `boot_ca` and so cannot see a
+cold-boot refusal.
 
 **Scope discipline.** This amendment touches ONLY the `Kek` source. `boot_ca` /
 `bootstrap_node_intermediate` / `RootKeyAeadCodec` / `root_kek_id` are
@@ -205,3 +210,21 @@ REUSE-AS-IS; the only new public surface is `ServerConfig.kek` +
 control-plane HTTPS CA (`mint_ephemeral_ca`, `lib.rs:1237`) is unrelated and
 untouched. The `serve_persistent_ca.rs` scaffolds stay `#[ignore]` (later
 runtime slice).
+
+**Test-helper reconciliation (2026-06-10).** The hermetic test-KEK mechanism in
+C-3 was reconciled from the originally-pinned `SystemdCredsKeyring::with_credentials_dir(tempdir)`
++ staged-credential helper (placed crate-local) to
+`overdrive_sim::adapters::SimKek::for_boot()` — a pure in-process `Kek` double
+in `overdrive-sim` (`crates/overdrive-sim/src/adapters/kek.rs`) — as the
+cleaner, keyring-independent choice, sanctioned during DELIVER. Rationale: a
+`Kek` fixture is a pure in-process test double, so per
+`.claude/rules/development.md` § "Shared real-infra test fixtures" it belongs
+with the `Sim*` adapters (the sim/host split), NOT in `overdrive-testing`
+(real-OS fixtures only); `SimKek` is keyring-independent by construction, which
+eliminates the leaked-kernel-keyring masking that hid the original regression and
+stops the fixtures accumulating kernel-keyring keys; and both consuming crates
+already dev-dep `overdrive-sim`, so injection is zero new wiring. **The
+production seam (D-OC-9 above) is unchanged** — mandatory `kek`, `Default`
+removed, `ServerConfig::new(kek)`, production composes
+`SystemdCredsKeyring::new()` at the CLI `serve` boundary, `run_server` consumes
+`config.kek` — only the test-double the suite injects was reconciled.
