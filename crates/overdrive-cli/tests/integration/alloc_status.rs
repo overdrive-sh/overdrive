@@ -24,11 +24,16 @@ use overdrive_cli::render::{
     JobVerdict, format_job_alloc_status_attempts_table, format_job_alloc_status_header,
     format_job_verdict,
 };
-use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, AllocStatusRowBody};
+use overdrive_control_plane::api::{
+    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary,
+};
 use overdrive_core::aggregate::{Listener, WorkloadKind};
 use overdrive_core::dataplane::Proto;
+use overdrive_core::id::{CertSerial, SpiffeId};
+use overdrive_core::wall_clock::UnixInstant;
 use proptest::prelude::*;
 use std::num::NonZeroU16;
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -608,4 +613,246 @@ fn format_job_alloc_status_header_includes_name_kind_digest() {
     assert!(rendered.contains("kind: Job"));
     assert!(rendered.contains("abc123def456"));
     assert!(rendered.contains("Verdict: Failed (backoff exhausted)"));
+}
+
+// ---------------------------------------------------------------------------
+// S-OC-11 + S-OC-12 — issued-certificate summary render
+// (built-in-ca-operator-composition Slice 3, EDD O05; relocated from the
+// misplaced control-plane scaffold per the user-approved placement
+// correction — the render driving port `alloc_status_kind_aware` cannot be
+// reached from a crate `overdrive-cli` depends on).
+//
+// Driving port = `overdrive_cli::render::alloc_status_kind_aware` called
+// in-process over a constructed `AllocStatusResponse` whose additive
+// `issued_certificates` field (landed in 03-01) carries `IssuedCertSummary`
+// FACTS only — NO cert PEM/DER bytes, NO private key (ADR-0067
+// #215-boundary). The render must surface `serial / spiffe_id /
+// issuer_serial / not_after` via their `Display` impls and must never
+// reconstruct or print any cert material.
+//
+// O05 ≠ E03: these capture operator-legible audit metadata at the render
+// layer. The "matches the minted cert" end-to-end is the server-projection
+// concern landed in 03-01; at the render layer, faithful display of the
+// provided serial IS the contract.
+// ---------------------------------------------------------------------------
+
+/// Build an `IssuedCertSummary` from string parts + a `not_after` seconds
+/// value. `serial`/`issuer_serial` are `CertSerial` (even-length hex);
+/// `spiffe_id` is a `SpiffeId`.
+fn issued_cert_summary(
+    serial: &str,
+    spiffe_id: &str,
+    issuer_serial: &str,
+    not_after_secs: u64,
+) -> IssuedCertSummary {
+    IssuedCertSummary {
+        serial: CertSerial::new(serial).expect("valid hex serial"),
+        spiffe_id: SpiffeId::new(spiffe_id).expect("valid spiffe id"),
+        issuer_serial: CertSerial::new(issuer_serial).expect("valid hex issuer serial"),
+        not_after: UnixInstant::from_unix_duration(Duration::from_secs(not_after_secs)),
+    }
+}
+
+/// S-OC-11 — a running alloc whose `AllocStatusResponse.issued_certificates`
+/// carries an `IssuedCertSummary` renders an issued-certificate section
+/// showing `serial`, `spiffe_id`, `issuer_serial`, and `not_after`, and the
+/// rendered serial faithfully matches the summary's serial.
+///
+/// Kind is `Job` — the DISTILL AC verb is `overdrive alloc status --job <id>`
+/// and the SVID `spiffe_id` is a `/job/` path (`SpiffeId::for_allocation`),
+/// so the kind under test MUST match the namespace. The server projects
+/// `issued_certificates` per running alloc with NO `WorkloadKind` filter,
+/// so a Job legitimately carries this summary; the render must surface it.
+#[test]
+fn alloc_status_surfaces_current_issued_certificate_summary() {
+    let summary = issued_cert_summary(
+        "0a1b2c3d4e5f",
+        "spiffe://overdrive.local/job/dns-resolver/alloc/alloc-0",
+        "ffeeddccbbaa",
+        1_700_000_000,
+    );
+    let serial_text = summary.serial.to_string();
+    let spiffe_text = summary.spiffe_id.to_string();
+    let issuer_text = summary.issuer_serial.to_string();
+    let not_after_text = summary.not_after.to_string();
+
+    let mut response = fixture_response(
+        "dns-resolver",
+        WorkloadKind::Job,
+        vec![fixture_row("alloc-0", AllocStateWire::Running, None, Some("123@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.issued_certificates = vec![summary];
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    // The four audit-row facts are each surfaced via their `Display`.
+    assert!(
+        rendered.contains(&serial_text),
+        "issued-cert section must surface the serial {serial_text:?}; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(&spiffe_text),
+        "issued-cert section must surface the spiffe_id {spiffe_text:?}; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(&issuer_text),
+        "issued-cert section must surface the issuer_serial {issuer_text:?}; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(&not_after_text),
+        "issued-cert section must surface the not_after {not_after_text:?}; got:\n{rendered}",
+    );
+}
+
+/// S-OC-12 (this step's primary scenario) — given the response carries
+/// exactly the latest-by-`issued_at` summary per running alloc (the server
+/// already projects this in 03-01; at the render layer we assert the render
+/// shows exactly the summaries provided, one per alloc, NOT a history list),
+/// the rendered section contains NO certificate PEM/DER bytes and NO private
+/// key, and a changed serial reads as the current cert. Guards the ADR-0067
+/// #215-boundary no-leak invariant.
+#[test]
+fn issued_certificate_summary_omits_cert_bytes_and_key_latest_by_issued_at() {
+    // The server projects ONE summary per running alloc (latest-by-issued_at).
+    // The render layer is handed exactly that projection — one per alloc.
+    let current = issued_cert_summary(
+        // A post-restart serial change — this is the CURRENT cert.
+        "deadbeefcafe",
+        "spiffe://overdrive.local/job/dns-resolver/alloc/alloc-0",
+        "ffeeddccbbaa",
+        1_700_000_500,
+    );
+    let current_serial = current.serial.to_string();
+
+    // Kind is `Job` — the spiffe_id is a `/job/` path and the AC verb is
+    // `overdrive alloc status --job <id>`; the kind under test must match
+    // the SVID namespace (no Service/`/job/` mismatch masking the render).
+    let mut response = fixture_response(
+        "dns-resolver",
+        WorkloadKind::Job,
+        vec![fixture_row("alloc-0", AllocStateWire::Running, None, Some("123@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.issued_certificates = vec![current];
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    // The changed serial reads as the current cert.
+    assert!(
+        rendered.contains(&current_serial),
+        "the current (post-restart) serial {current_serial:?} must read as the current cert; \
+         got:\n{rendered}",
+    );
+
+    // No-leak invariant (ADR-0067 #215-boundary): the audit-row facts carry
+    // no cert material, and the render must never reconstruct or print any.
+    for forbidden in ["-----BEGIN", "PRIVATE KEY", "CERTIFICATE-----"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "issued-cert render must NOT leak cert PEM/DER or private-key material \
+             (found {forbidden:?}); got:\n{rendered}",
+        );
+    }
+
+    // Exactly one issued-cert row per running alloc — the render shows the
+    // single provided summary, not a history list. A history list would
+    // surface more than one serial line; here there is exactly one.
+    let serial_line_count = rendered.lines().filter(|l| l.contains(&current_serial)).count();
+    assert_eq!(
+        serial_line_count, 1,
+        "render must show exactly the latest summary per alloc (one row), not history; \
+         got:\n{rendered}",
+    );
+}
+
+/// The CLI render is purely additive — output for a workload with no issued
+/// certs is unchanged (the empty section is omitted entirely, never rendered
+/// as an empty `Issued certificates:` header). Asserted across EVERY
+/// workload kind: the issued-certificates render is kind-agnostic, so the
+/// presence-guard must keep the no-cert output clean for Service, Job, AND
+/// Schedule alike.
+#[test]
+fn alloc_status_omits_issued_certificate_section_when_empty() {
+    for kind in [WorkloadKind::Service, WorkloadKind::Job, WorkloadKind::Schedule] {
+        let response = fixture_response(
+            "dns-resolver",
+            kind,
+            vec![fixture_row("alloc-0", AllocStateWire::Running, None, Some("123@node-1"))],
+            /*desired=*/ 1,
+            /*running=*/ 1,
+        );
+        // `fixture_response` defaults `issued_certificates: vec![]`.
+
+        let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+        assert!(
+            !rendered.contains("Issued certificate"),
+            "[{kind:?}] a workload with no issued certs must omit the issued-certificate \
+             section entirely; got:\n{rendered}",
+        );
+    }
+}
+
+/// The issued-certificates section is workload-kind-AGNOSTIC: it renders for
+/// a Job-kind alloc status (the DISTILL AC verb is `overdrive alloc status
+/// --job <id>`) exactly as it does for a Service. This is the test that
+/// would have caught the Service-arm-only gating regression — its litmus:
+/// deleting the kind-agnostic `render_issued_certificates_section` call in
+/// `alloc_status_kind_aware` turns it RED for the Job kind. The four
+/// audit-row facts (`serial` / `spiffe_id` / `issuer_serial` / `not_after`)
+/// are each surfaced via their `Display`, with no cert PEM/DER bytes or
+/// private key.
+#[test]
+fn job_alloc_status_surfaces_issued_certificate_summary() {
+    let summary = issued_cert_summary(
+        "0a1b2c3d4e5f",
+        "spiffe://overdrive.local/job/coinflip/alloc/alloc-coinflip-0",
+        "ffeeddccbbaa",
+        1_700_000_000,
+    );
+    let serial_text = summary.serial.to_string();
+    let spiffe_text = summary.spiffe_id.to_string();
+    let issuer_text = summary.issuer_serial.to_string();
+    let not_after_text = summary.not_after.to_string();
+
+    let mut response = fixture_response(
+        "coinflip",
+        WorkloadKind::Job,
+        vec![fixture_row("alloc-coinflip-0", AllocStateWire::Running, None, Some("100@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.issued_certificates = vec![summary];
+
+    let rendered = overdrive_cli::render::alloc_status_kind_aware(&response);
+
+    // The Job render must surface the issued-certificate section + its four
+    // facts — the Service-arm-only gating would drop all four for a Job.
+    assert!(
+        rendered.contains("Issued certificates:"),
+        "Job alloc-status must render the issued-certificate section; got:\n{rendered}",
+    );
+    for (label, fact) in [
+        ("serial", &serial_text),
+        ("spiffe_id", &spiffe_text),
+        ("issuer_serial", &issuer_text),
+        ("not_after", &not_after_text),
+    ] {
+        assert!(
+            rendered.contains(fact.as_str()),
+            "Job issued-cert section must surface the {label} {fact:?}; got:\n{rendered}",
+        );
+    }
+
+    // No-leak invariant (ADR-0067 #215-boundary) holds on the Job path too.
+    for forbidden in ["-----BEGIN", "PRIVATE KEY", "CERTIFICATE-----"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "Job issued-cert render must NOT leak cert PEM/DER or private-key material \
+             (found {forbidden:?}); got:\n{rendered}",
+        );
+    }
 }

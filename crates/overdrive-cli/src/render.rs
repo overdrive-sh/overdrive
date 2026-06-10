@@ -12,7 +12,8 @@
 //! 100ms target on localhost per US-05 AC.
 
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, StopOutcome, TransitionSource,
+    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, IssuedCertSummary, StopOutcome,
+    TransitionSource,
 };
 
 // workload-kind-discriminator slice 05 — Schedule submit/alloc-status
@@ -257,6 +258,46 @@ fn render_listeners_section(out: &mut String, listeners: &[overdrive_core::aggre
     let _ = writeln!(out, "Listeners:");
     for listener in listeners {
         let _ = writeln!(out, "  {}/{}", listener.port.get(), listener.protocol.as_str());
+    }
+}
+
+/// Append the operator-facing `Issued certificates:` section to `out` IFF
+/// the response carries at least one [`IssuedCertSummary`]
+/// (built-in-ca #215 consumer-side, ADR-0067 #215-boundary). Each summary
+/// renders the four audit-row FACTS — `serial`, `spiffe_id`,
+/// `issuer_serial`, `not_after` — via their `Display` impls. The summary
+/// carries NO certificate PEM/DER bytes and NO private key (the durable
+/// `issued_certificates` audit row persists only facts; per the workload-
+/// identity model the workload holds nothing), so this render structurally
+/// cannot leak cert material.
+///
+/// The section is purely additive: omitted entirely when the response
+/// carries no issued certificates, so output for a workload with no issued
+/// certs is byte-identical to before this section existed — the same
+/// presence-guard discipline as `render_listeners_section` /
+/// `render_vip_section`. The server projects exactly the latest-by-
+/// `issued_at` summary per running alloc (landed in step 03-01); this
+/// render shows exactly the summaries provided, one row per alloc, not a
+/// history list.
+///
+/// Rendered workload-kind-AGNOSTICALLY by `alloc_status_kind_aware` (after
+/// the kind-specific body, for Job / Service / Schedule alike): the server
+/// projection (`handlers::issued_certificates_for_rows`) filters only on
+/// `AllocState::Running` with no `WorkloadKind` filter, and SVIDs are
+/// issued to Jobs as much as Services, so a Job alloc-status legitimately
+/// carries summaries. The presence-guard keeps the no-cert output
+/// byte-identical for every kind.
+fn render_issued_certificates_section(out: &mut String, summaries: &[IssuedCertSummary]) {
+    use std::fmt::Write as _;
+    if summaries.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "Issued certificates:");
+    for summary in summaries {
+        let _ = writeln!(out, "  serial:        {}", summary.serial);
+        let _ = writeln!(out, "    spiffe_id:     {}", summary.spiffe_id);
+        let _ = writeln!(out, "    issuer_serial: {}", summary.issuer_serial);
+        let _ = writeln!(out, "    not_after:     {}", summary.not_after);
     }
 }
 
@@ -758,7 +799,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
     let workload_name = out.workload_id.as_deref().unwrap_or("(unknown)");
     let spec_digest = out.spec_digest.as_deref().unwrap_or("");
 
-    match kind {
+    let mut s = match kind {
         WorkloadKind::Service => {
             let mut s = String::new();
             let _ = writeln!(s, "Service '{workload_name}' (kind: Service)");
@@ -842,7 +883,27 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
             let _ = writeln!(s, "{}", crate::render::schedule::SCHEDULE_EXECUTION_TRACKING_URL);
             s
         }
-    }
+    };
+
+    // Issued-certificates section — workload-kind-AGNOSTIC, rendered AFTER
+    // the kind-specific body for EVERY kind (built-in-ca #215 consumer-side,
+    // ADR-0067 #215-boundary). The server projects `issued_certificates`
+    // per RUNNING alloc with NO `WorkloadKind` filter
+    // (`handlers::issued_certificates_for_rows`) — and SVIDs are issued to
+    // Jobs (and any running alloc; `SpiffeId::for_allocation` uses one fixed
+    // path shape for all kinds), so a Job alloc-status legitimately carries
+    // an `IssuedCertSummary`. The DISTILL design (S-OC-11/12) is
+    // workload-generic — the AC verb is `overdrive alloc status --job <id>`
+    // and the Gherkin reads "per running alloc". Gating the section inside
+    // the Service arm dropped it for Job/Schedule, which the kind-agnostic
+    // placement here closes. Surfaces audit-row FACTS only (serial /
+    // spiffe_id / issuer_serial / not_after); structurally cannot leak cert
+    // PEM/DER bytes or a private key. Additive + presence-guarded — when
+    // `issued_certificates` is empty the section is omitted entirely, so
+    // every kind's output stays byte-identical to before for the no-cert
+    // case.
+    render_issued_certificates_section(&mut s, &out.issued_certificates);
+    s
 }
 
 /// Render the streaming stopped summary line — the
