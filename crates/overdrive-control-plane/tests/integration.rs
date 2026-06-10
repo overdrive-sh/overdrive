@@ -257,6 +257,12 @@ mod integration {
     /// only illegal dependency direction). The original DISTILL placement was a
     /// defect, relocated single-cut in step 03-02.
     mod built_in_ca_operator_composition {
+        /// Feature-delta § D1-AMEND — the `alloc_status` server projection
+        /// selects the CURRENT issued cert by monotonic `IssuanceOrdinal`,
+        /// not `issued_at` (closes step-0302 review findings 1 + 2). Drives
+        /// the real `alloc_status` handler; replaces the deleted misplaced
+        /// render-layer scaffold.
+        mod alloc_status_issued_certificates;
         mod rotate_issue_svid_dispatch;
         mod serve_persistent_ca;
     }

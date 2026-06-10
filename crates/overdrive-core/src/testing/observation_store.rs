@@ -69,7 +69,7 @@ use tokio::time::timeout;
 
 use crate::UnixInstant;
 use crate::ca::issued_certificate_row::IssuedCertificateRow;
-use crate::id::{AllocationId, CertSerial, NodeId, Region, SpiffeId, WorkloadId};
+use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Region, SpiffeId, WorkloadId};
 use crate::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
@@ -155,6 +155,9 @@ fn issued_cert_row(serial: &CertSerial, spiffe: &str) -> IssuedCertificateRow {
         not_after: at,
         node_id: node_id("control-plane-0"),
         issued_at: at,
+        // The append-only contract case distinguishes rows by `spiffe` body
+        // difference, not ordinal; a fixed ordinal suffices here.
+        issuance_ordinal: IssuanceOrdinal::new(0),
     }
 }
 

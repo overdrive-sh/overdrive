@@ -587,6 +587,109 @@ impl From<CertSerial> for String {
 }
 
 // -----------------------------------------------------------------------------
+// IssuanceOrdinal — strictly-monotonic global issuance-order rank.
+// -----------------------------------------------------------------------------
+
+/// Strictly-monotonic global issuance ordinal — the issuance-order rank of an
+/// `issued_certificates` audit row.
+///
+/// The consumer-side "current cert" projection selects max-ordinal per SPIFFE
+/// ID, so a later issuance always outranks an earlier one even when their
+/// `issued_at` clock reads tie (the equal-`issued_at` same-tick re-issue the
+/// deterministic `SimClock` produces). An issuance-order **fact**, not derived
+/// state (`.claude/rules/development.md` § "Persist inputs, not derived
+/// state"): persisted on the row, never recomputed.
+///
+/// # Wire form
+///
+/// `Display` emits the decimal `u64`; `FromStr` parses a decimal `u64` into a
+/// structured [`IdParseError`]. `Serialize` / `Deserialize` go through the
+/// base-10 **string** form (`#[serde(try_from = "String", into = "String")]`),
+/// matching `Display` / `FromStr` exactly and mirroring [`CertSerial`] — the
+/// canonical wire form is the string, NOT a transparent raw integer. There is
+/// no case axis (numeric identifier).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
+pub struct IssuanceOrdinal(u64);
+
+impl IssuanceOrdinal {
+    /// Construct an ordinal from its raw `u64` rank.
+    ///
+    /// Infallible: every `u64` is a valid issuance ordinal, so there is no
+    /// value to reject. This is the sanctioned exception to the project's
+    /// "no infallible `new()`" newtype rule (`development.md` § Newtype
+    /// completeness) — a `Result` here would be dishonest, since no input
+    /// can fail.
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// The raw `u64` rank.
+    ///
+    /// The `&self` receiver is the shape pinned by feature-delta § D1-AMEND-1
+    /// ("exactly `pub const fn as_u64(&self) -> u64`"). `IssuanceOrdinal` is
+    /// `Copy`, so clippy's `trivially_copy_pass_by_ref` would prefer `self`;
+    /// the pinned contract is honored verbatim and the lint scoped here.
+    #[must_use]
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "accessor signature pinned verbatim by feature-delta § D1-AMEND-1"
+    )]
+    pub const fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Display for IssuanceOrdinal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl FromStr for IssuanceOrdinal {
+    type Err = IdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "IssuanceOrdinal" });
+        }
+        s.parse::<u64>().map(Self).map_err(|_| IdParseError::InvalidFormat {
+            kind: "IssuanceOrdinal",
+            expected: "decimal u64 (0..=18446744073709551615)",
+        })
+    }
+}
+
+impl TryFrom<String> for IssuanceOrdinal {
+    type Error = IdParseError;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        raw.parse()
+    }
+}
+
+impl From<IssuanceOrdinal> for String {
+    fn from(v: IssuanceOrdinal) -> Self {
+        v.0.to_string()
+    }
+}
+
+// -----------------------------------------------------------------------------
 // CorrelationKey — derived from (target, spec_hash, purpose). See §18.
 // -----------------------------------------------------------------------------
 
@@ -1074,6 +1177,27 @@ mod tests {
     }
 
     #[test]
+    fn issuance_ordinal_rejects_empty() {
+        assert!(matches!(
+            IssuanceOrdinal::from_str(""),
+            Err(IdParseError::Empty { kind: "IssuanceOrdinal" })
+        ));
+    }
+
+    #[test]
+    fn issuance_ordinal_rejects_non_numeric() {
+        assert!(matches!(
+            IssuanceOrdinal::from_str("12x"),
+            Err(IdParseError::InvalidFormat { kind: "IssuanceOrdinal", .. })
+        ));
+    }
+
+    #[test]
+    fn issuance_ordinal_as_u64_echoes_constructed_value() {
+        assert_eq!(IssuanceOrdinal::new(7).as_u64(), 7);
+    }
+
+    #[test]
     fn serde_round_trips_job_id() {
         let id = WorkloadId::new("payments").unwrap();
         let json = serde_json::to_string(&id).unwrap();
@@ -1137,6 +1261,40 @@ mod tests {
         ) {
             let key = CorrelationKey::new(&raw).unwrap();
             prop_assert_eq!(key.as_str(), raw);
+        }
+
+        /// `IssuanceOrdinal` round-trips bit-equivalently across all three
+        /// codecs for every `u64`, and all three agree on the SAME canonical
+        /// base-10 string form:
+        ///
+        /// * `Display` / `FromStr` — `parse(display(o)) == o`.
+        /// * serde — `from_str(to_string(o)) == o`, and the serialized JSON
+        ///   is exactly the quoted decimal (`"<n>"`), proving the pinned
+        ///   `#[serde(try_from = "String", into = "String")]` string codec
+        ///   (NOT a transparent raw integer).
+        /// * `as_u64` — the stored value survives every hop.
+        ///
+        /// The generated `value` varies per case and is never a fixed
+        /// sentinel, so a `Display`/serde body returning a constant cannot
+        /// satisfy the property.
+        #[test]
+        fn issuance_ordinal_round_trips_through_display_fromstr_and_serde(
+            value in any::<u64>(),
+        ) {
+            let ordinal = IssuanceOrdinal::new(value);
+
+            // Display / FromStr round-trip.
+            let displayed = ordinal.to_string();
+            prop_assert_eq!(&displayed, &value.to_string());
+            prop_assert_eq!(IssuanceOrdinal::from_str(&displayed).unwrap(), ordinal);
+
+            // serde round-trip — and the wire form is the QUOTED decimal
+            // string (the pinned base-10 string codec), not a bare integer.
+            let json = serde_json::to_string(&ordinal).unwrap();
+            prop_assert_eq!(&json, &format!("\"{value}\""));
+            let back: IssuanceOrdinal = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back, ordinal);
+            prop_assert_eq!(back.as_u64(), value);
         }
     }
 

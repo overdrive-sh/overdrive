@@ -58,7 +58,7 @@ control-plane composition root. No new aggregates. DDD verdicts:
 | **D-OC-4** | #215 boot-side: flip `lib.rs:1595` ephemeral `RcgenCa::new` → `ca_boot::boot_ca` + `bootstrap_node_intermediate` | **Persistent boot** | Closes the D-CA-4 "CA not wired into serve" deferral. KEK-backed, envelope-sealed, Earned-Trust refuse-to-start, adopt-on-restart — all already implemented in `ca_boot.rs`; this wires it into `run_server`. |
 | **D-OC-5** | `ControlPlaneError::CaBoot(#[from] CaBootError)` — distinct variant | **Dedicated variant** | `development.md` § Errors — never flatten a typed boot error to `Internal(String)`; the composition root must `matches!` on `CaBoot(_)` and the distinct `CaError` cause (wrong-KEK vs tampered) must survive to the operator. |
 | **D-OC-6** | Restart = re-mint (no leaf keys at rest); #35's `running ∧ ¬held ∧ ever_issued → IssueSvid` branch is correct as-is | **Confirm only** | Leaf keys are non-persistable (ADR-0063 D9); on boot the held set is empty, the audit-row `ever_issued` signal drives immediate re-issue (ADR-0067 rev 5 D10). No reshape — re-validated against this feature. |
-| **D-OC-7** | #215 consumer-side: additive `AllocStatusResponse.issued_certificates: Vec<…>`, latest-by-`issued_at` per running alloc | **Additive field** | Append-only audit ⇒ many rows per alloc over time; render the CURRENT cert (latest-by-`issued_at` matching `SpiffeId::for_allocation(...)`), NOT history, NOT cert bytes/keys (ADR-0067 #215-boundary). |
+| **D-OC-7** **(AMENDED — § D1-AMEND)** | #215 consumer-side: additive `AllocStatusResponse.issued_certificates: Vec<…>`, **max-`issuance_ordinal`** per running alloc | **Additive field + additive V1 row field** | Append-only audit ⇒ many rows per alloc over time; render the CURRENT cert (max-`issuance_ordinal` matching `SpiffeId::for_allocation(...)`; the ordinal is strictly ordered where `issued_at` ties), NOT history, NOT cert bytes/keys (ADR-0067 #215-boundary). |
 | **D-OC-8** | Un-skip the `near_expiry` mutation boundary | **Live mutation target** | With the gate retired the `<=` boundary is observable (a real `IssueSvid` emit), so it is a live mutation target needing a kill test — remove the `#[mutants::skip]`-equivalent `exclude_re` entry. |
 
 ---
@@ -133,7 +133,7 @@ in the workspace from `built-in-ca` (ADR-0063) and `workload-identity-manager`
 | **A1** rotate emit | `Action::IssueSvid { alloc_id: alloc_id.clone(), spiffe_id: held.spiffe_id.clone(), node_id: running.node_id.clone(), correlation: identity_correlation(alloc_id, &held.spiffe_id, "rotate-svid") }` — reuse the existing variant, NO new field/flag. `running` (the `RunningAlloc`) is in scope in the `running ∧ held` arm; source `node_id` from `running.node_id` (no `HeldSvidFacts` change). |
 | **B1** gate + threshold | Delete `ROTATION_ENABLED` + `CERT_ROTATION_WORKFLOW` consts + `StartWorkflow`/`WorkflowName` imports; near-expiry emits `IssueSvid` unconditionally; `NEAR_EXPIRY_THRESHOLD = WORKLOAD_SVID_TTL / 2` (1800s). Remove `#[mutants::skip]` on `near_expiry` + the `.cargo/mutants.toml` `exclude_re` entry; the `<=` boundary is a live mutation target → kill-test DELIVER obligation. |
 | **C1** boot wiring **(AMENDED 2026-06-10 — see § C1-AMEND)** | At `lib.rs:1595`: consume the **injected** `Kek` from `config.kek` (do NOT construct `SystemdCredsKeyring::new()` inline); `let codec = RootKeyAeadCodec::new();` + `let kek_id = root_kek_id();`; `let intent: Arc<dyn IntentStore> = Arc::clone(&store) as Arc<dyn IntentStore>;`; `let root = boot_ca(ca.as_ref(), config.kek.as_ref(), &kek_id, &codec, &intent, &store_path).await?;` then `bootstrap_node_intermediate(ca.as_ref(), &node_id, &intent, config.kek.as_ref(), &kek_id, &codec, &store_path).await?`; build `trust_bundle()` from the adopted CA → `IdentityMgr`. Add `ControlPlaneError::CaBoot(#[from] CaBootError)`. The `Kek` provider is injected through `ServerConfig.kek` (mandatory field) — production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a hermetic fixture KEK. |
-| **D1** consumer field | Additive `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary>` (skip-if-empty); server aggregates `issued_certificate_rows()` and projects per running alloc the latest-by-`issued_at` row whose `spiffe_id == SpiffeId::for_allocation(...)`; CLI renders `serial / spiffe_id / issuer_serial / not_after` — NO cert bytes, NO key. |
+| **D1** consumer field **(AMENDED 2026-06-11 — see § D1-AMEND)** | Additive `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary>` (skip-if-empty); server aggregates `issued_certificate_rows()` and projects per running alloc the **max-`issuance_ordinal`** row whose `spiffe_id == SpiffeId::for_allocation(...)`; CLI renders `serial / spiffe_id / issuer_serial / not_after` — NO cert bytes, NO key. The selection key is the new monotonic `IssuanceOrdinal` (not `issued_at`, which ties under a fixed `SimClock`); `IssuedCertificateRowV1` gains an `issuance_ordinal` field (greenfield single-cut, `FIXTURE_V1` regenerated, no `V2`). See § D1-AMEND. |
 | **E1** slices + EDD | ONE feature-delta, 3 DELIVER slices (below); EDD per slice via `verification/harness/run-expectation.sh` in Lima, then a different-fox Haiku reviewer PER expectation over `evidence/` before any `satisfied`. |
 
 ---
@@ -151,7 +151,7 @@ in the workspace from `built-in-ca` (ADR-0063) and `workload-identity-manager`
 | `identity_correlation(alloc, spiffe_id, purpose)` | **REUSE AS-IS** | Already derives `CorrelationKey` for `"issue-svid"`/`"drop-svid"`; the rotate path passes `"rotate-svid"` as a third purpose value (a string arg, not new API). No change. |
 | `SvidLifecycle` reconciler runtime + ViewStore | **REUSE AS-IS** | The reconciler stays one `Reconciler` on the shipped runtime; only its `reconcile` body's near-expiry branch changes (gate retired, emit flipped). No runtime change. |
 | `IssueSvid` executor (action-shim) | **REUSE AS-IS** | The rotate-correlation `IssueSvid` dispatches through the SAME executor (`action_shim/issue_svid.rs`) that first-issue/restart-reissue use — `issue_and_audit` mints + audits + the holder `hold`-replaces. No executor change. |
-| `IssuedCertificateRow` | **REUSE AS-IS** | The consumer-side projects `serial / spiffe_id / issuer_serial / not_after / issued_at` from existing fields. No row-schema change (no rkyv envelope bump). |
+| `IssuedCertificateRow` | **EXTEND (additive V1 field, single-cut)** — see § D1-AMEND | Gains `issuance_ordinal: IssuanceOrdinal` (the monotonic selection key the consumer maxes over — fixes the equal-`issued_at` tie that surfaced a stale cert, step-0302 review finding 1). Field added to the **existing V1** payload (greenfield single-cut: V1 has not shipped, so `FIXTURE_V1` is regenerated + both discriminant-offset sources re-pinned in the same commit — NO `V2` envelope). The four `IssuedCertSummary` operator fields are unchanged; the ordinal is a selection key, not operator-facing. |
 | `ObservationStore::issued_certificate_rows()` | **REUSE AS-IS** | Existing append-only read surface; both the consumer aggregation and the `ever_issued` restart signal already read it. No change. |
 | `SpiffeId::for_allocation(&WorkloadId, &AllocationId)` | **REUSE AS-IS** | Already the canonical derivation (ADR-0067 D5); the consumer matches audit rows on it. No change. |
 | `AllocStatusResponse` | **EXTEND (additive)** | +1 `Vec<IssuedCertSummary>` field (skip-if-empty) + 1 new wire struct. Additive — existing consumers untouched, JSON backward-compatible. |
@@ -336,6 +336,302 @@ These bind the follow-up implementation dispatch. Cite them by id.
   — still owned by the later runtime slice. This amendment does NOT un-ignore
   them; it only makes the *pre-existing* ~26 `run_server` fixtures boot again.
 
+## § D1-AMEND — deterministic "current cert" via a monotonic issuance ordinal (DELIVER-review amendment to D1 / D-OC-7, 2026-06-11)
+
+**Why this amendment exists.** The originally-pinned D1 / D-OC-7 said the
+consumer projects "the latest-by-`issued_at` row per running alloc." Step-0302
+adversarial review (`deliver/review-03-02.md`, finding 1, verified against
+source) found that selection key is **not strictly ordered**:
+`handlers.rs::issued_certificates_for_rows` selects
+`issued_cert_rows.iter().filter(|c| c.spiffe_id == spiffe).max_by_key(|c| c.issued_at)`,
+but `issued_at` is `UnixInstant::from_clock(clock)` (`ca_issuance.rs:181`) and a
+fixed/seeded `SimClock` can stamp two issuances for the same SPIFFE ID with an
+**equal `issued_at`** — the running `svid_is_reissued_on_demand_without_control_plane_restart`
+test issues twice on `FixedClock::at_unix_secs(1_700_000_005)`
+(`ca_boot_and_audit.rs:926-937`), so the tie is reachable, not hypothetical. On
+a tie, `max_by_key` resolves by the audit store's iteration order — and the
+`issued_certificates` table is keyed by **serial** (`LocalObservationStore`
+table key = `incoming.serial`; `SimObservationStore` `BTreeMap` by serial), so
+the "winner" is the largest *serial*, which is a CSPRNG draw with **no relation
+to recency**. A stale cert can render as "current," falsifying S-OC-12 ("a
+post-restart serial change reads as the current cert, not an anomaly").
+
+The fix (user-authorized, greenfield single-cut): add a **monotonic issuance
+ordinal** to `IssuedCertificateRow` and project "current" = the row with the
+**maximum ordinal** per SPIFFE ID. The ordinal is strictly ordered even when
+`issued_at` ties, so the newest cert is selected deterministically and
+recency-correctly.
+
+### D1-AMEND-1 — the ordinal field (newtype, type, scope, persist-inputs)
+
+**Pinned shape — a newtype, NOT a bare `u64`.** A raw integer for a
+domain-bearing value is a § "Newtypes" smell. Mint:
+
+```rust
+// crates/overdrive-core/src/id.rs — adjacent to CertSerial / CorrelationKey
+/// Strictly-monotonic global issuance ordinal — the issuance-order rank of an
+/// `issued_certificates` audit row. The consumer-side "current cert" projection
+/// selects max-ordinal per SPIFFE ID, so a later issuance always outranks an
+/// earlier one even when their `issued_at` clock reads tie (the equal-`issued_at`
+/// same-tick re-issue the deterministic SimClock produces). An issuance-order
+/// FACT, not derived state (§ "Persist inputs, not derived state"): persisted on
+/// the row, never recomputed.
+pub struct IssuanceOrdinal(u64);
+```
+
+| Element | Exact shape |
+|---|---|
+| Name / type | `IssuanceOrdinal(u64)` newtype in `overdrive-core::id` |
+| Newtype completeness | `FromStr` (parses a base-10 `u64`; returns `Result<Self, IdParseError>` — reuse the existing `IdParseError` family, add no new error type), `Display` (the base-10 form), `Serialize`/`Deserialize` **pinned to `#[serde(try_from = "String", into = "String")]`** — the canonical wire form is the base-10 string, matching `Display`/`FromStr` exactly and mirroring `CertSerial`. This is NOT a free choice: transparent-`u64` serde (`#[serde(transparent)]`) is the WRONG shape for a domain-bearing ordinal — it leaks the raw integer onto the wire, decouples the serialized form from `Display`/`FromStr`, and treats the newtype as a primitive (the exact § "Newtypes" smell the newtype exists to prevent). The crafter pins the string-codec shape and proves bit-equivalent round-trip with the mandatory proptest. Also derive `rkyv::{Archive, Serialize, Deserialize}` (so it persists as a row field — mirror `CertSerial`), `PartialOrd`/`Ord` (the selection key), `Copy` (it is a `u64` wrapper). Constructor: `IssuanceOrdinal::new(u64) -> Self` is infallible (every `u64` is a valid ordinal) — this is the sanctioned exception to "no infallible `new()`": there is no invalid `u64` ordinal to reject, so a `Result` would be dishonest. Accessor: **exactly `pub const fn as_u64(&self) -> u64`** (this name + signature; no alternative accessor name). |
+| Scope | **Single GLOBAL monotonic issuance sequence**, NOT per-SPIFFE. "Latest per SPIFFE = max ordinal among that SPIFFE's rows" is correct under one global counter (the per-SPIFFE filter happens first in the projection; the max-ordinal tiebreak operates on the filtered subset). A global counter needs ONE source of monotonic state, not per-SPIFFE bookkeeping — strictly simpler, and the cross-SPIFFE ordering it also provides is harmless (the projection never compares ordinals across SPIFFE IDs). |
+| Persist-inputs check | The ordinal is an **input** — the issuance-order fact observed at mint time, exactly like `serial` / `issued_at`. It is NOT derived from a policy or constant (editing any constant elsewhere would not change a past issuance's rank). Persisting it is correct; it is never recomputed on read. |
+
+### D1-AMEND-2 — the monotonic SOURCE (the load-bearing decision)
+
+**Decision: derive the ordinal at the `issue_and_audit` seam as the count of
+already-persisted `issued_certificates` rows — `ordinal = issued_certificate_rows().len()` read immediately before the audit write.** First-ever
+issuance gets ordinal `0`, the next `1`, and so on. This is a **persisted global
+issuance counter materialized from the durable audit log itself** — the audit
+store IS the counter; no separate counter field, no new port.
+
+**Why this source satisfies all three required properties:**
+
+- **DST-deterministic.** The count comes from `ObservationStore::issued_certificate_rows()`,
+  a deterministic read already on the seam's driven port — no wall-clock, no
+  `rand`, no `AtomicU64` seeded by process state. Two seeded DST runs issue in
+  the same deterministic order (issuance is driven by `Action::IssueSvid`, and
+  the action-shim dispatches actions **sequentially** in its per-action loop —
+  `action_shim/mod.rs:~1150`, "the per-action loop awaits between iterations" —
+  so there is no concurrent-issuance interleaving within a control-plane
+  process), so the row-count each issuance observes is identical across runs.
+  Replay-equivalence holds.
+- **Strictly monotonic across issuances, surviving restart.** The audit log is
+  durable observation (`LocalObservationStore` redb, append-only — one row per
+  distinct serial, never overwritten). On a control-plane restart the held SVID
+  set is rebuilt by re-issuing for every still-Running alloc (D-OC-6), and each
+  re-issue reads a row-count that **includes every pre-restart row**, so the
+  post-restart reissue's ordinal strictly exceeds every pre-restart ordinal for
+  that identity — exactly the S-OC-12 scenario ("a post-restart serial change
+  reads as the current cert, not an anomaly"). Cross-restart monotonicity is
+  therefore a *property of the source*, not something the design must bolt on.
+- **Coherent with the seam.** `issue_and_audit` already holds `observation: &dyn ObservationStore` and already calls it (for the audit `write`). Reading
+  `issued_certificate_rows()` once at the top of the seam, taking `.len()`, and
+  stamping `IssuanceOrdinal::new(len as u64)` onto the row before the write is a
+  single added read on a port the seam already depends on — no new port, no
+  `Entropy`/`Clock`-style injection, no Raft/action-index plumbing.
+
+**LOAD-BEARING PRECONDITION — the `issued_certificate_rows` table is
+append-only.** The `count = len()` derivation is monotonic ONLY because audit
+rows are **never deleted, overwritten, or compacted**: `LocalObservationStore`
+persists exactly one row per distinct serial and never overwrites it (the §
+D1-AMEND-2 source rationale above and `overdrive-core` observation-store
+contract test (viii) — "append-only: exactly one row per serial" — both pin
+this), and there is no delete/GC path today. This precondition is the entire
+basis for `len()` being a strictly-increasing source. **If a future phase adds
+row deletion** — Phase-5 revocation (whitepaper §8) pruning revoked certs, or an
+audit-log GC/retention sweep — the append-only invariant is violated, `len()`
+stops being monotonic (a delete makes the next `len()` *smaller* than a prior
+ordinal), and the ordinal becomes **non-unique** — which directly reintroduces
+the equal-`issued_at` stale-cert tie this entire amendment exists to fix.
+Therefore: **Phase-5 revocation MUST address ordinal assignment when it lands**
+(switch the source to a persisted monotonic counter that delete cannot rewind,
+or equivalent) — it cannot remove rows while leaving `len()` as the ordinal
+source. Single-node today this is a non-issue (no delete path exists); the
+constraint is recorded here so the Phase-5 author inherits it rather than
+silently breaking the projection. (This is NOT a deferral requiring a tracking
+issue: it is a precondition on *future* work, not a promise of work this feature
+defers — Phase-5 revocation is its own future scope and owns this when it
+arrives.)
+
+**TOCTOU note (addressed, not hand-waved).** "Read count, then write" is a
+check-then-act shape (§ "Check-and-act must be atomic"). It is safe HERE because
+issuance is **serialized through the single action-shim executor** (sequential
+per-action dispatch, established above) — there is no second concurrent issuer
+within a process to slip between the read and the write. This serialization is
+the load-bearing premise; the crafter MUST NOT call `issue_and_audit`
+concurrently for two issuances against the same store, and the seam's rustdoc
+MUST state the single-writer precondition explicitly. (Multi-node #36 gossip is
+out of scope — single-node today; when #36 lands, cross-peer ordinal
+assignment becomes a distinct concern that a future amendment owns. This is NOT
+a deferral requiring an issue: #36 already tracks multi-node observation gossip,
+and the ordinal's per-peer-monotonic-then-LWW behaviour is inside that existing
+scope, not new work this feature promises.)
+
+**Why the user's two rejected alternatives are correctly rejected (surfaced per
+the dispatch's "flag if option (a) is inferior" instruction — it is NOT
+inferior):**
+
+- *Enforce-unique-`issued_at` at the seam* — would require the seam to detect a
+  clock tie and synthesize a distinct timestamp, i.e. **fabricate a fact**
+  (`issued_at` is an observed clock reading, § "Persist inputs"; bumping it to
+  break a tie makes it a lie). Rejected: corrupts an audit input to do an
+  ordering job a dedicated ordinal does honestly.
+- *Project from the held-SVID serial in `IdentityMgr`* — couples the audit
+  projection to ephemeral runtime state that is **empty on restart** (the held
+  set is rebuilt by re-issue, D-OC-6) and is not the audit SSOT. The audit row
+  is the durable record; the projection must read it, not the volatile holder.
+  Rejected: wrong SSOT, restart-fragile.
+
+The chosen source (count-of-persisted-rows) is strictly better than both: it is
+honest (adds a new field rather than corrupting an existing one), durable
+(survives restart by construction), and reads the correct SSOT.
+
+**Seam signature change (pinned, so the crafter does not invent surface).**
+`issue_and_audit` gains the ordinal internally — it does NOT take the ordinal as
+a parameter (the seam owns the count read, mirroring how it owns the window
+computation). The count read goes through the existing `observation: &dyn ObservationStore`
+parameter (the seam's binding name, verified at `ca_issuance.rs:156`).
+
+**Trait signature verified (so the invocation is pinned, not guessed).**
+`ObservationStore::issued_certificate_rows` is **`async`** and returns
+`Result<Vec<IssuedCertificateRow>, ObservationStoreError>`
+(`crates/overdrive-core/src/traits/observation_store.rs:1265-1267`):
+
+```rust
+async fn issued_certificate_rows(
+    &self,
+) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError>;
+```
+
+Because it is `async`, the `.await` stays. Because its error is
+`ObservationStoreError` and `CaIssuanceError::audit(source: ObservationStoreError) -> Self`
+(`ca_issuance.rs:111`) is exactly the constructor the existing audit `write`
+failure already routes through (`...write(...).await.map_err(CaIssuanceError::audit)?`,
+`ca_issuance.rs:212-215`), `map_err(CaIssuanceError::audit)` is the correct,
+verbatim mapping. **Copy this invocation exactly** — inside `issue_and_audit`,
+before building the row:
+
+```rust
+// Global monotonic issuance ordinal — the issuance-order rank, read from the
+// durable audit log itself (the count of rows already persisted). Strictly
+// increasing across issuances and across restart (the count includes every
+// pre-restart row; the table is append-only — see § D1-AMEND-2 precondition),
+// DST-deterministic (a read on the same port the audit write uses; issuance is
+// serialized through the single action-shim executor, so the read-then-write is
+// race-free). This is the selection key the consumer-side "current cert"
+// projection maxes over — recency-correct even when `issued_at` ties under a
+// fixed SimClock. See feature-delta § D1-AMEND-2.
+let ordinal = IssuanceOrdinal::new(
+    observation
+        .issued_certificate_rows()
+        .await
+        .map_err(CaIssuanceError::audit)?
+        .len() as u64,
+);
+```
+
+The `issued_certificate_rows()` read failure maps to `CaIssuanceError::Audit`
+(same variant the write failure uses — both are audit-store failures that refuse
+the issuance; no new error variant). The crafter MUST NOT add a new
+`CaIssuanceError` variant for the count read, and MUST NOT alter the verb shape
+of the pinned invocation (it is `async` → keep `.await`; the `map_err` target is
+`CaIssuanceError::audit` passed as a function, not a closure).
+
+### D1-AMEND-3 — schema mechanics (greenfield single-cut: modify V1 in place)
+
+**Decision: add `issuance_ordinal: IssuanceOrdinal` to the existing `V1`
+payload in place and REGENERATE `FIXTURE_V1` — do NOT mint `V2`.**
+
+This is the correct single-cut move and it does NOT violate the testing.md rule
+that "prior `FIXTURE_V_N` literals are never touched." That rule's purpose is to
+preserve the schema-evolution signal *across shipped versions* — it forbids
+silently re-pinning a fixture whose bytes a deployed consumer already wrote. Per
+the fixture's own header comment (`issued_certificate_row.rs:62-67`):
+*"Pre-shipment regeneration is allowed under
+`feedback_single_cut_greenfield_migrations.md`; once V1 ships to a deployed
+consumer, this constant becomes immutable … future variants need a `V2`
+envelope."* **V1 has NOT shipped to a deployed consumer** (user-confirmed
+greenfield; "delete the on-disk redb file" is the official upgrade path), so V1
+is still mutable and the field is part of the *initial* V1 shape, not a
+post-ship evolution. Minting `V2` here would be wrong — it would assert a
+version history that never existed and leave a `V1` variant nothing ever wrote.
+
+The crafter's schema obligations (single commit, per `development.md` §
+"rkyv schema evolution"):
+
+| Element | Exact action |
+|---|---|
+| `IssuedCertificateRowV1` | Add `pub issuance_ordinal: IssuanceOrdinal` field (place it adjacent to `issued_at`, with a rustdoc line: "the global monotonic issuance-order rank; the consumer's current-cert projection selects max-ordinal per SPIFFE ID — recency-correct even on an `issued_at` tie"). |
+| Envelope enum | UNCHANGED — stays `IssuedCertificateRowEnvelope { V1(IssuedCertificateRowV1) }`. No `V2`. No `into_latest`/`latest`/`From` changes. |
+| `FIXTURE_V1` (`tests/schema_evolution/issued_certificate_row.rs`) | REGENERATE via the existing `print_fixture_v1_bytes` `#[ignore]` tool; replace the `FIXTURE_V1` literal AND extend `canonical_v1_payload()` with a pinned `issuance_ordinal` value (e.g. `IssuanceOrdinal::new(7)`). This re-pin is explicitly sanctioned because V1 is pre-ship. |
+| `GOLDEN_DISCRIMINANT_OFFSET_V1` + `IssuedCertificateRowEnvelope::discriminant_offset_from_end()` | RE-PIN BOTH in the same commit — adding a field shifts the trailing-root discriminant offset, so the current `GOLDEN_DISCRIMINANT_OFFSET_V1 = 96` (`tests/schema_evolution/issued_certificate_row.rs:41`) and the row module's own `discriminant_offset_from_end()` source both move. Re-locate the new offset empirically by regenerating the fixture (the `print_fixture_v1_bytes` `#[ignore]` tool, `issued_certificate_row.rs:131`) and reading the shifted value; update `GOLDEN_DISCRIMINANT_OFFSET_V1` and the envelope's `discriminant_offset_from_end()` derivation to match. The two-source triangulation test `issued_certificate_row_envelope_discriminant_offset_triangulates` (`issued_certificate_row.rs:86`, via `assert_discriminant_offset_triangulation::<IssuedCertificateRowEnvelope>`) enforces that the golden const and the source derivation AGREE — it FAILS the PR if either is re-pinned without the other. **All of it lands in ONE commit** — the field addition (D1-AMEND-3 row 1), the `FIXTURE_V1` regeneration (row 3), and BOTH discriminant-offset re-pins — per `development.md` § "Version-bump procedure" step 6 (the single-commit atomic-landing boundary for the schema-evolution structural defense). This is the known offset-re-pin discipline (feedback memory `rkyv_envelope_forward_traps`). |
+
+### D1-AMEND-4 — the projection change
+
+**Pinned new selection** in `handlers.rs::issued_certificates_for_rows`:
+
+```rust
+issued_cert_rows
+    .iter()
+    .filter(|c| c.spiffe_id == spiffe)
+    .max_by_key(|c| c.issuance_ordinal)   // was: c.issued_at
+    .map(|c| api::IssuedCertSummary { /* unchanged four fields */ })
+```
+
+- `max_by_key(|c| c.issuance_ordinal)` replaces `max_by_key(|c| c.issued_at)`.
+  `IssuanceOrdinal: Ord` is the strict total order; ties are now impossible
+  (the global counter is strictly increasing), so the selected row is
+  unambiguously the newest issuance for that SPIFFE ID.
+- **`issued_at` stays on the row** as an audit input (it is still a faithful
+  observed fact and other consumers / the schema-evolution fixture carry it) —
+  it simply stops being the *selection* key. It is NOT rendered (it was never in
+  `IssuedCertSummary`).
+- **`IssuedCertSummary` is UNCHANGED — the ordinal is NOT added to it.** The
+  ordinal is a *selection key*, not operator-facing metadata. The four
+  operator-facing fields (`serial`, `spiffe_id`, `issuer_serial`, `not_after`)
+  are unchanged — an operator cross-checks *which cert is current* by serial, and
+  exposing an internal issuance counter would be noise (and a derived-rank
+  surface the operator cannot act on). No wire-struct change; JSON stays
+  backward-compatible.
+
+### D1-AMEND-5 — test obligations (crafter + reviewer finding 2)
+
+| # | Obligation | Layer / file |
+|---|---|---|
+| (i) | **Control-plane projection test (the load-bearing regression for finding 1+2).** Seed ≥2 `IssuedCertificateRow`s for ONE running alloc with **distinct `issuance_ordinal`** AND **equal `issued_at`** (prove the ordinal — not the timestamp — drives selection). Drive the real alloc-status read path; assert the **newest** serial (max ordinal) reaches `AllocStatusResponse.issued_certificates` exactly once and the **older** serial is **absent**; assert the PEM/private-key forbidden tokens are absent. Construct the rows so the older row carries the *larger* serial (so a serial-order tiebreak would pick the WRONG row) — this is what makes the test fail against today's `max_by_key(issued_at)` + serial-iteration behaviour and pass only with the ordinal. | `crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/alloc_status_issued_certificates.rs` (the S-OC-11/12 file; replaces the deleted misplaced scaffold) — drives `handlers`/server projection, NOT the render-only CLI layer. |
+| (ii) | **Schema-evolution golden-fixture** per D1-AMEND-3: the regenerated `FIXTURE_V1` roundtrips (`..._golden_bytes_roundtrip`), the re-pinned discriminant offset triangulates (`..._discriminant_offset_triangulates`), unknown-version still surfaces `EnvelopeError` (`..._unknown_version_probe_surfaces_error`). | `crates/overdrive-core/tests/schema_evolution/issued_certificate_row.rs` (existing tests, updated for the new field). Plus the mandatory `IssuanceOrdinal` newtype roundtrip proptest (`FromStr`/`Display`/serde bit-equivalence) next to the type in `overdrive-core::id`. |
+| (iii) | **DST determinism / monotonicity of the ordinal source.** A Tier-1 expectation: two seeded `issue_and_audit` sequences for the same identity against a fresh `SimObservationStore` produce **identical, strictly-increasing** ordinals (`0, 1, …`); the equal-`issued_at` same-tick re-issue (the `FixedClock::at_unix_secs` case in `ca_boot_and_audit.rs`) still yields **distinct, strictly-ordered** ordinals. Assert the post-"restart" (fresh seam over the SAME persisted store) reissue outranks the pre-restart ordinal. | `crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs` (extend the existing re-issue test — it already issues twice on a fixed clock; add the ordinal assertions there) and/or a focused seam unit test. The replay-equivalence flavour belongs with the existing CA DST coverage. |
+
+### Crafter obligations (D-1 … D-5)
+
+- **D-1 — the newtype.** Add `IssuanceOrdinal` to `overdrive-core::id` with the
+  full completeness surface (D1-AMEND-1). Infallible `new(u64)`; do NOT invent a
+  `Result` constructor or a separate parse-error type.
+- **D-2 — the seam.** Add the count read + `IssuanceOrdinal` stamp inside
+  `issue_and_audit` (D1-AMEND-2 verbatim shape — keep the `.await`, keep
+  `map_err(CaIssuanceError::audit)`); map the count-read failure to the EXISTING
+  `CaIssuanceError::Audit`. Do NOT add `issue_and_audit` parameters for the
+  ordinal and do NOT add a new error variant. The `issue_and_audit` rustdoc MUST
+  carry a `# Preconditions` section stating **both** load-bearing assumptions and
+  pointing at § D1-AMEND-2: (1) the **single-writer / serialized-issuance**
+  precondition (the count read-then-write is race-free only because issuance is
+  serialized through the single action-shim executor; the seam MUST NOT be called
+  concurrently for two issuances against the same store); and (2) the
+  **append-only** precondition (the `len()`-derived ordinal is monotonic only
+  because `issued_certificate_rows` is never deleted/overwritten/compacted — a
+  future delete path, e.g. Phase-5 revocation, breaks ordinal uniqueness and must
+  re-source the ordinal then).
+- **D-3 — the row + fixture (single commit).** Add `issuance_ordinal` to
+  `IssuedCertificateRowV1` in place; regenerate `FIXTURE_V1`; re-pin BOTH
+  discriminant-offset sources; extend `canonical_v1_payload()`. NO `V2` envelope.
+- **D-4 — the projection.** Swap `max_by_key(issued_at)` →
+  `max_by_key(issuance_ordinal)` in `issued_certificates_for_rows`. Do NOT touch
+  `IssuedCertSummary` (the four fields stand; the ordinal is not operator-facing).
+- **D-5 — the three test obligations** (D1-AMEND-5 i/ii/iii), landed in the named
+  files. The (i) control-plane projection test is the regression the step-0302
+  review's findings 1 AND 2 both require — it must FAIL against the current
+  `issued_at`-keyed projection and PASS only with the ordinal.
+
+### Out of scope for this amendment
+
+- The two-CA discipline is intact: the ordinal lives on the workload-identity
+  `issued_certificates` audit row only; the operator/HTTPS CA is untouched.
+- The audit row continues to persist FACTS only — the ordinal is one more
+  issuance FACT, carries no cert bytes and no key, and cannot reconstruct an
+  SVID (root `CLAUDE.md` two-CA / workload-identity discipline holds).
+- Multi-node (#36) cross-peer ordinal assignment — single-node today; inside
+  #36's existing gossip scope, not new promised work.
+
 ## DELIVER slices (3) + EDD capture plan
 
 ### Slice ① — Rotation (core action flip)
@@ -403,7 +699,9 @@ injection + the **corrected RUN gate**.
   additive `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary>`
   (skip-if-empty).
 - Server aggregates `obs.issued_certificate_rows()`, projects per running alloc
-  the latest-by-`issued_at` row matching `SpiffeId::for_allocation(...)`.
+  the **max-`issuance_ordinal`** row matching `SpiffeId::for_allocation(...)`
+  (the deterministic, recency-correct selection key — § D1-AMEND; supersedes the
+  earlier latest-by-`issued_at`, which ties under a fixed `SimClock`).
 - CLI renders `serial / spiffe_id / issuer_serial / not_after` (NO cert bytes,
   NO key).
 - **Captures EDD: O05** (issued-certificates audit row is operator-visible; the
@@ -606,7 +904,7 @@ under `crates/*/tests/{acceptance,integration}` are the executable artifacts).
 | DESIGN#D-OC-4 | Wire `boot_ca` + `bootstrap_node_intermediate` into `run_server` | n/a | S-OC-06/07 prove persistent boot + adopt-on-restart through the wired `overdrive serve` binary |
 | DESIGN#D-OC-5 | `ControlPlaneError::CaBoot` — cause-distinct refuse-to-start | n/a | S-OC-08a/b/c pin one refusal cause each (wrong-KEK / tampered / absent); S-OC-08d pins pairwise-distinct stderr; S-OC-09 pins no silent re-mint |
 | DESIGN#D-OC-6 | Restart = re-mint (confirm only) | n/a | S-OC-05/07 keep the restart-recovery branch distinct from rotate |
-| DESIGN#D-OC-7 | Additive `AllocStatusResponse.issued_certificates`, latest-by-`issued_at` | n/a | S-OC-11/12 pin the render + the no-cert-bytes / latest-by-`issued_at` projection |
+| DESIGN#D-OC-7 **(AMENDED — § D1-AMEND)** | Additive `AllocStatusResponse.issued_certificates`, **max-`issuance_ordinal`** per running alloc (was latest-by-`issued_at`; the timestamp ties under a fixed `SimClock`) | n/a | S-OC-11/12 pin the render + the no-cert-bytes / max-ordinal projection; S-OC-12 now requires a control-plane projection test seeding ≥2 rows with distinct ordinals + equal `issued_at` (review-03-02 findings 1+2) |
 | DESIGN#D-OC-8 | Un-skip the `near_expiry` mutation boundary | n/a | S-OC-03 is the live mutation kill-test for the `<=` boundary |
 | review-design#Medium-1 | E03 runner MUST enforce all 3 sub-claims before `satisfied` | n/a | S-OC-13/14/15 specify all three; S-OC-15 is the mandatory pathLen=0 negative anchor |
 
@@ -711,7 +1009,7 @@ The orchestrator registers these (DISTILL has no Bash CLI access for
 
 | id | kind | input-shape | output-shape | keywords |
 |---|---|---|---|---|
-| `OUT-OC-ISSUED-CERTS-READ` | operation | `overdrive alloc status --job <WorkloadId>` over `issued_certificate_rows()` | `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary { serial, spiffe_id, issuer_serial, not_after }>` — latest-by-`issued_at` per running alloc, NO cert bytes / NO key | issued-certificates, alloc-status, operator-read, audit, svid-summary |
+| `OUT-OC-ISSUED-CERTS-READ` | operation | `overdrive alloc status --job <WorkloadId>` over `issued_certificate_rows()` | `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary { serial, spiffe_id, issuer_serial, not_after }>` — max-`issuance_ordinal` per running alloc (§ D1-AMEND; supersedes latest-by-`issued_at`), NO cert bytes / NO key | issued-certificates, alloc-status, operator-read, audit, svid-summary |
 | `OUT-OC-CA-BOOT-REFUSE` | invariant | `run_server` boot with persisted root + (resolvable \| wrong \| absent) KEK / (intact \| tampered) envelope | refuse-to-start with cause-distinct `ControlPlaneError::CaBoot(CaBootError)` (`WrongKek` \| `TamperedEnvelope` \| `KekUnavailable`) + `health.startup.refused`, NO silent re-mint (root unchanged) | ca-boot, refuse-to-start, earned-trust, no-remint, kek, envelope |
 
 The rotate-as-action behaviour (S-OC-01..05/10) does NOT register a new outcome:

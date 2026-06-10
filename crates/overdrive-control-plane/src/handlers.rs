@@ -1010,9 +1010,19 @@ pub async fn alloc_status(
     }))
 }
 
-/// Project, per RUNNING alloc, the single latest-by-`issued_at`
+/// Project, per RUNNING alloc, the single latest-by-`issuance_ordinal`
 /// issued-certificate audit row whose SPIFFE identity matches that alloc
 /// (built-in-ca #215 consumer-side, D-OC-7 / ADR-0067 #215-boundary).
+///
+/// The selection key is the global monotonic
+/// [`IssuanceOrdinal`](overdrive_core::id::IssuanceOrdinal), NOT
+/// `issued_at`: a fixed/seeded `SimClock` can stamp two issuances for one
+/// SPIFFE ID with an equal `issued_at`, and on that tie a `max_by_key`
+/// over the timestamp resolves by the audit store's serial-keyed iteration
+/// order — surfacing a STALE serial (a CSPRNG draw, no relation to recency)
+/// as "current". The ordinal is strictly increasing across issuances, so the
+/// newest cert is selected deterministically and recency-correctly even when
+/// the clock ties (feature-delta § D1-AMEND-4).
 ///
 /// Persist-inputs discipline: projected from audit-row FACTS at read time
 /// (`serial` / `spiffe_id` / `issuer_serial` / `not_after`) — NO cert
@@ -1033,7 +1043,7 @@ fn issued_certificates_for_rows(
             issued_cert_rows
                 .iter()
                 .filter(|c| c.spiffe_id == spiffe)
-                .max_by_key(|c| c.issued_at)
+                .max_by_key(|c| c.issuance_ordinal)
                 .map(|c| api::IssuedCertSummary {
                     serial: c.serial.clone(),
                     spiffe_id: c.spiffe_id.clone(),
