@@ -1,6 +1,6 @@
 # D01 — The root CA private key is never observable in plaintext at rest
 
-**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `evidence-captured` (re-captured at SHA `ba8ddd51` after the restart sub-claim was STRENGTHENED in response to an adversarial-review High finding: the restart now asserts a **serving witness** + a **stable root-identity witness**, not just a plaintext re-scan — a refused restart that left disk unchanged previously satisfied the runner. Awaiting a FRESH different-fox audit of the strengthened evidence before `satisfied` — see § "Different-fox review")
+**Surface:** D (dataplane / kernel- and disk-observable) · **KPI:** K3 (guardrail) · **Status:** `satisfied` (re-captured at SHA `ed16f60e` after the restart sub-claim was STRENGTHENED in response to an adversarial-review High finding: the restart now asserts a **serving witness** + a **stable root-identity witness** with BOTH pre- and post-restart serials printed for audit, not just a plaintext re-scan — a refused restart that left disk unchanged previously satisfied the runner. A fresh 3-fox different-fox audit CONFIRMED the strengthened evidence — see § "Different-fox review")
 
 ## Expectation
 
@@ -137,10 +137,15 @@ runs over the real on-disk `intent.redb`:
   (`key-envelope` marker, non-empty store).
 - Sub-claim 3 — **PASS**: the restart decrypted + adopted the root and reached
   serving (`control plane listening`, `rc=0`).
-- Sub-claim 4 — **PASS**: the restart adopted the SAME root — persisted cert
-  serial(s) byte-stable across restart (`serial=2247FA9B2C168A9EACBF061B98D41B3C`
-  for the root, `serial=F83611B080785BF1CFE1D9CC604C07D1` for the node
-  intermediate, identical before and after).
+- Sub-claim 4 — **PASS**: the restart adopted the SAME root — the persisted cert
+  serial(s) are printed BOTH before and after the restart so the equality is
+  visible in the artifact (not asserted only by the badge): `pre-restart cert
+  serial(s): serial=62E43C7B6CC4D56D5D30F86DD1AD736B
+  serial=F1D73D9BA6019331C3DDE29D69C05CD4` and `post-restart cert serial(s):`
+  the SAME two values — byte-identical (the second serial is the node
+  intermediate). A re-mint would change them. (The concrete serials are random
+  per capture — each boot mints a fresh root — so they differ run-to-run; the
+  load-bearing fact is pre == post.)
 - Sub-claim 5 — **PASS**: after the decrypt-and-adopt restart, STILL zero
   plaintext private-key markers (`PEM-armor=0 DER-OID-runs=0`).
 
@@ -188,6 +193,24 @@ and the evidence re-captured at `ba8ddd51` (all of self-test, first-boot-serving
 sub-claims 1–5 PASS, exit 0).
 
 Because the runner materially changed, the Fox 3/Fox 4 confirmations no longer
-cover the live evidence. Status is therefore `evidence-captured` pending a FRESH
-different-fox audit of the strengthened evidence — the authoring agent does NOT
-self-stamp `satisfied`.
+covered the live evidence. A FRESH 3-fox audit was dispatched against the
+strengthened evidence (foxes read only `evidence/` + the roadmap anchor, never
+the runner or production code):
+
+- Fox 5 — **CONFIRMED** (SHA `ed16f60e`, 2026-06-10): all five sub-claims back
+  by concrete run.log lines; serving witness present (rc=0); cert serials
+  byte-stable across restart; non-vacuity self-test 4/4 + 2/2; externals-only
+  dirty tree.
+- Fox 6 — **CONFIRMED**: same, with emphasis that the inline self-test is a hard
+  gate and the restart witness cannot hide a refused restart.
+- Fox 7 — initially **REFUTED**: sub-claim 4 printed only the POST-restart
+  serials + a `[PASS]` badge; the PRE-restart serials were never displayed, so a
+  fox reading only the evidence could not independently confirm pre == post (a
+  re-mint that swapped serials could pass undetected). The runner was fixed to
+  print BOTH the pre-restart and post-restart serial lines unconditionally; the
+  evidence was re-captured. Fox 7 re-audited and **CONFIRMED** — it compared the
+  two printed serial lines character-by-character (`62E4…736B` + `F1D7…5CD4`,
+  byte-identical) and explicitly recorded the original gap as CLOSED.
+
+Status set to `satisfied` on the Fox 5 + Fox 6 + Fox 7 confirmations. The
+authoring agent did NOT self-stamp — the verdict is the independent foxes'.

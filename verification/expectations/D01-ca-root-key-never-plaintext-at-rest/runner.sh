@@ -226,7 +226,12 @@ fi
 # byte-identical, so a re-scan-only check would still report "no plaintext" and
 # PASS vacuously. Assert the SERVING witness AND a stable root-IDENTITY witness,
 # not just the continued absence of plaintext.
+# Capture + PRINT the pre-restart cert serial(s) NOW, before the restart, so the
+# equality below is auditable from run.log ALONE — a different-fox reading only
+# the evidence must SEE both sides, not trust a PASS badge over a hidden shell
+# compare.
 id_before="$(root_serials "$INTENT")"
+printf "    pre-restart  cert serial(s): %s\n" "$(printf "%s" "$id_before" | tr "\n" " ")"
 
 restart_rc="$(serve 25 "$WORK/restart.out")"
 
@@ -240,14 +245,14 @@ fi
 
 # Sub-claim 4 — the SAME root was adopted, not re-minted: the persisted cert
 # serial(s) are byte-stable across the restart (S-OC-07 "identical serial").
+# BOTH sides are printed (pre above, post here) so the equality is visible in
+# the artifact, not asserted only by the [PASS]/[FAIL] badge.
 id_after="$(root_serials "$INTENT")"
+printf "    post-restart cert serial(s): %s\n" "$(printf "%s" "$id_after" | tr "\n" " ")"
 if [ -n "$id_before" ] && [ "$id_before" = "$id_after" ]; then
-  echo "  [PASS] sub-claim 4: restart adopted the SAME root (cert serial(s) stable across restart)"
-  printf "    serial(s): %s\n" "$(printf "%s" "$id_before" | tr "\n" " ")"
+  echo "  [PASS] sub-claim 4: restart adopted the SAME root (pre-restart serial(s) == post-restart serial(s), byte-identical above)"
 else
-  echo "  [FAIL] sub-claim 4: persisted root cert serial changed across restart (re-mint?)"; rc=1
-  printf "    before: %s\n    after:  %s\n" \
-    "$(printf "%s" "$id_before" | tr "\n" " ")" "$(printf "%s" "$id_after" | tr "\n" " ")"
+  echo "  [FAIL] sub-claim 4: persisted root cert serial changed across restart (re-mint? — compare the two serial lines above)"; rc=1
 fi
 
 # Sub-claim 5 — the guardrail holds across the lifecycle: still no plaintext
