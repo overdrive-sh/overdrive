@@ -13,7 +13,6 @@
 
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, IdempotencyOutcome, IssuedCertSummary, StopOutcome,
-    TransitionSource,
 };
 
 // workload-kind-discriminator slice 05 — Schedule submit/alloc-status
@@ -158,30 +157,68 @@ pub fn workload_stop_accepted(out: &StopOutput) -> String {
     s
 }
 
-/// Render an `AllocStatusOutput` as a multi-line operator-facing
-/// summary.
+/// Render an `AllocStatusOutput` as the single, operator-facing,
+/// kind-aware alloc-status summary — the LIVE render path.
 ///
-/// On empty-state (`allocations_total == 0`) the output includes the
-/// `phase-1-first-workload` reference carried in `empty_state_message`
-/// — this is the load-bearing onboarding signpost for an operator who
-/// has submitted a job but sees no allocations yet.
+/// This is the ONE alloc-status renderer `overdrive alloc status`
+/// dispatches through: `main.rs` calls `commands::alloc::status(..)`
+/// (returning an `AllocStatusOutput`) and prints
+/// `render::alloc_status(&out)`. There is no second/duplicate renderer
+/// — the historical flat `alloc_status` and the test-only
+/// `alloc_status_kind_aware` were consolidated into this one function
+/// (workload-kind-discriminator step 02-02 built the kind-aware body but
+/// never wired it into the command; this is that wiring landed for real).
+///
+/// The body branches on [`overdrive_core::aggregate::WorkloadKind`]
+/// (carried on `out.snapshot.kind`) per design [D4] / ADR-0047 §4:
+///
+/// - **Service**: `Service '<name>' (kind: Service)` header + `Spec
+///   digest:` + `Replicas (desired/running): N/M` + per-alloc table
+///   (`Alloc / State / Restarts / Since`, NO Exit column).
+/// - **Job**: `Job '<name>' (kind: Job)` header + `Spec digest:` +
+///   `Verdict:` (derived) + per-attempt table (`Attempt / State / Exit
+///   / Started / Duration`) + stderr tail on Failed.
+/// - **Schedule**: `Schedule '<name>' (kind: Schedule)` header + cron
+///   tracking URL.
+///
+/// On empty-state (`allocations_total == 0`) the output is prefixed with
+/// the `phase-1-first-workload` reference carried in
+/// `empty_state_message` — the load-bearing onboarding signpost
+/// (DWD-05) for an operator who has submitted a workload but sees no
+/// allocations yet. This wrapper concern is preserved across the
+/// kind-aware body (which has no access to the wrapper-level
+/// `empty_state_message`); the signpost reads first so it is the
+/// operator's primary signal before the (empty) kind-specific body.
+///
+/// After the kind-specific body, the shared VIP / Listeners /
+/// Issued-certificates sections render (presence-guarded + additive):
+/// the VIP rides on `out.snapshot.vip` (Service-only per ADR-0049 /
+/// #183); Listeners are an INTENT property rendered at ANY allocation
+/// count (including 0) so a pre-convergence UDP Service surfaces
+/// `5353/udp`; Issued certificates are the built-in-ca #215 consumer
+/// side (ADR-0067 #215-boundary) projecting audit-row FACTS per running
+/// alloc, kind-agnostically.
 #[must_use]
 pub fn alloc_status(out: &AllocStatusOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    let _ = writeln!(s, "Workload ID:   {}", out.workload_id);
-    let _ = writeln!(s, "Spec digest:   {}", out.spec_digest);
-    let _ = writeln!(s, "Allocations:   {}", out.allocations_total);
+
+    // Empty-state onboarding signpost (DWD-05) — a wrapper concern, not
+    // a kind-aware-body concern: the kind-aware body sees only
+    // `out.snapshot` and has no access to the wrapper-level
+    // `empty_state_message`. Rendered FIRST so an operator who submitted
+    // a workload but sees no allocations yet reads the `phase-1-first-
+    // workload` pointer before the (necessarily empty) kind-specific
+    // body. Gated on BOTH `allocations_total == 0` AND a non-empty
+    // message (asymmetric `&&` — a flip to `||` would either leak the
+    // hint when allocations exist or fire a blank `writeln!`).
     if out.allocations_total == 0 && !out.empty_state_message.is_empty() {
         let _ = writeln!(s, "{}", out.empty_state_message);
     }
-    // Per-allocation state lines. The bare `Allocations: N` count is not
-    // enough for an operator to distinguish a healthy Running workload
-    // from one whose backend process died on startup (RCA finding S-A4):
-    // a Failed allocation must read as Failed WITH its captured cause.
-    // Renders each row's state, its structured `reason`, and the verbatim
-    // driver `error` detail (e.g. `bind: Address already in use`).
-    render_allocation_rows(&mut s, &out.snapshot.rows);
+
+    // Kind-specific body (the workload-kind-discriminator [D4] design).
+    render_kind_aware_body(&mut s, &out.snapshot);
+
     // VIP + Listeners are the Service frontend — group them (VIP first).
     // The VIP rides on the snapshot envelope (`vip: Some(..)` for a
     // Service, `None` for Job/Schedule per ADR-0049 / #183); the line is
@@ -194,43 +231,43 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
     render_listeners_section(&mut s, &out.snapshot.listeners);
     // Issued-certificate summaries are the consumer-side of built-in-ca
     // #215 (ADR-0067 #215-boundary): the server projects the current SVID
-    // FACTS per running alloc onto the snapshot envelope. This is the LIVE
-    // operator-visible render path (`main.rs` dispatches `overdrive alloc
-    // status` here, NOT through `alloc_status_kind_aware`), so the section
-    // must render here — reading `out.snapshot.issued_certificates`.
-    // Presence-guarded + additive: a workload with no issued certs renders
-    // byte-identically to before. Shares the helper with
-    // `alloc_status_kind_aware` so the live and test-only paths do not drift.
+    // FACTS per running alloc onto the snapshot envelope. Workload-kind-
+    // AGNOSTIC (the server projection filters only on `AllocState::Running`
+    // with no `WorkloadKind` filter, and SVIDs are issued to Jobs as much
+    // as Services), so it renders after the kind-specific body for every
+    // kind. Presence-guarded + additive: a workload with no issued certs
+    // renders byte-identically to before.
     render_issued_certificates_section(&mut s, &out.snapshot.issued_certificates);
     s
 }
 
-/// Append a per-allocation state block to `out`, one row per allocation.
+/// Append an indented cause-detail block for a single Service per-alloc
+/// table row, IFF the row carries a structured transition `reason` or a
+/// verbatim driver `error`.
 ///
-/// Each allocation renders its `alloc_id`, its `state` (so a terminal /
-/// Failed allocation reads as Failed, not as a healthy bare count — RCA
-/// finding S-A4), and, when present, the structured transition `reason`
-/// and the verbatim driver `error` detail that captures the failure
-/// cause (e.g. `bind: Address already in use`). `exit_code` is surfaced
-/// when the allocation carries one. Shares `state_label` /
-/// `TransitionReason::human_readable()` with `alloc_snapshot` so the live
-/// and snapshot paths cannot drift on state vocabulary.
-fn render_allocation_rows(
+/// Preserves RCA finding S-A4: a Service allocation whose backend died on
+/// startup (e.g. `bind: Address already in use`) must read as Failed WITH
+/// its captured cause on the alloc-status snapshot, not as a healthy bare
+/// count. The designed `Alloc / State / Restarts / Since` table columns
+/// already carry the `state` (so the row reads `Failed`); this adds the
+/// cause beneath the row without a new column. Presence-guarded and
+/// additive — a Running row with no `reason`/`error` emits nothing, so
+/// the table stays byte-identical for the healthy case. Shares
+/// `state_label` / `TransitionReason::human_readable()` vocabulary with
+/// the rest of the renderer.
+fn render_row_cause_detail(
     out: &mut String,
-    rows: &[overdrive_control_plane::api::AllocStatusRowBody],
+    row: &overdrive_control_plane::api::AllocStatusRowBody,
 ) {
     use std::fmt::Write as _;
-    for row in rows {
-        let _ = writeln!(out, "  {}: {}", row.alloc_id, state_label(row.state));
-        if let Some(reason) = &row.reason {
-            let _ = writeln!(out, "    reason: {}", reason.human_readable());
-        }
-        if let Some(error) = &row.error {
-            let _ = writeln!(out, "    error: {error}");
-        }
-        if let Some(code) = row.exit_code {
-            let _ = writeln!(out, "    exit code: {code}");
-        }
+    if let Some(reason) = &row.reason {
+        let _ = writeln!(out, "    reason: {}", reason.human_readable());
+    }
+    if let Some(error) = &row.error {
+        let _ = writeln!(out, "    error: {error}");
+    }
+    if let Some(code) = row.exit_code {
+        let _ = writeln!(out, "    exit code: {code}");
     }
 }
 
@@ -241,10 +278,9 @@ fn render_allocation_rows(
 /// which case the line is omitted entirely (never `VIP: None`) — the
 /// same presence-guard discipline as `render_listeners_section`. The
 /// VIP is the Service frontend address; it is grouped with `Listeners:`
-/// (VIP first). The label is aligned to the same value column as
-/// `Workload ID:` / `Spec digest:` / `Allocations:` (offset 15). Shared
-/// by both `alloc_status` (the live command renderer) and
-/// `alloc_status_kind_aware` so the two paths cannot drift.
+/// (VIP first). The label is aligned to a value column at offset 15.
+/// Called once by the single live `alloc_status` renderer, after the
+/// kind-specific body.
 fn render_vip_section(out: &mut String, vip: Option<&str>) {
     use std::fmt::Write as _;
     let Some(vip) = vip else {
@@ -257,9 +293,8 @@ fn render_vip_section(out: &mut String, vip: Option<&str>) {
 /// intent declared at least one listener. Each listener renders as
 /// `<port>/<protocol>` using the protocol enum's canonical lowercase
 /// `as_str()` (per `.claude/rules/development.md` § "Label enums own
-/// their string representation"). Shared by both `alloc_status` (the
-/// live command renderer) and `alloc_status_kind_aware` so the two
-/// paths cannot drift.
+/// their string representation"). Called once by the single live
+/// `alloc_status` renderer, after the kind-specific body.
 fn render_listeners_section(out: &mut String, listeners: &[overdrive_core::aggregate::Listener]) {
     use std::fmt::Write as _;
     if listeners.is_empty() {
@@ -290,13 +325,13 @@ fn render_listeners_section(out: &mut String, listeners: &[overdrive_core::aggre
 /// render shows exactly the summaries provided, one row per alloc, not a
 /// history list.
 ///
-/// Rendered workload-kind-AGNOSTICALLY by `alloc_status_kind_aware` (after
-/// the kind-specific body, for Job / Service / Schedule alike): the server
-/// projection (`handlers::issued_certificates_for_rows`) filters only on
-/// `AllocState::Running` with no `WorkloadKind` filter, and SVIDs are
-/// issued to Jobs as much as Services, so a Job alloc-status legitimately
-/// carries summaries. The presence-guard keeps the no-cert output
-/// byte-identical for every kind.
+/// Rendered workload-kind-AGNOSTICALLY by the single live `alloc_status`
+/// renderer (after the kind-specific body, for Job / Service / Schedule
+/// alike): the server projection (`handlers::issued_certificates_for_rows`)
+/// filters only on `AllocState::Running` with no `WorkloadKind` filter, and
+/// SVIDs are issued to Jobs as much as Services, so a Job alloc-status
+/// legitimately carries summaries. The presence-guard keeps the no-cert
+/// output byte-identical for every kind.
 fn render_issued_certificates_section(out: &mut String, summaries: &[IssuedCertSummary]) {
     use std::fmt::Write as _;
     if summaries.is_empty() {
@@ -311,77 +346,8 @@ fn render_issued_certificates_section(out: &mut String, summaries: &[IssuedCertS
     }
 }
 
-/// Render a typed [`AllocStatusResponse`] as the journey TUI mockup
-/// from ADR-0033 §4 (amended 2026-04-30 — cause-class rendering).
-///
-/// Per slice 01 step 01-03 / S-AS-04 / S-AS-05 / S-AS-06: the renderer
-/// is a pure function over the typed response. Three case-arms drive
-/// the output:
-///
-/// * **Running** — full envelope with `Restart budget: U / M used`,
-///   per-row `Last transition` block.
-/// * **Failed** — adds `(backoff exhausted)` to the budget line when
-///   `restart_budget.exhausted` is set; surfaces the verbatim
-///   driver error from the row's `error` field.
-/// * **Pending-no-capacity** — never shows `Allocations: 0`; the
-///   row's `reason: TransitionReason::NoCapacity` is rendered
-///   explicitly via `human_readable()` plus the `error` line for
-///   the requested-vs-free diagnostic.
-///
-/// `human_readable()` lives on `TransitionReason` so the snapshot and
-/// streaming surfaces share one rendering function.
-#[must_use]
-pub fn alloc_snapshot(out: &AllocStatusResponse) -> String {
-    use std::fmt::Write as _;
-    let mut s = String::new();
-    if let Some(workload_id) = &out.workload_id {
-        let _ = writeln!(s, "Workload ID:   {workload_id}");
-    }
-    if let Some(digest) = &out.spec_digest {
-        let _ = writeln!(s, "Spec digest:   {digest}");
-    }
-    let _ = writeln!(s, "Replicas:      {}/{}", out.replicas_running, out.replicas_desired);
-    if let Some(budget) = &out.restart_budget {
-        if budget.exhausted {
-            let _ = writeln!(
-                s,
-                "Restart budget: {used} / {max} used (backoff exhausted)",
-                used = budget.used,
-                max = budget.max,
-            );
-        } else {
-            let _ = writeln!(s, "Restart budget: {} / {} used", budget.used, budget.max);
-        }
-    }
-
-    for row in &out.rows {
-        let _ = writeln!(s);
-        let _ = writeln!(s, "Allocation:    {}", row.alloc_id);
-        let _ = writeln!(s, "  state:       {}", state_label(row.state));
-        if let Some(reason) = &row.reason {
-            let _ = writeln!(s, "  reason:      {}", reason.human_readable());
-        }
-        if let Some(error) = &row.error {
-            let _ = writeln!(s, "  error:       {error}");
-        }
-        if let Some(last) = &row.last_transition {
-            let from =
-                last.from.map_or_else(|| "(initial)".to_owned(), |f| state_label(f).to_owned());
-            let to = state_label(last.to);
-            let _ = writeln!(
-                s,
-                "  Last transition: {at} {from} → {to} reason: {reason} source: {source}",
-                at = last.at,
-                reason = last.reason.human_readable(),
-                source = source_label(last.source),
-            );
-        }
-    }
-    s
-}
-
 /// Lowercase variant label for an `AllocStateWire`. Shared between
-/// the headline state line and the transition arrow rendering.
+/// the Service per-alloc table and the Job per-attempt table.
 const fn state_label(state: AllocStateWire) -> &'static str {
     match state {
         AllocStateWire::Pending => "Pending",
@@ -393,16 +359,6 @@ const fn state_label(state: AllocStateWire) -> &'static str {
         // `AllocStateWire` is `#[non_exhaustive]`; render unknown
         // future variants verbatim rather than panicking.
         _ => "(unknown)",
-    }
-}
-
-/// Render the source-attribution segment of a `Last transition` line.
-fn source_label(source: TransitionSource) -> String {
-    match source {
-        TransitionSource::Reconciler => "reconciler".to_owned(),
-        TransitionSource::Driver(driver) => format!("driver({driver})"),
-        // `TransitionSource` is `#[non_exhaustive]` — forward-compat fallback.
-        _ => "(unknown)".to_owned(),
     }
 }
 
@@ -789,131 +745,111 @@ pub fn format_job_alloc_status_attempts_table(
     s
 }
 
-/// Render the operator-facing alloc-status output, branching on
+/// Append the operator-facing alloc-status body to `out`, branching on
 /// [`overdrive_core::aggregate::WorkloadKind`] per design [D4].
 ///
-/// - Service: header + `Replicas (desired/running): N/M` + per-alloc
-///   table with columns `Alloc / State / Restarts / Since` (NO Exit).
-/// - Job: header (`Job '...' (kind: Job)`) + Verdict + per-attempt
-///   table with columns `Attempt / State / Exit / Started / Duration`
-///   + stderr tail on Failed.
-/// - Schedule: header + cron + deferral note.
+/// - Service: `Service '...' (kind: Service)` header, `Spec digest:`, `Replicas (desired/running): N/M`, per-alloc table (`Alloc / State / Restarts / Since`; NO Exit column).
+/// - Job: `Job '...' (kind: Job)` header, `Spec digest:`, derived Verdict, per-attempt table (`Attempt / State / Exit / Started / Duration`), stderr tail on Failed.
+/// - Schedule: `Schedule '...' (kind: Schedule)` header + cron tracking URL.
 ///
 /// The match on `WorkloadKind` is EXHAUSTIVE per ADR-0047 §1 — no
-/// catch-all wildcard. Future kinds require explicit arms.
-#[must_use]
-pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
+/// catch-all wildcard. Future kinds require explicit arms. `kind` is
+/// `None` (forward-compat) → treated as Service.
+///
+/// This is the kind-specific body of the single live `alloc_status`
+/// renderer. It does NOT render the empty-state signpost (a wrapper
+/// concern owned by `alloc_status`, which has the `AllocStatusOutput`
+/// wrapper fields) nor the kind-agnostic issued-certificates section
+/// (also rendered by `alloc_status` after this body, for every kind).
+fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
     use overdrive_core::aggregate::WorkloadKind;
     use std::fmt::Write as _;
-    let kind = out.kind.unwrap_or(WorkloadKind::Service);
-    let workload_name = out.workload_id.as_deref().unwrap_or("(unknown)");
-    let spec_digest = out.spec_digest.as_deref().unwrap_or("");
+    let kind = response.kind.unwrap_or(WorkloadKind::Service);
+    let workload_name = response.workload_id.as_deref().unwrap_or("(unknown)");
+    let spec_digest = response.spec_digest.as_deref().unwrap_or("");
 
-    let mut s = match kind {
+    match kind {
         WorkloadKind::Service => {
-            let mut s = String::new();
-            let _ = writeln!(s, "Service '{workload_name}' (kind: Service)");
+            let _ = writeln!(out, "Service '{workload_name}' (kind: Service)");
             if !spec_digest.is_empty() {
-                let _ = writeln!(s, "Spec digest: {spec_digest}");
+                let _ = writeln!(out, "Spec digest: {spec_digest}");
             }
             let _ = writeln!(
-                s,
+                out,
                 "Replicas (desired/running): {}/{}",
-                out.replicas_desired, out.replicas_running,
+                response.replicas_desired, response.replicas_running,
             );
             // Per-alloc table — Service columns: Alloc / State / Restarts / Since.
             let _ =
-                writeln!(s, "{:<24} {:<12} {:<10} {:<20}", "Alloc", "State", "Restarts", "Since");
+                writeln!(out, "{:<24} {:<12} {:<10} {:<20}", "Alloc", "State", "Restarts", "Since");
             // Restarts default to 0 in Phase 1 (per-alloc restart counter
             // not surfaced on the wire row body yet — this is a
             // forward-compat placeholder).
-            for row in &out.rows {
+            // Restarts default to 0 in Phase 1 (per-alloc restart counter
+            // not surfaced on the wire row body yet — this is a
+            // forward-compat placeholder). A Failed/errored alloc's
+            // captured cause is surfaced on an indented detail line beneath
+            // its table row — preserving RCA finding S-A4 (a Service alloc
+            // whose backend died on startup, e.g. `bind: Address already in
+            // use`, must read as Failed WITH its cause, not a healthy bare
+            // count). The designed `Alloc / State / Restarts / Since`
+            // columns are unchanged; the detail line is additive and
+            // presence-guarded (only emitted when the row carries a
+            // structured `reason` or a verbatim driver `error`).
+            for row in &response.rows {
                 let since = row.started_at.as_deref().unwrap_or("\u{2014}");
                 let _ = writeln!(
-                    s,
+                    out,
                     "{:<24} {:<12} {:<10} {:<20}",
                     row.alloc_id,
                     state_label(row.state),
                     "0",
                     since,
                 );
+                render_row_cause_detail(out, row);
             }
-            // VIP + Listeners are the Service frontend — group them (VIP
-            // first). The VIP rides on the response envelope (`vip:
-            // Some(..)` for a Service, `None` otherwise per ADR-0049 /
-            // #183); shares `render_vip_section` with the live
-            // `alloc_status` path so the two cannot drift. Omitted
-            // entirely when absent.
-            render_vip_section(&mut s, out.vip.as_deref());
-            // Listeners section — Service-only, rendered IFF the
-            // intent declared at least one listener. Shares
-            // `render_listeners_section` with `alloc_status` (the live
-            // command renderer) so the two paths cannot drift. This is
-            // the black-box surface that makes a UDP service's
-            // `Proto::Udp` operator-visible.
-            render_listeners_section(&mut s, &out.listeners);
-            s
+            // VIP + Listeners (the Service frontend) are NOT rendered here
+            // — the wrapper `alloc_status` renders them once, after this
+            // body, for every kind (presence-guarded: `vip` is `Some` only
+            // for Service, listeners only when declared). Keeping them out
+            // of this arm avoids a double-render.
         }
         WorkloadKind::Job => {
-            let mut s = String::new();
-            let verdict = derive_job_verdict(&out.rows);
-            s.push_str(&format_job_alloc_status_header(workload_name, spec_digest, verdict));
-            s.push('\n');
-            s.push_str(&format_job_alloc_status_attempts_table(&out.rows));
+            let verdict = derive_job_verdict(&response.rows);
+            out.push_str(&format_job_alloc_status_header(workload_name, spec_digest, verdict));
+            out.push('\n');
+            out.push_str(&format_job_alloc_status_attempts_table(&response.rows));
             // stderr tail on Failed: pull from the last attempt's
             // `error` field if present (the action shim threads
             // `prior_row.detail` / `prior_row.stderr_tail` onto the
             // wire row body's `error` field).
             if matches!(verdict, JobVerdict::Failed)
-                && let Some(last) = out.rows.last()
+                && let Some(last) = response.rows.last()
                 && let Some(err) = &last.error
                 && !err.is_empty()
             {
-                s.push('\n');
+                out.push('\n');
                 let _ = writeln!(
-                    s,
+                    out,
                     "stderr (last {} lines):",
                     overdrive_core::traits::driver::STDERR_TAIL_LINES
                 );
                 for line in err.lines() {
-                    let _ = writeln!(s, "  {line}");
+                    let _ = writeln!(out, "  {line}");
                 }
             }
-            s
         }
         WorkloadKind::Schedule => {
             // Schedule branch — minimal Phase-1 rendering. Slice 05
             // (deploy_schedule) provides the deferral surface;
             // here we name the kind so the dispatcher is exhaustive.
-            let mut s = String::new();
-            let _ = writeln!(s, "Schedule '{workload_name}' (kind: Schedule)");
+            let _ = writeln!(out, "Schedule '{workload_name}' (kind: Schedule)");
             if !spec_digest.is_empty() {
-                let _ = writeln!(s, "Spec digest: {spec_digest}");
+                let _ = writeln!(out, "Spec digest: {spec_digest}");
             }
-            let _ = writeln!(s, "{}", crate::render::schedule::SCHEDULE_EXECUTION_TRACKING_URL);
-            s
+            let _ = writeln!(out, "{}", crate::render::schedule::SCHEDULE_EXECUTION_TRACKING_URL);
         }
-    };
-
-    // Issued-certificates section — workload-kind-AGNOSTIC, rendered AFTER
-    // the kind-specific body for EVERY kind (built-in-ca #215 consumer-side,
-    // ADR-0067 #215-boundary). The server projects `issued_certificates`
-    // per RUNNING alloc with NO `WorkloadKind` filter
-    // (`handlers::issued_certificates_for_rows`) — and SVIDs are issued to
-    // Jobs (and any running alloc; `SpiffeId::for_allocation` uses one fixed
-    // path shape for all kinds), so a Job alloc-status legitimately carries
-    // an `IssuedCertSummary`. The DISTILL design (S-OC-11/12) is
-    // workload-generic — the AC verb is `overdrive alloc status --job <id>`
-    // and the Gherkin reads "per running alloc". Gating the section inside
-    // the Service arm dropped it for Job/Schedule, which the kind-agnostic
-    // placement here closes. Surfaces audit-row FACTS only (serial /
-    // spiffe_id / issuer_serial / not_after); structurally cannot leak cert
-    // PEM/DER bytes or a private key. Additive + presence-guarded — when
-    // `issued_certificates` is empty the section is omitted entirely, so
-    // every kind's output stays byte-identical to before for the no-cert
-    // case.
-    render_issued_certificates_section(&mut s, &out.issued_certificates);
-    s
+    }
 }
 
 /// Render the streaming stopped summary line — the

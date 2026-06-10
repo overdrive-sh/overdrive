@@ -1,14 +1,14 @@
 //! Unit tests for pure render helper functions that were flagged as
 //! missed mutations: `format_human_duration`, `derive_job_verdict`,
-//! and the spec-digest branches of `alloc_status_kind_aware`.
+//! and the spec-digest branches of the live `alloc_status` renderer.
 
 #![allow(clippy::expect_used)]
 
 use std::time::Duration;
 
+use overdrive_cli::commands::alloc::AllocStatusOutput;
 use overdrive_cli::render::{
-    JobVerdict, alloc_status_kind_aware, derive_job_verdict, format_human_duration,
-    is_backoff_exhausted,
+    JobVerdict, alloc_status, derive_job_verdict, format_human_duration, is_backoff_exhausted,
 };
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, ResourcesBody, RestartBudget,
@@ -119,11 +119,16 @@ fn verdict_terminated_nonzero_and_running_sibling_is_succeeded_not_in_progress()
 }
 
 // ---------------------------------------------------------------------------
-// alloc_status_kind_aware — spec_digest conditional rendering
+// alloc_status (live renderer) — spec_digest conditional rendering
+//
+// The kind-aware body reads `out.snapshot.spec_digest` (the server-
+// populated wire field), NOT the wrapper-level `out.spec_digest`. These
+// migrated from the test-only `alloc_status_kind_aware` onto the single
+// live `render::alloc_status` path that `main.rs:158` dispatches through.
 // ---------------------------------------------------------------------------
 
-fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusResponse {
-    AllocStatusResponse {
+fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusOutput {
+    let snapshot = AllocStatusResponse {
         workload_id: Some("test-wl".to_string()),
         spec_digest: Some(spec_digest.to_string()),
         replicas_desired: 1,
@@ -134,13 +139,20 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusResponse 
         vip: None,
         listeners: vec![],
         issued_certificates: vec![],
+    };
+    AllocStatusOutput {
+        workload_id: "test-wl".to_string(),
+        spec_digest: spec_digest.to_string(),
+        allocations_total: snapshot.rows.len(),
+        empty_state_message: String::new(),
+        snapshot,
     }
 }
 
 #[test]
 fn service_branch_renders_spec_digest_when_present() {
     let out = status_fixture(WorkloadKind::Service, "abcd1234");
-    let rendered = alloc_status_kind_aware(&out);
+    let rendered = alloc_status(&out);
     assert!(
         rendered.contains("Spec digest: abcd1234"),
         "Service with non-empty spec_digest must render it; got:\n{rendered}",
@@ -150,7 +162,7 @@ fn service_branch_renders_spec_digest_when_present() {
 #[test]
 fn service_branch_omits_spec_digest_when_empty() {
     let out = status_fixture(WorkloadKind::Service, "");
-    let rendered = alloc_status_kind_aware(&out);
+    let rendered = alloc_status(&out);
     assert!(
         !rendered.contains("Spec digest:"),
         "Service with empty spec_digest must omit the line; got:\n{rendered}",
@@ -160,7 +172,7 @@ fn service_branch_omits_spec_digest_when_empty() {
 #[test]
 fn schedule_branch_renders_spec_digest_when_present() {
     let out = status_fixture(WorkloadKind::Schedule, "abcd1234");
-    let rendered = alloc_status_kind_aware(&out);
+    let rendered = alloc_status(&out);
     assert!(
         rendered.contains("Spec digest: abcd1234"),
         "Schedule with non-empty spec_digest must render it; got:\n{rendered}",
@@ -170,7 +182,7 @@ fn schedule_branch_renders_spec_digest_when_present() {
 #[test]
 fn schedule_branch_omits_spec_digest_when_empty() {
     let out = status_fixture(WorkloadKind::Schedule, "");
-    let rendered = alloc_status_kind_aware(&out);
+    let rendered = alloc_status(&out);
     assert!(
         !rendered.contains("Spec digest:"),
         "Schedule with empty spec_digest must omit the line; got:\n{rendered}",

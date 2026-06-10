@@ -109,73 +109,83 @@ signal handling for the binary wrapper itself, it can exercise the
 test of the CLI's behaviour, and it must be tagged and scoped
 accordingly.
 
-## Alloc-status rendering — `render::alloc_status` is the LIVE path
+## Alloc-status rendering — ONE renderer: `render::alloc_status`
 
 `overdrive alloc status` renders through **`render::alloc_status(&AllocStatusOutput)`**
 — and only that function. `main.rs` dispatches
 `Command::Alloc(AllocCommand::Status { .. })` to `commands::alloc::status(..)`
 and prints `render::alloc_status(&out)`. That is the one renderer an
-operator ever sees.
+operator ever sees, and it is now the ONLY alloc-status renderer in
+`render.rs`. There is no test-only duplicate to mistake it for.
 
-`render.rs` contains **two other public renderers with confusingly
-similar names that are NOT wired into any command** — they are
-exercised *only by tests* (zero `src/` callers):
+`render::alloc_status` carries the **kind-aware** body that the
+`workload-kind-discriminator` feature designed (step 02-02, [D4] /
+ADR-0047 §4): it branches on `out.snapshot.kind`
+(`overdrive_core::aggregate::WorkloadKind`) via the private
+`render_kind_aware_body` helper —
 
-- `alloc_status_kind_aware(&AllocStatusResponse)` — branches on
-  `WorkloadKind` (Service / Job / Schedule). **Test-only.**
-- `alloc_snapshot(&AllocStatusResponse)` — the ADR-0033 §4 "journey
-  TUI mockup". **Test-only.**
+- **Service**: `Service '<name>' (kind: Service)` header + `Spec
+  digest:` + `Replicas (desired/running): N/M` + per-alloc table
+  (`Alloc / State / Restarts / Since`, NO Exit column; a Failed alloc's
+  cause renders on an indented detail line beneath its row, preserving
+  RCA S-A4).
+- **Job**: `Job '<name>' (kind: Job)` header + `Spec digest:` +
+  `Verdict:` (derived) + per-attempt table (`Attempt / State / Exit /
+  Started / Duration`) + stderr tail on Failed.
+- **Schedule**: `Schedule '<name>' (kind: Schedule)` header + cron
+  tracking URL.
 
-**A change made only to `alloc_status_kind_aware` or `alloc_snapshot`
-does NOT reach an operator.** This has bitten more than one agent: you
-grep for `alloc_status` + "render", land on the kind-aware function (it
-looks the most complete — it has the `WorkloadKind` match arms), wire
-your change there, write a green test against it — and the live
-`overdrive alloc status` output is unchanged. The test passes; the
-feature is broken. (Precedent: built-in-ca step 03-02 wired the
-issued-certificates section into `alloc_status_kind_aware` only; it
-shipped green and the operator saw nothing.)
+— plus, after the kind body, the shared presence-guarded
+`render_vip_section` / `render_listeners_section` /
+`render_issued_certificates_section`, and an empty-state onboarding
+signpost (`phase-1-first-workload`, DWD-05) rendered first when
+`out.allocations_total == 0`.
 
-Rules for any operator-visible change to `overdrive alloc status`
-output:
+### History — why this was a trap, and how it was closed
 
-1. **Make the change in `render::alloc_status`** (the live path). If you
-   also keep it in `alloc_status_kind_aware` so the two do not drift —
-   as the shared `render_vip_section` / `render_listeners_section` /
-   `render_issued_certificates_section` helpers already are — that is
-   fine, but `alloc_status` is the one that MUST change.
-2. **Test the LIVE path.** Add or extend a test that calls
+`render.rs` used to carry **three** alloc-status renderers, and the
+wrong one was live:
+
+- `alloc_status` was a FLAT renderer (`Workload ID:` / `Spec digest:` /
+  `Allocations:` + bare per-row lines) — it was live but did NOT branch
+  on kind.
+- `alloc_status_kind_aware(&AllocStatusResponse)` had the designed
+  kind-aware body but had **zero `src/` callers** — the
+  `workload-kind-discriminator` step 02-02 built it (commit `72175d7e`)
+  and a 442-line test suite, but never wired `main.rs` /
+  `commands/alloc.rs` through it (its tests asserted on
+  `alloc_status_kind_aware` directly, so the step went green on the
+  wrong surface and the kind-aware operator view never shipped).
+- `alloc_snapshot(&AllocStatusResponse)` was an older ADR-0033 §4
+  "journey TUI mockup", also test-only with zero `src/` callers.
+
+The consolidation (this branch) **finished the wiring**: the kind-aware
+body folded into the single live `render::alloc_status` (threading
+`AllocStatusOutput` so the empty-state signpost survives), the flat
+duplicate was retired single-cut, and `alloc_snapshot` + its tests were
+deleted (its transition-history mockup behavior — `Restart budget:` /
+`Last transition:` arrows / `source: driver(exec)` — had no live caller
+and is no longer produced). The authoritative tests moved onto the live
+`render::*` path.
+
+### Rules for any operator-visible change to `overdrive alloc status`
+
+1. **Make the change in `render::alloc_status`** (or the private
+   `render_kind_aware_body` / shared section helpers it calls). There is
+   no second renderer to keep in sync.
+2. **Test the LIVE path.** The live-path test home is
+   `tests/acceptance/render_alloc_status.rs` — call
    `render::alloc_status(&AllocStatusOutput { snapshot:
-   AllocStatusResponse { .. }, .. })` and asserts on its output. The
-   live-path test home is `tests/acceptance/render_alloc_status.rs` —
-   see the `(g)` listener-protocol test for the canonical shape and the
-   comment there explaining that `main.rs` dispatches through
-   `render::alloc_status`, NOT `alloc_status_kind_aware`. A test that
-   only calls `alloc_status_kind_aware` / `alloc_snapshot` is testing
-   the wrong surface and cannot defend operator-visible behaviour.
-3. **Mind the signature difference.** `alloc_status` takes
-   `&AllocStatusOutput`, so the response fields live on `out.snapshot.*`
-   (e.g. `out.snapshot.issued_certificates`). The two test-only
-   renderers take `&AllocStatusResponse` directly. Wiring a section into
-   the live path means reading `out.snapshot.<field>`.
-
-> The three-renderer split is a known hazard — but do NOT "fix" it by
-> deleting or `#[cfg(test)]`-gating the unused pair on sight.
-> `alloc_status_kind_aware` is the kind-aware renderer the
-> **`workload-kind-discriminator` feature** built (commit `72175d7e`,
-> step 02-02) to give `overdrive alloc status` Job-verdict /
-> per-attempt-exit / Service-replica output. That feature is **done** —
-> all its roadmap steps committed — but step 02-02 landed the renderer
-> and a 442-line test suite while touching neither `main.rs` nor
-> `commands/alloc.rs`: the wiring that makes the command dispatch through
-> it was never done (its tests assert on `alloc_status_kind_aware`
-> directly, so the step went green on the wrong surface). It has zero
-> `src/` callers in all of git history, so the kind-aware operator view
-> it built does not reach an operator.
-> `alloc_snapshot` is an older ADR-0033 §4 TUI mockup. The real fix is to
-> **finish that wiring** (dispatch the command through the kind-aware
-> renderer and retire the flat `alloc_status`, folding the shared section
-> helpers into the survivor), which is a `workload-kind-discriminator`
-> completion decision — not a delete. Until that lands,
-> `render::alloc_status` is the single source of operator-visible truth
-> and the only renderer to change/test for operator-facing work.
+   AllocStatusResponse { .. }, .. })` and assert on its output. See the
+   `(j)` kind-aware Job/Service tests and the `(g)` / `(g2)` / `(h)` /
+   `(i)` section tests for the canonical shapes. The render-layer
+   integration suite (`tests/integration/alloc_status.rs`) exercises the
+   same live renderer via its `render_live(..)` wrapper.
+3. **Mind the field source.** `alloc_status` takes `&AllocStatusOutput`,
+   so the snapshot fields live on `out.snapshot.*` (e.g.
+   `out.snapshot.issued_certificates`, `out.snapshot.kind`,
+   `out.snapshot.spec_digest`). The wrapper-level `out.workload_id` /
+   `out.spec_digest` / `out.allocations_total` / `out.empty_state_message`
+   are the command-derived envelope fields; the kind-aware body reads the
+   server-populated snapshot fields (which the live `commands::alloc::status`
+   populates from the `GET /v1/allocs` response).

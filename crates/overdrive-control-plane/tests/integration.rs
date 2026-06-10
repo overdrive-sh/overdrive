@@ -252,7 +252,7 @@ mod integration {
     /// The Slice ③ issued-certificates summary render (S-OC-11 / S-OC-12, EDD
     /// O05) lives in `overdrive-cli`
     /// (`tests/integration/alloc_status.rs`), NOT here: its driving port is
-    /// `overdrive_cli::render::alloc_status_kind_aware`, and
+    /// the single live `overdrive_cli::render::alloc_status` renderer, and
     /// `overdrive-control-plane` cannot depend on `overdrive-cli` (that is the
     /// only illegal dependency direction). The original DISTILL placement was a
     /// defect, relocated single-cut in step 03-02.
