@@ -161,12 +161,17 @@ output:
 
 > The three-renderer split is a known hazard — but do NOT "fix" it by
 > deleting or `#[cfg(test)]`-gating the unused pair on sight.
-> `alloc_status_kind_aware` is the kind-aware renderer the **in-flight
-> `workload-kind-discriminator` feature** built (commit `72175d7e`) to
-> give `overdrive alloc status` Job-verdict / per-attempt-exit /
-> Service-replica output; its commit message says the command "dispatches
-> on `response.kind`", but the step that actually wires the command
-> through it was never completed — so it has zero `src/` callers today.
+> `alloc_status_kind_aware` is the kind-aware renderer the
+> **`workload-kind-discriminator` feature** built (commit `72175d7e`,
+> step 02-02) to give `overdrive alloc status` Job-verdict /
+> per-attempt-exit / Service-replica output. That feature is **done** —
+> all its roadmap steps committed — but step 02-02 landed the renderer
+> and a 442-line test suite while touching neither `main.rs` nor
+> `commands/alloc.rs`: the wiring that makes the command dispatch through
+> it was never done (its tests assert on `alloc_status_kind_aware`
+> directly, so the step went green on the wrong surface). It has zero
+> `src/` callers in all of git history, so the kind-aware operator view
+> it built does not reach an operator.
 > `alloc_snapshot` is an older ADR-0033 §4 TUI mockup. The real fix is to
 > **finish that wiring** (dispatch the command through the kind-aware
 > renderer and retire the flat `alloc_status`, folding the shared section
