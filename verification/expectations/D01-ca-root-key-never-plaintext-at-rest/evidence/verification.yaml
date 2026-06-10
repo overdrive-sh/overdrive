@@ -1,9 +1,9 @@
 expectation_id: "D01"
-date_utc: "2026-06-10T10:43:33Z"
-overdrive_sha: "aaaaa0cd9a765e6a8ea73154e56f73a888b9a971"
+date_utc: "2026-06-10T11:12:11Z"
+overdrive_sha: "5f4ca9153f46f7cc0746ac50101ea23b82c4b121"
 working_tree_dirty: true
 dst_seed: 1
-harness_sha: "bbfe120b18bc41dbe7066f8aed8f4f9b5fac566b"
+harness_sha: "5f4ca9153f46f7cc0746ac50101ea23b82c4b121"
 harness_invocation: "verification/harness/run-expectation.sh D01"
 executed_in_lima: true
 runner_exit_code: "0"

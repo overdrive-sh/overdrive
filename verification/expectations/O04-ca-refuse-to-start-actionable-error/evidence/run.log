@@ -186,17 +186,17 @@ exit $rc
 '`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
-  [PASS] first boot persisted the root IntentStore at /tmp/tmp.k6T86CltmE/data/intent.redb
+  [PASS] first boot persisted the root IntentStore at /tmp/tmp.qlRBvnE5wm/data/intent.redb
   [PASS] wrong-KEK boot refused to start (exit 1, non-zero)
   [PASS] tampered-envelope boot refused to start (exit 1)
   [PASS] absent-KEK boot refused to start (exit 1)
   [PASS] absent-KEK boot persisted no root-key envelope (no throwaway KEK)
-  wrong-KEK cause:        [2m2026-06-10T10:53:22.231277Z[0m [31mERROR[0m persisted root-key envelope failed to decrypt; control-plane refusing to start (no silent re-mint) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mredb_path[0m[2m=[0m/tmp/tmp.k6T86CltmE/data/intent.redb [3mcause[0m[2m=[0mroot-key envelope is corrupt or tampered (AES-GCM auth failed) for kek_id `overdrive-ca-root`
-  tampered-envelope cause:[2m2026-06-10T10:53:22.504509Z[0m [31mERROR[0m root CA key envelope decode failed; control-plane refusing to start [3mredb_path[0m[2m=[0m/tmp/tmp.k6T86CltmE/data/intent.redb [3mkey[0m[2m=[0m"ca/node/intermediate-key-envelope/v1" [3menvelope_error[0m[2m=[0mMalformed { source: Error { inner: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: Utf8Error }, trace: TupleStructCheckContext { tuple_struct_name: "ArchivedKekId", field_index: 0 } } }, trace: StructCheckContext { struct_name: "ArchivedRootCaKeyRecordV1", field_name: "kek_id" } } }, trace: UnnamedEnumVariantCheckContext { enum_name: "ArchivedRootCaKeyEnvelope", variant_name: "V1", field_index: 1 } } } } }
-  absent-KEK cause:       [2m2026-06-10T10:53:22.779565Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
+  wrong-KEK cause:        [2m2026-06-10T11:13:28.122884Z[0m [31mERROR[0m persisted root-key envelope failed to decrypt; control-plane refusing to start (no silent re-mint) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mredb_path[0m[2m=[0m/tmp/tmp.qlRBvnE5wm/data/intent.redb [3mcause[0m[2m=[0mroot-key envelope is corrupt or tampered (AES-GCM auth failed) for kek_id `overdrive-ca-root`
+  tampered-envelope cause:[2m2026-06-10T11:13:28.428104Z[0m [31mERROR[0m root CA key envelope decode failed; control-plane refusing to start [3mredb_path[0m[2m=[0m/tmp/tmp.qlRBvnE5wm/data/intent.redb [3mkey[0m[2m=[0m"ca/node/intermediate-key-envelope/v1" [3menvelope_error[0m[2m=[0mMalformed { source: Error { inner: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: Utf8Error }, trace: TupleStructCheckContext { tuple_struct_name: "ArchivedKekId", field_index: 0 } } }, trace: StructCheckContext { struct_name: "ArchivedRootCaKeyRecordV1", field_name: "kek_id" } } }, trace: UnnamedEnumVariantCheckContext { enum_name: "ArchivedRootCaKeyEnvelope", variant_name: "V1", field_index: 1 } } } } }
+  absent-KEK cause:       [2m2026-06-10T11:13:28.699530Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
   [PASS] wrong-KEK vs tampered-envelope distinct
   [PASS] wrong-KEK vs absent-KEK distinct
   [PASS] tampered-envelope vs absent-KEK distinct
-  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: dd1fb5ab9f46c8918284111e4330e4531c99f93349110903c83d4b3c41621a07)
+  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: ef83f49584bc5e411f157ef9a2534dad018d91b35278c7cae9a95b594ca34fdd)
   [PASS] re-supplying the correct KEK adopts the SAME root (byte-stable)
 [3J'unknown': I need something more specific.

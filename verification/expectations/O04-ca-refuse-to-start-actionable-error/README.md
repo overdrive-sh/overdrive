@@ -54,10 +54,15 @@ Sub-claims:
 
 ## Evidence
 
-Executed through `harness/run-expectation.sh O04` at SHA `aaaaa0cd` in Lima
+Executed through `harness/run-expectation.sh O04` at SHA `fc276c70` in Lima
 (real kernel, real cgroup v2, real redb, production `SystemdCredsKeyring` KEK
-provider), `executed_in_lima: true`, `runner_exit_code: 0`. #215 wired `boot_ca`
-into `run_server`, so the refuse-to-start paths are now reachable from `serve`.
+provider), `executed_in_lima: true`, `runner_exit_code: 0`. The working tree
+carries only untracked externals (`AGENTS.md`, the `deliver/` DES artifacts)
+plus the just-written `evidence/` of this very capture, so the harness records
+`working_tree_dirty: true`; no *tracked source* is modified (this re-capture
+removed the prior dirty-tree asterisk where the runners themselves were
+uncommitted). #215 wired `boot_ca` into `run_server`, so the refuse-to-start
+paths are now reachable from `serve`.
 The runner drives the BUILT `overdrive serve` binary BLACK-BOX (no `overdrive-*`
 crate linked). Each boot runs under a FRESH kernel session keyring
 (`keyctl session -`) so the production keyring KEK cache cannot leak across boots
