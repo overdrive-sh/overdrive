@@ -108,3 +108,58 @@ signal handling for the binary wrapper itself, it can exercise the
 `main.rs` layer — but that is a test of `clap` configuration, not a
 test of the CLI's behaviour, and it must be tagged and scoped
 accordingly.
+
+## Alloc-status rendering — `render::alloc_status` is the LIVE path
+
+`overdrive alloc status` renders through **`render::alloc_status(&AllocStatusOutput)`**
+— and only that function. `main.rs` dispatches
+`Command::Alloc(AllocCommand::Status { .. })` to `commands::alloc::status(..)`
+and prints `render::alloc_status(&out)`. That is the one renderer an
+operator ever sees.
+
+`render.rs` contains **two other public renderers with confusingly
+similar names that are NOT wired into any command** — they are
+exercised *only by tests* (zero `src/` callers):
+
+- `alloc_status_kind_aware(&AllocStatusResponse)` — branches on
+  `WorkloadKind` (Service / Job / Schedule). **Test-only.**
+- `alloc_snapshot(&AllocStatusResponse)` — the ADR-0033 §4 "journey
+  TUI mockup". **Test-only.**
+
+**A change made only to `alloc_status_kind_aware` or `alloc_snapshot`
+does NOT reach an operator.** This has bitten more than one agent: you
+grep for `alloc_status` + "render", land on the kind-aware function (it
+looks the most complete — it has the `WorkloadKind` match arms), wire
+your change there, write a green test against it — and the live
+`overdrive alloc status` output is unchanged. The test passes; the
+feature is broken. (Precedent: built-in-ca step 03-02 wired the
+issued-certificates section into `alloc_status_kind_aware` only; it
+shipped green and the operator saw nothing.)
+
+Rules for any operator-visible change to `overdrive alloc status`
+output:
+
+1. **Make the change in `render::alloc_status`** (the live path). If you
+   also keep it in `alloc_status_kind_aware` so the two do not drift —
+   as the shared `render_vip_section` / `render_listeners_section` /
+   `render_issued_certificates_section` helpers already are — that is
+   fine, but `alloc_status` is the one that MUST change.
+2. **Test the LIVE path.** Add or extend a test that calls
+   `render::alloc_status(&AllocStatusOutput { snapshot:
+   AllocStatusResponse { .. }, .. })` and asserts on its output. The
+   live-path test home is `tests/acceptance/render_alloc_status.rs` —
+   see the `(g)` listener-protocol test for the canonical shape and the
+   comment there explaining that `main.rs` dispatches through
+   `render::alloc_status`, NOT `alloc_status_kind_aware`. A test that
+   only calls `alloc_status_kind_aware` / `alloc_snapshot` is testing
+   the wrong surface and cannot defend operator-visible behaviour.
+3. **Mind the signature difference.** `alloc_status` takes
+   `&AllocStatusOutput`, so the response fields live on `out.snapshot.*`
+   (e.g. `out.snapshot.issued_certificates`). The two test-only
+   renderers take `&AllocStatusResponse` directly. Wiring a section into
+   the live path means reading `out.snapshot.<field>`.
+
+> The three-renderer split is a known maintenance hazard: the test-only
+> pair are dead-to-production. Consolidating onto a single renderer is
+> the real fix; until that lands, treat `render::alloc_status` as the
+> single source of operator-visible truth.
