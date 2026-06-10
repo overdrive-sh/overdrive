@@ -19,6 +19,12 @@
 pub mod ca;
 pub mod cgroup_fs;
 pub mod clock;
+// built-in-ca-operator-composition step 02-02 — `SimKek`, the in-memory
+// `overdrive_core::ca::kek::Kek` double. The pure in-process counterpart to
+// the host `SystemdCredsKeyring`; injected through `ServerConfig.kek` by every
+// `run_server` integration/acceptance fixture so `boot_ca`'s KEK-resolve probe
+// succeeds hermetically (feature-delta § C1-AMEND, crafter obligation C-3).
+pub mod kek;
 // workload-identity-manager step 02-02 — `SimIdentityRead`, the in-memory
 // `overdrive_core::traits::identity_read::IdentityRead` double over a preloaded
 // held set + trust bundle. The sim counterpart to the host `IdentityMgr`
@@ -47,3 +53,4 @@ pub mod probers;
 pub use ca::SimCa;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
+pub use kek::SimKek;

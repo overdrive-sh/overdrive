@@ -61,9 +61,10 @@ impl DataplaneConfig {
     /// the serve-boot provision gate so the default config and the gate
     /// cannot drift (step 01-03).
     ///
-    /// Default `ServerConfig.dataplane` (`crate::ServerConfig::default`)
-    /// uses this so existing `..Default::default()` fixtures and the
-    /// production boot default both carry the veth-named shape.
+    /// The default `ServerConfig.dataplane` set by
+    /// [`crate::ServerConfig::new`] uses this so existing
+    /// `..ServerConfig::new(kek)` fixtures and the production boot default
+    /// both carry the veth-named shape.
     /// Production callers that read an operator TOML go through
     /// [`parse_dataplane_section`] and overwrite this value.
     #[must_use]

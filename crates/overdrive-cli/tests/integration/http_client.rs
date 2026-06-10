@@ -59,7 +59,9 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
         dataplane_override: Some(std::sync::Arc::new(
             overdrive_sim::adapters::dataplane::SimDataplane::new(),
         )),
-        ..Default::default()
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
+        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
+        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let handle: ServerHandle =
         run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");
