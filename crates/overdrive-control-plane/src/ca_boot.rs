@@ -81,8 +81,14 @@ pub enum CaBootError {
     /// (tampered / corrupt / wrong KEK). Startup is refused with NO silent
     /// re-mint (a re-mint orphans every issued identity, ADR-0063 D3). The boot
     /// path emits `health.startup.refused` before returning this.
-    #[error("persisted root-key envelope failed to decrypt; refusing to start (cause: {source})")]
+    #[error(
+        "persisted CA key envelope at {redb_path} failed to decrypt; refusing to start \
+         (cause: {source})"
+    )]
     EnvelopeDecrypt {
+        /// On-disk IntentStore (redb) path the operator must inspect or
+        /// delete to remediate a wrong-KEK / tampered / corrupt envelope.
+        redb_path: std::path::PathBuf,
         /// The underlying AEAD-open failure (tampered vs wrong-KEK distinct).
         #[source]
         source: CaError,
@@ -333,11 +339,12 @@ async fn load_persistent_intermediate(
         tracing::error!(
             name: "health.startup.refused",
             kek_id = %kek_id,
+            redb_path = %redb_path.display(),
             cause = %source,
             "persisted node-intermediate key envelope failed to decrypt; node bootstrap refusing \
              to start (no silent re-issue)",
         );
-        CaBootError::EnvelopeDecrypt { source }
+        CaBootError::EnvelopeDecrypt { redb_path: redb_path.to_path_buf(), source }
     })?;
 
     // The decrypted key is the proof of trust; the persisted public cert
@@ -435,11 +442,12 @@ async fn load_persistent_root(
         tracing::error!(
             name: "health.startup.refused",
             kek_id = %kek_id,
+            redb_path = %redb_path.display(),
             cause = %source,
             "persisted root-key envelope failed to decrypt; control-plane refusing to start (no \
              silent re-mint)",
         );
-        CaBootError::EnvelopeDecrypt { source }
+        CaBootError::EnvelopeDecrypt { redb_path: redb_path.to_path_buf(), source }
     })?;
 
     // The decrypted key is the proof of trust; the persisted public cert

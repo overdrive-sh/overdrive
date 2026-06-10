@@ -288,9 +288,11 @@ fn ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant() {
             source: KekError::not_found(kek("overdrive-root-kek")),
         }),
         ("wrong-kek", || CaBootError::EnvelopeDecrypt {
+            redb_path: std::path::PathBuf::from("/var/lib/overdrive/intent.redb"),
             source: CaError::wrong_kek(kek("sealed-under-kek"), kek("supplied-kek")),
         }),
         ("tampered-envelope", || CaBootError::EnvelopeDecrypt {
+            redb_path: std::path::PathBuf::from("/var/lib/overdrive/intent.redb"),
             source: CaError::tampered_envelope(kek("overdrive-root-kek")),
         }),
     ];
