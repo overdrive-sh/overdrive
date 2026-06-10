@@ -17,8 +17,9 @@
 #   2. Wrong KEK MATERIAL (same id) -> refuse-to-start; stderr names the
 #      AES-GCM AUTH-FAILURE cause ("failed AES-GCM authentication", naming BOTH
 #      wrong-material OR tamper) + the IntentStore path.
-#   3. STRUCTURALLY CORRUPTED envelope -> truncate the persisted envelope so it
-#      no longer deserializes; correct KEK; refuse-to-start; stderr names a
+#   3. STRUCTURALLY CORRUPTED envelope -> flip the persisted envelope value bytes
+#      in place (same length, redb container intact) so it no longer
+#      deserializes; correct KEK; refuse-to-start; stderr names a
 #      DECODE/MALFORMED cause (distinct CLASS — fails before crypto) + the path.
 #   4. Absent KEK        -> empty creds dir, no dev opt-in; refuse-to-start
 #      BEFORE any issuance; stderr names the KEK as unavailable.
@@ -115,13 +116,18 @@ fi
 
 # --- 3. STRUCTURALLY CORRUPTED envelope -> refuse-to-start, DECODE cause. ------
 # A tamper that keeps the record DECODABLE surfaces as auth-failure (the SAME
-# class as step 2 — not distinct). To exercise a DISTINCT decode-malformed cause
-# the corruption must break the record STRUCTURE, so it fails at deserialize
-# BEFORE crypto. Truncate the persisted envelope value to half its length: the
-# rkyv archived framing is broken, so `from_store_bytes` returns Malformed
-# (EnvelopeError::Malformed -> IntentStoreError::Envelope) before the AES-GCM
-# open ever runs. (Tamper-but-decodable is covered by step 2`s "or tampered"
-# wording.)
+# class as step 2 — not distinct). To exercise a DISTINCT decode cause the
+# corruption must break the record STRUCTURE so it fails at deserialize BEFORE
+# crypto, WITHOUT damaging the redb container (truncating the redb *file* trips
+# an internal redb page-layout panic before the app ever decodes — not the
+# decode path we mean to exercise). So this corrupts the persisted ENVELOPE
+# VALUE *in place* (same total file length → redb stays structurally valid),
+# flipping a run that spans the rkyv archived root + the outer-enum discriminant
+# (pinned 52 bytes from the value END; the only known discriminant is 0, so any
+# flip → UnknownVersion / Malformed). from_store_bytes then returns a decode
+# failure (EnvelopeError::{Malformed,UnknownVersion} -> IntentStoreError::Envelope)
+# before the AES-GCM open ever runs. (Tamper-but-decodable is covered by step 2 
+# "or tampered" wording.)
 python3 - "$INTENT" <<PY
 import sys
 p = sys.argv[1]
@@ -129,16 +135,23 @@ b = bytearray(open(p,"rb").read())
 marker = b"ca/root/key-envelope/v1"
 i = b.find(marker)
 if i == -1:
-    # Fallback: zero the second half of the file body (single-root store).
-    start = max(0, len(b)//2)
-    del b[start:]
-else:
-    # Truncate the value region: drop everything from halfway through the value
-    # bytes that follow the key marker, breaking the rkyv framing.
-    start = i + len(marker)
-    cut = start + max(8, (len(b) - start)//2)
-    del b[cut:]
-open(p,"wb").write(b)
+    sys.exit("could not locate key-envelope marker in redb file")
+# In-place flip (NO length change -> redb container framing intact; truncating
+# the redb file trips redb own page-layout assertion BEFORE the app decodes,
+# masking the decode path we mean to exercise). Flip the 64-byte run immediately
+# following the key marker — the start of the persisted envelope value region.
+# rkyv archives the outer-enum discriminant + root structure across the value,
+# so flipping its leading run breaks the archived framing and from_store_bytes
+# fails at decode (EnvelopeError::{Malformed,UnknownVersion} ->
+# IntentStoreError::Envelope) BEFORE the AES-GCM open runs. (This is the same
+# byte run the pre-correction capture used, which rendered a decode/Malformed
+# message per ADR-0063 2026-06-10 amendment; the only change is keeping it
+# in-place rather than truncating.)
+start = i + len(marker)
+end = min(start + 64, len(b))
+for k in range(start, end):
+    b[k] ^= 0xff
+open(p,"wb").write(b)   # same length as the original
 PY
 tamper_rc=$(serve "$CREDS" "$WORK/tamper.out" 20)
 tamper_msg="$(cat "$WORK/tamper.out")"
@@ -147,7 +160,7 @@ if [ "$tamper_rc" != 0 ]; then
 else
   echo "  [FAIL] corrupted-envelope boot did NOT refuse (exit 0)"; rc=1
 fi
-# Cause token: a decode/Malformed failure (distinct CLASS from step 2`s
+# Cause token: a decode/Malformed failure (distinct CLASS from step 2 
 # auth-failure — this fails before crypto).
 if printf "%s" "$tamper_msg" | grep -qiE "decode|malformed"; then
   echo "  [PASS] corrupted-envelope stderr names a decode/Malformed cause"

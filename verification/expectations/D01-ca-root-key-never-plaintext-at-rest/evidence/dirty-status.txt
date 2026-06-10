@@ -1,6 +1,3 @@
- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md
- M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
- M verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md
+ M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
 ?? AGENTS.md
 ?? docs/feature/built-in-ca-operator-composition/deliver/
-?? verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt

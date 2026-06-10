@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
      Running `target/debug/xtask lima run -- bash -lc '
 set -uo pipefail
 ROOT="$PWD"
@@ -47,27 +47,52 @@ echo "  [PASS] first boot persisted the root IntentStore at $INTENT"
 # whole redb file hash is stable iff the root is not re-minted.
 seed_hash="$(sha256sum "$INTENT" | cut -d" " -f1)"
 
-# --- 2. WRONG KEK -> refuse-to-start, wrong-KEK cause. ------------------------
+# --- 2. WRONG KEK MATERIAL (same id) -> refuse-to-start, AUTH-FAILURE cause. ---
+# Same kek_id, WRONG material -> the id check passes (NOT WrongKek) and the
+# AES-GCM open fails authentication -> CaError::EnvelopeAuthFailed.
 WRONG="$WORK/wrong"; mkdir -p "$WRONG"
 head -c 32 /dev/zero | tr "\0" "\\042" > "$WRONG/$KEK_ID"   # 0x22 bytes
 wrong_rc=$(serve "$WRONG" "$WORK/wrong.out" 20)
 wrong_msg="$(cat "$WORK/wrong.out")"
 if [ "$wrong_rc" '\!'= 0 ]; then
-  echo "  [PASS] wrong-KEK boot refused to start (exit $wrong_rc, non-zero)"
+  echo "  [PASS] wrong-KEK-material boot refused to start (exit $wrong_rc, non-zero)"
 else
-  echo "  [FAIL] wrong-KEK boot did NOT refuse (exit 0)"; rc=1
+  echo "  [FAIL] wrong-KEK-material boot did NOT refuse (exit 0)"; rc=1
+fi
+# Cause token: the AES-GCM auth failure, naming BOTH possibilities.
+if printf "%s" "$wrong_msg" | grep -qi "failed AES-GCM authentication"; then
+  echo "  [PASS] wrong-KEK-material stderr names the AES-GCM auth-failure cause"
+else
+  echo "  [FAIL] wrong-KEK-material stderr lacks the AES-GCM auth-failure token"; rc=1
+  printf "%s\n" "$wrong_msg" | sed -n "1,20p"
+fi
+if printf "%s" "$wrong_msg" | grep -qi "material is wrong OR" \
+   && printf "%s" "$wrong_msg" | grep -qi "tampered/corrupted"; then
+  echo "  [PASS] wrong-KEK-material stderr names BOTH possibilities (wrong material OR tamper)"
+else
+  echo "  [FAIL] wrong-KEK-material stderr does not name both possibilities"; rc=1
+fi
+# Actionable: names the IntentStore path the operator must inspect.
+if printf "%s" "$wrong_msg" | grep -qF "$INTENT"; then
+  echo "  [PASS] wrong-KEK-material stderr names the IntentStore path $INTENT"
+else
+  echo "  [FAIL] wrong-KEK-material stderr does not name the IntentStore path $INTENT"; rc=1
 fi
 
-# --- 3. TAMPERED envelope -> refuse-to-start, tampered cause (correct KEK). ---
-# Flip the final byte of the redb file (corrupts the sealed envelope auth tag
-# region with high probability; the boot under the CORRECT KEK then fails the
-# AEAD open rather than a KEK mismatch).
-# Locate the sealed root-key envelope value in the redb file and flip bytes
-# WITHIN it (corrupting the AEAD ciphertext/tag), so the boot under the CORRECT
-# KEK resolves the KEK but fails the AES-GCM open on a structurally-intact-but-
-# tampered envelope. Flipping the redb file tail can miss the value region
-# (redb padding/metadata), so we target the bytes immediately after the
-# `key-envelope/v1` key marker — the redb value bytes that follow the key.
+# --- 3. STRUCTURALLY CORRUPTED envelope -> refuse-to-start, DECODE cause. ------
+# A tamper that keeps the record DECODABLE surfaces as auth-failure (the SAME
+# class as step 2 — not distinct). To exercise a DISTINCT decode cause the
+# corruption must break the record STRUCTURE so it fails at deserialize BEFORE
+# crypto, WITHOUT damaging the redb container (truncating the redb *file* trips
+# an internal redb page-layout panic before the app ever decodes — not the
+# decode path we mean to exercise). So this corrupts the persisted ENVELOPE
+# VALUE *in place* (same total file length → redb stays structurally valid),
+# flipping a run that spans the rkyv archived root + the outer-enum discriminant
+# (pinned 52 bytes from the value END; the only known discriminant is 0, so any
+# flip → UnknownVersion / Malformed). from_store_bytes then returns a decode
+# failure (EnvelopeError::{Malformed,UnknownVersion} -> IntentStoreError::Envelope)
+# before the AES-GCM open ever runs. (Tamper-but-decodable is covered by step 2 
+# "or tampered" wording.)
 python3 - "$INTENT" <<PY
 import sys
 p = sys.argv[1]
@@ -75,26 +100,51 @@ b = bytearray(open(p,"rb").read())
 marker = b"ca/root/key-envelope/v1"
 i = b.find(marker)
 if i == -1:
-    # Fallback: corrupt a run of bytes in the file body (still hits the
-    # single persisted value on a small single-root store).
-    start = max(0, len(b)//2)
-    for k in range(start, min(start+64, len(b))):
-        b[k] ^= 0xff
-else:
-    # Flip a 64-byte run starting just past the key marker (the value region).
-    start = i + len(marker)
-    for k in range(start, min(start+64, len(b))):
-        b[k] ^= 0xff
-open(p,"wb").write(b)
+    sys.exit("could not locate key-envelope marker in redb file")
+# In-place flip (NO length change -> redb container framing intact; truncating
+# the redb file trips redb own page-layout assertion BEFORE the app decodes,
+# masking the decode path we mean to exercise). Flip the 64-byte run immediately
+# following the key marker — the start of the persisted envelope value region.
+# rkyv archives the outer-enum discriminant + root structure across the value,
+# so flipping its leading run breaks the archived framing and from_store_bytes
+# fails at decode (EnvelopeError::{Malformed,UnknownVersion} ->
+# IntentStoreError::Envelope) BEFORE the AES-GCM open runs. (This is the same
+# byte run the pre-correction capture used, which rendered a decode/Malformed
+# message per ADR-0063 2026-06-10 amendment; the only change is keeping it
+# in-place rather than truncating.)
+start = i + len(marker)
+end = min(start + 64, len(b))
+for k in range(start, end):
+    b[k] ^= 0xff
+open(p,"wb").write(b)   # same length as the original
 PY
 tamper_rc=$(serve "$CREDS" "$WORK/tamper.out" 20)
 tamper_msg="$(cat "$WORK/tamper.out")"
 if [ "$tamper_rc" '\!'= 0 ]; then
-  echo "  [PASS] tampered-envelope boot refused to start (exit $tamper_rc)"
+  echo "  [PASS] corrupted-envelope boot refused to start (exit $tamper_rc)"
 else
-  echo "  [FAIL] tampered-envelope boot did NOT refuse (exit 0)"; rc=1
+  echo "  [FAIL] corrupted-envelope boot did NOT refuse (exit 0)"; rc=1
 fi
-# Restore the untampered seed for the no-remint check below.
+# Cause token: a decode/Malformed failure (distinct CLASS from step 2 
+# auth-failure — this fails before crypto).
+if printf "%s" "$tamper_msg" | grep -qiE "decode|malformed"; then
+  echo "  [PASS] corrupted-envelope stderr names a decode/Malformed cause"
+else
+  echo "  [FAIL] corrupted-envelope stderr lacks a decode/Malformed token"; rc=1
+  printf "%s\n" "$tamper_msg" | sed -n "1,20p"
+fi
+# The corrupted-envelope cause must NOT be the auth-failure cause (distinct class).
+if printf "%s" "$tamper_msg" | grep -qi "failed AES-GCM authentication"; then
+  echo "  [FAIL] corrupted-envelope rendered the AUTH-FAILURE cause (not a distinct decode class)"; rc=1
+else
+  echo "  [PASS] corrupted-envelope cause is distinct from the auth-failure class"
+fi
+# Actionable: names the IntentStore path.
+if printf "%s" "$tamper_msg" | grep -qF "$INTENT"; then
+  echo "  [PASS] corrupted-envelope stderr names the IntentStore path $INTENT"
+else
+  echo "  [FAIL] corrupted-envelope stderr does not name the IntentStore path $INTENT"; rc=1
+fi
 
 # --- 4. ABSENT KEK -> refuse-to-start before any issuance, no throwaway KEK. --
 EMPTY="$WORK/empty"; mkdir -p "$EMPTY"
@@ -110,6 +160,19 @@ if [ "$absent_rc" '\!'= 0 ]; then
 else
   echo "  [FAIL] absent-KEK boot did NOT refuse (exit 0)"; rc=1
 fi
+# Cause token: the KEK is unavailable (distinct CLASS from the two above).
+if printf "%s" "$absent_msg" | grep -qi "unavailable"; then
+  echo "  [PASS] absent-KEK stderr names the KEK as unavailable"
+else
+  echo "  [FAIL] absent-KEK stderr lacks a KEK-unavailable token"; rc=1
+  printf "%s\n" "$absent_msg" | sed -n "1,20p"
+fi
+# Distinct from the other two cause classes.
+if printf "%s" "$absent_msg" | grep -qiE "failed AES-GCM authentication|decode|malformed"; then
+  echo "  [FAIL] absent-KEK rendered an auth-failure/decode cause (not a distinct KEK-unavailable class)"; rc=1
+else
+  echo "  [PASS] absent-KEK cause is distinct from the auth-failure and decode classes"
+fi
 if [ -f "$DATA2/intent.redb" ]; then
   # An absent-KEK refusal must fire BEFORE generate-or-persist, so no envelope.
   if grep -aq "key-envelope" "$DATA2/intent.redb" 2>/dev/null; then
@@ -121,18 +184,30 @@ else
   echo "  [PASS] absent-KEK boot persisted no IntentStore (refused before issuance)"
 fi
 
-# --- O04 sub-claim 5: pairwise-distinct cause strings. ------------------------
-# Extract the single cause line from each refusal stderr (the CaBoot Display).
-cause() { grep -aiE "kek|envelope|refus" "$1" | head -1; }
-wc_="$(cause "$WORK/wrong.out")"
-tc_="$(cause "$WORK/tamper.out")"
-ac_="$(cause "$WORK/absent.out")"
-echo "  wrong-KEK cause:        $wc_"
-echo "  tampered-envelope cause:$tc_"
-echo "  absent-KEK cause:       $ac_"
-[ "$wc_" '\!'= "$tc_" ] && echo "  [PASS] wrong-KEK vs tampered-envelope distinct" || { echo "  [FAIL] wrong vs tampered identical"; rc=1; }
-[ "$wc_" '\!'= "$ac_" ] && echo "  [PASS] wrong-KEK vs absent-KEK distinct" || { echo "  [FAIL] wrong vs absent identical"; rc=1; }
-[ "$tc_" '\!'= "$ac_" ] && echo "  [PASS] tampered-envelope vs absent-KEK distinct" || { echo "  [FAIL] tampered vs absent identical"; rc=1; }
+# --- O04 sub-claim 5: pairwise-distinct cause CLASSES (by token, not by string
+# inequality). The contract is that an operator can tell the three apart by the
+# cause — so each refusal must carry its OWN distinctive token and NOT the
+# others`. We classify each captured stderr by its token set and assert the
+# three classes are { auth-failure, decode-malformed, kek-unavailable }.
+classify() { # <stderr_file> -> echoes one of AUTH / DECODE / KEK / UNKNOWN
+  local f="$1"
+  if grep -qi "failed AES-GCM authentication" "$f"; then echo AUTH
+  elif grep -qiE "decode|malformed" "$f"; then echo DECODE
+  elif grep -qi "unavailable" "$f"; then echo KEK
+  else echo UNKNOWN; fi
+}
+wcls="$(classify "$WORK/wrong.out")"
+tcls="$(classify "$WORK/tamper.out")"
+acls="$(classify "$WORK/absent.out")"
+echo "  wrong-KEK-material class:  $wcls"
+echo "  corrupted-envelope class:  $tcls"
+echo "  absent-KEK class:          $acls"
+[ "$wcls" = AUTH ]   && echo "  [PASS] wrong-KEK-material classifies as AUTH"   || { echo "  [FAIL] wrong-KEK-material not AUTH ($wcls)"; rc=1; }
+[ "$tcls" = DECODE ] && echo "  [PASS] corrupted-envelope classifies as DECODE" || { echo "  [FAIL] corrupted-envelope not DECODE ($tcls)"; rc=1; }
+[ "$acls" = KEK ]    && echo "  [PASS] absent-KEK classifies as KEK"            || { echo "  [FAIL] absent-KEK not KEK ($acls)"; rc=1; }
+[ "$wcls" '\!'= "$tcls" ] && echo "  [PASS] auth-failure vs decode-malformed are distinct classes" || { echo "  [FAIL] auth-failure vs decode-malformed same class"; rc=1; }
+[ "$wcls" '\!'= "$acls" ] && echo "  [PASS] auth-failure vs KEK-unavailable are distinct classes" || { echo "  [FAIL] auth-failure vs KEK-unavailable same class"; rc=1; }
+[ "$tcls" '\!'= "$acls" ] && echo "  [PASS] decode-malformed vs KEK-unavailable are distinct classes" || { echo "  [FAIL] decode-malformed vs KEK-unavailable same class"; rc=1; }
 
 # --- O04 sub-claim 4: no silent re-mint across the refused boots. -------------
 # The wrong-KEK refusal ran against the original $INTENT (before tamper); its
@@ -186,17 +261,28 @@ exit $rc
 '`
 /opt/homebrew/bin/limactl
 xtask: running limactl shell <cmd>
-  [PASS] first boot persisted the root IntentStore at /tmp/tmp.qlRBvnE5wm/data/intent.redb
-  [PASS] wrong-KEK boot refused to start (exit 1, non-zero)
-  [PASS] tampered-envelope boot refused to start (exit 1)
+  [PASS] first boot persisted the root IntentStore at /tmp/tmp.H1B29Q7Xfl/data/intent.redb
+  [PASS] wrong-KEK-material boot refused to start (exit 1, non-zero)
+  [PASS] wrong-KEK-material stderr names the AES-GCM auth-failure cause
+  [PASS] wrong-KEK-material stderr names BOTH possibilities (wrong material OR tamper)
+  [PASS] wrong-KEK-material stderr names the IntentStore path /tmp/tmp.H1B29Q7Xfl/data/intent.redb
+  [PASS] corrupted-envelope boot refused to start (exit 1)
+  [PASS] corrupted-envelope stderr names a decode/Malformed cause
+  [PASS] corrupted-envelope cause is distinct from the auth-failure class
+  [PASS] corrupted-envelope stderr names the IntentStore path /tmp/tmp.H1B29Q7Xfl/data/intent.redb
   [PASS] absent-KEK boot refused to start (exit 1)
+  [PASS] absent-KEK stderr names the KEK as unavailable
+  [PASS] absent-KEK cause is distinct from the auth-failure and decode classes
   [PASS] absent-KEK boot persisted no root-key envelope (no throwaway KEK)
-  wrong-KEK cause:        [2m2026-06-10T11:13:28.122884Z[0m [31mERROR[0m persisted root-key envelope failed to decrypt; control-plane refusing to start (no silent re-mint) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mredb_path[0m[2m=[0m/tmp/tmp.qlRBvnE5wm/data/intent.redb [3mcause[0m[2m=[0mroot-key envelope is corrupt or tampered (AES-GCM auth failed) for kek_id `overdrive-ca-root`
-  tampered-envelope cause:[2m2026-06-10T11:13:28.428104Z[0m [31mERROR[0m root CA key envelope decode failed; control-plane refusing to start [3mredb_path[0m[2m=[0m/tmp/tmp.qlRBvnE5wm/data/intent.redb [3mkey[0m[2m=[0m"ca/node/intermediate-key-envelope/v1" [3menvelope_error[0m[2m=[0mMalformed { source: Error { inner: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: ErrorWithTrace { error: BoxedError { inner: Utf8Error }, trace: TupleStructCheckContext { tuple_struct_name: "ArchivedKekId", field_index: 0 } } }, trace: StructCheckContext { struct_name: "ArchivedRootCaKeyRecordV1", field_name: "kek_id" } } }, trace: UnnamedEnumVariantCheckContext { enum_name: "ArchivedRootCaKeyEnvelope", variant_name: "V1", field_index: 1 } } } } }
-  absent-KEK cause:       [2m2026-06-10T11:13:28.699530Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
-  [PASS] wrong-KEK vs tampered-envelope distinct
-  [PASS] wrong-KEK vs absent-KEK distinct
-  [PASS] tampered-envelope vs absent-KEK distinct
-  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: ef83f49584bc5e411f157ef9a2534dad018d91b35278c7cae9a95b594ca34fdd)
+  wrong-KEK-material class:  AUTH
+  corrupted-envelope class:  DECODE
+  absent-KEK class:          KEK
+  [PASS] wrong-KEK-material classifies as AUTH
+  [PASS] corrupted-envelope classifies as DECODE
+  [PASS] absent-KEK classifies as KEK
+  [PASS] auth-failure vs decode-malformed are distinct classes
+  [PASS] auth-failure vs KEK-unavailable are distinct classes
+  [PASS] decode-malformed vs KEK-unavailable are distinct classes
+  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: d60d378b01950068b8e84c532b1ffed43d8e01db50006cc2de0230b6fded2dc9)
   [PASS] re-supplying the correct KEK adopts the SAME root (byte-stable)
 [3J'unknown': I need something more specific.
