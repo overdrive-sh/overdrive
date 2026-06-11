@@ -1,0 +1,290 @@
+{
+  "roadmap": {
+    "project_id": "built-in-ca-operator-composition",
+    "created_at": "2026-06-09T16:06:59Z",
+    "total_steps": 8
+  },
+  "paradigm_note": "All exact public API shapes (action variants, error variants, wire structs, boot call shape) are pinned in DESIGN (feature-delta + ADR-0063/0067) — the crafter implements to that contract; ACs check observable boundary behaviour, so a behaviour-preserving shape tweak does not fail the roadmap. Project-wide discipline (Tier-1 DST + PBT default, Lima execution, EDD capture, mutation gate >=80%, single-cut greenfield, 'never invent API surface') is governed by .claude/rules/{testing,development}.md + CLAUDE.md and is NOT restated per step.",
+  "phases": [
+    {
+      "id": "01",
+      "name": "Rotation — near-expiry SVID reissue as a reconciler action (#40)",
+      "description": "Flip the SvidLifecycle near-expiry branch from the inert gated-workflow seam to a direct unconditional rotate IssueSvid action, and single-cut retire the rotation gate. Pure overdrive-core Tier-1 DST; no EDD (in-process reconciler logic stays in the test tiers). Implements D-OC-1/2/3/8. Does NOT depend on Phase 02/03.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Flip SvidLifecycle near-expiry branch to unconditional rotate Action::IssueSvid",
+          "description": "The near-expiry held-SVID branch in SvidLifecycle::reconcile emits a single rotate IssueSvid (reusing the existing action per DESIGN), unconditionally, instead of the inert gated StartWorkflow seam. The near-expiry threshold is half the workload SVID TTL, derived from the policy const (not a bare literal). GREENs the 5 DST rotation scaffolds S-OC-01..05.",
+          "criteria": [
+            "S-OC-01: a Running held alloc with not_after strictly within half-TTL of now emits exactly one rotate-correlation IssueSvid carrying the held spiffe_id and the running node_id, and no StartWorkflow (proptest invariant near_expiry_held_alloc_emits_one_rotate_issue_svid over arbitrary now + arbitrary in-window slack).",
+            "S-OC-02: a Running held alloc with not_after strictly beyond now + half-TTL emits no IssueSvid (converged action vector is exactly [Noop]) — proptest invariant held_alloc_outside_near_expiry_window_emits_no_issue_svid over arbitrary now + far-future not_after.",
+            "S-OC-04: the rotation threshold tracks half of the workload SVID TTL via the emitted action only — a hardcoded threshold that ignores a TTL policy change flips the emit and reds this (rotation_threshold_tracks_half_of_workload_svid_ttl_via_emitted_action); asserts the emitted action list, never a private threshold constant.",
+            "S-OC-05: a held near-expiry alloc emits a rotate-correlation IssueSvid while a separate unheld-but-ever_issued alloc emits an issue-correlation IssueSvid; neither emits StartWorkflow and the two correlations are distinct (proptest invariant rotate_is_distinct_from_restart_recovery_reissue).",
+            "All pre-existing SvidLifecycle branch tests (issue / drop / backoff / restart-recovery) stay GREEN, unchanged.",
+            "No Fixture Theater: the production branch flip is what flips the scaffolds RED -> GREEN."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_rotation.rs",
+          "scenario_name": "near_expiry_held_alloc_emits_one_rotate_issue_svid",
+          "effort_hours": 4,
+          "dependencies": [],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-core/src/reconcilers/svid_lifecycle.rs",
+              "crates/overdrive-core/tests/acceptance/svid_lifecycle_rotation.rs"
+            ]
+          },
+          "review_checklist": [
+            "git diff confirms svid_lifecycle.rs is modified (branch flip drives GREEN, not test fixtures).",
+            "Threshold const derived from the workload-SVID-TTL policy const, not a bare literal.",
+            "Action::IssueSvid reused unchanged; node_id from running.node_id (no HeldSvidFacts change)."
+          ],
+          "implementation_notes": "Tier-1 DST per testing.md. S-OC-01/02/05 are @property proptests; S-OC-04 uses TTL-derived boundary examples. Assert only on the Vec<Action> + next View, never private fields. Scaffolds exist (b8d0546f) — replace #[should_panic] bodies, do not re-author; confirm fail-for-right-reason first."
+        },
+        {
+          "id": "01-02",
+          "name": "Single-cut retire the rotation gate + un-skip the near_expiry mutation boundary",
+          "description": "Single-cut retire the now-dead rotation gate (the gate existed only to suppress an unregistered cert_rotation workflow that no longer exists after the action reframe) and remove the near_expiry mutation suppression, landing the inclusive-<= boundary kill-test (S-OC-03) so the now-live boundary has a mutation killer. All deletions and the kill-test land in one commit.",
+          "criteria": [
+            "S-OC-03: a Running held alloc whose not_after equals exactly now + half-TTL emits one rotate IssueSvid (the <= boundary is inclusive); one at half-TTL + 1s emits none. The two pinned boundary examples are the live mutation kill-test killing both the <=->< and <=->== mutants (near_expiry_boundary_is_inclusive_at_half_ttl).",
+            "The crate compiles with no dead_code / unused_imports warnings after the gate retirement.",
+            "The remaining SvidLifecycle reconcile tests stay GREEN after the gated-seam test is removed.",
+            "The live backoff comparison in reconcile remains a tested mutation target and is unaffected by the near_expiry suppression removal.",
+            "Mutation gate: diff-scoped run over svid_lifecycle.rs reports kill-rate >= 80% with the near_expiry <= boundary mutants CAUGHT (no longer skipped)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/svid_lifecycle_rotation.rs",
+          "scenario_name": "near_expiry_boundary_is_inclusive_at_half_ttl",
+          "effort_hours": 3,
+          "dependencies": ["01-01"],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-core/src/reconcilers/svid_lifecycle.rs",
+              "crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs",
+              "crates/overdrive-core/tests/acceptance/svid_lifecycle_rotation.rs",
+              ".cargo/mutants.toml"
+            ]
+          },
+          "review_checklist": [
+            "ROTATION_ENABLED / CERT_ROTATION_WORKFLOW consts + the StartWorkflow / WorkflowName imports removed from svid_lifecycle.rs.",
+            "The gated-seam test near_expiry_rotation_seam_is_emit_gated_until_cert_rotation_registered is deleted (delete code AND its test).",
+            ".cargo/mutants.toml no longer carries the near_expiry exclude_re entry or its comment block.",
+            "A dead_code warning after deletion signals MORE deletion, not an #[allow]."
+          ],
+          "implementation_notes": "Tier-1 DST per testing.md; mutation gate >=80% is a hard done-definition. S-OC-03 is the inclusive-<= boundary kill-test (hand-picked examples — generation dilutes the boundary signal); assert only on the emitted IssueSvid count. Suppression removal and kill-test land together so the boundary is never live-but-unkilled. Scaffold exists — replace its body, do not re-author."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Boot-side #215 — persistent CA wired into `overdrive serve`",
+      "description": "overdrive serve boots the persistent KEK-sealed workload-identity root, single-cut replacing the ephemeral root, and surfaces typed cause-distinct refusals on a bad KEK / envelope. Closes the D-CA-4 deferral and folds GH #215 (boot-side). Tier-3 Lima; captures EDD D01 (root key never plaintext at rest) + O04 (refuse-to-start, cause-distinct, no re-mint). Implements D-OC-4/5/6. Does NOT depend on Phase 01.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Typed CA-boot failure stays cause-distinguishable at the operator boundary",
+          "description": "Typed CA-boot failures remain cause-distinguishable when they reach the control-plane error boundary: a boot failure surfaces its underlying cause (wrong-KEK vs tampered-envelope vs absent-KEK) without being flattened to a string. This is the additive error surface 02-02 depends on; no underlying CA-error change is needed (the cause variants are already distinct).",
+          "criteria": [
+            "A CA-boot failure converts into the control-plane error type through ? with no string flattening — it stays matchable as a distinct CA-boot failure at the composition root.",
+            "Each boot cause (absent-KEK, envelope-decrypt over wrong-KEK, envelope-decrypt over tampered-envelope) is matchable as the CA-boot failure and renders a cause string that preserves the distinct underlying cause (wrong-KEK and tampered render different strings).",
+            "The CA-boot failure maps to a 500 at the HTTP boundary for exhaustiveness only (the boot path never reaches HTTP).",
+            "The error surface is additive — no existing control-plane error variant changes shape; the crate compiles clean."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/error_mapping_exhaustive.rs",
+          "scenario_name": "ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant",
+          "effort_hours": 3,
+          "dependencies": [],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/error.rs",
+              "crates/overdrive-control-plane/tests/acceptance/error_mapping_exhaustive.rs"
+            ]
+          },
+          "review_checklist": [
+            "Dedicated #[from] variant mirroring ViewStoreBoot / Tls / Cgroup — NEVER a ControlPlaneError::internal flatten (development.md § Errors).",
+            "No underlying CaError change in scope: wrong-KEK vs tampered are already distinct Display variants and the boot error embeds the typed cause as #[source]."
+          ],
+          "implementation_notes": "Acceptance, example-based — a finite enumerated set, so a parametrized table over the three causes (Mandate M5/M11). Assert on matchability + rendered cause-string distinctness, not private fields. The in-process typed-error invariant O04 rides on (O04 capture is 02-03). Default lane, no real I/O."
+        },
+        {
+          "id": "02-02",
+          "name": "Wire the persistent CA boot into run_server",
+          "description": "overdrive serve's composition root boots the persistent KEK-sealed root, single-cut replacing the ephemeral workload-identity root: the adopted persistent root (not a fresh per-boot root) backs IdentityMgr, the Earned-Trust probes (KEK-resolve, envelope-decrypt) run at production boot, and a boot failure propagates as the typed CA-boot failure from 02-01. The exact boot call shape is pinned in DESIGN (feature-delta C1); reuse it as-is, only newly called from production.",
+          "criteria": [
+            "The ephemeral workload-identity root composition is deleted (single-cut); run_server boots the persistent root, threading the real redb store path so refuse-to-start remediation names the actual file.",
+            "The workload-identity CA backing IdentityMgr is the adopted persistent root, not a fresh in-memory root per boot.",
+            "A boot failure propagates through ? as the typed CA-boot failure (no flatten) and surfaces its cause-distinct message.",
+            "The separate operator/control-plane HTTPS CA is unchanged — the two CAs are not conflated.",
+            "Compile-check + integration --no-run GREEN under Lima (runtime RED->GREEN of the serve scaffolds is confirmed in 02-03)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/serve_persistent_ca.rs",
+          "scenario_name": "serve_first_boot_generates_seals_and_persists_root",
+          "effort_hours": 5,
+          "dependencies": ["02-01"],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/lib.rs"
+            ]
+          },
+          "review_checklist": [
+            "git diff confirms only the workload-identity CA composition changed; the operator HTTPS CA (mint_ephemeral_ca) is untouched (CLAUDE.md two-CA discipline).",
+            "ca_boot reused as-is (Reuse Analysis: REUSE AS-IS, only newly called) — no signature/logic change; if the DESIGN boot signature diverges from C1, STOP and surface the gap.",
+            "Single-cut: the ephemeral block deletes in the same commit (no flag, no parallel path)."
+          ],
+          "implementation_notes": "Integration / wiring per testing.md — the contract is 'run_server composes the persistent CA correctly and the probes run'; the driving port is the overdrive serve subprocess (EDD surface captured in 02-03). This step's gate is the compile-check + the wiring landing."
+        },
+        {
+          "id": "02-03",
+          "name": "GREEN serve boot integration scaffolds + capture EDD D01 + O04",
+          "description": "GREEN the serve-boot Lima scaffolds slice by slice — first-boot persist (S-OC-06), adopt-on-restart no-remint (S-OC-07), refuse on wrong-KEK / tampered-envelope / absent-KEK (S-OC-08a/b/c), pairwise-distinct refusal stderr (S-OC-08d), and refuse-to-start leaves the root unchanged with no silent re-mint (S-OC-09) — plus the rotate-correlation IssueSvid executor-dispatch scaffold S-OC-10 (direct action-shim dispatch coverage; no Phase 01 dependency). Then capture EDD D01 and O04 against the built overdrive binary, SHA-pinned in Lima.",
+          "criteria": [
+            "S-OC-06 (EDD D01): serve first boot generates a P-256 root + node intermediate, persists the root as a KEK-sealed AEAD envelope in the IntentStore file, and reaches serving; the on-disk file contains the envelope fields and NO plaintext root-key DER (byte-scan).",
+            "S-OC-07 (EDD D01): serve restart with the same KEK decrypts and adopts the SAME root (identical serial across restart), generates no new root, and the on-disk file still contains no plaintext key bytes.",
+            "S-OC-08a/b/c (EDD O04): serve refuses to start on wrong-KEK, tampered-envelope, and absent-KEK (the latter before any issuance, no throwaway KEK); each refusal names its cause + the IntentStore path in stderr, emits health.startup.refused, and the control plane does NOT begin serving.",
+            "S-OC-08d (EDD O04): the wrong-KEK, tampered-envelope, and absent-KEK stderr cause strings are pairwise distinct.",
+            "S-OC-09 (EDD O04): after a refused boot, re-supplying the correct KEK adopts the SAME original root (identical serial) and no new root envelope was written during the refused boot (no silent re-mint).",
+            "S-OC-10: a rotate-correlation IssueSvid dispatches through the existing action-shim executor — a fresh issued_certificates row (new serial/window) is observable, IdentityMgr hold-replaces the freshly-minted material, and the held serial matches the new audit-row serial (no new executor surface).",
+            "EDD satisfied gate: D01 and O04 each carry Lima-captured SHA-pinned evidence (D01 shows the byte-scan finds no plaintext key; O04 shows the 3 cause-distinct stderr + the no-remint serial check); each is set to satisfied ONLY after a different-fox Haiku reviewer per expectation refutes-or-confirms the evidence (the authoring agent never self-stamps)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/serve_persistent_ca.rs",
+          "scenario_name": "serve_refusal_causes_are_pairwise_distinct",
+          "effort_hours": 8,
+          "dependencies": ["02-02"],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/serve_persistent_ca.rs",
+              "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs",
+              "verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh",
+              "verification/expectations/D01-ca-root-key-never-plaintext-at-rest/README.md",
+              "verification/expectations/O04-ca-refuse-to-start-actionable-error/runner.sh",
+              "verification/expectations/O04-ca-refuse-to-start-actionable-error/README.md"
+            ]
+          },
+          "review_checklist": [
+            "S-OC-10 is direct executor-dispatch coverage (a rotate-correlation IssueSvid constructed in the test and dispatched through the existing executor) — no Phase 01 reconcile-branch flip needed, no Phase 01 dependency.",
+            "The action-shim executor (issue_svid) is reused unchanged — assert the audit row + held snapshot, not executor internals.",
+            "EDD runners stay black-box (no overdrive-* link); captures run via run-expectation.sh in Lima."
+          ],
+          "implementation_notes": "Integration / Tier-3 Lima per testing.md — #[ignore]-gated subprocess tests over the built serve binary. Verify side effects: on-disk redb byte-scan (D01), stderr cause + refuse outcome (O04), no-remint serial comparison. Remove #[ignore] one scaffold at a time, confirm fail-for-right-reason first. Scaffolds exist (b8d0546f) — do not re-author. D01/O04 satisfied only after a different-fox Haiku reviewer reads evidence/ adversarially (verification.md)."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Consumer-side #215 — issued-cert summary surfaced + E03 chain proof",
+      "description": "Surface the current workload-SVID summary to the operator via an additive issued-certificates field on the alloc-status response (no cert bytes / no key), render it in overdrive alloc status, and complete the E03 full-chain-verifies proof to all three sub-claims. Tier-3 Lima; captures EDD O05 (operator-legible audit row) + E03 (full chain verifies). Implements D-OC-7 and the review-design Medium-1 E03 3-sub-claim obligation. Depends on Phase 02 (a booted persistent CA) for the O05 fixture; does NOT depend on Phase 01.",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Additive issued-certificates summary on the alloc-status response + server aggregation",
+          "description": "The alloc-status response gains an additive issued-certificates summary (serial, spiffe_id, issuer_serial, not_after — NO cert bytes, NO key), and the alloc-status handler projects, per running alloc, the max-issuance_ordinal audit row matching that alloc's SPIFFE identity. Reuse the existing audit-row type, observation query, and SPIFFE-for-allocation helper as-is — no row-schema or rkyv envelope change. The exact wire shape is pinned in DESIGN (feature-delta D1).",
+          "criteria": [
+            "The alloc-status response exposes an issued-certificates summary carrying exactly serial, spiffe_id, issuer_serial, not_after — no cert PEM/DER, no private key.",
+            "The server projects, per running alloc, the single max-issuance_ordinal issued-certificate row whose SPIFFE identity matches that alloc — NOT history, NOT non-matching rows.",
+            "The field is JSON backward-compatible: an empty issued-certificates summary is omitted from the serialized response, so existing consumers see no change.",
+            "No row-schema / rkyv envelope change to the audit row; the observation query and the SPIFFE-for-allocation helper are reused unchanged.",
+            "Compile-check GREEN under Lima."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/alloc_status_issued_certificates.rs",
+          "scenario_name": "alloc_status_surfaces_current_issued_certificate_summary",
+          "effort_hours": 4,
+          "dependencies": [],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/api.rs",
+              "crates/overdrive-control-plane/src/handlers.rs"
+            ]
+          },
+          "review_checklist": [
+            "Audit-row type, issued_certificate_rows() query, and SpiffeId::for_allocation reused as-is (Reuse Analysis: REUSE AS-IS) — no new field/method, no rkyv envelope bump.",
+            "Newtype discipline: serial is CertSerial, spiffe_id is SpiffeId — no raw String for domain ids.",
+            "Persist-inputs spirit: project from the audit-row facts; cache no derived 'current cert'."
+          ],
+          "implementation_notes": "Integration / wiring per testing.md — the AC is a wiring + projection contract; runtime assertions live in the 03-02 Lima scaffolds, this step's gate is the additive field + projection compiling. Assert observable response shape, never private handler internals. O05 capture is 03-03."
+        },
+        {
+          "id": "03-02",
+          "name": "`overdrive alloc status` CLI render of the issued-certificates section",
+          "description": "overdrive alloc status renders each issued-certificate summary (serial / spiffe_id / issuer_serial / not_after) with NO cert bytes and NO key, then GREENs the Lima scaffolds S-OC-11 (the surfaced serial matches the minted cert) and S-OC-12 (the render shows exactly the max-issuance_ordinal row per running alloc, not history, and leaks no cert bytes/key).",
+          "criteria": [
+            "S-OC-11 (EDD O05): overdrive alloc status --job <id> for a deployed running workload surfaces an issued-certificate section showing serial, spiffe_id, issuer_serial, not_after, and the surfaced serial matches the minted certificate's serial.",
+            "S-OC-12 (EDD O05): for a running alloc with multiple issued-certificate rows over time (first issue + a re-mint), the render shows exactly the max-issuance_ordinal row per running alloc (NOT history), contains NO certificate PEM/DER and NO private key, and a post-restart serial change reads as the current cert rather than an anomaly.",
+            "The CLI render is purely additive — alloc status output for a workload with no issued certs is unchanged (empty section omitted).",
+            "Compile-check GREEN and the two Lima scaffolds confirmed fail-for-right-reason before GREEN."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/alloc_status.rs",
+          "scenario_name": "issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal",
+          "effort_hours": 4,
+          "dependencies": ["03-01"],
+          "placement_correction": "2026-06-10 (orchestrator, user-approved): the DISTILL scaffold was authored in crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/alloc_status_issued_certificates.rs, but S-OC-11/12 are CLI-render driving-port tests and overdrive-control-plane CANNOT depend on overdrive-cli (cycle) — so the test is structurally unrunnable there. Relocated single-cut into the existing overdrive-cli CLI alloc-status home (crates/overdrive-cli/tests/integration/alloc_status.rs), driven in-process via overdrive_cli::render::alloc_status_* per overdrive-cli/CLAUDE.md (no-subprocess) and the 02-03 serve_persistent_ca.rs in-process-run_server precedent (same commit b8d0546f). The control-plane scaffold + its mod line in tests/integration.rs are deleted in the same commit (no stub).",
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-cli/src/render.rs",
+              "crates/overdrive-cli/tests/integration/alloc_status.rs",
+              "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/alloc_status_issued_certificates.rs",
+              "crates/overdrive-control-plane/tests/integration.rs"
+            ]
+          },
+          "review_checklist": [
+            "If the render lives in a different overdrive-cli path than commands/alloc.rs (e.g. a shared render module), use the actual file but stay within overdrive-cli render + alloc command; if the seam is ambiguous, STOP and surface it.",
+            "Render via the summary fields' Display — no raw String plumbing of domain ids."
+          ],
+          "implementation_notes": "Integration per testing.md — the driving port is overdrive_cli::render::alloc_status_* called IN-PROCESS over a constructed AllocStatusResponse (the established overdrive-cli/tests/integration/alloc_status.rs pattern; overdrive-cli/CLAUDE.md forbids subprocess-spawning the binary). The scaffold header's 'real subprocess in Lima' wording is boilerplate the sibling 02-03 serve_persistent_ca.rs already resolved against ('NOT a forked overdrive binary'). Verify the rendered section + its fields (serial/spiffe_id/issuer_serial/not_after via Display) and the ABSENCE of cert-bytes/key tokens (S-OC-12 no-leak invariant, ADR-0067 #215-boundary); section omitted when issued_certificates is empty (additive). Author S-OC-11/12 in alloc_status.rs as s_03_xx-style render tests; delete the misplaced control-plane scaffold + its tests/integration.rs mod line single-cut. Run under Lima (cargo xtask lima run -- cargo nextest run, no --no-run). O05 capture is 03-03."
+        },
+        {
+          "id": "03-03",
+          "name": "Extend E03 runner to 3 sub-claims + capture EDD O05 + E03",
+          "description": "Capture EDD O05 (issued-certificates audit row operator-visible) against the GREEN CLI surface, and complete EDD E03 (full chain verifies) by extending the E03 runner from its current 2-check shape to all three sub-claims: chain verifies, leaf profile, and the pathLen=0 negative anchor (a further-CA chain MUST fail verification). The existing chain-verify test gains an env-gated PEM export (fixture change; the existing tests stay GREEN) feeding the runner; no new production API and no chain-export operator verb (D-CA-4 holds — openssl verify is the honest external entry point).",
+          "criteria": [
+            "O05 satisfied: the captured alloc status evidence shows the issued-certificate summary (serial/spiffe_id/issuer_serial/not_after) is operator-legible and carries no cert bytes/key (graduates S-OC-11/12); satisfied only after a different-fox Haiku reviewer confirms the evidence is executed (not narrated) against the built binary in Lima.",
+            "S-OC-13 (E03 sub-claim 1): openssl verify of the exported svid against the exported root + untrusted intermediate exits 0 (svid: OK).",
+            "S-OC-14 (E03 sub-claim 2): the exported leaf carries exactly one spiffe:// URI SAN, basicConstraints CA:FALSE, and keyUsage digitalSignature marked critical.",
+            "S-OC-15 (E03 sub-claim 3, MANDATORY negative anchor): a chain where the pathLen=0 intermediate signs a further-CA cert FAILS openssl verify (non-zero exit) — pathLen is ENFORCED, not merely set.",
+            "The E03 runner enforces all three sub-claims before any satisfied (extended from 2 to 3 checks); the existing chain-verify tests stay GREEN (the PEM export is an env-gated fixture addition, not a behavioural change); the runner stays black-box (bash + openssl + file-observation, no overdrive-* link).",
+            "E03 satisfied gate: satisfied ONLY after a different-fox Haiku reviewer per expectation reads the captured evidence/ adversarially and confirms all three sub-claims executed; E03 evidence missing the pathLen=0 negative anchor (sub-claim 3) is a MANDATORY refuted, even if sub-claims 1-2 executed cleanly."
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+          "scenario_name": "rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced",
+          "effort_hours": 7,
+          "dependencies": ["03-02", "02-02"],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs",
+              "verification/expectations/E03-ca-full-chain-verifies/runner.sh",
+              "verification/expectations/E03-ca-full-chain-verifies/README.md",
+              "verification/expectations/O05-ca-issued-certificates-audit-row/runner.sh",
+              "verification/expectations/O05-ca-issued-certificates-audit-row/README.md"
+            ]
+          },
+          "review_checklist": [
+            "The export hook on the chain-verify test is an env-gated fixture write (PEMs written before the TempDir drops); the existing tests stay GREEN.",
+            "PEMs come from the existing Ca port surface — NO new production API, NO operator verb that mints/exports a chain (D-CA-4 holds).",
+            "Runner extended 2 -> 3 checks; cargo nextest invoked only as the PEM producer, runner otherwise black-box.",
+            "Dep on 02-02 is for a booted persistent CA backing the O05 fixture."
+          ],
+          "implementation_notes": "Integration / Tier-3 Lima per testing.md (S-OC-15 is an enumerated sad path). O05/E03 are operator-surface black-box evidence; the in-process invariants are covered by the Tier-3 alloc-status tests (O05) and the existing GREEN chain-verify tests (E03). E03 runner extension to 3 checks is MANDATORY (review-design Medium-1): a 2-check runner green on sub-claims 1-2 alone does NOT satisfy E03. Capture via run-expectation.sh, SHA-pinned; satisfied only after a different-fox Haiku reviewer who MUST refute E03 evidence missing sub-claim 3."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/reconcilers/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-cli/src/commands/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/",
+      "crates/overdrive-host/tests/integration/",
+      "verification/expectations/"
+    ],
+    "excluded_patterns": [
+      "mod.rs",
+      "**/target/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  }
+}

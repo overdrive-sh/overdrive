@@ -1,0 +1,181 @@
+review_id: roadmap_rev_20260609_built_in_ca_operator_composition
+reviewer: codex_nw_review
+artifact: docs/feature/built-in-ca-operator-composition/deliver/roadmap.json
+review_date: "2026-06-09"
+iteration: 1
+
+approval_status: revisions_needed
+approval_recommendation: REVISIONS_NEEDED
+blocker_issues_count: 2
+high_issues_count: 2
+medium_issues_count: 1
+low_issues_count: 0
+
+executive_summary: |
+  The roadmap has strong traceability and an executable end-to-end path: 8
+  steps, 3 phases, 18 referenced S-OC scenarios, all file paths present, and a
+  healthy decomposition ratio of 8 steps / 22 unique files = 0.36.
+
+  It is not ready for DELIVER as written. The roadmap embeds implementation
+  code and exact construction recipes in step descriptions and notes, and its
+  4,222-word size exceeds the 1,500-word roadmap threshold for an 8-step plan.
+  Those are roadmap-gate blockers because they turn the artifact into a
+  crafter script instead of a behavioral handoff.
+
+gating_checks:
+  external_validity:
+    status: PASS
+    evidence: |
+      The feature has clear invocation paths: the pure SvidLifecycle driving
+      port for rotation, `overdrive serve` for persistent CA boot, and
+      `overdrive alloc status --job <id>` for operator-visible issued-cert
+      summaries. Integration wiring appears in steps 02-02, 02-03, 03-02, and
+      03-03.
+  ac_implementation_coupling:
+    status: FAIL
+    severity: HIGH
+    evidence: |
+      Several ACs and descriptions prescribe exact internal identifiers and
+      types, including `ControlPlaneError::CaBoot(#[from] CaBootError)` at
+      lines 71-77, `AllocStatusResponse.issued_certificates:
+      Vec<IssuedCertSummary>` at lines 151-158, and
+      `#[serde(default, skip_serializing_if = "Vec::is_empty")]` at lines
+      152 and 154.
+  step_decomposition_ratio:
+    status: PASS
+    evidence: "8 implementation steps / 22 unique files = 0.36, well under the 2.5 rejection threshold."
+  implementation_code_in_roadmap:
+    status: FAIL
+    severity: BLOCKER
+    evidence: |
+      Step 02-02 includes a code-level recipe with constructor calls, coercion,
+      awaited calls, and `?` propagation in the description at line 94. Its
+      implementation notes repeat the exact construction order and call shape
+      at line 111. Step 01-01 similarly prescribes the full
+      `Action::IssueSvid { ... }` construction and correlation expression at
+      lines 15-23.
+  concision_and_precision:
+    status: FAIL
+    severity: BLOCKER
+    evidence: |
+      The roadmap contains 4,222 words. For an 8-step roadmap, the roadmap
+      check threshold is 1,500 words. Every step description is over the
+      50-word limit, every implementation note is over the 100-word limit, and
+      steps 01-01, 02-03, and 03-03 exceed the max-5-criteria check.
+  unit_test_boundary_validation:
+    status: PASS_WITH_NIT
+    evidence: |
+      Most tests invoke through acceptable driving ports: pure
+      `SvidLifecycle::reconcile`, real `overdrive serve`, real `overdrive alloc
+      status`, action-shim dispatch, and black-box `openssl verify`. Step
+      02-01's error-mapping test is type-level rather than operator-facing, but
+      it is scoped to the public error boundary and does not currently block
+      the roadmap.
+
+scenario_reference_audit:
+  referenced_in_roadmap: 18
+  defined_in_feature_delta: 18
+  defined_in_distill_file: 19
+  missing_references: 0
+  note: |
+    The extra distill occurrence is the historical aggregate S-OC-08 mention;
+    the roadmap correctly references the split S-OC-08a/b/c/d scenarios.
+
+file_scope_audit:
+  unique_files: 22
+  missing_files: 0
+  step_file_references: 24
+
+issues:
+  blocker:
+    - id: roadmap_contains_implementation_code
+      location: "roadmap.json:15-23, roadmap.json:94, roadmap.json:111"
+      issue: |
+        The roadmap gives exact code construction recipes: `Action::IssueSvid`
+        field assembly, exact boot call order, `Arc<dyn IntentStore>` coercion,
+        awaited calls, and `?` propagation. This crosses from WHAT into HOW.
+      consequence: |
+        DELIVER crafters are steered to transcribe the roadmap instead of
+        driving GREEN through tests and refactoring to the cleanest local shape.
+      recommendation: |
+        Move exact call recipes and construction-order details back to design
+        artifacts or dispatch notes. Keep the roadmap criteria behavioral:
+        persistent root is adopted across restarts, boot failures surface typed
+        causes, the issued SVID is observable through audit/hold state, and the
+        operator surfaces the current summary.
+
+    - id: roadmap_exceeds_concision_gate
+      location: "roadmap.json:1-246"
+      issue: |
+        The artifact is 4,222 words for 8 steps, exceeding the 1,500-word
+        threshold. All step descriptions exceed 50 words; implementation notes
+        run 167-280 words; three steps have more than five criteria.
+      consequence: |
+        The handoff is harder to review and creates multiple competing sources
+        of truth between design, distill, and deliver.
+      recommendation: |
+        Compress each step to a short behavior statement, at most five
+        observable criteria, and a <=100-word note. Delete repeated TDD,
+        Lima, EDD, and "do not invent API" boilerplate where the project rules
+        already govern it.
+
+  high:
+    - id: acceptance_criteria_overcoupled_to_types
+      location: "roadmap.json:71-77, roadmap.json:151-158"
+      issue: |
+        Some acceptance criteria require exact Rust type/attribute shapes
+        (`ControlPlaneError::CaBoot(#[from] CaBootError)`,
+        `IssuedCertSummary`, serde attributes) rather than observable
+        behavior.
+      consequence: |
+        A correct behavior-preserving design adjustment would fail the roadmap
+        even if it satisfies the operator-facing contract.
+      recommendation: |
+        Keep exact public API decisions in DESIGN. Rewrite roadmap ACs around
+        boundary behavior: typed CA boot failures remain distinguishable,
+        serialized responses omit empty issued-cert summaries, and no cert or
+        key bytes are exposed.
+
+    - id: private_internal_references_in_step_done_definitions
+      location: "roadmap.json:23, roadmap.json:40-46, roadmap.json:96"
+      issue: |
+        Done definitions rely on private file diffs, named private constants,
+        import deletion, and line-local implementation seams. These are useful
+        review checks but not acceptance criteria.
+      consequence: |
+        The crafter can satisfy the observable contract while still failing the
+        roadmap for implementation-shape differences.
+      recommendation: |
+        Move file-diff and deletion checks into review checklist language.
+        Keep ACs on emitted actions, refused boot behavior, persisted envelope
+        behavior, audit rows, and CLI output.
+
+  medium:
+    - id: s_oc_10_phase_dependency_ambiguous
+      location: "roadmap.json:67, roadmap.json:116, roadmap.json:123, roadmap.json:129"
+      issue: |
+        Phase 02 says it does not depend on Phase 01, but step 02-03 includes
+        S-OC-10 and says it "depends behaviorally on Phase 01 having flipped
+        the branch" while declaring only dependency 02-02.
+      consequence: |
+        A DELIVER agent may run 02-03 before 01-01/01-02 and get unclear RED
+        behavior if S-OC-10 expects the reconciler-emitted rotate action rather
+        than direct executor dispatch.
+      recommendation: |
+        Clarify S-OC-10 as either direct executor-dispatch coverage with no
+        Phase 01 dependency, or add the required Phase 01 dependency to 02-03.
+
+non_blocking_strengths:
+  - "External invocation paths are present and credible."
+  - "All roadmap file paths currently exist."
+  - "All 18 roadmap S-OC references resolve to feature-delta/distill coverage."
+  - "The 8-step decomposition is compact relative to the file surface."
+  - "E03/O05 separation is preserved; the roadmap requires the pathLen=0 negative anchor before E03 can be satisfied."
+
+next_steps: |
+  Revise the roadmap before DELIVER. The fastest fix is a compression pass:
+  keep phase/step structure and scenario mapping, remove code recipes from
+  descriptions/notes, rewrite overcoupled ACs into observable behavior, and
+  resolve the S-OC-10 dependency wording.
+
+reviewer_confidence: high

@@ -1,0 +1,391 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "built-in-ca-operator-composition",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T16:48:19Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T16:48:19Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: AT reaches GREEN without unit tests; IssueSvid variant + identity_correlation fn already exist",
+      "t": "2026-06-09T16:48:19Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T16:52:31Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T16:54:35Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T17:57:53Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T17:58:34Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-OC-03 is example-based boundary kill-test; no unit tests required and production <= is already live",
+      "t": "2026-06-09T17:58:41Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T18:00:59Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-09T18:03:11Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T07:31:08Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T07:32:15Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: example-based AT over the three enumerated boot causes is the full spec and reaches GREEN via the direct additive CaBoot variant + exhaustiveness arm; no PBT/unit decomposition required",
+      "t": "2026-06-10T07:32:21Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T07:33:18Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T07:36:05Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T08:05:01Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: AT runtime activation (overdrive serve subprocess + real keyring) is owned by step 02-03 per criteria #5; this wiring step's gate is compile-check + integration --no-run. The #[ignore] scaffolds stay until 02-03.",
+      "t": "2026-06-10T08:05:11Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: wiring of the existing boot_ca path; no new unit-testable pure logic \u2014 the boot/refuse/adopt behaviour is already covered by ca_boot_and_audit.rs at the boot_ca seam.",
+      "t": "2026-06-10T08:05:11Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T08:07:10Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T08:08:54Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T09:23:42Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T09:24:10Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: ServerConfig Kek seam is DI wiring + integration-fixture changes; boot/refuse/adopt behaviour already unit-covered at the boot_ca seam by ca_boot_and_audit.rs",
+      "t": "2026-06-10T09:24:10Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T09:42:15Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T09:44:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T10:31:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T10:38:59Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Mandate-11 example-only Layer-3 sad paths; production boot_ca wiring already landed (02-02 + aaaaa0cd), ATs reach GREEN with no unit decomposition needed",
+      "t": "2026-06-10T10:38:59Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T10:55:46Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T10:57:22Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T15:56:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "AT is 03-02-owned Lima subprocess test (alloc_status_surfaces_current_issued_certificate_summary), kept RED/#[ignore]d \u2014 not activated, not edited. Port-to-port AT stays structurally RED until both 03-01 (server projection) and 03-02 (CLI render) land. This step's gate is compile-green per roadmap implementation_notes (AC #5).",
+      "t": "2026-06-10T15:56:06Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration / wiring + projection contract; per implementation_notes assert observable response shape, never private handler internals \u2014 the projection's runtime behavior is owned by 03-02's Lima AT; this step's gate is compile-green under Lima (AC #5).",
+      "t": "2026-06-10T15:56:11Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 api.rs: IssuedCertSummary wire struct (CertSerial/SpiffeId/CertSerial/UnixInstant, all #[schema(value_type=String)]) + additive skip-if-empty issued_certificates field on AllocStatusResponse. handlers.rs: alloc_status fetches issued_certificate_rows().await and projects per-running-alloc latest-by-issued_at via SpiffeId::for_allocation (extracted to private issued_certificates_for_rows helper; #[expect(clippy::too_many_lines)] on handler). Lima compile-check --workspace --all-targets --features integration-tests GREEN (AC #5). openapi-gen + openapi-check GREEN. control-plane 364 pass/2 ignored, cli 163 pass. clippy -D warnings GREEN on both crates. Compile-consequence: added issued_certificates: vec![] to 4 existing exhaustive AllocStatusResponse literals in test files (in-scope additive-field fix, not deferral).",
+      "t": "2026-06-10T16:05:26Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 commit 1bb91932 (Step-ID: 03-01), 7 files: api.rs + handlers.rs (production), api/openapi.yaml (regenerated), 4 test-file compile-fixes for the additive AllocStatusResponse field. Lefthook green: fmt, doctest (33s), clippy (41s, -D warnings), nextest-affected (1575 pass / 17 skipped). Scoped: AGENTS.md (untracked, unrelated) and deliver/ exec-log dir left out. No --no-verify. .nwave/des-config.json unmodified.",
+      "t": "2026-06-10T16:08:03Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T16:08:36Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T16:08:36Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T16:08:36Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T16:36:52Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: render seam render::alloc_status lives in overdrive-cli; scaffold lives in overdrive-control-plane/tests which cannot import overdrive-cli (hard dependency cycle: cli depends on control-plane). Only in-crate route to the CLI render is a real overdrive subprocess, but no subprocess serve+deploy+poll-to-Running harness exists in the repo and it would be SystemClock-bound (no SimClock injection across process boundary), conflicting with overdrive-cli/CLAUDE.md no-subprocess rule + the crate's deterministic Tier-3 reach-Running discipline. Surfacing per CLAUDE.md 'STOP and surface the gap' rather than improvise a brittle subprocess e2e or relocate the DISTILL-authored AT (DISTILL owns AT placement).",
+      "t": "2026-06-10T16:39:05Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: render is a direct projection of typed summary fields (serial/spiffe_id/issuer_serial/not_after via Display) over an already-typed Vec<IssuedCertSummary>; no pure-logic decomposition the AT cannot reach GREEN without. Additionally moot: the AT itself is BLOCKED_BY_DEPENDENCY (see RED_ACCEPTANCE) \u2014 render::alloc_status in overdrive-cli is unreachable from the overdrive-control-plane scaffold (hard dependency cycle).",
+      "t": "2026-06-10T16:39:37Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cannot reach GREEN without an active acceptance scaffold. RED_ACCEPTANCE is blocked \u2014 the render seam render::alloc_status lives in overdrive-cli, the scaffold lives in overdrive-control-plane/tests, and cli depends on control-plane (hard dependency cycle, verified via cargo tree), so the test cannot drive the render in-process. The only in-crate mechanism is a real overdrive subprocess, which is SystemClock-bound (no SimClock injection across a process boundary), has no existing harness in the repo, and conflicts with overdrive-cli/CLAUDE.md no-subprocess rule + the crate's deterministic Tier-3 reach-Running discipline. Per CLAUDE.md 'STOP and surface the gap', awaiting a placement decision (recommend relocating the DISTILL-authored AT to overdrive-cli/tests for the in-process run_server+SimClock+render harness) rather than improvising a brittle subprocess e2e or faking GREEN. The GREEN implementation itself (additive render_issued_certificates_section in render.rs) is trivial and ready once the AT is reachable.",
+      "t": "2026-06-10T16:39:46Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: nothing to commit \u2014 no production code was changed because GREEN is blocked (see GREEN / RED_ACCEPTANCE). The step is blocked on a placement decision for the DISTILL-authored AT (render seam in overdrive-cli is unreachable from the overdrive-control-plane scaffold due to a hard dependency cycle). Awaiting orchestrator/DISTILL ruling per CLAUDE.md 'STOP and surface the gap'.",
+      "t": "2026-06-10T16:39:51Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T17:36:45Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T17:38:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: render is a direct Display projection over IssuedCertSummary; the render-level ATs (S-OC-11/12) reach GREEN with no pure-logic decomposition",
+      "t": "2026-06-10T17:38:26Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 render_issued_certificates_section added to crates/overdrive-cli/src/render.rs and wired into alloc_status_kind_aware Service branch; S-OC-11/12 + omit-when-empty GREEN under Lima; full overdrive-cli + overdrive-control-plane suite 713 passed; control-plane scaffold + mod line deleted, both crates compile clean (no dead_code). No AllocStatusResponse literals required editing \u2014 all already carry issued_certificates: vec![] from 03-01.",
+      "t": "2026-06-10T17:41:05Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 commit 4658318b (Step-ID: 03-02); lefthook pre-commit GREEN (fmt, doctest both crates, clippy -D warnings both crates, nextest-affected 1575 passed); 4 files changed, 225 insertions, 72 deletions; control-plane scaffold + mod line deleted single-cut.",
+      "t": "2026-06-10T17:43:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T17:43:43Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T17:43:45Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T20:57:21Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T20:57:32Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: EDD black-box evidence capture + env-gated test-fixture export; no pure-logic unit decomposition \u2014 the in-process invariants are already covered by the existing GREEN chain-verify tests (E03) and Tier-3 alloc-status tests (O05)",
+      "t": "2026-06-10T20:57:38Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T21:06:51Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-10T21:09:21Z"
+    }
+  ]
+}
