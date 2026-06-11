@@ -37,8 +37,15 @@ minimumLimaVersion: 2.0.0
 # Native arch on host — amd64 on Intel, arm64 on Apple Silicon. All of the
 # tooling we install has working aarch64 support.
 # ────────────────────────────────────────────────────────────────────────────
-base:
-  - template:_images/ubuntu-26.04
+# limactl 2.1.x ships no `_images/ubuntu-26.04` template yet, so the cloud
+# image is referenced by direct URL (digest omitted — Lima computes it on
+# download; `releases/26.04/release/` is the stable GA target, kernel
+# 7.0.0-15-generic per the image manifest).
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
 
 # ────────────────────────────────────────────────────────────────────────────
 # VM backend — auto-detected by Lima. Apple Virtualization.framework (vz)
@@ -100,6 +107,11 @@ param:
 provision:
   # -------------------------------------------------------------------------
   # apt packages — BPF toolchain, QEMU, Go, Python, networking, build tools.
+  # NOTE: no `qemu-kvm` — it is a defunct transitional package with no
+  # installation candidate on Ubuntu 26.04, and apt is transactional, so
+  # naming it aborts the WHOLE install (dropping every build dep). KVM comes
+  # from qemu-system-* + the udev rule below; the dummy metapackage is not
+  # needed.
   # -------------------------------------------------------------------------
   - mode: system
     script: |
@@ -115,7 +127,7 @@ provision:
           libelf-dev libbpf-dev linux-libc-dev \
           linux-tools-common linux-tools-generic \
           zlib1g-dev libssl-dev libzstd-dev libudev-dev \
-          qemu-system-x86 qemu-system-arm qemu-utils qemu-kvm \
+          qemu-system-x86 qemu-system-arm qemu-utils \
           virtiofsd \
           xdp-tools bpfcc-tools \
           tcpdump iproute2 bridge-utils \
