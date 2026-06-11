@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root. Implemented as a platform primitive; production does not use it yet, pending wiring into the control plane.
+description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation; no layer presents it on the wire yet.
 ---
 
 Overdrive is its own certificate authority. Every workload gets a cryptographic
@@ -8,15 +8,15 @@ identity — a SPIFFE SVID — minted by a built-in CA the platform runs itself,
 no external PKI to stand up: no SPIRE, no Vault, no cert-manager. This page
 describes the built-in CA and how it works.
 
-<Callout title="Implemented, not yet wired into serve">
-	The built-in CA is implemented and tested as a primitive — the port trait, both
-	adapters, the persistent encrypted root, the intermediate, and SVID issuance —
-	but it is **not yet wired into `overdrive serve`**, so production does not use it
-	yet. In a running control plane today, workloads do not receive SVIDs, and the
-	operator-facing TLS still uses the boot-time
-	[ephemeral CA](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
-	Wiring it into `serve` is the next step; see [Where it stands](#where-it-stands)
-	for the exact boundary.
+<Callout title="Wired into serve; not yet on the wire">
+	The built-in CA runs in `overdrive serve` today. At boot the control plane
+	resolves the operator key-encryption key, decrypts and adopts the persistent
+	root, and refuses to start if the envelope will not open. Every running
+	allocation then gets a SPIFFE SVID issued, held, and audited, and
+	`overdrive alloc status` reports each one. What is **not** done: no layer reads a
+	held SVID to present it on a connection — the sockops/kTLS mTLS path, the
+	gateway, and the telemetry sink are unbuilt. Identity is minted, persistent, and
+	provable; it is not yet on the wire. See [Where it stands](#where-it-stands).
 </Callout>
 
 ## Two TLS stories, two CAs
@@ -100,8 +100,12 @@ discovering it is not at the first handshake.
 
 ## Issuance is internal, and audited
 
-There is no `overdrive` command that issues a certificate. Issuance is a platform
-mechanism: when the control plane runs a workload, it mints that workload's SVID.
+No `overdrive` command issues a certificate. Issuance is a platform mechanism: when
+the control plane runs a workload, it mints that workload's SVID. What the operator
+*can* do is read the result — `overdrive alloc status` reports the current
+certificate for each running allocation: its serial, SPIFFE identity, issuer
+serial, and expiry. It shows the facts of issuance, never the certificate bytes or
+the private key.
 
 Every issuance writes an **append-only audit row** recording the certificate's
 serial, the SPIFFE identity, the issuer, and the validity window. The audit write
@@ -110,10 +114,14 @@ certificate it did not record. Because each issuance is a fresh certificate rath
 than a renewal, the audit trail is a complete history of every identity the
 platform has minted.
 
-Re-issuing on a schedule is exactly the bounded, ordered sequence a
-[workflow](/docs/concepts/workflows) is for: certificate rotation is the canonical
-first workflow ([#40](https://github.com/overdrive-sh/overdrive/issues/40)), and it
-drives the re-issue this CA exposes.
+Re-issuance near expiry is not a separate subsystem. The
+[lifecycle reconciler](/docs/concepts/workload-identity-lifecycle) that holds each
+identity also watches its expiry and mints a replacement when one nears its end — a
+single internal issue-and-swap down the same audited path as the first mint. It is
+a reconciler action, not a workflow: there is no external wait and no multi-step
+sequence to journal, just one more mint. (External public-certificate rotation —
+the ACME request-and-DNS-challenge dance — *is* workflow-shaped, but that is a
+[different concern](/docs/concepts/workflows) from these internal SVIDs.)
 
 ## Built on the same swappable seam
 
@@ -127,23 +135,25 @@ path.
 
 ## Where it stands
 
-The built-in CA is implemented and tested as a primitive, but it is not yet part of
-a running deploy:
+The built-in CA runs in `overdrive serve`:
 
-- **Implemented:** the `Ca` port trait and both adapters, the persistent
-  envelope-encrypted root, the per-node intermediate, SVID issuance with the
-  single-SAN leaf profile, trust-bundle composition, the issuance audit binding,
-  and the DST equivalence tests that pin host/sim parity.
-- **Not yet wired:** `overdrive serve` does not construct the CA or call its boot
-  path, so no workload receives an SVID in a running control plane today, and the
-  operator-facing TLS continues to use the boot-time ephemeral CA. Wiring the CA
-  into `serve` is the next step that puts it on the production path.
+- **Wired and live:** at boot the control plane resolves the operator KEK,
+  decrypts the persistent root and the node intermediate, and adopts them before
+  issuing anything — refusing to start if an envelope will not open. Every running
+  allocation gets an audited SVID, and `overdrive alloc status` reports each one.
+  The `Ca` port trait, both adapters, the envelope-sealed root, the per-node
+  intermediate, the single-SAN leaf profile, and the DST equivalence tests that pin
+  host/sim parity all sit on the production path.
+- **Not yet on the wire:** no layer reads a held SVID to present it on a
+  connection. The sockops/kTLS mTLS path, the gateway, and the telemetry sink that
+  would consume an identity are unbuilt, so a workload's identity is minted and
+  provable but not yet carried on a packet.
 
 ## Where to go next
 
-- The mutual TLS that ships today:
+- How each identity is held, dropped, and re-issued near expiry:
+  [the workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
+- The mutual TLS that secures the operator connection:
   [the architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
-- The primitive that will drive certificate rotation:
-  [workflows](/docs/concepts/workflows).
 - Why issuance is replayable under simulation:
   [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

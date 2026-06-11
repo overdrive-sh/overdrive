@@ -94,6 +94,12 @@ number of live allocations for it. This is the command to confirm that a deploy
 took effect: match the returned digest against the spec you deployed, and check
 the allocation count.
 
+For each running allocation that has been issued an identity, the output also lists
+its current certificate — serial, SPIFFE identity, issuer serial, and expiry —
+drawn from the issuance audit trail. These are the facts of issuance only; the
+certificate bytes and the private key never appear. The section is omitted for
+allocations with no issued certificate.
+
 ## `overdrive node`
 
 Node inspection.
