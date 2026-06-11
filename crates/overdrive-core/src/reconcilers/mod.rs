@@ -535,10 +535,12 @@ pub enum Action {
         correlation: CorrelationKey,
     },
 
-    /// Issue (or re-issue) a workload SVID for a Running allocation that
-    /// the `IdentityMgr` does not yet hold (ADR-0067 D2). Emitted by the
-    /// pure `SvidLifecycle` reconciler (01-04) on the `running ∧ ¬held`
-    /// branch; dispatched by the action-shim `issue_svid` executor (01-06),
+    /// Issue, re-issue, or ROTATE a workload SVID for a Running allocation
+    /// (ADR-0067 D2; feature-delta D-OC-1). Emitted by the pure
+    /// `SvidLifecycle` reconciler on two branches: `running ∧ ¬held`
+    /// (first-issue / restart-recovery, `"issue-svid"` correlation) and
+    /// `running ∧ held` near-expiry (rotation, `"rotate-svid"` correlation,
+    /// feature-delta A1); dispatched by the action-shim `issue_svid` executor (01-06),
     /// which mints the leaf via `ca_issuance::issue_and_audit` and holds it
     /// in the in-process `IdentityMgr`. CA I/O lives entirely in the
     /// executor — never in `reconcile()`.
@@ -555,8 +557,10 @@ pub enum Action {
         node_id: NodeId,
         /// Cause-to-response linkage. Derived via
         /// `CorrelationKey::derive("svid-lifecycle/<alloc>", spec_hash,
-        /// "issue-svid")` — NOT a per-attempt request id (ADR-0035
-        /// reconciler-I/O correlation discipline).
+        /// purpose)` with `purpose` ∈ {`"issue-svid"`, `"rotate-svid"`} —
+        /// `"issue-svid"` on the `running ∧ ¬held` branch, `"rotate-svid"` on
+        /// the `running ∧ held` near-expiry rotation branch. NOT a per-attempt
+        /// request id (ADR-0035 reconciler-I/O correlation discipline).
         correlation: CorrelationKey,
     },
 

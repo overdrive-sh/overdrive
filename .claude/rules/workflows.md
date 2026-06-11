@@ -191,15 +191,28 @@ The shapes that signal the boundary is being violated:
   "Worked example" (`RetryMemory { attempts, last_failure_seen_at }` in the
   `View`). The boundary: one idempotent call = action; 3+
   coordinated-as-a-unit = workflow.
-- **No production workflow registered yet:** `overdrive serve` builds
-  `WorkflowRegistry::new()` empty
-  (`crates/overdrive-control-plane/src/lib.rs`); the engine is wired and
-  exercised end-to-end under test, but no first-party workflow ships in a
-  live deploy. The canonical first workflow is **certificate rotation**
-  ([#40](https://github.com/overdrive-sh/overdrive/issues/40), DST
-  replay-equivalence gated) — request → wait for DNS propagation →
-  validate → publish, four ordered steps each with an effect, the textbook
-  Bar-2 case.
+- **No production workflow registered yet, and no first-party production
+  workflow is committed:** `overdrive serve` builds `WorkflowRegistry::new()`
+  empty (`crates/overdrive-control-plane/src/lib.rs`); the engine is wired and
+  exercised end-to-end under test, but no first-party workflow ships in a live
+  deploy. The candidate first production workflow is **TBD** — the most likely
+  shape is **revocation-coupled certificate rotation** (Phase 5, whitepaper §8),
+  IF and WHEN it coordinates ≥2 external steps (e.g. an external CRL/OCSP publish
+  + an external-ACME public-cert reissue). External-ACME public-cert rotation —
+  the `request → wait for DNS propagation → validate → publish` four-step shape —
+  is the textbook Bar-2 case if it ever ships, but it is NOT in tree.
+
+  **Note (corrects a prior claim, 2026-06-09):** earlier text named "certificate
+  rotation ([#40])" as the canonical first workflow with the
+  wait-for-DNS-propagation 4-step shape. That conflated two distinct things.
+  **Internal workload-SVID near-expiry reissue (the actual scope of #40) is a
+  reconciler ACTION, not a workflow** — it is a single internal mint+swap
+  (`Action::IssueSvid` with a `"rotate-svid"` correlation, emitted by the
+  `SvidLifecycle` reconciler; the action-shim executor does the CA I/O). It
+  coordinates no external steps and has no external-wait terminal, so it fails the
+  workflow-candidacy test above. The four-step wait-for-DNS shape belongs to
+  *external ACME public-cert* rotation, a separate concern. See ADR-0067 rev 6 /
+  `docs/feature/built-in-ca-operator-composition/feature-delta.md`.
 
 ---
 

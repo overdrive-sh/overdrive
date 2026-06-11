@@ -337,7 +337,7 @@ fn sim_ca_svid_carries_single_uri_san_and_is_not_a_ca() {
 /// `@in-memory` `@S-05` — `SimCa` re-issue: calling `issue_svid` twice for
 /// the SAME `SpiffeId` on the SAME instance yields a FRESH, DISTINCT leaf —
 /// proving issuance is per-CALL-SEQUENCE, NOT per-`SpiffeId`-CACHED (the
-/// re-issue mechanism the #40 rotation workflow will later drive).
+/// re-issue mechanism the #40 near-expiry reissue action drives).
 ///
 /// Port-to-port: enters through the `Ca` driving port (`issue_svid`), asserts
 /// on the observable `SvidMaterial` surface. The **faithful** sim observable

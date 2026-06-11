@@ -45,10 +45,49 @@ Sub-claims:
 
 ## Evidence
 
-Executed through `harness/run-expectation.sh O05` at SHA `2f4eccd4` and
-self-reports `pending` — issuance is not wired into deploy/alloc-start and
-`alloc status` renders no issued-certificates section this phase (D-CA-4).
-**Unblocked by #35** (SVID issuance on alloc-start) + the `alloc status` render.
-The gated integration tests
-in `ca_boot_and_audit.rs` (S-05-03/04) prove the row write + no-silent-issuance
-in-tree; this expectation captures the operator-visible read surface.
+Executed through `harness/run-expectation.sh O05` at SHA `c5702a13`
+(working tree dirty — the refined runner is in `evidence/dirty-diff.patch`),
+`executed_in_lima: true`, runner exit 0, and **self-reports `pending`**.
+
+The `evidence/preflight_cluster.out` capture shows the honest blocker: the O05
+runner reads an **already-running deployment**, and no `overdrive serve` control
+plane is reachable in the harness (`od cluster status` → `failed to reach
+overdrive control plane … could not connect to server`, exit 1). The runner does
+not stand up a persistent `serve` lifecycle itself — bringing up `serve` →
+`deploy` → converge-to-Running → SVID-issuance-on-alloc-start → `alloc status`
+is a multi-component live flow that a single harness runner invocation cannot
+orchestrate.
+
+What this slice DID land for O05:
+
+- The **live render surface is correct and matched.** The runner now greps the
+  actual operator render — heading `Issued certificates:` with the four
+  audit-row facts `serial:` / `spiffe_id:` / `issuer_serial:` / `not_after:`
+  (`render::render_issued_certificates_section`,
+  `crates/overdrive-cli/src/render.rs`, wired into the live `alloc status` path
+  by deps 03-01/03-02) — instead of the prior loose case-insensitive grep.
+- A **negative no-leak check** was added: the render is metadata-only, so a
+  `BEGIN CERTIFICATE` / `BEGIN … PRIVATE KEY` block in `alloc status` would
+  FAIL the runner (the audit row persists only facts; the workload holds no
+  SVID material — the kernel does mTLS, per CLAUDE.md's workload-identity
+  model).
+
+So when a deployment that issues an SVID IS reachable, the runner is ready to
+assert sub-claims 1+2 over the real render. The in-tree gated tests in
+`ca_boot_and_audit.rs` (S-05-03/04) already prove the row write +
+no-silent-issuance forever; this expectation captures the operator-visible read
+surface, which is **blocked on a live end-to-end deployment the harness cannot
+stand up in one runner invocation** — tracked by
+[#227](https://github.com/overdrive-sh/overdrive/issues/227) (a fully disposable
+full-system Lima VM on the immutable node OS, #75, that boots the entire system
+for end-to-end EDD captures). The deliberately-rejected stop-gap (a backgrounded
+`serve`+`deploy` bash fixture inside `runner.sh`) is recorded in #227.
+
+**Status: `pending` (honest), deferred to [#227](https://github.com/overdrive-sh/overdrive/issues/227).**
+The render surface is correct, but the live deployment that would produce an
+`issued_certificates` row is not reachable here — the disposable full-system VM
+that stands one up is tracked by #227. Not narrated: the `pending` reflects a
+real `executed_in_lima: true` capture whose preflight failed against a
+non-running control plane, not a believed outcome. O05 flips to `satisfied` once
+#227 lands the harness that boots a converged deployment and the capture is
+re-run (and passes a different-fox audit) at current HEAD.

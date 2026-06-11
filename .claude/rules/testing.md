@@ -207,7 +207,9 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 >
 > `cargo nextest run` is **blocked** by a pre-tool hook
 > (`.claude/hooks/block-bare-nextest.ts`) unless it is already
-> wrapped in `cargo xtask lima run --` or uses `--no-run`.
+> wrapped in `cargo xtask lima run --`. **`--no-run` is itself
+> blocked** (any form, even Lima-wrapped) — it compiles but runs
+> nothing, so it cannot gate runtime behaviour.
 >
 > **Rewrite your command before submitting it:**
 >
@@ -217,10 +219,14 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > | `cargo nextest run -p CRATE` | `cargo xtask lima run -- cargo nextest run -p CRATE` |
 > | `cargo nextest run -E 'test(X)'` | `cargo xtask lima run -- cargo nextest run -E 'test(X)'` |
 > | `cargo nextest run --workspace` | `cargo xtask lima run -- cargo nextest run --workspace` |
+> | `cargo nextest run ... --no-run` (compile-check) | `cargo xtask lima run -- cargo check --all-targets --features integration-tests` |
 >
-> **Allowed without Lima:**
-> - `cargo nextest run ... --no-run` — compile-check only; no Linux surface involved.
-> - `cargo xtask lima run -- cargo nextest run ...` — already routed.
+> **Only allowed nextest form:** `cargo xtask lima run -- cargo
+> nextest run ...` — routed through Lima and actually executing. To
+> *compile-check* the test surface without running, use `cargo check
+> --all-targets` (Lima-routed on macOS), NOT `--no-run`: a `--no-run`
+> "gate" is green even when every fixture refuses at boot (the
+> built-in-ca-operator-composition 02-02 cold-boot regression).
 >
 > See § "Running tests — Lima VM" below for the rationale.
 
@@ -900,8 +906,8 @@ integration-tests` MUST be prefixed with `cargo xtask lima run --`** —
 same Lima requirement that governs `cargo nextest run --features
 integration-tests` (see § "Running tests — Lima VM" below).
 The integration-tests-gated test surface is
-`#[cfg(target_os = "linux")]`; on macOS those tests compile (with
-`--no-run`) but the runtime surface is unreachable, so a mutation run
+`#[cfg(target_os = "linux")]`; on macOS those tests compile (via
+`cargo check`) but the runtime surface is unreachable, so a mutation run
 that supposedly uses these tests has a degraded signal that catches
 almost nothing — kill rate becomes meaningless. Every example in this
 section that shows a `cargo xtask mutants ... --features
@@ -1221,7 +1227,9 @@ canonical inner-loop path for all platforms (macOS and Linux).
 A pre-tool hook (`.claude/hooks/block-bare-nextest.ts`) enforces this
 mechanically: bare `cargo nextest run` is blocked at the tool-call
 boundary on all platforms. The hook allows only `cargo xtask lima run
--- cargo nextest run ...` and the `--no-run` compile-check form.
+-- cargo nextest run ...` (routed and actually executing); the
+`--no-run` form is **also blocked** (it compiles but runs nothing — use
+`cargo check --all-targets` to compile-check).
 
 The same Lima discipline extends to compile-only commands on macOS:
 `cargo check` is blocked by `.claude/hooks/block-bare-cargo-check.ts`
@@ -1297,14 +1305,21 @@ process at all use `SimDriver` per the standard DST convention.
 Do not paper over `EACCES` failures by removing the cgroup writes — the
 production code path IS the cgroup writes.
 
-**The `--no-run` macOS gate is necessary, not sufficient.** Every step's
-quality gate includes `cargo nextest run --workspace --features
-integration-tests --no-run` on macOS to catch compile errors before
-shipping. That gate cannot detect convergence-loop bugs, race
-conditions, missing match arms behind `#[cfg(target_os = "linux")]`,
-permission shape issues, or any runtime invariant. A green `--no-run`
-on macOS plus a green Lima run is the honest signal; either alone is
-not.
+**The compile-check gate is necessary, not sufficient.** Every step's
+quality gate includes a Lima-routed compile-check (`cargo xtask lima run
+-- cargo check --workspace --all-targets --features integration-tests`)
+to catch compile errors before shipping. That gate cannot detect
+convergence-loop bugs, race conditions, missing match arms behind
+`#[cfg(target_os = "linux")]`, permission shape issues, or any runtime
+invariant. A green compile-check plus a green Lima *run* is the honest
+signal; either alone is not. **`cargo nextest run --no-run` is NOT a
+substitute and is blocked at the tool boundary** — it compiles the test
+binaries but executes nothing, so a step that wires into `run_server` /
+a composition root / a boot path passes a `--no-run` "gate" green even
+when every fixture refuses to boot. A step touching a boot path MUST
+actually *run* the fixtures under Lima; that is precisely the gap that
+let the built-in-ca-operator-composition 02-02 cold-boot regression
+land.
 
 **Tier 3 / Tier 4 stays on `cargo xtask integration-test vm` and
 `cargo xtask xdp-perf`.** The Lima VM is the macOS dev convenience for

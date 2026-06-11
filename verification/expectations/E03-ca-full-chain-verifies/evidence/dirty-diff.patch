@@ -1,0 +1,420 @@
+diff --git a/crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs b/crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs
+index a0840016..905585b5 100644
+--- a/crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs
++++ b/crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs
+@@ -81,6 +81,33 @@ fn now_window() -> (UnixInstant, UnixInstant) {
+     (not_before, not_after)
+ }
+ 
++/// Env-gated EDD export for the E03 expectation (`built-in-ca-operator-composition`
++/// Slice ③ / S-OC-13/14/15). When `$OD_E03_CA_DIR` is set, the chain-verify tests
++/// ALSO write their already-minted PEMs (root / intermediate / leaf-or-further-CA)
++/// into `<$OD_E03_CA_DIR>/<sub_dir>/` so the
++/// `verification/expectations/E03-…/runner.sh` runner can run `openssl verify`
++/// over real exported bytes as a BLACK-BOX external tool — the honest E03 proof
++/// (no operator verb mints/exports a chain this phase, D-CA-4). The PEMs come
++/// from the EXISTING `Ca` port surface already used in each test; this is a TEST
++/// FIXTURE side-effect, NOT a production / library / CLI change, and it is fully
++/// additive: when `$OD_E03_CA_DIR` is UNSET this is a no-op and the tests behave
++/// exactly as before. `sub_dir` keeps the positive (sub-claim 1+2) and negative
++/// (sub-claim 3 pathLen=0 anchor) chains in DISTINCT directories so each is a
++/// self-consistent chain the runner verifies independently.
++fn export_e03_chain_if_requested(sub_dir: &str, pems: &[(&str, &str)]) {
++    let Ok(base) = std::env::var("OD_E03_CA_DIR") else {
++        return;
++    };
++    let dir = std::path::Path::new(&base).join(sub_dir);
++    std::fs::create_dir_all(&dir)
++        .unwrap_or_else(|e| panic!("OD_E03_CA_DIR export: create {}: {e}", dir.display()));
++    for (name, pem) in pems {
++        let path = dir.join(name);
++        std::fs::write(&path, pem.as_bytes())
++            .unwrap_or_else(|e| panic!("OD_E03_CA_DIR export: write {}: {e}", path.display()));
++    }
++}
++
+ // ---------------------------------------------------------------------------
+ // S-01 — Root CA self-verifies (US-CA-01)
+ // ---------------------------------------------------------------------------
+@@ -213,8 +240,21 @@ fn rcgen_intermediate_chains_to_root_via_openssl_verify() {
+ 
+ /// `@real-io` `@adapter-integration` `@S-03` `@error` — pathLen=0 is
+ /// ENFORCED not merely set: a constructed chain in which the intermediate
+-/// signs a FURTHER CA cert fails `openssl verify` (the constraint bounds
+-/// node-compromise blast radius — research Finding 4). Sad path, example-based.
++/// signs a FURTHER CA, and that further-CA signs an END-ENTITY LEAF, fails
++/// `openssl verify` because the further-CA exceeds the intermediate's
++/// pathLen=0 budget (the constraint bounds node-compromise blast radius —
++/// research Finding 4). Sad path, example-based.
++///
++/// Why the leaf below the further-CA is load-bearing: `openssl verify` applies
++/// a pathLenConstraint only to CAs that appear as INTERMEDIATES on the path to
++/// an end-entity — it does NOT apply the budget to the leaf-most certificate
++/// presented as the verification target. Verifying the further-CA *directly*
++/// (no leaf below it) is therefore accepted (zero intermediates follow it), and
++/// proves nothing about pathLen. The genuine abuse the constraint exists to bound
++/// is "a compromised node mints a sub-CA and then issues end-entity certs under
++/// it" — so the chain that EXERCISES pathLen=0 is
++/// root → intermediate(pathLen=0) → further-CA → leaf, where the further-CA is a
++/// real intermediate beyond the budget. That chain is the one that must FAIL.
+ #[test]
+ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
+     // GIVEN a host CA with a real root + a pathLen=0 node intermediate.
+@@ -236,9 +276,17 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
+         CertificateParams::new(Vec::<String>::new()).expect("intermediate issuer params");
+     inter_issuer_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+     inter_issuer_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
++    // The rebuilt issuer DN MUST match the real intermediate's subject DN
++    // (`O=overdrive.local, CN=node-a` per `RcgenCa::issue_intermediate` — the
++    // per-node CommonName is load-bearing). With the DN matched, `openssl
++    // verify` builds the genuine root → intermediate(pathLen=0) → further-CA →
++    // leaf chain and applies the pathLen constraint, instead of mis-linking the
++    // further-CA to the root and failing on a signature mismatch (the wrong
++    // reason).
+     inter_issuer_params.distinguished_name = {
+         let mut dn = DistinguishedName::new();
+         dn.push(DnType::OrganizationName, "overdrive.local");
++        dn.push(DnType::CommonName, node.as_str());
+         dn
+     };
+     let inter_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&inter_issuer_params, &inter_key);
+@@ -250,24 +298,63 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
+     further_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+     further_params.distinguished_name = {
+         let mut dn = DistinguishedName::new();
++        dn.push(DnType::OrganizationName, "overdrive.local");
+         dn.push(DnType::CommonName, "further-ca-abuse");
+         dn
+     };
+     let further_cert =
+         further_params.signed_by(&further_key, &inter_issuer).expect("sign further CA");
+ 
++    // AND an end-entity LEAF signed by the further-CA. This is the cert that
++    // makes the further-CA a true INTERMEDIATE on the path — the position where
++    // openssl actually counts the pathLen budget. Without this leaf, verifying
++    // the further-CA directly is accepted and pathLen is never exercised.
++    let further_issuer: Issuer<'_, &KeyPair> =
++        Issuer::from_params(&further_params, &further_key);
++    let leaf_key = KeyPair::generate().expect("leaf-under-further-ca keypair");
++    let mut leaf_params = CertificateParams::new(Vec::<String>::new()).expect("leaf params");
++    leaf_params.is_ca = IsCa::NoCa;
++    leaf_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
++    leaf_params.distinguished_name = {
++        let mut dn = DistinguishedName::new();
++        dn.push(DnType::CommonName, "leaf-under-further-ca-abuse");
++        dn
++    };
++    let leaf_cert =
++        leaf_params.signed_by(&leaf_key, &further_issuer).expect("sign leaf under further CA");
++
+     // THEN `openssl verify -CAfile root.pem -untrusted intermediate.pem
+-    // furtherca.pem` FAILS (non-zero exit). pathLen=0 forbids a CA child of the
+-    // intermediate, so the verifier rejects the chain — proving the constraint
+-    // is ENFORCED by the verifier, not merely present in the cert bytes.
++    // -untrusted furtherca.pem leaf.pem` FAILS (non-zero exit). pathLen=0
++    // forbids a CA child of the intermediate from itself issuing certs, so the
++    // verifier rejects the chain at the further-CA — proving the constraint is
++    // ENFORCED by the verifier, not merely present in the cert bytes.
+     let dir = tempfile::TempDir::new().expect("tempdir");
+     let root_pem_path = dir.path().join("root.pem");
+     let inter_pem_path = dir.path().join("intermediate.pem");
+     let further_pem_path = dir.path().join("furtherca.pem");
++    let leaf_pem_path = dir.path().join("leaf.pem");
+     std::fs::write(&root_pem_path, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
+     std::fs::write(&inter_pem_path, inter.cert_pem().as_pem().as_bytes())
+         .expect("write intermediate.pem");
+     std::fs::write(&further_pem_path, further_cert.pem().as_bytes()).expect("write furtherca.pem");
++    std::fs::write(&leaf_pem_path, leaf_cert.pem().as_bytes()).expect("write leaf.pem");
++
++    // EDD E03 (sub-claim 3 — the pathLen=0 NEGATIVE ANCHOR): when `$OD_E03_CA_DIR`
++    // is set, ALSO export this full negative chain to a DISTINCT `negative/`
++    // sub-dir. This root/intermediate come from a DIFFERENT `RcgenCa` instance
++    // than the positive (sub-claim 1+2) test, so the negative material MUST stay
++    // separate so the runner verifies a self-consistent chain whose `openssl
++    // verify` is EXPECTED to FAIL — the proof pathLen=0 is ENFORCED, not merely
++    // set. Additive, env-gated; no-op when the env var is unset.
++    export_e03_chain_if_requested(
++        "negative",
++        &[
++            ("root.pem", root.cert_pem().as_pem()),
++            ("intermediate.pem", inter.cert_pem().as_pem()),
++            ("furtherca.pem", &further_cert.pem()),
++            ("leaf.pem", &leaf_cert.pem()),
++        ],
++    );
+ 
+     let status = Command::new("openssl")
+         .arg("verify")
+@@ -275,12 +362,15 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
+         .arg(&root_pem_path)
+         .arg("-untrusted")
+         .arg(&inter_pem_path)
++        .arg("-untrusted")
+         .arg(&further_pem_path)
++        .arg(&leaf_pem_path)
+         .status()
+         .expect("invoke openssl verify");
+     assert!(
+         !status.success(),
+-        "openssl verify of a further-CA under a pathLen=0 intermediate must FAIL (constraint enforced)"
++        "openssl verify of a leaf under a further-CA (itself under a pathLen=0 intermediate) \
++         must FAIL (pathLen constraint enforced)"
+     );
+ }
+ 
+@@ -334,6 +424,19 @@ fn rcgen_full_svid_chain_verifies_root_intermediate_svid() {
+         .expect("write intermediate.pem");
+     std::fs::write(&svid_pem_path, svid.cert_pem().as_pem().as_bytes()).expect("write svid.pem");
+ 
++    // EDD E03 (sub-claims 1+2): when `$OD_E03_CA_DIR` is set, ALSO export this
++    // coherent root → intermediate → svid triple (from the same `RcgenCa`) so the
++    // E03 runner can `openssl verify` it as a black-box external tool. Additive,
++    // env-gated; no-op (and the test is unchanged) when the env var is unset.
++    export_e03_chain_if_requested(
++        "positive",
++        &[
++            ("root.pem", root.cert_pem().as_pem()),
++            ("intermediate.pem", inter.cert_pem().as_pem()),
++            ("svid.pem", svid.cert_pem().as_pem()),
++        ],
++    );
++
+     let output = Command::new("openssl")
+         .arg("verify")
+         .arg("-CAfile")
+diff --git a/verification/expectations/E03-ca-full-chain-verifies/runner.sh b/verification/expectations/E03-ca-full-chain-verifies/runner.sh
+index 1dc16d3f..809d6dff 100755
+--- a/verification/expectations/E03-ca-full-chain-verifies/runner.sh
++++ b/verification/expectations/E03-ca-full-chain-verifies/runner.sh
+@@ -1,43 +1,76 @@
+ # shellcheck shell=bash
+-# E03 — full Root -> Intermediate -> SVID chain verifies under `openssl verify`.
++# E03 — full Root -> Intermediate -> SVID chain verifies under `openssl verify`,
++# AND the pathLen=0 negative anchor FAILS `openssl verify` (S-OC-13/14/15).
+ #
+-# This is the walking-skeleton proof (S-04-07, KPI K1). It needs the built-in
+-# CA production surface (`Ca` trait + `RcgenCa` host adapter), which lands in
+-# DELIVER. Until the binary can export the three PEMs (root / intermediate /
+-# svid), this runner records `pending` and prints the manual capture path.
++# Walking-skeleton proof (S-04-07, KPI K1). There is NO operator CLI verb to
++# mint/export an SVID this phase (feature-delta D-CA-4) — so this runner produces
++# its PEMs as a SIDE-EFFECT of the gated `rcgen_ca_chain_verify.rs` integration
++# tests under an `OD_E03_CA_DIR` env-gate, then does its black-box `openssl`
++# checks over the exported `$CA_DIR/{positive,negative}/*.pem`. `cargo nextest`
++# is invoked ONLY as the PEM producer; the runner stays bash + openssl +
++# file-observation and links no `overdrive-*` crate (verification/README.md).
+ #
+-# There is NO operator CLI verb to mint an SVID this phase (feature-delta
+-# D-CA-4). When DELIVER lands a CA-material export surface (or the gated
+-# integration test writes the PEMs to a known dir), wire it below and flip the
+-# guard. `openssl verify` is the honest external entry point.
++# Three sub-claims, ALL required before any `satisfied`:
++#   1. positive chain: `openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem` -> exit 0 ("OK").
++#   2. leaf profile: exactly one spiffe:// URI SAN, CA:FALSE, digitalSignature critical.
++#   3. negative anchor (MANDATORY): a further-CA under the pathLen=0 intermediate
++#      FAILS `openssl verify` (non-zero exit) — pathLen ENFORCED, not merely set.
+ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
+ 
+-CA_DIR="${CA_DIR:-/tmp/od-e03-ca}"
+-ROOT_PEM="$CA_DIR/root.pem"
+-INT_PEM="$CA_DIR/intermediate.pem"
+-SVID_PEM="$CA_DIR/svid.pem"
++# $CA_DIR must be a path SHARED between the macOS host (where this runner + its
++# openssl checks run) and the Lima guest (where the gated test writes the PEMs).
++# The repo working tree is virtiofs-mounted into Lima at the same absolute path,
++# so anchoring under $EVIDENCE_DIR (inside the repo) makes the test's writes
++# visible here AND captures the PEMs as pinned evidence.
++CA_DIR="${CA_DIR:-$EVIDENCE_DIR/ca}"
++POS_DIR="$CA_DIR/positive"
++NEG_DIR="$CA_DIR/negative"
++rm -rf "$CA_DIR"
++mkdir -p "$CA_DIR"
+ 
+-if [[ ! -f "$ROOT_PEM" || ! -f "$INT_PEM" || ! -f "$SVID_PEM" ]]; then
++ROOT_PEM="$POS_DIR/root.pem"
++INT_PEM="$POS_DIR/intermediate.pem"
++SVID_PEM="$POS_DIR/svid.pem"
++NEG_ROOT_PEM="$NEG_DIR/root.pem"
++NEG_INT_PEM="$NEG_DIR/intermediate.pem"
++NEG_FURTHER_PEM="$NEG_DIR/furtherca.pem"
++NEG_LEAF_PEM="$NEG_DIR/leaf.pem"
++
++# --- PEM producer (in Lima, real ring/rcgen crypto) --------------------------
++# Run BOTH chain-verify tests with OD_E03_CA_DIR set. The
++# `rcgen_full_svid_chain_verifies_root_intermediate_svid` test exports the
++# positive triple (sub-claims 1+2); the
++# `rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced` test exports
++# the negative triple (sub-claim 3) to the DISTINCT negative/ sub-dir.
++capture produce_pems \
++  in_lima env "OD_E03_CA_DIR=$CA_DIR" \
++  cargo nextest run -p overdrive-host --features integration-tests \
++  -E 'test(rcgen_full_svid_chain_verifies_root_intermediate_svid) + test(rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced)' \
++  || true
++
++if [[ ! -f "$ROOT_PEM" || ! -f "$INT_PEM" || ! -f "$SVID_PEM" \
++   || ! -f "$NEG_ROOT_PEM" || ! -f "$NEG_INT_PEM" || ! -f "$NEG_FURTHER_PEM" \
++   || ! -f "$NEG_LEAF_PEM" ]]; then
+   cat <<MSG
+-  [pending] CA material not present at $CA_DIR — E03 needs the built-in CA
+-  production surface (DELIVER). Once the host adapter can emit the chain PEMs,
+-  export them to:
+-
+-      $ROOT_PEM
+-      $INT_PEM
+-      $SVID_PEM
+-
+-  then re-run E03. The gated integration test
+-  rcgen_ca_chain_verify.rs::rcgen_full_svid_chain_verifies_root_intermediate_svid
+-  already proves the chain in-tree; this expectation captures the external
+-  openssl-verify proof. This run stays 'pending'.
++  [pending] CA material not present under $CA_DIR — the gated
++  rcgen_ca_chain_verify.rs export did not run (OD_E03_CA_DIR producer step).
++  Expected, written by the gated integration tests in Lima:
++
++      $ROOT_PEM   $INT_PEM   $SVID_PEM          (positive, sub-claims 1+2)
++      $NEG_ROOT_PEM
++      $NEG_INT_PEM
++      $NEG_FURTHER_PEM
++      $NEG_LEAF_PEM   (negative pathLen=0 anchor, sub-claim 3)
++
++  The gated tests prove the chain in-tree; this expectation captures the
++  external openssl-verify proof. This run stays 'pending'.
+ MSG
+   exit 0
+ fi
+ 
+ rc=0
+ 
+-# Sub-claim 1 — full chain verifies.
++# Sub-claim 1 — positive full chain verifies (exit 0, "OK").
+ capture chain_verify openssl verify -CAfile "$ROOT_PEM" -untrusted "$INT_PEM" "$SVID_PEM" || rc=1
+ evidence_contains chain_verify "OK" || rc=1
+ 
+@@ -50,5 +83,49 @@ grep -qE 'URI:spiffe://overdrive\.local/job/.*/alloc/' "$EVIDENCE_DIR/svid_text.
+ [[ "$(grep -cE 'URI:' "$EVIDENCE_DIR/svid_text.out")" == "1" ]] \
+   && echo "  [PASS] exactly one URI SAN" \
+   || { echo "  [FAIL] expected exactly one URI SAN"; rc=1; }
++# Not a CA: basicConstraints is either ABSENT (a cert with no basicConstraints
++# is CA:FALSE per X.509) OR present with CA:FALSE — and never CA:TRUE. The
++# falsifying observation is CA:TRUE; absence and explicit CA:FALSE both pass.
++if grep -qE 'CA:TRUE' "$EVIDENCE_DIR/svid_text.out"; then
++  echo "  [FAIL] leaf is CA:TRUE — a leaf must not be a CA"; rc=1
++elif grep -qE 'CA:FALSE' "$EVIDENCE_DIR/svid_text.out"; then
++  echo "  [PASS] leaf basicConstraints explicitly CA:FALSE"
++else
++  echo "  [PASS] leaf carries no basicConstraints (CA:FALSE by X.509 default — never a CA)"
++fi
++# digitalSignature keyUsage marked critical
++grep -A1 -E 'X509v3 Key Usage:.*critical' "$EVIDENCE_DIR/svid_text.out" \
++  | grep -qE 'Digital Signature' \
++  && echo "  [PASS] keyUsage digitalSignature marked critical" \
++  || { echo "  [FAIL] keyUsage digitalSignature not marked critical"; rc=1; }
++
++# Sub-claim 3 (MANDATORY negative anchor) — a leaf signed by a further-CA that
++# is itself signed by the pathLen=0 intermediate FAILS openssl verify because
++# the further-CA exceeds the intermediate's pathLen=0 budget. The leaf below
++# the further-CA is load-bearing: openssl only counts the pathLen budget for
++# CAs that sit as INTERMEDIATES on the path to an end-entity, so the further-CA
++# must have a leaf below it to be counted. A non-zero exit here is the PASS
++# condition, AND the failure must cite the pathLen/depth constraint — not a
++# signature mismatch — to prove pathLen is the thing enforced.
++neg_rc=0
++capture pathlen_negative \
++  openssl verify -CAfile "$NEG_ROOT_PEM" \
++  -untrusted "$NEG_INT_PEM" -untrusted "$NEG_FURTHER_PEM" "$NEG_LEAF_PEM" \
++  || neg_rc=$?
++if [[ "$neg_rc" == "0" ]]; then
++  echo "  [FAIL] pathLen=0 anchor: leaf-under-further-CA chain VERIFIED (exit 0) — pathLen NOT enforced"
++  rc=1
++elif grep -qiE 'path length|pathlen|basic constraints|excluded|exceeded' "$EVIDENCE_DIR/pathlen_negative.out"; then
++  echo "  [PASS] pathLen=0 anchor: chain FAILED openssl verify (exit $neg_rc) on the pathLen/basicConstraints check — pathLen ENFORCED"
++else
++  # Failed, but not visibly on pathLen. Surface the actual reason so the
++  # different-fox audit can judge it (a signature failure would prove the
++  # WRONG thing — it would mean the chain did not even link).
++  reason="$(grep -iE 'error|fail' "$EVIDENCE_DIR/pathlen_negative.out" | head -3 | tr '\n' ';')"
++  echo "  [WARN] pathLen=0 anchor: chain FAILED openssl verify (exit $neg_rc) but not on a"
++  echo "         recognised pathLen message — actual reason: ${reason}"
++  echo "         (a signature failure here would prove the wrong thing; review the evidence)"
++  rc=1
++fi
+ 
+ exit $rc
+diff --git a/verification/expectations/O05-ca-issued-certificates-audit-row/runner.sh b/verification/expectations/O05-ca-issued-certificates-audit-row/runner.sh
+index b2d8b5a8..205ea2ed 100755
+--- a/verification/expectations/O05-ca-issued-certificates-audit-row/runner.sh
++++ b/verification/expectations/O05-ca-issued-certificates-audit-row/runner.sh
+@@ -3,7 +3,11 @@
+ #
+ # Needs the built-in CA issuance path (DELIVER): SVID issuance on alloc-start
+ # writes the issued_certificates observation row, surfaced by `alloc status`.
+-# Until that lands, this runner records `pending`.
++# The live render is `render::render_issued_certificates_section`
++# (crates/overdrive-cli/src/render.rs) — heading `Issued certificates:` with the
++# four audit-row FACTS (serial / spiffe_id / issuer_serial / not_after) and NO
++# cert bytes / NO private key. Until a deployment that issues an SVID is
++# reachable, this runner records `pending`.
+ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
+ 
+ # A deployed workload that triggers SVID issuance. The exact spec lands with
+@@ -12,12 +16,14 @@ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
+ JOB_SPEC="${JOB_SPEC:-crates/overdrive-cli/examples/coinflip.toml}"
+ 
+ if ! capture preflight_cluster od cluster status; then
+-  cat <<MSG
++  cat <<'MSG'
+   [pending] control plane not reachable — O05 needs a running deployment with
+-  the built-in CA issuance path (DELIVER). In a Lima-routed terminal:
++  the built-in CA issuance path (DELIVER). The O05 runner reads an
++  already-running deployment; it does not stand up "serve" itself. In a
++  Lima-routed terminal:
+ 
+       cargo overdrive serve --bind 127.0.0.1:7443 --data-dir /tmp/od-o05
+-      cargo overdrive deploy $JOB_SPEC --detach
++      cargo overdrive deploy crates/overdrive-cli/examples/coinflip.toml --detach
+ 
+   then re-run O05. This run stays 'pending'.
+ MSG
+@@ -29,15 +35,34 @@ job_name="$(grep -E '^name[[:space:]]*=' "$REPO_ROOT/$JOB_SPEC" | head -1 | sed
+ capture deploy_job od deploy "$JOB_SPEC" --detach || true
+ capture alloc_status od alloc status "${job_name:-coinflip}" || true
+ 
+-# Sub-claim 1 — alloc status surfaces the issued_certificates record.
+-# (The exact heading lands with the DELIVER render; grep both likely shapes.)
+-if grep -qiE 'issued.certificate|issued_certificates|SVID|serial' "$EVIDENCE_DIR/alloc_status.out"; then
+-  echo "  [PASS] alloc status surfaces an issued-certificate record"
++# Sub-claim 1 — alloc status surfaces the live `Issued certificates:` section
++# with the four operator-legible facts. The live render heading is
++# `Issued certificates:` (render_issued_certificates_section); each row carries
++# `serial:`, `spiffe_id:`, `issuer_serial:`, `not_after:`.
++status_out="$EVIDENCE_DIR/alloc_status.out"
++if grep -qE '^Issued certificates:' "$status_out" \
++   && grep -qE '^[[:space:]]*serial:' "$status_out" \
++   && grep -qE '^[[:space:]]*spiffe_id:' "$status_out" \
++   && grep -qE '^[[:space:]]*issuer_serial:' "$status_out" \
++   && grep -qE '^[[:space:]]*not_after:' "$status_out"; then
++  echo "  [PASS] alloc status surfaces 'Issued certificates:' with serial / spiffe_id / issuer_serial / not_after"
++
++  # Sub-claim 2 — the render is metadata-only: NO cert bytes, NO private key.
++  # The issued_certificates audit row persists only facts (the workload holds
++  # NOTHING; the kernel does mTLS — CLAUDE.md workload-identity model). A PEM
++  # block or key in the operator render would be a leak.
++  if grep -qiE 'BEGIN (CERTIFICATE|PRIVATE KEY|EC PRIVATE KEY|RSA PRIVATE KEY)' "$status_out"; then
++    echo "  [FAIL] alloc status leaks PEM cert/key bytes — the summary must be metadata-only"
++    rc=1
++  else
++    echo "  [PASS] no cert bytes / no private key in the render (metadata-only, as designed)"
++  fi
+ else
+-  echo "  [pending] alloc status shows no issued-certificate section yet — the"
+-  echo "            DELIVER render for issued_certificates is not present. The"
+-  echo "            in-tree gated tests ca_boot_and_audit.rs (S-05-03/04) prove"
+-  echo "            the row write; this expectation captures the read surface."
++  echo "  [pending] alloc status shows no 'Issued certificates:' section yet — the"
++  echo "            DELIVER issuance-on-alloc-start path did not write/surface an"
++  echo "            issued_certificates row for this deployment. The in-tree gated"
++  echo "            tests ca_boot_and_audit.rs (S-05-03/04) prove the row write;"
++  echo "            this expectation captures the operator-visible read surface."
+   rc=0
+ fi
+ 

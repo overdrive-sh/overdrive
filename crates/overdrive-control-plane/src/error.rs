@@ -542,6 +542,20 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     Ca(#[from] CaError),
 
+    /// Persistent built-in-CA boot failure surfaced from the #215 boot-side
+    /// wiring (built-in-ca-operator-composition D-OC-5). Pass-through embedding
+    /// via `#[from]` per `.claude/rules/development.md` § "Never flatten a typed
+    /// error to `Internal(String)`": the typed [`CaBootError`] keeps each boot
+    /// cause distinguishable at the composition root — absent-KEK
+    /// (`KekUnavailable`) vs envelope-decrypt failure (`EnvelopeDecrypt`,
+    /// embedding the typed [`CaError`] cause so wrong-KEK and tampered render
+    /// distinct strings) — so the CLI / §12 investigation agent can branch on
+    /// the cause without `Display`-grepping. Same boot-path shape as
+    /// `ViewStoreBoot` / `DataplaneBoot`: happens BEFORE the listener binds, so
+    /// the `to_response` arm is exhaustiveness-only.
+    #[error(transparent)]
+    CaBoot(#[from] crate::ca_boot::CaBootError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -792,6 +806,18 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // (`matches!(e, ControlPlaneError::Ca(_))`) for structured startup
             // diagnostics; the typed `CaError`'s own `Display` carries the
             // signing / subject / adoption cause.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::CaBoot(e) => (
+            // Same shape as `Ca` / `ViewStoreBoot` / `DataplaneBoot` above: the
+            // persistent built-in-CA boot (built-in-ca-operator-composition
+            // D-OC-5 / #215) happens BEFORE the listener binds, so this arm is
+            // exhaustiveness-only. The composition root branches on the typed
+            // variant (`matches!(e, ControlPlaneError::CaBoot(_))`) for
+            // structured startup diagnostics; the typed `CaBootError`'s own
+            // `Display` carries the distinct boot cause (absent-KEK vs
+            // wrong-KEK vs tampered-envelope).
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

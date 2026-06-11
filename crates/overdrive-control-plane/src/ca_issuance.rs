@@ -36,8 +36,11 @@
 //! [`issue_and_audit`] is an on-demand call on the RUNNING control plane —
 //! calling it twice for the same [`SpiffeId`] mints a FRESH leaf each time
 //! (distinct serial, new validity window) and writes a fresh audit row, with NO
-//! restart. This is the mechanism the #40 rotation workflow will later drive on
-//! a schedule; this module provides only the mechanism, not the trigger.
+//! restart. This is the mechanism the #40 near-expiry reissue *action* drives —
+//! the `SvidLifecycle` reconciler emits a `rotate-svid`-correlated
+//! `Action::IssueSvid` as a leaf nears expiry (internal SVID reissue is a
+//! reconciler action, NOT a workflow); this module provides only the mechanism,
+//! not the trigger.
 
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
@@ -146,11 +149,37 @@ impl CaIssuanceError {
 ///    fails, return [`CaIssuanceError::Audit`] and DROP the leaf — no unaudited
 ///    cert escapes (no silent issuance).
 ///
+/// # Preconditions
+///
+/// As of ADR-0063 rev 8 the monotonic [`IssuanceOrdinal`](overdrive_core::id::IssuanceOrdinal) stamped on the audit
+/// row is allocated from a durable atomic counter
+/// ([`ObservationStore::next_issuance_ordinal`]), NOT derived from
+/// `issued_certificate_rows().len()`. The two former load-bearing invariants
+/// (feature-delta § D1-AMEND-2) change accordingly:
+///
+/// 1. **Single-writer / serialized issuance — RETIRED.** The ordinal no longer
+///    derives from a `len()` read, so there is no check-then-act for
+///    serialization to protect. `issue_and_audit` MAY now be called
+///    concurrently for the same `observation` store; the atomic counter
+///    guarantees two concurrent callers receive two distinct, strictly-
+///    increasing ordinals (`.claude/rules/development.md` § "Check-and-act must
+///    be atomic" → make-the-collision-unrepresentable).
+/// 2. **Append-only audit log — DECOUPLED from ordinal monotonicity.** The
+///    append-only contract on `ObservationStore::issued_certificate_rows`
+///    remains for its OWN reasons (audit immutability, the serial-dedup guard,
+///    the ADR-0067 D10 restart-recovery marker), but the ordinal's correctness
+///    no longer depends on it — the counter is a separate durable datum that
+///    row deletion cannot rewind. A future delete/GC/revocation path may prune
+///    rows freely without breaking ordinal uniqueness; the counter does not
+///    rewind (overdrive-sh/overdrive#226's delete-survival property — satisfied
+///    by this rev).
+///
 /// # Errors
 ///
 /// * [`CaIssuanceError::Ca`] — the leaf or intermediate could not be signed.
 /// * [`CaIssuanceError::Audit`] — the leaf was minted but its audit row could
-///   not be written; the issuance is refused and the cert dropped.
+///   not be written (or the issuance-ordinal allocation failed); the issuance
+///   is refused and the cert dropped.
 pub async fn issue_and_audit(
     ca: &dyn Ca,
     observation: &dyn ObservationStore,
@@ -166,6 +195,18 @@ pub async fn issue_and_audit(
     // returns a fixture intermediate on every call (its serial is re-drawn from
     // the seeded `Entropy` port per the determinism contract).
     let intermediate = ca.issue_intermediate(node).map_err(CaIssuanceError::ca)?;
+
+    // Global monotonic issuance ordinal — atomically allocated from the
+    // store's durable counter (ADR-0063 D6 rev 8). REPLACES the former
+    // `issued_certificate_rows().await?.len()` derivation, which was a
+    // read-len → mint → write check-then-act TOCTOU (RCA
+    // docs/feature/fix-issuance-ordinal-toctou/deliver/rca.md): two
+    // concurrent issuances read the same len() and stamped duplicate
+    // ordinals. The atomic counter makes that collision unrepresentable —
+    // no serialization precondition is relied on. DST-deterministic (the
+    // sim adapter's counter advances under the same Mutex the audit writes
+    // take). See § D1-AMEND-2 (superseded by this rev).
+    let ordinal = observation.next_issuance_ordinal().await.map_err(CaIssuanceError::audit)?;
 
     // Compute the validity window ONCE from the injected clock, BEFORE minting
     // (ADR-0063 rev 2 amendment / ADR-0067 rev 3 D8). `issued_at` is the clock
@@ -202,6 +243,7 @@ pub async fn issue_and_audit(
         not_after,
         node_id: node.clone(),
         issued_at,
+        issuance_ordinal: ordinal,
     };
 
     // Bind issuance + audit: write the audit row through the `ObservationStore`

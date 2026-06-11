@@ -543,14 +543,24 @@ pub enum CaError {
         which: &'static str,
     },
 
-    /// The persisted root-key envelope failed AES-GCM authentication when
-    /// opened under the **correct** KEK — the ciphertext or tag was tampered
-    /// with / corrupted at rest. Distinct from [`WrongKek`](CaError::WrongKek):
-    /// the supplied KEK's id matches the record's `kek_id` (the AAD), so this
-    /// is integrity failure, not KEK-confusion (ADR-0063 D3/D4). The boot path
-    /// refuses to start on this error — never a silent re-mint.
-    #[error("root-key envelope is corrupt or tampered (AES-GCM auth failed) for kek_id `{kek_id}`")]
-    TamperedEnvelope {
+    /// The persisted root-key envelope failed AES-GCM authentication under a
+    /// KEK whose id **matches** the record's `kek_id` (the AAD). AES-256-GCM
+    /// **cannot** distinguish the two causes that produce this one opaque auth
+    /// failure: the KEK *material* is wrong (a benign mounted-the-wrong-cred
+    /// case, the common operator error), OR the ciphertext/tag was
+    /// tampered/corrupted at rest. Both surface identically — the name and
+    /// message name **both** possibilities so an operator who merely mounted the
+    /// wrong credential is not mis-routed onto a tamper/incident path
+    /// (ADR-0063 D4 § "Honest decrypt-failure cause taxonomy"). The only
+    /// id-level discrimination is [`WrongKek`](CaError::WrongKek), an id-mismatch
+    /// check performed *before* the crypto — that is the sole distinguishable
+    /// KEK-confusion case and is the Phase-1-unreachable rotation/migration
+    /// guard. The boot path refuses to start on this error — never a silent
+    /// re-mint.
+    #[error(
+        "root-key envelope failed AES-GCM authentication for kek_id `{kek_id}` — the KEK material is wrong OR the envelope was tampered/corrupted (these are indistinguishable under AEAD)"
+    )]
+    EnvelopeAuthFailed {
         /// The KEK identity the (failed-to-authenticate) record was sealed under.
         kek_id: KekId,
     },
@@ -559,7 +569,7 @@ pub enum CaError {
     /// supplied KEK's identity does not match the record's `kek_id`. AAD =
     /// `kek_id` binds the ciphertext to its KEK identity, so a KEK-confusion
     /// attempt is detected structurally and surfaces distinctly from
-    /// [`TamperedEnvelope`](CaError::TamperedEnvelope) (ADR-0063 D3/D4).
+    /// [`EnvelopeAuthFailed`](CaError::EnvelopeAuthFailed) (ADR-0063 D3/D4).
     #[error(
         "root-key envelope sealed under kek_id `{sealed_under}` cannot be opened with kek_id `{supplied}`"
     )]
@@ -592,11 +602,12 @@ impl CaError {
         Self::AdoptionConflict { which }
     }
 
-    /// Construct a [`TamperedEnvelope`](CaError::TamperedEnvelope) for a record
-    /// that failed AES-GCM authentication under its own KEK.
+    /// Construct an [`EnvelopeAuthFailed`](CaError::EnvelopeAuthFailed) for a
+    /// record that failed AES-GCM authentication under a matching `kek_id` —
+    /// wrong KEK material OR a tampered envelope (indistinguishable under AEAD).
     #[must_use]
-    pub const fn tampered_envelope(kek_id: KekId) -> Self {
-        Self::TamperedEnvelope { kek_id }
+    pub const fn envelope_auth_failed(kek_id: KekId) -> Self {
+        Self::EnvelopeAuthFailed { kek_id }
     }
 
     /// Construct a [`WrongKek`](CaError::WrongKek) for an open attempted under
@@ -713,7 +724,9 @@ pub trait Ca: Send + Sync {
     /// request type forecloses it (see Preconditions). **Re-issue is not
     /// cached**: calling `issue_svid` twice for the *same* [`SpiffeId`] yields a
     /// **fresh** certificate each time — a distinct serial and a new validity
-    /// window (the re-issue mechanism the #40 rotation workflow drives). A
+    /// window (the re-issue mechanism the #40 near-expiry reissue *action*
+    /// drives — `SvidLifecycle`'s `rotate-svid`-correlated `Action::IssueSvid`,
+    /// a reconciler action, not a workflow). A
     /// signing-backend failure surfaces [`CaError::SigningFailed`]; an issuance
     /// whose audit row cannot be written surfaces a [`CaError`] rather than
     /// handing out an unaudited certificate (no silent issuance; ADR-0063 D6).

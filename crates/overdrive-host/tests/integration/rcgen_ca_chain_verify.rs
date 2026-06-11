@@ -31,6 +31,27 @@
 //! `#[should_panic(expected = "RED scaffold")]`; no import of unbuilt
 //! `RcgenCa`. DELIVER replaces with real `RcgenCa` calls + `openssl verify`
 //! subprocess assertions.
+//!
+//! # DELIVER obligation — `built-in-ca-operator-composition` Slice ③ (EDD E03)
+//!
+//! These two tests are the SOURCE of the E03 evidence PEMs (S-OC-13/14/15 in
+//! `docs/feature/built-in-ca-operator-composition/distill/test-scenarios.md`).
+//! Slice ③ adds an ENV-GATED export (a TEST FIXTURE change — NO production /
+//! library / CLI change): when `$OD_E03_CA_DIR` is set, the tests ALSO write
+//! their PEMs to that directory before the `TempDir` drops, so the E03 runner
+//! can run `openssl verify` over real exported material.
+//! `rcgen_full_svid_chain_verifies_root_intermediate_svid` exports
+//! `root.pem` / `intermediate.pem` / `svid.pem` (E03 sub-claims 1+2);
+//! `rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced` exports the
+//! further-CA chain (E03 sub-claim 3 — the pathLen=0 NEGATIVE ANCHOR that MUST
+//! FAIL `openssl verify`).
+//!
+//! E03 is NOT `satisfied` until the runner enforces all THREE sub-claims; the
+//! different-fox audit MUST reject E03 evidence missing sub-claim 3. DELIVER
+//! owns both the `OD_E03_CA_DIR` export hook AND the
+//! `verification/expectations/E03-…/runner.sh` 3-check extension (DISTILL does
+//! NOT edit `runner.sh`). These tests stay GREEN throughout — the export is an
+//! additive side-effect behind the env gate, not a behavioural change.
 
 use std::process::Command;
 use std::sync::Arc;
@@ -58,6 +79,33 @@ fn now_window() -> (UnixInstant, UnixInstant) {
     let not_before = UnixInstant::from_unix_duration(now.saturating_sub(Duration::from_secs(60)));
     let not_after = not_before + Duration::from_secs(3600);
     (not_before, not_after)
+}
+
+/// Env-gated EDD export for the E03 expectation (`built-in-ca-operator-composition`
+/// Slice ③ / S-OC-13/14/15). When `$OD_E03_CA_DIR` is set, the chain-verify tests
+/// ALSO write their already-minted PEMs (root / intermediate / leaf-or-further-CA)
+/// into `<$OD_E03_CA_DIR>/<sub_dir>/` so the
+/// `verification/expectations/E03-…/runner.sh` runner can run `openssl verify`
+/// over real exported bytes as a BLACK-BOX external tool — the honest E03 proof
+/// (no operator verb mints/exports a chain this phase, D-CA-4). The PEMs come
+/// from the EXISTING `Ca` port surface already used in each test; this is a TEST
+/// FIXTURE side-effect, NOT a production / library / CLI change, and it is fully
+/// additive: when `$OD_E03_CA_DIR` is UNSET this is a no-op and the tests behave
+/// exactly as before. `sub_dir` keeps the positive (sub-claim 1+2) and negative
+/// (sub-claim 3 pathLen=0 anchor) chains in DISTINCT directories so each is a
+/// self-consistent chain the runner verifies independently.
+fn export_e03_chain_if_requested(sub_dir: &str, pems: &[(&str, &str)]) {
+    let Ok(base) = std::env::var("OD_E03_CA_DIR") else {
+        return;
+    };
+    let dir = std::path::Path::new(&base).join(sub_dir);
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("OD_E03_CA_DIR export: create {}: {e}", dir.display()));
+    for (name, pem) in pems {
+        let path = dir.join(name);
+        std::fs::write(&path, pem.as_bytes())
+            .unwrap_or_else(|e| panic!("OD_E03_CA_DIR export: write {}: {e}", path.display()));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,8 +240,21 @@ fn rcgen_intermediate_chains_to_root_via_openssl_verify() {
 
 /// `@real-io` `@adapter-integration` `@S-03` `@error` — pathLen=0 is
 /// ENFORCED not merely set: a constructed chain in which the intermediate
-/// signs a FURTHER CA cert fails `openssl verify` (the constraint bounds
-/// node-compromise blast radius — research Finding 4). Sad path, example-based.
+/// signs a FURTHER CA, and that further-CA signs an END-ENTITY LEAF, fails
+/// `openssl verify` because the further-CA exceeds the intermediate's
+/// pathLen=0 budget (the constraint bounds node-compromise blast radius —
+/// research Finding 4). Sad path, example-based.
+///
+/// Why the leaf below the further-CA is load-bearing: `openssl verify` applies
+/// a pathLenConstraint only to CAs that appear as INTERMEDIATES on the path to
+/// an end-entity — it does NOT apply the budget to the leaf-most certificate
+/// presented as the verification target. Verifying the further-CA *directly*
+/// (no leaf below it) is therefore accepted (zero intermediates follow it), and
+/// proves nothing about pathLen. The genuine abuse the constraint exists to bound
+/// is "a compromised node mints a sub-CA and then issues end-entity certs under
+/// it" — so the chain that EXERCISES pathLen=0 is
+/// root → intermediate(pathLen=0) → further-CA → leaf, where the further-CA is a
+/// real intermediate beyond the budget. That chain is the one that must FAIL.
 #[test]
 fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
     // GIVEN a host CA with a real root + a pathLen=0 node intermediate.
@@ -215,9 +276,17 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
         CertificateParams::new(Vec::<String>::new()).expect("intermediate issuer params");
     inter_issuer_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     inter_issuer_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+    // The rebuilt issuer DN MUST match the real intermediate's subject DN
+    // (`O=overdrive.local, CN=node-a` per `RcgenCa::issue_intermediate` — the
+    // per-node CommonName is load-bearing). With the DN matched, `openssl
+    // verify` builds the genuine root → intermediate(pathLen=0) → further-CA →
+    // leaf chain and applies the pathLen constraint, instead of mis-linking the
+    // further-CA to the root and failing on a signature mismatch (the wrong
+    // reason).
     inter_issuer_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
         dn.push(DnType::OrganizationName, "overdrive.local");
+        dn.push(DnType::CommonName, node.as_str());
         dn
     };
     let inter_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&inter_issuer_params, &inter_key);
@@ -229,24 +298,62 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
     further_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
     further_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
+        dn.push(DnType::OrganizationName, "overdrive.local");
         dn.push(DnType::CommonName, "further-ca-abuse");
         dn
     };
     let further_cert =
         further_params.signed_by(&further_key, &inter_issuer).expect("sign further CA");
 
+    // AND an end-entity LEAF signed by the further-CA. This is the cert that
+    // makes the further-CA a true INTERMEDIATE on the path — the position where
+    // openssl actually counts the pathLen budget. Without this leaf, verifying
+    // the further-CA directly is accepted and pathLen is never exercised.
+    let further_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&further_params, &further_key);
+    let leaf_key = KeyPair::generate().expect("leaf-under-further-ca keypair");
+    let mut leaf_params = CertificateParams::new(Vec::<String>::new()).expect("leaf params");
+    leaf_params.is_ca = IsCa::NoCa;
+    leaf_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    leaf_params.distinguished_name = {
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, "leaf-under-further-ca-abuse");
+        dn
+    };
+    let leaf_cert =
+        leaf_params.signed_by(&leaf_key, &further_issuer).expect("sign leaf under further CA");
+
     // THEN `openssl verify -CAfile root.pem -untrusted intermediate.pem
-    // furtherca.pem` FAILS (non-zero exit). pathLen=0 forbids a CA child of the
-    // intermediate, so the verifier rejects the chain — proving the constraint
-    // is ENFORCED by the verifier, not merely present in the cert bytes.
+    // -untrusted furtherca.pem leaf.pem` FAILS (non-zero exit). pathLen=0
+    // forbids a CA child of the intermediate from itself issuing certs, so the
+    // verifier rejects the chain at the further-CA — proving the constraint is
+    // ENFORCED by the verifier, not merely present in the cert bytes.
     let dir = tempfile::TempDir::new().expect("tempdir");
     let root_pem_path = dir.path().join("root.pem");
     let inter_pem_path = dir.path().join("intermediate.pem");
     let further_pem_path = dir.path().join("furtherca.pem");
+    let leaf_pem_path = dir.path().join("leaf.pem");
     std::fs::write(&root_pem_path, root.cert_pem().as_pem().as_bytes()).expect("write root.pem");
     std::fs::write(&inter_pem_path, inter.cert_pem().as_pem().as_bytes())
         .expect("write intermediate.pem");
     std::fs::write(&further_pem_path, further_cert.pem().as_bytes()).expect("write furtherca.pem");
+    std::fs::write(&leaf_pem_path, leaf_cert.pem().as_bytes()).expect("write leaf.pem");
+
+    // EDD E03 (sub-claim 3 — the pathLen=0 NEGATIVE ANCHOR): when `$OD_E03_CA_DIR`
+    // is set, ALSO export this full negative chain to a DISTINCT `negative/`
+    // sub-dir. This root/intermediate come from a DIFFERENT `RcgenCa` instance
+    // than the positive (sub-claim 1+2) test, so the negative material MUST stay
+    // separate so the runner verifies a self-consistent chain whose `openssl
+    // verify` is EXPECTED to FAIL — the proof pathLen=0 is ENFORCED, not merely
+    // set. Additive, env-gated; no-op when the env var is unset.
+    export_e03_chain_if_requested(
+        "negative",
+        &[
+            ("root.pem", root.cert_pem().as_pem()),
+            ("intermediate.pem", inter.cert_pem().as_pem()),
+            ("furtherca.pem", &further_cert.pem()),
+            ("leaf.pem", &leaf_cert.pem()),
+        ],
+    );
 
     let status = Command::new("openssl")
         .arg("verify")
@@ -254,12 +361,15 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
         .arg(&root_pem_path)
         .arg("-untrusted")
         .arg(&inter_pem_path)
+        .arg("-untrusted")
         .arg(&further_pem_path)
+        .arg(&leaf_pem_path)
         .status()
         .expect("invoke openssl verify");
     assert!(
         !status.success(),
-        "openssl verify of a further-CA under a pathLen=0 intermediate must FAIL (constraint enforced)"
+        "openssl verify of a leaf under a further-CA (itself under a pathLen=0 intermediate) \
+         must FAIL (pathLen constraint enforced)"
     );
 }
 
@@ -312,6 +422,19 @@ fn rcgen_full_svid_chain_verifies_root_intermediate_svid() {
     std::fs::write(&inter_pem_path, inter.cert_pem().as_pem().as_bytes())
         .expect("write intermediate.pem");
     std::fs::write(&svid_pem_path, svid.cert_pem().as_pem().as_bytes()).expect("write svid.pem");
+
+    // EDD E03 (sub-claims 1+2): when `$OD_E03_CA_DIR` is set, ALSO export this
+    // coherent root → intermediate → svid triple (from the same `RcgenCa`) so the
+    // E03 runner can `openssl verify` it as a black-box external tool. Additive,
+    // env-gated; no-op (and the test is unchanged) when the env var is unset.
+    export_e03_chain_if_requested(
+        "positive",
+        &[
+            ("root.pem", root.cert_pem().as_pem()),
+            ("intermediate.pem", inter.cert_pem().as_pem()),
+            ("svid.pem", svid.cert_pem().as_pem()),
+        ],
+    );
 
     let output = Command::new("openssl")
         .arg("verify")

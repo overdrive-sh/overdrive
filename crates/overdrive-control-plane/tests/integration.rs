@@ -238,4 +238,32 @@ mod integration {
     pub mod workload_identity_manager {
         mod lifecycle;
     }
+
+    /// built-in-ca-operator-composition (folds GH #40 + GH #215) — DISTILL RED
+    /// scaffolds for the Layer-3 (Lima) operator surfaces this feature
+    /// completes: `overdrive serve` persistent-CA boot / restart-adopt /
+    /// refuse-to-start (Slice ②, EDD D01/O04), and the rotate-correlation
+    /// `IssueSvid` executor dispatch (Slice ①). Per
+    /// docs/feature/built-in-ca-operator-composition/distill/test-scenarios.md
+    /// (S-OC-06..10). `#[ignore]` until the production wiring lands per slice —
+    /// the runtime surface is `#[cfg(feature = "integration-tests")]` and only
+    /// reachable under Lima.
+    ///
+    /// The Slice ③ issued-certificates summary render (S-OC-11 / S-OC-12, EDD
+    /// O05) lives in `overdrive-cli`
+    /// (`tests/integration/alloc_status.rs`), NOT here: its driving port is
+    /// the single live `overdrive_cli::render::alloc_status` renderer, and
+    /// `overdrive-control-plane` cannot depend on `overdrive-cli` (that is the
+    /// only illegal dependency direction). The original DISTILL placement was a
+    /// defect, relocated single-cut in step 03-02.
+    mod built_in_ca_operator_composition {
+        /// Feature-delta § D1-AMEND — the `alloc_status` server projection
+        /// selects the CURRENT issued cert by monotonic `IssuanceOrdinal`,
+        /// not `issued_at` (closes step-0302 review findings 1 + 2). Drives
+        /// the real `alloc_status` handler; replaces the deleted misplaced
+        /// render-layer scaffold.
+        mod alloc_status_issued_certificates;
+        mod rotate_issue_svid_dispatch;
+        mod serve_persistent_ca;
+    }
 }

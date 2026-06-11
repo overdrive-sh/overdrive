@@ -22,11 +22,15 @@ The question that picks the primitive is whether the work ends.
   certificate through request → wait → validate → publish, or migrating an
   allocation from one node to another — each finishes with an `Ok(result)`.
 
-When a single feature has both halves, split it along that line. "Keep this
-service holding a valid certificate" is a standing invariant — a reconciler — and
-the rotation it triggers when the certificate nears expiry is a terminating
-sequence — a workflow. The reconciler decides *when*; the workflow performs the
-*steps*.
+When a single feature has both halves, split it along that line. Take a public TLS
+certificate from a CA like Let's Encrypt: "keep this service holding a valid
+certificate" is a standing invariant — a reconciler — and the rotation it triggers
+when the certificate nears expiry is a terminating sequence — request, wait for the
+DNS challenge to propagate, validate, publish — a workflow. The reconciler decides
+*when*; the workflow performs the *steps*. The split only appears when the steps
+reach outside the cluster. Overdrive's own internal SVIDs rotate with a single
+audited re-issue, so their near-expiry reissue stays wholly inside the
+[lifecycle reconciler](/docs/concepts/workload-identity-lifecycle) — no workflow.
 
 ## One vocabulary: actions
 

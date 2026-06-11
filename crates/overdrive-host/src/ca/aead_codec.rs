@@ -43,7 +43,9 @@
 //! before the AES-GCM open**: if the supplied KEK's id ≠ the record's `kek_id`
 //! (which is also the AAD), it is [`CaError::WrongKek`] — detectable without
 //! decrypting. If the ids match but the GCM tag still fails to authenticate, it
-//! is [`CaError::TamperedEnvelope`]. The AAD = `kek_id` binding is what makes a
+//! is [`CaError::EnvelopeAuthFailed`] — wrong KEK *material* (matching id) and a
+//! tampered ciphertext (matching id) are indistinguishable under AEAD, so the
+//! variant names both. The AAD = `kek_id` binding is what makes a
 //! mismatched KEK *also* fail authentication, so even if a caller bypassed the
 //! id pre-check the open would still reject — the structural pre-check only
 //! refines the *error variant*, it does not weaken the cryptographic guard.
@@ -215,14 +217,16 @@ impl RootKeyAeadCodec {
     /// * [`CaError::WrongKek`] when `supplied_kek_id` ≠ the record's `kek_id`
     ///   (KEK-confusion; detected structurally, before decrypt — the AAD
     ///   binding would also fail authentication, this only refines the variant).
-    /// * [`CaError::TamperedEnvelope`] when the ids match but AES-GCM
-    ///   authentication fails (corrupt/tampered ciphertext or a right-length tag
-    ///   that fails to authenticate — integrity failure under the correct KEK).
+    /// * [`CaError::EnvelopeAuthFailed`] when the ids match but AES-GCM
+    ///   authentication fails. AEAD cannot tell wrong KEK *material* (matching
+    ///   id) from a tampered ciphertext (matching id) — both are one opaque auth
+    ///   failure, so the variant names both possibilities (ADR-0063 D4 § "Honest
+    ///   decrypt-failure cause taxonomy").
     /// * [`CaError::SigningFailed`] when the KEK cannot be resolved or the record
     ///   is structurally malformed — a nonce that is not 12 bytes or an
     ///   `aead_tag` that is not 16 bytes. A wrong-length tag is a malformed record
     ///   (a truncated/over-long write), NOT an authentication failure, so it does
-    ///   NOT surface as `TamperedEnvelope`.
+    ///   NOT surface as `EnvelopeAuthFailed`.
     ///
     /// Takes `&self` for API symmetry with [`seal`](Self::seal) even though
     /// open draws no randomness — the codec is the single seal/open surface.
@@ -236,9 +240,12 @@ impl RootKeyAeadCodec {
         supplied_kek_id: &KekId,
         record: &RootCaKeyRecord,
     ) -> Result<Vec<u8>, CaError> {
-        // KEK-confusion is detected structurally on the bound identity (also
-        // the AAD) BEFORE any decrypt — this is what makes WrongKek distinct
-        // from TamperedEnvelope (both yield ring's opaque Unspecified).
+        // KEK-confusion (id mismatch) is detected structurally on the bound
+        // identity (also the AAD) BEFORE any decrypt — this is what makes
+        // WrongKek (the id-mismatch rotation guard) distinct from
+        // EnvelopeAuthFailed. Once the ids MATCH, AEAD can no longer tell wrong
+        // KEK material from a tampered ciphertext (both yield ring's opaque
+        // Unspecified) — so they share the one EnvelopeAuthFailed variant.
         if supplied_kek_id != &record.kek_id {
             return Err(CaError::wrong_kek(record.kek_id.clone(), supplied_kek_id.clone()));
         }
@@ -256,11 +263,11 @@ impl RootKeyAeadCodec {
         // A wrong-LENGTH tag is a structurally-malformed record (the stored tag
         // is not 16 bytes), NOT an AES-GCM authentication failure — so it maps to
         // SigningFailed("malformed …"), the same class as the 12-byte nonce check
-        // above, rather than TamperedEnvelope. TamperedEnvelope means "the tag is
-        // the right shape but AES-GCM auth failed under the correct KEK" (the
-        // open_in_place call below); telling an operator "tampered" for a
-        // truncated/over-long write would misdiagnose a corrupt-at-rest record as
-        // an active-tampering integrity failure.
+        // above, rather than EnvelopeAuthFailed. EnvelopeAuthFailed means "the tag
+        // is the right shape but AES-GCM auth failed under a matching kek_id" (the
+        // open_in_place call below — wrong KEK material OR tamper, indistinguishable
+        // under AEAD); mapping a truncated/over-long write to it would misdiagnose
+        // a structurally-corrupt record as an auth failure.
         let tag: Tag = record
             .aead_tag
             .as_slice()
@@ -268,8 +275,9 @@ impl RootKeyAeadCodec {
             .map_err(|_| CaError::signing_failed("record aead_tag is not 16 bytes"))?;
 
         // Open in place: AES-GCM authenticates ciphertext + tag against the
-        // AAD (kek_id). The ids already match here, so an auth failure is
-        // integrity failure (tampered), not KEK-confusion.
+        // AAD (kek_id). The ids already match here, so an auth failure is either
+        // wrong KEK material OR a tampered ciphertext — AEAD cannot tell which,
+        // so both surface as EnvelopeAuthFailed.
         let mut in_out = record.ciphertext.clone();
         let plaintext = key
             .open_in_place_separate_tag(
@@ -279,7 +287,7 @@ impl RootKeyAeadCodec {
                 &mut in_out,
                 0..,
             )
-            .map_err(|_| CaError::tampered_envelope(record.kek_id.clone()))?;
+            .map_err(|_| CaError::envelope_auth_failed(record.kek_id.clone()))?;
 
         Ok(plaintext.to_vec())
     }

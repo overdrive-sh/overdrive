@@ -1,0 +1,4 @@
+# command: openssl verify -CAfile /Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca/negative/root.pem -untrusted /Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca/negative/intermediate.pem -untrusted /Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca/negative/furtherca.pem /Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca/negative/leaf.pem
+# seed:    1
+# started: 2026-06-10T21:05:52Z
+# exit:    2

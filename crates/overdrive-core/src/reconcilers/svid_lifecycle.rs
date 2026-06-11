@@ -2,7 +2,8 @@
 //!
 //! This module is the home for the pure `SvidLifecycle` reconciler that
 //! converges the in-process held-SVID set against the Running-allocation set
-//! (`running ∧ ¬held → IssueSvid`, `¬running ∧ held → DropSvid`; ADR-0067 D2).
+//! (`running ∧ ¬held → IssueSvid`, `running ∧ held(near-expiry) → IssueSvid`
+//! rotate, `¬running ∧ held → DropSvid`; ADR-0067 D2, feature-delta D-OC-1).
 //! The reconciler, its `State` projection, and its retry-memory `View` land in
 //! step 01-04; this step (01-03) defines ONLY the projection the held set
 //! yields into the reconciler's `actual`:
@@ -31,11 +32,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::SpiffeId;
+use crate::ca::WORKLOAD_SVID_TTL;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use crate::wall_clock::UnixInstant;
 
-use super::{Action, Reconciler, ReconcilerName, TickContext, WorkflowStart, backoff_for_attempt};
-use crate::workflow::WorkflowName;
+use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
 
 /// The per-allocation projection of a held workload SVID — the `actual` the
 /// `SvidLifecycle` reconciler (01-04) reads via `IdentityMgr::held_snapshot`.
@@ -194,45 +195,46 @@ pub struct SvidLifecycleView {
     pub retry: BTreeMap<AllocationId, IssueRetry>,
 }
 
-/// The near-expiry threshold (seconds) the gated #40 rotation branch compares
-/// the held cert's REAL `not_after` against (`held.not_after <= tick.now_unix +
-/// NEAR_EXPIRY_THRESHOLD_SECS` ⇒ near-expiry; ADR-0067 D8). `28_800` is
-/// `8 * 60 * 60` — eight hours, a third of the 24-hour SVID TTL.
+/// The near-expiry threshold (seconds) the LIVE near-expiry rotation branch
+/// compares the held cert's REAL `not_after` against (`held.not_after <=
+/// tick.now_unix + NEAR_EXPIRY_THRESHOLD_SECS` ⇒ near-expiry; ADR-0067 D8,
+/// feature-delta D-OC-3).
 ///
-/// This is a DOCUMENTED PLACEHOLDER. The emit it gates is dormant
-/// ([`SvidLifecycle::ROTATION_ENABLED`] is `false`) until #40 (which needs the
-/// workflow primitive #39) registers `cert_rotation` and flips the gate — at
-/// which point #40 pins the real threshold (a sensible fraction of the SVID
-/// TTL). Because the emit is gated, this value is never acted on yet; it exists
-/// only so the near-expiry branch is STRUCTURALLY PRESENT and reads
-/// `actual.not_after` exactly as #40 will, with zero #35 rework. A third of the
-/// 24-hour SVID TTL is a sane starting fraction; #40 owns the final value.
-///
-/// Stored as a plain literal (not `8 * 60 * 60`) deliberately: the arithmetic
-/// would otherwise be a mutation target at module scope, but it is INERT
-/// gated-#40 code (`ROTATION_ENABLED == false`) that no test can observe until
-/// #40 flips the gate. The `<=` comparison this threshold feeds lives inside the
-/// `#[mutants::skip]` [`near_expiry`] helper for the same reason. See #40.
-pub const NEAR_EXPIRY_THRESHOLD_SECS: u64 = 28_800;
+/// DERIVED from [`WORKLOAD_SVID_TTL`] — it is ½ × the workload-SVID TTL (1800s
+/// today, since the TTL is 3600s). It is NOT a bare literal: `Duration::as_secs`
+/// and `u64 / 2` are both `const`, so the threshold tracks a TTL-policy change
+/// at compile time. Re-issuing at the half-life leaves a full ½-TTL window for
+/// the rotate `IssueSvid` to complete and the new leaf to be held before the old
+/// one expires.
+pub const NEAR_EXPIRY_THRESHOLD_SECS: u64 = WORKLOAD_SVID_TTL.as_secs() / 2;
 
-/// The gated #40 near-expiry predicate: is the held cert's REAL `not_after`
-/// within [`NEAR_EXPIRY_THRESHOLD_SECS`] of `now` (ADR-0067 D8)?
+/// Executor-latency budget reserved before a held cert's `not_after`: the LAST
+/// clamped rotation attempt must fire at least this long before expiry so the
+/// executor can complete the mint + `issue_and_audit` write + hold-swap and the
+/// new leaf is held before the old one dies (ADR-0067 rev 7 D8). A flat
+/// latency budget, NOT a scheduling-jitter budget — one tick (~100ms) is too
+/// tight under a loaded control plane.
+///
+/// The rotation re-emit deadline is `min(last_failure_seen_at +
+/// backoff_for_attempt(attempts), held.not_after − ROTATION_DEADLINE_MARGIN)`, so
+/// a growing backoff knob can never push the next rotation attempt at or past the
+/// held cert's `not_after` (the rotation-backoff-clamp invariant). Module-private
+/// — NOT public API per ADR-0067 rev 7.
+const ROTATION_DEADLINE_MARGIN: Duration = Duration::from_secs(60);
+
+// ADR-0067 rev 7 invariant guard: the margin must live INSIDE the near-expiry
+// window, else the clamp could be pushed past the window it sits in. 60s ≪ 1800s
+// today; this const assertion fails the build if a future TTL shrink inverts it.
+const _: () = assert!(ROTATION_DEADLINE_MARGIN.as_secs() < NEAR_EXPIRY_THRESHOLD_SECS);
+
+/// The near-expiry predicate: is the held cert's REAL `not_after` within
+/// [`NEAR_EXPIRY_THRESHOLD_SECS`] of `now` (ADR-0067 D8)? Inclusive at the
+/// boundary (`<=`): a cert expiring at exactly `now + threshold` rotates.
 ///
 /// Extracted into its own function so the threshold-window computation and the
-/// `<=` comparison are one named, reviewable predicate whose mutation can be
-/// suppressed at function granularity.
-// mutants: skip — INERT gated-#40 seam code. The only caller
-// (`SvidLifecycle::reconcile`) guards this predicate's result behind
-// `SvidLifecycle::ROTATION_ENABLED` (`false`), so the boundary it computes is
-// never observable until #40 registers `cert_rotation` and flips the gate. No
-// test can distinguish the `<=` from a `>` while the result is gated away — it
-// is a genuine equivalent mutant today. #40 flips the gate, removes this skip,
-// and the kill test for the boundary lands in the same commit. The LIVE backoff
-// comparison in `reconcile` (`tick.now_unix < deadline`) is DELIBERATELY left
-// OUTSIDE this helper so it stays a mutable, tested target. The actual
-// suppression mechanism is the `exclude_re` entry in `.cargo/mutants.toml`
-// (this comment is the load-bearing documentation; comment-skip alone does not
-// reliably fire for a single-expression fn body).
+/// `<=` comparison are one named, reviewable predicate. The `<=` boundary is a
+/// LIVE mutation target killed by S-OC-03
+/// (`near_expiry_boundary_is_inclusive_at_half_ttl`).
 fn near_expiry(not_after: UnixInstant, now: UnixInstant) -> bool {
     not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)
 }
@@ -243,34 +245,6 @@ pub struct SvidLifecycle {
 }
 
 impl SvidLifecycle {
-    /// The #40 rotation-emit GATE (ADR-0067 D8). While `false`, the near-expiry
-    /// branch in [`reconcile`](SvidLifecycle::reconcile) is STRUCTURALLY PRESENT
-    /// (it evaluates the near-expiry condition against the held cert's real
-    /// `not_after`) but NEVER emits `Action::StartWorkflow(cert_rotation)`.
-    ///
-    /// This gate is LOAD-BEARING, not cosmetic. Production ALWAYS wires an
-    /// empty-registry workflow engine (`WorkflowRegistry::new()`,
-    /// `overdrive-control-plane/src/lib.rs:1576`); a committed `StartWorkflow`
-    /// for the UNREGISTERED `cert_rotation` kind raises
-    /// `WorkflowEngineError::UnknownWorkflow` (`lib.rs:1560`), isolated per-action
-    /// by the action-shim but RE-EMITTED every tick the near-expiry condition
-    /// holds — so a naïve emit raises `UnknownWorkflow` EVERY tick. With the gate
-    /// `false` the seam is a CLEAN no-op until #40 (which needs the workflow
-    /// primitive #39) registers `cert_rotation` and flips this const to `true`,
-    /// with ZERO #35 View/branch rework.
-    ///
-    /// This is DISTINCT from restart re-issue (`running ∧ ¬held → IssueSvid`,
-    /// always live, landed 03-01): restart recovery must NEVER route through this
-    /// (gated) rotation path. There is NO synchronous sync-rotate path (A5
-    /// rejected) — rotation is a multi-step durable sequence #40 lands as a
-    /// workflow.
-    pub const ROTATION_ENABLED: bool = false;
-
-    /// The kebab-case identity of the rotation workflow the gated near-expiry
-    /// branch targets. The workflow itself is unregistered until #40; this const
-    /// names the kind the gated `StartWorkflow` would carry.
-    const CERT_ROTATION_WORKFLOW: &'static str = "cert-rotation";
-
     /// Construct the canonical `svid-lifecycle` instance.
     ///
     /// # Panics
@@ -289,7 +263,7 @@ impl SvidLifecycle {
 /// Derive the deterministic [`CorrelationKey`] for an identity action against an
 /// allocation: `target = "svid-lifecycle/<alloc>"`, `spec_hash =
 /// ContentHash::of(<spiffe-uri bytes>)`, `purpose ∈ {"issue-svid",
-/// "drop-svid"}` (ADR-0067 D2 — the ADR-0035 reconciler-I/O correlation
+/// "rotate-svid", "drop-svid"}` (ADR-0067 D2 — the ADR-0035 reconciler-I/O correlation
 /// discipline; the content identity is the SVID's own SPIFFE URI, stable across
 /// ticks for the same allocation, NOT a per-attempt request id).
 fn identity_correlation(
@@ -341,15 +315,32 @@ impl Reconciler for SvidLifecycle {
     ///   `¬held ∧ ¬ever_issued` next tick with a retry entry).
     /// - **`¬running ∧ held`** → emit [`Action::DropSvid`] so the executor drops
     ///   the held leaf key (ADR-0067 O2 — leak resistance on stop).
-    /// - **`running ∧ held`** → clear the alloc's `IssueRetry` entry (the issue
-    ///   succeeded — it is now in `actual`) AND evaluate the gated #40 near-expiry
-    ///   ROTATION branch ([`SvidLifecycle::ROTATION_ENABLED`]): when the held
-    ///   cert's real `not_after` (read off `actual`, D4) is within
-    ///   [`NEAR_EXPIRY_THRESHOLD_SECS`] of `tick.now_unix` it WOULD target
-    ///   `Action::StartWorkflow(cert_rotation)` — but the emit is GATED (the gate
-    ///   is `false` until #40 registers `cert_rotation`), so the seam is a clean
-    ///   no-op. DISTINCT from restart re-issue (the `running ∧ ¬held` branch); no
-    ///   synchronous sync-rotate path.
+    /// - **`running ∧ held ∧ ¬near-expiry`** → clear-on-success: clear the alloc's
+    ///   `IssueRetry` entry (the issue succeeded — it is now in `actual` with a
+    ///   full-TTL `not_after`; this is also the post-rotation-success landing, a
+    ///   completed rotation having advanced `not_after` past the ½-TTL window) and
+    ///   converge to no-op (ADR-0067 rev 7 D10).
+    /// - **`running ∧ held ∧ near-expiry`** → the LIVE near-expiry ROTATION branch
+    ///   (feature-delta D-OC-1/2/3, decision A1): when the held cert's real
+    ///   `not_after` (read off `actual`, D4) is within [`NEAR_EXPIRY_THRESHOLD_SECS`]
+    ///   (½ × `WORKLOAD_SVID_TTL`) of `tick.now_unix`, emit a rotate
+    ///   [`Action::IssueSvid`] carrying the HELD `spiffe_id`, the running
+    ///   `node_id`, and a `"rotate-svid"` correlation (distinguishing it from the
+    ///   restart-recovery / first-issue `"issue-svid"` path). Internal near-expiry
+    ///   reissue is a reconciler ACTION, not a workflow
+    ///   (`.claude/rules/workflows.md`). Rev 7: this rotation participates in the
+    ///   SAME `IssueRetry` / `backoff_for_attempt` machinery as the first-issue
+    ///   path, so a *failed* rotate backs off instead of re-firing every tick. The
+    ///   first rotate on a freshly-near-expiry cert fires immediately (no entry
+    ///   yet); a re-fire after a failure is suppressed only when BOTH the
+    ///   backoff-spacing window has NOT elapsed AND the alloc is outside the expiry
+    ///   "panic zone". The re-emit deadline is CLAMPED to
+    ///   `min(last_failure_seen_at + backoff_for_attempt(attempts), held.not_after
+    ///   − ROTATION_DEADLINE_MARGIN)` — the rotation-backoff-clamp invariant: a
+    ///   near-expiry cert is ALWAYS re-attempted before `held.not_after`,
+    ///   regardless of the backoff policy. Each emitted rotate BUMPS the entry
+    ///   (`attempts += 1`, `last_failure_seen_at = tick.now_unix`); a successful
+    ///   rotate lands in `held ∧ ¬near-expiry` next tick, which clears it.
     /// - **GC** — `IssueRetry` entries for allocations no longer Running are
     ///   dropped from `next_view` (mirror `ServiceMapHydrator`'s `retain`).
     ///
@@ -367,46 +358,84 @@ impl Reconciler for SvidLifecycle {
         let mut actions: Vec<Action> = Vec::new();
         let mut next_view = view.clone();
 
-        // Per running alloc, in the ADR-0067 rev 5 D10 priority order:
-        //   held              → no-op + gated near-expiry; clear retry
+        // Per running alloc, in the ADR-0067 rev 5/rev 7 D10 priority order:
+        //   held ∧ ¬near-expiry → success: no-op; clear retry
+        //   held ∧ near-expiry  → rotation: IssueSvid backoff-gated + deadline-
+        //                         clamped; bump retry on emit (rev 7)
         //   ¬held ∧ ever_issued → restart recovery: IssueSvid IMMEDIATELY
         //                         (bypass the backoff gate); clear retry
         //   ¬held ∧ ¬ever_issued → first-issue / failing: IssueSvid backoff-gated;
         //                          record/keep the failure memory
         for (alloc_id, running) in &desired.desired {
             if let Some(held) = actual.actual.get(alloc_id) {
-                // running ∧ held → the issue succeeded, so clear any recorded
-                // retry memory (clear-on-success).
-                next_view.retry.remove(alloc_id);
-
-                // The gated #40 near-expiry ROTATION branch (ADR-0067 D8). It is
-                // STRUCTURALLY PRESENT — it reads the held cert's REAL `not_after`
-                // (`HeldSvidFacts.not_after`, an OBSERVED fact off `actual`, D4 —
-                // NOT a View field; there is no `expires_at` anywhere) and
-                // compares it against `tick.now_unix + NEAR_EXPIRY_THRESHOLD_SECS`
-                // recomputed each tick (no persisted deadline). When near-expiry
-                // it WOULD target `Action::StartWorkflow(cert_rotation)` — but the
-                // emit is GATED behind `ROTATION_ENABLED` (`false`), so it is
-                // NEVER emitted while `cert_rotation` is unregistered (production
-                // wires an empty-registry engine, so a naïve emit would raise
-                // `UnknownWorkflow` every tick). #40 (needs #39) registers the
-                // kind and flips the gate with ZERO rework. This is DISTINCT from
-                // restart re-issue (`running ∧ ¬held → IssueSvid`, above) — there
-                // is no synchronous sync-rotate path (A5 rejected).
-                if Self::ROTATION_ENABLED && near_expiry(held.not_after, tick.now_unix) {
-                    let name =
-                        WorkflowName::new(Self::CERT_ROTATION_WORKFLOW).unwrap_or_else(|_| {
-                            unreachable!(
-                                "CERT_ROTATION_WORKFLOW is a valid kebab WorkflowName constant"
-                            )
-                        });
-                    let correlation =
-                        identity_correlation(alloc_id, &held.spiffe_id, "rotate-svid");
-                    actions.push(Action::StartWorkflow {
-                        start: WorkflowStart { name, input: Vec::new() },
-                        correlation,
-                    });
+                // running ∧ held ∧ ¬near-expiry → genuine success (first issue
+                // completed OR a prior rotation completed — a completed rotation
+                // advances `not_after` to `now + full TTL`, outside the ½-TTL
+                // window, so this IS the post-rotation-success landing). Clear any
+                // recorded retry memory (clear-on-success) and converge to no-op
+                // (ADR-0067 rev 7 D10). The `held ∧ near-expiry` rotation case is
+                // handled below.
+                if !near_expiry(held.not_after, tick.now_unix) {
+                    next_view.retry.remove(alloc_id);
+                    continue;
                 }
+
+                // running ∧ held ∧ near-expiry → the LIVE near-expiry ROTATION
+                // branch (ADR-0067 D8 rev 7; feature-delta D-OC-1/2/3). Internal
+                // SVID near-expiry reissue is a reconciler ACTION, not a workflow
+                // (`.claude/rules/workflows.md`): a single internal mint+swap with
+                // no external DNS-propagation wait. It reads the held cert's REAL
+                // `not_after` (`HeldSvidFacts.not_after`, an OBSERVED fact off
+                // `actual`, D4 — NOT a View field; there is no `expires_at`
+                // anywhere) and participates in the SAME `IssueRetry` /
+                // `backoff_for_attempt` machinery as the first-issue path, so a
+                // *failed* rotate (a CA / audit-write failure lands no new hold —
+                // D6 audit-before-hold — leaving the alloc `held ∧ near-expiry`)
+                // backs off instead of re-firing every tick (rev 7 — the hot-loop
+                // fix). The FIRST rotate on a freshly-near-expiry cert has no
+                // entry yet, so it fires immediately (preserving rev 6's "emit on
+                // near-expiry" intent); only a re-fire after a failed rotate backs
+                // off.
+                //
+                // The re-emit DEADLINE is CLAMPED to
+                //   min(last_failure_seen_at + backoff_for_attempt(attempts),  // spacing
+                //       held.not_after − ROTATION_DEADLINE_MARGIN)             // the wall
+                // so a growing backoff knob can NEVER schedule the next rotation
+                // attempt at or beyond `held.not_after` (the rotation-backoff-clamp
+                // invariant). Suppress this tick IFF BOTH terms suppress — inside
+                // the backoff-spacing window AND outside the expiry "panic zone".
+                // `UnixInstant` has `Add<Duration>` but no `Sub<Duration>`, so the
+                // wall term is written in addition form: `now + MARGIN < not_after`
+                // ⇔ `now < not_after − MARGIN`.
+                if let Some(retry) = next_view.retry.get(alloc_id) {
+                    let inside_backoff_window = tick.now_unix
+                        < retry.last_failure_seen_at + backoff_for_attempt(retry.attempts);
+                    let outside_panic_zone =
+                        tick.now_unix + ROTATION_DEADLINE_MARGIN < held.not_after;
+                    if inside_backoff_window && outside_panic_zone {
+                        // Suppress the rotate this tick — preserve the entry
+                        // UNCHANGED (NOT cleared, NOT bumped) so the deadline
+                        // recomputes identically next tick.
+                        continue;
+                    }
+                }
+
+                // Emit the rotate (no entry yet, OR backoff elapsed, OR in the
+                // panic zone) and BUMP the retry entry — the `bump_if_dispatched`
+                // shape, so a re-emit that then FAILS backs off. Persist INPUTS
+                // (`attempts`, `last_failure_seen_at`), never the deadline. A
+                // SUCCESSFUL rotate advances `not_after` to `now + full TTL` →
+                // next tick lands in `held ∧ ¬near-expiry` → clear (above).
+                let correlation = identity_correlation(alloc_id, &held.spiffe_id, "rotate-svid");
+                actions.push(Action::IssueSvid {
+                    alloc_id: alloc_id.clone(),
+                    spiffe_id: held.spiffe_id.clone(),
+                    node_id: running.node_id.clone(),
+                    correlation,
+                });
+                let entry = next_view.retry.entry(alloc_id.clone()).or_default();
+                entry.attempts = entry.attempts.saturating_add(1);
+                entry.last_failure_seen_at = tick.now_unix;
                 continue;
             }
 

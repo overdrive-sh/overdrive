@@ -9,7 +9,8 @@
 //!
 //! The V1 payload (`IssuedCertificateRowV1`, research Finding 15) carries:
 //! `serial`, `spiffe_id`, `issuer_serial`, `not_before`, `not_after`,
-//! `node_id`, `issued_at`. These are the audit *inputs* (what was issued) —
+//! `node_id`, `issued_at`, `issuance_ordinal`. These are the audit *inputs*
+//! (what was issued) —
 //! observation, never intent (the CA *material* is intent, D2). The
 //! unknown-version read path **logs-and-skips** the row (observation
 //! TOLERATES; asymmetric vs intent's fail-fast at 02-01).
@@ -23,7 +24,7 @@ use overdrive_core::ca::issued_certificate_row::{
     IssuedCertificateRowEnvelope, IssuedCertificateRowLatest, IssuedCertificateRowV1,
 };
 use overdrive_core::codec::VersionedEnvelope;
-use overdrive_core::id::{CertSerial, NodeId, SpiffeId};
+use overdrive_core::id::{CertSerial, IssuanceOrdinal, NodeId, SpiffeId};
 use overdrive_core::wall_clock::UnixInstant;
 
 use super::harness::{
@@ -38,7 +39,7 @@ use super::harness::{
 /// BOTH must update in the same commit. Empirically pinned by regenerating
 /// `FIXTURE_V1` and locating the trailing-root discriminant byte (mirror
 /// `root_ca_key.rs::GOLDEN_DISCRIMINANT_OFFSET_V1`).
-const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 96;
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 104;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one of them
@@ -53,6 +54,7 @@ fn canonical_v1_payload() -> IssuedCertificateRowLatest {
         not_after: UnixInstant::from_unix_duration(std::time::Duration::from_secs(1_700_086_400)),
         node_id: NodeId::new("node-01").expect("valid node id"),
         issued_at: UnixInstant::from_unix_duration(std::time::Duration::from_secs(1_700_000_005)),
+        issuance_ordinal: IssuanceOrdinal::new(7),
     }
 }
 
@@ -65,7 +67,7 @@ fn canonical_v1_payload() -> IssuedCertificateRowLatest {
 /// deployed consumer, this constant becomes immutable per
 /// `.claude/rules/development.md` § "rkyv schema evolution" — future
 /// variants need a `V2` envelope.
-const FIXTURE_V1: &str = "3061316232633364346535667370696666653a2f2f6f76657264726976652e746573742f6e6f64652f6e6f64652d30312f776f726b6c6f61642f646e732d7265736f6c76657266666565646463636262616100000000000000000000000000008c000000a0ffffffba000000a4ffffff170000008c000000d2ffffff0000000000f15365000000000000000000000000804255650000000000000000000000006e6f64652d3031ff05f15365000000000000000000000000";
+const FIXTURE_V1: &str = "3061316232633364346535667370696666653a2f2f6f76657264726976652e746573742f6e6f64652f6e6f64652d30312f776f726b6c6f61642f646e732d7265736f6c76657266666565646463636262616100000000000000000000000000008c000000a0ffffffba000000a4ffffff170000008c000000d2ffffff0000000000f15365000000000000000000000000804255650000000000000000000000006e6f64652d3031ff05f153650000000000000000000000000700000000000000";
 
 /// `@property` `@S-05` (S-05-06) — golden-bytes roundtrip for the
 /// issued-cert audit row envelope: hex-decode `FIXTURE_V1`,

@@ -10,15 +10,15 @@ it without a network round trip. Overdrive's [built-in CA](/docs/concepts/identi
 mints; this subsystem holds, reads, and drops. It is a reconciler that converges
 the set of held identities against the set of running allocations.
 
-<Callout title="Wired into serve, with an ephemeral CA and no consumer yet">
+<Callout title="Wired into serve, backed by the persistent CA, not yet presented">
 	The lifecycle runs in `overdrive serve` today: the reconciler is registered, and
-	every running allocation gets an SVID issued, held, audited, and dropped on stop.
-	Two boundaries matter. The CA backing it at boot is **ephemeral** — a fresh
-	in-memory root per process, not the persistent envelope-encrypted root the
-	[built-in CA page](/docs/concepts/identity) describes. And nothing **reads** the
-	held SVID to present it on a connection yet: the sockops/kTLS mTLS layer, the
-	gateway, and the telemetry sink are unbuilt. Identity is held and provable, not
-	yet presented. See [Where it stands](#where-it-stands) for the exact line.
+	every running allocation gets an SVID issued, held, audited, re-issued near
+	expiry, and dropped on stop. It is backed by the
+	[built-in CA](/docs/concepts/identity)'s **persistent**, envelope-encrypted root
+	— adopted at boot, the same root across restarts. One boundary remains: nothing
+	**reads** a held SVID to present it on a connection yet. The sockops/kTLS mTLS
+	layer, the gateway, and the telemetry sink are unbuilt. Identity is held and
+	provable, but no connection carries it yet. See [Where it stands](#where-it-stands).
 </Callout>
 
 ## The CA mints; nothing held what it minted
@@ -158,44 +158,48 @@ already uses: a row recording the serial, the SPIFFE identity, the issuer, and
 the validity window. If that row cannot be written, the issuance is refused, and
 no unaudited credential enters the held set.
 
-## Rotation: a wired but dormant seam
+## Rotation: a live reconciler action
 
-Short-lived certificates need re-issuing before they expire. The reconciler
-already has the branch for it — it compares each held identity's expiry against
-the current tick and, when one is close, would start a rotation workflow. That
-emit is **gated off**. Re-issuing on a schedule is a bounded, ordered sequence,
-which is exactly what a [workflow](/docs/concepts/workflows) is for, and
-certificate rotation is the canonical first workflow
-([#40](https://github.com/overdrive-sh/overdrive/issues/40)). Until that workflow
-is registered, starting it would raise an "unknown workflow" error on every tick,
-so the seam stays a clean no-op. The branch is present and waiting; it does
-nothing until rotation lands.
+Short-lived certificates need re-issuing before they expire, and the reconciler
+does it. Each tick it compares every held identity's expiry against the clock; when
+one falls inside the near-expiry window — half the certificate's lifetime — it emits
+an `IssueSvid` action carrying a `rotate-svid` correlation. The executor mints a
+fresh certificate through the same audited path, swaps it into the held set, and the
+new expiry pushes the identity back out of the window until next time.
+
+This is a reconciler **action**, not a workflow. Re-issuing an internal SVID is a
+single internal mint-and-swap — no external call, no DNS wait, no multi-step
+sequence to journal — so it stays in the converge loop where it costs one action.
+Rotation shares the reconciler's retry memory: a failed re-issue backs off rather
+than hammering the CA, and the back-off is clamped so it can never push the next
+attempt past the certificate's own expiry. (External *public-certificate* rotation,
+the ACME request-then-wait-for-DNS dance, is the genuinely
+[workflow-shaped](/docs/concepts/workflows) case — a separate concern from these
+internal SVIDs.)
 
 ## Where it stands
 
-The lifecycle is implemented and wired into a running control plane, with two
-honest boundaries:
+The lifecycle is implemented and wired into a running control plane, with one
+honest boundary:
 
 - **Live in serve:** the `SvidLifecycle` reconciler is registered in the boot
   path, and `IdentityMgr` is threaded into the control plane's shared state. A
-  running allocation gets an SVID issued, held, and audited; a stopped one has its
-  identity dropped. Convergence and audit are proven by simulation tests and a
-  test-tier `openssl verify` of the minted chain.
-- **The boot CA is ephemeral:** the CA composed into `serve` mints a fresh
-  in-memory root per process — no key-encryption key, no persistence. It is not
-  the persistent envelope-encrypted root from the
-  [built-in CA page](/docs/concepts/identity); that root, and the operator-facing
-  surfaces, are tracked separately and depend on this subsystem landing first. An
-  identity issued today does not outlive its process as a chain to the old root;
-  after a restart it is simply re-issued under the new boot root.
+  running allocation gets an SVID issued, held, and audited; a near-expiry one is
+  re-issued; a stopped one has its identity dropped. Convergence and audit are
+  proven by simulation tests and a test-tier `openssl verify` of the minted chain.
+- **Backed by the persistent root:** the CA composed into `serve` is the
+  [built-in CA](/docs/concepts/identity)'s envelope-encrypted root, adopted at boot
+  under the operator KEK — the same root across restarts. A certificate issued
+  today verifies under the same anchor after a restart; the held set is rebuilt by
+  re-issuing, but the root that signs it does not change.
 - **No consumer presents it:** the read port is proven against a test consumer,
   but the sockops/kTLS mTLS layer, the gateway, and the telemetry sink that would
   read a held SVID and present it on a connection are unbuilt. Identity is held
   and readable; it is not yet on the wire.
-- **No operator verb:** holding and dropping identity is an internal mechanism.
-  There is no `overdrive` subcommand to issue or inspect an SVID; the
-  `alloc status` render of issued certificates is future work that depends on this
-  feature.
+- **One inspection verb, no issue verb:** holding and dropping identity is an
+  internal mechanism with no operator command to mint one. `overdrive alloc status`
+  does report the current certificate for each running allocation — serial, SPIFFE
+  identity, issuer serial, and expiry — drawn from the audit rows, never the key.
 
 ## Where to go next
 
@@ -205,7 +209,7 @@ honest boundaries:
   [reconcilers](/docs/concepts/reconcilers).
 - Where the held credential sits in the state model:
   [intent and observation](/docs/concepts/intent-observation).
-- The destination of the dormant rotation seam:
-  [workflows](/docs/concepts/workflows).
+- Why public-certificate rotation is workflow-shaped but internal SVID re-issue is
+  not: [workflows](/docs/concepts/workflows).
 - Why issuance and convergence replay deterministically:
   [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

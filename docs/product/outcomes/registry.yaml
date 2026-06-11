@@ -146,9 +146,9 @@ outcomes:
   superseded_by: null
 - id: OUT-WIM-IDENTITY-READ
   kind: specification
-  summary: IdentityRead is a sync owned-clone read port over the held SVID set — a
-    read never issues, never mutates, returns explicit None for absence, hands back
-    owned clones holding no lock, and observes drop-on-stop as None
+  summary: "IdentityRead is a sync owned-clone read port over the held SVID set \u2014\
+    \ a read never issues, never mutates, returns explicit None for absence, hands\
+    \ back owned clones holding no lock, and observes drop-on-stop as None"
   feature: workload-identity-manager
   inputs:
   - shape: AllocationId for svid_for; no argument for current_bundle; reads served
@@ -165,5 +165,45 @@ outcomes:
   - no-reissue
   - drop-on-stop
   artifact: crates/overdrive-core/src/traits/identity_read.rs
+  related: []
+  superseded_by: null
+- id: OUT-CA-ISSUED-CERTS-READ
+  kind: operation
+  summary: Operator reads the current issued-certificate summary per running alloc
+    via alloc status (EDD O05)
+  feature: built-in-ca-operator-composition
+  inputs:
+  - shape: overdrive alloc status --job <WorkloadId> (reads issued_certificate_rows())
+  output:
+    shape: 'AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary{serial,spiffe_id,issuer_serial,not_after}>,
+      current = max issuance_ordinal per alloc (issued_at retained as audit fact, not selection key), NO cert bytes/key'
+  keywords:
+  - issued-certificates
+  - alloc-status
+  - operator-read
+  - audit
+  - svid-summary
+  artifact: crates/overdrive-control-plane/src/api.rs
+  related: []
+  superseded_by: null
+- id: OUT-CA-BOOT-REFUSE
+  kind: invariant
+  summary: Persistent workload-CA boot refuses to start with a cause-distinct actionable
+    error and never silently re-mints (EDD O04/D01)
+  feature: built-in-ca-operator-composition
+  inputs:
+  - shape: run_server boot with persisted root + (resolvable|wrong|absent) KEK / (intact|tampered)
+      envelope
+  output:
+    shape: cause-distinct ControlPlaneError::CaBoot(CaBootError::{WrongKek|TamperedEnvelope|KekUnavailable})
+      + health.startup.refused; no silent re-mint
+  keywords:
+  - ca-boot
+  - refuse-to-start
+  - earned-trust
+  - no-remint
+  - kek
+  - envelope
+  artifact: crates/overdrive-control-plane/src/ca_boot.rs
   related: []
   superseded_by: null

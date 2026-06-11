@@ -481,37 +481,6 @@ exclude_re = [
     # carry the same rationale as documentation, this regex is the mechanism.
     "replace Ca::adopt_persisted_root -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
     "replace Ca::adopt_persisted_intermediate -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
-
-    # `near_expiry` (`crates/overdrive-core/src/reconcilers/svid_lifecycle.rs`)
-    # — INERT gated-#40 rotation seam (ADR-0067 D8; workload-identity-manager
-    # #35 mutation cleanup). The predicate
-    # `not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)` is
-    # the near-expiry boundary the gated #40 cert-rotation branch reads. Its
-    # SOLE caller (`SvidLifecycle::reconcile`) guards the result behind
-    # `SvidLifecycle::ROTATION_ENABLED` (`false`), so the boundary is never
-    # observable: no committed `StartWorkflow(cert_rotation)` is emitted while
-    # the gate is closed (production wires an empty `WorkflowRegistry`). With
-    # the result gated away, the `<=` → `>` flip — and any window-arithmetic
-    # mutation folded into this fn — is a genuine EQUIVALENT MUTANT today: the
-    # S-WIM-09 acceptance proptest asserts ZERO StartWorkflow under EITHER
-    # operator, so no test can distinguish them. #40 (needs the workflow
-    # primitive #39) registers `cert_rotation`, flips the gate, removes this
-    # exclusion, and lands the boundary kill test in the SAME commit. The
-    # threshold ARITHMETIC was deliberately moved off module scope (the const
-    # `NEAR_EXPIRY_THRESHOLD_SECS = 28_800` is a bare literal, not `8 * 60 *
-    # 60`) so the `*` operators are no longer mutation targets at all. The LIVE
-    # backoff comparison in the same `reconcile` (`tick.now_unix < deadline`)
-    # is DELIBERATELY OUTSIDE this helper and remains a mutable, tested target
-    # — the `near_expiry` regex below matches every mutation of the inert
-    # helper (the `<=`→`>` operator flip AND the `-> bool with true`/`with
-    # false` whole-body replacements cargo-mutants also generates for the fn)
-    # and nothing else: the backoff comparison's description is `... in
-    # reconcile` with no `near_expiry` token, so it stays a tested target. The
-    # source-level `// mutants: skip` comment above the fn carries the same
-    # rationale as documentation; this regex is the actual suppression
-    # mechanism (comment-skip does not reliably fire for a single-expression
-    # fn body, same as the `ProbeRunner::probe` / `ListenerFactStore` entries).
-    "near_expiry",
 ]
 
 # ---------------------------------------------------------------------------

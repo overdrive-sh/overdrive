@@ -1,0 +1,10 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask lima run -- env OD_E03_CA_DIR=/Users/marcus/conductor/workspaces/helios/munich-v3/verification/expectations/E03-ca-full-chain-verifies/evidence/ca cargo nextest run -p overdrive-host --features integration-tests -E 'test(rcgen_full_svid_chain_verifies_root_intermediate_svid) + test(rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced)'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+────────────
+[32;1m Nextest run[0m ID [1m16b34f8c-1331-4ee7-b55b-27077a46b1c8[0m with nextest profile: [1mdefault[0m
+[32;1m    Starting[0m [1m2[0m tests across [1m2[0m binaries ([1m13[0m tests [33;1mskipped[0m)
+────────────
+[32;1m     Summary[0m [   0.010s] [1m2[0m tests run: [1m2[0m [32;1mpassed[0m, [1m13[0m [33;1mskipped[0m

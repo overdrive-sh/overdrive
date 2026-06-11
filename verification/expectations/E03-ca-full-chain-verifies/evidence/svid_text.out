@@ -1,0 +1,33 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            08:40:7f:7a:d6:b9:ad:72:9d:ae:31:1b:ec:ac:b2:60
+        Signature Algorithm: ecdsa-with-SHA256
+        Issuer: O=overdrive.local, CN=node-a
+        Validity
+            Not Before: Jun 10 21:04:52 2026 GMT
+            Not After : Jun 10 22:04:52 2026 GMT
+        Subject: CN=spiffe://overdrive.local/job/payments/alloc/a1b2c3
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub:
+                    04:be:ba:c7:f1:27:d2:d2:03:aa:c7:d7:56:64:5e:
+                    fd:c1:b7:f1:d4:aa:bd:54:3c:03:1c:1c:4d:92:e3:
+                    c7:2f:b0:e1:73:b6:ff:49:93:ac:62:49:67:30:cb:
+                    40:90:48:54:6f:5d:1b:a9:07:9a:5f:0f:8c:6f:21:
+                    e0:85:c2:ef:28
+                ASN1 OID: prime256v1
+                NIST CURVE: P-256
+        X509v3 extensions:
+            X509v3 Subject Alternative Name: 
+                URI:spiffe://overdrive.local/job/payments/alloc/a1b2c3
+            X509v3 Key Usage: critical
+                Digital Signature
+    Signature Algorithm: ecdsa-with-SHA256
+    Signature Value:
+        30:44:02:20:4c:e1:57:ec:5b:0c:c9:aa:d6:29:71:d9:48:84:
+        26:d0:fb:6a:c7:1d:09:3d:e1:c2:45:97:dd:d6:7b:91:a7:bf:
+        02:20:3e:80:22:8a:ca:16:a2:b2:20:f7:dd:6d:64:6a:4f:35:
+        b5:60:f9:64:88:65:7e:54:cf:23:5a:c0:ec:e8:d9:91

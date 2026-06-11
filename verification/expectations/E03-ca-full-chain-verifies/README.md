@@ -1,6 +1,6 @@
 # E03 — The full Root → Intermediate → SVID chain verifies under `openssl verify`
 
-**Surface:** E (end-to-end) · **KPI:** K1 · **Status:** `pending`
+**Surface:** E (end-to-end) · **KPI:** K1 · **Status:** `satisfied`
 
 ## Expectation
 
@@ -55,8 +55,49 @@ audit reads only the captured `evidence/`).
 
 ## Evidence
 
-Executed through `harness/run-expectation.sh E03` at SHA `2f4eccd4` and
-self-reports `pending` — no operator verb mints/exports a chain this phase
-(D-CA-4). **Unblocked by #215** (boot-side) + **#35** (issuance on alloc-start).
-Until then the runner
-records `pending` and prints the manual capture steps.
+Executed through `harness/run-expectation.sh E03` at SHA `c5702a13` (working
+tree dirty — the Slice ③ env-gated export + 3-check runner are captured in the
+pinned `evidence/dirty-diff.patch`), `executed_in_lima: true`, **runner exit 0**.
+The runner now enforces ALL THREE sub-claims over real exported PEM material;
+the PEMs are produced as a side-effect of the gated
+`rcgen_ca_chain_verify.rs` integration tests run in Lima with
+`OD_E03_CA_DIR="$EVIDENCE_DIR/ca"` (the black-box producer step — `cargo
+nextest` is invoked only to write the PEMs; the runner itself stays
+bash + openssl + file-observation and links no `overdrive-*` crate).
+
+What the captured `evidence/` shows:
+
+- **Sub-claim 1 (S-OC-13) — positive chain verifies.**
+  `openssl verify -CAfile root.pem -untrusted intermediate.pem svid.pem` →
+  `evidence/chain_verify.out` = `…/positive/svid.pem: OK` (exit 0).
+- **Sub-claim 2 (S-OC-14) — leaf profile.** `evidence/svid_text.out` shows
+  exactly one `URI:spiffe://overdrive.local/job/payments/alloc/a1b2c3` SAN,
+  `X509v3 Key Usage: critical` → `Digital Signature`, and NO basicConstraints
+  extension (a cert with no basicConstraints is CA:FALSE by X.509 default —
+  never a CA; the runner falsifies on `CA:TRUE`, which is absent).
+- **Sub-claim 3 (S-OC-15, MANDATORY negative anchor) — pathLen=0 ENFORCED.**
+  `evidence/pathlen_negative.out` = `error 25 at 2 depth lookup: path length
+  constraint exceeded` / `…/negative/leaf.pem: verification failed` (exit 2).
+  The chain is `root → intermediate(pathLen=0) → further-CA → leaf`; the
+  end-entity leaf below the further-CA is load-bearing — `openssl` only counts
+  the pathLen budget for CAs that sit as INTERMEDIATES on the path to an
+  end-entity, so without a leaf below it the further-CA verifies directly and
+  pathLen is never exercised. With the leaf present `openssl` rejects on
+  `path length constraint exceeded`, the genuine proof pathLen is enforced and
+  not merely set. (This corrected the pre-Slice-③ negative test, which failed
+  on a *signature* mismatch — the wrong reason — because its rebuilt issuer DN
+  omitted the per-node `CN=node-a` and never linked the chain.)
+
+**Status: `satisfied`** — a different-fox Haiku auditor (a separate agent that
+read ONLY `evidence/` + this README's anchors, never the producing test/runner
+code, per `.claude/rules/verification.md`) returned **CONFIRMED**. The audit
+independently re-inspected the on-disk PEMs (intermediate `CA:TRUE, pathlen:0`;
+further-CA signed by the intermediate; leaf below the further-CA) and verified:
+all three sub-claims executed on the real Lima run (`executed_in_lima: true`,
+2026-06-10T21:05:51Z); the `.meta`/`.out` exit codes are consistent (0 / 0 / 2);
+no narration smell (raw `openssl` output, not prose); and — the critical check —
+sub-claim 3 fails on `error 25 ... path length constraint exceeded`, the genuine
+basicConstraints/pathLen signal, NOT a signature mismatch, expiry, or
+unable-to-get-local-issuer reason. pathLen is proven ENFORCED, not merely set.
+The authoring agent did not self-stamp; this `satisfied` is the auditor's
+verdict.

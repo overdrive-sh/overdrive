@@ -142,7 +142,8 @@ impl TestServer {
             // production: tick_cadence/clock default to 100ms +
             // SystemClock — the walking-skeleton runs real wall-clock
             // because it asserts on real kernel side effects.
-            ..Default::default()
+            // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
+            ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
         };
 
         let handle = run_server_with_obs_and_driver(config, obs.clone(), driver)

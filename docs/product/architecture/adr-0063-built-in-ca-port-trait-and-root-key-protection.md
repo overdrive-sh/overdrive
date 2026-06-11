@@ -2,10 +2,21 @@
 
 ## Status
 
-Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key) and
+Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key),
 2026-06-08 (rev 2 — `SvidMaterial.not_after` + validity window threaded through
-`SvidRequest`)** — see § Changelog for both dated amendments (each reopens this
-Accepted ADR via a dated entry, not a silent rewrite). Supersedes **ADR-0010 for
+`SvidRequest`), 2026-06-09 (#215 wires `boot_ca`/`bootstrap_node_intermediate`
+into `run_server` — closes the D-CA-4 "CA not wired into serve" deferral), and
+2026-06-10 (decrypt-failure cause taxonomy correction — AES-GCM cannot
+distinguish wrong-KEK-material from tampering; `TamperedEnvelope` →
+`EnvelopeAuthFailed`), and 2026-06-11 (rev 8 — issuance ordinal sourced from a durable atomic
+counter (`ObservationStore::next_issuance_ordinal`) instead of
+`issued_certificate_rows().len()`; retires the single-writer issuance
+precondition and decouples ordinal monotonicity from the append-only audit
+log — resolves the TOCTOU RCA at
+`docs/feature/fix-issuance-ordinal-toctou/deliver/rca.md` and the #226
+delete-survival precondition)** — see
+§ Changelog for the dated amendments (each reopens this Accepted ADR via a dated
+entry, not a silent rewrite). Supersedes **ADR-0010 for
 *workload identity* only** — ADR-0010's ephemeral CA (`tls_bootstrap.rs`)
 continues to serve the control-plane-HTTPS / operator-CLI consumer unchanged
 (see § Consequences and D-CA-5 in the feature delta). This ADR governs the
@@ -75,8 +86,10 @@ A pure `Ca` **trait** lives in `overdrive-core/src/traits/ca.rs` (no impl, no
 Constraints). A **sim adapter**
 (`SimCa`) in `overdrive-sim` (`adapter-sim`) loads pre-generated fixture keys
 for DST. Consumers (control-plane boot, node bootstrap, workload-lifecycle on
-alloc-start, and later the #40 rotation workflow) take `Arc<dyn Ca>` as a
-**required constructor parameter** — never defaulted to a production binding
+alloc-start, the internal SVID issue/reissue executor — incl. near-expiry reissue,
+which is a live `Action::IssueSvid`, NOT a workflow — and a future external-ACME /
+public-trust root-rotation workflow) take `Arc<dyn Ca>` as a **required
+constructor parameter** — never defaulted to a production binding
 (per `.claude/rules/development.md` § "Port-trait dependencies").
 
 **The trait surface speaks project newtypes + typed DER/PEM byte newtypes,
@@ -219,11 +232,17 @@ The keyring/systemd-creds plumbing is a **host-adapter concern**
      silently breaking the chain. Adoption happens **once, before any
      issuance**, and is idempotent for the same root (a divergent
      already-minted root fails loud with a typed `CaError`).
-  4. **Decrypt failure (wrong KEK, tampered ciphertext) → refuse to start**
-     with a typed `CaError` + `health.startup.refused`. **Never silently
-     re-mint** — a re-mint orphans every issued identity. AEAD authentication
-     distinguishes "tampered envelope" from "wrong KEK" (distinct error
-     variants).
+  4. **Decrypt failure → refuse to start** with a typed `CaError` +
+     `health.startup.refused`. **Never silently re-mint** — a re-mint orphans
+     every issued identity. The cause taxonomy the boot path can actually
+     detect is the **honest four-cause** set in D4 § "Honest decrypt-failure
+     cause taxonomy" — NOT the false "AES-GCM authentication distinguishes
+     tampered from wrong-KEK" claim corrected on 2026-06-10 (see § Changelog).
+     AES-GCM **cannot** distinguish wrong-KEK-*material* from a tampered
+     ciphertext; both surface as one opaque auth failure. The only id-level
+     discrimination is the `kek_id` identity check (`WrongKek`), which is the
+     **rotation/migration guard** and is **Phase-1-unreachable** (the `kek_id`
+     is a hardcoded constant).
 
 **Dev / non-systemd fallback:** an `OVERDRIVE_CA_KEK` environment variable
 supplies the KEK for local dev and non-systemd environments. It is **dev-only**
@@ -267,14 +286,103 @@ provides HKDF-SHA256 today; one extract + one expand call):
    `info`, with no key-reuse across domains.
 2. **A clean key-rotation seam** — `kek_id` + per-seal `salt` mean KEK rotation
    (re-seal under a new KEK) is a re-encrypt of the record, not a format change.
-   This is the seam #40 (rotation) and a future HSM KEK provider build on.
+   This is the seam **future KEK / root-CA rotation** (workflow-shaped, a
+   separate concern — genuinely multi-step; future / not yet ticketed) and a
+   future HSM KEK provider build on. (Distinct from *internal SVID near-expiry
+   reissue*, which is a live `Action::IssueSvid` this feature owns — that is the
+   scope #40 closed here, NOT a workflow.)
 
 Direct AES-256-GCM under the raw KEK would be simpler and *sufficient* for
 Phase 2.6's single secret — but the HKDF cost is negligible and the
 domain-separation + rotation properties are exactly what the deferred work
-(#40, HSM) will need, so paying it now avoids a format migration later. AAD =
+(future KEK / root-CA rotation, HSM) will need, so paying it now avoids a
+format migration later. AAD =
 `kek_id` binds the ciphertext to the KEK identity (defends against
 KEK-confusion).
+
+#### Honest decrypt-failure cause taxonomy (corrected 2026-06-10)
+
+**Load-bearing cryptographic fact: AES-256-GCM cannot distinguish "wrong KEK
+*material* (same id)" from "tampered ciphertext/tag (same id)".** Both produce
+one opaque authentication failure under a matching `kek_id`. The only thing
+that distinguishes `WrongKek` is the **`kek_id` plaintext identity check**
+performed *before* the crypto runs — NOT "AEAD authentication". The earlier
+claim that "AEAD authentication distinguishes tampered from wrong KEK" was
+false and is corrected here.
+
+The boot path (`ca_boot::boot_ca` → `RootKeyAeadCodec::open`, AES-256-GCM,
+`aad = kek_id`) can detect exactly these four causes, and no more:
+
+| Cause | How it is detected | Distinguishable? | `CaError` |
+|---|---|---|---|
+| **KEK unavailable** | KEK resolve returns nothing — *before* any crypto | yes | `CaBootError::KekUnavailable` (boot layer) |
+| **KEK id mismatch** | `supplied_kek_id != record.kek_id` — plaintext compare *before* crypto | yes | `CaError::WrongKek { sealed_under, supplied }` |
+| **Auth failure** — wrong KEK *material* (matching id) **OR** tampered ciphertext/tag (matching id, still structurally decodable) | AES-GCM returns one opaque auth failure | **NO** — wrong-material and ciphertext-tamper are the **same signal** | `CaError::EnvelopeAuthFailed { kek_id }` |
+| **Malformed / decode** | bytes don't deserialize into a valid `RootCaKeyRecord` — *before* crypto | yes (fails at decode) | decode/`Malformed` → `CaBootError::EnvelopeDecode` |
+
+**The three operationally-real, pairwise-distinct refusal causes for Phase-1
+single-node are `{ KEK-unavailable, decrypt-auth-failure, decode-malformed }`** —
+three classes the system genuinely tells apart. A tamper that *keeps the record
+structurally decodable* surfaces as **auth-failure** (same class as
+wrong-material — NOT distinct); a tamper/corruption that *breaks the record
+structure* surfaces as **decode-malformed**. So the honest "tampered" scenario
+is the structural-corruption one; ciphertext-tamper is covered by the
+auth-failure message's "or tampered" wording.
+
+`WrongKek` (id-mismatch) is the **KEK-rotation/migration guard** (D4's
+`kek_id`-as-rotation-seam). It is correctly coded but **Phase-1-unreachable**:
+the supplied id is a hardcoded constant (`ca_boot::root_kek_id()`), so no
+in-tree boot can produce an id mismatch. Document it as the rotation seam, NOT
+as "the wrong KEK an operator hits today" — the wrong-KEK an operator actually
+hits (a different cred under the same id) lands in **auth-failure**, not
+`WrongKek`.
+
+#### `CaError` auth-failure contract (prescription for the crafter)
+
+**Decision: RENAME `CaError::TamperedEnvelope` → `CaError::EnvelopeAuthFailed`.**
+
+*Rationale.* The variant fires for the **common operator case** of wrong KEK
+*material* under the right id, not only for tampering. A name that says
+"tampered" sends an operator who merely mounted the wrong credential down a
+forensic/incident path ("someone corrupted my key at rest") when the fix is
+"mount the right cred". Per `.claude/rules/development.md` § "Distinct failure
+modes get distinct error variants … never misdiagnose the cause → wrong
+remediation", the name and message must name *both* possibilities. The
+API-churn of the rename is bounded and mechanical — the match sites in
+`error_mapping_exhaustive.rs`, the `CaBootError::EnvelopeDecrypt { #[source] }`
+wrapping, and the `tampered_envelope(kek_id)` constructor (→
+`envelope_auth_failed(kek_id)`) — and is worth paying once to retire a
+misleading name that would mis-route every operator who hits the common case.
+A reword-only fix (keep `TamperedEnvelope`, fix the message) was rejected: the
+*variant name* leaks into match arms and logs, and a variant literally named
+`Tampered` firing on a benign wrong-cred is the exact "variant has become a
+catch-all whose name lies about the cause" smell the rule names.
+
+The crafter implements (in `crates/overdrive-core/src/traits/ca.rs`; the
+architect does **not** edit `ca.rs`):
+
+- **Rename** the variant `TamperedEnvelope { kek_id }` →
+  `EnvelopeAuthFailed { kek_id }`, the constructor `tampered_envelope` →
+  `envelope_auth_failed`, and update all match sites
+  (`error_mapping_exhaustive.rs`, the `CaBootError::EnvelopeDecrypt` wrapping).
+- **The EXACT `#[error("…")]` message string** the auth-failure cause must
+  render (the IntentStore path is added by the boot layer's
+  `CaBootError::EnvelopeDecrypt` wrapping, so this `CaError` message names the
+  cause + `kek_id` only):
+
+  ```
+  root-key envelope failed AES-GCM authentication for kek_id `{kek_id}` — the KEK material is wrong OR the envelope was tampered/corrupted (these are indistinguishable under AEAD)
+  ```
+
+- **`WrongKek` stays as-is** (correctly coded; rotation-seam guard). Its
+  rendered form the crafter asserts on:
+  `root-key envelope sealed under kek_id \`{sealed_under}\` cannot be opened with kek_id \`{supplied}\``.
+- **The decode/Malformed path stays as-is** — structurally invalid bytes fail
+  at deserialize *before* crypto and surface through the boot layer's
+  decode/`Malformed` rendering (`… envelope decode failed … Malformed …`,
+  naming the redb path), NOT through `CaError`. The crafter asserts the
+  `decode`/`Malformed` token, not an `EnvelopeAuthFailed` token, for the
+  structural-corruption case.
 
 ### D5 — Pure `CertSpec` builder in `overdrive-core`; host adapter translates to `rcgen::CertificateParams`
 
@@ -389,6 +497,41 @@ back-propagation, commit `aab5a69b`).
 **Issuance is never silent:** an issuance whose audit row cannot be written
 surfaces a `CaError` rather than handing out an unaudited certificate (KPI/AC,
 US-CA-05).
+
+**D6 rev 8 — issuance ordinal is counter-allocated, not `len()`-derived.**
+The `IssuanceOrdinal` stamped on each `issued_certificates` row is allocated
+by a new additive `ObservationStore` port method
+`next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError>`,
+which atomically advances a durable, strictly-monotonic counter and returns the
+next value. This SUPERSEDES the original derivation (feature-delta § D1-AMEND-2:
+"ordinal = count of already-persisted rows, read immediately before the audit
+write"), which was a read-len → mint → write check-then-act TOCTOU
+(`.claude/rules/development.md` § "Check-and-act must be atomic"): two concurrent
+issuances read the same `len()` and stamped duplicate ordinals, and the
+consumer's `max_by_key(issuance_ordinal)` then surfaced a stale serial as
+"current". The counter makes the collision UNREPRESENTABLE.
+
+Consequences of rev 8:
+- The **single-writer / serialized-issuance precondition is RETIRED** —
+  `issue_and_audit` is now safe to call concurrently for one store.
+- **Ordinal monotonicity no longer depends on the append-only audit log.**
+  The counter is a separate durable datum that row deletion cannot rewind —
+  this satisfies the #226 delete/GC precondition as a side effect (a future
+  `issued_certificates` GC may prune rows without breaking ordinals).
+- The method is mandatory on BOTH adapters (`LocalObservationStore` host:
+  single-key redb counter table, atomic under redb's serializable isolation;
+  `SimObservationStore` sim: in-memory counter under the existing Mutex). A DST
+  conformance case drives both through the same allocation sequence and asserts
+  monotonic-and-unique-under-concurrency equivalence.
+- Gap semantics: an allocated-but-unwritten ordinal (mint/write fails after
+  allocation) is burned; the sequence may have holes. This is correct —
+  selection needs strict ordering, not density.
+- **No row / envelope / golden-bytes change.** `issuance_ordinal` stays a
+  caller-set field on the `V1` payload; only its *source* changes. The rkyv
+  schema-evolution surface and the append-only serial guard are untouched.
+- Greenfield single-cut migration: a fresh store starts the counter at 0;
+  "delete the redb file" is the upgrade path. No migration code reconstructs a
+  counter from a pre-rev-8 store.
 
 > **Downstream dependent (cross-ref, ADR-0067 D10, rev 5 2026-06-09).** The
 > **audit-before-hold** ordering this row's write site enforces — the
@@ -549,9 +692,14 @@ owns the rcgen call.
 RustCrypto `pkcs8` with scrypt-derived key + AES-256-CBC (research Finding 8
 Approach A). **Rejected:** AES-CBC is *unauthenticated* — for the platform's
 trust anchor, authenticated encryption (AES-GCM, integrity + confidentiality)
-is the defensible floor. AEAD lets us distinguish "tampered envelope" from
-"wrong key" as distinct errors (an AC). PKCS#8's only advantage —
-`openssl pkcs8` interop — is irrelevant for an internal key never exported.
+is the defensible floor — AES-GCM gives integrity (tamper detection) on top of
+confidentiality, where AES-CBC gives confidentiality only. (NB: AEAD detects
+*that* authentication failed; it does **not** distinguish wrong-key-material
+from tampering — both are one opaque auth failure. The cause taxonomy is in D4
+§ "Honest decrypt-failure cause taxonomy"; an earlier version of this bullet
+overclaimed that AEAD distinguishes the two — corrected 2026-06-10.) PKCS#8's
+only advantage — `openssl pkcs8` interop — is irrelevant for an internal key
+never exported.
 
 ### A4 — Root key protection: passphrase-derived KEK (the DISCUSS sketch)
 
@@ -567,15 +715,16 @@ Encrypt the root key directly under the raw KEK, envelope =
 `{version, ciphertext, nonce, kek_id, aead_tag}`. **Rejected (reconciliation
 A):** simpler and sufficient for one secret, but HKDF-derive costs one
 extract+expand and buys domain separation (reuse the KEK for future secrets via
-`info`) and a clean rotation seam (`kek_id` + `salt`) — exactly what #40 and a
-future HSM provider need. Paying the negligible HKDF cost now avoids a format
-migration later.
+`info`) and a clean rotation seam (`kek_id` + `salt`) — exactly what future
+KEK / root-CA rotation and a future HSM provider need. Paying the negligible
+HKDF cost now avoids a format migration later.
 
 ### A6 — Audit trail in the workflow journal only (no observation row)
 
-Rely on the (future #40) rotation workflow's await-point journal as the sole
-audit surface. **Rejected:** issuance happens on alloc-start *before* any
-rotation workflow exists; the journal is per-workflow and not gossip-readable.
+Rely on a future (workflow-shaped, external-ACME / public-trust or root-CA)
+rotation workflow's await-point journal as the sole audit surface.
+**Rejected:** issuance happens on alloc-start *before* any rotation workflow
+exists; the journal is per-workflow and not gossip-readable.
 The `issued_certificates` observation row is queryable by any node via the
 existing observation path and is the internal-CT equivalent (research
 Finding 15). The two are complementary (journal = workflow step inputs;
@@ -598,8 +747,9 @@ was issued."
 - **Refuse-to-start over silent re-mint**: a decrypt failure refuses startup
   rather than orphaning every issued identity.
 - **Clean extension seams**: KEK-source pluggable (env → systemd-creds → future
-  HSM); rotation seam (`kek_id`/`salt`/HKDF) ready for #40; multi-node
-  intermediate shape ready for #36.
+  HSM); rotation seam (`kek_id`/`salt`/HKDF) ready for future KEK / root-CA
+  rotation (workflow-shaped, separate concern); multi-node intermediate shape
+  ready for #36.
 - **Reuse, not reinvention**: `SpiffeId` / `CertSerial` / `NodeId` / `Entropy` /
   `IntentStore` / `ObservationStore` / `VersionedEnvelope` are all reused
   as-is (see brief § Reuse Analysis). The proven `rcgen` usage in
@@ -648,8 +798,12 @@ the system accepts traffic — *wire then probe then use*:
   (`health.startup.refused`), not a panic mid-issuance.
 - **Persisted envelope decrypts, then the root is adopted** — on subsequent
   boot, the adapter performs a trial HKDF-derive + AES-GCM-open of the
-  persisted `RootCaKeyRecord` at composition time; an auth failure (tampered)
-  or wrong-KEK failure refuses startup with the *distinct* typed error. The
+  persisted `RootCaKeyRecord` at composition time; an **auth failure** (wrong
+  KEK material OR tampered ciphertext — indistinguishable under AEAD,
+  `CaError::EnvelopeAuthFailed`), a **decode failure** (structurally malformed
+  bytes, before crypto), or — only across a future KEK rotation — a **`kek_id`
+  mismatch** (`CaError::WrongKek`) each refuses startup with its typed error
+  (D4 § "Honest decrypt-failure cause taxonomy"). The
   *use* step closes the loop: after the trial decrypt succeeds, the boot path
   installs the persisted root into the adapter via `Ca::adopt_persisted_root`
   **before** any issuance — so "use" means "issue under the persisted root,"
@@ -678,13 +832,100 @@ for DISTILL.
 - ADR-0048 — rkyv versioned envelope (the `RootCaKeyEnvelope` /
   `IssuedCertificateRowEnvelope` discipline).
 - Whitepaper §4 (state layers; CA material is intent), §8 (security),
-  §18 (rotation is a workflow → #40), §21 (DST).
-- Deferrals: #40 [3.3] rotation (needs #39 [3.2] workflow primitive),
-  #36 [2.14] multi-node CA / node attestation, #104 [7.1] / #83 [5.17]
-  multi-region, #81 operator-cert minting (Phase 5), Phase 5 gossip-revocation,
-  Phase 7 SPIFFE Workload API.
+  §18 (durable workflows — applies to **external-ACME / public-trust** rotation
+  only; **internal** SVID near-expiry reissue is a reconciler **action**, NOT a
+  workflow — see the rev 6 reframe below), §21 (DST).
+- Deferrals (rev 6 — `built-in-ca-operator-composition`, 2026-06-09):
+  **#40 internal SVID near-expiry rotation is CLOSED — it is a live
+  `Action::IssueSvid` (not a workflow, does NOT need #39).** Only
+  **external-ACME / public-trust gateway rotation** (if it ever ships) stays
+  workflow-shaped and future-owned (Phase 5, revocation-coupled). Remaining
+  deferrals unchanged: #36 [2.14] multi-node CA / node attestation, #104 [7.1] /
+  #83 [5.17] multi-region, #81 operator-cert minting (Phase 5), Phase 5
+  gossip-revocation, Phase 7 SPIFFE Workload API. *(Historical, superseded:
+  "#40 [3.3] rotation needs #39 [3.2] workflow primitive" — that framing was
+  external-ACME, never internal SVID reissue.)*
 
 ## Changelog
+
+- 2026-06-10 — **Decrypt-failure cause taxonomy correction (no decision
+  reversed; the refuse-to-start / never-silently-re-mint decision is intact).**
+  A code review of DELIVER step 02-03 (`serve` persistent-CA boot integration)
+  surfaced that D3's decision-4 bullet, the A3 alternatives bullet, the
+  Earned-Trust probe bullet, and the 2026-06-09 changelog sub-block all carried
+  a **false cryptographic claim**: *"AEAD authentication distinguishes 'tampered
+  envelope' from 'wrong KEK' (distinct error variants)."* **AES-256-GCM cannot
+  distinguish wrong KEK *material* (matching `kek_id`) from a tampered
+  ciphertext/tag (matching `kek_id`) — both are one opaque authentication
+  failure.** The only id-level discrimination is the **plaintext `kek_id`
+  identity check** (`WrongKek`), performed *before* the crypto runs — and that
+  guard is **Phase-1-unreachable** because the supplied id is a hardcoded
+  constant (`ca_boot::root_kek_id()`); it is the **KEK-rotation/migration
+  guard**, not the wrong-KEK an operator hits today. The captured O04/S-OC-08
+  EDD evidence confirms the swap: the "tampered" scenario rendered a
+  *decode/Malformed* message and the "wrong KEK" scenario rendered the
+  *AES-GCM-auth-failed* message.
+
+  **What this amendment changes:**
+  - D3 decision-4, A3, and the Earned-Trust probe bullets are corrected to the
+    **honest four-cause taxonomy** (`{ KEK-unavailable, decrypt-auth-failure,
+    decode-malformed }` pairwise-distinct + `WrongKek` as the
+    Phase-1-unreachable rotation guard) — added as D4 § "Honest decrypt-failure
+    cause taxonomy".
+  - **`CaError::TamperedEnvelope` → `CaError::EnvelopeAuthFailed`** (variant +
+    `tampered_envelope` constructor → `envelope_auth_failed`), with a message
+    that names *both* possibilities (wrong material OR tamper). The full
+    prescription — exact `#[error(...)]` string, match-site sweep, the
+    `WrongKek`/decode tokens to assert — is pinned in D4 § "`CaError`
+    auth-failure contract (prescription for the crafter)". *(The architect does
+    not edit `ca.rs`; the crafter implements against this pinned contract.)*
+  - The 2026-06-09 "CONFIRMED satisfiable, no fix needed" sub-block is annotated
+    as the corrected-wrong claim.
+
+  **What is NOT changed:** the refuse-to-start-over-silent-re-mint decision (D3),
+  the AEAD shape (D4 HKDF→AES-256-GCM), the `kek_id`-AAD rotation seam, and every
+  D1/D2/D5–D9 decision. This is reconciliation of the *cause-labelling* prose to
+  cryptographic reality, not a design change. — Morgan.
+
+- 2026-06-09 — **#215 wires the persistent CA into `run_server` — closes the
+  D-CA-4 "CA not wired into serve" deferral (decision change: ephemeral →
+  persistent at the production composition root).** The `built-in-ca-operator-
+  composition` feature (folds #40 + #215) replaces the 2026-06-08 ephemeral
+  `RcgenCa` composition at `overdrive-control-plane/src/lib.rs:1580-1600` with
+  the persistent boot path this ADR shipped: `boot_ca(...)` (generate-or-load the
+  KEK-sealed root, Earned-Trust probe-then-use — KEK-resolve probe (a) + envelope
+  decrypt-probe (b), adopt-on-restart) then `bootstrap_node_intermediate(...)`
+  (generate-or-load the node intermediate, adopt-on-restart). Both already
+  implemented in `ca_boot.rs` — this is the *wiring*, not new logic. The boot
+  root constructs `SystemdCredsKeyring::new()` (the `Kek` provider) +
+  `RootKeyAeadCodec::new()` + `root_kek_id()`, coerces the `IntentStore` to
+  `Arc<dyn IntentStore>`, and `.await`s both. **`ControlPlaneError::CaBoot(#[from]
+  CaBootError)`** is the new dedicated top-level variant (never flattened to
+  `Internal`, per `development.md` § Errors) — so refuse-to-start surfaces the
+  typed `CaBootError` and the distinct `CaError` cause survives to the operator's
+  stderr.
+
+  **O04 cause-distinctness — claim was WRONG; corrected 2026-06-10 (see the
+  2026-06-10 amendment below).** This entry originally asserted "D3's claim that
+  AES-GCM authentication distinguishes wrong-KEK from tampered-envelope is TRUE
+  in code … no fix needed." That was **false**: AES-GCM cannot distinguish wrong
+  KEK *material* (matching id) from a tampered ciphertext (matching id) — both
+  are one opaque auth failure. The two variants `WrongKek` (id mismatch — a
+  plaintext check, NOT AEAD) and the auth-failure variant discriminate
+  *different* things than the original prose claimed; and `WrongKek` is
+  Phase-1-unreachable (hardcoded `kek_id`). The honest taxonomy and the variant
+  rename (`TamperedEnvelope` → `EnvelopeAuthFailed`) are in the 2026-06-10
+  amendment. This stale paragraph is retained struck-through-in-spirit so the
+  history of the correction is legible.
+
+  **D01 / O04 move pending → wired.** Both EDD expectations were blocked on #215
+  (`overdrive serve` exposed no CA boot surface); this feature unblocks them. D01
+  (root key never plaintext at rest) and O04 (refuse-to-start, actionable error)
+  are captured against the built binary in Lima during the feature's DELIVER
+  slice ②. (The *operator/control-plane HTTPS* ephemeral CA,
+  `tls_bootstrap::mint_ephemeral_ca`, ADR-0010 / D-CA-5 / #81, is a DIFFERENT CA
+  and is explicitly out of scope — it is not a `Ca` and cannot issue workload
+  SVIDs.)
 
 - 2026-06-08 — **Phase-2 production wires an *ephemeral* workload CA, not the
   persistent KEK-backed root (note, no decision change).** Recorded while
@@ -725,9 +966,10 @@ for DISTILL.
   spiffe_id, leaf_key`. The window the cert is actually signed with was an
   adapter-internal detail (`RcgenCa::issue_svid` computed it from
   `SystemTime::now()` at `rcgen_ca.rs:478-480`) and never crossed the trait
-  boundary. The #40 near-expiry rotation seam (ADR-0067 D8 / S-WIM-09) compares
-  `actual.not_after` against `tick.now_unix`, so without a real field that
-  comparison had nothing sound to read.
+  boundary. The near-expiry reissue branch (ADR-0067 D8 / S-WIM-09 — rev 6: a live
+  `Action::IssueSvid`, NOT a workflow) compares `actual.not_after` against
+  `tick.now_unix`, so without a real field that comparison had nothing sound to
+  read.
 
   **The amendment (the "Option A" the user ratified):**
   - **`SvidMaterial` gains `not_after: UnixInstant`** (+ a `const fn
@@ -799,7 +1041,7 @@ for DISTILL.
   baked-in window, independently of `issue_and_audit`'s `clock`. Rejected: it
   re-creates the exact drift this amendment closes — host-path sub-second skew
   between `held.not_after` and `row.not_after`, and (worse) a DST-non-deterministic
-  `SimCa` window unrelated to `SimClock`, breaking the #40 near-expiry seam's
+  `SimCa` window unrelated to `SimClock`, breaking the near-expiry reissue branch's
   replay-equivalence. The single-clock-read-threaded-through-the-request shape is
   the only one that makes the consistency invariant hold *by construction* rather
   than by two paths happening to agree.

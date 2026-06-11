@@ -137,6 +137,93 @@ operator-facing docs, journeys, or examples, the only correct verb is
 `overdrive deploy <SPEC>`. Do not copy `job submit` from older phase
 docs.
 
+## Two distinct certificate authorities — do not conflate them
+
+`overdrive serve` wires **two independent CAs**. They share nothing but
+the `rcgen` library and are easy to mix up (this has already cost a
+debugging detour):
+
+- **Operator / control-plane HTTPS CA** —
+  `tls_bootstrap::mint_ephemeral_ca()`
+  (`crates/overdrive-control-plane/src/lib.rs:1237`). Backs the operator
+  mTLS surface the CLI connects to (Talos-shape operator auth, D-CA-5 /
+  [#81](https://github.com/overdrive-sh/overdrive/issues/81)). **Ephemeral
+  by design and staying that way** — it is NOT the workload-identity root
+  and is out of scope for any built-in-CA / SVID work.
+- **Workload-identity CA** — `RcgenCa::new(OsEntropy, ca_subject)`
+  (`lib.rs:1595`). Signs the SVIDs issued to workloads. **Currently also
+  ephemeral** — a fresh in-memory P-256 root minted each boot, NO KEK, NO
+  persistence, NOT `boot_ca` (the comment above the line states this
+  verbatim, citing ADR-0067 D3 rev 4). The persistent, KEK-backed,
+  envelope-sealed root (`ca_boot::boot_ca`, ADR-0063) is
+  [#215](https://github.com/overdrive-sh/overdrive/issues/215) — formerly
+  blocked on #35 (now landed), so the `lib.rs:1595` seam is ready to flip.
+
+When reasoning about "the persistent CA," "boot the CA," "root key at
+rest," or any SVID-issuance path, the subject is the **workload-identity**
+CA (`1595` / `boot_ca`), never `mint_ephemeral_ca` (`1237`). "`serve`
+boots the ephemeral CA" is true of BOTH lines today — name which one, or
+the distinction is lost.
+
+## "Cert rotation workflow" = external ACME, NOT internal SVID reissue
+
+The **cert-rotation `Workflow`** named as the canonical/first workflow
+example — whitepaper §18, `.claude/rules/workflows.md` § "Codebase
+precedent", and the `cert_rotation` body in `.claude/rules/development.md`
+§ "Workflow contract" — refers to **external ACME / public-certificate**
+rotation: the genuine four-step `request → wait-for-DNS-propagation →
+validate → publish` sequence. Multiple ordered side-effecting steps plus a
+real propagation wait → genuinely workflow-shaped (the textbook Bar-2
+case).
+
+It does **NOT** describe **internal workload-SVID reissue**. Minting a
+workload SVID is a *single* synchronous `Ca::issue_svid` call. By
+workflows.md's own decision rule a single idempotent side-effecting call
+is a **reconciler action** (`Action::IssueSvid`, already live in
+`SvidLifecycle`), not a workflow — "only when the reconciler would
+coordinate three or more external calls that must complete as a unit does
+the sequence cross into workflow territory." Internal SVID reissue has no
+DNS wait, no validate/publish, and (pre-Phase-5 revocation) no second
+step to coordinate.
+
+GH [#40](https://github.com/overdrive-sh/overdrive/issues/40) ("cert
+rotation as first internal workflow") and ADR-0067's #40-boundary section
+**conflated the two** — they pasted the external "wait-for-DNS-propagation"
+shape onto internal SVID rotation, which has no such step. If you see
+internal SVID rotation described as a journaled `ctx.run(...)` workflow,
+that is the conflation; the distinction above governs. (#40 / ADR-0067 /
+the workflows.md precedent still carry the conflated wording pending
+correction.)
+
+## Workload identity model — workloads hold NOTHING; the kernel does mTLS
+
+mTLS in Overdrive is **kernel-mediated** (eBPF sockops + kTLS,
+[#26](https://github.com/overdrive-sh/overdrive/issues/26)). The
+consequences, easy to get wrong:
+
+- **Workloads are identity-unaware and hold NO SVID material** — no cert,
+  no key. They open ordinary sockets; the kernel-side BPF programs
+  terminate/originate TLS transparently using material the platform
+  supplies. There is no SPIRE-agent-style workload-held copy.
+- **The worker / control-plane `IdentityMgr` holds the `SvidMaterial`**
+  (cert PEM/DER + `leaf_key` + serial + `not_after`) **in memory**
+  (`Arc<RwLock<BTreeMap<AllocationId, SvidMaterial>>>`); the kernel is the
+  consumer.
+- **The durable `issued_certificates` audit row persists only the
+  *facts*** — `spiffe_id, serial, issuer_serial, not_before, not_after,
+  node_id, issued_at` (`crates/overdrive-core/src/ca/issued_certificate_row.rs`).
+  It carries **no cert bytes and no private key**, so it cannot reconstruct
+  a usable SVID.
+
+Implications when reasoning about restart/rotation: **do not say "the
+workload still holds a valid SVID"** — it never held one. On a
+control-plane restart the in-memory hold (`IdentityMgr`) is lost; only the
+audit-row facts survive. Whether the *operative* crypto survives a CP
+restart (kernel-held / pinned, à la the bpffs HoM pinning discipline) or
+must be re-supplied by the control plane is a **#26-coupled, Tier-3-spike
+question** — do not assume it without confirming the kernel/kTLS survival
+semantics on a real kernel.
+
 ## Mutation Testing Strategy
 
 This project uses **per-feature** mutation testing. Per-PR runs are diff-scoped via `cargo mutants --in-diff origin/main` with a kill-rate gate of ≥80%. A nightly job runs the full workspace against the baseline in `mutants-baseline/main/` to catch drift. Mutations to `unsafe` blocks, `aya-rs` eBPF programs, generated code, and async scheduling logic are excluded per `.claude/rules/testing.md`.

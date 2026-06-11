@@ -242,7 +242,8 @@ fn server_config_with(
         operator_config_dir: operator_config_dir.to_path_buf(),
         dataplane: Some(fx.dataplane_config()),
         dataplane_pin_dir: Some(fx.pin_dir.clone()),
-        ..Default::default()
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
+        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     }
 }
 
@@ -537,7 +538,8 @@ async fn boot_refuses_when_client_iface_does_not_exist() {
             backend_iface: nonexistent_client.clone(),
         }),
         dataplane_pin_dir: Some(bpffs_root.path().to_path_buf()),
-        ..Default::default()
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
+        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
 
     let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
@@ -837,7 +839,8 @@ async fn boot_refuses_when_earned_trust_probe_fails() {
         dataplane: Some(fx.dataplane_config()),
         dataplane_pin_dir: Some(fx.pin_dir.clone()),
         dataplane_probe_fault: Some(fault_msg),
-        ..Default::default()
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
+        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let pin_path = fx.pin_dir.join("SERVICE_MAP");
 

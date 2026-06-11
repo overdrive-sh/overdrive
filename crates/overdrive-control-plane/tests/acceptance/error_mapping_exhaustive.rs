@@ -19,9 +19,13 @@ use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use overdrive_control_plane::api::ErrorBody;
+use overdrive_control_plane::ca_boot::CaBootError;
 use overdrive_control_plane::error::{ControlPlaneError, to_response};
 use overdrive_control_plane::tls_bootstrap::TlsBootstrapError;
 use overdrive_core::aggregate::AggregateError;
+use overdrive_core::ca::kek::KekError;
+use overdrive_core::ca::root_key_envelope::KekId;
+use overdrive_core::traits::ca::CaError;
 use overdrive_core::traits::intent_store::IntentStoreError;
 use overdrive_core::traits::observation_store::ObservationStoreError;
 
@@ -246,6 +250,111 @@ fn internal_error_renders_as_500_with_internal_kind() {
     assert_eq!(body.error, "internal");
     assert_eq!(body.message, "store dropped mid-write");
     assert!(body.field.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// CA-boot failures stay cause-distinguishable at the operator boundary
+// (built-in-ca-operator-composition step 02-01 / D-OC-5)
+// ---------------------------------------------------------------------------
+
+/// Helper: build a `KekId` from a known-valid raw string.
+fn kek(raw: &str) -> KekId {
+    KekId::new(raw).expect("valid kek id fixture")
+}
+
+/// A CA-boot failure converts into `ControlPlaneError` through `?`/`From`
+/// with NO string flattening — it stays matchable as the distinct
+/// `ControlPlaneError::CaBoot(_)` variant at the composition root, each
+/// cause renders a cause string that preserves its distinct underlying
+/// cause (wrong-KEK and tampered render different strings), and the
+/// variant maps to HTTP 500 for exhaustiveness (the boot path never
+/// reaches HTTP).
+///
+/// Example-based over the finite, enumerated set of three boot causes —
+/// a parametrized table is the right shape (the cause space is closed,
+/// not a quantified domain). Asserts on matchability + rendered
+/// cause-string distinctness through the public error boundary
+/// (`From`/`?` + `to_response`), never private fields.
+#[test]
+fn ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant() {
+    // The three CaError-class boot causes the mapping must tell apart. NB:
+    // `WrongKek` (id mismatch) is the rotation guard and is Phase-1-unreachable
+    // by an operator, but it remains a valid `CaError` variant the error-mapping
+    // plumbing must carry distinctly, so it is exercised here for exhaustiveness.
+    // absent-KEK     → KekUnavailable
+    // wrong-KEK      → EnvelopeDecrypt(CaError::WrongKek)         (id mismatch)
+    // auth-failed    → EnvelopeDecrypt(CaError::EnvelopeAuthFailed) (wrong material OR tamper)
+    type CauseBuilder = fn() -> CaBootError;
+    let causes: [(&str, CauseBuilder); 3] = [
+        ("absent-kek", || CaBootError::KekUnavailable {
+            kek_id: kek("overdrive-root-kek"),
+            source: KekError::not_found(kek("overdrive-root-kek")),
+        }),
+        ("wrong-kek", || CaBootError::EnvelopeDecrypt {
+            redb_path: std::path::PathBuf::from("/var/lib/overdrive/intent.redb"),
+            source: CaError::wrong_kek(kek("sealed-under-kek"), kek("supplied-kek")),
+        }),
+        ("envelope-auth-failed", || CaBootError::EnvelopeDecrypt {
+            redb_path: std::path::PathBuf::from("/var/lib/overdrive/intent.redb"),
+            source: CaError::envelope_auth_failed(kek("overdrive-root-kek")),
+        }),
+    ];
+
+    let mut rendered = std::collections::BTreeMap::new();
+
+    for (label, build) in causes {
+        // (a) converts via `?`/`From` and stays matchable as the distinct
+        //     CaBoot variant — never flattened into `Internal(String)`.
+        let cp: ControlPlaneError = build().into();
+        assert!(
+            matches!(cp, ControlPlaneError::CaBoot(_)),
+            "{label}: CaBootError must convert to ControlPlaneError::CaBoot(_), \
+             not be flattened; got {cp:?}",
+        );
+
+        // (c) maps to HTTP 500 for exhaustiveness (boot never reaches HTTP).
+        let (status, body) = to_response(build().into());
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{label}: CaBoot maps to 500 for exhaustiveness",
+        );
+        assert_eq!(body.error, "internal", "{label}: CaBoot renders the internal kind");
+        assert!(body.field.is_none(), "{label}: CaBoot carries no field");
+
+        // The rendered message preserves the distinct underlying cause —
+        // capture it for the cross-cause distinctness assertion below.
+        rendered.insert(label, body.message);
+    }
+
+    // (b) wrong-KEK (id mismatch) and auth-failed render distinct cause CLASSES
+    //     — asserted via each variant's distinctive token, not bare string
+    //     inequality (string `!=` is incidental; the contract is that the
+    //     operator can tell the cause CLASS apart — ADR-0063 D4 / S-OC-08d).
+    let wrong = &rendered["wrong-kek"];
+    let auth_failed = &rendered["envelope-auth-failed"];
+    assert!(
+        wrong.contains("cannot be opened with kek_id"),
+        "wrong-KEK cause string must preserve the id-mismatch cause; got {wrong:?}",
+    );
+    assert!(
+        auth_failed.contains("failed AES-GCM authentication"),
+        "auth-failed cause string must name the AES-GCM auth failure; got {auth_failed:?}",
+    );
+    assert!(
+        auth_failed.contains("wrong OR") && auth_failed.contains("tampered/corrupted"),
+        "auth-failed cause string must name BOTH possibilities (wrong material OR tamper); \
+         got {auth_failed:?}",
+    );
+    // The two render distinct token sets → distinct cause classes.
+    assert!(
+        !auth_failed.contains("cannot be opened with kek_id"),
+        "auth-failed must NOT carry the id-mismatch token; got {auth_failed:?}",
+    );
+    assert!(
+        !wrong.contains("failed AES-GCM authentication"),
+        "wrong-KEK must NOT carry the auth-failure token; got {wrong:?}",
+    );
 }
 
 // ---------------------------------------------------------------------------

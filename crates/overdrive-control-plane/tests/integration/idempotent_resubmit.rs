@@ -121,7 +121,9 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         // `host_ipv4` from `client_iface` at boot, so it names `lo` via
         // the shared SSOT helper.
         dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        ..Default::default()
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
+        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
+        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let handle =
         run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");

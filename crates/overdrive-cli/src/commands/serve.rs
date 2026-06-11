@@ -110,34 +110,50 @@ impl ServeHandle {
 /// configuration fails. `endpoint` names the requested bind address so
 /// the operator can act on the error.
 pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
-    run_inner(args, None).await
+    // The ONE production composition site for the workload-identity CA's KEK
+    // binding (feature-delta § C1-AMEND): `SystemdCredsKeyring::new()` (the
+    // Linux kernel-keyring `Kek` provider, ADR-0063 D3/D6) is composed here at
+    // the `serve` binary boundary and threaded into `ServerConfig.kek`. The
+    // test-only sibling `run_with_dataplane` takes the KEK as a parameter so
+    // integration tests inject a hermetic `SimKek` instead — the same
+    // test-injection precedent as the `dataplane` parameter below.
+    let kek: Arc<dyn overdrive_core::ca::kek::Kek> =
+        Arc::new(overdrive_host::ca::SystemdCredsKeyring::new());
+    run_inner(args, None, kek).await
 }
 
 /// Test-only sibling of [`run`].
 ///
-/// Starts the server with an injected [`Dataplane`] adapter. Used by
-/// integration tests whose subject under test is the CLI / HTTPS /
-/// observation-row surface and which therefore inject
-/// `Arc::new(SimDataplane::new())` instead of paying the
-/// `CAP_NET_ADMIN` / `CAP_BPF` cost of constructing the production
-/// `EbpfDataplane`.
+/// Starts the server with an injected [`Dataplane`] adapter and an injected
+/// [`Kek`] provider. Used by integration tests whose subject under test is the
+/// CLI / HTTPS / observation-row surface and which therefore inject
+/// `Arc::new(SimDataplane::new())` (instead of paying the `CAP_NET_ADMIN` /
+/// `CAP_BPF` cost of constructing the production `EbpfDataplane`) and a
+/// hermetic `Arc::new(SimKek::for_boot())` (instead of the production
+/// kernel-keyring binding, which refuses to boot in a cold CI environment —
+/// feature-delta § C1-AMEND).
 ///
 /// Per architecture.md § 4.7 of
 /// `backend-discovery-bridge-service-reachability`. Production
 /// callers MUST use [`run`] — that path leaves
 /// `ServerConfig.dataplane_override = None`, so production composition
 /// goes through the single-cut `EbpfDataplane` per
-/// `feedback_single_cut_greenfield_migrations.md`.
+/// `feedback_single_cut_greenfield_migrations.md`, and composes the production
+/// `SystemdCredsKeyring` KEK.
+///
+/// [`Kek`]: overdrive_core::ca::kek::Kek
 pub async fn run_with_dataplane(
     args: ServeArgs,
     dataplane: Arc<dyn Dataplane>,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServeHandle, CliError> {
-    run_inner(args, Some(dataplane)).await
+    run_inner(args, Some(dataplane), kek).await
 }
 
 async fn run_inner(
     args: ServeArgs,
     dataplane_override: Option<Arc<dyn Dataplane>>,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
@@ -189,19 +205,27 @@ async fn run_inner(
     // invariant: probe-success is a property of the handle that was
     // probed, not of "some handle to the same substrate".
 
-    // `..Default::default()` populates `tick_cadence`
+    // `..ServerConfig::new(kek)` populates `tick_cadence`
     // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
     // (`Arc::new(SystemClock)` from `overdrive-host`). Per CLAUDE.md
     // "Repository structure" `overdrive-host` is the only crate
     // permitted to instantiate `SystemClock`, so the binding lives in
-    // the `Default` impl of `ServerConfig` rather than this call site.
+    // the `ServerConfig::new` constructor rather than this call site.
     // Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2).
+    //
+    // `kek` is threaded in from the caller (feature-delta § C1-AMEND):
+    // production `run` composes `SystemdCredsKeyring::new()` (the Linux
+    // kernel-keyring `Kek` provider, ADR-0063 D3/D6); the test-only sibling
+    // `run_with_dataplane` injects a hermetic `SimKek`. `run_server` then
+    // consumes `config.kek` and never constructs the production binding inline
+    // (inline construction was the regression). The KEK injection mirrors the
+    // `dataplane_override` test-injection precedent above.
     let config = ServerConfig {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
         dataplane_override,
-        ..Default::default()
+        ..ServerConfig::new(kek)
     };
     let inner = run_server(config, fs.clone()).await.map_err(|e| {
         // ADR-0035 §5 + reconciler-memory-redb step 01-06: any

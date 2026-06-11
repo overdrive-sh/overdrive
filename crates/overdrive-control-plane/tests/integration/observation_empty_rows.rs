@@ -111,7 +111,9 @@ async fn spawn_server_with_obs_handle()
         // `host_ipv4` from `client_iface` at boot, so it names `lo` via
         // the shared SSOT helper.
         dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        ..Default::default()
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
+        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
+        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)

@@ -131,6 +131,9 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         operator_config_dir: operator_config_dir.clone(),
         tick_cadence: Duration::from_millis(100),
         clock: clock.clone(),
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
+        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
+        kek: std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
         node: overdrive_worker::NodeConfig::default(),
         vip_range: overdrive_dataplane::allocators::VipRange::default(),
         // Step 02-01 — required `[dataplane]` section. ADR-0061 § 1

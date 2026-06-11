@@ -2,39 +2,295 @@
 # O04 — control plane refuses to start on root-key decrypt failure with an
 # actionable error, distinctly per cause, with no silent re-mint.
 #
-# Needs the built-in CA boot path (DELIVER): root-key envelope persistence in
-# the IntentStore + keyring/systemd-creds KEK provider + Earned-Trust probe.
-# Until that lands, this runner records `pending` and prints the manual path.
+# Black-box: drives the BUILT `overdrive serve` binary inside Lima (real kernel,
+# real cgroup v2, real redb IntentStore, the production `SystemdCredsKeyring`
+# KEK provider reading `$CREDENTIALS_DIRECTORY/overdrive-ca-root`). No
+# `overdrive-*` crate is linked — the only surfaces observed are the CLI exit
+# code, stderr, and the on-disk redb file. #215 wired `boot_ca` into
+# `run_server`, so the refuse-to-start paths are now reachable from `serve`.
+#
+# Capture sequence (cause taxonomy corrected 2026-06-10, ADR-0063 D4 — AES-GCM
+# CANNOT distinguish wrong KEK material from tamper; the three operator causes
+# are { decrypt-auth-failure, decode-malformed, KEK-unavailable }):
+#   1. First boot (correct KEK) -> root persisted to $DATA/intent.redb. The
+#      server is backgrounded, given a moment to persist + bind, then stopped.
+#   2. Wrong KEK MATERIAL (same id) -> refuse-to-start; stderr names the
+#      AES-GCM AUTH-FAILURE cause ("failed AES-GCM authentication", naming BOTH
+#      wrong-material OR tamper) + the IntentStore path.
+#   3. STRUCTURALLY CORRUPTED envelope -> flip the persisted envelope value bytes
+#      in place (same length, redb container intact) so it no longer
+#      deserializes; correct KEK; refuse-to-start; stderr names a
+#      DECODE/MALFORMED cause (distinct CLASS — fails before crypto) + the path.
+#   4. Absent KEK        -> empty creds dir, no dev opt-in; refuse-to-start
+#      BEFORE any issuance; stderr names the KEK as unavailable.
+#   5. No-remint         -> re-supply the correct KEK; SAME root reused (the
+#      persisted cert-material bytes are unchanged across the refused boots).
+#
+# Each refusal asserts its EXPECTED CAUSE TOKEN (not just non-zero exit), the
+# IntentStore path, and the three are distinct BY those tokens (not bare string
+# inequality) — the operator-triage contract is the cause CLASS.
 source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
-DATA_DIR="${DATA_DIR:-/tmp/od-o04}"
+# The whole O04 capture runs as one scripted sequence inside Lima (real kernel),
+# black-box over the built `overdrive` binary. The guest script writes its own
+# pass/fail verdicts to stdout, which `run-expectation.sh` tees into evidence/.
+in_lima bash -lc '
+set -uo pipefail
+ROOT="$PWD"
+WORK="$(mktemp -d)"
+DATA="$WORK/data"; CONF="$WORK/conf"; CREDS="$WORK/creds"
+mkdir -p "$DATA" "$CONF" "$CREDS"
+KEK_ID="overdrive-ca-root"
+INTENT="$DATA/intent.redb"
 
-# Probe: does `overdrive serve --help` reveal a CA/keyring boot surface yet?
-# (Heuristic gate — replace with the real first-boot/tamper setup in DELIVER.)
-if ! capture serve_help od serve --help; then
-  cat <<MSG
-  [pending] cannot reach the overdrive serve surface — O04 needs the built-in
-  CA boot path (DELIVER). When it lands, the capture sequence is:
+# 32 raw bytes is the KEK material shape SystemdCredsKeyring reads from
+# $CREDENTIALS_DIRECTORY/<id> (same shape the in-tree fixture stages).
+mk_kek() { head -c 32 /dev/zero | tr "\0" "$1" > "$CREDS/$KEK_ID"; }
 
-    1. First boot (correct KEK) -> root persisted to \$DATA_DIR's IntentStore.
-    2. Tamper one byte of the persisted root-key blob; `overdrive serve` again
-       -> expect refuse-to-start naming a corrupt/tampered envelope.
-    3. Restart with the WRONG KEK -> expect refuse-to-start naming a wrong-KEK
-       cause, DISTINCT from (2).
-    4. Restart with an ABSENT keyring KEK and no OVERDRIVE_CA_KEK -> refuse
-       before any issuance; no throwaway KEK generated.
-    5. Restore the correct KEK + untampered blob -> SAME root reused (no re-mint).
+# Run `overdrive serve` for a bounded time with a chosen creds dir, capturing
+# combined stdout+stderr and the exit code. A refusal exits fast and non-zero;
+# a successful boot blocks on the listener, so we cap it with `timeout` and
+# treat a timeout (124) as "reached serving" for the seeding boot.
+#
+# CRITICAL — each boot runs under a FRESH kernel session keyring via
+# `keyctl session - <cmd>`. The production SystemdCredsKeyring CACHES the
+# resolved KEK in the session keyring under a stable description; without a
+# fresh session, a later boot reads the PRIOR boot`s cached KEK and never
+# consults its own creds dir — masking wrong-KEK / absent-KEK refusals (the
+# kernel-keyring-leak hazard, feedback_no_run_gate_misses_boot_regressions).
+serve() { # <creds_dir> <out_file> <timeout_secs>
+  local creds="$1" out="$2" t="$3"
+  keyctl session - env CREDENTIALS_DIRECTORY="$creds" OVERDRIVE_CONFIG_DIR="$CONF" \
+    timeout --preserve-status -s INT "${t}s" \
+    cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA" \
+    > "$out" 2>&1
+  echo $?
+}
 
-  This run stays 'pending'.
-MSG
-  exit 0
+rc=0
+
+# --- 1. Seed: first boot under the CORRECT KEK persists the root. -------------
+mk_kek "\\377"   # 0xFF bytes
+seed_rc=$(serve "$CREDS" "$WORK/seed.out" 20)
+if [ ! -f "$INTENT" ]; then
+  echo "  [FAIL] seeding boot did not persist $INTENT (rc=$seed_rc)"
+  sed -n "1,40p" "$WORK/seed.out"
+  exit 1
+fi
+echo "  [PASS] first boot persisted the root IntentStore at $INTENT"
+# Capture the persisted cert-material region as the no-remint witness: the
+# whole redb file hash is stable iff the root is not re-minted.
+seed_hash="$(sha256sum "$INTENT" | cut -d" " -f1)"
+
+# --- 2. WRONG KEK MATERIAL (same id) -> refuse-to-start, AUTH-FAILURE cause. ---
+# Same kek_id, WRONG material -> the id check passes (NOT WrongKek) and the
+# AES-GCM open fails authentication -> CaError::EnvelopeAuthFailed.
+WRONG="$WORK/wrong"; mkdir -p "$WRONG"
+head -c 32 /dev/zero | tr "\0" "\\042" > "$WRONG/$KEK_ID"   # 0x22 bytes
+wrong_rc=$(serve "$WRONG" "$WORK/wrong.out" 20)
+wrong_msg="$(cat "$WORK/wrong.out")"
+if [ "$wrong_rc" != 0 ]; then
+  echo "  [PASS] wrong-KEK-material boot refused to start (exit $wrong_rc, non-zero)"
+else
+  echo "  [FAIL] wrong-KEK-material boot did NOT refuse (exit 0)"; rc=1
+fi
+# Cause token: the AES-GCM auth failure, naming BOTH possibilities.
+if printf "%s" "$wrong_msg" | grep -qi "failed AES-GCM authentication"; then
+  echo "  [PASS] wrong-KEK-material stderr names the AES-GCM auth-failure cause"
+else
+  echo "  [FAIL] wrong-KEK-material stderr lacks the AES-GCM auth-failure token"; rc=1
+  printf "%s\n" "$wrong_msg" | sed -n "1,20p"
+fi
+if printf "%s" "$wrong_msg" | grep -qi "material is wrong OR" \
+   && printf "%s" "$wrong_msg" | grep -qi "tampered/corrupted"; then
+  echo "  [PASS] wrong-KEK-material stderr names BOTH possibilities (wrong material OR tamper)"
+else
+  echo "  [FAIL] wrong-KEK-material stderr does not name both possibilities"; rc=1
+fi
+# Actionable: names the IntentStore path the operator must inspect.
+if printf "%s" "$wrong_msg" | grep -qF "$INTENT"; then
+  echo "  [PASS] wrong-KEK-material stderr names the IntentStore path $INTENT"
+else
+  echo "  [FAIL] wrong-KEK-material stderr does not name the IntentStore path $INTENT"; rc=1
 fi
 
-cat <<MSG
-  [pending] O04 capture sequence is defined above but not yet automated — the
-  tamper/wrong-KEK/absent-KEK boot fixtures require the DELIVER CA boot path.
-  The gated integration tests ca_boot_and_audit.rs::{boot_refuses_to_start_*}
-  prove the behaviour in-tree; this expectation captures the operator-visible
-  stderr quality once the serve-with-CA surface exists. Staying 'pending'.
-MSG
-exit 0
+# --- 3. STRUCTURALLY CORRUPTED envelope -> refuse-to-start, DECODE cause. ------
+# A tamper that keeps the record DECODABLE surfaces as auth-failure (the SAME
+# class as step 2 — not distinct). To exercise a DISTINCT decode cause the
+# corruption must break the record STRUCTURE so it fails at deserialize BEFORE
+# crypto, WITHOUT damaging the redb container (truncating the redb *file* trips
+# an internal redb page-layout panic before the app ever decodes — not the
+# decode path we mean to exercise). So this corrupts the persisted ENVELOPE
+# VALUE *in place* (same total file length → redb stays structurally valid),
+# flipping a run that spans the rkyv archived root + the outer-enum discriminant
+# (pinned 52 bytes from the value END; the only known discriminant is 0, so any
+# flip → UnknownVersion / Malformed). from_store_bytes then returns a decode
+# failure (EnvelopeError::{Malformed,UnknownVersion} -> IntentStoreError::Envelope)
+# before the AES-GCM open ever runs. (Tamper-but-decodable is covered by step 2 
+# "or tampered" wording.)
+python3 - "$INTENT" <<PY
+import sys
+p = sys.argv[1]
+b = bytearray(open(p,"rb").read())
+marker = b"ca/root/key-envelope/v1"
+i = b.find(marker)
+if i == -1:
+    sys.exit("could not locate key-envelope marker in redb file")
+# In-place flip (NO length change -> redb container framing intact; truncating
+# the redb file trips redb own page-layout assertion BEFORE the app decodes,
+# masking the decode path we mean to exercise). Flip the 64-byte run immediately
+# following the key marker — the start of the persisted envelope value region.
+# rkyv archives the outer-enum discriminant + root structure across the value,
+# so flipping its leading run breaks the archived framing and from_store_bytes
+# fails at decode (EnvelopeError::{Malformed,UnknownVersion} ->
+# IntentStoreError::Envelope) BEFORE the AES-GCM open runs. (This is the same
+# byte run the pre-correction capture used, which rendered a decode/Malformed
+# message per ADR-0063 2026-06-10 amendment; the only change is keeping it
+# in-place rather than truncating.)
+start = i + len(marker)
+end = min(start + 64, len(b))
+for k in range(start, end):
+    b[k] ^= 0xff
+open(p,"wb").write(b)   # same length as the original
+PY
+tamper_rc=$(serve "$CREDS" "$WORK/tamper.out" 20)
+tamper_msg="$(cat "$WORK/tamper.out")"
+if [ "$tamper_rc" != 0 ]; then
+  echo "  [PASS] corrupted-envelope boot refused to start (exit $tamper_rc)"
+else
+  echo "  [FAIL] corrupted-envelope boot did NOT refuse (exit 0)"; rc=1
+fi
+# Cause token: a decode/Malformed failure (distinct CLASS from step 2 
+# auth-failure — this fails before crypto).
+if printf "%s" "$tamper_msg" | grep -qiE "decode|malformed"; then
+  echo "  [PASS] corrupted-envelope stderr names a decode/Malformed cause"
+else
+  echo "  [FAIL] corrupted-envelope stderr lacks a decode/Malformed token"; rc=1
+  printf "%s\n" "$tamper_msg" | sed -n "1,20p"
+fi
+# The corrupted-envelope cause must NOT be the auth-failure cause (distinct class).
+if printf "%s" "$tamper_msg" | grep -qi "failed AES-GCM authentication"; then
+  echo "  [FAIL] corrupted-envelope rendered the AUTH-FAILURE cause (not a distinct decode class)"; rc=1
+else
+  echo "  [PASS] corrupted-envelope cause is distinct from the auth-failure class"
+fi
+# Actionable: names the IntentStore path.
+if printf "%s" "$tamper_msg" | grep -qF "$INTENT"; then
+  echo "  [PASS] corrupted-envelope stderr names the IntentStore path $INTENT"
+else
+  echo "  [FAIL] corrupted-envelope stderr does not name the IntentStore path $INTENT"; rc=1
+fi
+
+# --- 4. ABSENT KEK -> refuse-to-start before any issuance, no throwaway KEK. --
+EMPTY="$WORK/empty"; mkdir -p "$EMPTY"
+DATA2="$WORK/data2"; mkdir -p "$DATA2"
+absent_rc=$(keyctl session - env -u OVERDRIVE_CA_KEK -u OVERDRIVE_CA_KEK_DEV_OPT_IN \
+  CREDENTIALS_DIRECTORY="$EMPTY" OVERDRIVE_CONFIG_DIR="$CONF" \
+  timeout --preserve-status -s INT 20s \
+  cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA2" \
+  > "$WORK/absent.out" 2>&1; echo $?)
+absent_msg="$(cat "$WORK/absent.out")"
+if [ "$absent_rc" != 0 ]; then
+  echo "  [PASS] absent-KEK boot refused to start (exit $absent_rc)"
+else
+  echo "  [FAIL] absent-KEK boot did NOT refuse (exit 0)"; rc=1
+fi
+# Cause token: the KEK is unavailable (distinct CLASS from the two above).
+if printf "%s" "$absent_msg" | grep -qi "unavailable"; then
+  echo "  [PASS] absent-KEK stderr names the KEK as unavailable"
+else
+  echo "  [FAIL] absent-KEK stderr lacks a KEK-unavailable token"; rc=1
+  printf "%s\n" "$absent_msg" | sed -n "1,20p"
+fi
+# Distinct from the other two cause classes.
+if printf "%s" "$absent_msg" | grep -qiE "failed AES-GCM authentication|decode|malformed"; then
+  echo "  [FAIL] absent-KEK rendered an auth-failure/decode cause (not a distinct KEK-unavailable class)"; rc=1
+else
+  echo "  [PASS] absent-KEK cause is distinct from the auth-failure and decode classes"
+fi
+if [ -f "$DATA2/intent.redb" ]; then
+  # An absent-KEK refusal must fire BEFORE generate-or-persist, so no envelope.
+  if grep -aq "key-envelope" "$DATA2/intent.redb" 2>/dev/null; then
+    echo "  [FAIL] absent-KEK boot persisted a root-key envelope (throwaway KEK?)"; rc=1
+  else
+    echo "  [PASS] absent-KEK boot persisted no root-key envelope (no throwaway KEK)"
+  fi
+else
+  echo "  [PASS] absent-KEK boot persisted no IntentStore (refused before issuance)"
+fi
+
+# --- O04 sub-claim 5: pairwise-distinct cause CLASSES (by token, not by string
+# inequality). The contract is that an operator can tell the three apart by the
+# cause — so each refusal must carry its OWN distinctive token and NOT the
+# others`. We classify each captured stderr by its token set and assert the
+# three classes are { auth-failure, decode-malformed, kek-unavailable }.
+classify() { # <stderr_file> -> echoes one of AUTH / DECODE / KEK / UNKNOWN
+  local f="$1"
+  if grep -qi "failed AES-GCM authentication" "$f"; then echo AUTH
+  elif grep -qiE "decode|malformed" "$f"; then echo DECODE
+  elif grep -qi "unavailable" "$f"; then echo KEK
+  else echo UNKNOWN; fi
+}
+wcls="$(classify "$WORK/wrong.out")"
+tcls="$(classify "$WORK/tamper.out")"
+acls="$(classify "$WORK/absent.out")"
+echo "  wrong-KEK-material class:  $wcls"
+echo "  corrupted-envelope class:  $tcls"
+echo "  absent-KEK class:          $acls"
+[ "$wcls" = AUTH ]   && echo "  [PASS] wrong-KEK-material classifies as AUTH"   || { echo "  [FAIL] wrong-KEK-material not AUTH ($wcls)"; rc=1; }
+[ "$tcls" = DECODE ] && echo "  [PASS] corrupted-envelope classifies as DECODE" || { echo "  [FAIL] corrupted-envelope not DECODE ($tcls)"; rc=1; }
+[ "$acls" = KEK ]    && echo "  [PASS] absent-KEK classifies as KEK"            || { echo "  [FAIL] absent-KEK not KEK ($acls)"; rc=1; }
+[ "$wcls" != "$tcls" ] && echo "  [PASS] auth-failure vs decode-malformed are distinct classes" || { echo "  [FAIL] auth-failure vs decode-malformed same class"; rc=1; }
+[ "$wcls" != "$acls" ] && echo "  [PASS] auth-failure vs KEK-unavailable are distinct classes" || { echo "  [FAIL] auth-failure vs KEK-unavailable same class"; rc=1; }
+[ "$tcls" != "$acls" ] && echo "  [PASS] decode-malformed vs KEK-unavailable are distinct classes" || { echo "  [FAIL] decode-malformed vs KEK-unavailable same class"; rc=1; }
+
+# --- O04 sub-claim 4: no silent re-mint across the refused boots. -------------
+# The wrong-KEK refusal ran against the original $INTENT (before tamper); its
+# refusal must not have overwritten the root. We hashed the seed BEFORE the
+# tamper, so compare against a fresh seed in a clean dir to prove the refused
+# boot leaves the persisted root intact: re-supply the correct KEK on a freshly
+# seeded store and confirm the cert material is byte-stable across a refused boot.
+DATA3="$WORK/data3"; mkdir -p "$DATA3"
+# The no-remint witness is the PERSISTED ROOT CERT, not the whole redb file:
+# redb rewrites file metadata / padding on every open (even a refused boot that
+# never reaches persist), so a whole-file hash is noisy. The root cert PEM is
+# the durable identity — a silent re-mint would replace it with a new keypair`s
+# cert. Extract every CERTIFICATE PEM block from the redb bytes and hash them.
+root_cert_hash() { # <redb_path>
+  python3 - "$1" <<PY
+import sys, re, hashlib
+b = open(sys.argv[1],"rb").read()
+blocks = re.findall(rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", b, re.S)
+blocks.sort()
+print(hashlib.sha256(b"".join(blocks)).hexdigest() if blocks else "NO-CERT")
+PY
+}
+keyctl session - env CREDENTIALS_DIRECTORY="$CREDS" OVERDRIVE_CONFIG_DIR="$CONF" \
+  timeout --preserve-status -s INT 20s \
+  cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA3" \
+  > "$WORK/seed3.out" 2>&1 || true
+h_before="$(root_cert_hash "$DATA3/intent.redb")"
+keyctl session - env CREDENTIALS_DIRECTORY="$WRONG" OVERDRIVE_CONFIG_DIR="$CONF" \
+  timeout --preserve-status -s INT 20s \
+  cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA3" \
+  > "$WORK/refuse3.out" 2>&1 || true
+h_after="$(root_cert_hash "$DATA3/intent.redb")"
+if [ "$h_before" = "$h_after" ] && [ "$h_before" != "NO-CERT" ]; then
+  echo "  [PASS] refused boot did NOT re-mint the root (persisted root cert byte-stable: $h_before)"
+else
+  echo "  [FAIL] refused boot changed the persisted root cert ($h_before -> $h_after)"; rc=1
+fi
+keyctl session - env CREDENTIALS_DIRECTORY="$CREDS" OVERDRIVE_CONFIG_DIR="$CONF" \
+  timeout --preserve-status -s INT 20s \
+  cargo run -q -p overdrive-cli --bin overdrive -- serve --bind 127.0.0.1:0 --data-dir "$DATA3" \
+  > "$WORK/recover3.out" 2>&1 || true
+h_recover="$(root_cert_hash "$DATA3/intent.redb")"
+if [ "$h_before" = "$h_recover" ]; then
+  echo "  [PASS] re-supplying the correct KEK adopts the SAME root (byte-stable)"
+else
+  echo "  [FAIL] recovery boot changed the root (re-mint after refusal)"; rc=1
+fi
+
+rm -rf "$WORK"
+exit $rc
+'

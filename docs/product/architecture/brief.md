@@ -1461,7 +1461,7 @@ Rules to enforce:
 | 0063 | Built-in CA — `Ca` port trait (`overdrive-core`; pure, no rcgen) + `RcgenCa` host adapter (all rcgen/crypto-backend [`ring` today; aws-lc-rs + FIPS pending #204]/HKDF/AES-256-GCM) + `SimCa` sim adapter (fixture P-256 keys); 3-tier hierarchy (self-signed P-256 root → pathLen=0 node intermediate → single-URI-SAN SVID, 1h TTL); single-node (one intermediate). Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore; KEK in Linux kernel keyring delivered per-boot by systemd-creds (TPM/host-key); HKDF-SHA256-from-KEK subkey → AES-256-GCM (reconciliation A); pure `CertSpec` builder in core, host adapter translates to `rcgen::CertificateParams` (reconciliation B). Serials via `Entropy`; key-gen via backend CSPRNG (not injectable, F11). `issued_certificates` ObservationStore audit row. Refuse-to-start on decrypt failure — never silent re-mint. `ca_equivalence` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only (`tls_bootstrap.rs` keeps the control-plane-HTTPS consumer). GH #28 [2.6] | Accepted |
 | 0063 | **Workflow primitive** — workflow `await`-point journal is a **second redb table layout** on the shared runtime-owned substrate (`<data_dir>/reconcilers/memory.redb`), distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`, value = CBOR `JournalEntry` (`ciborium`, ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — mutable runtime memory, additive entry-variants per slice via `#[serde(default)]`); fsync-then-suspend ordering + Earned-Trust `probe()` reused from 0035; `SleepArmed` records the deadline (input, not "remaining"). Resolves DIVERGE D4/open-Q3 in favour of redb (R2); supersedes pre-DIVERGE "per-primitive libSQL" phrasing. Extends 0035. Single-node scope; cross-node resume (#205) not precluded | Accepted |
 | 0064 | **Workflow primitive** — `Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowStart` in NEW `overdrive-core::workflow` (no tokio in core; injected ports + `async_trait`); durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**. Engine↔reconciler boundary: the workflow-lifecycle reconciler stays a **pure-sync ADR-0035 reconciler** emitting `Action::StartWorkflow` + observing terminal rows; the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`. Check-then-record journal replay ⇒ bit-identical replay (K4); `ctx` surface additive per slice (`call`/`sleep`/`wait_for_signal`/`emit_action`); `WorkflowResult` distinct from `TerminalCondition` (inherits the SemVer convention, not the type); `ctx.emit_action` → Action channel → Raft (no IntentStore bypass). Companion to 0063 | Accepted (§2/§3/§5/§6 amended by 0065) |
-| 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowStart { name, input }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks #40. Amends ADR-0064 §2/§3/§5/§6 | Proposed |
+| 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowStart { name, input }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks the first external/root rotation workflow consumer. *(Historical: "unblocks #40"; SUPERSEDED — #40 is the now-closed internal SVID reissue `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* Amends ADR-0064 §2/§3/§5/§6 | Proposed |
 
 ---
 
@@ -4116,6 +4116,44 @@ this section is deferred-that-shipped. Evolution record:
 > recorded as a DESIGN NOTE (feature-delta § Open questions #1) — NOT a
 > tracking issue. The no-op-on-miss behavior is correct regardless.
 
+### Shipped — Component Inventory (FINALIZE 2026-06-11) — built-in-ca-operator-composition
+
+The built-in CA composed into the operator binary: persistent KEK-sealed
+workload-identity root booted in `overdrive serve`, near-expiry SVID rotation
+as a reconciler action (#40), and the current issued-cert summary surfaced via
+`overdrive alloc status` (#215). DELIVER complete (8 steps 01-01…03-03 all
+COMMIT/PASS); closes the D-CA-4 "CA not wired into serve" deferral and folds
+GH #40 + #215. Evolution record:
+`docs/evolution/2026-06-11-built-in-ca-operator-composition.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| Near-expiry branch → unconditional rotate `Action::IssueSvid` (`"rotate-svid"`); rotation gate + workflow consts deleted | `crates/overdrive-core/src/reconcilers/svid_lifecycle.rs` | EXTEND (no new action variant) / DELETE (gate, single-cut) |
+| `IssuanceOrdinal(u64)` monotonic issuance-rank newtype (current-cert selection key) | `crates/overdrive-core/src/id.rs` | NEW |
+| `issuance_ordinal` field on `IssuedCertificateRowV1` (additive, in-place; `FIXTURE_V1` regenerated) | `crates/overdrive-core/src/ca/issued_certificate_row.rs` | EXTEND (additive V1 field, greenfield single-cut) |
+| `boot_ca` + `bootstrap_node_intermediate` wired into `run_server` (single-cut replacing the ephemeral `RcgenCa` block) | `crates/overdrive-control-plane/src/lib.rs` | EXTEND (newly called) / DELETE (ephemeral block, single-cut) |
+| Mandatory `ServerConfig.kek: Arc<dyn Kek>` injection seam (`Default` removed; `ServerConfig::new(kek)` added) | `crates/overdrive-control-plane/src/lib.rs` | EXTEND (new mandatory field) |
+| `ControlPlaneError::CaBoot(#[from] CaBootError)` + exhaustive `to_response` arm | `crates/overdrive-control-plane/src/error.rs` | EXTEND (additive variant) |
+| `IssuedCertSummary { serial, spiffe_id, issuer_serial, not_after }` + `AllocStatusResponse.issued_certificates` (skip-if-empty) | `crates/overdrive-control-plane/src/api.rs` | NEW (wire struct) / EXTEND (additive field) |
+| `alloc_status` max-`issuance_ordinal` projection per running alloc; `issue_and_audit` stamps the ordinal | `crates/overdrive-control-plane/src/handlers.rs`, `src/ca_issuance.rs` | EXTEND |
+| `SimKek::for_boot()` hermetic in-process `Kek` test double | `crates/overdrive-sim/src/adapters/kek.rs` | NEW (sim adapter) |
+| `SystemdCredsKeyring::new()` composed at the CLI `serve` boundary; issued-cert section on `render::alloc_status` | `crates/overdrive-cli/src/commands/serve.rs`, `src/render.rs` | EXTEND |
+
+> **The append-only precondition for the `len()`-derived issuance ordinal is
+> load-bearing across a future phase (DESIGN NOTE for DEVOPS / Phase-5
+> revocation):** the ordinal is monotonic only because `issued_certificates`
+> rows are never deleted/overwritten/compacted. The first future work to add a
+> delete path (Phase-5 revocation pruning, or audit-log GC) MUST re-source the
+> ordinal (a persisted monotonic counter a delete cannot rewind). Tracked as
+> [overdrive-sh/overdrive#226](https://github.com/overdrive-sh/overdrive/issues/226).
+
+> **EDD status at finalize:** D01 (root key never plaintext at rest), O04
+> (refuse-to-start, cause-distinct), and E03 (full chain verifies, 3 sub-claims)
+> are `satisfied` (different-fox audited). O05 (issued-certificates audit row
+> operator-visible) is `pending` — the behavior is implemented and
+> integration-tested, but the black-box operator-CLI capture needs a disposable
+> full-system VM ([#227](https://github.com/overdrive-sh/overdrive/issues/227)).
+
 ---
 
 ### 88. Listener-fact in-memory view extension (ADR-0062)
@@ -4286,7 +4324,11 @@ identities; it does not perform handshakes or rotation.
 workload-start (existing allocation lifecycle) → `issue_svid(req)`. **No
 operator CLI verb** — by design (D-CA-4); the only operator-observable read
 surface is the `issued_certificates` row via the existing `alloc status` path.
-The #40 rotation **workflow** (deferred) is a future driving caller.
+Internal SVID near-expiry reissue is **not** a driving caller of a workflow —
+it is a live `Action::IssueSvid` (rev 6, `"rotate-svid"` correlation) driven
+through the existing action-shim executor. The only future *workflow*-shaped
+driving caller is **external-ACME / public-trust gateway** rotation (Phase 3+,
+genuinely multi-step) — distinct from internal SVID reissue.
 
 **Driven** (CA reaches out): `IntentStore` (persist/read
 `RootCaKeyEnvelope`); `ObservationStore` (write `issued_certificates`);
@@ -4358,7 +4400,7 @@ in Phase 2.6 regardless.
   `{kek_id, salt, info, nonce, ciphertext, aead_tag}`. Rationale: HKDF costs
   one extract+expand and buys domain separation (reuse the KEK for future
   secrets via `info`) + a clean rotation seam (`kek_id`/`salt`) — exactly what
-  #40 and a future HSM KEK provider need. (ADR-0063 D4.)
+  future KEK/root-CA rotation and a future HSM KEK provider need. (ADR-0063 D4.)
 - **(B) Pure cert-param construction in core; host adapter does the rcgen
   call.** `CertSpec` (core) owns the *decision* of which extensions each role
   carries (the single-URI-SAN rejection, pathLen=0, CA:TRUE/FALSE, keyUsage
@@ -4444,8 +4486,8 @@ new typed reader, the same shape every prior observation row was added
 
 | Non-goal | Owner |
 |---|---|
-| Certificate rotation lifecycle (workflow) | **#40 [3.3]** (needs workflow primitive **#39 [3.2]**) |
-| Root CA rotation (dual-bundle two-phase) | **#40** |
+| Certificate rotation lifecycle | **CURRENT (rev 6 — `built-in-ca-operator-composition`):** internal SVID near-expiry reissue is a **live `Action::IssueSvid`** (NOT a workflow, does NOT need #39). Only **external-ACME / public-trust gateway** rotation stays workflow-shaped + future-owned. *(Historical: "#40 [3.3] workflow needs #39 [3.2]" — that framing was external-ACME, never internal SVID reissue.)* |
+| Root CA rotation (dual-bundle two-phase) | **Future KEK / root-CA rotation** (workflow-shaped, separate concern; future / not yet ticketed — NOT #40, which is the now-closed internal SVID near-expiry reissue `Action::IssueSvid`. Distinct from leaf SVID reissue; genuinely multi-step, may be workflow-shaped when it ships) |
 | Multi-node per-node intermediates + node attestation | **#36 [2.14]** (`Depends on #28`) |
 | Multi-region CA federation | **#104 [7.1]** + **#83 [5.17]** |
 | Operator cert minting / OIDC / Biscuit | **Phase 5/7**, **#81** |
@@ -4490,24 +4532,29 @@ the **`issued_certificates` audit row** is **observation** (ADR-0063 D6); the
 **`SvidLifecycle` View** is **reconciler memory** (the runtime-owned ViewStore,
 carrying only **retry memory** for a failed issue — `attempts` +
 `last_failure_seen_at`, NOT issuance success facts). This is a *holder* primitive
-— it does not mint (that is the `Ca` port, #28), perform handshakes (that is #26
-sockops/kTLS), or rotate (that is #40).
+— it does not mint (that is the `Ca` port, #28) or perform handshakes (that is #26
+sockops/kTLS). Internal SVID near-expiry reissue IS in scope here (rev 6 — a live
+`Action::IssueSvid`, not #40); only **external-ACME / public-trust root rotation**
+remains a separate future concern.
 
 **Restart recovery (rev 2):** the held `SvidMaterial` cannot survive a restart —
 the leaf key is non-persistable (`CaKeyPem` has no `Serialize`, ADR-0063 D9) and
 non-reconstructable (each `issue_and_audit` mints a fresh leaf). So restart
 recovery is **re-issue on boot** for every still-Running allocation
-(`running ∧ ¬held → IssueSvid`, bounded, audited) — RECOVERY, distinct from #40's
-near-expiry rotation. "Recompute held state without re-issue" is impossible; the
-honest model has no secret at rest.
+(`running ∧ ¬held → IssueSvid`, bounded, audited) — RECOVERY, a distinct branch
+from the near-expiry reissue branch (`held ∧ near-expiry → IssueSvid`, rev 6),
+though both emit `Action::IssueSvid` through the same executor. "Recompute held
+state without re-issue" is impossible; the honest model has no secret at rest.
 
 This is a **FOUNDATION feature (F2)**: it builds the lifecycle, the held store,
 the read port, WRITES the `issued_certificates` rows, and proves convergence —
 but its **operator surface** (the `alloc status` render of `issued_certificates`
-+ the deployed-SVID operator-verify flow) is **#215's** (blocked on #35), and
-the **consumer** is **#26's**. #35's own Phase-2 proof is TEST-tier (`openssl
-verify` the chain + ObservationStore row readback + the DST `assert_eventually!`
-convergence invariant) — built-in-ca's `rcgen_ca_chain_verify` shape.
++ the deployed-SVID operator-verify flow) is **#215's** — *(rev 6, 2026-06-09:
+#215 is CLOSED by `built-in-ca-operator-composition`, no longer blocked on #35;
+the "blocked on #35" phrasing is rev-2-era historical)* — and the **consumer** is
+**#26's**. #35's own Phase-2 proof is TEST-tier (`openssl verify` the chain +
+ObservationStore row readback + the DST `assert_eventually!` convergence
+invariant) — built-in-ca's `rcgen_ca_chain_verify` shape.
 
 ### Component decomposition (which crate gets what)
 
@@ -4601,11 +4648,16 @@ production composes `Arc<dyn Ca>` as an **ephemeral workload `RcgenCa`** built
 directly in `run_server` (ADR-0067 D3 rev 4) — `RcgenCa::new(Arc::new(OsEntropy),
 SpiffeId "spiffe://overdrive.local/overdrive/ca")` → `root()` →
 `issue_intermediate(&node_id)` → `trust_bundle()` → `IdentityMgr::new(Some(bundle))`,
-fresh in-memory root each boot, NO KEK / NO persistence. This is **NOT** the
-`ca_boot` path: `lib.rs:50` is a bare `pub mod ca_boot;` and `boot_ca`/`RcgenCa`
-are never called in `lib.rs`. The persistent KEK-backed root (`boot_ca` +
-`SystemdCredsKeyring`, ADR-0063 D2/D8) + the operator surface are **#215**
-(blocked on #35).
+fresh in-memory root each boot, NO KEK / NO persistence.
+
+> **rev 6 (2026-06-09) — SUPERSEDED.** The ephemeral-`RcgenCa`-in-`run_server`
+> wiring described above is **rev-4-era historical**. `built-in-ca-operator-
+> composition` Slice ② replaces it (single-cut) with the persistent
+> `boot_ca(...)` + `bootstrap_node_intermediate(...)` path (KEK-sealed root,
+> Earned-Trust probe-then-use, adopt-on-restart) — `boot_ca`/`RcgenCa` ARE now
+> called in `lib.rs`. The persistent KEK-backed root (ADR-0063 D2/D8) + the
+> operator surface are CLOSED by this feature, no longer #215-blocked-on-#35. A
+> DELIVER agent must NOT preserve the ephemeral-fresh-root-each-boot path.
 
 ### Held-set-as-`actual` — the convergence model (rev 2)
 
@@ -4619,11 +4671,15 @@ The pure `SvidLifecycle::reconcile` converges two sets:
   projected into `actual`.
 
 The diff: `running ∧ ¬held → IssueSvid`; `¬running ∧ held → DropSvid`; `running ∧
-held(valid `not_after`) → Noop`; `running ∧ held(near-expiry) →` the gated #40
-branch. **Restart recovery falls out for free** — on boot `IdentityMgr` is empty
-(held set never persisted), so `actual = ∅` and every still-Running alloc is
-re-issued (`running ∧ ¬held`). This is RECOVERY, a *distinct branch* from the
-gated near-expiry rotation; it is NOT the forbidden synchronous-rotation path.
+held(valid `not_after`) → Noop`; `running ∧ held(near-expiry) →` emit
+`Action::IssueSvid` **unconditionally** (rev 6 — `"rotate-svid"` correlation; the
+threshold is ½ × `WORKLOAD_SVID_TTL` = 1800s, owned by THIS feature; there is no
+`ROTATION_ENABLED` gate and no `StartWorkflow`). **Restart recovery falls out for
+free** — on boot `IdentityMgr` is empty (held set never persisted), so `actual =
+∅` and every still-Running alloc is re-issued (`running ∧ ¬held`). This is
+RECOVERY, a *distinct branch* from the near-expiry reissue branch; both emit
+`Action::IssueSvid` through the same executor, neither is a synchronous-rotation
+path.
 
 **Runtime wiring (grounded — feasibility verdict: FEASIBLE, no blocker).**
 `hydrate_actual` (`reconciler_runtime.rs:2190`) is a `match` over `AnyReconciler`.
@@ -4636,9 +4692,9 @@ new `AnyReconciler::SvidLifecycle(_)` arm reads `state.identity.held_snapshot()`
 (sync, in-process) and builds `SvidLifecycleState { desired, actual }`. Identical
 shape to the workflow precedent, no runtime-mechanism change (one new `match`
 arm). `held_snapshot` returns `HeldSvidFacts { spiffe_id, not_after }` per held
-alloc — facts the convergence needs (presence = held; `not_after` drives the gated
-near-expiry branch), NOT the leaf key (which never leaves `IdentityMgr` except via
-the `IdentityRead` getter).
+alloc — facts the convergence needs (presence = held; `not_after` drives the
+near-expiry reissue branch), NOT the leaf key (which never leaves `IdentityMgr`
+except via the `IdentityRead` getter).
 
 ### Enqueue/handoff trigger (rev 2 — the missing level-trigger)
 
@@ -4704,12 +4760,13 @@ The `TrustBundle` is held **in** `IdentityMgr` — set at boot (composition root
 opportunistically by the issue executor (which holds `&dyn Ca`; after
 `issue_and_audit`, `identity.set_bundle(ca.trust_bundle()?)`). `current_bundle()`
 reads **in-process — ZERO CA I/O on the read hot path** (O3). `set_bundle` is the
-seam **#40** (rotation) later uses to push a rotated bundle through the same
-surface with no consumer change. (Rejected alternative: pull `Ca::trust_bundle()`
-on demand per read — violates O3; hydration is strictly better and gives #40 its
-push seam. ADR-0067 D6 / A4.)
+seam the issue executor refreshes the bundle through, and the same seam a future
+**external-ACME / public-trust root rotation** would use to push a rotated bundle
+with no consumer change. (Rejected alternative: pull `Ca::trust_bundle()` on
+demand per read — violates O3; hydration is strictly better and gives the future
+external-rotation path its push seam. ADR-0067 D6 / A4.)
 
-### The `SvidLifecycle` View (retry memory) + the gated #40 rotation seam
+### The `SvidLifecycle` View (retry memory) + the near-expiry reissue branch
 
 ```rust
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
@@ -4742,22 +4799,36 @@ reads the held cert's real `not_after` off `actual` (`held_snapshot`), not a Vie
 field. GC `IssueRetry` entries for allocs no longer Running (mirror
 `ServiceMapHydrator`'s `retain`).
 
-**The #40 rotation seam is pre-wired but EMIT-GATED.** The near-expiry branch is
-structurally present and *would* target `Action::StartWorkflow(cert_rotation)`,
-but the **emit is suppressed** (`const ROTATION_ENABLED: bool = false` / absent
-emit) so `StartWorkflow(cert_rotation)` is **NEVER emitted** until #40 flips it.
-This is load-bearing, not cosmetic: production **always wires an empty-registry
-workflow engine**, so a committed `StartWorkflow` for an *unregistered* kind
-raises `WorkflowEngineError::UnknownWorkflow` (`lib.rs:417-418`), isolated
-per-action by the shim (`action_shim/mod.rs:429`) but **re-emitted each tick** the
-condition holds — a naïve emit raises `UnknownWorkflow` every tick. (The
-`None`-engine no-op path is NOT production's.) Near-expiry reads the held cert's
-real `not_after` off `actual` (`held_snapshot`, rev 2), so the seam needs **no**
-View field to drive it; the branch is pre-wired, the emit is gated. Rotation
-(`held ∧ near-expiry → #40`) is a *distinct branch* from restart re-issue
-(`¬held → IssueSvid`, RECOVERY) — keeping them separate ensures restart recovery
-never routes through the (forbidden) synchronous-rotation path. **NO throwaway
-synchronous sync-rotate path** (a single-cut violation #40 would delete).
+**The near-expiry branch emits `Action::IssueSvid` unconditionally (rev 6).**
+
+> **rev 6 (2026-06-09) — CURRENT model; the EMIT-GATED-workflow framing below is
+> SUPERSEDED.** `built-in-ca-operator-composition` flips the near-expiry branch
+> from a gated `StartWorkflow(cert_rotation)` to an **unconditional
+> `Action::IssueSvid`** (`"rotate-svid"` correlation). The `ROTATION_ENABLED`
+> gate const, the `CERT_ROTATION_WORKFLOW` name, and the `StartWorkflow` /
+> `WorkflowName` imports are **DELETED** (single-cut). Internal SVID near-expiry
+> reissue is a single internal mint+swap — NOT a workflow, no #39 dependency,
+> no `UnknownWorkflow` risk (nothing is committed to the empty-registry engine).
+> **A DELIVER agent must NOT preserve `ROTATION_ENABLED` or
+> `StartWorkflow(cert_rotation)`.**
+
+The near-expiry branch (`held ∧ near-expiry`) emits `Action::IssueSvid`
+**unconditionally** — a single internal mint+swap through the existing action-shim
+executor, `"rotate-svid"` correlation. There is **no** `ROTATION_ENABLED` gate, no
+`CERT_ROTATION_WORKFLOW`, no `StartWorkflow(cert_rotation)`, and no `#39`/workflow
+dependency — nothing is committed to the workflow engine, so there is no
+`UnknownWorkflow` risk. Near-expiry reads the held cert's real `not_after` off
+`actual` (`held_snapshot`, rev 2), so the branch needs **no** View field to drive
+it. Near-expiry reissue (`held ∧ near-expiry → IssueSvid`) is a *distinct branch*
+from restart re-issue (`¬held → IssueSvid`, RECOVERY); both emit `Action::IssueSvid`
+through the same executor and neither is a synchronous-rotation path. **NO throwaway
+synchronous sync-rotate path.**
+
+> **Provenance (rev-2-era, SUPERSEDED — do not implement):** rev 1–5 modelled this
+> branch as an EMIT-GATED `Action::StartWorkflow(cert_rotation)` behind
+> `const ROTATION_ENABLED: bool = false`, to be flipped by #40. rev 6 deletes that
+> gate, name, and the `StartWorkflow`/`WorkflowName` imports (single-cut). A DELIVER
+> agent must NOT preserve any of them.
 
 ### Reconciliation decisions resolved (stated, not punted)
 
@@ -4785,8 +4856,10 @@ are all RESOLVED here:
   is `actual`, success lives in `issued_certificates`; 6 bounds; manual `Default`.
   (ADR-0067 D8; A3.)
 - **(#5) Trust-bundle currency** — **HYDRATED into `IdentityMgr`** (set at boot,
-  refreshed by the executor, pushed by #40 via `set_bundle`); zero CA I/O on the
-  read hot path. (ADR-0067 D6; A4.)
+  refreshed by the executor, pushed by a future external/root-rotation path via
+  `set_bundle`); zero CA I/O on the read hot path. (Internal SVID near-expiry
+  reissue re-mints a leaf under the unchanged intermediate, so it does not touch
+  this bundle seam.) (ADR-0067 D6; A4.)
 - **(rev 2) Enqueue/handoff trigger** — `Action::EnqueueEvaluation` from
   `WorkloadLifecycle::reconcile` + the exit observer, keyed `job/<workload_id>`,
   broker LWW dedup; DELIVER regression proves Running AND Stopped transitions tick
@@ -4814,9 +4887,9 @@ held. Fault-injection (audit-write failure, broken hold/drop) flagged for DISTIL
 | Availability of identity (O1 / K1 — North Star) | Every Running alloc holds a valid chain-verifiable SVID at every stable point | `assert_eventually!("running allocs hold a valid SVID")` over the held `BTreeMap` vs the running set; a broken executor fails it |
 | Leak resistance (O2 / K2) | No SVID/leaf key held for a non-Running alloc | Drop-on-stop removes the held-map entry; `svid_for == None` post-drop; observable via the read surface |
 | Read latency (O3) | Consumer reads current SVID + bundle in-process, no re-issue | `Arc` + sync `IdentityRead` getter; SVID from the held map; bundle hydrated (zero CA I/O on read) |
-| Restart recovery (O4 / K3 — reframed rev 2) | Restart leaves no Running alloc without a held SVID; re-issue is bounded + audited; no stale/silent credential | Held set is `actual`; on boot `actual = ∅` (leaf key non-persistable) → `running ∧ ¬held → IssueSvid` re-issues every running alloc, each audited via `issue_and_audit`; a *failed* re-issue backs off via the retry-memory View. (RECOVERY — distinct from #40 rotation.) |
+| Restart recovery (O4 / K3 — reframed rev 2) | Restart leaves no Running alloc without a held SVID; re-issue is bounded + audited; no stale/silent credential | Held set is `actual`; on boot `actual = ∅` (leaf key non-persistable) → `running ∧ ¬held → IssueSvid` re-issues every running alloc, each audited via `issue_and_audit`; a *failed* re-issue backs off via the retry-memory View. (RECOVERY — a distinct branch from near-expiry reissue, though both emit `Action::IssueSvid`; rev 6: neither is a workflow.) |
 | No silent issuance (O5 / K4) | Every issuance has an `issued_certificates` row; unauditable issuance refused | Reuse `issue_and_audit` (binds audit row, refuses on audit-write failure) — no unaudited material reaches the held map |
-| Mechanism economy (O6) | No new concurrency/storage beyond runtime + `Ca` + ObservationStore | One `RwLock<BTreeMap>` holder; reconciler runtime + action-shim; #40 seam on the same `set_bundle` surface |
+| Mechanism economy (O6) | No new concurrency/storage beyond runtime + `Ca` + ObservationStore | One `RwLock<BTreeMap>` holder; reconciler runtime + action-shim; near-expiry reissue reuses the same `Action::IssueSvid` executor (rev 6); a future external/root-rotation path reuses the same `set_bundle` push seam |
 | Testability (K5) | Identity subsystem reproduces bit-identically from a seed | `BTreeMap` iteration; serials via `Entropy`; fixture keys; `identity_read_equivalence` + twin-run DST |
 
 ### Reuse Analysis (HARD GATE)
@@ -4849,9 +4922,12 @@ EXTENDs are purely additive (new enum variants, a new impl method, two new
   beyond removing the held-map entry) — drop-on-stop removes the entry so the key
   is no longer reachable (O2 met); zeroization is a hardening call, not invented
   here (DISCUSS Out-of-scope: "DESIGN call / future hardening").
-- The exact `WORKLOAD_SVID_TTL` policy constant the near-expiry recompute reads
-  (ADR-0063's 1h SVID TTL is the policy; the near-expiry *threshold* the #40 seam
-  uses is #40's to pin when it flips the gate).
+- The near-expiry *threshold* is owned by **THIS feature** (rev 6) and pinned at
+  **½ × `WORKLOAD_SVID_TTL` (= 1800s)** — `WORKLOAD_SVID_TTL` is ADR-0063's 1h SVID
+  TTL policy. (No longer deferred: with internal near-expiry reissue reframed as a
+  live `Action::IssueSvid`, there is no #40 gate to flip and nothing for #40 to pin
+  — only external-ACME / public-trust rotation, which carries its own threshold,
+  remains future-owned.)
 - Fault-injection scenario set for the Earned-Trust probes (audit-write failure
   refuses issuance; a broken executor fails the convergence invariant).
 
@@ -4859,14 +4935,109 @@ EXTENDs are purely additive (new enum variants, a new impl method, two new
 
 | Non-goal | Owner |
 |---|---|
-| Certificate **rotation lifecycle** (near-expiry → mint-fresh → swap → retire) | **#40 [3.3]** (a `cert_rotation` workflow; needs workflow primitive **#39 [3.2]**). #35 owns *issue + hold + swap-into-`IdentityMgr` (`hold` replaces) + converge*; #40 owns the durable rotation workflow whose `SvidMaterial` output #35 swaps in. The near-expiry branch is pre-wired but EMIT-GATED, keyed off the held cert's real `not_after` (from `actual`), NOT a View field. **Boundary (rev 2):** #40's "SvidMaterial lands as observation" is loose — the leaf key NEVER enters the gossiped ObservationStore (`CaKeyPem` no `Serialize`, ADR-0063 D9); the honest contract is **rotation status/audit lands as observation; the material is swapped IN-PROCESS** into `IdentityMgr`. Restart re-issue (`¬held → IssueSvid`) is RECOVERY, a *distinct* branch from the gated near-expiry rotation. |
+| Certificate **rotation lifecycle** (near-expiry → mint-fresh → swap → retire) | **CURRENT (rev 6 — `built-in-ca-operator-composition`, 2026-06-09):** internal SVID near-expiry reissue is a **live reconciler action** — `SvidLifecycle::reconcile` emits `Action::IssueSvid` (`"rotate-svid"` correlation) **unconditionally**; the `ROTATION_ENABLED` gate, the `CERT_ROTATION_WORKFLOW` name, and `StartWorkflow`/`WorkflowName` are DELETED. It is **NOT a workflow and does NOT need #39** — a single internal mint+swap coordinates no external steps and has no external-wait terminal. The held cert's real `not_after` (from `actual`) keys the near-expiry comparison; the threshold is ½ × `WORKLOAD_SVID_TTL` (1800s). **A DELIVER agent must NOT preserve `ROTATION_ENABLED` or `StartWorkflow(cert_rotation)`.** Restart re-issue (`¬held → IssueSvid`) is RECOVERY, a *distinct* branch. **Only external-ACME / public-trust gateway rotation remains workflow-shaped and future-owned** (see ACME row below). **Historical (ADR-0067 rev 2, superseded):** #40 was framed as a `cert_rotation` workflow needing #39; that framing was external-ACME, never internal SVID reissue (the leaf key never enters the gossiped ObservationStore — `CaKeyPem` no `Serialize`, ADR-0063 D9; rotation status/audit lands as observation, material swapped IN-PROCESS into `IdentityMgr`). |
 | The dataplane **consumers** that present identity (sockops/kTLS mTLS, L7 gateway, telemetry sink) | **#26** (sockops/kTLS) + gateway/telemetry features. This feature ships the `IdentityRead` *read port + sim double + a test consumer*, not the production consumers. |
-| The operator `alloc status` render of `issued_certificates` + the deployed-SVID operator-verify flow | **#215** (compose built-in CA into the operator surface — O05/E03), **blocked on #35**. #35's own observable is TEST-tier (`openssl verify` + ObservationStore readback + DST convergence). **Boundary (rev 2):** re-issue-on-restart + rotation ⇒ **many `issued_certificates` rows per alloc** (append-only audit) — #215 renders the **current** cert (latest row matching the held serial), NOT one-per-alloc; a serial change after a restart reads as *legible* (re-issued on restart), NOT anomalous. O05 "no silent issuance" is reinforced (every re-issue leaves a row). |
+| The operator `alloc status` render of `issued_certificates` + the deployed-SVID operator-verify flow | **CLOSED by `built-in-ca-operator-composition` (rev 6, 2026-06-09) — folds #215.** Its Slice ②/③ land the boot-side (persistent CA wired into `serve`) + consumer-side (`AllocStatusResponse.issued_certificates` summary + CLI render) surfaces; no longer blocked on #35. **Surface split (load-bearing for DELIVER):** O05 is the `issued_certificates` summary render (operator-legible metadata, NO cert bytes/key); E03 (full chain verifies) is proven SEPARATELY by an exported-PEM `openssl verify` capture (test-only env-gated export from `rcgen_ca_chain_verify.rs`), NOT by the summary render. **Boundary (carried forward):** re-issue-on-restart + rotation ⇒ **many `issued_certificates` rows per alloc** (append-only audit) — the surface renders the **current** cert (the **max-`issuance_ordinal`** row matching `SpiffeId::for_allocation(...)` — the strictly-ordered selection key; `issued_at` is retained as an audit fact, NOT the selection key), NOT one-per-alloc; a post-restart serial change reads as *legible* recovery, NOT anomalous. O05 "no silent issuance" is reinforced (every re-issue leaves a row). **Historical (ADR-0067 rev 2, superseded):** #215 was "blocked on #35; this ADR does not build it." |
 | **Multi-node** held sets, gossiped audit rows across nodes, per-node identity, node attestation | **#36 [2.14]** (`Depends on #28`). Single-node Phase 2: one node's running set. |
 | **ACME / public-trust gateway certs** unified into `IdentityMgr` | **Roadmap step 4.7** (whitepaper §11). `IdentityMgr` is shaped to admit them later, not to hold them now. |
-| The `watch`/`broadcast` **push** read surface (consumers notified on change) | **Future (DIVERGE Option 3)** — a non-breaking change behind the `IdentityRead` port; #40 rotation pushes down the same `set_bundle` seam. No new issue. |
+| The `watch`/`broadcast` **push** read surface (consumers notified on change) | **Future (DIVERGE Option 3)** — a non-breaking change behind the `IdentityRead` port; a future external/root-rotation path pushes a rotated bundle down the same `set_bundle` seam (NOT internal SVID near-expiry reissue, which is a live `Action::IssueSvid`). No new issue. |
 | SVID **revocation** (CRL / OCSP) | **Phase 5** (whitepaper §8) — revocation-by-expiry (1h TTL) is the model. |
 | Leaf-key **zeroization** on drop | **NOT in #35 — accepted residual risk** — O2 is reachability: drop removes the entry so the key is unreachable (O2 met); memory-scrubbing the key bytes is separate hardening, out of #35 scope (explicit scoping decision, not an open question). |
+
+### Built-in CA operator composition (built-in-ca-operator-composition extension)
+
+This section extends the Application Architecture with the decisions landed by
+feature `built-in-ca-operator-composition` (folds GH #40 + GH #215, 2026-06-09).
+It is a **composition + lifecycle-completion** feature over the shipped
+`built-in-ca` (ADR-0063) and `workload-identity-manager` (ADR-0067) — nothing
+prior is rewritten; three existing seams are *completed*. Touches **ADR-0067
+rev 6** (A5 reframe, D8 + #40-boundary rewrite) and an **ADR-0063 dated
+amendment** (D-CA-4 closure). See `docs/feature/built-in-ca-operator-composition/
+feature-delta.md` for the full delta.
+
+**The load-bearing reframe (back-propagated):** #40 internal SVID near-expiry
+reissue is a reconciler **action** (`Action::IssueSvid` with a `"rotate-svid"`
+correlation), NOT a `cert_rotation` workflow. A single internal mint+swap does
+not coordinate ≥2 external steps and has no external-wait terminal — it fails the
+`.claude/rules/workflows.md` candidacy test. The prior "near-expiry → request →
+wait-for-DNS-propagation → validate → publish" 4-step framing was external-ACME
+public-cert rotation, never internal SVID reissue.
+
+#### Rotation as a reconciler action (folds #40)
+
+`SvidLifecycle::reconcile`'s `running ∧ held(near-expiry)` branch flips from a
+gated `StartWorkflow(cert_rotation)` to an unconditional `Action::IssueSvid`:
+
+- The `ROTATION_ENABLED` gate const, the `CERT_ROTATION_WORKFLOW` name, and the
+  `StartWorkflow`/`WorkflowName` imports are **deleted** (single-cut). With the
+  action reframe there is no unregistered workflow to guard against.
+- The branch emits `Action::IssueSvid { alloc_id, spiffe_id: held.spiffe_id,
+  node_id: running.node_id, correlation: identity_correlation(alloc, &held.spiffe_id,
+  "rotate-svid") }` — the **existing variant, unchanged** (no new field/flag —
+  honors "never invent API surface"). The rotate `IssueSvid` dispatches through
+  the SAME action-shim executor as first-issue and restart-reissue:
+  `issue_and_audit` mints a fresh leaf (distinct serial, new window), writes the
+  `issued_certificates` audit row, and the holder `hold`-replaces the prior entry.
+- The near-expiry threshold is **½ × `WORKLOAD_SVID_TTL` = 1800s** (verified TTL
+  = 3600s) — derived-from-TTL (persist-inputs spirit; SPIRE half-life norm), not
+  a bare literal. The `near_expiry` `<=` boundary is now a **live mutation
+  target** (the gate is gone), so its `#[mutants::skip]` and the
+  `.cargo/mutants.toml` `exclude_re` entry are removed and a boundary kill-test
+  lands in the same slice.
+
+#### Persistent CA wired into `serve` (folds #215 boot-side; closes D-CA-4)
+
+`run_server` (`overdrive-control-plane/src/lib.rs`) replaces the ephemeral
+`RcgenCa::new` + `root()` + `issue_intermediate()` block with the
+already-implemented, already-probing persistent boot path:
+
+- Construct `SystemdCredsKeyring::new()` (the `Kek` provider) +
+  `RootKeyAeadCodec::new()` + `root_kek_id()`; coerce `store` to `Arc<dyn
+  IntentStore>`.
+- `boot_ca(...).await?` (generate-or-load the KEK-sealed root, **probe-then-use**:
+  KEK-resolve probe (a) + envelope decrypt-probe (b), adopt-on-restart) then
+  `bootstrap_node_intermediate(...).await?` (generate-or-load the node
+  intermediate, adopt-on-restart).
+- Earned-Trust composition-root invariant **wire → probe → use**: a KEK-absent
+  boot returns `CaBootError::KekUnavailable` (no throwaway KEK); a tampered /
+  wrong-KEK envelope returns `CaBootError::EnvelopeDecrypt` (no silent re-mint —
+  it would orphan every issued identity). Both emit `health.startup.refused` and
+  refuse to start.
+- `ControlPlaneError::CaBoot(#[from] CaBootError)` is the dedicated typed variant
+  (never flattened to `Internal`, per `development.md` § Errors) — so the
+  composition root can `matches!` and the distinct `CaError` cause (`WrongKek` vs
+  `TamperedEnvelope`, already-split Display) survives to the operator's stderr.
+
+#### Operator-visible current SVID (folds #215 consumer-side)
+
+The `alloc status` read aggregates the append-only `issued_certificates` audit
+and surfaces the **current** cert per running alloc:
+
+- `AllocStatusResponse` gains an additive `issued_certificates:
+  Vec<IssuedCertSummary>` field (`skip_serializing_if = "Vec::is_empty"` —
+  JSON-backward-compatible). `IssuedCertSummary { serial, spiffe_id,
+  issuer_serial, not_after }` carries NO cert bytes and NO key.
+- The server reads `obs.issued_certificate_rows()` and projects, per running
+  alloc, the **max-`issuance_ordinal`** row whose `spiffe_id ==
+  SpiffeId::for_allocation(workload_id, alloc_id)` (the strictly-ordered
+  selection key; `issued_at` is retained as an audit fact, NOT the selection
+  key — a fixed `SimClock` can tie two issuances on `issued_at`). Append-only audit means many
+  rows per alloc over time (first issue + each restart re-mint + each near-expiry
+  rotate); the surface renders the current one, NOT history. A post-restart serial
+  change reads as legible recovery, not an anomaly.
+- The CLI renders `serial / spiffe_id / issuer_serial / not_after`.
+
+#### Reuse posture
+
+11 REUSE AS-IS (`boot_ca`, `bootstrap_node_intermediate`, `SystemdCredsKeyring`,
+`RootKeyAeadCodec`, `Action::IssueSvid`, the `IssueSvid` executor,
+`IssuedCertificateRow`, `issued_certificate_rows()`, `SpiffeId::for_allocation`,
+`identity_correlation`, the reconciler runtime); 2 EXTEND (additive —
+`AllocStatusResponse`, `ControlPlaneError`); 3 DELETE (single-cut — the ephemeral
+`RcgenCa` composition, the rotation gate consts, the mutation exclusion). Zero
+new dependency, zero new subsystem, zero new public API surface beyond one
+additive wire struct.
+
 ## Phase 1 workflow-primitive extension
 
 This section extends the Application Architecture with the decisions
@@ -5234,9 +5405,13 @@ the new contract lands in the same change (the only registered workflow is the
   `started_digests` now derives `input_digest = ContentHash::of(&spec.input)`
   and `spec_digest = ContentHash::of(spec.name…)` — they diverge as intended
   (discharges the engine's `TODO(#217)`). The rkyv envelope wraps the OUTER
-  `WorkflowStart`; the inner `input` stays opaque CBOR. **Unblocks
-  [#40](https://github.com/overdrive-sh/overdrive/issues/40)** (cert-rotation,
-  the validating consumer of typed input + typed output). ADR-0065 §5.
+  `WorkflowStart`; the inner `input` stays opaque CBOR. **Unblocks the first
+  external/root rotation workflow consumer** (the validating consumer of typed
+  input + typed output). *(Historical: [#40](https://github.com/overdrive-sh/overdrive/issues/40)
+  was then expected to be that first workflow consumer; SUPERSEDED — #40's
+  internal SVID near-expiry reissue is now an `Action::IssueSvid`, not a
+  workflow. The future workflow consumer is external-ACME / public-trust or
+  root-CA rotation, TBD.)* ADR-0065 §5.
 
 **C4 — Container (L2), the body-contract + spec-input reshape.** Containers
 are the same Rust crates as §97/§98; what changes is the *body return type*,
@@ -5253,7 +5428,7 @@ C4Container
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "replay_equivalence_provision_record asserts Completed{output} projection; NEW WorkflowTerminalStatusProjection invariant (Err(TerminalError)→Failed round-trips). SimJournalStore carries WorkflowStatus.")
     ContainerDb(redb, "redb file (shared substrate)", "ACID KV", "ViewStore tables + __wf_journal__ (CBOR LoadedEntry, Terminal now carries WorkflowStatus) + workflow-instance intent (rkyv WorkflowStartEnvelope). One Arc<Database>.")
   }
-  Rel(devon, core, "impl Workflow { type Output=CertOutput; type Input=CertSpec; run -> Result<Output, TerminalError> } (#40)")
+  Rel(devon, core, "impl Workflow { type Output=CertOutput; type Input=CertSpec; run -> Result<Output, TerminalError> } (future external/root rotation; NOT #40 — #40 is an Action::IssueSvid)")
   Rel(ctrl, core, "ErasedWorkflowAdapter erases Output/Input to CBOR; engine drives run_erased; maps to WorkflowStatus")
   Rel(ctrl, redb, "RedbJournalStore append (Terminal{status}) ; IntentStore put/get full WorkflowStart via rkyv envelope codec")
   Rel(sim, core, "DST asserts the body-return → status-projection mapping")
@@ -5310,25 +5485,29 @@ C4Component
 | Functional suitability — correctness | The durable terminal carries no engine-derived non-deterministic value | Typed `WorkflowStatus`; bounded `TerminalError` (D2/D3); closes the `reason: String` hazard |
 | Reliability — recoverability | Terminal replays losslessly incl. the typed output bytes | `Completed{output}` in journal `Terminal` + obs row; short-circuit re-publishes (§91 carried forward) |
 | Reliability — fault tolerance | Retryable failures never end the workflow; budget exhaustion is engine-minted | D4 engine-owned retry; `WorkflowBudgetExhaustionMintsTerminal` DST invariant (Slice 04) |
-| Maintainability — modifiability | Author writes domain types, not status variants | typed `Output`/`Input`; #40 cert-rotation is the consumer |
+| Maintainability — modifiability | Author writes domain types, not status variants | typed `Output`/`Input`; the future external-ACME / public-trust or root-CA rotation workflow is the consumer (NOT #40 — #40's internal SVID reissue is an `Action::IssueSvid`) |
 | Maintainability — testability | The erasure adapter + body-return→status mapping are unit/DST testable | `ErasedWorkflowAdapter` isolated; `WorkflowTerminalStatusProjection` invariant |
 | Maintainability — modifiability | Parameter-bearing durable intent evolves safely | `WorkflowStartEnvelope` (rkyv V1) + golden-bytes schema-evolution fixture (ADR-0048) |
 
 ### External integrations — none (carried forward from §96)
 
 This feature reshapes types and the engine's body-contract; no new external
-boundary. When cert-rotation (#40) lands its ACME/DNS effects (Phase 3+), the
-`ctx.run` closure is the contract-test seam (Pact-shaped) — annotated for the
-platform-architect handoff, unchanged from §96.
+boundary. When the future external-ACME / public-trust (or root-CA) rotation
+workflow lands its ACME/DNS effects (Phase 3+), the `ctx.run` closure is the
+contract-test seam (Pact-shaped) — annotated for the platform-architect
+handoff, unchanged from §96. *(This was historically framed as #40; SUPERSEDED
+— #40 is the now-closed internal SVID near-expiry reissue, an
+`Action::IssueSvid`, with no ACME/DNS effects.)*
 
 ## Changelog
 
 | Date | Change |
 |---|---|
-| 2026-06-06 | **workflow-result-error-model — body returns `Result<Output, TerminalError>`; status enum becomes an engine-owned projection; typed `WorkflowStart.input` (ADR-0065 amends ADR-0064 §2/§3/§5/§6).** PROPOSE mode, evidence base = the 4-platform research (Restate/Temporal/DBOS/Step Functions, High confidence) — no DISCUSS wave. Adds the "Phase 1 workflow-result-error-model extension" section (§ body-contract reshape, D1–D5, C4 L2+L3, Reuse Analysis, quality scenarios) and ADR-0065 to the index; marks ADR-0064 §2/§3/§5/§6 amended. Greenfield single-cut: `WorkflowResult` deleted, new contract lands in the same change (only the `provision-record` test fixture is registered). Resolves #217 (input_digest off parameter bytes), unblocks #40 (cert-rotation). — Morgan. |
+| 2026-06-11 | **built-in-ca-operator-composition DELIVERED** (GH #215 boot-side + #40 near-expiry rotation; folds both into one composition feature over the shipped built-in CA (ADR-0063) + SVID lifecycle (ADR-0067)). Three moves, 8 DES steps all COMMIT/PASS, no new subsystem and no new dependency: (1) `SvidLifecycle` near-expiry branch flips from a gated `StartWorkflow(cert_rotation)` seam to an **unconditional rotate `Action::IssueSvid`** (`"rotate-svid"` correlation; the `ROTATION_ENABLED` gate + `cert_rotation` workflow name single-cut retired) — internal SVID near-expiry reissue is a reconciler ACTION, NOT a workflow; threshold = ½ × `WORKLOAD_SVID_TTL` (1800s, derived). (2) `run_server` boots the **persistent KEK-sealed workload-identity root** via `boot_ca` + `bootstrap_node_intermediate` (single-cut replacing the ephemeral `RcgenCa` block; closes the D-CA-4 "CA not wired into serve" deferral); `ControlPlaneError::CaBoot(#[from] CaBootError)` carries cause-distinct refuse-to-start. The `Kek` provider is a **mandatory injected `ServerConfig.kek`** field (`Default` removed, `ServerConfig::new(kek)` added — production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject hermetic `SimKek::for_boot()`), the C1-AMEND fix for the inline-production-binding cold-boot regression. (3) `overdrive alloc status` surfaces the current issued-cert summary (`serial / spiffe_id / issuer_serial / not_after`, NO cert bytes/key) via an additive `AllocStatusResponse.issued_certificates`, projecting the **max-`issuance_ordinal`** row per running alloc — a new monotonic `IssuanceOrdinal` newtype (D1-AMEND) replaces the equal-`issued_at` tie that surfaced a stale cert. Back-propagates the "#40 = cert-rotation workflow" conflation correction into ADR-0067 (rev 7), ADR-0063 (amendment), and `.claude/rules/workflows.md`. Quality: adversarial review APPROVE 0 blockers; mutation 100% kill (45 mutants, 0 missed); 1645 tests pass. EDD D01/O04/E03 `satisfied` (different-fox audited); O05 `pending` (operator-CLI capture needs a disposable full-system VM, #227). The `issuance_ordinal` append-only precondition is tracked for the first future delete-path (Phase-5 revocation) at #226. Evolution: `docs/evolution/2026-06-11-built-in-ca-operator-composition.md`. — Morgan. |
+| 2026-06-06 | **workflow-result-error-model — body returns `Result<Output, TerminalError>`; status enum becomes an engine-owned projection; typed `WorkflowStart.input` (ADR-0065 amends ADR-0064 §2/§3/§5/§6).** PROPOSE mode, evidence base = the 4-platform research (Restate/Temporal/DBOS/Step Functions, High confidence) — no DISCUSS wave. Adds the "Phase 1 workflow-result-error-model extension" section (§ body-contract reshape, D1–D5, C4 L2+L3, Reuse Analysis, quality scenarios) and ADR-0065 to the index; marks ADR-0064 §2/§3/§5/§6 amended. Greenfield single-cut: `WorkflowResult` deleted, new contract lands in the same change (only the `provision-record` test fixture is registered). Resolves #217 (input_digest off parameter bytes), unblocks the first external/root rotation workflow consumer. *(Historical: written as "unblocks #40 (cert-rotation)"; SUPERSEDED — #40's internal SVID reissue is now an `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* — Morgan. |
 | 2026-06-06 | **built-in-ca Reuse-Analysis correction — `ObservationStore` is EXTEND (additive), not REUSE AS-IS (DELIVER back-propagation).** The `issued_certificates` audit row first shipped via a non-compliant concrete-adapter bypass (a parallel redb table + inherent methods on `LocalObservationStore`, which was NOT DST-testable because it never routed through the port). The user directed the correction (2026-06-06) to the faithful "mirroring `AllocStatusRow`/`NodeHealthRow`" shape ADR-0063 D6 always intended: the audit now routes through the `ObservationStore` trait on BOTH `LocalObservationStore` and `SimObservationStore` (commit `aab5a69b`). The fix added TWO purely-additive trait members — `ObservationRow::IssuedCertificate(IssuedCertificateRow)` (a new enum variant, like the 5 existing sibling rows) and `ObservationStore::issued_certificate_rows()` (a typed reader mirroring `alloc_status_rows()`/`node_health_rows()`/`service_backends_rows()`). NO existing `ObservationStore` method signature changed; the additions grow the enum + reader exactly as every prior observation row did. The brief's Reuse-Analysis row + verdict tally are corrected (ObservationStore: REUSE AS-IS → EXTEND; tally 6 REUSE-AS-IS → 5 REUSE-AS-IS + 1 EXTEND); ADR-0063 D6 gains a one-line clarification of what "mirroring `AllocStatusRow`/`NodeHealthRow`" means (additive variant + reader through the port on both adapters, not a concrete-adapter-only surface). No prior decision reversed — D6 always specified the observation-row pattern; this only corrects a brief line that had become factually stale relative to the landed, DST-testable shape. — Morgan. |
 | 2026-06-06 | **built-in-ca `issue_svid` contract clarification — single-URI-SAN enforced by TYPE, not an adapter runtime guard (Option A; DELIVER-surfaced).** DELIVER step 04 found the `Ca::issue_svid` rustdoc + the brief/ADR trait-contract prose claimed the adapter "rejects an empty or oversized SAN set with `CaError::InvalidSan` before any cert" — a rejection the request type (`SvidRequest { spiffe_id: SpiffeId }`, one validated identity by construction) makes *unreachable* (aspirational-doc bug per `development.md` § "No aspirational docs"). User ratified **Option A — type-enforced** (2026-06-06) on the strength of `docs/research/security/svid-request-cardinality-enforcement-research.md` (committed `b6a5278b`; SPIFFE X.509-SVID §2 "exactly one URI SAN" + §5.2 places the runtime MUST-reject at the *relying party*, not the issuer; SPIRE reference impl carries a single `spiffeid.ID` not a SAN slice; "parse, don't validate"). The `## built-in-ca extension` § "`Ca` trait surface" prose is corrected to the three-layer enforcement-location statement: (1) the request type makes ≠1 unrepresentable; (2) the pure-core `CertSpec::svid(Vec<SpiffeId>)` parse is the single fallible boundary (rejects 0/≥2, tested at L1 by S-04-02); (3) the runtime reject lives at the verifier (#26), not `issue_svid`. ADR-0063 D5 gains the same enforcement-location note + an Amendments changelog entry; the `Ca` trait SIGNATURE is unchanged (no widening — `SvidRequest` is correct under Option A). DISTILL scenarios S-04-09 + S-04-10 (which tested the type-unreachable adapter path) are RETIRED as redundant under Option A (S-04-08 already asserts host single-URI-SAN; S-04-06 asserts cross-adapter SAN-cardinality equivalence; S-04-02 tests the live `CertSpec` parse reject); built-in-ca scenario count 39 → 37, `@error` 15/39 → 13/37 (non-gating DISTILL metric, accepted as a consequence of the type-honest design). No prior decision reversed — D5 already put policy in core; this only pins WHERE the runtime reject lives and retires the aspirational claim. The crafter applies the corrected `issue_svid` rustdoc + retires the two scaffolds. — Morgan. |
-| 2026-06-05 | **built-in-ca extension** (GH #28 [2.6]; GUIDE mode — locked decisions from 2026-06-05 Q&A). New `## built-in-ca extension` section under Application Architecture. Added ADR-0063 (built-in CA: `Ca` port trait in `overdrive-core` [pure, no rcgen — dst-lint boundary verified: core is `crate_class = "core"`, bans `rand::*`/FFI] + `RcgenCa` host adapter [all rcgen 0.14.8 `features = ["ring", "pem"]` (bump from current 0.13.2 pin — DELIVER first-compile prerequisite; extension APIs stable 0.13→0.14, builder API changed so `mint_ephemeral_ca` migrates too)/crypto-backend (`ring` today; aws-lc-rs + FIPS pending #204)/HKDF/AES-256-GCM] + `SimCa` sim adapter [fixture P-256 keys, `SeededEntropy` serials]; 3-tier self-signed-P-256-root → pathLen=0-intermediate → single-URI-SAN-SVID hierarchy, single-node = one intermediate). **Reconciliation A resolved**: root-key AEAD = HKDF-SHA256-derive a per-use subkey from the kernel-keyring KEK → AES-256-GCM (passphrase-KDF dropped; HKDF buys domain-separation + rotation seam for #40/HSM). **Reconciliation B resolved**: pure `CertSpec` builder in core owns cert-extension policy (single-URI-SAN rejection, pathLen=0, keyUsage sets — DST-testable), host adapter translates `CertSpec → rcgen::CertificateParams`. Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore (intent, never observation — whitepaper §4); KEK in Linux kernel keyring, delivered per-boot by systemd-creds (TPM/host-key root-of-trust), `OVERDRIVE_CA_KEK` dev-only fallback. Refuse-to-start (`health.startup.refused`) on decrypt failure — never silent re-mint. Serials via `Entropy` (DST-deterministic); key-gen via backend CSPRNG (not injectable, research F11). `issued_certificates` ObservationStore audit row (research F15). Earned-Trust probe (wire→probe→use): KEK-present + envelope-decrypt + credential-present, refuse-to-start on failure. `tests/integration/ca_equivalence.rs` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only — `tls_bootstrap.rs` keeps serving the control-plane-HTTPS / operator-CLI consumer (Phase 5 / #81 replaces it). C4 L1+L2+L3 (Mermaid) added at `c4-diagrams.md` § "Built-in CA". Reuse: 6 REUSE-AS-IS (`IntentStore`/`ObservationStore`/`Entropy`/`SpiffeId`/`CertSerial`/`NodeId`/`VersionedEnvelope`), 1 REUSE-proven-via-new-adapter (rcgen usage from `mint_ephemeral_ca`), 1 LEAVE-AS-IS-distinct-consumer (`tls_bootstrap.rs`), 8 CREATE-NEW (justified). Deferrals all cite existing issues: #40 rotation (needs #39), #36 multi-node CA, #104/#83 multi-region, #81/Phase 5/7 operator-auth/revocation, separate consumer feature for mTLS+kTLS. ADR index grows by 1 (0063). No roadmap (DELIVER owns that). — Morgan. |
+| 2026-06-05 | **built-in-ca extension** (GH #28 [2.6]; GUIDE mode — locked decisions from 2026-06-05 Q&A). New `## built-in-ca extension` section under Application Architecture. Added ADR-0063 (built-in CA: `Ca` port trait in `overdrive-core` [pure, no rcgen — dst-lint boundary verified: core is `crate_class = "core"`, bans `rand::*`/FFI] + `RcgenCa` host adapter [all rcgen 0.14.8 `features = ["ring", "pem"]` (bump from current 0.13.2 pin — DELIVER first-compile prerequisite; extension APIs stable 0.13→0.14, builder API changed so `mint_ephemeral_ca` migrates too)/crypto-backend (`ring` today; aws-lc-rs + FIPS pending #204)/HKDF/AES-256-GCM] + `SimCa` sim adapter [fixture P-256 keys, `SeededEntropy` serials]; 3-tier self-signed-P-256-root → pathLen=0-intermediate → single-URI-SAN-SVID hierarchy, single-node = one intermediate). **Reconciliation A resolved**: root-key AEAD = HKDF-SHA256-derive a per-use subkey from the kernel-keyring KEK → AES-256-GCM (passphrase-KDF dropped; HKDF buys domain-separation + rotation seam for future KEK/root-CA rotation + HSM). **Reconciliation B resolved**: pure `CertSpec` builder in core owns cert-extension policy (single-URI-SAN rejection, pathLen=0, keyUsage sets — DST-testable), host adapter translates `CertSpec → rcgen::CertificateParams`. Root key at rest = rkyv `RootCaKeyEnvelope` (ADR-0048) in IntentStore (intent, never observation — whitepaper §4); KEK in Linux kernel keyring, delivered per-boot by systemd-creds (TPM/host-key root-of-trust), `OVERDRIVE_CA_KEK` dev-only fallback. Refuse-to-start (`health.startup.refused`) on decrypt failure — never silent re-mint. Serials via `Entropy` (DST-deterministic); key-gen via backend CSPRNG (not injectable, research F11). `issued_certificates` ObservationStore audit row (research F15). Earned-Trust probe (wire→probe→use): KEK-present + envelope-decrypt + credential-present, refuse-to-start on failure. `tests/integration/ca_equivalence.rs` DST test enforces the trait contract. Supersedes ADR-0010 for *workload identity* only — `tls_bootstrap.rs` keeps serving the control-plane-HTTPS / operator-CLI consumer (Phase 5 / #81 replaces it). C4 L1+L2+L3 (Mermaid) added at `c4-diagrams.md` § "Built-in CA". Reuse: 6 REUSE-AS-IS (`IntentStore`/`ObservationStore`/`Entropy`/`SpiffeId`/`CertSerial`/`NodeId`/`VersionedEnvelope`), 1 REUSE-proven-via-new-adapter (rcgen usage from `mint_ephemeral_ca`), 1 LEAVE-AS-IS-distinct-consumer (`tls_bootstrap.rs`), 8 CREATE-NEW (justified). Deferrals all cite existing issues: #40 rotation (needs #39) *(historical framing, SUPERSEDED 2026-06-09 by `built-in-ca-operator-composition` rev 6 — #40's internal SVID near-expiry reissue is now a live `Action::IssueSvid`, NOT a workflow and does NOT need #39; only future external-ACME / public-trust or root-CA rotation stays workflow-shaped)*, #36 multi-node CA, #104/#83 multi-region, #81/Phase 5/7 operator-auth/revocation, separate consumer feature for mTLS+kTLS. ADR index grows by 1 (0063). No roadmap (DELIVER owns that). — Morgan. |
 | 2026-06-06 | **Workflow journal command/notification split (§98; ADR-0066/0064 amended)** — feature `workflow-journal-command-notification-split` (GUIDE-mode Q1–Q6, user-ratified). Types the journal stream so the positional replay cursor advances ONLY over replayable command entries, closing a latent replay-corruption trap (`Started` documented as the journal's first entry but never engine-written; the positional cursor cannot consume a non-`await` entry at a walked position). **Q1** — single 7-variant `JournalEntry` → `JournalCommand` (`Started`/`RunResult`/`SleepArmed`/`SignalAwaited`/`ActionEmitted`/`Terminal`, advance the cursor) + `JournalNotification` (`SignalSeen`, `SignalKey`-correlated, off the walk) + a `LoadedEntry = Command | Notification` boundary sum (the on-disk/append/load shape); "make invalid states unrepresentable." No `#[serde(tag="v")]` envelope bump — greenfield single-cut. **Q2** — partition at the cursor: `load_journal` returns flat `Vec<LoadedEntry>`; `JournalCursorHandle::new`/`new_with_channels` partitions once into `Vec<JournalCommand>` + `BTreeMap<SignalKey, JournalNotification>`; retires the `*cursor += 2` two-positional-entry signal walk; "crashed while blocked" = `SignalAwaited` command present, no matching `SignalSeen` notification. **Q3** — redb key stays `(WorkflowId, u32)` = storage append-position over ALL entries (`next_step` count-all UNCHANGED); command-index derived at the cursor; `Started` = command-index 0; storage-step ≠ command-index by design. **Q4** — determinism gate Layers 1+2 fail-closed (`WorkflowCtxError::NonDeterministic`): Layer 1 type-at-index (Restate RT0016 shape, CLOSES the silent-fall-to-live twin), Layer 2 name within `RunResult`; **Layer 3 content/digest DEFERRED → [#214](https://github.com/overdrive-sh/overdrive/issues/214)**. **Q5** — in-entry `step: u32` DROPPED from all variants (identity structural; "persist inputs, not derived state"); DELIVER verifies no reader. **Q6** — minimal notification model (no general `NotificationId`); `replay_equivalence_provision_record` (verbatim name) EXTENDED with the `Started`-at-command-index-0 + notification-not-as-command cursor-advance guard (K1 effect-fires-0-times + K4 byte-identical command sequence) — the guard that would have caught the trap. ADR-0066 `## Changed Assumptions` CA-1..CA-4; ADR-0064 `## Changed Assumptions` CA-5..CA-7. Reuse: EXTEND-dominant, 1 genuinely-new type (`LoadedEntry` boundary sum), zero new components. C4 System Context (L1, largely unchanged) + Container (L2, the journal/engine/cursor/store reshape) added as Mermaid in §98. Restate evidence: `docs/research/workflow/restate-journal-replay-model.md`. Forward pointers: #205 (HA cross-node resume — not precluded) + #214 (determinism Layer 3) only; no GH issues created. No assumptions changed beyond the trap correction; §89–§93 not rewritten. — Morgan. |
 | 2026-06-05 | **Phase 1 workflow-primitive extension (§89–§97)** — the §18 durable-async `Workflow` primitive (GH #39, roadmap [3.2]). Architecture locked to B′ per DIVERGE/DISCUSS. Added **ADR-0066** (workflow `await`-point journal — a **second redb table layout** on the shared runtime-owned substrate `<data_dir>/reconcilers/memory.redb`, distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`; **CBOR via `ciborium`** per ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — additive entry-variants per slice ride `#[serde(default)]`; fsync-then-suspend ordering + Earned-Trust `probe()` reused verbatim; resolves DIVERGE D4/open-Q3 in favour of redb per R2, supersedes the pre-DIVERGE whitepaper "per-primitive libSQL" phrasing). Added **ADR-0064** (`Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowStart` in NEW `overdrive-core::workflow` — no tokio in core; durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**; engine↔lifecycle-reconciler boundary — the workflow-lifecycle reconciler stays a pure-sync ADR-0035 reconciler emitting `Action::StartWorkflow` and observing terminal rows, the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`; check-then-record journal replay ⇒ bit-identical replay K4; `ctx` surface additive per slice — `call`/`sleep`/`wait_for_signal`/`emit_action`; `WorkflowResult` distinct from `TerminalCondition`). Reuse: 6 EXTEND/REUSE, 2 DO-NOT-REUSE-(relate), 2 CREATE NEW. EXTENDED: `Action::StartWorkflow` placeholder, `WorkflowStart` placeholder (made concrete), `ReplayEquivalentEmptyWorkflow` invariant (graduated to `replay_equivalence_provision_record`, the load-bearing K4 invariant), action-shim no-op `StartWorkflow` arm (`action_shim/mod.rs:446`), `CorrelationKey`/`HttpCall`/`Transport` machinery. REUSED substrate+discipline (CREATE NEW port): the `RedbViewStore` redb file + `Arc<Database>` + codec + fsync-ordering + probe. CREATE NEW: `JournalStore`/`RedbJournalStore`/`SimJournalStore`, `WorkflowEngine`. No new external dep (redb + ciborium + async_trait already in graph). No external integrations; no contract tests this phase (ACME boundary lands Phase 3+). Single-node scope (D3); cross-node resume not precluded. Deferrals #205–#209 cited by real issue number; no design element hinges on code-graph hashing (R1). C4 L1+L2+L3 added at `c4-diagrams.md` § Phase 1 Workflow Primitive. Outcome Collision Check: N/A (no `docs/product/outcomes/registry.yaml`). — Morgan. |
 | 2026-04-21 | Initial Application Architecture section (Phase 1 foundation) — Morgan. |

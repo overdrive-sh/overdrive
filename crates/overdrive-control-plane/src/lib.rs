@@ -559,6 +559,31 @@ pub struct ServerConfig {
     /// controls time.
     pub clock: Arc<dyn Clock>,
 
+    /// Injected [`Kek`] provider used by the workload-identity CA boot path
+    /// (`boot_ca` / `bootstrap_node_intermediate`) to resolve the
+    /// `overdrive-ca-root` key-encryption key that seals the persistent root
+    /// at rest (ADR-0063 D3/D6).
+    ///
+    /// **Mandatory by design — no `Default`, no `Option`-override.** Production
+    /// composes `SystemdCredsKeyring::new()` (the Linux kernel keyring binding)
+    /// at the CLI `serve` boundary; tests inject a hermetic in-process double
+    /// (`overdrive_sim::adapters::SimKek::for_boot()`) so the boot's KEK-resolve
+    /// probe succeeds with no `$CREDENTIALS_DIRECTORY` / kernel-keyring
+    /// dependency. The field is mandatory specifically so a boot site that
+    /// forgets the KEK **fails to compile** rather than silently inheriting the
+    /// production binding and refusing to start in a cold environment — the
+    /// exact regression this seam closes. See `.claude/rules/development.md`
+    /// § "Port-trait dependencies" and feature-delta § C1-AMEND. Because a
+    /// mandatory `Arc<dyn Kek>` cannot be defaulted to a benign value,
+    /// `ServerConfig` has **no `Default` impl**; use
+    /// [`ServerConfig::new`](Self::new) + the `..ServerConfig::new(kek)`
+    /// rest-pattern instead.
+    ///
+    /// Excluded from [`Debug`] — `Arc<dyn Kek>` is not [`Debug`].
+    ///
+    /// [`Kek`]: overdrive_core::ca::kek::Kek
+    pub kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+
     /// `[node]` config block per ADR-0025 (amended by ADR-0029).
     /// Carries the operator-supplied `id_override` (hostname fallback
     /// when `None`), `region` (Phase 1 default `"local"`), and
@@ -693,6 +718,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("operator_config_dir", &self.operator_config_dir)
             .field("tick_cadence", &self.tick_cadence)
             .field("clock", &"<dyn Clock>")
+            .field("kek", &"<dyn Kek>")
             .field("node", &self.node)
             .field("vip_range", &"<VipRange>")
             .field("dataplane", &self.dataplane)
@@ -708,22 +734,35 @@ impl std::fmt::Debug for ServerConfig {
     }
 }
 
-impl Default for ServerConfig {
-    /// `bind`, `data_dir`, and `operator_config_dir` get sentinel
-    /// values that callers MUST override; the `Default` impl exists
-    /// exclusively to make `..Default::default()` rest-pattern
-    /// construction ergonomic for test fixtures that override the
-    /// three required fields.
+impl ServerConfig {
+    /// Construct a `ServerConfig` with the **mandatory** `kek` provider and
+    /// every other field set to its prior `Default` value.
     ///
-    /// `tick_cadence` defaults to [`reconciler_runtime::DEFAULT_TICK_CADENCE`]
-    /// (100ms) and `clock` defaults to `Arc::new(SystemClock)` from
-    /// the [`overdrive_host`] crate — the only crate permitted to
-    /// instantiate `SystemClock` per CLAUDE.md "Repository structure".
-    /// Tests that need a controllable clock construct the
-    /// `ServerConfig` directly with `clock: Arc::new(SimClock::new())`.
-    fn default() -> Self {
+    /// Replaces the removed `impl Default for ServerConfig`: the [`Kek`] port
+    /// binding MUST be supplied explicitly (production composes
+    /// `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a
+    /// hermetic `SimKek::for_boot()`) so a boot site that forgets it fails to
+    /// **compile**, never inherits the production binding and refuses to start
+    /// in a cold environment. See feature-delta § C1-AMEND and
+    /// `.claude/rules/development.md` § "Port-trait dependencies".
+    ///
+    /// Fixtures swap `..Default::default()` → `..ServerConfig::new(test_kek)`:
+    /// the rest-pattern still supplies every non-`kek` field, while `kek` is
+    /// now an explicit, type-checked argument.
+    ///
+    /// `bind`, `data_dir`, and `operator_config_dir` get sentinel values that
+    /// callers MUST override (as under the prior `Default`). `tick_cadence`
+    /// defaults to [`reconciler_runtime::DEFAULT_TICK_CADENCE`] (100ms) and
+    /// `clock` to `Arc::new(SystemClock)` from the [`overdrive_host`] crate —
+    /// the only crate permitted to instantiate `SystemClock` per CLAUDE.md
+    /// "Repository structure". Tests that need a controllable clock override
+    /// `clock` in the same struct literal.
+    ///
+    /// [`Kek`]: overdrive_core::ca::kek::Kek
+    #[must_use]
+    pub fn new(kek: Arc<dyn overdrive_core::ca::kek::Kek>) -> Self {
         // 127.0.0.1:0 — IPv4 loopback, ephemeral port. Constructed
-        // directly rather than via `parse()` so the `Default` impl
+        // directly rather than via `parse()` so the constructor
         // is infallible and clippy's `expect_used` lint stays clean.
         let loopback = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
         Self {
@@ -732,6 +771,7 @@ impl Default for ServerConfig {
             operator_config_dir: PathBuf::new(),
             tick_cadence: DEFAULT_TICK_CADENCE,
             clock: Arc::new(overdrive_host::SystemClock),
+            kek,
             node: overdrive_worker::NodeConfig::default(),
             vip_range: VipRange::default(),
             // ADR-0061 § 1 (step 01-03): `Default` populates the
@@ -1573,25 +1613,62 @@ pub async fn run_server_with_obs_and_driver(
         Arc::clone(&obs),
     ));
 
-    // ADR-0067 D3 rev 4 — compose the EPHEMERAL workload CA into the
-    // production AppState. A fresh in-memory P-256 root is minted each boot
-    // (cached in `RcgenCa` via `RaceOnceCell`); the node intermediate is
-    // signed by it; the trust bundle seeds the `IdentityMgr` so relying
-    // parties can verify SVIDs from boot. The `IssueSvid` executor (the ONE
-    // place workload-CA I/O happens) mints leaves off this CA on demand.
-    //
-    // This is EPHEMERAL: NO KEK, NO persistence, NOT `boot_ca` — the original
-    // Phase-2 plan. The persistent KEK-backed root + operator-render surface
-    // are GH #215 (blocked on #35); do NOT wire `boot_ca` /
-    // `SystemdCredsKeyring` here. All `Ca` methods are SYNC, `Result`-returning
-    // (no `.await`); their typed `CaError` maps into `ControlPlaneError::Ca`
-    // via the dedicated `#[from]` variant (never flattened to `Internal`).
+    // Persistent, KEK-sealed workload-identity root (#215 boot-side; closes
+    // D-OC-4). Single-cut replacement of the prior EPHEMERAL per-boot root:
+    // `boot_ca` runs the Earned-Trust probes (KEK-resolve (a), envelope-decrypt
+    // (b)) and generate-or-adopt, then `bootstrap_node_intermediate` does the
+    // same for the node intermediate — both threading the real redb store path
+    // so a refuse-to-start remediation names the actual file to inspect/delete.
+    // A boot failure propagates through `?` as the typed
+    // `ControlPlaneError::CaBoot` (the `#[from]` landed in 02-01) — never
+    // flattened to `Internal` — surfacing its cause-distinct message. The
+    // adopted root/intermediate are cached inside the `RcgenCa`, so the trust
+    // bundle below is built from the ADOPTED root (not a fresh per-boot one),
+    // seeding `IdentityMgr` relying-party verification from boot. The `IssueSvid`
+    // executor (the ONE place workload-CA I/O happens) mints leaves off this
+    // adopted CA on demand. This is the WORKLOAD-identity CA only; the separate
+    // operator/control-plane HTTPS CA (`mint_ephemeral_ca`) is ephemeral by
+    // design and untouched.
     let ca_subject = overdrive_core::SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
         .unwrap_or_else(|e| unreachable!("CA trust-domain subject is a valid SPIFFE URI: {e}"));
     let ca: Arc<dyn Ca> =
         Arc::new(overdrive_host::ca::RcgenCa::new(Arc::new(overdrive_host::OsEntropy), ca_subject));
-    ca.root()?; // ephemeral P-256 root (cached in RcgenCa via RaceOnceCell)
-    ca.issue_intermediate(&node_id)?; // node intermediate signed by root (cached)
+
+    // The `Kek` provider is INJECTED through `config.kek` (§ C1-AMEND), NOT
+    // constructed inline. Production composes `SystemdCredsKeyring::new()` at
+    // the CLI `serve` boundary; tests inject a hermetic `SimKek::for_boot()`.
+    // Inline construction here (the prior `SystemdCredsKeyring::new()`) forced
+    // the production kernel-keyring binding on every test fixture and refused
+    // to boot in a cold environment — the regression this seam closes. Both
+    // `boot_ca` and `bootstrap_node_intermediate` already take `&dyn Kek`, so
+    // only the SOURCE of the `&dyn Kek` changes (REUSE-AS-IS).
+    let codec = overdrive_host::ca::RootKeyAeadCodec::new();
+    let kek_id = ca_boot::root_kek_id();
+    let intent_store: Arc<dyn IntentStore> = Arc::clone(&store) as Arc<dyn IntentStore>;
+
+    let _root = ca_boot::boot_ca(
+        ca.as_ref(),
+        config.kek.as_ref(),
+        &kek_id,
+        &codec,
+        &intent_store,
+        &store_path,
+    )
+    .await?;
+    let _intermediate = ca_boot::bootstrap_node_intermediate(
+        ca.as_ref(),
+        &node_id,
+        &intent_store,
+        config.kek.as_ref(),
+        &kek_id,
+        &codec,
+        &store_path,
+    )
+    .await?;
+
+    // Bundle is built from the ADOPTED CA (the `RcgenCa` now holds the
+    // persistent root/intermediate); `IdentityMgr` seeds relying-party
+    // verification from boot.
     let bundle = ca.trust_bundle()?;
     let identity: Arc<IdentityMgr> = Arc::new(IdentityMgr::new(Some(bundle)));
 

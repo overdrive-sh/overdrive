@@ -959,4 +959,78 @@ async fn svid_is_reissued_on_demand_without_control_plane_restart() {
         2,
         "each on-demand re-issue writes its own issued_certificates row (no restart needed)"
     );
+
+    // AND the two same-tick issuances carry DISTINCT, strictly-increasing
+    // issuance ordinals even though their `issued_at` ties (both stamped from the
+    // SAME `FixedClock::at_unix_secs(1_700_000_005)`). This is the equal-`issued_at`
+    // case the deterministic SimClock produces (ca_boot_and_audit re-issue on a
+    // fixed clock); the ordinal — not the timestamp — is what makes the second
+    // issuance unambiguously outrank the first, so the consumer's max-ordinal
+    // "current cert" projection selects the newest deterministically
+    // (feature-delta § D1-AMEND-2 / D1-AMEND-5 iii).
+    let first_row = rows
+        .iter()
+        .find(|r| r.serial == *first.serial())
+        .expect("first issuance's audit row is present");
+    let second_row = rows
+        .iter()
+        .find(|r| r.serial == *second.serial())
+        .expect("second (re-issue) audit row is present");
+    assert_eq!(
+        first_row.issued_at, second_row.issued_at,
+        "both same-tick issuances share an equal `issued_at` (the tie the ordinal exists to break)"
+    );
+    assert_ne!(
+        first_row.issuance_ordinal, second_row.issuance_ordinal,
+        "same-tick re-issues must carry DISTINCT ordinals (the ordinal is the recency tiebreaker, \
+         not `issued_at`)"
+    );
+    assert!(
+        second_row.issuance_ordinal > first_row.issuance_ordinal,
+        "the later issuance must STRICTLY outrank the earlier ({} must exceed {})",
+        second_row.issuance_ordinal,
+        first_row.issuance_ordinal,
+    );
+    // The source is the count of pre-existing rows: first-ever issuance is rank 0,
+    // the next rank 1. Pin the deterministic sequence (kills a mutation that
+    // sources the ordinal from anything other than the durable row count).
+    assert_eq!(
+        first_row.issuance_ordinal.as_u64(),
+        0,
+        "the first-ever issuance against a fresh store is rank 0 (count of zero prior rows)"
+    );
+    assert_eq!(
+        second_row.issuance_ordinal.as_u64(),
+        1,
+        "the second issuance is rank 1 (count of one prior row)"
+    );
+
+    // AND a post-"restart" reissue — a FRESH issuance seam over the SAME persisted
+    // store (the audit log survives; the held SVID set does not, D-OC-6) — strictly
+    // OUTRANKS every pre-restart ordinal, because its count read includes every
+    // pre-restart row (S-OC-12: a post-restart serial change reads as the CURRENT
+    // cert, not an anomaly). This is cross-restart monotonicity as a property of
+    // the source, not something the design bolts on.
+    let third =
+        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
+            .await
+            .expect("post-restart re-issue against the SAME persisted store succeeds");
+    let rows_after = audit.issued_certificate_rows().await.expect("read back audit rows");
+    let third_row = rows_after
+        .iter()
+        .find(|r| r.serial == *third.serial())
+        .expect("post-restart audit row is present");
+    assert!(
+        third_row.issuance_ordinal > second_row.issuance_ordinal,
+        "a reissue over the same persisted store must outrank every pre-restart ordinal ({} must \
+         exceed {})",
+        third_row.issuance_ordinal,
+        second_row.issuance_ordinal,
+    );
+    assert_eq!(
+        third_row.issuance_ordinal.as_u64(),
+        2,
+        "the third issuance is rank 2 (count of two prior persisted rows — append-only, monotonic \
+         across restart)"
+    );
 }

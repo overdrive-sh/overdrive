@@ -277,10 +277,14 @@ not describe them as present until there is:
   drivers are named in the trait but unimplemented.
 - **The ingress gateway, the policy engine, native telemetry, and the LLM
   self-healing agent.** Each is part of the design; none is wired into `serve`.
-- **Workload identity.** The built-in certificate authority that issues SPIFFE
-  SVIDs to workloads is implemented as a primitive but not wired into `serve`; the
-  operator-facing TLS above is unaffected. See the
-  [identity model](/docs/concepts/identity).
+- **Presenting workload identity on the wire.** The built-in certificate authority
+  issues, holds, and audits a SPIFFE SVID for every running allocation — that path
+  is wired into `serve`, and `alloc status` reports the result. What is not built is
+  the layer that *presents* it: the sockops/kTLS mTLS path, the gateway, and the
+  telemetry sink that would read a held SVID and put it on a connection. Identity is
+  minted and provable, not yet carried on a packet. See the
+  [identity model](/docs/concepts/identity) and the
+  [workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
 - **Cross-host load balancing.** Service traffic reaches same-host backends
   through the cgroup `connect4` path. The XDP `SERVICE_MAP` / `REVERSE_NAT_MAP`
   path that forwards to a backend on another node is built and tested but

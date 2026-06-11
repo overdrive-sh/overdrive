@@ -22,7 +22,7 @@ use overdrive_core::aggregate::{
     AggregateError, IntentKey, Job, ServiceV1, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::describe::DescribeSpecOutput;
-use overdrive_core::id::WorkloadId;
+use overdrive_core::id::{SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
 };
@@ -845,6 +845,17 @@ pub async fn cluster_status(
     ),
     tag = "observation",
 )]
+// The handler reads + 404s the intent, projects per-variant identity /
+// resources / VIP / listeners, filters rows, derives the restart budget,
+// reads the kind discriminator, and (built-in-ca #215) projects the
+// issued-certificate summary — a linear sequence of read-and-project
+// steps that reads top-to-bottom. The pure projections are already
+// extracted to `issued_certificates_for_rows` / `restart_budget_from_rows`;
+// the remaining length is irreducible orchestration.
+#[expect(
+    clippy::too_many_lines,
+    reason = "linear read-and-project orchestration; pure projections already extracted"
+)]
 pub async fn alloc_status(
     State(state): State<AppState>,
     Query(query): Query<AllocStatusQuery>,
@@ -951,6 +962,15 @@ pub async fn alloc_status(
     // exhausted?".
     let restart_budget = restart_budget_from_rows(&workload_rows);
 
+    // Built-in-ca #215 consumer-side (D-OC-7): fetch audit rows, then
+    // project per running alloc (see `issued_certificates_for_rows`).
+    let issued_cert_rows = state
+        .obs
+        .issued_certificate_rows()
+        .await
+        .map_err(|e| ControlPlaneError::internal("issued_certificate_rows", e))?;
+    let issued_certificates = issued_certificates_for_rows(&workload_rows, &issued_cert_rows);
+
     let rows: Vec<api::AllocStatusRowBody> = workload_rows
         .into_iter()
         .map(|row| {
@@ -986,7 +1006,52 @@ pub async fn alloc_status(
         kind: Some(kind),
         vip: response_vip,
         listeners,
+        issued_certificates,
     }))
+}
+
+/// Project, per RUNNING alloc, the single latest-by-`issuance_ordinal`
+/// issued-certificate audit row whose SPIFFE identity matches that alloc
+/// (built-in-ca #215 consumer-side, D-OC-7 / ADR-0067 #215-boundary).
+///
+/// The selection key is the global monotonic
+/// [`IssuanceOrdinal`](overdrive_core::id::IssuanceOrdinal), NOT
+/// `issued_at`: a fixed/seeded `SimClock` can stamp two issuances for one
+/// SPIFFE ID with an equal `issued_at`, and on that tie a `max_by_key`
+/// over the timestamp resolves by the audit store's serial-keyed iteration
+/// order — surfacing a STALE serial (a CSPRNG draw, no relation to recency)
+/// as "current". The ordinal is strictly increasing across issuances, so the
+/// newest cert is selected deterministically and recency-correctly even when
+/// the clock ties (feature-delta § D1-AMEND-4).
+///
+/// Persist-inputs discipline: projected from audit-row FACTS at read time
+/// (`serial` / `spiffe_id` / `issuer_serial` / `not_after`) — NO cert
+/// bytes, NO private key, no cached "current cert". A running alloc with no
+/// matching row contributes nothing (the empty `Vec` is omitted from the
+/// JSON response via `skip_serializing_if`). Iterates `workload_rows`
+/// (deterministic observation-store order); the result `Vec` order follows
+/// that deterministic order — no `HashMap` is introduced.
+fn issued_certificates_for_rows(
+    workload_rows: &[AllocStatusRow],
+    issued_cert_rows: &[overdrive_core::ca::issued_certificate_row::IssuedCertificateRow],
+) -> Vec<api::IssuedCertSummary> {
+    workload_rows
+        .iter()
+        .filter(|row| matches!(row.state, AllocState::Running))
+        .filter_map(|row| {
+            let spiffe = SpiffeId::for_allocation(&row.workload_id, &row.alloc_id);
+            issued_cert_rows
+                .iter()
+                .filter(|c| c.spiffe_id == spiffe)
+                .max_by_key(|c| c.issuance_ordinal)
+                .map(|c| api::IssuedCertSummary {
+                    serial: c.serial.clone(),
+                    spiffe_id: c.spiffe_id.clone(),
+                    issuer_serial: c.issuer_serial.clone(),
+                    not_after: c.not_after,
+                })
+        })
+        .collect()
 }
 
 /// Derive a [`RestartBudget`] from the durable

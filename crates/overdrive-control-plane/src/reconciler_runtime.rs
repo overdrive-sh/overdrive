@@ -1590,14 +1590,17 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // failing-and-backing-off, and emitted-but-not-yet-confirmed-held.
         //
         // Division of labour with the §18 action-emitted gate (`has_work`):
-        // on a tick that EMITS `IssueSvid` (first issue or restart recovery),
-        // the re-tick is ALREADY driven by `has_work` (an `IssueSvid` is
-        // non-`Noop`), so this predicate firing too is redundant-but-harmless
-        // — the broker collapses duplicate `(reconciler, target)` submits.
-        // This predicate is the SOLE re-enqueue driver only on a SUPPRESSED
-        // tick: a `running ∧ ¬held` alloc inside its backoff window emits a
-        // bare `Noop`, `has_work` is false, and without this arm the broker
-        // drains empty and the reconciler is never re-ticked at the deadline.
+        // on a tick that EMITS `IssueSvid` (first issue, restart recovery, OR
+        // a near-expiry rotate — ADR-0067 rev 7: rotation now bumps `retry` on
+        // emit too), the re-tick is ALREADY driven by `has_work` (an
+        // `IssueSvid` is non-`Noop`), so this predicate firing too is
+        // redundant-but-harmless — the broker collapses duplicate
+        // `(reconciler, target)` submits. This predicate is the SOLE
+        // re-enqueue driver only on a SUPPRESSED tick: a `running ∧ ¬held`
+        // alloc inside its first-issue backoff window — or, rev 7, a `running ∧
+        // held(near-expiry)` alloc mid-rotation-backoff — emits a bare `Noop`,
+        // `has_work` is false, and without this arm the broker drains empty and
+        // the reconciler is never re-ticked at the deadline.
         // That suppressed-tick path is the one pinned by
         // `svid_lifecycle_reenqueues_while_issue_backoff_pending`.
         //

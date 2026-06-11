@@ -1,0 +1,23 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask lima run -- cargo run -p overdrive-cli --bin overdrive -- cluster status`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+[1m[92m     Running[0m `/home/marcus.guest/.cargo-target-lima/debug/overdrive cluster status`
+Error: 
+   0: [91mfailed to reach overdrive control plane at https://127.0.0.1:41191/: could not connect to server
+      hint: check that the server is running and the endpoint is correct[0m
+
+Location:
+   [35mcrates/overdrive-cli/src/main.rs[0m:[35m59[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+xtask failed: 
+   0: [91mlimactl shell <cmd> failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1110[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

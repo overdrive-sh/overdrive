@@ -49,7 +49,7 @@
 use rkyv::util::AlignedVec;
 
 use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
-use crate::id::{CertSerial, NodeId, SpiffeId};
+use crate::id::{CertSerial, IssuanceOrdinal, NodeId, SpiffeId};
 use crate::traits::observation_store::ObservationStoreError;
 use crate::wall_clock::UnixInstant;
 
@@ -78,6 +78,7 @@ pub type IssuedCertificateRowLatest = IssuedCertificateRowV1;
 /// * `not_after` — end of the certificate's validity window.
 /// * `node_id` — the node whose CA minted this certificate.
 /// * `issued_at` — wall-clock observation of when issuance happened.
+/// * `issuance_ordinal` — the global monotonic issuance-order rank.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct IssuedCertificateRowV1 {
     /// Serial number of the issued certificate.
@@ -94,6 +95,11 @@ pub struct IssuedCertificateRowV1 {
     pub node_id: NodeId,
     /// Wall-clock instant the issuance was observed.
     pub issued_at: UnixInstant,
+    /// The global monotonic issuance-order rank; the consumer's current-cert
+    /// projection selects max-ordinal per SPIFFE ID — recency-correct even on
+    /// an `issued_at` tie (the equal-`issued_at` same-tick re-issue a fixed
+    /// `SimClock` produces). See feature-delta § D1-AMEND.
+    pub issuance_ordinal: IssuanceOrdinal,
 }
 
 /// Per-type rkyv versioned envelope for [`IssuedCertificateRow`]
@@ -132,13 +138,17 @@ impl VersionedEnvelope for IssuedCertificateRowEnvelope {
     /// lockstep on a `V<N+1>` bump per `development.md` § "Version-bump
     /// procedure".
     ///
-    /// Empirically located at `96` by flipping each byte of a canonical V1
+    /// Empirically located at `104` by flipping each byte of a canonical V1
     /// archive to an out-of-set tag and observing which one causes rkyv's
     /// bytecheck to surface `invalid discriminant '99' for enum
     /// 'ArchivedIssuedCertificateRowEnvelope'` (the
     /// `probe_discriminant_offset` helper in the schema-evolution fixture).
+    /// Re-pinned from `96` → `104` when the `issuance_ordinal` `u64` field was
+    /// appended to V1 (greenfield single-cut, feature-delta § D1-AMEND-3): the
+    /// 8-byte trailing field pushes the discriminant 8 bytes further from the
+    /// archive's end.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(96)
+        Some(104)
     }
 
     fn known_discriminants() -> &'static [u8] {

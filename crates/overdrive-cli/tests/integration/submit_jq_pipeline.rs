@@ -68,6 +68,8 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
     let handle = overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
     )
     .await
     .expect("serve::run");

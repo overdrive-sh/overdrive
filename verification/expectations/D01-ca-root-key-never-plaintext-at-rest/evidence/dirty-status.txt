@@ -1,0 +1,4 @@
+ M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/evidence/dirty-status.txt
+ M verification/expectations/D01-ca-root-key-never-plaintext-at-rest/runner.sh
+?? AGENTS.md
+?? docs/feature/built-in-ca-operator-composition/deliver/
