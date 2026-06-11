@@ -36,8 +36,11 @@
 //! [`issue_and_audit`] is an on-demand call on the RUNNING control plane —
 //! calling it twice for the same [`SpiffeId`] mints a FRESH leaf each time
 //! (distinct serial, new validity window) and writes a fresh audit row, with NO
-//! restart. This is the mechanism the #40 rotation workflow will later drive on
-//! a schedule; this module provides only the mechanism, not the trigger.
+//! restart. This is the mechanism the #40 near-expiry reissue *action* drives —
+//! the `SvidLifecycle` reconciler emits a `rotate-svid`-correlated
+//! `Action::IssueSvid` as a leaf nears expiry (internal SVID reissue is a
+//! reconciler action, NOT a workflow); this module provides only the mechanism,
+//! not the trigger.
 
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};

@@ -724,7 +724,9 @@ pub trait Ca: Send + Sync {
     /// request type forecloses it (see Preconditions). **Re-issue is not
     /// cached**: calling `issue_svid` twice for the *same* [`SpiffeId`] yields a
     /// **fresh** certificate each time — a distinct serial and a new validity
-    /// window (the re-issue mechanism the #40 rotation workflow drives). A
+    /// window (the re-issue mechanism the #40 near-expiry reissue *action*
+    /// drives — `SvidLifecycle`'s `rotate-svid`-correlated `Action::IssueSvid`,
+    /// a reconciler action, not a workflow). A
     /// signing-backend failure surfaces [`CaError::SigningFailed`]; an issuance
     /// whose audit row cannot be written surfaces a [`CaError`] rather than
     /// handing out an unaudited certificate (no silent issuance; ADR-0063 D6).

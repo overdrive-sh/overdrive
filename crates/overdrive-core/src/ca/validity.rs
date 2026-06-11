@@ -22,7 +22,8 @@ use std::time::Duration;
 
 /// SVID leaf validity width — ~1 hour (research Finding 6 / ADR-0063). Short-
 /// lived workload identities keep the node-compromise / rotation blast radius
-/// small; the #40 rotation workflow re-issues before expiry.
+/// small; the #40 near-expiry reissue action (`SvidLifecycle`'s
+/// `rotate-svid`-correlated `Action::IssueSvid`) re-issues before expiry.
 ///
 /// The issuer sets `not_after = not_before + WORKLOAD_SVID_TTL`; the audit row
 /// records the SAME width. There is no separate "audit TTL" — the window the

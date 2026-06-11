@@ -9,7 +9,8 @@
 //!
 //! The V1 payload (`IssuedCertificateRowV1`, research Finding 15) carries:
 //! `serial`, `spiffe_id`, `issuer_serial`, `not_before`, `not_after`,
-//! `node_id`, `issued_at`. These are the audit *inputs* (what was issued) —
+//! `node_id`, `issued_at`, `issuance_ordinal`. These are the audit *inputs*
+//! (what was issued) —
 //! observation, never intent (the CA *material* is intent, D2). The
 //! unknown-version read path **logs-and-skips** the row (observation
 //! TOLERATES; asymmetric vs intent's fail-fast at 02-01).
