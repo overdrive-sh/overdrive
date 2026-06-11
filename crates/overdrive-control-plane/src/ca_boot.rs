@@ -374,24 +374,14 @@ async fn load_persistent_intermediate(
 
 /// Newline-framed encoding of the public node-intermediate cert material: PEM,
 /// DER (base16), serial. All three are public — no secret is persisted here.
+/// Delegates to [`encode_framed_material`] — the single encode site whose frame
+/// shape is the inverse of [`decode_framed_material`]'s single parse site.
 fn encode_intermediate_material(intermediate: &IntermediateHandle) -> Vec<u8> {
-    let der_hex = intermediate.cert_der().as_der().iter().fold(
-        String::with_capacity(intermediate.cert_der().as_der().len() * 2),
-        |mut acc, b| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        },
-    );
-    let pem = intermediate.cert_pem().as_pem();
-    format!(
-        "{pem_len}\n{pem}{der_hex}\n{serial}\n",
-        pem_len = pem.len(),
-        pem = pem,
-        der_hex = der_hex,
-        serial = intermediate.serial(),
+    encode_framed_material(
+        intermediate.cert_pem().as_pem(),
+        intermediate.cert_der().as_der(),
+        intermediate.serial(),
     )
-    .into_bytes()
 }
 
 /// First boot: mint the root, seal its key under the KEK, persist both the
@@ -474,27 +464,28 @@ async fn load_persistent_root(
 
 /// Newline-framed encoding of the public root cert material: PEM, DER (base16),
 /// serial. The PEM/DER/serial are public; no secret is persisted here.
+/// Delegates to [`encode_framed_material`] — the single encode site whose frame
+/// shape is the inverse of [`decode_framed_material`]'s single parse site.
 fn encode_cert_material(root: &RootCaHandle) -> Vec<u8> {
-    let der_hex = root.cert_der().as_der().iter().fold(
-        String::with_capacity(root.cert_der().as_der().len() * 2),
-        |mut acc, b| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        },
-    );
-    // Field order: PEM (single base64-ish block — may contain newlines), so we
-    // length-prefix the PEM and put DER-hex + serial on dedicated trailing
-    // lines. Encode PEM length as the first line to avoid newline ambiguity.
-    let pem = root.cert_pem().as_pem();
-    format!(
-        "{pem_len}\n{pem}{der_hex}\n{serial}\n",
-        pem_len = pem.len(),
-        pem = pem,
-        der_hex = der_hex,
-        serial = root.serial(),
-    )
-    .into_bytes()
+    encode_framed_material(root.cert_pem().as_pem(), root.cert_der().as_der(), root.serial())
+}
+
+/// Encode the shared newline-framed public cert material from its `(pem, der,
+/// serial)` parts. The single encode site for both [`encode_cert_material`]
+/// (root) and [`encode_intermediate_material`] (intermediate) — the two
+/// callers emit the identical frame shape, so they cannot drift, and this
+/// function is the exact inverse of [`decode_framed_material`].
+///
+/// Field order: PEM (a single base64-ish block — may itself contain newlines)
+/// is length-prefixed on the first line so the trailing DER-hex + serial lines
+/// are unambiguous to split on.
+fn encode_framed_material(pem: &str, der: &[u8], serial: &CertSerial) -> Vec<u8> {
+    let der_hex = der.iter().fold(String::with_capacity(der.len() * 2), |mut acc, b| {
+        use std::fmt::Write as _;
+        let _ = write!(acc, "{b:02x}");
+        acc
+    });
+    format!("{pem_len}\n{pem}{der_hex}\n{serial}\n", pem_len = pem.len()).into_bytes()
 }
 
 /// Decode the newline-framed public cert material + decrypted key into a
