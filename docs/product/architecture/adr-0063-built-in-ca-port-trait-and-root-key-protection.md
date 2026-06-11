@@ -8,7 +8,13 @@ Accepted (2026-06-05). **Amended 2026-06-06 (D9 — node-held leaf key),
 into `run_server` — closes the D-CA-4 "CA not wired into serve" deferral), and
 2026-06-10 (decrypt-failure cause taxonomy correction — AES-GCM cannot
 distinguish wrong-KEK-material from tampering; `TamperedEnvelope` →
-`EnvelopeAuthFailed`)** — see
+`EnvelopeAuthFailed`), and 2026-06-11 (rev 8 — issuance ordinal sourced from a durable atomic
+counter (`ObservationStore::next_issuance_ordinal`) instead of
+`issued_certificate_rows().len()`; retires the single-writer issuance
+precondition and decouples ordinal monotonicity from the append-only audit
+log — resolves the TOCTOU RCA at
+`docs/feature/fix-issuance-ordinal-toctou/deliver/rca.md` and the #226
+delete-survival precondition)** — see
 § Changelog for the dated amendments (each reopens this Accepted ADR via a dated
 entry, not a silent rewrite). Supersedes **ADR-0010 for
 *workload identity* only** — ADR-0010's ephemeral CA (`tls_bootstrap.rs`)
@@ -491,6 +497,41 @@ back-propagation, commit `aab5a69b`).
 **Issuance is never silent:** an issuance whose audit row cannot be written
 surfaces a `CaError` rather than handing out an unaudited certificate (KPI/AC,
 US-CA-05).
+
+**D6 rev 8 — issuance ordinal is counter-allocated, not `len()`-derived.**
+The `IssuanceOrdinal` stamped on each `issued_certificates` row is allocated
+by a new additive `ObservationStore` port method
+`next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError>`,
+which atomically advances a durable, strictly-monotonic counter and returns the
+next value. This SUPERSEDES the original derivation (feature-delta § D1-AMEND-2:
+"ordinal = count of already-persisted rows, read immediately before the audit
+write"), which was a read-len → mint → write check-then-act TOCTOU
+(`.claude/rules/development.md` § "Check-and-act must be atomic"): two concurrent
+issuances read the same `len()` and stamped duplicate ordinals, and the
+consumer's `max_by_key(issuance_ordinal)` then surfaced a stale serial as
+"current". The counter makes the collision UNREPRESENTABLE.
+
+Consequences of rev 8:
+- The **single-writer / serialized-issuance precondition is RETIRED** —
+  `issue_and_audit` is now safe to call concurrently for one store.
+- **Ordinal monotonicity no longer depends on the append-only audit log.**
+  The counter is a separate durable datum that row deletion cannot rewind —
+  this satisfies the #226 delete/GC precondition as a side effect (a future
+  `issued_certificates` GC may prune rows without breaking ordinals).
+- The method is mandatory on BOTH adapters (`LocalObservationStore` host:
+  single-key redb counter table, atomic under redb's serializable isolation;
+  `SimObservationStore` sim: in-memory counter under the existing Mutex). A DST
+  conformance case drives both through the same allocation sequence and asserts
+  monotonic-and-unique-under-concurrency equivalence.
+- Gap semantics: an allocated-but-unwritten ordinal (mint/write fails after
+  allocation) is burned; the sequence may have holes. This is correct —
+  selection needs strict ordering, not density.
+- **No row / envelope / golden-bytes change.** `issuance_ordinal` stays a
+  caller-set field on the `V1` payload; only its *source* changes. The rkyv
+  schema-evolution surface and the append-only serial guard are untouched.
+- Greenfield single-cut migration: a fresh store starts the counter at 0;
+  "delete the redb file" is the upgrade path. No migration code reconstructs a
+  counter from a pre-rev-8 store.
 
 > **Downstream dependent (cross-ref, ADR-0067 D10, rev 5 2026-06-09).** The
 > **audit-before-hold** ordering this row's write site enforces — the
