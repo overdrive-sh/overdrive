@@ -104,7 +104,7 @@ API surface": the rotate path reuses `Action::IssueSvid` UNCHANGED.
 | S-OC-09 | Refuse-to-start leaves the persisted root unchanged (no silent re-mint) | `…serve_persistent_ca.rs::refuse_to_start_does_not_remint_the_root` | `@integration @real-io @error @driving_port @slice-2 @edd:O04` | ② | L3 | D-OC-5, ADR-0063 D8 |
 | S-OC-10 | Rotate-correlation `IssueSvid` dispatches through the existing executor (mint + hold-replace + audit) | `overdrive-control-plane/tests/integration/built_in_ca_operator_composition/rotate_issue_svid_dispatch.rs::rotate_correlation_issue_svid_mints_replaces_hold_and_audits` | `@integration @real-io @adapter-integration @driving_port @slice-1` | ① | L3 | D-OC-1, ADR-0067 D3 |
 | S-OC-11 | `overdrive alloc status` surfaces the current `issued_certificates` summary | `…alloc_status_issued_certificates.rs::alloc_status_surfaces_current_issued_certificate_summary` | `@integration @real-io @adapter-integration @driving_port @slice-3 @edd:O05` | ③ | L3 | D-OC-7, ADR-0063 D6, journey step 4 |
-| S-OC-12 | `issued_certificates` summary carries NO cert bytes / NO key; latest-by-`issued_at` | `…alloc_status_issued_certificates.rs::issued_certificate_summary_omits_cert_bytes_and_key_latest_by_issued_at` | `@integration @real-io @error @driving_port @slice-3 @edd:O05` | ③ | L3 | D-OC-7, ADR-0067 #215-boundary |
+| S-OC-12 | `issued_certificates` summary carries NO cert bytes / NO key; max-`issuance_ordinal` | `…alloc_status_issued_certificates.rs::issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal` | `@integration @real-io @error @driving_port @slice-3 @edd:O05` | ③ | L3 | D-OC-7, ADR-0067 #215-boundary |
 | S-OC-13 | Exported chain verifies under `openssl verify` (E03 sub-claim 1) | `overdrive-host/tests/integration/rcgen_ca_chain_verify.rs::rcgen_full_svid_chain_verifies_root_intermediate_svid` (MODIFY: `OD_E03_CA_DIR` export) | `@integration @real-io @adapter-integration @driving_port @slice-3 @edd:E03` | ③ | L3 | S-04-07, ADR-0063 D1, K1 |
 | S-OC-14 | Exported leaf profile: one spiffe URI SAN / CA:FALSE / critical digitalSignature (E03 sub-claim 2) | `…rcgen_ca_chain_verify.rs::rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile` (EXISTING) + runner.sh | `@integration @real-io @adapter-integration @driving_port @slice-3 @edd:E03` | ③ | L3 | S-04, K2 |
 | S-OC-15 | pathLen=0 negative anchor: further-CA chain FAILS `openssl verify` (E03 sub-claim 3) | `…rcgen_ca_chain_verify.rs::rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced` (MODIFY: `OD_E03_CA_DIR` export) + runner.sh | `@integration @real-io @error @driving_port @slice-3 @edd:E03` | ③ | L3 | S-03-05 (negative anchor) |
@@ -415,12 +415,12 @@ Universe: the `overdrive alloc status` rendered output (the issued-certificate
 section + its fields) and the cross-checked minted serial. EDD O05 sub-claim 1+2.
 Example-based, one deployed-workload example.
 
-#### S-OC-12 — Summary omits cert bytes / key; renders latest-by-`issued_at`
+#### S-OC-12 — Summary omits cert bytes / key; renders max-`issuance_ordinal`
 
 ```gherkin
 Given a running allocation with MULTIPLE issued_certificates audit rows over time (first issue + a re-mint)
 When the operator runs overdrive alloc status --job <id>
-Then the issued-certificate summary renders exactly the latest-by-issued_at row per running alloc (NOT history)
+Then the issued-certificate summary renders exactly the max-issuance_ordinal row per running alloc (NOT history)
 And the summary contains NO certificate PEM/DER bytes and NO private key
 And a post-restart serial change reads as the current cert, not an anomaly
 ```

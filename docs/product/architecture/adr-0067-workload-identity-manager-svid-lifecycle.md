@@ -1313,8 +1313,13 @@ Re-issue-on-restart **plus** near-expiry reissue means **many `issued_certificat
 rows per allocation over time** (the table is append-only audit — one row per
 issuance: first issue, each restart re-issue, each near-expiry reissue — all
 `Action::IssueSvid`, rev 6). The operator surface therefore renders the **current**
-cert — the latest-by-`issued_at` row matching `SpiffeId::for_allocation(...)`
-(cross-referenced via `IdentityRead` / the held set), NOT one row per alloc and NOT
+cert — the **max-`issuance_ordinal`** row matching `SpiffeId::for_allocation(...)`
+(the strictly-ordered selection key; `issued_at` is retained as an audit fact,
+NOT the selection key) (cross-referenced via `IdentityRead` / the held set),
+*(Amended 2026-06-11, feature-delta § D1-AMEND: selection key moved from
+latest-by-`issued_at` to max-`issuance_ordinal` — a fixed `SimClock` can tie two
+issuances on `issued_at`, so the timestamp is not strictly ordered; the global
+monotonic ordinal breaks the tie deterministically.)* NOT one row per alloc and NOT
 the whole history as if each were live. A **serial change after a restart** should
 read as *legible* ("re-issued on restart"), NOT as an anomaly — the operator
 surface must treat a post-restart serial change as expected recovery, not a

@@ -740,15 +740,15 @@ fn alloc_status_surfaces_current_issued_certificate_summary() {
 }
 
 /// S-OC-12 (this step's primary scenario) — given the response carries
-/// exactly the latest-by-`issued_at` summary per running alloc (the server
+/// exactly the max-`issuance_ordinal` summary per running alloc (the server
 /// already projects this in 03-01; at the render layer we assert the render
 /// shows exactly the summaries provided, one per alloc, NOT a history list),
 /// the rendered section contains NO certificate PEM/DER bytes and NO private
 /// key, and a changed serial reads as the current cert. Guards the ADR-0067
 /// #215-boundary no-leak invariant.
 #[test]
-fn issued_certificate_summary_omits_cert_bytes_and_key_latest_by_issued_at() {
-    // The server projects ONE summary per running alloc (latest-by-issued_at).
+fn issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal() {
+    // The server projects ONE summary per running alloc (max-issuance_ordinal).
     // The render layer is handed exactly that projection — one per alloc.
     let current = issued_cert_summary(
         // A post-restart serial change — this is the CURRENT cert.

@@ -176,7 +176,7 @@ outcomes:
   - shape: overdrive alloc status --job <WorkloadId> (reads issued_certificate_rows())
   output:
     shape: 'AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary{serial,spiffe_id,issuer_serial,not_after}>,
-      latest-by-issued_at per alloc, NO cert bytes/key'
+      current = max issuance_ordinal per alloc (issued_at retained as audit fact, not selection key), NO cert bytes/key'
   keywords:
   - issued-certificates
   - alloc-status

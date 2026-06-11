@@ -277,9 +277,13 @@ pub struct AllocStatusResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub listeners: Vec<overdrive_core::aggregate::Listener>,
     /// Current issued-certificate summary per running alloc (built-in-ca
-    /// #215 consumer-side, D-OC-7). Latest-by-`issued_at` row whose SPIFFE
-    /// identity matches the running alloc. NO cert bytes, NO key. Additive
-    /// + skip-if-empty: existing consumers see no change.
+    /// #215 consumer-side, D-OC-7). The row whose SPIFFE identity matches
+    /// the running alloc with the maximum monotonic issuance ordinal
+    /// (`max_by_key(issuance_ordinal)`), NOT latest-by-`issued_at`: a
+    /// fixed/seeded `SimClock` can tie two issuances on equal `issued_at`,
+    /// so the strictly-increasing ordinal is the recency-correct selection
+    /// key; `issued_at` is retained only as an audit fact. NO cert bytes,
+    /// NO key. Additive + skip-if-empty: existing consumers see no change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issued_certificates: Vec<IssuedCertSummary>,
 }

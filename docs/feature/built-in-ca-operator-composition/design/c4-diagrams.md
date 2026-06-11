@@ -44,7 +44,7 @@ C4Container
   Rel(boot, svidlc, "Composes adopted CA + IdentityMgr into")
   Rel(svidlc, exec, "Emits IssueSvid action to")
   Rel(exec, obs, "Writes issued_certificates audit row to")
-  Rel(cli, obs, "Aggregates latest-by-issued_at row per running alloc from")
+  Rel(cli, obs, "Aggregates max-issuance_ordinal row per running alloc from")
 ```
 
 ## L3 — Component (CA boot-composition seam)

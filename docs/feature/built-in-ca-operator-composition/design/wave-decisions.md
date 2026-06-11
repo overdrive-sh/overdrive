@@ -13,7 +13,7 @@ Rust · **Scope:** Application · **Architect:** Morgan
 | D-OC-4 | Wire `ca_boot::boot_ca` + `bootstrap_node_intermediate` into `run_server` (`lib.rs:1595`), replacing the ephemeral `RcgenCa` block | Settled |
 | D-OC-5 | `ControlPlaneError::CaBoot(#[from] CaBootError)` — dedicated variant, never flatten to `Internal` | Settled |
 | D-OC-6 | Restart = re-mint; #35's `ever_issued → IssueSvid` branch correct as-is (confirm only) | Confirmed |
-| D-OC-7 | Additive `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary>`, latest-by-`issued_at` per running alloc | Settled |
+| D-OC-7 | Additive `AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary>`, max-`issuance_ordinal` per running alloc (`issued_at` retained as audit fact) | Settled (selection-key amended 2026-06-11: latest-by-`issued_at` → max-`issuance_ordinal`) |
 | D-OC-8 | Un-skip the `near_expiry` mutation boundary (live target) | Settled |
 | D-OC-9 | `Kek` provider injected through a **mandatory** `ServerConfig.kek: Arc<dyn Kek>` field (remove `ServerConfig: Default`, add `ServerConfig::new(kek)`); production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary, tests inject a hermetic fixture KEK — replaces C1's inline `SystemdCredsKeyring::new()` in `run_server` | Settled (DELIVER-review amendment, 2026-06-10) |
 
@@ -32,8 +32,8 @@ A composition + lifecycle-completion feature over the shipped `built-in-ca`
    decrypt-probe → adopt-or-refuse), replacing the ephemeral `RcgenCa` composition.
    Refuse-to-start surfaces a typed `CaBoot` error.
 3. **Operator-visible current SVID.** The `alloc status` read aggregates the
-   append-only `issued_certificates` audit and projects the current cert (latest
-   row per running alloc by `issued_at`) into an additive response field.
+   append-only `issued_certificates` audit and projects the current cert (max
+   `issuance_ordinal` row per running alloc) into an additive response field.
 
 Style: Hexagonal ports-and-adapters (established). No new subsystem, no new
 dependency, no new public API surface beyond one additive wire struct.
