@@ -22,9 +22,9 @@ use std::time::{Duration, Instant};
 use overdrive_core::ca::WORKLOAD_SVID_TTL;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::svid_lifecycle::{
-    HeldSvidFacts, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
+    HeldSvidFacts, IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
 };
-use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext, backoff_for_attempt};
 use overdrive_core::wall_clock::UnixInstant;
 use proptest::prelude::*;
 
@@ -168,12 +168,25 @@ proptest! {
             other => prop_assert!(false, "expected IssueSvid, got {:?}", other),
         }
 
-        // The held-running alloc's retry memory stays clear (clear-on-success);
-        // the rotate path records no failed-issue entry.
-        prop_assert!(
-            !next_view.retry.contains_key(&alloc),
-            "S-OC-01: a held-running alloc carries no retry entry; got {:?}",
-            next_view.retry
+        // ADR-0067 rev 7: the FIRST rotate on a freshly-near-expiry cert (empty
+        // View, no prior entry) emits AND RECORDS the attempt — mirroring the
+        // first-issue `…records_one_attempt` discipline so a *failed* rotate
+        // backs off instead of hammering every tick. (Pre-rev-7 this asserted
+        // "no entry"; that was the buggy hot-loop behaviour.)
+        let entry = next_view.retry.get(&alloc).expect(
+            "S-OC-01: the first rotate records a one-attempt retry entry (rev 7 backoff arming)",
+        );
+        prop_assert_eq!(
+            entry.attempts,
+            1,
+            "S-OC-01: the first rotate bumps attempts to 1; got {:?}",
+            entry
+        );
+        prop_assert_eq!(
+            entry.last_failure_seen_at,
+            tick.now_unix,
+            "S-OC-01: the first rotate records last_failure_seen_at = tick.now_unix; got {:?}",
+            entry
         );
     }
 }
@@ -428,4 +441,248 @@ proptest! {
             "S-OC-05: rotate and restart-recovery correlations are distinct"
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0067 rev 7 — the near-expiry ROTATION branch participates in the shared
+// `IssueRetry` / `backoff_for_attempt` machinery with a DEADLINE-AWARE CLAMP so a
+// failed rotate backs off (no hot loop) yet a near-expiry cert is always
+// re-attempted before its `not_after`. These three scenarios fail against the
+// pre-rev-7 "emit unconditionally, clear unconditionally" body.
+
+/// `ROTATION_DEADLINE_MARGIN` is a module-private production constant (NOT public
+/// API per ADR-0067 rev 7 — the crafter keeps it private). The test pins its
+/// design value locally, the same way `HALF_TTL_SECS` mirrors the derived
+/// threshold: 60s, the flat executor-latency budget before `held.not_after`.
+const ROTATION_DEADLINE_MARGIN_SECS: u64 = 60;
+
+/// A `running ∧ held(near-expiry)` alloc whose retry entry is seeded with a
+/// recent failure (inside the backoff-spacing window) AND which is comfortably
+/// outside the expiry "panic zone" emits ZERO rotate IssueSvid this tick, and
+/// the seeded retry entry is preserved UNCHANGED (not bumped, not cleared).
+///
+/// Pre-rev-7 the rotation branch emitted UNCONDITIONALLY (no backoff gate) and
+/// cleared the entry unconditionally — so this fails today on BOTH counts.
+/// Universe: the emitted IssueSvid count + the alloc's retry entry in next_view.
+#[test]
+fn failed_rotate_inside_backoff_window_is_suppressed() {
+    let reconciler = SvidLifecycle::canonical();
+    let now_secs = 1_700_000_000u64;
+    let alloc = AllocationId::new("payments-mid-backoff").expect("valid AllocationId");
+
+    // near-expiry but FAR from the wall: not_after = now + HALF_TTL (just inside
+    // the window) ⇒ now + MARGIN ≪ not_after, so the panic-zone clamp does NOT
+    // fire and only the backoff-spacing term governs.
+    let not_after = now_secs + HALF_TTL_SECS;
+
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    desired.insert(alloc.clone(), running_alloc());
+    let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+    actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+    let state = state_no_audit(desired, actual);
+
+    // Seed a retry entry whose last failure was JUST now ⇒ the backoff-spacing
+    // deadline (now + backoff_for_attempt(1)) is in the future ⇒ suppress.
+    let mut view = SvidLifecycleView::default();
+    let seeded = IssueRetry { attempts: 1, last_failure_seen_at: make_tick(now_secs).now_unix };
+    view.retry.insert(alloc.clone(), seeded.clone());
+
+    // Sanity: the seeded failure is strictly inside the spacing window.
+    assert!(
+        backoff_for_attempt(1) > Duration::ZERO,
+        "precondition: spacing window is non-zero so 'inside the window' is meaningful"
+    );
+    // Sanity: NOT in the panic zone (now + MARGIN < not_after).
+    assert!(
+        now_secs + ROTATION_DEADLINE_MARGIN_SECS < not_after,
+        "precondition: alloc is outside the expiry panic zone"
+    );
+
+    let (actions, next_view) = reconciler.reconcile(&state, &state, &view, &make_tick(now_secs));
+
+    assert_eq!(
+        issue_actions(&actions).len(),
+        0,
+        "rev 7: a failed rotate inside the backoff window is suppressed (no rotate IssueSvid); \
+         got {actions:?}"
+    );
+    let entry = next_view
+        .retry
+        .get(&alloc)
+        .expect("rev 7: the suppressed rotate PRESERVES the seeded retry entry");
+    assert_eq!(
+        entry, &seeded,
+        "rev 7: the suppressed rotate leaves the retry entry unchanged (not bumped, not cleared); \
+         got {entry:?}"
+    );
+}
+
+/// Once the rotation backoff-spacing window has elapsed (and still outside the
+/// panic zone), the rotation re-emits EXACTLY ONE IssueSvid and BUMPS the entry
+/// (attempts → 2, last_failure_seen_at → tick.now_unix). Universe: the emitted
+/// IssueSvid count + the alloc's bumped retry entry.
+#[test]
+fn rotate_re_emits_once_backoff_window_elapses() {
+    let reconciler = SvidLifecycle::canonical();
+    let failure_secs = 1_700_000_000u64;
+    // Tick PAST the backoff-spacing deadline: now > last_failure + spacing.
+    let now_secs = failure_secs + backoff_for_attempt(1).as_secs() + 1;
+    let alloc = AllocationId::new("payments-backoff-elapsed").expect("valid AllocationId");
+
+    // near-expiry, FAR from the wall (outside the panic zone at this `now`).
+    let not_after = now_secs + HALF_TTL_SECS;
+
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    desired.insert(alloc.clone(), running_alloc());
+    let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+    actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+    let state = state_no_audit(desired, actual);
+
+    let mut view = SvidLifecycleView::default();
+    view.retry.insert(
+        alloc.clone(),
+        IssueRetry { attempts: 1, last_failure_seen_at: make_tick(failure_secs).now_unix },
+    );
+
+    // Sanity: NOT in the panic zone — the emit is driven by elapsed backoff, not
+    // by the clamp.
+    assert!(
+        now_secs + ROTATION_DEADLINE_MARGIN_SECS < not_after,
+        "precondition: alloc is outside the expiry panic zone"
+    );
+
+    let (actions, next_view) = reconciler.reconcile(&state, &state, &view, &make_tick(now_secs));
+
+    assert_eq!(
+        issue_actions(&actions).len(),
+        1,
+        "rev 7: once the backoff window elapses the rotation re-emits exactly one IssueSvid; \
+         got {actions:?}"
+    );
+    let entry =
+        next_view.retry.get(&alloc).expect("rev 7: the re-emitted rotate keeps a retry entry");
+    assert_eq!(entry.attempts, 2, "rev 7: the re-emit bumps attempts to 2; got {entry:?}");
+    assert_eq!(
+        entry.last_failure_seen_at,
+        make_tick(now_secs).now_unix,
+        "rev 7: the re-emit records last_failure_seen_at = tick.now_unix; got {entry:?}"
+    );
+}
+
+/// The load-bearing CLAMP: even when the backoff-spacing window would SUPPRESS
+/// (last failure == now ⇒ inside the 1s spacing window), a rotation in the
+/// expiry "panic zone" (`now + ROTATION_DEADLINE_MARGIN >= held.not_after`, still
+/// near-expiry) re-emits EXACTLY ONE IssueSvid — the `min(backoff-spacing,
+/// not_after − margin)` clamp overrides the spacing suppression so the cert is
+/// re-attempted before it expires. Fails today (no clamp exists). With the
+/// spacing term suppressing, ONLY the clamp can force this emit. Universe: the
+/// emitted IssueSvid count.
+#[test]
+fn rotate_deadline_clamp_emits_in_panic_zone_despite_backoff() {
+    let reconciler = SvidLifecycle::canonical();
+    let now_secs = 1_700_000_000u64;
+    let alloc = AllocationId::new("payments-panic-zone").expect("valid AllocationId");
+
+    // In the panic zone: not_after within MARGIN of now (still near-expiry, since
+    // 30 < HALF_TTL). now + MARGIN (= now + 60) >= not_after (= now + 30).
+    let not_after = now_secs + (ROTATION_DEADLINE_MARGIN_SECS / 2);
+    assert!(
+        not_after <= now_secs + HALF_TTL_SECS,
+        "precondition: the panic-zone cert is still near-expiry"
+    );
+    assert!(
+        now_secs + ROTATION_DEADLINE_MARGIN_SECS >= not_after,
+        "precondition: the cert is INSIDE the expiry panic zone"
+    );
+
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    desired.insert(alloc.clone(), running_alloc());
+    let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+    actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+    let state = state_no_audit(desired, actual);
+
+    // Seed a retry whose last failure is NOW ⇒ the backoff-spacing term alone
+    // would SUPPRESS (now < now + 1s). Only the clamp can force the emit.
+    let mut view = SvidLifecycleView::default();
+    view.retry.insert(
+        alloc,
+        IssueRetry { attempts: 1, last_failure_seen_at: make_tick(now_secs).now_unix },
+    );
+    assert!(
+        backoff_for_attempt(1) > Duration::ZERO,
+        "precondition: spacing window is non-zero so it would suppress absent the clamp"
+    );
+
+    let (actions, _next_view) = reconciler.reconcile(&state, &state, &view, &make_tick(now_secs));
+
+    assert_eq!(
+        issue_actions(&actions).len(),
+        1,
+        "rev 7 CLAMP: a near-expiry rotate in the panic zone re-emits despite the backoff-spacing \
+         suppression (the deadline clamp overrides); got {actions:?}"
+    );
+}
+
+/// Boundary mutation kill-test for the two `<` comparisons in the rotation
+/// suppression predicate (the `inside_backoff_window` spacing term and the
+/// `outside_panic_zone` wall term). Both are LIVE mutation targets — a `<`→`<=`
+/// relaxation on either flips a boundary fixture from emit to suppress. Two
+/// hand-picked `==`-boundary fixtures (NOT PBT — generation dilutes the boundary
+/// signal), each driven so the CORRECT (strict `<`) behaviour EMITS and the
+/// mutant (`<=`) would SUPPRESS. Universe: the emitted IssueSvid count per
+/// fixture.
+#[test]
+fn rotation_suppression_boundaries_are_strict() {
+    let reconciler = SvidLifecycle::canonical();
+
+    // Drive one held-near-expiry alloc with a seeded retry, return the rotate
+    // IssueSvid count.
+    let drive = |now_secs: u64, not_after: u64, last_failure_secs: u64, attempts: u32| {
+        let alloc = AllocationId::new("payments-boundary").expect("valid AllocationId");
+        let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+        desired.insert(alloc.clone(), running_alloc());
+        let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+        actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+        let state = state_no_audit(desired, actual);
+        let mut view = SvidLifecycleView::default();
+        view.retry.insert(
+            alloc,
+            IssueRetry { attempts, last_failure_seen_at: make_tick(last_failure_secs).now_unix },
+        );
+        let (actions, _) = reconciler.reconcile(&state, &state, &view, &make_tick(now_secs));
+        issue_actions(&actions).len()
+    };
+
+    let now = 1_700_000_000u64;
+    let backoff_secs = backoff_for_attempt(1).as_secs();
+
+    // Term 1 — the backoff-spacing `<` (line `inside_backoff_window`): at
+    // `now == last_failure + backoff` the window has JUST elapsed. Outside the
+    // panic zone (not_after far). Strict `<`: NOT inside ⇒ EMIT. Mutant `<=`:
+    // inside ∧ outside-panic ⇒ SUPPRESS. Assert EMIT kills `<`→`<=`.
+    let spacing_boundary_now = now;
+    let spacing_last_failure = spacing_boundary_now - backoff_secs; // now == last + backoff
+    assert_eq!(
+        drive(spacing_boundary_now, spacing_boundary_now + HALF_TTL_SECS, spacing_last_failure, 1),
+        1,
+        "rev 7: at now == last_failure + backoff the spacing window has elapsed (strict `<`) ⇒ \
+         rotate EMITS (kills the `<`→`<=` spacing mutant)"
+    );
+
+    // Term 2 — the expiry-wall `<` (line `outside_panic_zone`): at
+    // `now + MARGIN == not_after` the cert sits EXACTLY at the panic-zone edge.
+    // Inside the backoff window (last_failure == now). Strict `<`: NOT outside ⇒
+    // panic zone ⇒ clamp forces EMIT. Mutant `<=`: outside ∧ inside-window ⇒
+    // SUPPRESS. Assert EMIT kills `<`→`<=`.
+    let wall_not_after = now + ROTATION_DEADLINE_MARGIN_SECS; // now + MARGIN == not_after
+    assert!(
+        wall_not_after <= now + HALF_TTL_SECS,
+        "precondition: the wall-boundary cert is still near-expiry"
+    );
+    assert_eq!(
+        drive(now, wall_not_after, now, 1),
+        1,
+        "rev 7: at now + MARGIN == not_after the cert is AT the panic-zone edge (strict `<` ⇒ in \
+         the zone) ⇒ the clamp forces a rotate EMIT (kills the `<`→`<=` wall mutant)"
+    );
 }
