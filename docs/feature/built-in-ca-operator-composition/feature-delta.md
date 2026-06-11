@@ -1016,3 +1016,163 @@ The rotate-as-action behaviour (S-OC-01..05/10) does NOT register a new outcome:
 it reuses the existing `OUT-WIM-SVID-LIFECYCLE` contract (`Action::IssueSvid`
 unchanged) — a behavioural extension of an already-registered surface, not a new
 typed contract.
+
+---
+
+## Wave: DELIVER
+
+**Finalized:** 2026-06-11 · **Feature SHA:** `e9711be5` · **Crafter:** (DES
+8-step DELIVER) · **Branch:** `marcus-sa/cert-rotation-workflow` (not yet pushed
+at finalize)
+
+### [REF] Implementation Summary
+
+Three slices, eight DES steps, all EXECUTED/PASS. Slice ① flipped the
+`SvidLifecycle` near-expiry branch to an unconditional rotate `Action::IssueSvid`
+(reusing the existing variant, `"rotate-svid"` correlation, `node_id` from
+`running.node_id`), set the threshold to `WORKLOAD_SVID_TTL / 2` (1800s, derived),
+and single-cut retired the `ROTATION_ENABLED` / `CERT_ROTATION_WORKFLOW` gate +
+the `near_expiry` mutation exclusion — landing the inclusive-`<=` boundary
+kill-test in the same commit. Slice ② added the `ControlPlaneError::CaBoot`
+`#[from]` variant, the **mandatory `ServerConfig.kek: Arc<dyn Kek>` injection
+seam** (C1-AMEND — `Default` removed, `ServerConfig::new(kek)` added), wired
+`boot_ca` + `bootstrap_node_intermediate` into `run_server` (single-cut replacing
+the ephemeral `RcgenCa` block), and injected the hermetic `SimKek::for_boot()`
+into every `run_server` fixture. Slice ③ added the additive `IssuedCertSummary` +
+`AllocStatusResponse.issued_certificates` field, the server-side max-ordinal
+projection, the CLI render, the monotonic `IssuanceOrdinal` newtype (D1-AMEND, to
+fix the equal-`issued_at` tie review-03-02 found), and extended the E03 runner to
+all three sub-claims via an env-gated `OD_E03_CA_DIR` PEM export. **Zero new
+public API surface beyond the additive `IssuedCertSummary` wire struct,
+`IssuanceOrdinal` newtype, `ControlPlaneError::CaBoot` variant, and
+`ServerConfig.kek` seam** — every CA / boot / audit / reconciler primitive was
+reused as-is (11 REUSE AS-IS, 2 EXTEND additive, 3 DELETE single-cut, per the
+Reuse Analysis HARD GATE).
+
+### [REF] Files Modified
+
+Derived from `git diff --name-only b5910fba..HEAD` (feature-scoped).
+
+**Production (`src/`):**
+
+| File | Change |
+|---|---|
+| `crates/overdrive-core/src/reconcilers/svid_lifecycle.rs` | Near-expiry branch → unconditional rotate `IssueSvid`; gate consts + workflow imports deleted; threshold = `WORKLOAD_SVID_TTL / 2`; `#[mutants::skip]` removed. |
+| `crates/overdrive-core/src/reconcilers/mod.rs` | Reconciler module wiring touched by the gate retirement. |
+| `crates/overdrive-core/src/ca/validity.rs` | `WORKLOAD_SVID_TTL` consumed by the derived near-expiry threshold. |
+| `crates/overdrive-core/src/id.rs` | New `IssuanceOrdinal(u64)` newtype (FromStr/Display/string-codec serde/rkyv/Ord/Copy). |
+| `crates/overdrive-core/src/ca/issued_certificate_row.rs` | Additive `issuance_ordinal: IssuanceOrdinal` field on `IssuedCertificateRowV1` (in-place, single-cut); discriminant-offset source re-pinned. |
+| `crates/overdrive-core/src/traits/ca.rs` | CA-error / cause-taxonomy alignment (decrypt-failure cause distinctness). |
+| `crates/overdrive-core/src/testing/observation_store.rs` | Test-double observation-store updated for the additive row field. |
+| `crates/overdrive-control-plane/src/error.rs` | `ControlPlaneError::CaBoot(#[from] CaBootError)` + exhaustive `to_response` arm (500). |
+| `crates/overdrive-control-plane/src/lib.rs` | `ServerConfig.kek` mandatory seam (`Default` removed, `ServerConfig::new(kek)` added, `Debug` extended); `run_server` consumes `config.kek` into `boot_ca` + `bootstrap_node_intermediate`, single-cut replacing the ephemeral `RcgenCa` block. |
+| `crates/overdrive-control-plane/src/ca_boot.rs` | L3 refactor dedup (`encode_framed_material`); `CaBootError::Envelope*` threads the real redb path. |
+| `crates/overdrive-control-plane/src/ca_issuance.rs` | `issue_and_audit` stamps the `IssuanceOrdinal` from `issued_certificate_rows().len()` (single-writer + append-only preconditions documented). |
+| `crates/overdrive-control-plane/src/api.rs` | Additive `IssuedCertSummary { serial, spiffe_id, issuer_serial, not_after }` + `AllocStatusResponse.issued_certificates` (skip-if-empty). |
+| `crates/overdrive-control-plane/src/handlers.rs` | `alloc_status` projects per running alloc the max-`issuance_ordinal` row matching `SpiffeId::for_allocation(...)`. |
+| `crates/overdrive-control-plane/src/dataplane_config.rs`, `reconciler_runtime.rs` | Ripple from the `ServerConfig` seam (no `Default`). |
+| `crates/overdrive-cli/src/commands/serve.rs` | Composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary into `ServerConfig.kek`. |
+| `crates/overdrive-cli/src/render.rs` | Renders the issued-certificates section on the live `render::alloc_status` path. |
+| `crates/overdrive-host/src/ca/aead_codec.rs` | AEAD codec touched for the decrypt-cause taxonomy. |
+| `crates/overdrive-sim/src/adapters/kek.rs`, `adapters/mod.rs` | New `SimKek::for_boot()` hermetic in-process `Kek` test double. |
+
+**Tests:**
+
+| File | Change |
+|---|---|
+| `crates/overdrive-core/tests/acceptance/svid_lifecycle_rotation.rs` | S-OC-01..05 GREEN + the inclusive-`<=` boundary kill-test (S-OC-03). |
+| `crates/overdrive-core/tests/acceptance/svid_lifecycle_reconcile.rs` | Gated-seam test deleted (single-cut). |
+| `crates/overdrive-core/tests/schema_evolution/issued_certificate_row.rs` | `FIXTURE_V1` regenerated + both discriminant-offset sources re-pinned for the additive field. |
+| `crates/overdrive-control-plane/tests/acceptance/error_mapping_exhaustive.rs` | `ca_boot_error_causes_map_to_distinct_control_plane_ca_boot_variant` (cause-distinct, exhaustive). |
+| `crates/overdrive-control-plane/tests/integration/built_in_ca_operator_composition/{serve_persistent_ca,rotate_issue_svid_dispatch,alloc_status_issued_certificates}.rs` | S-OC-06..12 + S-OC-10 GREEN under Lima; the misplaced control-plane CLI-render scaffold deleted (relocated to overdrive-cli). |
+| `crates/overdrive-control-plane/tests/integration/ca_boot_and_audit.rs` | Extended with the ordinal determinism/monotonicity assertions. |
+| `crates/overdrive-cli/tests/integration/alloc_status.rs`, `tests/acceptance/{render_alloc_status,alloc_status_render,render_pure_fns}.rs` | S-OC-11/12 render tests on the live path. |
+| `crates/overdrive-host/tests/integration/rcgen_ca_chain_verify.rs` | Env-gated `OD_E03_CA_DIR` PEM export (fixture change; existing tests stay GREEN). |
+| ~26 `run_server` fixtures across `overdrive-control-plane` + `overdrive-cli` integration/acceptance suites | `..Default::default()` → `..ServerConfig::new(SimKek::for_boot())`; additive `issued_certificates: vec![]` on exhaustive `AllocStatusResponse` literals. |
+| `crates/overdrive-sim/tests/acceptance/sim_ca_deterministic.rs`, `crates/overdrive-core/tests/acceptance.rs`, `crates/overdrive-cli/tests/acceptance.rs`, `crates/overdrive-control-plane/tests/integration.rs` | Test-module wiring + sim-CA determinism touched by the new surfaces. |
+
+**Docs / config:**
+
+| File | Change |
+|---|---|
+| `docs/product/architecture/adr-0067-…md` | rev 6→7 (rotation = reconciler action; retry/backoff with deadline-aware clamp). |
+| `docs/product/architecture/adr-0063-…md` | Dated amendment (D-CA-4 closure, `ControlPlaneError::CaBoot`, D01/O04 wired). |
+| `.claude/rules/workflows.md` | Corrected the "#40 = canonical first workflow" conflation. |
+| `.claude/rules/testing.md`, `.claude/hooks/block-bare-nextest.ts`, `CLAUDE.md` | Banned bare nextest `--no-run` at the tool boundary (the gate that let the cold-boot regression hide). |
+| `.cargo/mutants.toml` | Removed the `near_expiry` `exclude_re` entry. |
+| `api/openapi.yaml` | Regenerated for the additive `issued_certificates` field. |
+| `docs/product/outcomes/registry.yaml` | `OUT-OC-ISSUED-CERTS-READ` + `OUT-OC-CA-BOOT-REFUSE` registered. |
+| `docs/research/{dataplane/ktls-sockops-cp-restart-survival,security/workload-svid-rotation-lifecycle-comprehensive}-research.md` | Supporting research notes. |
+
+### [REF] Scenarios Green
+
+- **1645 tests pass** (14 skipped), doctests pass, on the Lima green baseline.
+- All 18 DISTILL scenarios (S-OC-01..15 + sub-variants) GREEN: S-OC-01..05 (Tier-1
+  DST rotation), S-OC-06..09 + S-OC-08a-d (Tier-3 serve boot / refuse / adopt),
+  S-OC-10 (executor dispatch), S-OC-11/12 (render + max-ordinal projection),
+  S-OC-13/14/15 (E03 three sub-claims).
+- EDD: **D01, E03, O04 `satisfied`** (different-fox Haiku audited);
+  **O05 `pending` — GH #227** (the operator-CLI capture needs a live
+  deploy→converge→issuance→`alloc status` path requiring a disposable full-system
+  VM the in-process harness cannot run; the behavior IS implemented and
+  integration-tested via `alloc_status_issued_certificates`).
+
+### [REF] DoD Check
+
+Against the DISCUSS Definition of Done implicit in the feature-delta gates:
+
+| DoD item | Status |
+|---|---|
+| #40 near-expiry rotation lands as a reconciler action (not a workflow) | ✅ Slice ① — unconditional rotate `IssueSvid`, gate retired |
+| #215 boot-side: persistent KEK-sealed CA wired into `serve`, refuse-to-start observable | ✅ Slice ② — `boot_ca` in `run_server`; D01 + O04 `satisfied` |
+| #215 consumer-side: current SVID operator-visible (no cert bytes/key) | ✅ Slice ③ — `issued_certificates` summary rendered; in-tree proven, O05 capture pending #227 |
+| No new public API surface beyond additive wire struct (CLAUDE.md "implement to the design") | ✅ adversarial review confirmed: no invented surface |
+| Two-CA distinction intact (workload-identity ≠ operator HTTPS CA) | ✅ adversarial review verified; `mint_ephemeral_ca` untouched |
+| Single-cut greenfield (no parallel paths, no flags) | ✅ ephemeral `RcgenCa` + rotation gate deleted in-commit |
+| Mutation gate ≥80% on touched logic | ✅ **100% kill rate** (45 mutants, 0 missed) |
+| EDD captured + different-fox audited | ✅ D01/E03/O04 `satisfied`; ⏳ O05 `pending` #227 (honest) |
+
+### [REF] Demo Evidence
+
+The EDD captures ARE the demo evidence for this feature (operator-surface /
+data-at-rest / end-to-end black-box proofs in `verification/`, SHA-pinned in
+Lima):
+
+| Expectation | Surface | Status | Evidence |
+|---|---|---|---|
+| D01 — root key never plaintext at rest | D (data-at-rest) | **`satisfied`** (different-fox audited) | on-disk IntentStore byte-scan finds no plaintext root-key DER across first-boot + adopt-on-restart |
+| O04 — refuse-to-start, actionable error | O (operator CLI) | **`satisfied`** (different-fox audited) | three pairwise-distinct stderr causes (wrong-KEK / tampered / absent); root unchanged after a refused boot (no silent re-mint) |
+| E03 — full chain verifies | E (end-to-end) | **`satisfied`** (different-fox audited) | `openssl verify` over exported `$CA_DIR/{root,intermediate,svid}.pem` — all 3 sub-claims (chain verifies + leaf profile + pathLen=0 negative anchor FAILS verify) |
+| O05 — issued-certificates audit row operator-visible | O (operator CLI) | **`pending` — GH #227** | behavior implemented + integration-tested (`alloc_status_issued_certificates` drives the real handler projection); black-box capture blocked on a disposable full-system VM (#227) |
+
+### [REF] Quality Gates
+
+| Gate | Outcome |
+|---|---|
+| Implementation (DES 8-step) | 8/8 EXECUTED/PASS; DES integrity exit 0 |
+| Green baseline (Lima) | compile clean · 1645 pass / 14 skipped · doctests pass |
+| Refactor (L1–L6) | one L3 dedup (`encode_framed_material`, `ca_boot.rs`); rest clean → `19e665eb` |
+| Adversarial review (Opus, `@nw-software-crafter-reviewer`) | **APPROVE, 0 blockers**; 7 dimensions clean; 2 non-blocking doc fixes → `11363cde` |
+| Mutation (diff-scoped, ≥80% gate) | **PASS — 100% kill rate** (45 mutants: 38 caught, 0 missed, 0 timeout, 7 unviable) |
+| DES integrity | PASS (exit 0) |
+| Machine artifacts | committed → `e9711be5` |
+
+### [REF] Pre-requisites
+
+The DISTILL scenarios + DESIGN manifest the implementation depended on:
+
+- **DESIGN surfaces (REUSE AS-IS):** `ca_boot::boot_ca` +
+  `bootstrap_node_intermediate`, `SystemdCredsKeyring` (`Kek`),
+  `SimKek::for_boot()`, `RootKeyAeadCodec`, `root_kek_id()`, `Action::IssueSvid`,
+  `identity_correlation(...)`, the `SvidLifecycle` runtime + ViewStore, the
+  `IssueSvid` action-shim executor, `ObservationStore::issued_certificate_rows()`,
+  `SpiffeId::for_allocation(...)` — all shipped by built-in-ca (ADR-0063) +
+  workload-identity-manager (ADR-0067).
+- **Environment:** `overdrive serve` + `overdrive alloc status` CLI verbs; real
+  `RcgenCa` / `SystemdCredsKeyring` / `LocalIntentStore` (redb) /
+  `LocalObservationStore`; Lima VM (cgroup v2 + systemd-creds/keyring) for the
+  boot subprocess; `openssl` on PATH (E03); `cargo xtask bpf-build` as a compile
+  prereq for the control-plane integration binary.
+- **DISTILL artifacts:** `distill/test-scenarios.md` (18 scenarios, GIVEN/WHEN/THEN
+  specification) + `distill/red-classification.md`; the RED scaffolds under
+  `crates/*/tests/{acceptance,integration}` (landed `b8d0546f`).
