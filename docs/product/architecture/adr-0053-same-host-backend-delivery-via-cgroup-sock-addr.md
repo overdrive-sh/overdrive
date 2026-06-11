@@ -570,9 +570,10 @@ applies. The new path adds no new flake surface.
   ancestor (system components, host agents). Surfaced for the next
   reader; not a deferral.
 - **Kernel floor unchanged.** `BPF_CGROUP_INET4_CONNECT` is stable
-  since kernel 4.17; Overdrive's floor is 5.10 LTS per
-  `.claude/rules/testing.md` § "Kernel matrix". Comfortable margin.
-  No kernel-version bump.
+  since kernel 4.17; Overdrive's pinned appliance-kernel floor is 6.18 LTS
+  per **ADR-0068** (was 5.10 LTS; ADR-0068 collapsed the multi-kernel
+  matrix to the pinned latest-LTS + bpf-next model). Comfortable margin either
+  way. No kernel-version bump.
 - **Tier 2 (`BPF_PROG_TEST_RUN`) coverage**: cgroup_sock_addr
   programs admit `BPF_PROG_TEST_RUN` differently than XDP — the
   context is `bpf_sock_addr` not a packet buffer. The project's
@@ -961,7 +962,8 @@ let key = LocalServiceKey { vip_host, port_host, proto, _pad: 0 };
 → IPPROTO_TCP=6, SOCK_DGRAM=2 → IPPROTO_UDP=17) is the documented
 fallback derivation **only if** a kernel in the matrix is observed to
 leave `protocol` zero/unset for `connect4` (no such kernel is known
-on the 5.10+ floor; `protocol` is populated for connect-family hooks).
+on the pinned 6.18 floor — ADR-0068; `protocol` is populated for
+connect-family hooks).
 The crafter MUST verify `protocol` is populated on the Tier 3 kernel
 matrix; if any matrix kernel leaves it zero, derive proto from `type`
 via the SOCK_*→IPPROTO_* mapping above. Either way the key carries the

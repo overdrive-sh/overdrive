@@ -648,6 +648,8 @@ The node agent calls `fs_quiesce` immediately before triggering Cloud Hypervisor
 
 **Rejecting the broader framing.** Fly's sprites architecture slides additional services into the guest (service manager, log router, in-VM control agent). Overdrive rejects this for the same reason it ships the gateway as a node-agent subsystem rather than a workload: each concern belongs at the layer that can enforce it best. A guest-side log router cannot see kernel syscalls; a guest-side service manager duplicates `systemd`; a guest-side control agent contradicts the single-binary model. The only operations that *must* live in the guest are the ones the host physically cannot perform — and those are enumerated exactly above.
 
+**mTLS is enforced host-side, not in the guest.** Transparent mTLS for MicroVM and unikernel workloads is performed by a host-resident L4 tap proxy (§7, [#222](https://github.com/overdrive-sh/overdrive/issues/222)) — not by anything inside the guest. This **reinforces** the minimal-guest principle rather than straining it: no mTLS logic, no SVID, no private key, and no sidecar enter the guest. The proxy terminates the guest's TCP on the host and re-originates mTLS asserting the allocation's identity, so the guest stays a sealed image speaking plain TCP to its peers. An in-guest mTLS agent — which would require key material and a BPF/`setsockopt`-capable guest kernel, impossible for sealed unikernels and BYO-kernel VMs — is rejected for exactly the reasons enumerated above.
+
 **Composition with `overdrive-fs`.** The guest agent's `fs_quiesce` call is the natural integration point for the metadata-only snapshot in §17. The snapshot transaction in libSQL is:
 
 ```
@@ -723,17 +725,59 @@ Traffic Control (TC) programs operate on the egress and ingress paths and implem
 - Per-workload traffic shaping and rate limiting
 - Flow export to the telemetry ringbuf
 
-### sockops — Kernel mTLS
+### Transparent mTLS — one identity model, two enforcement mechanisms
 
-BPF socket operations programs intercept the socket lifecycle to implement transparent kernel mTLS:
+mTLS in Overdrive is transparent to the workload — the workload holds no
+key material and opens ordinary sockets. The **identity model is universal**
+across every workload class: one SPIFFE CA, one set of per-allocation SVIDs,
+one `IDENTITY_MAP`, one cluster trust bundle, one SPIFFE-ID-based
+`POLICY_MAP`. An operator writes a policy against a SPIFFE ID; the mechanism
+that enforces it is an implementation detail the operator does not see.
 
-1. A new connection is initiated by any workload
+The **enforcement mechanism splits by where the workload's TCP stack
+terminates** — not by workload type. This split is structural, a
+consequence of how the kernel sees (or does not see) the connection, not a
+design choice.
+
+**Host-socket workloads — process and WASM functions.** Their TCP sockets
+terminate in the **host kernel** (the exec driver's processes hold host
+sockets; wasmtime's WASI sockets are host sockets). There is a `struct sock`
+on the host the dataplane can reach, so mTLS is installed in place:
+
+1. A new connection is initiated by the workload
 2. The sockops program intercepts `BPF_SOCK_OPS_TCP_CONNECT_CB`
 3. The node agent performs the TLS 1.3 handshake via rustls, presenting the workload's SVID
 4. Session keys are installed into kTLS — the kernel record layer takes over
 5. All subsequent encrypt/decrypt happens in-kernel, with optional NIC offload
 
-The application is completely unaware. This works identically for process workloads, VMs, unikernels, and WASM functions — there is no sidecar injection required or possible.
+The application is completely unaware; no sidecar is injected. This is the
+**sockops + kTLS** path — [#26](https://github.com/overdrive-sh/overdrive/issues/26).
+
+**Guest-stack workloads — MicroVMs and unikernels.** Their TCP stacks
+terminate in the **guest** (a Linux kernel inside the Cloud Hypervisor VM,
+or a unikernel net stack). The host kernel sees virtio-net frames, not TCP
+sockets — no host-side BPF mechanism (sockops, sockmap, `sk_storage`, kTLS)
+can see these connections, so the in-place path is structurally impossible.
+Instead, a **host-resident L4 tap proxy** runs on the host (transparent to
+the guest): it intercepts the guest's TCP at the virtio-net tap interface,
+terminates the connection on the host, asserts the allocation's SPIFFE SVID
+(keyed by tap identity — the host knows which allocation owns which tap), and
+re-originates an outbound mTLS connection. Because that egress connection is
+itself a host socket, the proxy installs **host kTLS on its egress socket** —
+kernel record-layer encryption with NIC offload, not userspace crypto. No
+mTLS logic, keys, or agent enters the guest. This is the **guest-stack tap
+proxy** subsystem — [#222](https://github.com/overdrive-sh/overdrive/issues/222).
+
+The two mechanisms differ only in where TCP terminates; both consume the
+same SVIDs, the same `IDENTITY_MAP`, and the same trust bundle. The prior
+"this works identically for process workloads, VMs, unikernels, and WASM
+functions — there is no sidecar injection required or possible" claim was
+true of the *identity model* but false of the *enforcement mechanism* for
+guest-stack workloads, and is corrected here. (The precise tap intercept —
+TPROXY vs TC-eBPF redirect — and the in-kernel `sockmap`/`bpf_sk_redirect`
+splice for the proxy's guest-leg→egress-leg path are open DESIGN-wave
+decisions, the latter pending a Tier-3 kTLS+sockmap spike; see
+`docs/research/dataplane/transparent-mtls-recommended-architecture-research.md`.)
 
 ### BPF LSM — Mandatory Access Control
 
@@ -859,7 +903,10 @@ SVIDs are issued at workload start, rotated automatically before expiry, and rev
 
 ### Kernel mTLS Operation
 
-mTLS between workloads is transparent and universal:
+mTLS between workloads is transparent, and its identity model is universal —
+though the enforcement mechanism splits by where TCP terminates (§7). For
+**host-socket workloads** (process, WASM) the connection is intercepted and
+keyed in place:
 
 ```
 Workload A calls connect() to Workload B
@@ -873,6 +920,20 @@ node agent exits data path
 kTLS handles all encrypt/decrypt in-kernel
 optional NIC offload for crypto operations
 ```
+
+For **guest-stack workloads** (MicroVM, unikernel) the host-resident tap
+proxy (§7, [#222](https://github.com/overdrive-sh/overdrive/issues/222))
+performs the same rustls handshake on the workload's behalf and installs
+kTLS on its **host egress socket** — the guest never participates.
+
+**The host is the trust root for every workload class.** The SVID private
+key is held by the host node agent and **never enters the workload** — not
+for the in-place kTLS path (the key drives the host-side rustls handshake),
+and not for the tap-proxy path (the key stays on the host; the guest holds
+no key material and is unaware mTLS is happening). A compromised guest
+cannot exfiltrate an SVID private key it never receives. This is the §6
+"trust root remains on the host" invariant, holding identically across both
+enforcement mechanisms.
 
 IP addresses are routing hints, not security boundaries. Policy is expressed in terms of SPIFFE identities. A workload can move nodes, scale to 100 instances, and receive a new IP — the policy remains correct because it references `job/payments`, not `10.0.1.45`.
 
@@ -2490,18 +2551,14 @@ This tier exercises only program-level correctness — it does *not* prove the k
 
 The goal is to prove that the programs load on every kernel in the support matrix, attach to their hooks, and produce correct end-to-end behaviour against real syscalls and real packets.
 
-**Kernel matrix:**
+**Kernel matrix.** Overdrive ships its own immutable appliance OS (§23) and **pins the kernel it boots** — it is not a CNI plugin or agent that must run on an operator's arbitrary kernel. The matrix is therefore the one kernel Overdrive ships plus a single early-warning canary, not a range of operator kernels (ADR-0068):
 
 | Kernel | Why it's in the matrix |
 |---|---|
-| 5.10 LTS | First LTS with BPF LSM, kTLS, and sockops jointly stable. The Overdrive floor. |
-| 5.15 LTS | Ubuntu 22.04, Debian 12 backports, RHEL 9 backports — most-deployed LTS in production. |
-| 6.1 LTS | Debian 13 stable; matches Tetragon's matrix. |
-| 6.6 LTS | Ubuntu 24.04 lineage; vhost-vsock parity for Cloud Hypervisor. |
-| Current LTS | Most recent kernel in the line; regression-catch for newer verifier behaviour. |
-| `bpf-next` | Early warning for upstream changes. Soft-fail in CI. |
+| 6.18 LTS (the pin) | The one kernel Overdrive's appliance OS ships. Latest LTS at pin time (released 2025-11-30, EOL Dec 2028); guarantees in-kernel TLS 1.3 TX+RX (≥6.0) and `CONFIG_NET_HANDSHAKE` (≥6.5). Every Tier-3/Tier-4 gate runs here — this is the merge-blocking signal. |
+| `bpf-next` | Early warning for upstream verifier / BPF-subsystem changes before a future pin bump adopts them. Soft-fail nightly, never merge-blocking. |
 
-The matrix is `little-vm-helper` (LVH) `image-version` inputs in CI; adding a kernel is one line of YAML. LVH ships pre-built OCI kernel images and is used in production by Cilium, Tetragon, and pwru. On developer laptops `virtme-ng` boots a kernel from a tree in roughly a second and snapshots the host filesystem — same harness shape, faster iteration. Overdrive reuses aya's existing `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` as the entry point rather than inventing its own.
+The pin can be advanced at will in a later Image Factory revision since Overdrive owns the image; advancing it is a deliberate, tested image change, not an operator-environment variable. The matrix is `little-vm-helper` (LVH) `image-version` inputs in CI; adding a kernel is one line of YAML. LVH ships pre-built OCI kernel images and is used in production by Cilium, Tetragon, and pwru. On developer laptops `virtme-ng` boots a kernel from a tree in roughly a second and snapshots the host filesystem — same harness shape, faster iteration. Overdrive reuses aya's existing `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` as the entry point rather than inventing its own.
 
 Nested virtualisation is not required. Tetragon's `--qemu-disable-kvm` flag exists specifically to make GitHub Actions runners viable; Overdrive takes the same approach. Standard `ubuntu-latest` runners are sufficient through Phase 2 of the roadmap; a self-hosted KVM-capable runner pool can be added later if PR latency budget demands it.
 
@@ -2546,8 +2603,8 @@ Per-PR (critical path ≈ 15 minutes):
   Job A   cargo nextest run + cargo test --doc      pure Rust, no BPF      (s)
   Job B   cargo dst                           turmoil DST (§21)      (min)
   Job C   cargo xtask bpf-unit                      Tier 2                 (min)
-  Job D   cargo xtask integration-test vm <K>       Tier 3, kernel matrix  (10 min)
-            matrix: 5.10, 5.15, 6.1, 6.6, latest LTS
+  Job D   cargo xtask integration-test vm <K>       Tier 3, pinned kernel  (10 min)
+            matrix: 6.18 (the pinned appliance kernel, latest LTS) — ADR-0068
   Job E   cargo xtask verifier-regress              Tier 4 — veristat      (min)
           cargo xtask xdp-perf                      Tier 4 — xdp-bench     (min)
 

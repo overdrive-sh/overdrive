@@ -23,12 +23,22 @@
 minimumLimaVersion: 2.0.0
 
 # ────────────────────────────────────────────────────────────────────────────
-# Base image — Ubuntu 24.04 LTS (kernel 6.8: BPF LSM, kTLS, cgroups v2, KVM).
+# Base image — Ubuntu 26.04 LTS (kernel 7.0: BPF LSM, kTLS incl. TLS 1.3
+# KeyUpdate, CONFIG_NET_HANDSHAKE, cgroups v2, KVM). Chosen so the dev VM is
+# at-or-above the pinned 6.18-LTS appliance kernel (ADR-0068).
+#
+# NOTE — dev/prod kernel skew: Ubuntu 26.04 ships mainline **7.0**, which is
+# *newer* than the production appliance pin (6.18 LTS). That's fine for the
+# inner loop (every feature the code uses is present in both), but the
+# authoritative kernel-fidelity signal is CI's Tier-3 LVH matrix pinned at
+# 6.18 — NOT this VM. If exact 6.18 fidelity is ever needed locally, install
+# a mainline 6.18 kernel here instead of bumping the Ubuntu release.
+#
 # Native arch on host — amd64 on Intel, arm64 on Apple Silicon. All of the
 # tooling we install has working aarch64 support.
 # ────────────────────────────────────────────────────────────────────────────
 base:
-  - template:_images/ubuntu-24.04
+  - template:_images/ubuntu-26.04
 
 # ────────────────────────────────────────────────────────────────────────────
 # VM backend — auto-detected by Lima. Apple Virtualization.framework (vz)
@@ -144,7 +154,7 @@ provision:
   # RET_SUCCESS against forwarded destinations. Without it the helper
   # returns BPF_FIB_LKUP_RET_FWD_DISABLED and Tier 2 FIB-hit tests
   # (`xdp_{service_map,reverse_nat}_redirect_neigh`) fall through to
-  # XDP_PASS. Ubuntu 24.04 defaults this to 0; this drop-in flips it
+  # XDP_PASS. Ubuntu defaults this to 0; this drop-in flips it
   # to 1 for the dev VM. Future Tier 3 real-veth tests need it too.
   # -------------------------------------------------------------------------
   - mode: system

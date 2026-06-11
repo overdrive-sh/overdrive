@@ -2,6 +2,15 @@
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 55
 
+> **Superseded in part (2026-06-05) — kernel matrix.** This note recommended a
+> multi-kernel LTS matrix (`5.10, 5.15, 6.1, 6.6, current LTS`). Overdrive has
+> since decided to ship an immutable appliance OS and **pin** the kernel at
+> the **latest qualifying LTS — currently 6.18 LTS** (EOL Dec 2028),
+> collapsing the matrix to *the pinned kernel + `bpf-next` soft-fail* — see
+> **ADR-0068** and whitepaper §22. The tiered
+> testing strategy (DST → BPF unit → real-kernel QEMU → verifier/perf gates)
+> below is unchanged; only the kernel-matrix recommendation is historical.
+
 ## Executive Summary
 
 **Claim.** The eBPF-heavy orchestrator ecosystem (Cilium, Tetragon, kernel-patches/bpf, aya, Falco) has converged on a layered integration-testing pattern that complements deterministic simulation testing (DST) without substituting for it. The shape is: (1) in-process DST for control-plane logic; (2) BPF unit tests via `BPF_PROG_TEST_RUN` for program-level correctness; (3) real-kernel integration in QEMU (`little-vm-helper` in CI, `virtme-ng` on developer laptops) against an LTS kernel matrix; (4) verifier-complexity + perf regression gates using `veristat` and `xdp-bench`. Each tier catches bug classes the others cannot.
