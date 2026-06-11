@@ -2,8 +2,6 @@
 
 **Date**: 2026-06-05 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 26 (avg reputation 0.97)
 
-> **Pin updated (2026-06-11): 6.6 → 6.18 LTS.** Written against a 6.6 pin; the appliance kernel is now pinned at the latest qualifying LTS — **6.18** (EOL Dec 2028, ADR-0068). The recommended architecture is unaffected (6.18 ⊇ 6.6 on every feature). **KeyUpdate correction (2026-06-11):** the "SVID rotation = teardown+reconnect" note is **NOT** removed by the 6.18 pin. In-place rekey needs TLS 1.3 KeyUpdate in both the kernel (**confirmed present at v6.18**) **and** the userspace rustls→kTLS bridge, which does not yet support it (the `ktls` crate: [rustls/ktls#59](https://github.com/rustls/ktls/issues/59) open, [PR#62](https://github.com/rustls/ktls/pull/62) unmerged). So it is unavailable to Overdrive's recommended stack — the kernel is ready, the **userspace bridge is the sole blocker**; teardown+reconnect stands for v1. The unblocking lever is the **userspace bridge**, not the kernel pin. Kernel-floor references reading "6.6 pin" below now read 6.18.
-
 > Decision-grade synthesis. Inputs:
 > - `docs/research/dataplane/sockops-mtls-ktls-installation-comprehensive-research.md` (mechanism)
 > - `docs/research/dataplane/sockops-ktls-plaintext-race-window-research.md` (race window)

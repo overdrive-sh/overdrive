@@ -349,6 +349,123 @@ jobs:
     served_by_phase: 2
     status: active
 
+  - id: J-SEC-003
+    title: "Transparently encrypt every host-socket workload's traffic with its own SVID, in-kernel, with the platform out of the data path — no sidecar, no cleartext on the wire"
+    relates_to: J-SEC-002
+    situation: >
+      When a host-socket workload I run (a process via the exec driver, or a
+      WASM function via wasmtime — whose TCP terminates in the HOST kernel)
+      opens a connection — and design principle 3 says "every packet carries
+      cryptographic workload identity" and principle 2 says mTLS is in-kernel
+      and undisableable — and the platform already MINTS a forgery-proof SVID
+      (J-SEC-001 / #28) and HOLDS it bound to the running set, readable via the
+      IdentityRead port (J-SEC-002 / #35) — but NOTHING yet consumes that held
+      identity to encrypt the actual bytes on the wire, so the promise is true
+      in principle but not observable on a packet capture,
+    motivation: >
+      I want the platform to detect the host-socket connection in the kernel
+      (sockops), perform the TLS 1.3 handshake on the workload's behalf in the
+      node agent (rustls, presenting the held SVID read via IdentityRead, leaf
+      key per ADR-0063 D9), install the negotiated session keys into the
+      workload's own socket via kTLS (setsockopt TLS_TX/TLS_RX), and then LEAVE
+      THE DATA PATH — so encryption is in-kernel and the workload holds NOTHING
+      and is identity-unaware (Overdrive is sidecarless) — and I want the
+      plaintext race window between connection-established and kTLS-installed to
+      be closed fail-closed (no cleartext byte egresses before kTLS is armed),
+    outcome: >
+      so design principle 3 is OPERATIONALLY TRUE ON THE WIRE for host-socket
+      workloads — provable by wire capture showing TLS 1.3 records (not
+      cleartext) between two host-socket workloads — and principle 2's "mTLS is
+      in-kernel and cannot be disabled" is real, not aspirational: the SAME TLS
+      1.3 session that authenticated carries the data (auth-session ==
+      data-session), encryption runs in the kernel via kTLS, the platform agent
+      is out of the steady-state data path, and a handshake against an absent or
+      wrong SVID fails closed (no plaintext fallback). This is the on-the-wire
+      ENFORCEMENT peer of the mint(J-SEC-001)/hold(J-SEC-002) chain — 001 mints
+      identity, 002 holds/reads it, 003 consumes it to encrypt the wire.
+    job_dimensions:
+      functional: >
+        On a host-socket connection: (a) sockops detects the
+        ESTABLISHED transition in the kernel; (b) the node agent acquires the
+        workload's socket (process: pidfd_getfd; WASM: in-process host fd) and
+        performs a rustls TLS 1.3 handshake presenting the held SVID (read via
+        the IdentityRead port) and verifying the peer against the trust bundle;
+        (c) the agent installs the negotiated TLS 1.3 session keys into kTLS on
+        the workload's socket (setsockopt TLS_TX/TLS_RX) and exits the data
+        path; (d) the wire carries TLS 1.3 Application Data records, NOT
+        cleartext; (e) no cleartext byte egresses before kTLS is installed
+        (fail-closed); (f) a handshake against an absent/wrong SVID fails closed
+        with no plaintext fallback.
+      emotional: >
+        Trust that "mTLS is default and cannot be disabled" and "every packet
+        carries identity" are now TRUE ON THE WIRE for host-socket workloads —
+        provable by a packet capture Sam runs himself (tcpdump shows TLS 1.3
+        records; ss -K shows the kTLS ULP installed) — not a claim he has to
+        take on faith. Security he cannot accidentally turn off.
+      social: >
+        Tell a security reviewer "encryption uses the SAME TLS 1.3 session that
+        authenticated the workload (auth-session == data-session), terminated
+        in-kernel via kTLS, sidecarless, with the platform agent out of the
+        steady-state data path" — and have a wire capture prove it, rather than
+        the ztunnel/sidecar shape where a userspace proxy stays in the data path
+        for the whole connection.
+    four_forces:
+      push: >
+        Identity is now mintable (J-SEC-001) and held/readable (J-SEC-002), but
+        NOTHING consumes it on the wire — design principles 2 (in-kernel,
+        undisableable mTLS) and 3 (every packet carries identity) are
+        aspirational until an enforcer ships. A CA + a holder with no enforcer
+        is a chain whose last link is missing: the held SVID is never presented,
+        the bytes are never encrypted with it, and a packet capture would show
+        cleartext.
+      pull: >
+        sockops detects the connection → the agent does the rustls TLS 1.3
+        handshake presenting the held SVID → kTLS installs the session keys on
+        the workload's own socket → the agent exits the data path → the wire
+        carries TLS 1.3 records, in-kernel, with the workload holding nothing.
+        Strictly stronger than ztunnel/Istio (userspace proxy stays in the data
+        path) — the agent leaves after the handshake.
+      anxiety: >
+        "Has anyone shipped in-band sidecarless kTLS where the auth-session IS
+        the data-session and the agent then exits the data path?" — NO; every
+        production mesh either does out-of-band auth + separate encryption
+        (Cilium: WireGuard/IPsec) or keeps a userspace proxy in the data path
+        (Istio ztunnel). "Can the plaintext race window between sockops
+        ESTABLISHED and kTLS install be closed?" — sk_msg has only PASS/DROP/
+        REDIRECT, no lossless HOLD; bpf_msg_cork_bytes does not buffer.
+        Mitigated: a Tier-3 SPIKE FIRST on ONE process→process flow validates
+        BOTH hypotheses before any design locks; the 6.18 pin (ADR-0068) removes
+        all kernel-version anxiety (in-kernel TLS 1.3 TX+RX + CONFIG_NET_HANDSHAKE
+        guaranteed); and the DOCUMENTED FALLBACK is the Cilium model
+        (out-of-band auth + separate encryption, or a userspace proxy) if in-band
+        kTLS cannot be made race-free.
+      habit: >
+        Teams reach for sidecar injection (Istio/Linkerd inject Envoy/
+        linkerd-proxy into the pod) or the SPIRE Workload API (the workload
+        fetches its own SVID over a Unix socket and runs userspace TLS).
+        Overdrive's kernel-mediated, workload-holds-nothing model is a different
+        shape — the workload is identity-unaware and never touches crypto.
+    source: >
+      whitepaper §7 ("Transparent mTLS — one identity model, two enforcement
+      mechanisms"), §8 (Identity and mTLS), §6 addendum; vision.md design
+      principles 2 (in-kernel undisableable mTLS) + 3 (every packet carries
+      identity); ADR-0068 (pinned 6.18 LTS appliance kernel; KeyUpdate kernel-
+      ready, userspace-bridge-blocked);
+      docs/research/dataplane/transparent-mtls-recommended-architecture-research.md,
+      docs/research/dataplane/sockops-mtls-ktls-installation-comprehensive-research.md
+      (Gap-4 RESOLVED),
+      docs/research/dataplane/sockops-ktls-plaintext-race-window-research.md (the
+      race-window deep-dive + comparison matrix — the WS hypothesis),
+      docs/research/dataplane/ktls-sockops-cp-restart-survival-research.md
+      (CP-restart survival). Carve-outs: guest-stack workloads (microVM/
+      unikernel) → #222 (host L4 tap proxy, a SEPARATE feature); in-place SVID
+      rekey / TLS 1.3 KeyUpdate → #229 (userspace rustls/ktls bridge gap; v1 =
+      teardown+reconnect); certificate-rotation workflow → #40; revocation
+      (CRL/OCSP) → Phase 5; multi-node → #36. Distilled from the whitepaper +
+      research, not from user interviews (per the header precedent).
+    served_by_phase: 2
+    status: active
+
   - id: J-DOCS-001
     title: "Find an authoritative Overdrive answer fast while evaluating or adopting"
     situation: >
@@ -569,3 +686,33 @@ changelog:
       IdentityRead port; rotation deferred to #40 as a no-op
       Action::StartWorkflow). Existing entries unmodified. See
       docs/feature/workload-identity-manager/.
+  - date: 2026-06-11
+    change: >
+      Added J-SEC-003 for the transparent-mtls-host-socket feature (GH #26,
+      roadmap step 2.4), authored by the DISCUSS wave. This is the on-the-wire
+      ENFORCEMENT peer of the J-SEC-001 (mint, #28) / J-SEC-002 (hold/read,
+      #35) chain: 001 mints a forgery-proof SVID, 002 holds it bound to the
+      running set and exposes it via the IdentityRead port, and J-SEC-003
+      CONSUMES that held identity to encrypt the wire — sockops detects the
+      host-socket connection, the node agent performs the rustls TLS 1.3
+      handshake presenting the held SVID, kTLS installs the session keys on the
+      workload's own socket, the agent exits the data path, and the wire carries
+      TLS 1.3 records with no cleartext before kTLS install (fail-closed).
+      carries relates_to: J-SEC-002 + full functional/emotional/social
+      dimensions + four forces. SCOPE — host-socket workloads ONLY (process,
+      WASM): guest-stack workloads (microVM/unikernel, TCP terminates in the
+      GUEST kernel) are #222 (host L4 tap proxy, a SEPARATE feature, the
+      corrected whitepaper §7 "one identity model, two enforcement mechanisms"
+      split); in-place SVID rekey / TLS 1.3 KeyUpdate is #229 (userspace
+      rustls/ktls bridge gap — kernel-side IS present at v6.18 per ADR-0068; v1
+      = teardown+reconnect); certificate-rotation workflow is #40; revocation is
+      Phase 5; multi-node is #36. Grounded in the post-ADR-0068 reality (6.18
+      pin removes kernel-version anxiety, NOT the stale #26 issue body's "5.10
+      floor / KeyUpdate-must-be-handled / fd-acquisition-differs-per-kind"
+      framing). The DISCUSS wave is spike-first (D2): the walking skeleton is a
+      Tier-3 SPIKE that disproves the core hypothesis — in-band sidecarless kTLS
+      (auth-session == data-session, agent exits the data path) is unshipped
+      anywhere, and the plaintext race window may be unclosable — with the
+      Cilium out-of-band-auth + separate-encryption model as the DOCUMENTED
+      FALLBACK. served_by_phase: 2. Existing entries unmodified. See
+      docs/feature/transparent-mtls-host-socket/.

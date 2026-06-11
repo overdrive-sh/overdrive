@@ -1,0 +1,225 @@
+schema_version: 1
+
+# Structured journey schema for the host-socket transparent-mTLS enforcement
+# mechanism (GH #26 · roadmap 2.4). Gherkin is embedded PER STEP (no standalone
+# .feature file — the project bans .feature files; these GIVEN/WHEN/THEN blocks
+# are specification only, never parsed/executed — the DISTILL wave translates
+# them into Rust integration tests).
+#
+# This is the feature-local structured companion to the product-level summary at
+# docs/product/journeys/enforce-transparent-mtls-on-the-wire.yaml and the single
+# narrative at docs/feature/transparent-mtls-host-socket/feature-delta.md.
+#
+# Maps to J-SEC-003. Persona: Sam (sam-platform-security-engineer, J-SEC-003
+# lens). Host-socket ONLY (process, WASM); guest-stack -> #222; rekey -> #229;
+# rotation -> #40; revocation -> Phase 5; multi-node -> #36.
+
+journey:
+  name: "Encrypt every host-socket workload's wire with its own SVID, in-kernel, agent out of the path"
+  goal: >
+    For host-socket workloads (process, WASM), turn a plaintext TCP connection
+    into a kernel-encrypted TLS 1.3 session carrying the workload's own SVID,
+    with the workload holding nothing and the agent out of the steady-state data
+    path — provable by a packet capture, fail-closed, no cleartext before kTLS
+    install.
+  persona: "sam-platform-security-engineer (J-SEC-003 lens)"
+  job: J-SEC-003
+
+  emotional_arc:
+    start: "Skeptical — 'identity is minted and held, but show me a packet capture: is the wire actually encrypted with the workload's own SVID, in-kernel, no cleartext leak — and has ANYONE shipped in-band sidecarless kTLS?'"
+    middle: "Reassured incrementally — the spike proves one process->process flow goes TLS 1.3 on the wire with kTLS installed (ss -K), no cleartext before install; a wrong/absent SVID fails closed; the agent is out of the steady-state path."
+    end: "Confident — 'the auth-session IS the data-session, encryption is in-kernel, the agent is out of the data path, fail-closed is proven by a race-window probe, and a wire capture I ran shows TLS 1.3 records — the principle made real.'"
+
+steps:
+  - id: 0
+    name: "SPIKE FIRST — prove in-band sidecarless kTLS race-free on the pinned kernel for ONE flow (or fall back)"
+    command: "(Tier-3 spike on the 6.18 Lima/LVH kernel; the walking skeleton — runs BEFORE design locks)"
+    observable_surface: |
+      +-- Spike verdict + wire capture (Slice 00) -------------------------------+
+      | $ tcpdump -i overdrive-veth0 -X 'tcp port 8443'   (ONE process flow)      |
+      |   0x0000: ... 1703 0304 ...   <-- TLS 1.3 App Data (0x17 03 03)           |
+      | $ ss -K   tcp ESTAB ... ulp tls   <-- kTLS ULP installed                  |
+      | race-window probe: write("PLAINTEXT_PROBE") on connect() return, install  |
+      |   delayed 500ms -> tcpdump NEVER shows "PLAINTEXT_PROBE"                   |
+      | VERDICT: PASS (proceed with in-band kTLS) | FAIL (Cilium fallback)         |
+      +--------------------------------------------------------------------------+
+    shared_artifacts:
+      - name: "SvidMaterial (held)"
+        source: "J-SEC-002/#35 Arc<IdentityMgr>, read via IdentityRead::svid_for"
+        consumers: ["the spike's rustls handshake"]
+      - name: "workload socket fd"
+        source: "the workload's own socket (pidfd_getfd)"
+        consumers: ["setsockopt(TCP_ULP/TLS_TX/TLS_RX)"]
+      - name: "kTLS crypto_info"
+        source: "the rustls handshake's extracted secrets (auth-session == data-session)"
+        consumers: ["setsockopt(TLS_TX/TLS_RX); tcpdump TLS records; ss -K ULP"]
+    emotional_state:
+      entry: "Skeptical and threat-modelling — 'in-band sidecarless kTLS is unshipped; the race window may be unclosable. Prove it on a real kernel for one flow first.'"
+      exit: "De-risked — 'either the spike proves the handoff is race-free on 6.18 and the design proceeds, or it disproves it and we adopt the documented Cilium fallback — no design locked on a hope.'"
+    integration_checkpoint: |
+      The spike's handoff targets the workload-owns-fd shape (so Slice 05's
+      restart-survival observable is reachable). The agent reads SVID + bundle
+      ONLY via IdentityRead (no spike-local issuance/cache).
+    failure_modes:
+      - "Handoff cannot be made race-free for one flow -> FAIL verdict -> Cilium out-of-band-auth + separate-encryption fallback (a successful spike outcome)."
+      - "Cleartext leaks before the sk_msg gate is active -> the gate insertion is not synchronous-at-ESTABLISHED -> mechanism re-evaluation."
+    gherkin: |
+      Scenario: One host-socket flow carries TLS 1.3 on the wire after the in-kernel handoff
+        Given two host-socket workloads on the pinned 6.18 kernel, each with a held SVID
+        When the platform performs the sockops-detect to rustls-handshake to kTLS-install handoff for one connection between them
+        Then a wire capture between them shows TLS 1.3 Application Data records and no cleartext
+        And the kTLS ULP is installed on each workload's socket
+
+      Scenario: The spike returns an honest verdict that decides the mechanism
+        Given the spike has run the full handoff on the pinned kernel
+        When the handoff cannot be made race-free for one flow
+        Then the spike reports a FAIL verdict naming the failure mode
+        And the documented fallback (out-of-band auth + separate encryption) is selected for the design
+
+  - id: 1
+    name: "Detect the host-socket connection in the kernel and acquire the workload's socket"
+    command: "(internal — sockops ACTIVE/PASSIVE_ESTABLISHED; agent pidfd_getfd the workload socket)"
+    observable_surface: |
+      Tier-3 test: the sockops program fires on the host-socket ESTABLISHED
+      transition (synchronously, before connect()/accept() returns); the agent
+      holds the workload's socket fd. A guest-stack connection does NOT fire it.
+    shared_artifacts:
+      - name: "AllocationId / SpiffeId"
+        source: "the SpiffeId newtype + allocation lifecycle (J-SEC-001 derivation)"
+        consumers: ["the IdentityRead lookup key; the SAN the peer sees"]
+      - name: "workload socket fd"
+        source: "the workload's own socket (process: pidfd_getfd; WASM: in-process host fd)"
+        consumers: ["the handshake (step 2); kTLS install (step 2->3)"]
+    emotional_state:
+      entry: "Focused — 'does the kernel catch the host-socket connection before the workload can write — and present the WORKLOAD's identity, not the node's?'"
+      exit: "Reassured — 'sockops detects it in-kernel before the workload writes; the agent holds the workload's socket.'"
+    integration_checkpoint: |
+      The sockops program + maps/link are bpffs-pinned (pinning = ByName,
+      /sys/fs/bpf/overdrive/) — prerequisite for restart survival (step error
+      path / Slice 05).
+    failure_modes:
+      - "Detection fires AFTER the workload could write -> cleartext race (closed by the synchronous-at-ESTABLISHED gate, step 2 error path)."
+      - "A guest-stack connection erroneously triggers the host path (it must not — that is #222's scope)."
+    gherkin: |
+      Scenario: A host-socket connection is detected before the workload can write
+        Given a host-socket workload that opens a TCP connection
+        When the connection reaches the established state in the kernel
+        Then the platform detects the connection synchronously before the workload's first write
+        And the platform holds a handle to the workload's own socket
+
+      Scenario: A guest-stack connection is correctly not detected by the host path
+        Given a guest-stack workload (microVM or unikernel) whose TCP terminates in the guest kernel
+        When that workload opens a connection
+        Then the host detection path does not fire for it and does not error
+
+  - id: 2
+    name: "Handshake on the workload's behalf, presenting the held SVID; install kTLS; agent exits"
+    command: "(internal — rustls TLS 1.3 handshake presenting IdentityRead-read SVID; setsockopt TLS_TX/TLS_RX; agent exits the data path)"
+    observable_surface: |
+      Tier-3 test: a completed mutual-TLS handshake whose presented leaf chains
+      to the root (SAN == the workload's alloc); ss -K shows the kTLS ULP
+      installed; the agent is absent from the steady-state byte path.
+    shared_artifacts:
+      - name: "SvidMaterial (held)"
+        source: "J-SEC-002/#35 Arc<IdentityMgr>, read via IdentityRead::svid_for (#26 is a READER, never an issuer)"
+        consumers: ["the agent's rustls ClientConfig/ServerConfig (cert + leaf key)"]
+      - name: "TrustBundle"
+        source: "J-SEC-002/#35 IdentityRead::current_bundle() (hydrated from Ca::trust_bundle())"
+        consumers: ["the agent's rustls peer-verification"]
+      - name: "kTLS crypto_info"
+        source: "the rustls handshake's extracted secrets (auth-session == data-session)"
+        consumers: ["setsockopt(TLS_TX/TLS_RX) on the workload socket"]
+    emotional_state:
+      entry: "Focused — 'does it present the WORKLOAD's identity (held SVID), verify the peer, and is the encryption really IN-KERNEL with the agent out of the path?'"
+      exit: "Reassured — 'the agent presents the held SVID, verifies the peer, installs kTLS (ss -K), and exits — the kernel does the crypto; the workload holds nothing.'"
+    integration_checkpoint: |
+      The agent reads SVID + bundle ONLY via IdentityRead (no #26-local
+      issuance/cache — single source of truth preserved across #35/#26). The
+      kTLS keys are the handshake's extracted secrets (auth-session ==
+      data-session), not a separate session.
+    failure_modes:
+      - "Plaintext race window — a write() between ESTABLISHED and kTLS install could leak cleartext (the sk_msg gate, inserted synchronously at ESTABLISHED, is fail-closed for confidentiality; residual data-loss closed by connection reset if drops>0). [Slice 04]"
+      - "Handshake against an absent/wrong SVID -> FAIL CLOSED, no plaintext fallback (IdentityRead None -> agent refuses; peer not chaining to bundle -> rustls aborts). [Slice 04]"
+      - "Agent restart with in-flight kTLS — survives iff the workload owns the fd and the sockops link/maps are bpffs-pinned (kTLS state is socket-owned). [Slice 05]"
+      - "SVID rotation on a long-lived connection — v1 = teardown+reconnect (in-place rekey needs the userspace rustls/ktls KeyUpdate bridge, deferred to #229; kernel-side present at v6.18)."
+    gherkin: |
+      Scenario: The agent presents the workload's own held identity in the handshake
+        Given a detected host-socket connection for a running workload whose SVID is held
+        When the platform performs the TLS handshake on the workload's behalf
+        Then it presents the workload's own held SVID read from the identity read surface
+        And it verifies the peer against the current trust bundle
+        And the workload itself holds no certificate or private key
+
+      Scenario: Encryption is in-kernel with the platform out of the steady-state data path
+        Given a host-socket connection whose encryption is armed in the kernel
+        When the workloads exchange application bytes
+        Then the kernel performs the record framing and encryption
+        And the platform agent is not in the steady-state byte path
+
+      Scenario: A handshake against an absent or wrong identity fails closed
+        Given a host-socket connection whose held SVID is absent, or whose peer does not chain to the trust bundle
+        When the platform attempts the handshake
+        Then the connection fails closed with no TLS application data and no cleartext on the wire
+
+      Scenario: No cleartext escapes before encryption is armed
+        Given a host-socket workload that writes immediately after its connection is established
+        And the kTLS installation is deliberately delayed
+        When the wire is captured during the delay
+        Then no cleartext application bytes appear on the wire before kTLS is installed
+
+  - id: 3
+    name: "Prove the wire carries TLS 1.3 records (the headline observable)"
+    command: "tcpdump on the veth (TEST tier) shows TLS 1.3 Application Data records, not cleartext"
+    observable_surface: |
+      +-- Wire capture (TEST tier — the headline observable) --------------------+
+      | $ tcpdump -i overdrive-veth0 -X 'tcp port 8443'                          |
+      |   0x0000: ... 1703 0304 00a7 ...   <-- TLS 1.3 App Data (0x17 03 03)      |
+      |   NO cleartext "GET /payments HTTP/1.1" anywhere in the capture           |
+      | $ ss -K   tcp ESTAB ... ulp tls   <-- kTLS ULP installed                  |
+      +--------------------------------------------------------------------------+
+    shared_artifacts:
+      - name: "TLS 1.3 records on the wire"
+        source: "the kTLS context on the workload socket (auth-session == data-session)"
+        consumers: ["the security reviewer's tcpdump capture; the K1 North-Star KPI"]
+    emotional_state:
+      entry: "Skeptical — 'does a packet capture ACTUALLY show TLS 1.3 records, or am I taking the platform's word?'"
+      exit: "Confident — 'tcpdump shows TLS 1.3 Application Data records — the wire is encrypted with the workload's own session, provable independent of the platform's assertion.'"
+    integration_checkpoint: |
+      Between two host-socket workloads the wire MUST show TLS 1.3 records and
+      NEVER the cleartext payload — the K1 North-Star observable, the reason
+      J-SEC-003 exists.
+    failure_modes:
+      - "tcpdump shows cleartext (or the plaintext probe string) -> the encryption is not on the wire (a blocking failure, not a degradation)."
+      - "A userspace proxy is quietly in the data path (the ztunnel anti-pattern) -> the agent is NOT out of the data path (K4 guardrail violated)."
+    gherkin: |
+      Scenario: The wire carries TLS 1.3 records between two host-socket workloads
+        Given two host-socket workloads whose handshake has completed
+        When the platform installs the negotiated session into the kernel and steps out of the data path
+        Then a wire capture between them shows TLS 1.3 Application Data records and no cleartext
+        And the kTLS upper-layer protocol is installed on each workload's socket
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: "SvidMaterial (held) + TrustBundle"
+      must_match_across: [0, 2]
+      failure_message: "#26 must read SVID + bundle ONLY via the IdentityRead port (#35) — never mint, re-issue, or cache its own copy. A #26-local copy drifts on rotation/drop."
+    - artifact: "kTLS crypto_info"
+      must_match_across: [0, 2, 3]
+      failure_message: "The kTLS keys MUST be the rustls handshake's extracted secrets (auth-session == data-session). A separately negotiated session breaks the property the design rests on."
+    - artifact: "workload socket fd ownership"
+      must_match_across: [0, 1, 2]
+      failure_message: "kTLS state is socket-owned; in-flight restart survival needs the WORKLOAD to own the fd. The spike's handoff must target workload-owns-fd (a DESIGN decision)."
+
+carve_outs:
+  - "Guest-stack workloads (microVM/unikernel — TCP in the GUEST kernel) -> #222 (host L4 tap proxy, SEPARATE feature)."
+  - "In-place SVID rekey / TLS 1.3 KeyUpdate -> #229 (userspace rustls/ktls bridge gap; kernel-side present at v6.18; v1 = teardown+reconnect)."
+  - "Certificate-rotation workflow -> #40 (depends on #39)."
+  - "Revocation (CRL/OCSP) -> Phase 5. Multi-node -> #36."
+
+changelog:
+  - date: 2026-06-11
+    feature: transparent-mtls-host-socket
+    change: >
+      Initial structured journey schema for GH #26 (J-SEC-003), Gherkin embedded
+      per step. Spike-first (step 0 = the walking-skeleton Tier-3 spike).
+      Host-socket only; carve-outs named. Does NOT extend the J-SEC-002 journey.

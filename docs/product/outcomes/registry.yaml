@@ -207,3 +207,160 @@ outcomes:
   artifact: crates/overdrive-control-plane/src/ca_boot.rs
   related: []
   superseded_by: null
+- id: OUT-MTLS-SPIKE-INBAND-KTLS
+  kind: spike
+  summary: 'Tier-3 spike (walking skeleton, runs BEFORE design locks): prove in-band
+    sidecarless kTLS for ONE process->process flow on the pinned 6.18 kernel — sockops
+    ESTABLISHED -> pidfd_getfd -> rustls TLS 1.3 handshake presenting the held SVID
+    (IdentityRead) -> kTLS install -> agent exits -> tcpdump shows TLS 1.3 records,
+    race-free (no cleartext before kTLS). FALSIFICATION -> fall back to Cilium out-of-band
+    auth + separate encryption'
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: one process->process host-socket flow on the 6.18 Lima/LVH kernel; held SVID
+      read via IdentityRead; deliberate kTLS-install delay to widen the race window
+  output:
+    shape: PASS = tcpdump shows TLS 1.3 Application Data records + ss -K shows kTLS ULP
+      installed + race-window probe shows zero cleartext bytes before install; FAIL =
+      handoff not race-free -> documented Cilium fallback (out-of-band auth + separate
+      encryption)
+  keywords:
+  - sockops
+  - ktls
+  - rustls
+  - pidfd-getfd
+  - spike
+  - in-band
+  - sidecarless
+  - tls13
+  - wire-capture
+  - fallback
+  artifact: crates/overdrive-dataplane (spike harness; mechanism unbuilt)
+  related: [OUT-WIM-IDENTITY-READ]
+  superseded_by: null
+- id: OUT-MTLS-WIRE-TLS13
+  kind: invariant
+  summary: Between two host-socket workloads the wire carries TLS 1.3 Application Data
+    records (content type 0x17), NOT cleartext — the auth-session is the data-session,
+    encryption is in-kernel via kTLS, the agent is out of the steady-state data path
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: two host-socket workloads exchanging bytes after the sockops->handshake->kTLS
+      handoff completes
+  output:
+    shape: tcpdump on the veth shows TLS 1.3 records (0x17) and never the cleartext payload;
+      ss -K shows the kTLS ULP installed on the socket; the agent is absent from the
+      steady-state byte path
+  keywords:
+  - mtls
+  - ktls
+  - tls13
+  - wire-capture
+  - in-kernel
+  - sidecarless
+  - auth-session-is-data-session
+  - principle-3
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-SPIKE-INBAND-KTLS, OUT-WIM-IDENTITY-READ]
+  superseded_by: null
+- id: OUT-MTLS-NO-PLAINTEXT-PRE-KTLS
+  kind: invariant
+  summary: 'Fail-closed for confidentiality: no cleartext byte egresses on the wire
+    before kTLS is installed; the gate is armed before connect()/accept() returns. The
+    gate MECHANISM (sk_msg DROP-until-armed vs sockmap redirect vs other) is a DESIGN
+    choice the spike informs, not pinned here; the residual data-loss window is closed by
+    connection reset if drops > 0'
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: a write() issued immediately on connect() return (no sleep), with a deliberately
+      delayed kTLS install widening the window
+  output:
+    shape: tcpdump shows EITHER TLS 1.3 records OR zero application bytes — NEVER the
+      cleartext probe string on the wire; a drop-counter signals whether the window fired
+  keywords:
+  - race-window
+  - fail-closed
+  - sk-msg
+  - no-cleartext
+  - confidentiality
+  - sockops
+  - drop-counter
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-WIRE-TLS13]
+  superseded_by: null
+- id: OUT-MTLS-HANDSHAKE-FAIL-CLOSED
+  kind: invariant
+  summary: A handshake against an absent or wrong SVID fails closed — no plaintext fallback,
+    no cleartext egress; an absent IdentityRead read refuses the handshake rather than
+    presenting a stale credential, and a peer that does not chain to the trust bundle
+    aborts the handshake
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: a host-socket flow whose held SVID is absent (stopped/not-yet-issued) OR whose
+      peer presents a credential not chaining to the current trust bundle
+  output:
+    shape: NO TLS 1.3 Application Data on the wire AND NO cleartext — the connection fails
+      closed (rustls aborts / the agent refuses to drive the handshake)
+  keywords:
+  - fail-closed
+  - mtls
+  - handshake
+  - absent-svid
+  - wrong-svid
+  - trust-bundle
+  - no-plaintext-fallback
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-WIRE-TLS13, OUT-WIM-IDENTITY-READ]
+  superseded_by: null
+- id: OUT-MTLS-RESTART-RE-HANDSHAKE
+  kind: invariant
+  summary: 'Restart behaviour, two-tier: after a node-agent restart, NEW host-socket
+    connections re-run the sockops->handshake->kTLS handoff and re-install kTLS (the held
+    SVID is re-readable via IdentityRead) — this is the unconditional Phase-2 promise.
+    Survival of an ALREADY-IN-FLIGHT kTLS session across the restart is a spike/DESIGN-gated
+    observable (holds IFF the workload owns the socket fd and the sockops link/maps are
+    bpffs-pinned), NOT an unconditional Phase-2 acceptance criterion. A full node reboot
+    re-handshakes every connection (bpffs pins do not survive a reboot)'
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: a node-agent restart (crash/upgrade) with in-flight kTLS sessions in the
+      fd-ownership/bpffs-pin shape the spike validates; separately, new connections opened
+      after the restart
+  output:
+    shape: new connections re-handshake and re-install kTLS (unconditional); an in-flight
+      session survives the restart iff workload-owns-fd + bpffs-pinned link (spike-gated) —
+      otherwise the documented behaviour is new-connection re-handshake
+  keywords:
+  - restart-survival
+  - re-handshake
+  - ktls
+  - socket-owned
+  - bpffs-pin
+  - spike-gated
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-SPIKE-INBAND-KTLS, OUT-MTLS-WIRE-TLS13]
+  superseded_by: null
+- id: OUT-MTLS-WASM-PARITY
+  kind: invariant
+  summary: A WASM (wasmtime) host-socket workload receives the same transparent mTLS
+    enforcement as a process workload — via the in-process host fd path rather than
+    pidfd_getfd — with the same wire observable (TLS 1.3 Application Data records, no
+    cleartext) and the same fail-closed semantics
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: a WASM (wasmtime) host-socket workload exchanging bytes; the agent acquires the
+      in-process host fd rather than pidfd_getfd
+  output:
+    shape: tcpdump shows TLS 1.3 records (0x17) and never cleartext, identical to the
+      process-workload path; ss -K shows the kTLS ULP installed
+  keywords:
+  - wasm
+  - wasmtime
+  - parity
+  - mtls
+  - tls13
+  - host-socket
+  - in-process-fd
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-WIRE-TLS13]
+  superseded_by: null

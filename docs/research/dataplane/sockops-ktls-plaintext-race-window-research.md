@@ -2,8 +2,6 @@
 
 **Date**: 2026-06-04 | **Researcher**: nw-researcher (Nova) | **Confidence**: Medium (mechanisms High; "Architecture A fully correct" Low — no precedent) | **Sources**: 25
 
-> **Pin updated (2026-06-11): 6.6 → 6.18 LTS.** Written against a 6.6 pin; the appliance kernel is now pinned at the latest qualifying LTS — **6.18** (EOL Dec 2028, ADR-0068). The race-window mechanism analysis is unaffected (6.18 ⊇ 6.6 on every feature). The kernel-floor cells in the comparison matrix below ("6.6 pin") now read 6.18; nothing about the sk_msg / kTLS / sockmap mechanics changes.
-
 > Focused deep-dive companion to `docs/research/dataplane/sockops-mtls-ktls-installation-comprehensive-research.md`
 > (Finding 1 "feasibility crux" + Risk 1 "race window, CRITICAL"). That document established the problem and
 > sketched a hybrid mitigation; THIS document answers **how to actually close it**, with mechanism-level evidence.
@@ -420,7 +418,7 @@ The asymmetry is **narrower than expected**: both sides can have the sockmap gat
 
 Overdrive ships its own stripped-down immutable appliance OS and **pins the kernel** (currently 6.6 LTS). This does NOT change the stock-primitive verdict above — the data-loss race is unsolvable with upstream BPF/kTLS primitives, because sk_msg has no lossless hold verdict and `CONFIG_NET_HANDSHAKE` only serves kernel-initiated consumers. But owning the kernel changes the **option space** in a way no upstream-bound mesh (Istio, Cilium, Linkerd) can use:
 
-1. **Version constraints evaporate.** Every kernel-version caveat in this document (TLS 1.3 RX ≥6.0, `CONFIG_NET_HANDSHAKE` ≥6.5, TLS 1.3 KeyUpdate) is **satisfied at the pinned v6.18** — pin choices, not external blockers. The tlshd-style path (Architecture D) is floor-available today. (Note: *driving* KeyUpdate for in-place rekey still needs userspace support the `ktls` crate lacks — rustls/ktls#59 / #62 / #229 — but that is a userspace gap, not a kernel-version one; the kernel half is present at v6.18.)
+1. **Version constraints evaporate.** Every kernel-version caveat in this document (TLS 1.3 RX ≥6.0, `CONFIG_NET_HANDSHAKE` ≥6.5, and — by advancing the pin — TLS 1.3 KeyUpdate >6.6) is a pin choice, not an external blocker. The tlshd-style path (Architecture D) is floor-available today.
 2. **A custom kernel mechanism becomes legitimate.** The one thing that would make Architecture A *fully correct* (no cleartext AND no data loss) is a socket state that **blocks (backpressures) the app's `write()` until kTLS is armed** rather than dropping it — i.e. the lossless `SK_HOLD`-equivalent that upstream sk_msg lacks. Because Overdrive controls the kernel, this is reachable two ways: (a) a small out-of-tree patch adding a "pending-kTLS" write-block socket state (the app blocks in `write()`/`sendmsg()` exactly as it would on a full socket buffer — standard, well-understood backpressure semantics), or (b) extending `CONFIG_NET_HANDSHAKE` so an agent can register a handshake-pending hold on a transparently-intercepted socket. Either closes the data-loss window that dooms stock Architecture A.
 3. **The cost is kernel-maintenance burden, not runtime overhead.** An out-of-tree patch must be carried across kernel pin bumps and is a verifier/security-review surface. That is a real cost — but it is the *only* path to Architecture A's "app plaintext, agent steps out, fully correct" goal, and it is a cost only an appliance-OS vendor can choose to pay.
 
