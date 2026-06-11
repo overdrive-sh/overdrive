@@ -34,7 +34,9 @@ use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{AllocationId, CorrelationKey, NodeId, Region, ServiceId, WorkloadId};
+use crate::id::{
+    AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, Region, ServiceId, WorkloadId,
+};
 use crate::observation::ProbeResultRow;
 use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
@@ -1265,6 +1267,89 @@ pub trait ObservationStore: Send + Sync + 'static {
     async fn issued_certificate_rows(
         &self,
     ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError>;
+
+    /// Atomically allocate the next global issuance ordinal from a durable,
+    /// strictly-monotonic counter, and return it.
+    ///
+    /// This is the SSOT for the `IssuanceOrdinal` stamped on every
+    /// `issued_certificates` audit row (ADR-0063 D6, rev 8). It REPLACES the
+    /// former `issued_certificate_rows().await?.len()` derivation
+    /// (`ca_issuance.rs`, pre-rev-8), which was a check-then-act TOCTOU
+    /// (`.claude/rules/development.md` § "Check-and-act must be atomic"): two
+    /// concurrent issuances read the same `len()` and stamped DUPLICATE
+    /// ordinals. Drawing from an atomically-incremented durable counter makes
+    /// that collision UNREPRESENTABLE — two concurrent callers receive two
+    /// distinct, strictly-increasing values.
+    ///
+    /// # Preconditions
+    ///
+    /// None. The method is safe to call concurrently for the same store from
+    /// any number of callers — that is the whole point. It requires no
+    /// serialization, no single-writer discipline, and no append-only
+    /// invariant on any other table.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(n)`:
+    /// * `n` is strictly greater than every ordinal this method has previously
+    ///   returned for this store, INCLUDING across process restart (the counter
+    ///   is durable). The first call on a fresh store returns the initial
+    ///   value (see "Edge cases").
+    /// * The counter has been durably advanced past `n` BEFORE this method
+    ///   returns `Ok(n)` — a crash immediately after return cannot re-issue
+    ///   `n` to a later caller.
+    /// * No `issued_certificates` row is read or written by this call. The
+    ///   ordinal is allocated independently of the audit table's contents; it
+    ///   is NOT a function of `issued_certificate_rows().len()`.
+    ///
+    /// # Edge cases
+    ///
+    /// * **Fresh store.** The first call on a never-before-allocated store
+    ///   returns the initial ordinal value. The initial value is pinned at
+    ///   ordinal `0` (via [`IssuanceOrdinal::new`]) to match the pre-fix
+    ///   `len()`-of-empty-table semantics (an empty audit log derived ordinal
+    ///   0 for its first row); this keeps existing consumers' "ordinals start
+    ///   at 0" expectation and the golden-bytes V1 fixtures valid. Greenfield
+    ///   single-cut migration (`feedback_single_cut_greenfield_migrations.md`):
+    ///   a fresh store starts the counter at 0; "delete the redb file" is the
+    ///   upgrade path. No migration code reconstructs a counter from a pre-fix
+    ///   store.
+    /// * **Allocated-but-unused ordinal (gap semantics).** This method commits
+    ///   the counter advance unconditionally on `Ok`. If the caller's
+    ///   subsequent mint or audit-row write fails, the allocated ordinal is
+    ///   BURNED — the sequence is left with a hole. This is by design and
+    ///   CORRECT: the consumer projection
+    ///   (`handlers::issued_certificates_for_rows`) maxes over the ordinal for
+    ///   strict ORDERING, not density. A burned ordinal never collides and
+    ///   never re-issues. Callers MUST NOT attempt to "return" or "reclaim" an
+    ///   allocated-but-unused ordinal.
+    /// * **Counter saturation.** `u64` ordinals do not realistically saturate
+    ///   (2^64 issuances). Adapters do NOT special-case overflow; a wrapping or
+    ///   saturating add is unnecessary, and `u64::MAX` issuances is out of any
+    ///   operational envelope.
+    ///
+    /// # Observable invariants
+    ///
+    /// * **Monotonic-and-unique across concurrency.** For any interleaving of N
+    ///   concurrent calls, the N returned values are N distinct, totally-ordered
+    ///   `IssuanceOrdinal`s. No two calls — ever, on the same store — return the
+    ///   same value.
+    /// * **Durable across restart.** The value returned after a restart is
+    ///   strictly greater than every value returned before the restart. The
+    ///   counter survives process death (host: persisted; sim: in-memory for
+    ///   the sim process lifetime — sufficient, as DST does not restart the
+    ///   sim process mid-run).
+    /// * **Independent of the audit table.** Deleting, compacting, or GCing
+    ///   `issued_certificates` rows does NOT rewind the counter (this is the
+    ///   #226 delete-survival property). The counter is a separate durable
+    ///   datum.
+    ///
+    /// # Errors
+    ///
+    /// [`ObservationStoreError::Io`] on a backing-store read/write/commit
+    /// failure while allocating. On error, NO ordinal is allocated and the
+    /// counter is unchanged (the advance is committed atomically or not at all).
+    async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError>;
 
     /// Read every LWW-winner `service_hydration_results` row for the
     /// given [`ServiceId`]. Used by the `ServiceMapHydrator` reconciler

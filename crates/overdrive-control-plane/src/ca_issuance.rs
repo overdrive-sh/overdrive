@@ -44,7 +44,6 @@
 
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
-use overdrive_core::id::IssuanceOrdinal;
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::{
@@ -152,35 +151,35 @@ impl CaIssuanceError {
 ///
 /// # Preconditions
 ///
-/// Two load-bearing invariants hold today and MUST be preserved — they make the
-/// monotonic [`IssuanceOrdinal`] stamped on the audit row correct (feature-delta
-/// § D1-AMEND-2):
+/// As of ADR-0063 rev 8 the monotonic [`IssuanceOrdinal`](overdrive_core::id::IssuanceOrdinal) stamped on the audit
+/// row is allocated from a durable atomic counter
+/// ([`ObservationStore::next_issuance_ordinal`]), NOT derived from
+/// `issued_certificate_rows().len()`. The two former load-bearing invariants
+/// (feature-delta § D1-AMEND-2) change accordingly:
 ///
-/// 1. **Single-writer / serialized issuance.** The ordinal is derived as the
-///    count of already-persisted `issued_certificates` rows read immediately
-///    before the audit write. That read-then-write is a check-then-act shape
-///    (`.claude/rules/development.md` § "Check-and-act must be atomic") and is
-///    race-free ONLY because issuance is serialized through the single
-///    action-shim executor (sequential per-action dispatch). `issue_and_audit`
-///    MUST NOT be called concurrently for two issuances against the SAME
-///    `observation` store — a concurrent caller would read the same count twice
-///    and stamp duplicate ordinals (a TOCTOU).
-/// 2. **Append-only audit log.** The `len()`-derived ordinal is strictly
-///    monotonic ONLY because `ObservationStore::issued_certificate_rows` is
-///    never deleted, overwritten, or compacted (exactly one row per distinct
-///    serial). A future delete/GC path — e.g. Phase-5 revocation pruning
-///    revoked certs, or an ADR-0007 `TombstoneSweeper` on this table —
-///    breaks ordinal uniqueness (a delete makes the next `len()` smaller
-///    than a prior ordinal) and MUST re-source the ordinal then (a persisted
-///    monotonic counter a delete cannot rewind, or equivalent). Tracked:
-///    overdrive-sh/overdrive#226.
+/// 1. **Single-writer / serialized issuance — RETIRED.** The ordinal no longer
+///    derives from a `len()` read, so there is no check-then-act for
+///    serialization to protect. `issue_and_audit` MAY now be called
+///    concurrently for the same `observation` store; the atomic counter
+///    guarantees two concurrent callers receive two distinct, strictly-
+///    increasing ordinals (`.claude/rules/development.md` § "Check-and-act must
+///    be atomic" → make-the-collision-unrepresentable).
+/// 2. **Append-only audit log — DECOUPLED from ordinal monotonicity.** The
+///    append-only contract on `ObservationStore::issued_certificate_rows`
+///    remains for its OWN reasons (audit immutability, the serial-dedup guard,
+///    the ADR-0067 D10 restart-recovery marker), but the ordinal's correctness
+///    no longer depends on it — the counter is a separate durable datum that
+///    row deletion cannot rewind. A future delete/GC/revocation path may prune
+///    rows freely without breaking ordinal uniqueness; the counter does not
+///    rewind (overdrive-sh/overdrive#226's delete-survival property — satisfied
+///    by this rev).
 ///
 /// # Errors
 ///
 /// * [`CaIssuanceError::Ca`] — the leaf or intermediate could not be signed.
 /// * [`CaIssuanceError::Audit`] — the leaf was minted but its audit row could
-///   not be written (or the pre-write issuance-ordinal count read failed); the
-///   issuance is refused and the cert dropped.
+///   not be written (or the issuance-ordinal allocation failed); the issuance
+///   is refused and the cert dropped.
 pub async fn issue_and_audit(
     ca: &dyn Ca,
     observation: &dyn ObservationStore,
@@ -197,18 +196,17 @@ pub async fn issue_and_audit(
     // the seeded `Entropy` port per the determinism contract).
     let intermediate = ca.issue_intermediate(node).map_err(CaIssuanceError::ca)?;
 
-    // Global monotonic issuance ordinal — the issuance-order rank, read from the
-    // durable audit log itself (the count of rows already persisted). Strictly
-    // increasing across issuances and across restart (the count includes every
-    // pre-restart row; the table is append-only — see § D1-AMEND-2 precondition),
-    // DST-deterministic (a read on the same port the audit write uses; issuance is
-    // serialized through the single action-shim executor, so the read-then-write is
-    // race-free). This is the selection key the consumer-side "current cert"
-    // projection maxes over — recency-correct even when `issued_at` ties under a
-    // fixed SimClock. See feature-delta § D1-AMEND-2.
-    let ordinal = IssuanceOrdinal::new(
-        observation.issued_certificate_rows().await.map_err(CaIssuanceError::audit)?.len() as u64,
-    );
+    // Global monotonic issuance ordinal — atomically allocated from the
+    // store's durable counter (ADR-0063 D6 rev 8). REPLACES the former
+    // `issued_certificate_rows().await?.len()` derivation, which was a
+    // read-len → mint → write check-then-act TOCTOU (RCA
+    // docs/feature/fix-issuance-ordinal-toctou/deliver/rca.md): two
+    // concurrent issuances read the same len() and stamped duplicate
+    // ordinals. The atomic counter makes that collision unrepresentable —
+    // no serialization precondition is relied on. DST-deterministic (the
+    // sim adapter's counter advances under the same Mutex the audit writes
+    // take). See § D1-AMEND-2 (superseded by this rev).
+    let ordinal = observation.next_issuance_ordinal().await.map_err(CaIssuanceError::audit)?;
 
     // Compute the validity window ONCE from the injected clock, BEFORE minting
     // (ADR-0063 rev 2 amendment / ADR-0067 rev 3 D8). `issued_at` is the clock

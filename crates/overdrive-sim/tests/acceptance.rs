@@ -24,6 +24,13 @@ mod acceptance {
     // `overdrive-core::testing::observation_store`).
     mod lww_conformance;
 
+    // fix-issuance-ordinal-toctou Step 01-01 — issuance-ordinal
+    // allocation conformance against `SimObservationStore` (ADR-0063 D6
+    // rev 8). Drives `next_issuance_ordinal` through the DST-equivalence
+    // sequence: monotonic-and-unique under concurrency + independent of
+    // the audit table.
+    mod issuance_ordinal_conformance;
+
     // US-06 §6.1 — Sim adapters for every nondeterminism port.
     mod sim_adapters_deterministic;
 

@@ -78,7 +78,7 @@ use futures::Stream;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::id::{AllocationId, ServiceId};
+use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
@@ -146,6 +146,27 @@ const PROBE_RESULTS_TABLE: TableDefinition<&[u8], &[u8]> =
 /// additive-only, never alters existing tables.
 const ISSUED_CERTIFICATES_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_issued_certificates");
+
+/// Single-key durable counter backing
+/// [`ObservationStore::next_issuance_ordinal`] (ADR-0063 D6 rev 8). Holds
+/// the NEXT value to allocate under one fixed key (`ISSUANCE_ORDINAL_KEY`);
+/// `next_issuance_ordinal` reads it, returns it as the ordinal, and stores
+/// `value + 1` — all inside ONE `begin_write`/`commit` so redb's
+/// serializable isolation linearises concurrent allocators (the same
+/// TOCTOU-safety the LWW / append-only read-before-write guards rely on).
+/// REPLACES the former `issued_certificate_rows().len()` derivation, which
+/// was a read-len → mint → write check-then-act TOCTOU (RCA
+/// `docs/feature/fix-issuance-ordinal-toctou/deliver/rca.md`). Independent
+/// of [`ISSUED_CERTIFICATES_TABLE`] — deleting audit rows never rewinds it
+/// (the #226 delete-survival property). New table; additive-only, never
+/// alters existing tables.
+const ISSUANCE_ORDINAL_COUNTER_TABLE: TableDefinition<&[u8], u64> =
+    TableDefinition::new("issuance_ordinal_counter");
+
+/// The single fixed key under which [`ISSUANCE_ORDINAL_COUNTER_TABLE`]
+/// stores the next-to-allocate ordinal. The table is single-row by
+/// construction; the empty slice is the canonical one-entry key.
+const ISSUANCE_ORDINAL_KEY: &[u8] = b"next";
 
 /// Encode the composite `(alloc_id, probe_idx)` key as a byte
 /// sequence. Sort order on the underlying redb `BTree` mirrors the
@@ -340,6 +361,12 @@ impl LocalObservationStore {
                 // Issued-certificates audit table — ADR-0063 D6. New
                 // table; additive-only, never alters existing tables.
                 let _ = write.open_table(ISSUED_CERTIFICATES_TABLE).map_err(map_to_io)?;
+                // Issuance-ordinal counter table — ADR-0063 D6 rev 8. New
+                // table; additive-only. Materialised here so the first
+                // allocation does not race table creation. This boot-time
+                // materialization is the wire-then-probe gate for the
+                // counter surface (architecture § 7.1 Earned Trust note).
+                let _ = write.open_table(ISSUANCE_ORDINAL_COUNTER_TABLE).map_err(map_to_io)?;
             }
             write.commit().map_err(map_to_io)?;
         }
@@ -614,6 +641,39 @@ impl ObservationStore for LocalObservationStore {
         .await
         .map_err(map_to_io)??;
         Ok(rows)
+    }
+
+    async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        // Atomic allocate: read-current → return-as-ordinal → store
+        // current+1, all inside ONE redb `begin_write`/`commit`. redb's
+        // serializable isolation linearises concurrent writers, so two
+        // concurrent allocators never observe the same `current` — the
+        // collision the former `len()` derivation permitted is
+        // unrepresentable here. Run on `spawn_blocking` so the blocking
+        // redb txn never stalls a tokio worker
+        // (`development.md` § "No blocking `std::fs::*` inside `async fn`").
+        let allocated: u64 = tokio::task::spawn_blocking(move || {
+            let write = inner.db.begin_write().map_err(map_to_io)?;
+            let allocated = {
+                let mut table =
+                    write.open_table(ISSUANCE_ORDINAL_COUNTER_TABLE).map_err(map_to_io)?;
+                // Absent entry (fresh store) → allocate 0; the next value to
+                // store is then 1. The persisted value is always "the next
+                // ordinal to allocate", so the first call returns 0.
+                let current =
+                    table.get(ISSUANCE_ORDINAL_KEY).map_err(map_to_io)?.map_or(0, |v| v.value());
+                table.insert(ISSUANCE_ORDINAL_KEY, current + 1).map_err(map_to_io)?;
+                current
+            };
+            // Durably advance the counter past `allocated` BEFORE returning
+            // — a crash after this commit cannot re-issue `allocated`.
+            write.commit().map_err(map_to_io)?;
+            Ok::<_, ObservationStoreError>(allocated)
+        })
+        .await
+        .map_err(map_to_io)??;
+        Ok(IssuanceOrdinal::new(allocated))
     }
 
     async fn service_hydration_results_rows(

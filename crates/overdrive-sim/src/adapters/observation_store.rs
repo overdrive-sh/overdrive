@@ -57,7 +57,9 @@ use tokio_stream::wrappers::BroadcastStream;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::id::{AllocationId, CertSerial, CorrelationKey, NodeId, ServiceId};
+use overdrive_core::id::{
+    AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
+};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
@@ -136,6 +138,18 @@ struct PeerState {
     /// `BTreeMap` for deterministic iteration per
     /// `.claude/rules/development.md` § "Ordered-collection choice".
     by_signal: Mutex<BTreeMap<SignalKey, SignalValue>>,
+    /// In-memory durable counter backing
+    /// [`ObservationStore::next_issuance_ordinal`] (ADR-0063 D6 rev 8).
+    /// Holds the NEXT value to allocate; allocation reads it, returns it
+    /// as the ordinal, and increments — all under the `parking_lot::Mutex`
+    /// in one critical section with no `.await` across the lock
+    /// (`development.md` § "Never hold a lock across `.await`").
+    /// DST-deterministic: under a seeded run the allocation order follows
+    /// the deterministic call order, so the ordinal trajectory is
+    /// bit-identical across replays. The sim's durability domain is the
+    /// sim-process lifetime (DST never reconstructs the store mid-run);
+    /// the host adapter carries the across-OS-restart guarantee.
+    next_issuance_ordinal: Mutex<u64>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Test-only FIFO of write failures to inject. Each call to
     /// [`SimObservationStore::write`] pops the front entry; when the
@@ -158,6 +172,8 @@ impl PeerState {
             by_probe_results: Mutex::new(BTreeMap::new()),
             by_issued_certificate: Mutex::new(BTreeMap::new()),
             by_signal: Mutex::new(BTreeMap::new()),
+            // Fresh store: the first allocation returns 0.
+            next_issuance_ordinal: Mutex::new(0),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
         })
@@ -516,6 +532,23 @@ impl ObservationStore for SimObservationStore {
         // across seeds. No LWW winner to resolve (serials are unique
         // per issuance).
         Ok(self.inner.issued_certificate_snapshot())
+    }
+
+    async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError> {
+        // Lock → read → increment → return, one critical section, no
+        // `.await` held across the lock. Under a seeded DST run the
+        // allocation order follows the deterministic call order, so the
+        // ordinal trajectory is bit-identical across replays. The lock
+        // makes two concurrent allocators observe distinct values — the
+        // collision the former `len()` derivation permitted is
+        // unrepresentable.
+        let allocated = {
+            let mut next = self.inner.next_issuance_ordinal.lock();
+            let allocated = *next;
+            *next += 1;
+            allocated
+        };
+        Ok(IssuanceOrdinal::new(allocated))
     }
 
     async fn service_hydration_results_rows(

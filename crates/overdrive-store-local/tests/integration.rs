@@ -32,6 +32,11 @@ mod integration {
     mod envelope_observation_skip;
     mod envelope_walking_skeleton;
     mod lww_conformance;
+    // fix-issuance-ordinal-toctou Step 01-01 — issuance-ordinal
+    // allocation conformance (shared trait harness) + host-only
+    // durable-across-reopen sub-case (ADR-0063 D6 rev 8).
+    mod issuance_ordinal_conformance;
+    mod issuance_ordinal_durable_reopen;
     mod observation_backend_proptest;
     mod probe_result_roundtrip;
     mod snapshot_proptest;

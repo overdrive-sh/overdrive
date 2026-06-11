@@ -65,6 +65,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
+use futures::future::join_all;
 use tokio::time::timeout;
 
 use crate::UnixInstant;
@@ -726,5 +727,136 @@ async fn case_issued_certificate_append_only<T: ObservationStore + ?Sized>(store
     assert_eq!(
         stored[0], first,
         "(viii) append-only: the original audit row must never be overwritten by a duplicate serial"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issuance-ordinal allocation conformance (ADR-0063 D6 rev 8)
+//
+// The sibling of `run_lww_conformance` for the additive
+// `ObservationStore::next_issuance_ordinal` port method. Both adapters
+// (`SimObservationStore`, `LocalObservationStore`) are driven through one
+// allocation sequence and asserted to observe the § 3.1 trait contract
+// identically (`development.md` § "The DST equivalence test is the
+// structural guard"). The TOCTOU this method closes is documented in
+// `docs/feature/fix-issuance-ordinal-toctou/deliver/rca.md`: the former
+// `issued_certificate_rows().len()` derivation let two concurrent
+// issuances stamp DUPLICATE ordinals; an atomically-allocated durable
+// counter makes that collision unrepresentable.
+// ---------------------------------------------------------------------------
+
+/// Number of concurrent allocations driven in the monotonic-and-unique
+/// sub-case. Large enough that an interleaving slip would surface a
+/// duplicate (the pre-fix `len()` derivation collided at any N >= 2);
+/// small enough to stay well under the per-test wall-clock budget.
+const ORDINAL_CONCURRENCY: usize = 64;
+
+/// Run the issuance-ordinal allocation conformance suite against `store`.
+///
+/// Drives BOTH adapters through the same allocation sequence and asserts
+/// the § 3.1 observable invariants of
+/// [`ObservationStore::next_issuance_ordinal`]:
+///
+/// 1. **Monotonic-and-unique under concurrency** (architecture § 4.3 #1) —
+///    `ORDINAL_CONCURRENCY` concurrent `next_issuance_ordinal()` calls
+///    against one store yield that many DISTINCT ordinals which, once
+///    sorted, are strictly increasing with NO gaps for this contiguous
+///    run (every value in the half-open range is hit exactly once).
+/// 2. **Independent of the audit table** (architecture § 4.3 #2) —
+///    allocate, write an `issued_certificate` row, allocate again; the
+///    second ordinal is strictly greater than the first AND is NOT equal
+///    to `issued_certificate_rows().len()` (proving the ordinal is not a
+///    function of the row count — the exact `len()`-derivation defect this
+///    fix removes).
+///
+/// The host-only durable-across-reopen sub-case (architecture § 4.3 #3) is
+/// NOT driven here — it requires dropping and reopening a real redb file,
+/// which only the host adapter can do. That sub-case lives in the host
+/// adapter's `integration-tests`-gated suite (see
+/// `overdrive-store-local/tests/integration/issuance_ordinal_durable_reopen.rs`).
+///
+/// On any contract violation the harness panics with a message naming the
+/// property that failed and the ordinals involved.
+pub async fn run_issuance_ordinal_conformance<T: ObservationStore + ?Sized>(store: &T) {
+    case_monotonic_and_unique_under_concurrency(store).await;
+    case_independent_of_audit_table(store).await;
+}
+
+/// (1) Monotonic-and-unique under concurrency. Fires
+/// `ORDINAL_CONCURRENCY` allocations concurrently (`join_all`) against the
+/// SAME store and asserts the returned ordinals are all distinct and form
+/// a strictly-increasing contiguous run once sorted. The pre-fix
+/// `len()`-derived ordinal collided here: two concurrent reads of the
+/// same `len()` stamped the same value.
+async fn case_monotonic_and_unique_under_concurrency<T: ObservationStore + ?Sized>(store: &T) {
+    let allocations = join_all((0..ORDINAL_CONCURRENCY).map(|_| store.next_issuance_ordinal()));
+    let mut ordinals: Vec<u64> = allocations
+        .await
+        .into_iter()
+        .map(|r| r.expect("(1) ordinal allocation must succeed").as_u64())
+        .collect();
+
+    assert_eq!(
+        ordinals.len(),
+        ORDINAL_CONCURRENCY,
+        "(1) every concurrent allocation must return a value"
+    );
+
+    ordinals.sort_unstable();
+
+    // No two concurrent callers ever receive the same value.
+    let mut deduped = ordinals.clone();
+    deduped.dedup();
+    assert_eq!(
+        deduped.len(),
+        ordinals.len(),
+        "(1) concurrent allocations must be UNIQUE — duplicate ordinals would re-open the \
+         TOCTOU this method closes; got {ordinals:?}"
+    );
+
+    // Strictly increasing AND contiguous for this fresh run: a fresh store
+    // starts at 0, so the first ORDINAL_CONCURRENCY allocations are exactly
+    // 0..ORDINAL_CONCURRENCY in some order.
+    for (expected, observed) in ordinals.iter().enumerate() {
+        assert_eq!(
+            *observed, expected as u64,
+            "(1) sorted ordinals must be the contiguous strictly-increasing run \
+             0..{ORDINAL_CONCURRENCY}; got {ordinals:?}"
+        );
+    }
+}
+
+/// (2) Independent of the audit table. Allocates, writes an
+/// `issued_certificate` row (advancing the audit table's `len()` WITHOUT
+/// advancing the counter), then allocates again. The second ordinal must
+/// be strictly greater than the first and MUST NOT equal the audit
+/// table's row count — pinning "not derived from `len()`" and the gap
+/// semantics in one assertion.
+async fn case_independent_of_audit_table<T: ObservationStore + ?Sized>(store: &T) {
+    let first = store.next_issuance_ordinal().await.expect("(2) first allocation").as_u64();
+
+    // Write an audit row at a serial unique to this sub-case. This bumps
+    // `issued_certificate_rows().len()` but does NOT touch the counter.
+    let serial = CertSerial::new("0ad17a51").expect("(2) serial parses");
+    let row = issued_cert_row(&serial, "spiffe://overdrive.local/wl/ordinal-independence");
+    store
+        .write(ObservationRow::IssuedCertificate(row))
+        .await
+        .expect("(2) audit row write must succeed");
+
+    let second = store.next_issuance_ordinal().await.expect("(2) second allocation").as_u64();
+
+    assert!(
+        second > first,
+        "(2) the counter is strictly monotonic across an interleaved audit-row write; \
+         first={first}, second={second}"
+    );
+
+    let row_count =
+        store.issued_certificate_rows().await.expect("(2) read audit rows").len() as u64;
+    assert_ne!(
+        second, row_count,
+        "(2) the ordinal must NOT be a function of the audit table's row count — equality \
+         would mean the `len()` derivation is back; second={second}, row_count={row_count}"
     );
 }
