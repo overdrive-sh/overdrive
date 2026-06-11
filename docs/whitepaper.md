@@ -725,7 +725,7 @@ Traffic Control (TC) programs operate on the egress and ingress paths and implem
 - Per-workload traffic shaping and rate limiting
 - Flow export to the telemetry ringbuf
 
-### Transparent mTLS — one identity model, two enforcement mechanisms
+### Transparent mTLS — one identity model, one universal agent-light L4 proxy
 
 mTLS in Overdrive is transparent to the workload — the workload holds no
 key material and opens ordinary sockets. The **identity model is universal**
@@ -734,50 +734,70 @@ one `IDENTITY_MAP`, one cluster trust bundle, one SPIFFE-ID-based
 `POLICY_MAP`. An operator writes a policy against a SPIFFE ID; the mechanism
 that enforces it is an implementation detail the operator does not see.
 
-The **enforcement mechanism splits by where the workload's TCP stack
-terminates** — not by workload type. This split is structural, a
-consequence of how the kernel sees (or does not see) the connection, not a
-design choice.
+The **enforcement mechanism is also universal**: a single **agent-light L4
+proxy** for every workload kind — process/exec, WASM, microVM, unikernel.
+This unifies the two-mechanism split this section previously carried (an
+in-band host-socket kTLS path plus a separate guest-stack tap proxy). The
+unification was settled empirically — six Tier-3 spikes on the pinned-floor
+kernel proved (a) the in-band lossless path is foreclosed three independent
+ways on runtime-loadable BPF, and (b) the proxy can be made **agent-light in
+both directions**. See **ADR-0069** and
+`docs/feature/transparent-mtls-host-socket/spike/`.
 
-**Host-socket workloads — process and WASM functions.** Their TCP sockets
-terminate in the **host kernel** (the exec driver's processes hold host
-sockets; wasmtime's WASI sockets are host sockets). There is a `struct sock`
-on the host the dataplane can reach, so mTLS is installed in place:
+**The mechanism (every workload kind):**
 
-1. A new connection is initiated by the workload
-2. The sockops program intercepts `BPF_SOCK_OPS_TCP_CONNECT_CB`
-3. The node agent performs the TLS 1.3 handshake via rustls, presenting the workload's SVID
-4. Session keys are installed into kTLS — the kernel record layer takes over
-5. All subsequent encrypt/decrypt happens in-kernel, with optional NIC offload
+1. The workload's outbound TCP `connect()` is **transparently intercepted**
+   to a node-local agent leg (a `cgroup/connect4` destination rewrite, or
+   TPROXY) — the workload is unaware and lands on the agent's plaintext leg.
+2. The agent drains the workload's pre-arm plaintext **losslessly** (a
+   userspace buffer — no dropped bytes, no RESET), and performs the **rustls
+   TLS 1.3 handshake** with the real peer on a peer-facing leg, presenting the
+   workload's own SVID (read via the in-process `IdentityRead` port) and
+   verifying the peer against the trust bundle.
+3. The negotiated session keys install into **kTLS on the peer-facing leg**
+   (`setsockopt TCP_ULP "tls"` + `TLS_TX`/`TLS_RX`) — auth-session ==
+   data-session. The agent flushes the captured plaintext as the first
+   application_data and then **hands steady state to the kernel**.
+4. **Forward** (workload-plaintext → peer ciphertext) rides an **in-kernel
+   sockmap EGRESS-redirect** (`bpf_sk_redirect_map`, egress) into the kTLS
+   leg's TX — the kernel's `tcp_sendmsg_locked` encrypts; the agent does ZERO
+   per-byte work (**agent-idle**). **Return** (peer ciphertext →
+   workload-plaintext) rides a **zero-copy `splice(2)`** on a plain kTLS-RX
+   leg (`tls_sw_splice_read` decrypts each record) — the agent drives a
+   bounded pump (~1 splice per TLS record), with no per-byte userspace copy
+   (**agent-light**).
 
-The application is completely unaware; no sidecar is injected. This is the
-**sockops + kTLS** path — [#26](https://github.com/overdrive-sh/overdrive/issues/26).
+The application is completely unaware; no sidecar is injected; the workload
+holds nothing. This is the **universal transparent-mTLS L4 proxy** —
+[#26](https://github.com/overdrive-sh/overdrive/issues/26) (which now folds
+in the former guest-stack tap proxy,
+[#222](https://github.com/overdrive-sh/overdrive/issues/222)).
 
-**Guest-stack workloads — MicroVMs and unikernels.** Their TCP stacks
-terminate in the **guest** (a Linux kernel inside the Cloud Hypervisor VM,
-or a unikernel net stack). The host kernel sees virtio-net frames, not TCP
-sockets — no host-side BPF mechanism (sockops, sockmap, `sk_storage`, kTLS)
-can see these connections, so the in-place path is structurally impossible.
-Instead, a **host-resident L4 tap proxy** runs on the host (transparent to
-the guest): it intercepts the guest's TCP at the virtio-net tap interface,
-terminates the connection on the host, asserts the allocation's SPIFFE SVID
-(keyed by tap identity — the host knows which allocation owns which tap), and
-re-originates an outbound mTLS connection. Because that egress connection is
-itself a host socket, the proxy installs **host kTLS on its egress socket** —
-kernel record-layer encryption with NIC offload, not userspace crypto. No
-mTLS logic, keys, or agent enters the guest. This is the **guest-stack tap
-proxy** subsystem — [#222](https://github.com/overdrive-sh/overdrive/issues/222).
+**Why one mechanism, not two.** Host-socket workloads (process/WASM) terminate
+TCP in the host kernel; guest-stack workloads (microVM/unikernel) terminate in
+the guest. The earlier design installed in-band kTLS on the host-socket
+workload's *own* socket and used a separate host tap proxy for the guest case.
+The in-band model uniquely wins **restart-survival** (kTLS state is
+socket-owned) and **1-socket density**, but it has **no lossless
+client-speaks-first path** on runtime-loadable BPF (no `sk_msg` HOLD;
+redirecting a live socket's own egress bypasses its TX accounting and RSTs;
+lossless capture structurally requires a proxy), and it cannot serve
+guest-stack workloads at all — so a separate proxy mechanism was unavoidable
+regardless. The universal proxy is **lossless for every kind**, needs **no
+kernel patch** (every primitive is in-tree at the pinned 6.18 floor), and is
+**one mechanism instead of two**. The in-band model is retained as a tracked
+**future optimization** for restart-survival + density, not the v1 path. The
+intercept (`cgroup/connect4` rewrite vs TPROXY) is a DELIVER-pinnable detail
+within ADR-0069. (Guest-stack workloads reach the proxy at the virtio-net tap
+the host owns — the host knows which allocation owns which tap — and the
+proxy's peer-facing leg is itself a host socket carrying host kTLS, exactly as
+for host-socket workloads.)
 
-The two mechanisms differ only in where TCP terminates; both consume the
-same SVIDs, the same `IDENTITY_MAP`, and the same trust bundle. The prior
-"this works identically for process workloads, VMs, unikernels, and WASM
-functions — there is no sidecar injection required or possible" claim was
-true of the *identity model* but false of the *enforcement mechanism* for
-guest-stack workloads, and is corrected here. (The precise tap intercept —
-TPROXY vs TC-eBPF redirect — and the in-kernel `sockmap`/`bpf_sk_redirect`
-splice for the proxy's guest-leg→egress-leg path are open DESIGN-wave
-decisions, the latter pending a Tier-3 kTLS+sockmap spike; see
-`docs/research/dataplane/transparent-mtls-recommended-architecture-research.md`.)
+The proxy keeps Overdrive's thesis ("no userspace proxies in the data path")
+intact at steady state: the per-byte movement rides the kernel (agent-idle
+forward, agent-light zero-copy return), so the agent leaves the per-byte path
+after the handshake window — strictly lighter than the ztunnel/sidecar shape
+where a userspace proxy copies every byte for the connection's life.
 
 ### BPF LSM — Mandatory Access Control
 
@@ -903,37 +923,44 @@ SVIDs are issued at workload start, rotated automatically before expiry, and rev
 
 ### Kernel mTLS Operation
 
-mTLS between workloads is transparent, and its identity model is universal —
-though the enforcement mechanism splits by where TCP terminates (§7). For
-**host-socket workloads** (process, WASM) the connection is intercepted and
-keyed in place:
+mTLS between workloads is transparent, its identity model is universal, and
+its enforcement mechanism is universal too — one agent-light L4 proxy for
+every workload kind (§7). For **every workload** the connection is
+transparently intercepted to a node-local agent leg and the agent performs
+the handshake on the workload's behalf:
 
 ```
 Workload A calls connect() to Workload B
     │
-sockops intercepts
+connect() transparently rewritten to the agent's plaintext leg (cgroup/connect4 / TPROXY)
+sockops detects ESTABLISHED; agent drains A's pre-arm plaintext losslessly
 node agent fetches SVID for A, trust bundle for cluster
-rustls performs TLS 1.3 handshake (A presents SVID, verifies B's SVID)
-session keys installed into kTLS
-node agent exits data path
+rustls performs TLS 1.3 handshake on the peer-facing leg (A presents SVID, verifies B's SVID)
+session keys installed into kTLS on the peer-facing leg
+node agent hands steady state to the kernel:
+    forward  A→B : in-kernel sockmap EGRESS-redirect → kTLS TX        (agent-idle)
+    return   B→A : zero-copy splice(2) on a plain kTLS-RX leg          (agent-light)
     │
 kTLS handles all encrypt/decrypt in-kernel
 optional NIC offload for crypto operations
 ```
 
-For **guest-stack workloads** (MicroVM, unikernel) the host-resident tap
-proxy (§7, [#222](https://github.com/overdrive-sh/overdrive/issues/222))
-performs the same rustls handshake on the workload's behalf and installs
-kTLS on its **host egress socket** — the guest never participates.
+**Host-socket workloads** (process, WASM) terminate TCP in the host kernel;
+**guest-stack workloads** (microVM, unikernel) terminate in the guest and are
+intercepted at the virtio-net tap the host owns (the host knows which
+allocation owns which tap). Both land on the same proxy: the agent's
+peer-facing leg is a host socket carrying host kTLS, so the mechanism is
+identical regardless of where the workload's own TCP terminates.
 
 **The host is the trust root for every workload class.** The SVID private
-key is held by the host node agent and **never enters the workload** — not
-for the in-place kTLS path (the key drives the host-side rustls handshake),
-and not for the tap-proxy path (the key stays on the host; the guest holds
-no key material and is unaware mTLS is happening). A compromised guest
-cannot exfiltrate an SVID private key it never receives. This is the §6
-"trust root remains on the host" invariant, holding identically across both
-enforcement mechanisms.
+key is held by the host node agent (read via the in-process `IdentityRead`
+port) and **never enters the workload** — the key drives the host-side rustls
+handshake on the agent's peer-facing leg; the workload holds a plaintext
+socket to the agent and no key material, and is unaware mTLS is happening. A
+compromised workload (process or guest) cannot exfiltrate an SVID private key
+it never receives. This is the §6 "trust root remains on the host"
+invariant, holding identically across every workload class under the one
+universal mechanism.
 
 IP addresses are routing hints, not security boundaries. Policy is expressed in terms of SPIFFE identities. A workload can move nodes, scale to 100 instances, and receive a new IP — the policy remains correct because it references `job/payments`, not `10.0.1.45`.
 

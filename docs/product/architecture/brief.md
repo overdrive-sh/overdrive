@@ -1462,6 +1462,7 @@ Rules to enforce:
 | 0063 | **Workflow primitive** — workflow `await`-point journal is a **second redb table layout** on the shared runtime-owned substrate (`<data_dir>/reconcilers/memory.redb`), distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`, value = CBOR `JournalEntry` (`ciborium`, ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — mutable runtime memory, additive entry-variants per slice via `#[serde(default)]`); fsync-then-suspend ordering + Earned-Trust `probe()` reused from 0035; `SleepArmed` records the deadline (input, not "remaining"). Resolves DIVERGE D4/open-Q3 in favour of redb (R2); supersedes pre-DIVERGE "per-primitive libSQL" phrasing. Extends 0035. Single-node scope; cross-node resume (#205) not precluded | Accepted |
 | 0064 | **Workflow primitive** — `Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowStart` in NEW `overdrive-core::workflow` (no tokio in core; injected ports + `async_trait`); durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**. Engine↔reconciler boundary: the workflow-lifecycle reconciler stays a **pure-sync ADR-0035 reconciler** emitting `Action::StartWorkflow` + observing terminal rows; the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`. Check-then-record journal replay ⇒ bit-identical replay (K4); `ctx` surface additive per slice (`call`/`sleep`/`wait_for_signal`/`emit_action`); `WorkflowResult` distinct from `TerminalCondition` (inherits the SemVer convention, not the type); `ctx.emit_action` → Action channel → Raft (no IntentStore bypass). Companion to 0063 | Accepted (§2/§3/§5/§6 amended by 0065) |
 | 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowStart { name, input }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks the first external/root rotation workflow consumer. *(Historical: "unblocks #40"; SUPERSEDED — #40 is the now-closed internal SVID reissue `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* Amends ADR-0064 §2/§3/§5/§6 | Proposed |
+| 0069 | **Transparent mTLS via a universal agent-light L4 proxy** — folds #222 into #26; ONE enforcement mechanism for ALL workload kinds (process/exec, WASM, microVM, unikernel). Workload's outbound TCP transparently intercepted (`cgroup_connect4`-rewrite default / TPROXY alt) to an agent-owned plaintext leg F; the agent drains plaintext losslessly + rustls TLS 1.3 handshake on a peer-facing leg B presenting the held SVID (read via `IdentityRead`, never minted/cached) + arms kTLS on leg B (reusing `ktls::KtlsStream` for control records). Steady state: **forward F→B = in-kernel sockmap EGRESS-redirect (`bpf_sk_redirect_map`, flags=0) → kTLS-TX, AGENT-IDLE**; **return B→F = `splice(2)` via `tls_sw_splice_read` on a plain (no-psock) kTLS-RX leg, AGENT-LIGHT zero-copy (~1 splice/record)**. New driven port `MtlsEnforcement` in `overdrive-core` (does NOT fit `Dataplane` — per-connection socket ops, not map writes) + host adapter (`adapter-host`, over sockops/sk_msg/sockmap/kTLS/splice/cgroup_connect4, consumes `IdentityRead`) + `SimMtlsEnforcement` for DST. Earned-Trust `probe()` (wire→probe→use; sentinel handshake + splice-read + egress-redirect, refuse-to-start on failure). Decided on 6 Tier-3 spikes + 3 research docs (kernel 7.0, `353cdc52`): in-band lossless foreclosed 3 ways; proxy proven agent-light both directions. **Amends whitepaper §7/§8** (two mechanisms → one); **supersedes** in-band kTLS-on-own-socket as v1 — retained as tracked FUTURE OPTIMIZATION (restart-survival + 1-socket density; deferral pending product-owner GH issue). J-SEC-003 / GH #26 (folds #222) | Accepted |
 
 ---
 
@@ -5499,10 +5500,162 @@ handoff, unchanged from §96. *(This was historically framed as #40; SUPERSEDED
 — #40 is the now-closed internal SVID near-expiry reissue, an
 `Action::IssueSvid`, with no ACME/DNS effects.)*
 
+## Transparent mTLS — universal agent-light L4 proxy extension (ADR-0069, GH #26 folds #222)
+
+**Scope**: the application-architecture decomposition for the ONE universal
+transparent-mTLS enforcement mechanism. Companion to **ADR-0069** (the decision +
+alternatives + consequences) and `docs/feature/transparent-mtls-host-socket/`
+(the DISCUSS job J-SEC-003, the 6 Tier-3 spikes, the feature-delta DESIGN
+sections). This section is the SSOT for the component/port decomposition; the ADR
+is the SSOT for the decision.
+
+### 1. What this replaces
+
+Whitepaper §7's "one identity model, **two** enforcement mechanisms" (host-socket
+in-band kTLS #26 + guest-stack L4 tap proxy #222) collapses to ONE: a universal
+agent-light L4 proxy for every workload kind. The identity model is unchanged
+(one CA, one SVID set, one trust bundle, one `IdentityRead` port). Only the
+enforcement mechanism unifies. The in-band kTLS-on-the-workload's-own-socket model
+is superseded as v1 and retained as a tracked future optimisation (ADR-0069 § A1).
+
+### 2. Architectural style — fits the existing hexagon
+
+No new style. This is ports-and-adapters over the existing single-process hexagon
+(§1 of this brief). The proxy is a **driven adapter** behind a **new driven port**;
+the agent that orchestrates it is core-adjacent control logic in the node-agent
+crate. The DST sim/host split (`.claude/rules/development.md` § "Port-trait
+dependencies") applies verbatim: production wires the host adapter, tests wire the
+sim adapter.
+
+### 3. Component decomposition
+
+| Component | Home crate | Class | Responsibility |
+|---|---|---|---|
+| **`MtlsEnforcement` port (trait)** | `overdrive-core` (new `traits/mtls_enforcement.rs`) | `core` | The driven-port contract for per-connection transparent-mTLS enforcement: intercept-arm, drive-handshake-and-arm-kTLS, run-steady-state-splice, teardown. Pure trait, no I/O. Behaviour pinned in rustdoc (§ "Trait definitions specify behavior") + a DST equivalence harness. |
+| **`HostMtlsEnforcement` adapter** | new `adapter-host` crate (`overdrive-mtls-host`) OR extend `overdrive-host` (Reuse decision below) | `adapter-host` | The production proxy: transparent intercept (`cgroup_connect4`-rewrite / TPROXY), lossless plaintext capture, rustls handshake on leg B presenting the held SVID, kTLS arm via `ktls::KtlsStream`, sockmap EGRESS-redirect (forward, agent-idle), `splice(2)` pump (return, agent-light). Consumes `IdentityRead`. Owns the new BPF programs. |
+| **`SimMtlsEnforcement` adapter** | `overdrive-sim` | `adapter-sim` | The DST double: models the observable contract (intercept→handshake→arm→steady-state→teardown) in-memory, no real sockets/kTLS/BPF. Drives the `mtls_enforcement_equivalence` DST test. |
+| **mTLS proxy agent (node-agent control logic)** | `overdrive-worker` (the node-agent home) | `adapter-host` | Per-connection lifecycle owner: receives the intercept event, calls the port to drive the handshake (reading the held SVID + bundle via `IdentityRead`), manages leg F / leg B lifecycle, supervises the return splice pump. The agent holds the leaf key (via the port read); the workload holds nothing. |
+| **New BPF programs** | `overdrive-bpf` (extend) | (BPF) | `sockops` (ESTABLISHED detect → SOCKHASH + ringbuf), `sk_skb/stream_verdict` (forward egress-redirect leg F → leg B), `cgroup_connect4` *transparent-mTLS variant* (intercept rewrite — extends the existing `cgroup_connect4_service` shape). NO psock/verdict on leg B's RX (return uses plain `splice`). |
+| **`IdentityRead` consumer seam** | `overdrive-core` (consume as-is) | `core` | The agent reads `svid_for(&AllocationId)` + `current_bundle()` to drive the rustls handshake. #26 is a READER; never mints, re-issues, or caches. |
+
+### 4. Driving (primary) ports
+
+The feature has **no operator-facing driving port** (no CLI verb — it is a D1
+foundation primitive; encryption is automatic and undisableable, whitepaper
+principle 2). The driving surface is the **kernel-originated connection-detect /
+intercept event**: a host-socket workload's `connect()` (transparently rewritten
+to the agent) and the `sockops` ESTABLISHED transition. This inbound event drives
+the agent's per-connection enforcement. The honest observable surfaces (the
+"acceptance" surface) are TEST-tier: `tcpdump` (TLS 1.3 records on the
+peer-facing wire), `ss -tie` (kTLS ULP on leg B), a fail-closed negative test, a
+no-cleartext race-window probe.
+
+### 5. Driven (secondary) ports & adapters
+
+```mermaid
+flowchart LR
+    subgraph core["overdrive-core (core, no I/O)"]
+        IR["IdentityRead (port, consumed)"]
+        ME["MtlsEnforcement (port, NEW)"]
+    end
+    subgraph agent["overdrive-worker (adapter-host) — mTLS proxy agent"]
+        A["per-connection lifecycle owner"]
+    end
+    subgraph host["adapter-host — HostMtlsEnforcement"]
+        H["intercept · handshake-drive · kTLS-arm · splice-pump"]
+        BPF["overdrive-bpf: sockops · sk_skb verdict · cgroup_connect4 (mtls variant)"]
+    end
+    subgraph sim["overdrive-sim (adapter-sim)"]
+        S["SimMtlsEnforcement (in-memory contract model)"]
+    end
+    A -->|"reads held SVID + bundle"| IR
+    A -->|"drives per connection"| ME
+    ME -. "prod wiring" .-> H
+    ME -. "DST wiring" .-> S
+    H --> BPF
+    H -->|"reads leaf key + bundle"| IR
+```
+
+**Why a NEW port, not `Dataplane`** (ADR-0069 Decision): the `Dataplane` port
+models **map writes** (`update_policy`, `update_service`, `register_local_backend`
+— ADR-0040/0049/0053) keyed by service/policy identity. The proxy is
+**per-connection socket operations** (intercept a `connect()`, drive a handshake
+on an acquired socket, arm kTLS on a leg, run a `splice` pump) — a different
+abstraction with a different lifecycle (per-connection, not per-service-update).
+Forcing it onto `Dataplane` would conflate two contracts and break the DST
+equivalence story. CREATE-NEW is justified.
+
+**The exact `MtlsEnforcement` signature is a DESIGN decision, NOT improvised by
+the crafter** (CLAUDE.md "Implement to the design"). The *model* is fixed by
+ADR-0069 (the four lifecycle phases: intercept-arm → drive-handshake-and-arm →
+run-steady-state → teardown; consumes `IdentityRead`; async only at the
+adapter-host boundary, never on a `core` compile path). The *method shapes* are
+pinned in the feature-delta DESIGN § "Ports" — open item OQ-1 below flags that the
+crafter must not add public surface beyond what the feature-delta names.
+
+### 6. Reuse Analysis (HARD GATE — every overlap classified; default EXTEND)
+
+| # | Existing asset | Overlap | Verdict | Justification |
+|---|---|---|---|---|
+| 1 | `IdentityRead` port (`overdrive-core/src/traits/identity_read.rs`) | The agent must read the held SVID + trust bundle to drive the handshake | **REUSE AS-IS** | The port already exposes `svid_for` + `current_bundle` with the exact owned-clone, no-issue, no-mutate contract #26 needs. #26 is a pure reader; no signature change. |
+| 2 | `SvidMaterial` / `TrustBundle` (`overdrive-core`, ADR-0063) | The material presented in the rustls handshake + peer verification anchor | **REUSE AS-IS** | Cert + leaf key + bundle are exactly what rustls `ClientConfig`/`ServerConfig` consume. No change. |
+| 3 | `cgroup_connect4_service` program (`overdrive-bpf/src/programs/cgroup_connect4_service.rs`) | Transparent destination rewrite (workload `connect()` → agent leg) | **EXTEND** | The connect4-rewrite shape is proven for the intercept (`findings-userspace-relay.md` Unknown 1). Add a transparent-mTLS variant (rewrite to the agent listener) rather than reimplementing the rewrite mechanism. |
+| 4 | `Dataplane` port (`overdrive-core/src/traits/dataplane.rs`) | Kernel-side enforcement boundary | **DO-NOT-REUSE (CREATE-NEW port)** | Models map writes, NOT per-connection socket ops. The proxy's intercept/handshake-drive/kTLS-arm/splice-pump lifecycle does not fit; forcing it conflates contracts (ADR-0069 Decision). CREATE-NEW `MtlsEnforcement`. |
+| 5 | `overdrive-bpf` crate (maps, XDP/cgroup programs, `pinning = ByName` discipline) | Home for the new sockops / `sk_skb` verdict / cgroup_connect4-mtls programs | **EXTEND** | The crate is the BPF home; reuse the build pipeline (`xtask bpf-build`, ADR-0038) and the bpffs-pin discipline. Add programs; no new BPF crate. NOTE: sockops/sk_skb/sockmap/ringbuf are net-new program *types* here (no prior sockops in tree) — the programs are CREATE-NEW *within* the EXTENDED crate. aya-ebpf 0.1.1 has no `#[sk_skb]` macro → hand-roll via `#[link_section]` (proven in the spikes). |
+| 6 | `overdrive-worker` crate (node-agent: ExecDriver, cgroup mgr, probe-runner) | Home for the per-connection mTLS proxy agent | **EXTEND** | The node-agent already owns host-side per-workload lifecycle (drivers, cgroups, probes). The mTLS proxy agent is another node-agent responsibility; add a module, not a crate. |
+| 7 | `rustls 0.23 [ring]` (`[workspace.dependencies]`) | The TLS 1.3 handshake on leg B | **REUSE AS-IS** | Already in the workspace graph (ADR-0039 / built-in CA). `dangerous_extract_secrets()` is the kTLS-arm seam (proven in spikes). |
+| 8 | `ktls` crate (NOT yet a dep) | kTLS arm + control-record loop (`NewSessionTicket`/KeyUpdate → `EIO` on raw RX) | **CREATE-NEW (add dependency)** | `findings.md` #4 + spike-wave-decisions favour `ktls::KtlsStream` over raw `setsockopt` for control records. New workspace dep (`ktls 6.x`, MIT/Apache-2.0 — OSS, open-source-first). Documented as a tech choice in the feature-delta. |
+| 9 | `overdrive-host` crate (Clock/Entropy/Transport/cgroup_fs/CA host adapters) | Possible home for `HostMtlsEnforcement` | **EXTEND-OR-NEW-CRATE (OQ-2)** | `overdrive-host` is the `adapter-host` home, but the proxy adapter is large (BPF loading + sockops + kTLS + splice) and may warrant its own `overdrive-mtls-host` crate for compile-graph hygiene (it pulls `ktls` + the BPF object). Default EXTEND `overdrive-host`; a dedicated crate is the alternative if the dep graph warrants — flagged as OQ-2, a DELIVER-pinnable detail within ADR-0069's decision. |
+| 10 | `EbpfDataplane` / `overdrive-dataplane` (aya loader, HoM, bpffs pins) | aya BPF-loading machinery, pin-path discipline | **REUSE (pattern) / EXTEND** | The aya `EbpfLoader` + `map_pin_path("/sys/fs/bpf/overdrive")` + `pinning = ByName` shape (ADR-0040 §"pin-by-name") is reused for the sockops/sockmap loading. The mTLS programs may load via the same loader infra or a sibling; reuse the established pattern, do not reinvent BPF loading. |
+
+**Verdict tally**: 3 REUSE-AS-IS (1, 2, 7) · 4 EXTEND (3, 5, 6, 10) · 1 CREATE-NEW
+port (4) · 1 CREATE-NEW dep (8) · 1 EXTEND-or-new-crate open (9). Default-EXTEND
+honored; the two CREATE-NEWs (the port, the `ktls` dep) are justified above.
+
+### 7. C4 diagrams
+
+C4 System Context (L1) + Container (L2) + Component (L3, the proxy dataplane path)
+are in `docs/feature/transparent-mtls-host-socket/design/c4-diagrams.md` (Mermaid).
+The L3 component diagram traces the
+detect→intercept→handshake→kTLS-arm→forward-splice→return-splice path.
+
+### 8. Quality attribute strategies (ISO 25010)
+
+| Attribute | Strategy | Observable |
+|---|---|---|
+| Security (confidentiality/authenticity) | Transparent intercept guarantees the workload never reaches the real peer un-proxied; auth-session == data-session (rustls secrets → leg B kTLS); fail-closed on absent SVID (`IdentityRead` `None` → refuse handshake) | `tcpdump`: TLS 1.3 records, zero cleartext on the peer wire; fail-closed negative test |
+| Reliability (losslessness) | Handshake-window capture is a userspace buffer (trivially lossless); no DROP-RESET; no server-speaks-first assumption | No dropped pre-arm bytes; no RESET on client-speaks-first |
+| Performance (agent-light) | Forward = agent-idle sockmap-egress-redirect → kTLS-TX; return = zero-copy `splice` (~1/record) | strace: zero per-byte forward syscalls; ~1 splice/record return |
+| Maintainability (one mechanism, DST-testable) | One driven port + host/sim adapters + `mtls_enforcement_equivalence` DST harness | DST equivalence test passes for both adapters |
+| Portability | All primitives in-tree at the pinned 6.18 floor (ADR-0068); no kernel patch | Tier-3 on the pinned kernel |
+
+### 9. Earned-Trust probe (principle 12 — mandatory)
+
+`HostMtlsEnforcement` ships a `probe()` (specified in the feature-delta DESIGN §
+Ports). At the composition root, "wire → probe → use": before the proxy is
+declared usable, probe verifies (a) the kTLS arm round-trips (sentinel handshake +
+one `tls_sw_splice_read` on a loopback leg), (b) the sockmap egress-redirect fires
+(a sentinel F→B byte emerges encrypted), (c) the SOCKMAP-insert-before-`TCP_ULP`
+ordering holds. On probe failure the node refuses to start with
+`health.startup.refused`. This exercises the *specific substrate lies the spikes
+catalogued* (ordering invariant; kTLS-RX-no-psock; egress-flag-not-ingress-flag) —
+not a convention, a compile-and-CI-enforced contract (subtype + structural +
+behavioural layers per principle 12).
+
+### 10. External integrations — none new
+
+The only "external" boundary is the **real peer's TLS endpoint**, which is another
+Overdrive workload presenting its own SVID — internal east-west mTLS, not a
+third-party API. No consumer-driven contract tests (Pact-shaped) are warranted:
+both sides are Overdrive-native, verified against the same trust bundle. (Contrast
+the future external-ACME workflow, which IS a contract-test seam — unrelated to
+#26.) Flagged for the platform-architect handoff: none.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-06-12 | **transparent-mtls-host-socket DESIGN (GH #26 folds #222; ADR-0069)** — formalises the user's LOCKED decision (2026-06-12): ONE universal "transparent mTLS via an agent-light L4 proxy" as THE enforcement mechanism for ALL workload kinds (process/exec, WASM, microVM, unikernel), collapsing whitepaper §7's two-mechanism framing. Decided on 6 Tier-3 spikes + 3 research docs (kernel 7.0, `353cdc52`): in-band lossless foreclosed 3 ways (no `sk_msg` HOLD; source-TX-bypass RST on live-socket redirect; lossless capture requires a proxy); the proxy proven agent-light BOTH directions (forward agent-IDLE sockmap-egress→kTLS-TX 15/15; return agent-LIGHT zero-copy `splice` via `tls_sw_splice_read` ~1/record). Adds ADR-0069 + the `## Transparent mTLS — universal agent-light L4 proxy extension` section. New driven port `MtlsEnforcement` (`overdrive-core`; does NOT fit `Dataplane`) + `HostMtlsEnforcement` (`adapter-host`, over sockops/sk_msg/sockmap/kTLS/splice/cgroup_connect4, consumes `IdentityRead`) + `SimMtlsEnforcement` (DST). Earned-Trust `probe()` (wire→probe→use). Reuse: 3 REUSE-AS-IS, 4 EXTEND, 1 CREATE-NEW port, 1 CREATE-NEW dep (`ktls`), 1 EXTEND-or-new-crate open. C4 L1+L2+L3 at `docs/feature/transparent-mtls-host-socket/design/c4-diagrams.md`. In-band kTLS-on-own-socket SUPERSEDED as v1, retained as tracked FUTURE OPTIMIZATION (restart-survival + 1-socket density — deferral pending product-owner GH issue, surfaced as a blocker, NOT created). Amends whitepaper §7/§8. J-SEC-003 back-propagation flagged for the product-owner in `design/upstream-changes.md` (does NOT edit `jobs.yaml`). — Morgan. |
 | 2026-06-11 | **built-in-ca-operator-composition DELIVERED** (GH #215 boot-side + #40 near-expiry rotation; folds both into one composition feature over the shipped built-in CA (ADR-0063) + SVID lifecycle (ADR-0067)). Three moves, 8 DES steps all COMMIT/PASS, no new subsystem and no new dependency: (1) `SvidLifecycle` near-expiry branch flips from a gated `StartWorkflow(cert_rotation)` seam to an **unconditional rotate `Action::IssueSvid`** (`"rotate-svid"` correlation; the `ROTATION_ENABLED` gate + `cert_rotation` workflow name single-cut retired) — internal SVID near-expiry reissue is a reconciler ACTION, NOT a workflow; threshold = ½ × `WORKLOAD_SVID_TTL` (1800s, derived). (2) `run_server` boots the **persistent KEK-sealed workload-identity root** via `boot_ca` + `bootstrap_node_intermediate` (single-cut replacing the ephemeral `RcgenCa` block; closes the D-CA-4 "CA not wired into serve" deferral); `ControlPlaneError::CaBoot(#[from] CaBootError)` carries cause-distinct refuse-to-start. The `Kek` provider is a **mandatory injected `ServerConfig.kek`** field (`Default` removed, `ServerConfig::new(kek)` added — production composes `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject hermetic `SimKek::for_boot()`), the C1-AMEND fix for the inline-production-binding cold-boot regression. (3) `overdrive alloc status` surfaces the current issued-cert summary (`serial / spiffe_id / issuer_serial / not_after`, NO cert bytes/key) via an additive `AllocStatusResponse.issued_certificates`, projecting the **max-`issuance_ordinal`** row per running alloc — a new monotonic `IssuanceOrdinal` newtype (D1-AMEND) replaces the equal-`issued_at` tie that surfaced a stale cert. Back-propagates the "#40 = cert-rotation workflow" conflation correction into ADR-0067 (rev 7), ADR-0063 (amendment), and `.claude/rules/workflows.md`. Quality: adversarial review APPROVE 0 blockers; mutation 100% kill (45 mutants, 0 missed); 1645 tests pass. EDD D01/O04/E03 `satisfied` (different-fox audited); O05 `pending` (operator-CLI capture needs a disposable full-system VM, #227). The `issuance_ordinal` append-only precondition is tracked for the first future delete-path (Phase-5 revocation) at #226. Evolution: `docs/evolution/2026-06-11-built-in-ca-operator-composition.md`. — Morgan. |
 | 2026-06-06 | **workflow-result-error-model — body returns `Result<Output, TerminalError>`; status enum becomes an engine-owned projection; typed `WorkflowStart.input` (ADR-0065 amends ADR-0064 §2/§3/§5/§6).** PROPOSE mode, evidence base = the 4-platform research (Restate/Temporal/DBOS/Step Functions, High confidence) — no DISCUSS wave. Adds the "Phase 1 workflow-result-error-model extension" section (§ body-contract reshape, D1–D5, C4 L2+L3, Reuse Analysis, quality scenarios) and ADR-0065 to the index; marks ADR-0064 §2/§3/§5/§6 amended. Greenfield single-cut: `WorkflowResult` deleted, new contract lands in the same change (only the `provision-record` test fixture is registered). Resolves #217 (input_digest off parameter bytes), unblocks the first external/root rotation workflow consumer. *(Historical: written as "unblocks #40 (cert-rotation)"; SUPERSEDED — #40's internal SVID reissue is now an `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* — Morgan. |
 | 2026-06-06 | **built-in-ca Reuse-Analysis correction — `ObservationStore` is EXTEND (additive), not REUSE AS-IS (DELIVER back-propagation).** The `issued_certificates` audit row first shipped via a non-compliant concrete-adapter bypass (a parallel redb table + inherent methods on `LocalObservationStore`, which was NOT DST-testable because it never routed through the port). The user directed the correction (2026-06-06) to the faithful "mirroring `AllocStatusRow`/`NodeHealthRow`" shape ADR-0063 D6 always intended: the audit now routes through the `ObservationStore` trait on BOTH `LocalObservationStore` and `SimObservationStore` (commit `aab5a69b`). The fix added TWO purely-additive trait members — `ObservationRow::IssuedCertificate(IssuedCertificateRow)` (a new enum variant, like the 5 existing sibling rows) and `ObservationStore::issued_certificate_rows()` (a typed reader mirroring `alloc_status_rows()`/`node_health_rows()`/`service_backends_rows()`). NO existing `ObservationStore` method signature changed; the additions grow the enum + reader exactly as every prior observation row did. The brief's Reuse-Analysis row + verdict tally are corrected (ObservationStore: REUSE AS-IS → EXTEND; tally 6 REUSE-AS-IS → 5 REUSE-AS-IS + 1 EXTEND); ADR-0063 D6 gains a one-line clarification of what "mirroring `AllocStatusRow`/`NodeHealthRow`" means (additive variant + reader through the port on both adapters, not a concrete-adapter-only surface). No prior decision reversed — D6 always specified the observation-row pattern; this only corrects a brief line that had become factually stale relative to the landed, DST-testable shape. — Morgan. |
