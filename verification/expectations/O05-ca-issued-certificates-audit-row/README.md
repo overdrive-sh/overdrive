@@ -77,10 +77,17 @@ assert sub-claims 1+2 over the real render. The in-tree gated tests in
 `ca_boot_and_audit.rs` (S-05-03/04) already prove the row write +
 no-silent-issuance forever; this expectation captures the operator-visible read
 surface, which is **blocked on a live end-to-end deployment the harness cannot
-stand up in one runner invocation**.
+stand up in one runner invocation** — tracked by
+[#227](https://github.com/overdrive-sh/overdrive/issues/227) (a fully disposable
+full-system Lima VM on the immutable node OS, #75, that boots the entire system
+for end-to-end EDD captures). The deliberately-rejected stop-gap (a backgrounded
+`serve`+`deploy` bash fixture inside `runner.sh`) is recorded in #227.
 
-**Status candidate: `pending` (honest).** The render surface is correct, but
-the live deployment that would produce an `issued_certificates` row is not
-reachable here — see the surfaced blocker in the step handoff. Not narrated: the
-`pending` reflects a real `executed_in_lima: true` capture whose preflight
-failed against a non-running control plane, not a believed outcome.
+**Status: `pending` (honest), deferred to [#227](https://github.com/overdrive-sh/overdrive/issues/227).**
+The render surface is correct, but the live deployment that would produce an
+`issued_certificates` row is not reachable here — the disposable full-system VM
+that stands one up is tracked by #227. Not narrated: the `pending` reflects a
+real `executed_in_lima: true` capture whose preflight failed against a
+non-running control plane, not a believed outcome. O05 flips to `satisfied` once
+#227 lands the harness that boots a converged deployment and the capture is
+re-run (and passes a different-fox audit) at current HEAD.
