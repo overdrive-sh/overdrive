@@ -209,84 +209,145 @@ outcomes:
   superseded_by: null
 - id: OUT-MTLS-SPIKE-INBAND-KTLS
   kind: spike
-  summary: 'Tier-3 spike (walking skeleton, runs BEFORE design locks): prove in-band
-    sidecarless kTLS for ONE process->process flow on the pinned 6.18 kernel — sockops
-    ESTABLISHED -> pidfd_getfd -> rustls TLS 1.3 handshake presenting the held SVID
-    (IdentityRead) -> kTLS install -> agent exits -> tcpdump shows TLS 1.3 records,
-    race-free (no cleartext before kTLS). FALSIFICATION -> fall back to Cilium out-of-band
-    auth + separate encryption'
+  summary: 'SUPERSEDED by ADR-0069 (2026-06-12): the in-band sidecarless kTLS-on-the-
+    workload''s-own-socket spike (sockops ESTABLISHED -> pidfd_getfd -> rustls handshake
+    -> kTLS install -> agent exits -> Cilium fallback on falsification) is no longer
+    the v1 mechanism. The 6 committed Tier-3 spikes foreclosed the lossless in-band
+    path three independent ways and selected the universal agent-light L4 proxy
+    instead (no pidfd_getfd, no agent-exit, no Cilium fallback). Replaced by the
+    composed-proxy walking-skeleton outcome OUT-MTLS-COMPOSED-PROXY-SKELETON.'
   feature: transparent-mtls-host-socket
   inputs:
-  - shape: one process->process host-socket flow on the 6.18 Lima/LVH kernel; held SVID
-      read via IdentityRead; deliberate kTLS-install delay to widen the race window
+  - shape: superseded — see OUT-MTLS-COMPOSED-PROXY-SKELETON for the v1 proxy walking
+      skeleton (ADR-0069)
   output:
-    shape: PASS = tcpdump shows TLS 1.3 Application Data records + ss -K shows kTLS ULP
-      installed + race-window probe shows zero cleartext bytes before install; FAIL =
-      handoff not race-free -> documented Cilium fallback (out-of-band auth + separate
-      encryption)
+    shape: superseded — see OUT-MTLS-COMPOSED-PROXY-SKELETON
   keywords:
-  - sockops
+  - superseded
+  - in-band
+  - adr-0069
+  artifact: crates/overdrive-dataplane (superseded; in-band model not built)
+  related: [OUT-WIM-IDENTITY-READ]
+  superseded_by: OUT-MTLS-COMPOSED-PROXY-SKELETON
+- id: OUT-MTLS-COMPOSED-PROXY-SKELETON
+  kind: invariant
+  summary: 'STATUS: this is the BLOCKING Slice-00 acceptance gate — a future DELIVER
+    invariant the bidirectional netns/veth walking skeleton MUST satisfy, NOT an
+    already-demonstrated spike result (the spikes proved the mechanism; this gate
+    has NOT yet been built). Composed-proxy walking skeleton (the FIRST, BLOCKING
+    DELIVER slice — an INTEGRATION gate, not a prove-the-mechanism gate). The mechanism
+    is spike-proven:
+    the 6 committed Tier-3 spikes settled the verdict (proxy, not in-band) AND proved
+    the composed INBOUND flow end-to-end (increment-i: real nft-TPROXY intercept ->
+    getsockname orig-dst -> server-side mutual-TLS verifying the client SVID chains to
+    the bundle -> kTLS-RX arm -> agent-light splice -> server reads byte-exact
+    plaintext, fail-closed on nocert/wrongca). This outcome COMPOSES the spike-proven
+    pieces into ONE bidirectional walking skeleton on the real netns/veth topology with
+    cgroup-isolated workloads, closing the three narrow gaps the spikes left open
+    (gap 1 outbound composed in ONE flow — increment-e intercept+capture+flush wired to
+    the increment-f kTLS-TX splice; gap 2 bidirectional steady-state round-trip; gap 3
+    real netns/veth + cgroup isolation). On the pinned 6.18 kernel, a real transparent
+    intercept (cgroup_connect4 outbound / nft-TPROXY inbound) -> the agent drains
+    pre-arm plaintext losslessly -> rustls TLS 1.3 handshake on the agent''s peer-facing
+    leg presenting the held SVID (IdentityRead) -> kTLS arm on the agent''s leg ->
+    agent-light splice -> post-arm bidirectional multi-record transfer with NO RST,
+    under BOTH normal AND traced/delayed timing. NO pidfd_getfd, NO agent-exit, NO
+    Cilium fallback.'
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: one composed process->process flow per direction on the 6.18 Lima/LVH kernel
+      over a real netns/veth topology with cgroup-isolated workloads (gap 3); real
+      cgroup_connect4 (outbound) / nft-TPROXY (inbound) intercept; held SVID read via
+      IdentityRead; deliberate handshake-window delay to defeat the increment-e
+      throwaway-harness intercept-lifecycle RST (a harness artifact, not a kernel
+      finding)
+  output:
+    shape: PASS = tcpdump shows TLS 1.3 Application Data records (0x17) on the agent''s
+      peer-facing leg + the post-arm bidirectional multi-record transfer completes with
+      NO RST under normal AND delayed timing + the workload reads byte-exact plaintext
+      on the host-internal leg. The mechanism and the composed INBOUND flow are
+      spike-proven (increment-i); this outcome is the bidirectional netns/veth
+      INTEGRATION of the proven pieces — closing gap 1 (outbound composed in ONE flow),
+      gap 2 (bidirectional steady-state round-trip), gap 3 (real netns/veth +
+      cgroup isolation) — and is the BLOCKING Slice-00 gate
+  keywords:
+  - composed-proxy
+  - walking-skeleton
+  - cgroup-connect4
+  - tproxy
   - ktls
   - rustls
-  - pidfd-getfd
-  - spike
-  - in-band
-  - sidecarless
+  - splice
   - tls13
   - wire-capture
-  - fallback
-  artifact: crates/overdrive-dataplane (spike harness; mechanism unbuilt)
-  related: [OUT-WIM-IDENTITY-READ]
+  - no-rst
+  - blocking-slice-00
+  artifact: crates/overdrive-dataplane (composed proxy path; mechanism + composed inbound
+    flow spike-proven, increment-i; bidirectional netns/veth composition is the Slice-00 gate)
+  related: [OUT-MTLS-WIRE-TLS13, OUT-MTLS-INBOUND-SERVER-MTLS, OUT-WIM-IDENTITY-READ]
   superseded_by: null
 - id: OUT-MTLS-WIRE-TLS13
   kind: invariant
-  summary: Between two host-socket workloads the wire carries TLS 1.3 Application Data
-    records (content type 0x17), NOT cleartext — the auth-session is the data-session,
-    encryption is in-kernel via kTLS, the agent is out of the steady-state data path
+  summary: Between two host-socket workloads the peer-facing AGENT leg carries TLS 1.3
+    Application Data records (content type 0x17), NEVER cleartext — the auth-session is
+    the data-session (the rustls handshake's extracted secrets ARE the kTLS keys),
+    encryption is in-kernel via kTLS on the agent's peer-facing leg (NOT the workload's
+    socket), and the agent is AGENT-LIGHT (splice-mediated, no per-byte userspace copy),
+    NOT a userspace proxy (ADR-0069)
   feature: transparent-mtls-host-socket
   inputs:
-  - shape: two host-socket workloads exchanging bytes after the sockops->handshake->kTLS
-      handoff completes
+  - shape: two host-socket workloads exchanging bytes after the transparent-intercept ->
+      agent rustls handshake -> kTLS-arm-on-the-agent's-leg handoff completes (ADR-0069
+      proxy model)
   output:
-    shape: tcpdump on the veth shows TLS 1.3 records (0x17) and never the cleartext payload;
-      ss -K shows the kTLS ULP installed on the socket; the agent is absent from the
-      steady-state byte path
+    shape: tcpdump on the agent's peer-facing leg shows TLS 1.3 records (0x17) and never
+      the cleartext payload; ss -tie on the agent leg shows the kTLS ULP installed
+      (tcp-ulp-tls 1.3 aes-gcm-256); strace shows the agent agent-light (forward
+      agent-idle kernel splice; return/deliver splice+ppoll only, no per-byte
+      read/write/recv/send of the payload)
   keywords:
   - mtls
   - ktls
   - tls13
   - wire-capture
   - in-kernel
-  - sidecarless
+  - agent-light
+  - peer-facing-leg
+  - ss-tie
   - auth-session-is-data-session
   - principle-3
   artifact: crates/overdrive-dataplane (mechanism unbuilt)
-  related: [OUT-MTLS-SPIKE-INBAND-KTLS, OUT-WIM-IDENTITY-READ]
+  related: [OUT-MTLS-COMPOSED-PROXY-SKELETON, OUT-MTLS-INBOUND-SERVER-MTLS, OUT-WIM-IDENTITY-READ]
   superseded_by: null
 - id: OUT-MTLS-NO-PLAINTEXT-PRE-KTLS
   kind: invariant
-  summary: 'Fail-closed for confidentiality: no cleartext byte egresses on the wire
-    before kTLS is installed; the gate is armed before connect()/accept() returns. The
-    gate MECHANISM (sk_msg DROP-until-armed vs sockmap redirect vs other) is a DESIGN
-    choice the spike informs, not pinned here; the residual data-loss window is closed by
-    connection reset if drops > 0'
+  summary: 'Fail-closed for confidentiality, and LOSSLESS: no cleartext byte ever
+    egresses on the peer wire. The workload never reaches the real peer un-intercepted —
+    its plaintext is transparently intercepted to the agent, which buffers the pre-arm
+    plaintext IN USERSPACE (a bounded buffer) during the handshake window, then flushes
+    it as the first Application Data once kTLS is armed on its peer-facing leg. There is
+    NO sk_msg DROP race-window, NO drop-counter, NO kernel race, and NO dropped pre-arm
+    bytes — the userspace handshake-window capture is trivially lossless on the stock
+    6.18 kernel (ADR-0069)'
   feature: transparent-mtls-host-socket
   inputs:
-  - shape: a write() issued immediately on connect() return (no sleep), with a deliberately
-      delayed kTLS install widening the window
+  - shape: a write() issued immediately on connect() return (no sleep, client-speaks-first),
+      with a deliberately delayed handshake widening the pre-arm window
   output:
-    shape: tcpdump shows EITHER TLS 1.3 records OR zero application bytes — NEVER the
-      cleartext probe string on the wire; a drop-counter signals whether the window fired
+    shape: tcpdump on the peer-facing leg shows EITHER TLS 1.3 records OR zero application
+      bytes — NEVER the cleartext probe string on the wire; the pre-arm plaintext is
+      captured losslessly in the agent's bounded userspace buffer and flushed as the first
+      Application Data post-arm (no bytes dropped, no RST)
   keywords:
-  - race-window
   - fail-closed
-  - sk-msg
+  - lossless
   - no-cleartext
   - confidentiality
-  - sockops
-  - drop-counter
+  - userspace-prearm-buffer
+  - no-race-window
+  - transparent-intercept
   artifact: crates/overdrive-dataplane (mechanism unbuilt)
-  related: [OUT-MTLS-WIRE-TLS13]
+  related: [OUT-MTLS-WIRE-TLS13, OUT-MTLS-RESOURCE-PUMP-GUARDRAILS]
   superseded_by: null
 - id: OUT-MTLS-HANDSHAKE-FAIL-CLOSED
   kind: invariant
@@ -314,53 +375,132 @@ outcomes:
   superseded_by: null
 - id: OUT-MTLS-RESTART-RE-HANDSHAKE
   kind: invariant
-  summary: 'Restart behaviour, two-tier: after a node-agent restart, NEW host-socket
-    connections re-run the sockops->handshake->kTLS handoff and re-install kTLS (the held
-    SVID is re-readable via IdentityRead) — this is the unconditional Phase-2 promise.
-    Survival of an ALREADY-IN-FLIGHT kTLS session across the restart is a spike/DESIGN-gated
-    observable (holds IFF the workload owns the socket fd and the sockops link/maps are
-    bpffs-pinned), NOT an unconditional Phase-2 acceptance criterion. A full node reboot
-    re-handshakes every connection (bpffs pins do not survive a reboot)'
+  summary: 'Restart behaviour (v1, ADR-0069): after a node-agent restart, NEW connections
+    re-run the transparent-intercept -> agent rustls handshake -> kTLS-arm path and
+    re-arm kTLS on the agent''s peer-facing leg (the held SVID is re-readable via
+    IdentityRead). There is NO in-flight-session survival in v1 — the agent owns BOTH
+    legs and the kTLS state, so an agent restart DROPS in-flight sessions and they
+    re-handshake on reconnect (the same recovery v1 relies on for a stalled-pump
+    teardown). New-connection re-handshake is the documented behaviour; in-flight
+    survival + 1-socket density are the SUPERSEDED in-band model''s unique win — out of
+    v1 scope, a post-v1 optimization tracked in #231 (ADR-0069 A1).'
   feature: transparent-mtls-host-socket
   inputs:
-  - shape: a node-agent restart (crash/upgrade) with in-flight kTLS sessions in the
-      fd-ownership/bpffs-pin shape the spike validates; separately, new connections opened
-      after the restart
+  - shape: a node-agent restart (crash/upgrade) with in-flight sessions, and separately
+      new connections opened after the restart
   output:
-    shape: new connections re-handshake and re-install kTLS (unconditional); an in-flight
-      session survives the restart iff workload-owns-fd + bpffs-pinned link (spike-gated) —
-      otherwise the documented behaviour is new-connection re-handshake
+    shape: new connections re-handshake and re-arm kTLS on the agent's leg; in-flight
+      sessions are DROPPED and re-handshake on reconnect (NO in-flight survival in v1 —
+      not a workload-owns-fd / bpffs-pin claim, which belonged to the superseded in-band
+      model)
   keywords:
-  - restart-survival
   - re-handshake
   - ktls
-  - socket-owned
-  - bpffs-pin
-  - spike-gated
+  - no-restart-survival
+  - new-connection
+  - agent-owns-legs
   artifact: crates/overdrive-dataplane (mechanism unbuilt)
-  related: [OUT-MTLS-SPIKE-INBAND-KTLS, OUT-MTLS-WIRE-TLS13]
+  related: [OUT-MTLS-WIRE-TLS13]
   superseded_by: null
 - id: OUT-MTLS-WASM-PARITY
   kind: invariant
-  summary: A WASM (wasmtime) host-socket workload receives the same transparent mTLS
-    enforcement as a process workload — via the in-process host fd path rather than
-    pidfd_getfd — with the same wire observable (TLS 1.3 Application Data records, no
-    cleartext) and the same fail-closed semantics
+  summary: 'SUPERSEDED by ADR-0069 (2026-06-12): there is NO distinct WASM mTLS path in
+    v1 and WASM is not supported yet (only ExecDriver exists). The old in-process-host-fd
+    WASM parity outcome (a separate fd-acquisition path mirroring the in-band pidfd_getfd
+    model) does not exist under the universal agent-light L4 proxy: a WASM host-socket
+    workload, once a WASM driver lands, is auto-covered by the SAME transparent-intercept
+    proxy as any process/exec workload (the agent intercepts the workload''s host socket
+    regardless of driver), with no WASM-specific enforcement surface. v1 workload kinds =
+    process/exec ONLY. The universal wire observable is OUT-MTLS-WIRE-TLS13.'
   feature: transparent-mtls-host-socket
   inputs:
-  - shape: a WASM (wasmtime) host-socket workload exchanging bytes; the agent acquires the
-      in-process host fd rather than pidfd_getfd
+  - shape: superseded — no distinct WASM mTLS path; see OUT-MTLS-WIRE-TLS13 (the universal
+      proxy observable that auto-covers a WASM host-socket workload once a WASM driver lands)
   output:
-    shape: tcpdump shows TLS 1.3 records (0x17) and never cleartext, identical to the
-      process-workload path; ss -K shows the kTLS ULP installed
+    shape: superseded — no WASM-specific observable; the universal proxy applies
   keywords:
+  - superseded
   - wasm
-  - wasmtime
-  - parity
-  - mtls
-  - tls13
-  - host-socket
-  - in-process-fd
-  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  - no-distinct-path
+  - adr-0069
+  artifact: crates/overdrive-dataplane (superseded; no distinct WASM path in v1)
   related: [OUT-MTLS-WIRE-TLS13]
+  superseded_by: OUT-MTLS-WIRE-TLS13
+- id: OUT-MTLS-INBOUND-SERVER-MTLS
+  kind: invariant
+  summary: 'Inbound (server-side) enforcement (ADR-0069, proven in
+    findings-inbound-intercept.md): a connection aimed at a server workload''s logical
+    address is transparently intercepted via nft-TPROXY to the agent''s IP_TRANSPARENT
+    listener; the agent recovers the ORIGINAL DESTINATION via getsockname() (NOT
+    SO_ORIGINAL_DST), selects that server workload''s AllocationId -> its held SVID, runs
+    the rustls TLS 1.3 SERVER handshake (presents the server SVID, WebPkiClientVerifier
+    REQUIRE+VERIFY the client''s SVID chains to the trust bundle), arms kTLS-RX, and
+    agent-light splices the decrypted plaintext to the identity-unaware server workload —
+    which reads byte-exact plaintext while the client-facing leg carries only TLS 1.3
+    records'
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: an inbound connection (the peer's agent presents the client SVID) aimed at a
+      server workload's logical address on the 6.18 kernel; nft-TPROXY prerouting +
+      ip-rule-fwmark + IP_TRANSPARENT listener; server SVID + trust bundle read via
+      IdentityRead
+  output:
+    shape: getsockname() on the accepted leg recovers the original destination -> server
+      AllocationId -> held SVID; the server-side mutual-TLS handshake presents the server
+      SVID and REQUIRE+VERIFYs the client SVID chains to the bundle (fail-closed on
+      nocert/wrongca with a distinct reason, zero bytes to the server); kTLS-RX arms;
+      the agent splices (tls_sw_splice_read) the decrypted plaintext to the server
+      workload byte-exact, agent-light (strace shows splice/ppoll only, no per-byte copy);
+      tcpdump on the client-facing leg shows only TLS 1.3 records (0x17)
+  keywords:
+  - inbound
+  - server-mtls
+  - tproxy
+  - ip-transparent
+  - getsockname
+  - orig-dst
+  - webpki-client-verifier
+  - ktls-rx
+  - splice
+  - fail-closed
+  - agent-light
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-WIRE-TLS13, OUT-MTLS-HANDSHAKE-FAIL-CLOSED, OUT-MTLS-COMPOSED-PROXY-SKELETON, OUT-WIM-IDENTITY-READ]
+  superseded_by: null
+- id: OUT-MTLS-RESOURCE-PUMP-GUARDRAILS
+  kind: invariant
+  summary: 'Resource and pump guardrails (ADR-0069 § "Resource & robustness constraints"
+    F7 + § "Pump supervision policy" F6): the lossless pre-arm userspace buffer and the
+    agent-light splice pump are bounded and fail-closed. MtlsLimits pins concrete v1
+    defaults — max_prearm_bytes = 256 KiB (over-limit -> BufferLimitExceeded, buffer
+    dropped, leg reset, no cleartext), handshake_deadline = 5 s (over -> HandshakeTimeout),
+    max_inflight_per_alloc = 128 concurrent pre-arm connections (over -> InFlightLimitExceeded,
+    new intercept refused, no cleartext). A return/deliver splice pump whose bytes-spliced
+    counter has not advanced for pump_stall_deadline (30 s) WHILE a record is pending is
+    PumpLiveness::Stalled -> the node-agent/worker tears the connection down (teardown +
+    fail-closed reset) -> Gone, no fd/sockmap/kTLS leak'
+  feature: transparent-mtls-host-socket
+  inputs:
+  - shape: a pre-arm stream exceeding max_prearm_bytes; a stalled handshake exceeding
+      handshake_deadline; over-the-per-allocation-limit concurrent intercepts; a stalled
+      splice pump with a record pending on the kTLS-RX leg past pump_stall_deadline
+  output:
+    shape: each limit trips its cause-distinct MtlsEnforcementError with the concrete
+      value (BufferLimitExceeded / HandshakeTimeout / InFlightLimitExceeded), fail-closed
+      with no cleartext on the wire; a stalled pump observable via PumpLiveness::Stalled
+      drives worker teardown to Gone with zero fd/sockmap/kTLS leak; mtls.pump.stalled /
+      mtls.pump.teardown_on_stall telemetry surface pump health
+  keywords:
+  - mtls-limits
+  - max-prearm-bytes
+  - handshake-deadline
+  - max-inflight-per-alloc
+  - pump-liveness
+  - stalled
+  - teardown-on-stall
+  - fail-closed
+  - no-leak
+  - resource-bound
+  artifact: crates/overdrive-dataplane (mechanism unbuilt)
+  related: [OUT-MTLS-NO-PLAINTEXT-PRE-KTLS, OUT-MTLS-HANDSHAKE-FAIL-CLOSED, OUT-MTLS-COMPOSED-PROXY-SKELETON]
   superseded_by: null

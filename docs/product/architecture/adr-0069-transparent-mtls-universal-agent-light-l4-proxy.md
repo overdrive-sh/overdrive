@@ -7,8 +7,8 @@ identity model, two enforcement mechanisms") and §8 ("Identity and mTLS"):
 collapses the two-enforcement-mechanism framing (host-socket in-band kTLS #26 +
 guest-stack L4 tap proxy #222) into ONE universal mechanism. **Supersedes** the
 in-band sockops+kTLS-on-the-workload's-own-socket model as the v1 #26 enforcement
-path; that model is retained as a tracked FUTURE OPTIMIZATION (see *Alternatives*
-and the deferral surfaced to the product-owner).
+path; that model is NOT in v1 scope — a post-v1 optimization tracked in **#231**
+(see *Alternatives* A1).
 
 Folds GH [#222](https://github.com/overdrive-sh/overdrive/issues/222) into GH
 [#26](https://github.com/overdrive-sh/overdrive/issues/26) as the **STAGED
@@ -58,22 +58,48 @@ kTLS+sockmap spike" (§7, verbatim).
 
 ### The empirical evidence base (this is what settles it)
 
-Six Tier-3 spikes (5 follow-ups + the original) and three research docs, all on a
+Spikes and research docs, all on a
 real 7.0 kernel (≥ the pinned 6.18 floor, ADR-0068), software kTLS, AES-256-GCM
 TLS 1.3. Committed under `docs/feature/transparent-mtls-host-socket/spike/` and
-`docs/research/dataplane/` at `353cdc52`. The findings are decision-grade: **the
-*primitives* are de-risked** (forward sockmap-egress splice, return `splice`
-pump, kTLS arm, the SOCKMAP-before-`TCP_ULP` ordering invariant — each proven in
-isolation). **The *composition* under a real transparent intercept is NOT yet
-demonstrated end-to-end** — increment-e's composed harness RST'd on the
-intercept lifecycle (`findings-userspace-relay.md` Unknown 3, a harness
-limitation), and increments-f/h proved their primitives with the transparent
-intercept removed. **Closing that gap — a composed post-arm bidirectional
-multi-record transfer under a real `cgroup_connect4` intercept with NO RST — is
-the walking-skeleton gate, the FIRST DELIVER slice** (see *Consequences* →
-*Composition gate* and the feature-delta DESIGN handoff). "De-risked" here means
-the mechanism is *proven viable primitive-by-primitive*, NOT *proven composed*.
-The load-bearing results:
+`docs/research/dataplane/` at `353cdc52` (and the inbound increment-i added
+since). The findings are decision-grade. **The *mechanism* is spike-verified —
+both the primitives in isolation AND a composed real-intercept flow in one
+direction.** The primitives are each proven (forward sockmap-egress splice into
+kTLS-TX, return `splice(2)` pump on a no-psock kTLS-RX leg, kTLS arm, the
+SOCKMAP-before-`TCP_ULP` ordering invariant). And the **inbound half is proven
+COMPOSED end-to-end**: `findings-inbound-intercept.md` (increment-i §2, *ok*
+mode) demonstrated a real TPROXY transparent intercept → `getsockname` orig-dst
+recovery → server-side mutual-TLS (the agent presents S's SVID and
+`WebPkiClientVerifier` VERIFIES C's client SVID chains to the bundle) → kTLS-RX
+arm → agent-light `splice` of the decrypted plaintext to an identity-unaware
+server S, with S reading byte-exact plaintext while the client leg carries TLS
+`0x17` ciphertext, and fail-closed on `nocert`/`wrongca` (distinct reasons, 0
+bytes to S). That is a composed real-intercept flow, end-to-end, in one
+direction.
+
+**Three NARROW composition gaps remain** — these are the integration/
+walking-skeleton scope, NOT "the mechanism is unproven":
+1. **Outbound composed in ONE flow** — increment-e proved outbound
+   intercept + lossless pre-arm capture + handshake-window flush; increment-f
+   proved the steady-state egress splice; but on SEPARATE harnesses (increment-f
+   deliberately removed the `cgroup_connect4` intercept to isolate the splice
+   primitive, and increment-e's steady-state was blocked by a *throwaway-harness
+   intercept-lifecycle RST — explicitly a harness limitation, NOT a kernel
+   finding*). The two were never wired into one outbound flow.
+2. **Bidirectional steady-state round-trip** — inbound drove only C→S
+   (request); outbound forward drove only F→B; neither composed the response
+   leg. (The agent-IDLE sockmap-verdict bidirectional splice has a known
+   leg-B-RX-psock vs kTLS-RX conflict — increment-f "Load-bearing mechanics" #2 —
+   so the return/deliver direction uses the proven agent-LIGHT `splice(2)` path
+   from increment-i/h, not the agent-idle redirect.)
+3. **Real netns/veth topology + cgroup-isolated workloads** — every spike was
+   loopback + sibling processes.
+
+**Closing gaps 1–3 — composing the proven pieces into ONE bidirectional walking
+skeleton in the real netns/veth topology — is the FIRST DELIVER slice (Slice 00,
+BLOCKING).** Slice 00 is an integration/walking-skeleton gate, NOT a
+"prove-the-mechanism" gate (see *Consequences* → *Composition gate* and the
+feature-delta DESIGN handoff). The load-bearing results:
 
 1. **The in-band lossless path is foreclosed three independent ways** — proving
    the in-band model cannot be made *lossless* for a client-speaks-first flow on
@@ -144,8 +170,9 @@ decision; it does not relitigate it.
 | **Performance efficiency — agent-light** | Steady state is agent-idle forward (kernel splice) + agent-light return (zero-copy `splice`, ~1/record). No userspace per-byte copy in either direction. Two sockets/connection and a per-connection handshake are the accepted cost. |
 
 The trade-off the user accepted: **uniformity + losslessness over
-restart-survival + 1-socket density**. Restart-survival becomes a future
-optimisation; density (2 sockets/conn) is the steady-state cost.
+restart-survival + 1-socket density**. Restart-survival becomes a post-v1
+optimisation tracked in **#231**; density (2 sockets/conn) is the steady-state
+cost.
 
 ## Decision
 
@@ -408,12 +435,10 @@ exits → the kernel carries crypto on one socket the workload owns.
      `struct sock`), so #222's separate proxy mechanism was unavoidable
      regardless. Keeping in-band means shipping **two** mechanisms; the proxy
      unifies to **one**.
-- **Retained as a tracked FUTURE OPTIMIZATION** (restart-survival + density),
-  *not* v1. A `health.startup`-style follow-up would layer it for host-socket
-  kinds where restart-survival matters, on top of the proxy default. This is a
-  deferral surfaced to the product-owner for an issue (it has no issue number
-  yet — see *Consequences* and `design/upstream-changes.md`); it carries no
-  hand-wavy forward pointer here.
+- **Not in v1 scope** (restart-survival + density) — a post-v1 optimization
+  tracked in **#231**. Should it ever be wanted, a follow-up would layer it for
+  host-socket kinds where restart-survival matters, on top of the proxy default.
+  v1 does not pursue it; #231 is the tracking issue for the deferred alternative.
 
 ### A2. In-band lossy DROP-RESET gate as the universal v1
 
@@ -497,10 +522,8 @@ data-session).
   scheduled per-record on the return path. (Forward is genuinely idle.)
 - **No restart-survival in v1.** The agent owns both legs and the kTLS state; an
   agent restart drops in-flight sessions (they re-handshake on reconnect).
-  Restart-survival is the in-band model's unique win and is the named future
-  optimisation (A1) — **deferred, pending a product-owner-approved GH issue**
-  (no issue number exists yet; surfaced as a blocker, not written as a forward
-  pointer).
+  Restart-survival is the in-band model's unique win; it is **not in v1 scope**
+  (the accepted proxy trade, A1) — a post-v1 optimization tracked in **#231**.
 - **Transparent-intercept complexity, both directions.** Outbound: every
   workload's `connect()` is rewritten to the agent's leg-F listener
   (`cgroup_connect4`). Inbound: every connection aimed at a server workload's
@@ -512,24 +535,38 @@ data-session).
   limitation); the inbound spike was clean and bounded but loopback-only, so the
   netns/veth topology re-proving is a DELIVER obligation
   (`findings-inbound-intercept.md` § "What was NOT tested").
-- **Inbound bidirectional steady-state is unproven in the spike.** The inbound
-  spike drove only the request direction (C→S); the server's response leg
-  (re-encrypt the server's reply onto leg C's kTLS-TX) was not exercised
-  (`findings-inbound-intercept.md` § "What was NOT tested"). The forward
-  kTLS-TX primitive it needs is proven separately (`findings-egress-ktls-splice.md`),
-  but composing it into the inbound server shape is part of the composed
-  walking-skeleton gate, not a settled fact.
-- **Composition is unproven; it is the walking-skeleton gate (NOT optional).**
-  The spikes proved the *primitives* (forward splice, return splice, kTLS arm,
-  arming order) but the *composed* system — a real `cgroup_connect4` intercept →
-  pre-arm capture → handshake → kTLS arm → **post-arm bidirectional multi-record
-  transfer with NO RST** — was never demonstrated end-to-end (increment-e RST'd
-  on the intercept lifecycle; increments-f/h removed the intercept to prove their
-  primitive). DELIVER MUST land a **composed Tier-3 acceptance test as its FIRST
-  slice (walking skeleton)** before any other slice — exercising the full
-  composed path under BOTH normal AND traced/delayed timing, asserting zero RST
-  post-arm. This supersedes the old in-band walking skeleton. (See *Consequences*
-  → *Composition gate* below and the feature-delta DESIGN handoff.)
+- **Inbound is proven COMPOSED end-to-end (one direction); bidirectional
+  round-trip is a remaining gap.** `findings-inbound-intercept.md` (increment-i
+  §2, *ok* mode) demonstrated the full inbound flow composed — TPROXY intercept →
+  orig-dst recovery → server-side mutual-TLS (verifies C's client SVID) →
+  kTLS-RX arm → agent-light splice-to-S, with fail-closed on `nocert`/`wrongca`.
+  What is NOT yet exercised is the **response leg** (re-encrypt the server's
+  reply onto leg C's kTLS-TX); the inbound spike drove only the request
+  direction (C→S) (`findings-inbound-intercept.md` § "What was NOT tested"). The
+  forward kTLS-TX primitive that leg needs is proven separately
+  (`findings-egress-ktls-splice.md`); composing it into the inbound server shape
+  for a full round-trip is gap #2 of the Slice-00 walking-skeleton scope, not a
+  doubt about the mechanism.
+- **Three narrow composition gaps remain; closing them is the walking-skeleton
+  gate (NOT optional).** The mechanism is spike-verified — the primitives in
+  isolation (forward splice, return splice, kTLS arm, arming order) AND the
+  inbound flow composed end-to-end in one direction (increment-i §2). What is NOT
+  yet demonstrated is (1) the **outbound** path composed in ONE flow — increment-e
+  proved outbound intercept + pre-arm capture + handshake-window flush and
+  increment-f proved the steady-state egress splice, but on SEPARATE harnesses
+  (increment-f removed the `cgroup_connect4` intercept to isolate the splice;
+  increment-e's steady-state was blocked by a *throwaway-harness
+  intercept-lifecycle RST — a harness limitation, NOT a kernel finding*, later
+  superseded by increment-f's clean-harness steady-state proof); (2)
+  **bidirectional steady-state round-trip** in either direction; (3) the **real
+  netns/veth topology with cgroup-isolated workloads** (every spike was loopback +
+  sibling processes). DELIVER MUST land a **composed Tier-3 acceptance test as its
+  FIRST slice (Slice 00, walking skeleton)** before any other slice — wiring the
+  proven pieces into ONE bidirectional flow in the real netns/veth topology,
+  closing gaps 1–3, under BOTH normal AND traced/delayed timing, asserting zero
+  RST post-arm. This is an integration gate, not a "prove-the-mechanism" gate, and
+  it supersedes the old in-band walking skeleton. (See *Consequences* →
+  *Composition gate* below and the feature-delta DESIGN handoff.)
 - **J-SEC-003 / slices 00–05 re-grounding.** The DISCUSS-wave job and slices were
   authored on the in-band "agent fully out, restart-survivable, kTLS on the
   workload's own socket" model. Those properties no longer hold in v1. This is a
@@ -604,8 +641,8 @@ the `enforce` precondition surface:
 
 The concrete v1 defaults (F7 — pinned, not "sensible defaults"; the acceptance
 tests assert these values, not merely field existence). They are compile-time
-defaults, NOT operator-tunable in v1 — operator-tunability is a separate
-deferral surfaced to the product-owner (no issue created):
+defaults, NOT operator-tunable in v1 — operator-tunability of `MtlsLimits` is a
+separate concern tracked in [#230](https://github.com/overdrive-sh/overdrive/issues/230):
 
 - **Bounded pre-arm buffer** — `max_prearm_bytes = 256 KiB` (262 144 bytes) per
   connection. Rationale: comfortably covers a request-first protocol's first
@@ -695,14 +732,21 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   `health.startup.refused` event. This exercises the specific substrate lies the
   spikes catalogued (sockmap-insert-before-ULP ordering; the kTLS-RX-no-psock
   invariant; the egress-flag-not-ingress-flag invariant).
-- **Composed walking-skeleton gate (the FIRST DELIVER slice, BLOCKING)**: a
-  composed Tier-3 acceptance test — real `cgroup_connect4` intercept → workload
-  pre-arm write → leg-B handshake → kTLS arm → **post-arm bidirectional
-  multi-record transfer with NO RST** — repeated under BOTH normal AND
-  traced/delayed timing. This is the one thing the spikes did NOT prove (they
-  proved the primitives in isolation; the composed intercept lifecycle RST'd in
-  increment-e). It MUST pass before any other DELIVER slice lands. It supersedes
-  the old in-band walking skeleton.
+- **Composed walking-skeleton gate (the FIRST DELIVER slice, Slice 00,
+  BLOCKING)**: a composed Tier-3 acceptance test — real `cgroup_connect4`
+  intercept → workload pre-arm write → leg-B handshake → kTLS arm → **post-arm
+  bidirectional multi-record transfer with NO RST** — repeated under BOTH normal
+  AND traced/delayed timing. This is an **integration gate, not a
+  "prove-the-mechanism" gate**: the mechanism is spike-verified (the primitives in
+  isolation AND the inbound flow composed end-to-end in increment-i §2). Slice 00
+  closes the three remaining composition gaps — (1) the OUTBOUND path composed in
+  ONE flow (increment-e and increment-f proved its pieces on separate harnesses;
+  increment-e's steady-state RST was a *throwaway-harness intercept-lifecycle
+  limitation, NOT a kernel finding*, superseded by increment-f's clean-harness
+  steady-state proof); (2) bidirectional steady-state round-trip; (3) the real
+  netns/veth topology with cgroup-isolated workloads (the spikes were loopback +
+  sibling processes). It MUST pass before any other DELIVER slice lands. It
+  supersedes the old in-band walking skeleton.
 - **Tier-3 invariants (outbound)** pinned as tests: `tls-ULP-after-sockmap ==
   EINVAL`; forward redirect uses `flags=0` (egress) not `BPF_F_INGRESS`; leg B
   carries no psock for the return path; `tcpdump` shows TLS 1.3 records and zero

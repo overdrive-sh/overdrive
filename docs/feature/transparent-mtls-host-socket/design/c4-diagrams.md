@@ -5,9 +5,12 @@ Component is rendered TWICE for the proxy dataplane (a complex subsystem) — on
 for the OUTBOUND/client path (detect→intercept→handshake→kTLS-arm→forward-splice
 →return-splice) and once for the INBOUND/server path
 (TPROXY-intercept→orig-dst→server-mTLS→kTLS-RX→splice-to-server, F3). Every arrow
-is labelled with a verb. Abstraction levels are not mixed. Both directions are
-real-kernel proven (outbound: increments-f/g; inbound:
-`findings-inbound-intercept.md`).
+is labelled with a verb. Abstraction levels are not mixed. The per-direction
+primitives AND the composed INBOUND flow are spike-proven (increment-i; outbound
+primitives: increments-f/g; inbound: `findings-inbound-intercept.md`); **Slice 00
+composes the remaining gaps** — outbound composed in one flow, the bidirectional
+response legs, and real netns/veth + cgroup isolation (these three are NOT yet
+proven).
 
 ---
 
@@ -104,7 +107,8 @@ flowchart TB
     end
 
     IR["IdentityRead (svid_for + current_bundle)"]
-    PEER["Peer workload (mTLS endpoint)"]
+    PEERAGENT["Peer-side agent / inbound proxy (the mTLS endpoint — presents the PEER workload's SVID)"]
+    PEERW["Peer workload (plaintext socket, holds nothing — identity-unaware, behind its agent)"]
 
     W -->|"connect()"| CONNECT4
     CONNECT4 -->|"redirected to"| ACCEPT
@@ -113,19 +117,20 @@ flowchart TB
     ACCEPT --> CAPTURE
     CAPTURE --> HS
     HS -->|"reads SVID + bundle"| IR
-    HS -->|"TLS 1.3 records"| PEER
+    HS -->|"TLS 1.3 records"| PEERAGENT
     HS --> ARM
     ARM --> FLUSH
-    FLUSH -->|"encrypted"| PEER
+    FLUSH -->|"encrypted"| PEERAGENT
+    PEERAGENT -.->|"decrypted plaintext (peer agent splices to its workload)"| PEERW
 
     %% steady-state forward (agent-idle)
     W ==>|"plaintext bytes"| ACCEPT
     ACCEPT ==>|"leg F RX"| VERDICT
     VERDICT ==>|"egress redirect"| LEGBKTLS
-    LEGBKTLS ==>|"TLS 1.3 encrypted"| PEER
+    LEGBKTLS ==>|"TLS 1.3 encrypted"| PEERAGENT
 
     %% steady-state return (agent-light)
-    PEER -->|"TLS 1.3 encrypted"| LEGBKTLS
+    PEERAGENT -->|"TLS 1.3 encrypted"| LEGBKTLS
     LEGBKTLS -->|"decrypted record"| SPLICE
     SPLICE -->|"plaintext"| W
 ```
@@ -140,10 +145,13 @@ flowchart TB
   egress-redirected (`bpf_sk_redirect_map`, `flags=0`) into leg B's kTLS TX; the
   kernel's `tcp_sendmsg_locked` encrypts; the agent issues zero per-byte syscalls
   (`findings-egress-ktls-splice.md`, 15/15).
-- **Steady-state return (thin arrows from PEER) — AGENT-LIGHT**: leg B is a plain
-  kTLS-RX socket (NO psock); the agent drives a `splice(legB → pipe → legF)` pump;
-  `tls_sw_splice_read` decrypts each record into clean plaintext, zero-copy, ~1
-  splice/record (`findings-splice-return.md`).
+- **Steady-state return (thin arrows from the peer-side agent) — AGENT-LIGHT**: leg
+  B is a plain kTLS-RX socket (NO psock); the agent drives a
+  `splice(legB → pipe → legF)` pump; `tls_sw_splice_read` decrypts each record into
+  clean plaintext, zero-copy, ~1 splice/record (`findings-splice-return.md`). The
+  TLS endpoint on the far side is the **peer-side agent** presenting the peer
+  workload's SVID — never the peer workload itself, which holds nothing and sits
+  behind its agent as identity-unaware plaintext.
 
 **Invariant (Tier-3 test target)**: leg B carries NO sockmap verdict/psock on its
 RX — that both fights kTLS RX (`ConnectionAborted`) and forecloses the return path

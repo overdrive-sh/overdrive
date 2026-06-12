@@ -785,8 +785,9 @@ lossless capture structurally requires a proxy), and it cannot serve
 guest-stack workloads at all — so a separate proxy mechanism was unavoidable
 regardless. The universal proxy is **lossless for every kind**, needs **no
 kernel patch** (every primitive is in-tree at the pinned 6.18 floor), and is
-**one mechanism instead of two**. The in-band model is retained as a tracked
-**future optimization** for restart-survival + density, not the v1 path. The
+**one mechanism instead of two**. The in-band model is **out of v1 scope** — a
+post-v1 optimization tracked in **#231** (ADR-0069 § A1) — it uniquely wins
+restart-survival + density but is not the v1 path. The
 intercept (`cgroup/connect4` rewrite vs TPROXY) is a DELIVER-pinnable detail
 within ADR-0069. (Guest-stack workloads reach the proxy at the virtio-net tap
 the host owns — the host knows which allocation owns which tap — and the

@@ -11,7 +11,7 @@ inherit; `review_enabled: true` (see § Review below); mutation N/A (docs).
 proxy" as THE enforcement mechanism for ALL workload kinds** (process/exec, WASM,
 microVM, unikernel). Whitepaper §7's "one identity model, two enforcement
 mechanisms" collapses to ONE. In-band kTLS-on-the-workload's-own-socket is
-SUPERSEDED as v1 and retained as a tracked FUTURE OPTIMIZATION.
+SUPERSEDED as v1 and retained as a post-v1 optimization tracked in **#231**.
 
 **Two USER-LOCKED scope decisions (2026-06-12 re-review):**
 - **Host-socket is BIDIRECTIONAL v1** — both the outbound/client half
@@ -96,10 +96,11 @@ Reuse Analysis.
   `#![forbid(unsafe_code)]`; the proxy is irreducibly `unsafe`). **Revisit trigger**
   (not a blocker): if mTLS later needs isolation from the LB/service dataplane,
   split into a dedicated `adapter-host` crate then.
-- **DEFER-1** — in-band restart-survival future optimization → needs a
-  product-owner-approved GH issue (none exists). Surfaced, NOT created.
-- **DEFER-2** — multi-node reachability → likely the existing #36; verify
-  (`gh issue view 36 --comments`) before citing.
+- **In-band restart-survival + 1-socket density** — NOT in v1 scope (the accepted
+  proxy trade, ADR-0069 A1); a post-v1 optimization tracked in **#231**.
+- **Multi-node transparent mTLS** — OUT of v1 scope (Phase 1 is single-node). No
+  forward-pointer issue; do NOT cite #36 (generic node enrollment/admission, not
+  cross-node transparent mTLS).
 
   (The agent-light splice return is the design; a fully-agent-idle bidirectional
   return is a non-goal, not pursued — NO kernel patch is or will be required.)
@@ -128,10 +129,12 @@ review risks the critique dimensions target (resume-driven dev, technology bias,
 missing alternatives) are pre-empted — the ADR carries 4 alternatives with rejection
 rationale, all OSS, all kernel-source-pinned. The HIGH-value review target was
 **OQ-1** (the `MtlsEnforcement` signature) — now **ACCEPTED (user-approved
-2026-06-12)**; the contract is pinned and is what DELIVER implements to. The
-remaining gating items are DEFER-1..2 (OQ-2 is resolved — extend
-`overdrive-dataplane` + `overdrive-bpf`); a full reviewer pass is optional and
-lower-yield than the now-accepted contract.
+2026-06-12)**; the contract is pinned and is what DELIVER implements to. No gating
+deferrals remain (in-band restart-survival/density is out of v1 scope — a post-v1
+optimization tracked in **#231**; multi-node transparent mTLS is simply out of v1
+scope, no forward-pointer issue; OQ-2 is resolved — extend `overdrive-dataplane` +
+`overdrive-bpf`); a full reviewer pass is optional and lower-yield than the
+now-accepted contract.
 
 ## Review revisions (adversarial review — rejected pending revisions, 2026-06-12)
 
@@ -146,7 +149,7 @@ cited.**
 | Finding | Severity | Resolution | Where |
 |---|---|---|---|
 | **F1 — authn ≠ authz; expected-destination not pinned** | CRITICAL | **Authorization is a SEPARATE, already-tracked subsystem** — the BPF-LSM `socket_connect` hook (#27) fed by compiled `policy_verdicts` (#38; related #49); the proxy does authn + encryption, NOT authz, and MUST NOT embed a policy engine. **Expected-destination SAN-match** depends on east-west SPIFFE-ID resolution (#178, downstream of #26; VIP path #61) — v1 #26 is **chain-to-trust-bundle authn only** (keep `AbsentSvid`/`PeerVerificationFailed`, fail-closed). Added an OPTIONAL `expected_peer: Option<SpiffeId>` to `InterceptedConnection` + a reserved `PeerIdentityMismatch` variant (v1 `None`, wires with #178) + a negative-test placeholder for the wrong-but-valid-peer case (gated on #178). The policy verdict is NOT duplicated. | ADR-0069 § Decision "What this does NOT do" + § Enforcement + § References; feature-delta contract (module docstring, `InterceptedConnection.expected_peer`, `enforce` postcondition/edge-case, `PeerIdentityMismatch`) |
-| **F2 — composition unproven; "fully de-risked" overstated** | HIGH | Softened "fully de-risked" → **the *primitives* are de-risked; the *composition* under a real transparent intercept is the walking-skeleton gate** (increment-e's steady-state RST is unresolved). Added a **BLOCKING composed Tier-3 acceptance test as the FIRST DELIVER slice** (real `cgroup_connect4` intercept → pre-arm write → handshake → kTLS arm → post-arm bidirectional multi-record transfer with NO RST, under normal AND traced/delayed timing) — supersedes the old in-band walking skeleton. | ADR-0069 § Context (evidence base), § Consequences/Negative, § Enforcement; feature-delta DESIGN Handoff + equivalence-harness obligations; upstream-changes.md Slice 00 |
+| **F2 — "fully de-risked" overstated; three narrow composition gaps remain** | HIGH | Softened "fully de-risked" → **the primitives are de-risked AND the composed INBOUND flow is spike-verified** (`spike/findings-inbound-intercept.md` increment-i §2: real TPROXY intercept → `getsockname` orig-dst → server-side mutual-TLS verifying C's client SVID chains to the bundle → kTLS-RX → agent-light splice → byte-exact plaintext at S; fail-closed on nocert/wrongca). What remains is **THREE NARROW composition gaps**, not "the composition": (1) outbound composed in ONE flow, (2) bidirectional steady-state round-trip, (3) real netns/veth topology + cgroup-isolated workloads. (The earlier "increment-e steady-state RST" framing was a throwaway-harness intercept-lifecycle artifact, **NOT a kernel finding** — `spike/findings-egress-ktls-splice.md` increment-f later proved the steady-state egress kTLS splice cleanly, agent-idle, 15/15, superseding it.) Slice 00 is therefore a **BLOCKING first DELIVER slice = an integration / walking-skeleton GATE that closes the three narrow gaps** (NOT a "prove the mechanism" gate): a composed Tier-3 acceptance test (real `cgroup_connect4` intercept → pre-arm write → handshake → kTLS arm → post-arm bidirectional multi-record transfer with NO RST, under normal AND traced/delayed timing) — supersedes the old in-band walking skeleton. | ADR-0069 § Context (evidence base), § Consequences/Negative, § Enforcement; feature-delta DESIGN Handoff + equivalence-harness obligations; upstream-changes.md Slice 00 |
 | **F4 — pre-arm buffer has no resource contract (DoS)** | HIGH | Added the `MtlsLimits` resource contract (bounded `max_prearm_bytes`, `handshake_deadline`, `max_inflight_per_alloc`) as a construction param + cause-distinct fail-closed variants `BufferLimitExceeded` / `HandshakeTimeout` / `InFlightLimitExceeded` (no `Internal(String)`). Fail-closed cleanup total (drop buffer + reset leg, no leak); backpressure = refuse, never queue-unbounded. Metrics/observability noted. Limit + cleanup tests added to the design's test obligations. | ADR-0069 § Consequences "Resource & robustness constraints" + § Enforcement; feature-delta contract (`MtlsLimits`, the three variants, `enforce` edge-cases, equivalence-harness limit branches) |
 | **F5 — intercept recursion / agent-leg-B exemption underspecified** | MEDIUM | Pinned the exemption mechanism — a narrowly-scoped `SO_MARK` socket-mark bypass the `cgroup_connect4` program checks-and-skips OR cgroup scoping (the existing `cgroup_connect4_service` attach boundary: program attaches to the *workload* subtree, not the agent's). Two Tier-3 obligations: (a) agent leg B NOT re-intercepted; (b) workload CANNOT self-exempt (bypass is agent-private). | ADR-0069 § Consequences "intercept-recursion exemption" + § Enforcement; feature-delta `enforce` postcondition + equivalence-harness F5 obligations |
 

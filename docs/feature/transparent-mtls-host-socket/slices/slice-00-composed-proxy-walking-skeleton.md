@@ -1,13 +1,24 @@
-# Slice 00 — the COMPOSED proxy walking skeleton (BLOCKING): real intercept → handshake → kTLS → bidirectional transfer, NO RST
+# Slice 00 — the COMPOSED proxy walking skeleton (BLOCKING): real netns/veth bidirectional round-trip → handshake → kTLS → splice, NO RST
 
 > **WALKING SKELETON — the FIRST, BLOCKING DELIVER slice (F2).** Must pass
 > before any other slice lands. Re-grounded to **ADR-0069** (the universal
 > agent-light L4 proxy). This **supersedes** the old in-band kTLS-on-the-
-> workload's-own-socket spike slice: the 6 committed Tier-3 spikes settled the
-> MECHANISM (verdict: proxy, not in-band) and proved every PRIMITIVE in
-> isolation, but did **NOT** prove the **composition** under a real transparent
-> intercept (increment-e RST'd on the intercept lifecycle; increments-f/h
-> removed the intercept to prove their primitive). This slice closes that gap.
+> workload's-own-socket spike slice. The 6 committed Tier-3 spikes settled the
+> MECHANISM (verdict: proxy, not in-band) AND proved the **composed INBOUND
+> flow end-to-end** under a real transparent intercept: increment-i drove a real
+> nft-TPROXY intercept → `getsockname` orig-dst → server-side mutual-TLS
+> (presents S's SVID, `WebPkiClientVerifier` VERIFIES C's client SVID chains to
+> the bundle) → kTLS-RX arm → agent-light splice → S reads byte-exact plaintext,
+> with the client leg carrying TLS `0x17` ciphertext and fail-closed on
+> nocert/wrongca (distinct reasons, 0 bytes to S). The OUTBOUND primitives are
+> equally spike-proven — intercept + lossless pre-arm capture + handshake flush
+> (increment-e) and the kTLS-TX steady-state splice (increment-f, 15/15,
+> agent-idle) — but on SEPARATE harnesses. So the MECHANISM and the composed
+> inbound flow are PROVEN; what remains is **integration**, not mechanism. This
+> slice composes the spike-proven pieces into ONE bidirectional walking skeleton
+> in the real netns/veth topology, closing the three NARROW gaps the spikes left
+> open: (1) outbound composed in ONE flow, (2) bidirectional steady-state
+> round-trip, (3) real netns/veth + cgroup-isolated workloads.
 
 **Job**: J-SEC-003 | **Feature**: transparent-mtls-host-socket (GH #26) | **Stories**: US-MTLS-00
 **Walking skeleton**: YES — the thinnest composed end-to-end cut, BOTH directions, one flow each
@@ -15,13 +26,17 @@
 
 ## Goal (one sentence)
 
-On the pinned 6.18 kernel, prove the COMPOSED agent-light L4 proxy path holds
-end-to-end with **NO RST post-arm** — OUTBOUND (real `cgroup_connect4` intercept
-→ workload pre-arm write → leg-B rustls handshake presenting the held SVID →
-kTLS arm → post-arm **bidirectional** multi-record transfer) AND INBOUND (real
-nft-TPROXY intercept → `getsockname` orig-dst → server-mTLS → kTLS-RX arm →
-splice-to-server, byte-exact plaintext at S) — under **BOTH** normal AND
-traced/delayed timing.
+On the pinned 6.18 kernel, COMPOSE the spike-proven pieces into ONE bidirectional
+walking skeleton in the real netns/veth topology with cgroup-isolated workloads
+and **NO RST post-arm** — OUTBOUND (real `cgroup_connect4` intercept → workload
+pre-arm write → leg-B rustls handshake presenting the held SVID → kTLS arm →
+post-arm **bidirectional** multi-record transfer, composing increment-e's
+intercept+capture+flush with increment-f's kTLS-TX splice in ONE flow) AND
+INBOUND (the increment-i composed flow — real nft-TPROXY intercept →
+`getsockname` orig-dst → server-mTLS → kTLS-RX arm → splice-to-server, byte-exact
+plaintext at S — extended with the S→C response leg) — closing the three narrow
+gaps the spikes left open (outbound-one-flow, bidirectional round-trip,
+netns/veth), under **BOTH** normal AND traced/delayed timing.
 
 ## IN scope
 
@@ -57,23 +72,40 @@ traced/delayed timing.
 
 ## Learning hypothesis
 
-- **Disproves if it fails**: "the agent-light L4 proxy COMPOSES under a real
-  transparent intercept — a real `cgroup_connect4` (outbound) / nft-TPROXY
-  (inbound) intercept → pre-arm capture → handshake → kTLS arm → post-arm
-  bidirectional multi-record transfer holds with NO RST, under normal AND delayed
-  timing." If the composed intercept lifecycle RSTs (the increment-e failure
-  mode), the composition does not hold and every later slice is blocked until the
-  RST is engineered around.
-- **Confirms if it succeeds**: the primitives the spikes proved in isolation
-  compose on a real intercept; Slices 01–05 productionise the proven composition
-  (intercept-exemption, handshake, outbound enforce, inbound enforce, guardrails).
+This is an **integration / walking-skeleton gate, NOT a "prove the mechanism"
+gate** — the mechanism is spike-proven (the composed inbound flow end-to-end in
+increment-i; the outbound primitives in increment-e/f). The open question is
+whether the proven pieces COMPOSE into one bidirectional flow on the real
+netns/veth topology.
 
-## Acceptance criteria
+- **Disproves if it fails**: "the spike-proven pieces compose into ONE
+  bidirectional walking skeleton in the real netns/veth topology with NO RST —
+  (1) the OUTBOUND increment-e intercept+capture+flush and increment-f kTLS-TX
+  splice, never wired together before, hold in ONE flow; (2) a bidirectional
+  steady-state round-trip (the S→C / B→F response leg never composed in the
+  spikes) holds; (3) cgroup-isolated workloads over veth (all spikes were
+  loopback + sibling processes) behave as the loopback spikes did — under normal
+  AND delayed timing." A FAIL here is an integration defect (the pieces don't
+  compose, or netns/veth changes the behaviour the loopback spikes saw), not a
+  mechanism unknown.
+- **Confirms if it succeeds**: the spike-proven pieces compose into the
+  bidirectional netns/veth walking skeleton; Slices 01–05 productionise the
+  composed path (intercept-exemption, handshake, outbound enforce, inbound
+  enforce, guardrails).
 
-- [ ] **OUTBOUND composed**: on the 6.18 kernel, a real `cgroup_connect4` intercept routes a workload's `connect()` to the agent's leg-F listener; the agent drains the pre-arm plaintext losslessly, completes a rustls TLS 1.3 CLIENT handshake on leg B presenting the held SVID (read via `IdentityRead`), arms kTLS on leg B, and post-arm **bidirectional** multi-record transfer (F→B forward AND B→F return) completes with **NO RST**. Anchor: ADR-0069 § Enforcement "Composed walking-skeleton gate" (the composition increment-e did NOT prove).
-- [ ] **INBOUND composed**: a real nft-TPROXY intercept routes a connection aimed at the server workload's logical address to the agent's `IP_TRANSPARENT` leg-C listener; `getsockname()` recovers the original destination; the agent completes a server-side mutual-TLS handshake (presents the server SVID, `WebPkiClientVerifier` REQUIRE+VERIFY the client SVID), arms kTLS-RX, and `splice`s the decrypted plaintext to the server workload S, which reads the **byte-exact** request as plaintext, with **NO RST**. Anchor: `findings-inbound-intercept.md` §1–§3.
+> The mechanism — including the composed INBOUND flow end-to-end — is
+> spike-proven (increment-i §1–§4: real TPROXY intercept → orig-dst → server-mTLS
+> verifying the client SVID → kTLS-RX → agent-light splice → byte-exact plaintext
+> at S, fail-closed on nocert/wrongca). These ACs do NOT re-prove the mechanism;
+> they demonstrate the THREE gap-closures (outbound-one-flow, bidirectional
+> round-trip, netns/veth) that compose the proven pieces into the walking
+> skeleton.
+
+- [ ] **GAP 1 — OUTBOUND composed in ONE flow**: on the 6.18 kernel, a real `cgroup_connect4` intercept routes a workload's `connect()` to the agent's leg-F listener; the agent drains the pre-arm plaintext losslessly (the increment-e intercept+capture+flush), completes a rustls TLS 1.3 CLIENT handshake on leg B presenting the held SVID (read via `IdentityRead`), arms kTLS on leg B, and the post-arm forward F→B kTLS-TX splice (the increment-f steady-state) carries the steady-state bytes — increment-e and increment-f wired together in ONE flow for the first time, with **NO RST**. Anchor: `findings-userspace-relay.md` (intercept+capture+flush) + `findings-egress-ktls-splice.md` (kTLS-TX splice), composed; ADR-0069 § Enforcement "Composed walking-skeleton gate."
+- [ ] **GAP 2 — bidirectional steady-state round-trip**: post-arm transfer is **bidirectional** in BOTH directions — outbound forward F→B AND the return B→F, inbound request C→S AND the response S→C (the response leg increment-i drove only one way of; increment-i §"What was NOT tested" names the S→C leg as unproven) — all multi-record, with **NO RST**. Anchor: `findings-inbound-intercept.md` § "What was NOT tested" (bidirectional steady-state) + `findings-splice-return.md` (the return splice primitive being composed).
+- [ ] **GAP 3 — real netns/veth + cgroup-isolated workloads**: the composed flow runs over a real netns/veth topology with cgroup-isolated workloads, NOT loopback + sibling processes (all spikes were loopback). The nft-TPROXY prerouting intercept, the `cgroup_connect4` rewrite, and the splice-to-workload all hold in the real topology. Anchor: `findings-inbound-intercept.md` § "What was NOT tested" (the cgroup/netns shape would need re-proving in the real netns/veth topology).
 - [ ] The peer-facing leg carries TLS 1.3 Application Data records (`tcpdump` shows `1703 03` / 0x17) in both directions; the workload's plaintext appears only on the host-internal leg F / leg S, NEVER on the peer leg. Anchor: `findings-egress-ktls-splice.md` Assertion 1 / `findings-inbound-intercept.md` §3.
-- [ ] The composed path holds under **BOTH** normal AND traced/delayed timing — the post-arm transfer never RSTs in either timing regime (the increment-e RST mode is defeated). Anchor: ADR-0069 § Consequences "Composition is unproven."
+- [ ] The composed path holds under **BOTH** normal AND traced/delayed timing — the post-arm transfer never RSTs in either timing regime (the increment-e harness's intercept-lifecycle RST — a throwaway-harness artifact, not a kernel finding — is defeated by the production intercept lifecycle). Anchor: `findings-userspace-relay.md` § Crux 2 (the steady-state-blocking harness RST).
 - [ ] The agent reads SVID + bundle ONLY via `IdentityRead` (#26 is a READER, never an issuer/cache); kTLS arms on the **agent's** leg (leg B / leg C), NOT the workload's socket.
 - [ ] `cargo xtask lima run -- cargo nextest run -p <crate> --features integration-tests` green for the composed acceptance test (real 6.18 kernel, actually executing — NOT `--no-run`, which would not exercise the composed intercept lifecycle).
 
@@ -92,26 +124,32 @@ traced/delayed timing.
 
 ## Effort estimate
 
-~1–1.5 days. The primitives are proven; the cost is engineering the composed
-intercept lifecycle so it does NOT RST (the increment-e failure mode) and wiring
-the bidirectional transfer + the dual (outbound + inbound) harness on the real
-kernel.
+~1–1.5 days. The mechanism is proven (the composed inbound flow end-to-end in
+increment-i; the outbound primitives in increment-e/f); the cost is INTEGRATION —
+wiring increment-e's intercept+capture+flush with increment-f's kTLS-TX splice
+into ONE outbound flow (gap 1), composing the bidirectional round-trip including
+the response legs (gap 2), and standing the whole thing up on the real netns/veth
+topology with cgroup-isolated workloads (gap 3) — plus the dual (outbound +
+inbound) harness on the real kernel.
 
 ## Pre-slice SPIKE
 
-Not needed — the 6 committed Tier-3 spikes already settled the mechanism and
-de-risked every primitive on a real 7.0 kernel. This slice is the PRODUCTION
-composition the spikes did NOT prove (they proved the primitives in isolation;
-increment-e's composed harness RST'd). It is a composed acceptance test, not a
-spike — a FAIL here is a real defect to fix, not a learning outcome.
+Not needed — the 6 committed Tier-3 spikes already settled the mechanism, proved
+the composed INBOUND flow end-to-end (increment-i), and de-risked every outbound
+primitive on a real 7.0 kernel. This slice is the PRODUCTION INTEGRATION of the
+spike-proven pieces — composing them into the bidirectional netns/veth walking
+skeleton and closing gaps 1–3. It is a composed acceptance test, not a spike — a
+FAIL here is a real integration defect to fix, not a mechanism-learning outcome.
 
 ## Taste-test note
 
 The walking skeleton, thinned to ONE composed flow per direction + the no-RST
 invariant. Touches every backbone activity (intercept → handshake → kTLS arm →
 bidirectional transfer) for both directions. Production-data observable (real
-`tcpdump` TLS 1.3 records + `ss -tie` kTLS ULP, NOT synthetic). Closes the ONE
-thing the spikes did not prove (the composition under a real intercept). Carries
-one value story (US-MTLS-00); its observable is the lossless, RST-free,
-TLS-1.3-on-the-peer-wire capture for both halves — the proof the whole feature
-composes. BLOCKING: no other slice lands until this passes.
+`tcpdump` TLS 1.3 records + `ss -tie` kTLS ULP, NOT synthetic). The mechanism and
+the composed inbound flow are spike-proven; this slice closes the three NARROW
+integration gaps the spikes left (outbound-one-flow, bidirectional round-trip,
+netns/veth). Carries one value story (US-MTLS-00); its observable is the
+lossless, RST-free, TLS-1.3-on-the-peer-wire capture for both halves over the
+real netns/veth topology — the proof the proven pieces compose. BLOCKING: no
+other slice lands until this passes.

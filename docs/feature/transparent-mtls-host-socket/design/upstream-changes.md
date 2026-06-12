@@ -1,16 +1,29 @@
 # Upstream changes — transparent-mtls-host-socket DESIGN (GH #26 folds #222)
 
-Back-propagation flagged for the **product-owner** by Morgan (DESIGN wave,
-2026-06-12). The architect does **NOT** edit `jobs.yaml` or the DISCUSS slice files
-— those are the product-owner's artifacts. This file records what must change
-upstream and why, for the product-owner to action.
+Back-propagation **record** kept by Morgan (DESIGN wave, 2026-06-12). The architect
+did **NOT** edit `jobs.yaml` or the DISCUSS slice files — those are the
+product-owner's artifacts. This file is the **completed-back-propagation record**:
+it documents what changed upstream and why, after the changes landed. It is **not a
+live TODO list** — every item below has been actioned in the product/slice/journey
+files.
+
+> **Status (2026-06-12):** the back-propagation is **COMPLETE**. The product job
+> J-SEC-003, the product + DISCUSS journeys, slices 00–05, the persona lens, the
+> outcome registry, and the scope-boundary table have all been re-grounded on the
+> ADR-0069 proxy model. The deferral re-grounding also landed — in-band
+> restart-survival + 1-socket density is recorded as out of v1 scope, a post-v1
+> optimization tracked in **#231** (ADR-0069 A1); multi-node transparent mTLS is
+> recorded as out of v1 scope (no forward-pointer issue). The C4 outbound-L3 peer
+> endpoint (F3) and the `InterceptedConnection` inbound-leg wording (F4) have been
+> aligned to the proxy model. The sections below are the **rationale of record**
+> (why each change was made), past-tense — not edits still pending.
 
 ## Context
 
 The DESIGN wave formalized the user's LOCKED decision (ADR-0069): ONE universal
 **transparent mTLS via an agent-light L4 proxy** for ALL workload kinds, folding
 #222 into #26. The previously-primary **in-band kTLS-on-the-workload's-own-socket**
-model is SUPERSEDED as v1 (retained as a tracked future optimization). The DISCUSS
+model is SUPERSEDED as v1 (out of v1 scope — a post-v1 optimization tracked in **#231**; ADR-0069 A1). The DISCUSS
 job J-SEC-003 and slices 00–05 were authored on the in-band model's properties —
 several of which **no longer hold in v1**.
 
@@ -20,24 +33,24 @@ several of which **no longer hold in v1**.
 |---|---|
 | "the agent EXITS the data path" / "agent fully out" | **Agent is LIGHT, not OUT.** Forward steady state is agent-idle (kernel splice); **return** steady state is agent-LIGHT (`splice` pump, ~1/record) — the agent stays scheduled per-record on the return path for the connection's life. |
 | "kTLS on the workload's OWN socket" / "workload-owns-fd" | **kTLS lives on the agent's leg B**, not the workload's socket. The workload holds a plaintext socket to the agent (leg F). |
-| "restart-survivable" (kTLS state socket-owned + workload owns fd) | **No restart-survival in v1.** The agent owns both legs + the kTLS state; an agent restart drops in-flight sessions (re-handshake on reconnect). Restart-survival is the in-band model's unique win → tracked future optimization (DEFER-1). |
+| "restart-survivable" (kTLS state socket-owned + workload owns fd) | **No restart-survival in v1.** The agent owns both legs + the kTLS state; an agent restart drops in-flight sessions (re-handshake on reconnect). Restart-survival is the in-band model's unique win → out of v1 scope, a post-v1 optimization tracked in **#231** (ADR-0069 A1). |
 | "1 socket per connection" | **2 sockets per connection** (leg F + leg B). |
 | "host-socket ONLY; guest-stack is #222, a SEPARATE feature" | **#222 folds into #26 as a STAGED ADAPTER, not a separate mechanism.** The proxy is universal — guest-stack (microVM/unikernel) routes through the SAME mechanism via a guest-stack intercept adapter (tap/TPROXY/TC source → same `InterceptedConnection`), STAGED to #222 (repurposed). Host-socket #26 v1 is BIDIRECTIONAL (outbound + inbound). |
 | "host-socket = outbound/client only" (implicit in the in-band framing) | **Host-socket is BIDIRECTIONAL v1.** The inbound/server half (TPROXY intercept → `getsockname` orig-dst → server mTLS verifying the client → splice-to-server) is designed + spike-proven (`findings-inbound-intercept.md`), a first-class path alongside the outbound/client half. |
 | "mTLS with workload identity" (implies intended-peer) | **v1 = chain-to-bundle transport authn + encryption, NO intended-peer pinning.** A routing bug / VIP collision / valid-but-unintended SVID is NOT prevented in v1; intended-peer SAN-match is the #178 UPGRADE. |
 | race-window "lossy DROP-then-RESET under a named server-speaks-first assumption" | **Lossless for all kinds.** The handshake-window capture is a userspace buffer; no dropped pre-arm bytes, no RESET, NO server-speaks-first assumption. |
 
-## Anchor the re-grounding on PROVEN spike observables (not hypotheticals)
+## How the re-grounding was anchored — on PROVEN spike observables (not hypotheticals)
 
 The DISCUSS wave authored J-SEC-003 + slices 00–05 with the mechanism un-pinned
-("show me a packet capture"), so several ACs are framed as *hypotheses to test*.
+("show me a packet capture"), so several ACs were framed as *hypotheses to test*.
 The mechanism is now **empirically settled** by 6 committed Tier-3 spikes
-(`../spike/findings*.md`, `353cdc52`). The re-grounding must therefore **anchor
-each AC on the concrete spike observable that PROVED it** — the AC becomes "assert
+(`../spike/findings*.md`, `353cdc52`). The re-grounding therefore **anchored
+each AC on the concrete spike observable that PROVED it** — each AC now reads "assert
 the proven observable holds for the productionised path," not "discover whether the
 mechanism works." The committed findings are the foundation of record; the
 gitignored `spike-scratch/` probe code is a non-durable convenience only (see the
-feature-delta § "Proven-Mechanism Traceability" → Durability). The anchors:
+feature-delta § "Proven-Mechanism Traceability" → Durability). The anchors used:
 
 | Re-grounded AC | Proven spike observable to cite | Committed finding |
 |---|---|---|
@@ -48,43 +61,52 @@ feature-delta § "Proven-Mechanism Traceability" → Durability). The anchors:
 | No cleartext on the peer wire | `strings pcap \| grep <marker>` / cleartext count on leg B = 0; the workload's plaintext is on leg F (host-internal) BY DESIGN | `findings-userspace-relay.md` Unknown 2; `findings-egress-ktls-splice.md` Assertion 1 |
 | Lossless handshake-window capture | pre-arm plaintext arrives at the peer exactly once, in order, as the first `application_data` (rec_seq 0); no dropped bytes, no RESET | `findings-userspace-relay.md` Unknown 1+2; `findings-lossless-hybrid.md` |
 | Fail-closed (absent/wrong SVID) | `IdentityRead::svid_for == None` → handshake refused, leg closed, no bytes egress (the `MtlsEnforcementError::AbsentSvid` path) | contract § (consumes `identity_read.rs` clause 3) |
-| **Composed walking skeleton (F2)** | real `cgroup_connect4` intercept → pre-arm write → handshake → kTLS arm → post-arm bidirectional multi-record transfer, NO RST, under normal AND traced/delayed timing — the composition the spikes did NOT prove (increment-e RST'd) | ADR-0069 § Enforcement "Composed walking-skeleton gate"; the FIRST DELIVER slice (BLOCKING) |
+| **Composed walking skeleton (F2)** | real `cgroup_connect4` intercept → pre-arm write → handshake → kTLS arm → post-arm bidirectional multi-record transfer, NO RST, under normal AND traced/delayed timing, in the real netns/veth topology — the three narrow composition gaps the spikes left (outbound composed in ONE flow; bidirectional round-trip; real netns/veth topology). Mechanism is spike-verified incl. the inbound flow composed end-to-end (increment-i §2); increment-e's steady-state RST was a throwaway-harness limitation, NOT a kernel finding, superseded by increment-f. Integration gate, not mechanism. | ADR-0069 § Enforcement "Composed walking-skeleton gate"; the FIRST DELIVER slice (BLOCKING) |
 | **Inbound / server half (F3)** | TPROXY intercept → `getsockname` orig-dst recovery (`127.0.0.2:18443`); server-side mutual-TLS (present server SVID + `WebPkiClientVerifier` REQUIRE+VERIFY client SVID); kTLS-RX armed (`ss -tie` `rxconf:sw`); byte-exact plaintext spliced to the identity-unaware server workload; client leg carries `0x17` only, agent-light (`strace`: splice/ppoll only); fail-closed on `nocert`/`wrongca` (distinct reasons, 0 bytes to S) | `findings-inbound-intercept.md` §1–§5 (increment-i, kernel 7.0) |
 | **Resource limits (F4/F7)** | bounded pre-arm buffer → `BufferLimitExceeded` (256 KiB); handshake deadline → `HandshakeTimeout` (5 s); per-alloc in-flight ceiling → `InFlightLimitExceeded` (128); cleanup leaks nothing — all fail-closed. **Assert the CONCRETE values, not field existence.** | feature-delta contract `MtlsLimits` (F7 defaults + `Default` impl) + the three variants; ADR-0069 § "Resource & robustness constraints" |
 | **Pump supervision (F6)** | pump `Stalled` after `pump_stall_deadline` (30 s) with a record pending → worker tears down (teardown + fail-closed reset) → `Gone`, no leak; telemetry `mtls.pump.stalled` / `mtls.pump.teardown_on_stall` | feature-delta `liveness` § "F6 supervision policy" + `PumpLiveness::Stalled` + `MtlsLimits::pump_stall_deadline`; ADR-0069 § ATAM |
 | **Intercept exemption (F5)** | agent leg B NOT re-intercepted (no recursion); workload CANNOT self-exempt (bypass agent-private); inbound leg-S dial not TPROXY-re-intercepted | `cgroup_connect4_service` attach boundary; ADR-0069 § "intercept-recursion exemption" |
 | **Authn-only boundary (F1/F5)** | v1 authenticates **chain-to-bundle ONLY** (BOTH directions; inbound proven fail-closed on `nocert`/`wrongca`); **NO intended-peer pinning** — a valid-but-unintended SVID is NOT prevented in v1; authorization is #27/#38; wrong-but-valid-peer SAN-match (`PeerIdentityMismatch`) reserved, `#[ignore]` gated on #178; docs/tests MUST NOT call that case "protected" until #178 lands | ADR-0069 § Decision "The honest v1 security claim" + "What this does NOT do"; `findings-inbound-intercept.md` §4; #27/#38 (authz), #178/#61 (expected destination) |
 
-State the observable + the finding in each re-grounded AC so the DISTILL test
+Each re-grounded AC states the observable + the finding, so the DISTILL test
 scenarios and the DELIVER Tier-3 tests assert the SAME thing the spike already
 proved — closing the loop from proven evidence → acceptance criterion → test.
 
-## Action items for the product-owner
+## Back-propagation record (what was re-grounded, and why)
 
-1. **Re-ground J-SEC-003** (`docs/product/jobs.yaml` § J-SEC-003) on the proxy
+1. **J-SEC-003 re-grounded** (`docs/product/jobs.yaml` § J-SEC-003) on the proxy
    mechanism. The `functional`/`emotional`/`social` dimensions and the `pull`/
-   `anxiety` forces reference "agent exits the data path", "kTLS on the workload's
-   socket", and "restart-survivable" — re-word to the proxy reality (agent-light
-   return; kTLS on the agent's peer-facing leg; no v1 restart-survival; lossless;
-   universal across kinds). The CORE job (transparent in-kernel mTLS with the
-   workload's own SVID, auth-session == data-session, workload holds nothing,
-   provable on the wire) is UNCHANGED and still holds. **Product-owner edits
-   `jobs.yaml`.**
+   `anxiety` forces previously referenced "agent exits the data path", "kTLS on the
+   workload's socket", and "restart-survivable" — these were re-worded to the proxy
+   reality (agent-light return; kTLS on the agent's peer-facing leg; no v1
+   restart-survival; lossless; universal across kinds). The CORE job (transparent
+   in-kernel mTLS with the workload's own SVID, auth-session == data-session,
+   workload holds nothing, provable on the wire) is UNCHANGED and still holds. **The
+   product-owner has edited `jobs.yaml` accordingly.**
 
-2. **Re-ground slices 00–05** (`docs/feature/transparent-mtls-host-socket/slices/`)
-   on the proxy mechanism. Specifically:
-   - **Slice 00 (spike)** — the 6 committed spikes settled the MECHANISM (verdict:
-     "proxy", not "in-band"). But they proved the *primitives in isolation*, NOT
-     the *composition*: increment-e's composed harness RST'd on the intercept
-     lifecycle, and increments-f/h removed the transparent intercept to prove
-     their primitive. **The new walking skeleton is a composed Tier-3 acceptance
-     test (F2 — the FIRST DELIVER slice, BLOCKING)**: real `cgroup_connect4`
-     intercept → workload pre-arm write → leg-B handshake → kTLS arm → **post-arm
-     bidirectional multi-record transfer with NO RST**, under BOTH normal AND
-     traced/delayed timing. This **supersedes the old in-band walking skeleton**
-     (and the spike-as-walking-skeleton framing) — the spike de-risked the
-     primitives; the composed slice proves they compose. Anchor: ADR-0069 §
-     Consequences "Composition is unproven" + § Enforcement "Composed
+2. **Slices 00–05 re-grounded** (`docs/feature/transparent-mtls-host-socket/slices/`)
+   on the proxy mechanism. The slice files now reflect the re-scopes below; the
+   per-slice text records what changed and why:
+   - **Slice 00 (composed walking skeleton)** — the Tier-3 spikes settled the
+     MECHANISM (verdict: "proxy", not "in-band"). They proved the *primitives in
+     isolation* AND the *INBOUND flow composed end-to-end* in one direction
+     (`findings-inbound-intercept.md` increment-i §2: real TPROXY intercept →
+     orig-dst recovery → server-mTLS verifying C's client SVID → kTLS-RX arm →
+     agent-light splice-to-S byte-exact, fail-closed on `nocert`/`wrongca`). Three
+     NARROW composition gaps remain: (1) the OUTBOUND path composed in ONE flow
+     (its pieces proven on SEPARATE harnesses — increment-f removed the intercept
+     to isolate the splice; increment-e's steady-state RST was a *throwaway-harness
+     intercept-lifecycle limitation, NOT a kernel finding*, superseded by
+     increment-f's clean-harness proof); (2) bidirectional steady-state round-trip;
+     (3) the real netns/veth topology with cgroup-isolated workloads. **The new
+     walking skeleton is a composed Tier-3 acceptance test (F2 — the FIRST DELIVER
+     slice, BLOCKING)**: real `cgroup_connect4` intercept → workload pre-arm write →
+     leg-B handshake → kTLS arm → **post-arm bidirectional multi-record transfer
+     with NO RST**, under BOTH normal AND traced/delayed timing, in the real
+     netns/veth topology. This **supersedes the old in-band walking skeleton** (and
+     the spike-as-walking-skeleton framing) — it is an integration gate that closes
+     gaps 1–3, NOT a "prove-the-mechanism" gate. Anchor: ADR-0069 § Consequences
+     "Three narrow composition gaps remain" + § Enforcement "Composed
      walking-skeleton gate".
    - **Slice 01 (sockops detect + fd acquire + intercept exemption)** — re-scope to
      "intercept (`cgroup_connect4` rewrite) + sockops detect + agent accepts leg
@@ -130,38 +152,40 @@ proved — closing the loop from proven evidence → acceptance criterion → te
      peer; VIP path #61) — `#[ignore]` until #178 lands. The proxy never embeds a
      policy engine. (No GH issues created here.)
    - **Slice 05 (restart-survival + WASM variant)** — **restart-survival is GONE in
-     v1** (DEFER-1). Re-scope to "new connections re-handshake after an agent
+     v1**. Re-scope to "new connections re-handshake after an agent
      restart" (which the proxy gives unconditionally) + "the WASM and guest-stack
      variants route through the same proxy". The in-flight-survival AC is removed
      (it was the in-band model's property).
-   **Product-owner edits the slice files.**
+   **The product-owner has edited the slice files accordingly.**
 
-3. **Approve (or reject) the deferral GH issues** — the architect created NONE
-   (CLAUDE.md: deferrals need user approval BEFORE creation). Pending the
-   product-owner's decision:
-   - **DEFER-1** — in-band restart-survival + 1-socket-density future optimization.
-   - **DEFER-2** — multi-node reachability — verify the existing **#36** covers it
-     (`gh issue view 36 --comments`) before citing; create a new issue only if not.
+3. **Deferrals — RESOLVED as out of v1 scope.** The architect created NO GH issues
+   directly (CLAUDE.md: deferrals need user approval BEFORE creation):
+   - **(a) In-band restart-survival + 1-socket density** is not pursued in v1
+     (the superseded in-band model's unique win; ADR-0069 A1) — a post-v1
+     optimization tracked in **#231**.
+   - **(b) Multi-node / cross-node transparent mTLS** is out of v1 scope (Phase 1 is
+     single-node), no forward-pointer issue. **#36 is generic node
+     enrollment/admission and does NOT cover cross-node transparent mTLS, so it is
+     NOT cited for it.**
 
    (The agent-light splice return is the design; a fully-agent-idle bidirectional
    return is a non-goal, not pursued — NO kernel patch is or will be required.)
 
-4. **Update the scope-boundary table** in the feature-delta DISCUSS section ("In
+4. **Scope-boundary table updated** in the feature-delta DISCUSS section ("In
    scope (#26) / Out of scope") — #222 is no longer "out of scope, a SEPARATE
    feature"; it is folded in as the **STAGED guest-stack intercept ADAPTER** of
    the ONE universal proxy (re-grounded by ADR-0069; #222 repurposed to "the
    guest-stack intercept adapter for the #26 universal proxy"). Host-socket #26 v1
-   is **BIDIRECTIONAL** (outbound + inbound). Also **add the authn-vs-authz
-   boundary AND the honest v1 claim** to the out-of-scope column: authorization
+   is **BIDIRECTIONAL** (outbound + inbound). The authn-vs-authz boundary AND the
+   honest v1 claim were **added** to the out-of-scope column: authorization
    (allow/deny) is the BPF-LSM `socket_connect` hook (**#27**) fed by compiled
    `policy_verdicts` (**#38**; related **#49**); **intended-peer identity pinning**
    is downstream via east-west SPIFFE-ID resolution (**#178**; VIP path **#61**) —
    v1 does **chain-to-bundle transport authn + encryption only, NO intended-peer
-   pinning** (a valid-but-unintended SVID is NOT prevented in v1). (The architect
-   left the DISCUSS sections intact; the product-owner owns the DISCUSS
-   re-grounding. No GH issues created.)
+   pinning** (a valid-but-unintended SVID is NOT prevented in v1). (The product-owner
+   owns the DISCUSS re-grounding; it has landed. No GH issues created.)
 
-5. **Land the review-revision ACs across the slices (F1/F4/F5 + the F2 gate).**
+5. **Review-revision ACs landed across the slices (F1/F4/F5 + the F2 gate).**
    The adversarial review (rejected pending revisions, 2026-06-12; recorded in
    `design/wave-decisions.md` § "Review revisions") added, additively on the
    unchanged contract:
@@ -175,15 +199,15 @@ proved — closing the loop from proven evidence → acceptance criterion → te
    - **F1 authn-vs-authz boundary** + the reserved `PeerIdentityMismatch`
      negative-test placeholder (gated on **#178**) → Slice 04; authorization
      stays with **#27/#38**, never this feature.
-   **Product-owner threads these into the slice ACs; the architect named them but
-   does not edit the slice files.**
+   **The product-owner has threaded these into the slice ACs; the architect named
+   them but did not edit the slice files.**
 
-6. **Land the RE-review ACs across the slices (F3/F6/F7 + the bidirectional +
+6. **RE-review ACs landed across the slices (F3/F6/F7 + the bidirectional +
    honest-claim re-grounding).** The adversarial RE-review (2026-06-12;
    `design/review-adversarial-2026-06-12.md`; resolutions in
-   `design/wave-decisions.md` § "RE-review revisions"). The Luna pass must
-   re-ground **BOTH directions** + the **honest v1 claim** + the **limit values**
-   into the slices:
+   `design/wave-decisions.md` § "RE-review revisions"). The Luna pass re-grounded
+   **BOTH directions** + the **honest v1 claim** + the **limit values** into the
+   slices:
    - **F3 inbound/server half** → a new INBOUND slice (or an inbound arm of the
      existing handshake/kTLS/wire slices): TPROXY intercept → `getsockname`
      orig-dst → server-SVID selection → `WebPkiClientVerifier` client-auth →
@@ -200,8 +224,8 @@ proved — closing the loop from proven evidence → acceptance criterion → te
      values (256 KiB / 5 s / 128 / 30 s), not field existence (Slice 04).
    - **F4 guest-stack staging** → the scope-boundary update (item 4) reflects #222
      as the STAGED guest-stack ADAPTER, not a separate mechanism.
-   **Product-owner / Luna threads these into the slice ACs; the architect named
-   them but does not edit the slice files (only the journey's #222-separate
+   **The product-owner / Luna have threaded these into the slice ACs; the architect
+   named them but did not edit the slice files (only the journey's #222-separate
    contradiction, which directly contradicted the ADR, was corrected here).**
 
 ## What does NOT change

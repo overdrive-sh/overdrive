@@ -1,8 +1,25 @@
 # DISCUSS Wave Review - transparent-mtls-host-socket
 
+> **SUPERSEDED (2026-06-12) — DO NOT READ THE VERDICT BELOW AS CURRENT STATE.**
+> This 2026-06-11 review is **superseded by
+> `design/review-design-discuss-2026-06-12.md` (2026-06-12)**, the combined
+> DISCUSS + DESIGN adversarial review that supersedes it. Its findings were
+> **addressed**: blocking issue #1 (the `docs/product/outcomes/registry.yaml`
+> YAML parse failure) is **resolved — the registry now parses cleanly** and its
+> `OUT-MTLS-*` entries were re-grounded to the ADR-0069 agent-light L4 proxy
+> model; blocking issue #2 (restart-survival both promised and not) is resolved
+> — v1 carries NO restart-survival (ADR-0069), consistently across all artifacts;
+> high issues #3/#4 were resolved by the ADR-0069 re-grounding (mechanism is now
+> DESIGN-pinned by the ADR; the restart-survival and distinct-WASM-path outcomes
+> were superseded rather than left unregistered). The **stale `rejected` verdict
+> and the old "registry.yaml does not parse" note below are HISTORICAL** and must
+> not be mistaken for current state. For the live review state, see
+> `design/review-design-discuss-2026-06-12.md`. The findings below are retained
+> verbatim for the audit trail; nothing here has been deleted.
+
 **Reviewer**: Codex, applying `nw-product-owner-reviewer` / DISCUSS hard-gate criteria
 **Date**: 2026-06-11
-**Verdict**: **REJECTED_PENDING_REVISIONS**
+**Verdict**: **REJECTED_PENDING_REVISIONS** *(SUPERSEDED 2026-06-12 — see banner above)*
 **Scope**: `docs/feature/transparent-mtls-host-socket/{feature-delta.md,wave-decisions.md,discuss/journey-enforce-transparent-mtls.yaml,slices/*.md}` plus product SSOT updates in `docs/product/jobs.yaml`, `docs/product/personas/sam-platform-security-engineer.yaml`, `docs/product/journeys/enforce-transparent-mtls-on-the-wire.yaml`, and `docs/product/outcomes/registry.yaml`.
 
 The artifacts are directionally strong, but the handoff should not proceed to DESIGN until the blocking consistency and parse issues below are fixed.

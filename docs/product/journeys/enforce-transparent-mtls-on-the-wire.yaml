@@ -25,7 +25,7 @@ schema_version: 1
 # MECHANISM — locked by ADR-0069 (2026-06-12): ONE universal transparent-mTLS
 # enforcement mechanism, an agent-light L4 proxy, BIDIRECTIONAL in host-socket
 # v1. This SUPERSEDES the in-band "kTLS on the workload's own socket / agent
-# fully exits" model (retained only as a tracked future optimization). The
+# fully exits" model (out of v1 scope — a post-v1 optimization tracked in #231; ADR-0069 A1). The
 # agent is agent-LIGHT, NOT agent-OUT; kTLS lives on the agent's peer-facing
 # leg, NOT the workload's socket; there is NO restart-survival in v1; 2 sockets
 # per connection. Empirically settled by 6 committed Tier-3 spikes
@@ -58,9 +58,13 @@ schema_version: 1
 #     bridge gap; kernel-side IS present at v6.18 per ADR-0068; v1 = teardown +
 #     reconnect on rotation, no in-place rekey).
 #   - Certificate-rotation workflow -> #40 (depends on workflow primitive #39).
-#   - Revocation (CRL / OCSP) -> Phase 5. Multi-node -> #36.
+#   - Revocation (CRL / OCSP) -> Phase 5.
+#   - Multi-node / cross-node transparent mTLS -> OUT of v1 scope (Phase 1 is
+#     single-node). No forward-pointer issue: #36 is generic node
+#     enrollment/admission and does NOT cover cross-node transparent mTLS, so it
+#     is NOT cited for that concern.
 #   - In-band restart-survival + 1-socket density -> the superseded model's
-#     unique win, retained as a tracked future optimization (ADR-0069 A1).
+#     unique win, out of v1 scope — a post-v1 optimization tracked in #231 (ADR-0069 A1).
 #
 # Like its siblings this is a SECURITY-PRIMITIVE / capability journey, not an
 # operator-CLI journey. There is NO operator verb to "encrypt this workload" in
@@ -137,21 +141,29 @@ steps:
     command: "(Tier-3 composed acceptance test on the pinned 6.18 kernel; the FIRST, BLOCKING DELIVER slice)"
     summary: >
       The 6 committed spikes settled the MECHANISM (verdict: proxy, not in-band)
-      and proved every PRIMITIVE in isolation — but NOT the COMPOSITION under a
-      real transparent intercept (increment-e RST'd on the intercept lifecycle;
-      increments-f/h removed the intercept to prove their primitive). So the
-      walking skeleton is a COMPOSED Tier-3 acceptance test, the BLOCKING first
-      DELIVER slice: a real cgroup_connect4 OUTBOUND intercept AND a real TPROXY
-      INBOUND intercept -> workload pre-arm write -> the agent's leg-B/leg-C
-      handshake -> kTLS arm -> post-arm BIDIRECTIONAL multi-record transfer with
-      NO RST, under BOTH normal AND traced/delayed timing. This SUPERSEDES the
-      old in-band walking-skeleton spike: the spike de-risked the primitives; the
-      composed slice proves they compose without the intercept-lifecycle RST.
-      The observable IS the lossless, RST-free, TLS-1.3-on-the-peer-wire capture
-      for both halves of one composed flow.
+      AND proved the composed INBOUND flow end-to-end under a real transparent
+      intercept (increment-i: real nft-TPROXY intercept -> getsockname orig-dst ->
+      server-side mutual-TLS verifying the client SVID chains to the bundle ->
+      kTLS-RX arm -> agent-light splice -> the server reads byte-exact plaintext,
+      fail-closed on nocert/wrongca). The OUTBOUND primitives are equally proven —
+      intercept + lossless pre-arm capture + handshake flush (increment-e) and the
+      kTLS-TX steady-state splice (increment-f, agent-idle) — but on SEPARATE
+      harnesses. So the walking skeleton is an INTEGRATION gate, the BLOCKING first
+      DELIVER slice, that COMPOSES the spike-proven pieces into ONE bidirectional
+      flow on the real netns/veth topology: a real cgroup_connect4 OUTBOUND
+      intercept AND a real TPROXY INBOUND intercept -> workload pre-arm write ->
+      the agent's leg-B/leg-C handshake -> kTLS arm -> post-arm BIDIRECTIONAL
+      multi-record transfer with NO RST, under BOTH normal AND traced/delayed
+      timing. This SUPERSEDES the old in-band walking-skeleton spike. The slice
+      closes the three NARROW gaps the spikes left open: gap 1 outbound composed in
+      ONE flow (increment-e wired to increment-f), gap 2 bidirectional steady-state
+      round-trip (the response legs the spikes drove only one way of), gap 3 real
+      netns/veth + cgroup-isolated workloads (all spikes were loopback + sibling
+      processes). The observable IS the lossless, RST-free,
+      TLS-1.3-on-the-peer-wire capture for both halves of one composed flow.
     emotional_state:
-      entry: "Threat-modelling the composition — 'the primitives are proven, but the spike's composed harness RST'd on the intercept lifecycle. Prove the WHOLE path composes on a real intercept, both directions, no RST, before any other slice lands.'"
-      exit: "De-risked at the integration boundary — 'the composed intercept->handshake->kTLS->bidirectional-transfer path holds with no RST under normal AND delayed timing; every later slice productionises a proven composition, not a hope.'"
+      entry: "Threat-modelling the integration — 'the mechanism and the composed inbound flow are spike-proven (increment-i), but the outbound pieces ran on separate harnesses, no response leg was driven, and everything was loopback. Compose the proven pieces into ONE bidirectional flow on the real netns/veth topology — closing those three gaps, no RST, before any other slice lands.'"
+      exit: "De-risked at the integration boundary — 'the spike-proven pieces compose into the bidirectional netns/veth walking skeleton with no RST under normal AND delayed timing; every later slice productionises a composed, proven path, not a hope.'"
 
   - id: 1
     name: "The workload's traffic is transparently intercepted to the agent and the agent owns the legs (no recursion, no self-exempt)"
@@ -267,8 +279,7 @@ error_paths:
       teardown). NEW connections after the restart re-run the
       intercept->handshake->kTLS-arm path (the held SVID is re-readable via
       IdentityRead). The restart-survival + 1-socket-density properties were the
-      SUPERSEDED in-band model's unique win and are retained only as a tracked
-      future optimization (ADR-0069 A1). The journey ships the proxy enforcement
+      SUPERSEDED in-band model's unique win and are out of v1 scope — a post-v1 optimization tracked in #231 (ADR-0069 A1). The journey ships the proxy enforcement
       path; 'new connections re-handshake' is the documented behaviour, NOT an
       in-flight-survival guarantee.
   - step: 3
@@ -306,11 +317,11 @@ deferred_outside_this_journey:
   - "WASM workloads as a DISTINCT mTLS path — there is NO separate WASM mTLS slice in v1. Only ExecDriver exists (no WASM driver). WASM host-socket workloads (TCP terminating in the host kernel) are auto-covered by the SAME outbound proxy the moment a WASM driver lands — a separate roadmap concern, not a #26 deliverable. v1 workload kinds = process/exec ONLY."
   - "Intended-peer identity pinning (verify the authenticated peer is the INTENDED destination, not merely SOME valid cluster workload chaining to the bundle) -> GH #178 (native east-west SPIFFE-ID resolution, which supplies the expected peer; VIP path #61). v1 = chain-to-bundle transport authn + encryption ONLY; a routing bug / VIP collision / valid-but-unintended SVID is NOT prevented in v1. The wrong-but-valid-peer (PeerIdentityMismatch) SAN-match is the #178 UPGRADE. Docs/tests MUST NOT call that case 'protected' until #178 lands."
   - "Authorization (allow/deny WHO may connect to WHOM) -> the BPF-LSM socket_connect hook (GH #27) fed by compiled policy_verdicts (GH #38; related #49) — a SEPARATE subsystem. The mTLS proxy does AUTHENTICATION + ENCRYPTION only and MUST NOT embed a policy engine / read policy_verdicts (two sources of authorization truth would drift). A connection that authenticates here can still be DENIED by #27's LSM hook before it is established."
-  - "In-band restart-survival of in-flight sessions + 1-socket-per-connection density -> the SUPERSEDED in-band kTLS-on-the-workload's-own-socket model's unique win (ADR-0069 A1), retained ONLY as a tracked FUTURE OPTIMIZATION. v1 = 2 sockets/connection, NO restart-survival (the agent owns both legs + the kTLS state; an agent restart drops in-flight sessions, which re-handshake on reconnect). New-connection re-handshake is the documented behaviour."
+  - "In-band restart-survival of in-flight sessions + 1-socket-per-connection density -> the SUPERSEDED in-band kTLS-on-the-workload's-own-socket model's unique win (ADR-0069 A1), tracked as a post-v1 optimization in #231. v1 = 2 sockets/connection, NO restart-survival (the agent owns both legs + the kTLS state; an agent restart drops in-flight sessions, which re-handshake on reconnect). New-connection re-handshake is the documented behaviour."
   - "In-place SVID rekey / TLS 1.3 KeyUpdate handling on long-lived connections -> GH #229 (userspace rustls/ktls bridge gap — rustls/ktls#59 / #62; kernel-side IS present at v6.18 per ADR-0068). v1 = teardown + reconnect on rotation. A TRACKED DEPENDENCY, not an open design risk."
   - "Certificate-rotation workflow (near-expiry -> mint-fresh -> swap) -> GH #40 (a cert_rotation workflow, depends on workflow primitive GH #39). J-SEC-003 v1 handles rotation by teardown+reconnect; the rotation lifecycle is #40."
   - "SVID revocation (CRL / OCSP / revoked lists) -> Phase 5 (whitepaper §8). Revocation-by-expiry (1h TTL) is the model here."
-  - "Multi-node / cross-node mTLS, gossiped trust bundles across nodes, node attestation -> GH #36 [2.14] (node enrollment / admission handler). Single-node Phase 2 = one node's workloads (the inbound spike was loopback-only; the netns/veth topology re-proving is a DELIVER obligation, findings-inbound-intercept.md § 'What was NOT tested')."
+  - "Multi-node / cross-node transparent mTLS, gossiped trust bundles across nodes, node attestation -> OUT of v1 scope (Phase 1 is single-node = one node's workloads). NO forward-pointer issue: #36 [2.14] is the generic node enrollment / admission handler and does NOT cover cross-node transparent mTLS, so it is NOT cited for that concern. (Even single-node, the inbound spike was loopback-only; the netns/veth topology re-proving is a DELIVER obligation, findings-inbound-intercept.md § 'What was NOT tested'.)"
   - "Fully agent-idle BIDIRECTIONAL kernel splice (return/deliver agent-idle too, not just forward) -> would need an out-of-tree kernel patch (push-driven kTLS-RX->sockmap, or relaxing tls_sw_read_sock's psock refusal). Deferred; v1's return/deliver is agent-light splice."
 
 changelog:

@@ -1,5 +1,16 @@
 # Adversarial Design Review - transparent-mtls-host-socket
 
+> **SUPERSEDED (2026-06-12).** This review's findings **F1–F7 were addressed**
+> (the inbound/passive half is now designed and spike-proven; the contract is
+> bidirectional with concrete `MtlsLimits` values and a pump-supervision policy;
+> the authn-only v1 boundary is scoped honestly). This file is **superseded by
+> `review-design-discuss-2026-06-12.md` (2026-06-12)**, which is the current
+> review of record. Its `rejected` verdict below is **STALE** — do not read it as
+> the current state. The file and its findings are retained for audit history
+> only; resolution of each finding is recorded in `wave-decisions.md`
+> § "RE-review revisions (adversarial RE-review F3–F7, 2026-06-12)".
+
+
 **Artifact reviewed**: ADR-0069, feature-delta DESIGN section, C4 diagrams, upstream-change note, product journey, J-SEC-003, slices 00-05.
 **Reviewer stance**: adversarial architecture/security review.
 **Verdict**: **rejected pending revisions**.

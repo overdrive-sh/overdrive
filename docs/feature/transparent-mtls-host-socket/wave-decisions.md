@@ -19,7 +19,7 @@ and the IdentityMgr holds + exposes via `IdentityRead` (J-SEC-002 / #35).
 > deliberately un-pinned**. The DESIGN wave **settled it**: **ADR-0069
 > (2026-06-12)** locked a **universal agent-light L4 proxy** as the v1
 > mechanism for #26 and **superseded** the in-band kTLS-on-the-workload's-own-
-> socket model (retained only as a tracked future optimization). The
+> socket model (out of v1 scope — a post-v1 optimization tracked in #231; ADR-0069 A1). The
 > spike-first risk was **resolved by 6 committed Tier-3 spikes** (verdict:
 > proxy, not in-band) — so D2's "FAIL → Cilium fallback" branch did NOT fire;
 > the proxy is the answer.

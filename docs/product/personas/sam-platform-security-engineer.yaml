@@ -101,24 +101,37 @@ persona:
   # ON-THE-WIRE ENFORCEMENT lens — not "is identity held?" (#35) but "is the
   # wire ACTUALLY encrypted with the held identity, in-kernel, with no
   # cleartext leak?". Sam's questions here are about the PACKET CAPTURE and the
-  # data path, not the held set. Host-socket workloads ONLY (process, WASM);
-  # guest-stack (#222) is out of scope.
+  # data path, not the held set. Re-grounded to ADR-0069 (2026-06-12): the
+  # enforcement mechanism is a UNIVERSAL AGENT-LIGHT L4 PROXY, BIDIRECTIONAL in
+  # host-socket v1 (outbound client half + inbound server half). v1 workload
+  # kinds = process/exec ONLY (ExecDriver is the only driver). There is NO
+  # distinct WASM mTLS path — WASM host-socket workloads are auto-covered by the
+  # SAME proxy once a WASM driver lands. Guest-stack (microVM/unikernel) is a
+  # STAGED intercept adapter of the same proxy under #222, NOT a separate
+  # out-of-scope mechanism. Both workloads are identity-unaware and hold
+  # nothing; each node's agent does its side. kTLS arms on the AGENT'S
+  # peer-facing leg (NOT the workload's own socket — that in-band model is
+  # superseded, #231). The agent is AGENT-LIGHT (forward agent-idle kernel
+  # splice; return/deliver splice+ppoll, no per-byte userspace copy), NOT
+  # agent-out. v1 authenticates chain-to-trust-bundle only — NO intended-peer
+  # SAN pinning (that is the #178 upgrade).
   j_sec_003_lens:
     questions_sam_asks:
-      - "Does a packet capture (tcpdump on the veth) ACTUALLY show TLS 1.3 Application Data records between two host-socket workloads — not cleartext — or is the encryption claim aspirational?"
-      - "Is the auth-session the data-session — does the SAME TLS 1.3 session that authenticated the workload carry the bytes, terminated in-kernel via kTLS (ss -K shows the ULP), with the platform agent OUT of the steady-state data path (unlike a ztunnel userspace proxy)?"
-      - "Is NO cleartext byte leaked on the wire before kTLS is installed (the plaintext race window between sockops ESTABLISHED and kTLS install) — fail-closed for confidentiality?"
-      - "Does a handshake against an absent or wrong SVID FAIL CLOSED — no plaintext fallback, no cleartext egress?"
-      - "Has anyone actually SHIPPED in-band sidecarless kTLS where the agent then leaves the data path — and if the spike disproves it on our kernel, is there an honest documented fallback (Cilium out-of-band auth + separate encryption)?"
+      - "Does a packet capture (tcpdump on the peer-facing leg) ACTUALLY show TLS 1.3 Application Data records between two host-socket (process/exec) workloads — not cleartext — in BOTH directions (outbound client half AND inbound server half) — or is the encryption claim aspirational?"
+      - "Is the auth-session the data-session — does the SAME TLS 1.3 session that authenticated the workload carry the bytes, terminated in-kernel via kTLS on the AGENT'S peer-facing leg (ss -tie shows the ULP), with the agent AGENT-LIGHT (forward agent-idle kernel splice; return/deliver splice+ppoll, no per-byte userspace copy) — not a ztunnel-shape userspace proxy copying every byte forever?"
+      - "Is NO cleartext byte leaked on the wire before kTLS is installed (the plaintext race window before kTLS arms on the agent's leg) — fail-closed for confidentiality?"
+      - "Does a handshake against an absent or wrong (untrusted, chain-fails-to-bundle) SVID FAIL CLOSED — no plaintext fallback, no cleartext egress?"
+      - "Is the agent-light proxy ACTUALLY enforcing kTLS on the agent's leg, fail-closed, chain-to-bundle — proven by a composed real-intercept walking skeleton on the pinned 6.18 kernel — and is the honest v1 boundary stated plainly: chain-to-trust-bundle transport authn + encryption ONLY, NO intended-peer SAN pinning (a valid-but-unintended SVID is NOT prevented in v1; that is #178)?"
     success_signals:
-      - "A tcpdump capture on the veth shows TLS 1.3 records (content type 0x17), never the cleartext payload, between two host-socket workloads at the test tier."
-      - "ss -K shows the kTLS ULP installed on the workload's socket; the workload holds NOTHING (no cert, no key) and the agent is absent from the steady-state byte path."
-      - "A race-window probe (write() immediately on connect() return, deliberately delayed kTLS install) shows zero cleartext bytes on the wire before install — fail-closed for confidentiality."
-      - "A negative test (absent/wrong SVID) shows the handshake fails closed — no TLS Application Data and no cleartext on the wire."
-      - "The walking-skeleton spike proves the full sockops->rustls->kTLS->agent-exits handoff for one process flow on the pinned 6.18 kernel (or honestly falls back to the documented Cilium model)."
+      - "A tcpdump capture on the peer-facing leg shows TLS 1.3 records (content type 0x17), never the cleartext payload, between two host-socket (process/exec) workloads at the test tier — in BOTH directions (outbound and inbound)."
+      - "ss -tie shows the kTLS ULP (tcp-ulp-tls 1.3 aes-gcm-256) installed on the AGENT'S peer-facing leg (leg B outbound / leg C inbound), NOT the workload's own socket; the workload holds NOTHING (no cert, no key) and the agent is AGENT-LIGHT (idle on the forward splice; splice+ppoll only on return/deliver) — never a per-byte userspace copy."
+      - "A race-window probe (write() immediately on connect() return, deliberately delayed kTLS install) shows zero cleartext bytes on the wire before kTLS arms on the agent's leg — fail-closed for confidentiality."
+      - "A negative test (absent/missing/untrusted SVID that fails to chain to the trust bundle) shows the handshake fails closed — no TLS Application Data and no cleartext on the wire."
+      - "The composed walking skeleton proves a real intercepted process/exec flow goes TLS 1.3 on the peer wire with NO RST on the pinned 6.18 kernel: agent-light kTLS arms on the agent's leg, fail-closed, chain-to-bundle — and the platform states plainly this is chain-to-trust-bundle authn + encryption ONLY, with NO intended-peer pinning (#178)."
     frustrations_to_avoid:
       - "A packet capture showing cleartext (or the plaintext probe string) on the wire — the encryption claim must be provable, not asserted."
-      - "A userspace proxy quietly staying in the data path for the whole connection (the ztunnel shape) when the promise is 'agent out of the data path, encryption in-kernel'."
-      - "A cleartext byte egressing before kTLS is armed (the plaintext race window left open)."
-      - "A handshake that falls back to plaintext on an absent/wrong SVID instead of failing closed."
-      - "Aspirational docs claiming in-band sidecarless kTLS works without a Tier-3 spike proving it on the real pinned kernel first (the issue mandates spike-first)."
+      - "A userspace proxy quietly copying every byte for the whole connection (the ztunnel shape) when the promise is 'agent-light, encryption in-kernel via kTLS on the agent's leg' — the forward path must be agent-idle kernel splice and the return/deliver path splice+ppoll with no per-byte copy."
+      - "A cleartext byte egressing before kTLS is armed on the agent's leg (the plaintext race window left open)."
+      - "A handshake that falls back to plaintext on an absent/missing/untrusted SVID instead of failing closed."
+      - "Overclaiming the v1 boundary — implying intended-peer pinning when v1 is chain-to-trust-bundle transport authn + encryption ONLY (a valid-but-unintended SVID is NOT prevented until #178); the honest boundary must be stated, not glossed."
+      - "Aspirational docs claiming the composed agent-light proxy path works without a Tier-3 spike / composed walking skeleton proving it on the real pinned 6.18 kernel first (the issue mandates spike-first)."

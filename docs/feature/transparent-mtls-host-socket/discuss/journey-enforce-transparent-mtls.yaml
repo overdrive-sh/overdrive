@@ -25,8 +25,10 @@ schema_version: 1
 # auto-covered by the same proxy when a WASM driver lands); guest-stack -> #222
 # (the STAGED guest-stack intercept ADAPTER of the ONE universal proxy);
 # intended-peer pinning -> #178; authorization -> #27/#38; rekey -> #229;
-# rotation -> #40; revocation -> Phase 5; multi-node -> #36; in-band
-# restart-survival + 1-socket density -> tracked future optimization.
+# rotation -> #40; revocation -> Phase 5; multi-node / cross-node transparent
+# mTLS -> OUT of v1 scope (Phase 1 single-node; NOT #36 — #36 is generic node
+# enrollment/admission and does NOT cover cross-node transparent mTLS); in-band
+# restart-survival + 1-socket density -> OUT of v1 scope — a post-v1 optimization tracked in #231 (ADR-0069 A1).
 
 journey:
   name: "Encrypt every workload's wire with its own SVID via an agent-light L4 proxy, in-kernel, both directions"
@@ -78,16 +80,22 @@ steps:
         source: "the rustls handshake's extracted secrets (auth-session == data-session)"
         consumers: ["setsockopt(TLS_TX/TLS_RX) on the agent's leg; tcpdump 0x17 records; ss -tie tcp-ulp-tls"]
     emotional_state:
-      entry: "Threat-modelling the composition — 'the primitives are proven, but the spike's composed harness RST'd on the intercept lifecycle. Prove the WHOLE path composes on a real intercept, both directions, no RST, first.'"
-      exit: "De-risked at the integration boundary — 'the composed intercept->handshake->kTLS->bidirectional-transfer path holds with no RST under normal AND delayed timing; later slices productionise a proven composition.'"
+      entry: "Threat-modelling the integration — 'the mechanism and the composed inbound flow are spike-proven (increment-i), but the outbound pieces ran on separate harnesses, no response leg was driven, and everything was loopback. Compose the proven pieces into ONE bidirectional flow on the real netns/veth topology — closing those three gaps, no RST, first.'"
+      exit: "De-risked at the integration boundary — 'the spike-proven pieces compose into the bidirectional netns/veth walking skeleton with no RST under normal AND delayed timing; later slices productionise a composed, proven path.'"
     integration_checkpoint: |
       The agent reads SVID + bundle ONLY via IdentityRead (no #26-local
       issuance/cache). kTLS arms on the AGENT's leg (leg B / leg C), NOT the
-      workload's socket. The composed path is the gate the spikes did NOT
-      prove (increment-e RST'd on the intercept lifecycle; ADR-0069
-      Consequences "Composition is unproven").
+      workload's socket. The mechanism AND the composed INBOUND flow are
+      spike-proven (increment-i: real TPROXY intercept -> orig-dst ->
+      server-mTLS verifying the client SVID -> kTLS-RX -> agent-light splice ->
+      byte-exact plaintext at S, fail-closed). This slice is the INTEGRATION
+      gate that composes the proven pieces into the bidirectional netns/veth
+      walking skeleton, closing the three narrow gaps: gap 1 outbound composed in
+      ONE flow (increment-e intercept+capture+flush wired to the increment-f
+      kTLS-TX splice), gap 2 bidirectional steady-state round-trip, gap 3 real
+      netns/veth + cgroup-isolated workloads (the spikes were loopback + siblings).
     failure_modes:
-      - "Post-arm RST on the composed intercept lifecycle (the increment-e failure) -> the composition does not hold -> blocks every later slice until fixed."
+      - "Post-arm RST when the outbound pieces are wired into ONE flow (gap 1) under the production intercept lifecycle -> the composition does not hold -> blocks every later slice until fixed. (The increment-e harness RST was a throwaway-harness artifact, not a kernel finding.)"
       - "Cleartext of the payload reaches the peer leg before kTLS arms -> the lossless handshake-window capture failed -> mechanism re-evaluation."
     gherkin: |
       Scenario: A real intercepted flow carries TLS 1.3 both ways with no reset
@@ -270,9 +278,9 @@ carve_outs:
   - "WASM as a distinct mTLS path -> NONE in v1 (only ExecDriver exists). WASM host-socket workloads are auto-covered by the same outbound proxy when a WASM driver lands (a separate roadmap concern). v1 = process/exec ONLY."
   - "Intended-peer identity pinning (the authenticated peer is the INTENDED destination) -> #178 (VIP path #61). v1 = chain-to-bundle authn only; a valid-but-unintended SVID is NOT prevented. No 'protected' claim for the wrong-but-valid-peer case until #178."
   - "Authorization (allow/deny who-may-connect-to-whom) -> the BPF-LSM socket_connect hook #27 fed by policy_verdicts #38 (related #49) — a SEPARATE subsystem the proxy MUST NOT duplicate."
-  - "In-band restart-survival + 1-socket density -> the SUPERSEDED model's unique win, a tracked future optimization (ADR-0069 A1). v1 = 2 sockets/connection, NO restart-survival (new-connection re-handshake)."
+  - "In-band restart-survival + 1-socket density -> the SUPERSEDED model's unique win, out of v1 scope — a post-v1 optimization tracked in #231 (ADR-0069 A1). v1 = 2 sockets/connection, NO restart-survival (new-connection re-handshake)."
   - "In-place SVID rekey / TLS 1.3 KeyUpdate -> #229 (userspace rustls/ktls bridge gap; kernel-side present at v6.18; v1 = teardown+reconnect)."
-  - "Certificate-rotation workflow -> #40 (depends on #39). Revocation (CRL/OCSP) -> Phase 5. Multi-node -> #36."
+  - "Certificate-rotation workflow -> #40 (depends on #39). Revocation (CRL/OCSP) -> Phase 5. Multi-node / cross-node transparent mTLS -> OUT of v1 scope (Phase 1 single-node); NOT #36 (#36 is generic node enrollment/admission and does NOT cover cross-node transparent mTLS — no forward-pointer issue)."
 
 changelog:
   - date: 2026-06-11
@@ -300,3 +308,24 @@ changelog:
       re-written as business outcomes (no implementation-detail titles). Anchored
       on the 6 committed Tier-3 spike findings. Still does NOT extend the
       J-SEC-002 journey (distinct job).
+  - date: 2026-06-12
+    feature: transparent-mtls-host-socket
+    change: >
+      CORRECTED the step-0 composition-status framing. The prior wording said the
+      spikes proved primitives in isolation but did NOT prove the composition under
+      a real transparent intercept — that UNDERSOLD the evidence. increment-i in
+      fact proved the composed INBOUND flow end-to-end under a real intercept (real
+      nft-TPROXY intercept -> getsockname orig-dst -> server-side mutual-TLS
+      verifying the client SVID chains to the bundle -> kTLS-RX arm -> agent-light
+      splice -> the server reads byte-exact plaintext, fail-closed on
+      nocert/wrongca with distinct reasons). Re-framed step 0 as an INTEGRATION /
+      walking-skeleton gate (NOT a prove-the-mechanism gate) that composes the
+      spike-proven pieces into ONE bidirectional flow on the real netns/veth
+      topology, closing the three NARROW gaps the spikes left open: gap 1 outbound
+      composed in ONE flow (increment-e intercept+capture+flush wired to the
+      increment-f kTLS-TX splice — proven on separate harnesses, never together),
+      gap 2 bidirectional steady-state round-trip (the response legs the spikes
+      drove only one way of), gap 3 real netns/veth + cgroup-isolated workloads
+      (all spikes were loopback + sibling processes). The increment-e harness RST
+      is a throwaway-harness artifact, not a kernel finding. Slice 00 remains the
+      BLOCKING first DELIVER slice.
